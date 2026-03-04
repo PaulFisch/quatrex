@@ -394,11 +394,7 @@ class ElectronSolver(SubsystemSolver):
 
         """
         self.system_matrix.data = 0.0
-        if self.orthogonal_basis:
-            self.system_matrix.fill_diagonal(1.0)
-        else:
-            # TODO: This is not correct in the case of kpoints
-            self.system_matrix += self.overlap_sparray
+        self.system_matrix.fill_diagonal(1.0)
 
         scale_stack(
             self.system_matrix.data,

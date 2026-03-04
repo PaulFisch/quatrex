@@ -134,7 +134,7 @@ class SCBAData:
             self.sparsity_pattern.astype(xp.complex128),
             block_sizes=block_sizes,
             global_stack_shape=electron_energies.shape
-            + tuple([k for k in kpoint_grid if k > 1]),
+                               + tuple([k for k in kpoint_grid if k > 1]),
         )
         self.g_retarded.data[:] = 0.0  # Initialize to zero.
 
@@ -142,7 +142,7 @@ class SCBAData:
             self.sparsity_pattern.astype(xp.complex128),
             block_sizes=block_sizes,
             global_stack_shape=electron_energies.shape
-            + tuple([k for k in kpoint_grid if k > 1]),
+                               + tuple([k for k in kpoint_grid if k > 1]),
             symmetry=config.scba.symmetric,
             symmetry_op=lambda a: -a.conj(),
         )
@@ -187,7 +187,7 @@ class SCBAData:
                 self.sparsity_pattern.astype(xp.complex128),
                 block_sizes=coulomb_screening_block_sizes,
                 global_stack_shape=electron_energies.shape
-                + tuple([k for k in kpoint_grid if k > 1]),
+                                   + tuple([k for k in kpoint_grid if k > 1]),
                 symmetry=config.scba.symmetric,
                 symmetry_op=lambda a: -a.conj(),
             )
@@ -274,13 +274,13 @@ class SCBA:
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
-        # ----- Electrons ----------------------------------------------
-        self.electron_energies = get_electron_energies(config)
+        # ----- Particles ----------------------------------------------
+        self.energies = get_electron_energies(config)
 
-        min_energy = self.electron_energies[0]
-        max_energy = self.electron_energies[-1]
-        num_energies = len(self.electron_energies)
-        energy_resolution = self.electron_energies[1] - self.electron_energies[0]
+        min_energy = self.energies[0]
+        max_energy = self.energies[-1]
+        num_energies = len(self.energies)
+        energy_resolution = self.energies[1] - self.energies[0]
         num_energies_per_rank = num_energies // comm.stack.size
         if comm.rank == 0:
             print(
@@ -292,11 +292,20 @@ class SCBA:
                 f"Each comm.block has {num_energies_per_rank} grid points.", flush=True
             )
 
-        self.electron_solver = ElectronSolver(
-            self.config,
-            self.electron_energies,
-            sparsity_pattern=self.data.sparsity_pattern,
-        )
+        if config.simulation_type == "electron":
+            self.electron_solver = ElectronSolver(
+                self.config,
+                self.energies,
+                sparsity_pattern=self.data.sparsity_pattern,
+            )
+        elif config.simulation_type == "phonon":
+            self.phonon_solver = PhononSolver(
+                self.config,
+                self.energies,
+                sparsity_pattern=self.data.sparsity_pattern,
+            )
+        else:
+            raise NotImplementedError("Simulation type not yet supported")
 
         # ----- Coulomb screening --------------------------------------
         if self.config.scba.coulomb_screening:
@@ -319,7 +328,7 @@ class SCBA:
                 self.coulomb_screening_energies = distributed_load(energies_path)
             else:
                 self.coulomb_screening_energies = (
-                    self.electron_energies - self.electron_energies[0]
+                    self.energies - self.energies[0]
                 )
                 # Remove the zero energy to avoid division by zero.
                 self.coulomb_screening_energies += 1e-6
@@ -332,7 +341,7 @@ class SCBA:
             self.sigma_fock = SigmaFock(
                 self.config,
                 coulomb_matrix,
-                self.electron_energies,
+                self.energies,
             )
             # Have to transpose the coulomb matrix back to the original distribution.
             (
@@ -354,7 +363,7 @@ class SCBA:
             )
             self.sigma_coulomb_screening = SigmaCoulombScreening(
                 self.config,
-                self.electron_energies,
+                self.energies,
             )
 
         # ----- Photons ------------------------------------------------
@@ -383,10 +392,10 @@ class SCBA:
                 self.sigma_phonon = SigmaPhonon(...)
 
             elif self.config.phonon.model == "pseudo-scattering":
-                self.sigma_phonon = SigmaPhonon(config, self.electron_energies)
+                self.sigma_phonon = SigmaPhonon(config, self.energies)
 
         self.data = SCBAData(
-            config, electron_energies=self.electron_energies
+            config, electron_energies=self.energies
         )  # real data
 
     def _stash_sigma(self) -> None:
@@ -448,7 +457,7 @@ class SCBA:
         i_left = xp.real(self.observables.electron_current.get("left", 0.0))
         i_right = xp.real(self.observables.electron_current.get("right", 0.0))
 
-        dE = self.electron_energies[1] - self.electron_energies[0]
+        dE = self.energies[1] - self.energies[0]
         current_diff = xp.abs(xp.sum(i_left) * dE + xp.sum(i_right) * dE)
 
         current_conservation_abs, current_conservation_rel = current_conservation(
@@ -537,6 +546,10 @@ class SCBA:
 
         self.data.w_greater.free_data()
         self.data.w_lesser.free_data()
+
+    @profiler.profile(label="SCBA: Phonon-Phonon interactions", level="default", comm=comm)
+    def _compute_phonon_phonon_interaction(self):
+        pass
 
     @profiler.profile(label="SCBA: G observables", level="default", comm=comm)
     def _compute_electron_observables(self) -> None:
@@ -715,12 +728,20 @@ class SCBA:
             with profiler.profile_range(
                 label="SCBA: Iteration", level="default", comm=comm
             ):
-                self.electron_solver.solve(
-                    self.data.sigma_lesser,
-                    self.data.sigma_greater,
-                    self.data.sigma_retarded,
-                    out=(self.data.g_lesser, self.data.g_greater, self.data.g_retarded),
-                )
+                if self.config.simulation_type == "electron":
+                    self.electron_solver.solve(
+                        self.data.sigma_lesser,
+                        self.data.sigma_greater,
+                        self.data.sigma_retarded,
+                        out=(self.data.g_lesser, self.data.g_greater, self.data.g_retarded),
+                    )
+                else:
+                    self.phonon_solver.solve(
+                        self.data.sigma_lesser,
+                        self.data.sigma_greater,
+                        self.data.sigma_retarded,
+                        out=(self.data.g_lesser, self.data.g_greater, self.data.g_retarded),
+                    )
                 self._compute_electron_observables()
 
                 # Stash current into previous self-energy buffer.
@@ -737,9 +758,9 @@ class SCBA:
                         m.dtranspose(discard=False)  # This must not be discarded.
                         assert m.distribution_state == "nnz"
                     for m in (
-                        self.data.sigma_lesser,
-                        self.data.sigma_greater,
-                        self.data.sigma_retarded,
+                            self.data.sigma_lesser,
+                            self.data.sigma_greater,
+                            self.data.sigma_retarded,
                     ):
                         m.dtranspose(discard=True)  # These can be safely discarded.
                         assert m.distribution_state == "nnz"
@@ -760,9 +781,9 @@ class SCBA:
                         m.dtranspose(discard=True)  # These can be safely discarded.
                         assert m.distribution_state == "stack"
                     for m in (
-                        self.data.sigma_lesser,
-                        self.data.sigma_greater,
-                        self.data.sigma_retarded,
+                            self.data.sigma_lesser,
+                            self.data.sigma_greater,
+                            self.data.sigma_retarded,
                     ):
                         m.dtranspose(discard=False)  # This must not be discarded.
                         assert m.distribution_state == "stack"

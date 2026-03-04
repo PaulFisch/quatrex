@@ -347,7 +347,6 @@ class LyapunovConfig(BaseModel):
 
     memoizer: MemoizerConfig = MemoizerConfig()
 
-
 class ElectronConfig(BaseModel):
     """Options for the electronic subsystem solver."""
 
@@ -529,10 +528,19 @@ class PhononConfig(BaseModel):
     obc: OBCConfig = OBCConfig()
     lyapunov: LyapunovConfig = LyapunovConfig()
 
+    eta_obc: NonNegativeFloat = 0  # eV
+    eta: NonNegativeFloat = 1e-12  # eV
+
     model: Literal["pseudo-scattering", "negf"] = "pseudo-scattering"
     phonon_energy: NonNegativeFloat | None = None
     deformation_potential: NonNegativeFloat | None = None
     temperature: PositiveFloat = 300.0  # K
+
+    band_edge_tracking: Literal["dos-peaks", "eigenvalues"] | None = None
+    filtering_iteration_limit: PositiveInt = 1
+
+    left_temperature: PositiveFloat | None = None
+    right_temperature: PositiveFloat | None = None
 
     @model_validator(mode="after")
     def check_phonon_energy_or_deformation_potential(self):
@@ -933,6 +941,7 @@ class QuatrexConfig(BaseModel):
     # --- Simulation parameters ---------------------------------------
     device: DeviceConfig
     formalism: Literal["wf", "negf"]
+    simulation_type: Literal["electron", "phonon"] = "electron"
     """The transport formalism to use.
 
     There are two supported formalisms:
@@ -951,8 +960,7 @@ class QuatrexConfig(BaseModel):
     qtbm: QTBMConfig = QTBMConfig()
     poisson: PoissonConfig = PoissonConfig()
 
-    electron: ElectronConfig
-
+    electron: ElectronConfig  | None = None
     phonon: PhononConfig | None = None
     coulomb_screening: CoulombScreeningConfig | None = None
     photon: PhotonConfig | None = None
