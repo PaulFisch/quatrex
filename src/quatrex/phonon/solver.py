@@ -124,8 +124,6 @@ class PhononSolver(SubsystemSolver):
         self.left_occupancies = bose_einstein(self.local_frequencies, self.left_temperature)
         self.right_occupancies = bose_einstein(self.local_frequencies, self.right_temperature)
 
-        self.band_edge_tracking = config.phonon.band_edge_tracking
-
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc
 

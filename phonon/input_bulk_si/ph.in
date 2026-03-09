@@ -1,0 +1,15 @@
+&INPUTPH
+   prefix           = 'silicon'
+   outdir           = 'results'
+   amass(1)=28.08
+   tr2_ph           = 1e-12
+   alpha_mix(1)     = 0.1
+   verbosity        = 'high'
+   qplot            = .false.
+   ldisp            = .true.
+   epsil=.true.
+   fildyn='si.dynG'
+   nq1              = 2
+   nq2              = 2
+   nq3              = 2
+/
