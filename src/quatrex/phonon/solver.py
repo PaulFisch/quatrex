@@ -121,8 +121,11 @@ class PhononSolver(SubsystemSolver):
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
-        self.left_occupancies = bose_einstein(self.local_frequencies, self.left_temperature)
-        self.right_occupancies = bose_einstein(self.local_frequencies, self.right_temperature)
+        # TODO units here in eV expected
+        local_omega_rad = np.sqrt(np.abs(self.local_frequencies))
+        hbar_omega_eV = 6.582119569e-16 * local_omega_rad
+        self.left_occupancies = bose_einstein(hbar_omega_eV, self.left_temperature)
+        self.right_occupancies = bose_einstein(hbar_omega_eV, self.right_temperature)
 
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc
