@@ -408,7 +408,7 @@ def _assemble_kpoint(
     if all(kpoint_grid == 1):
         out_matrix.stack[(...,)] += sum(matrix_dict.values())
     else:
-        index = np.argwhere(kpoint_grid > 1)[0]
+        index = np.argwhere(kpoint_grid > 1).flatten()
         for stack_index in np.ndindex(kpoints.shape[:-1]):
             kpoint = kpoints[stack_index]
             stack_index = np.array(stack_index)
@@ -607,7 +607,13 @@ def load_matrix(
     # TODO: This is not efficient and will be refactored when the inputs
     # are unified in (issue #214).
     if sparsity_pattern is None:
-        sparsity_pattern = matrix_sparray.copy()
+        if matrix_dict is not None:
+            # Use union of all periodic shifts to avoid missing entries
+            # that cancel at gamma but are nonzero at other k-points.
+            sparsity_pattern = sum(abs(m) for m in matrix_dict.values())
+            sparsity_pattern.sum_duplicates()
+        else:
+            sparsity_pattern = matrix_sparray.copy()
         sparsity_pattern.data[:] = 1
         # Make sure that the sparsity pattern is symmetric.
         sparsity_pattern = sparsity_pattern + sparsity_pattern.T
