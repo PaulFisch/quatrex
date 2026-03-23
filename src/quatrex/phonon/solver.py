@@ -130,6 +130,8 @@ class PhononSolver(SubsystemSolver):
         self.obc_blocks = OBCBlocks(num_blocks=self.system_matrix.num_local_blocks)
         self.block_sections = config.phonon.obc.block_sections
 
+        self.band_edge_tracking = config.phonon.band_edge_tracking
+
         self.call_count = 0
         self.filtering_iteration_limit = config.phonon.filtering_iteration_limit
 
@@ -137,11 +139,8 @@ class PhononSolver(SubsystemSolver):
     def _compute_obc(self) -> None:
         """Computes open boundary conditions."""
         if comm.block.rank == 0:
-            # Extract the overlap matrix blocks.
-            s_00 = 1j * self.eta_obc * sparse.eye(
-                self.block_sizes[0],
-                format="coo",
-                dtype=self.dynamical_matrix.dtype)
+            s_00 = 1j * self.eta_obc * xp.eye(
+                self.block_sizes[0], dtype=self.dynamical_matrix.dtype)
 
             m_10, m_00, m_01 = get_periodic_superblocks(
                 a_ii=self.system_matrix.blocks[0, 0],
@@ -150,10 +149,8 @@ class PhononSolver(SubsystemSolver):
                 block_sections=self.block_sections,
             )
 
-            g_00 = self.obc(
-                a_ii=m_00 + s_00,
-                a_ij=m_01,
-                a_ji=m_10,
+            g_00, *__ = self.obc(
+                (m_00 + s_00, m_01, m_10),
                 contact="left",
             )
             # Apply the retarded boundary self-energy.
@@ -170,11 +167,8 @@ class PhononSolver(SubsystemSolver):
                 gamma_00.copy(), self.left_occupancies + 1
             )
         if comm.block.rank == comm.block.size - 1:
-            # Extract the overlap matrix blocks.
-            s_nn = 1j * self.eta_obc * 1j * self.eta_obc * sparse.eye(
-                self.block_sizes[0],
-                format="coo",
-                dtype=self.dynamical_matrix.dtype)
+            s_nn = 1j * self.eta_obc * xp.eye(
+                self.block_sizes[0], dtype=self.dynamical_matrix.dtype)
 
             n = self.system_matrix.num_local_blocks - 1
             m = n - 1
@@ -190,11 +184,13 @@ class PhononSolver(SubsystemSolver):
             m_nn = xp.flip(m_nn, axis=(-2, -1))
             m_nm = xp.flip(m_nm, axis=(-2, -1))
             m_mn = xp.flip(m_mn, axis=(-2, -1))
-            g_nn = self.obc(
+            g_nn, *__ = self.obc(
                 # Twist it, flip it, ...
-                a_ii=xp.flip(m_nn + s_nn, axis=(-2, -1)),
-                a_ij=xp.flip(m_nm, axis=(-2, -1)),
-                a_ji=xp.flip(m_mn, axis=(-2, -1)),
+                (
+                    xp.flip(m_nn + s_nn, axis=(-2, -1)),
+                    xp.flip(m_nm, axis=(-2, -1)),
+                    xp.flip(m_mn, axis=(-2, -1)),
+                ),
                 contact="right",
             )
             # ... bop it.
@@ -215,7 +211,7 @@ class PhononSolver(SubsystemSolver):
             )
 
             self.obc_blocks.greater[-1] = 1j * scale_stack(
-                gamma_nn.copy(), self.right_occupancies - 1
+                gamma_nn.copy(), self.right_occupancies + 1
             )
 
     @profiler.profile(label="PhononSolver: Assemble", level="default", comm=comm)
@@ -270,7 +266,7 @@ class PhononSolver(SubsystemSolver):
             )
 
     @profiler.profile(label="PhononSolver: Filter", level="default", comm=comm)
-    def _filter_peaks(out: tuple[DSDBSparse, ...]) -> None:
+    def _filter_peaks(self, out: tuple[DSDBSparse, ...]) -> None:
         """Filters out peaks in the output Green's functions"""
         pass
 
@@ -360,6 +356,6 @@ class PhononSolver(SubsystemSolver):
             self._filter_peaks(out)
 
         if self.band_edge_tracking == "dos-peaks":
-            self._track_dos_peaks()
+            self._track_dos_peaks(out)
 
         self.call_count += 1
