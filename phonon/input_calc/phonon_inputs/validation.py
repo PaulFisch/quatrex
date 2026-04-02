@@ -6,28 +6,33 @@ Provides:
 - Band structure comparison (extracted blocks vs phonopy)
 - Reference Sancho-Rubio + Caroli ballistic transmission
 - Thermal conductance from the Landauer formula
+
+Internal units: THz^2 by default (set conversion_factor=CONVERSION for legacy (rad/s)^2).
 """
 
 import numpy as np
 from numpy.linalg import eigvalsh, inv, norm
 from phonopy import Phonopy
 
-from .constants import CONVERSION, EV_TO_J, HBAR_EV, KB_EV, THZ_TO_RAD
+from .constants import CONVERSION_THZ2, EV_TO_J, HBAR_EV, HBAR_SI, KB_EV, THZ_TO_RAD
 from .convention import gauge_transform_A_to_B, get_btd_blocks
 
 
 def check_gamma_point(
     blocks: dict[tuple[int, int, int], np.ndarray],
     n_acoustic: int = 3,
+    conversion_factor: float | None = None,
 ) -> dict:
     """Check that summing all blocks gives n_acoustic zero eigenvalues.
 
     Parameters
     ----------
     blocks : dict[(nx, ny, nz), ndarray]
-        Real-space blocks in (rad/s)^2.
+        Real-space blocks (in THz^2 or (rad/s)^2).
     n_acoustic : int
         Expected number of acoustic (zero) modes.
+    conversion_factor : float, optional
+        If provided, eigenvalues are in this unit system. Default assumes THz^2.
 
     Returns
     -------
@@ -38,7 +43,14 @@ def check_gamma_point(
     """
     D_gamma = sum(blocks.values())
     eigs = eigvalsh(D_gamma)
-    freqs = np.sign(eigs) * np.sqrt(np.abs(eigs)) / THZ_TO_RAD
+
+    # Convert eigenvalues to THz
+    if conversion_factor is not None:
+        # Legacy: blocks in (rad/s)^2
+        freqs = np.sign(eigs) * np.sqrt(np.abs(eigs)) / THZ_TO_RAD
+    else:
+        # Default: blocks in THz^2
+        freqs = np.sign(eigs) * np.sqrt(np.abs(eigs))
 
     sorted_abs = np.sort(np.abs(freqs))
     return {
@@ -77,6 +89,7 @@ def compare_band_structure(
     labels: list[str],
     npoints: int = 51,
     save_path=None,
+    conversion_factor: float = CONVERSION_THZ2,
 ) -> dict:
     """Compare eigenfrequencies from extracted blocks vs phonopy.
 
@@ -87,15 +100,13 @@ def compare_band_structure(
     phonon : Phonopy
         Phonopy object with force constants.
     blocks : dict
-        Extracted real-space blocks in (rad/s)^2.
+        Extracted real-space blocks (THz^2 by default).
     band_paths : list of segments
-        Each segment is [[q_start], [q_end], ...].
     labels : list of str
-        High-symmetry point labels.
     npoints : int
-        Points per segment.
     save_path : Path, optional
-        If given, save comparison plot.
+    conversion_factor : float
+        Conversion factor used for blocks (default: CONVERSION_THZ2).
 
     Returns
     -------
@@ -114,13 +125,19 @@ def compare_band_structure(
 
     for seg_qpts in qpoints:
         for q in seg_qpts:
-            # Phonopy -> Convention B
+            # Phonopy -> Convention B -> THz^2
             D_A = phonon.get_dynamical_matrix_at_q(q)
-            D_ph = gauge_transform_A_to_B(D_A, q, tau_frac) * CONVERSION
+            D_ph = gauge_transform_A_to_B(D_A, q, tau_frac) * conversion_factor
             e_ph = eigvalsh(D_ph)
-            freqs_phonopy.append(
-                np.sign(e_ph) * np.sqrt(np.abs(e_ph)) / THZ_TO_RAD
-            )
+
+            if conversion_factor == CONVERSION_THZ2:
+                freqs_phonopy.append(
+                    np.sign(e_ph) * np.sqrt(np.abs(e_ph))
+                )
+            else:
+                freqs_phonopy.append(
+                    np.sign(e_ph) * np.sqrt(np.abs(e_ph)) / THZ_TO_RAD
+                )
 
             # Reconstructed from blocks
             D_rec = sum(
@@ -128,9 +145,15 @@ def compare_band_structure(
                 for (nx, ny, nz), H in blocks.items()
             )
             e_bl = eigvalsh(D_rec)
-            freqs_blocks.append(
-                np.sign(e_bl) * np.sqrt(np.abs(e_bl)) / THZ_TO_RAD
-            )
+
+            if conversion_factor == CONVERSION_THZ2:
+                freqs_blocks.append(
+                    np.sign(e_bl) * np.sqrt(np.abs(e_bl))
+                )
+            else:
+                freqs_blocks.append(
+                    np.sign(e_bl) * np.sqrt(np.abs(e_bl)) / THZ_TO_RAD
+                )
 
     freqs_phonopy = np.array(freqs_phonopy)
     freqs_blocks = np.array(freqs_blocks)
@@ -179,7 +202,10 @@ def compare_band_structure(
 
 
 def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
-    """Surface Green's function via Sancho-Rubio decimation."""
+    """Surface Green's function via Sancho-Rubio decimation.
+
+    All quantities in THz^2 (or any consistent unit system).
+    """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
 
@@ -232,6 +258,8 @@ def reference_transmission(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute reference ballistic transmission via Sancho-Rubio + Caroli.
 
+    Uses THz^2 internal units.
+
     Parameters
     ----------
     phonon : Phonopy
@@ -243,7 +271,7 @@ def reference_transmission(
     transport_direction : str
         "x", "y", or "z".
     eta_factor : float
-        eta = dw^2 * eta_factor, where dw is the frequency spacing in (rad/s).
+        eta = dw^2 * eta_factor, where dw is frequency spacing in THz.
 
     Returns
     -------
@@ -252,9 +280,9 @@ def reference_transmission(
     """
     fmin, fmax, nfreq = freq_range_thz
     freqs_thz = np.linspace(fmin, fmax, int(nfreq))
-    omega_sq = (freqs_thz * THZ_TO_RAD) ** 2
-    dw = (freqs_thz[1] - freqs_thz[0]) * THZ_TO_RAD
-    eta = dw ** 2 * eta_factor
+    omega_sq = freqs_thz ** 2  # THz^2
+    dw = freqs_thz[1] - freqs_thz[0]  # THz
+    eta = dw ** 2 * eta_factor  # THz^2
 
     nkx, nky = q_mesh_transverse
     q_1d = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
@@ -265,7 +293,8 @@ def reference_transmission(
 
     for qx, qy in q_points:
         H_00, H_01 = get_btd_blocks(
-            phonon, (qx, qy), transport_direction=transport_direction
+            phonon, (qx, qy), transport_direction=transport_direction,
+            conversion_factor=CONVERSION_THZ2,
         )
         for iw, w2 in enumerate(omega_sq):
             trans[iw] += _ballistic_transmission(
@@ -287,26 +316,17 @@ def interface_transmission(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute ballistic transmission through an interface.
 
-    Uses the mass-mismatch model: same FC everywhere, different masses
-    in L/R leads and device. The coupling H_LD = H_01 of the left lead,
-    H_DR = H_01 of the right lead (nearest-neighbor coupling to device).
+    Uses THz^2 internal units.
 
     Parameters
     ----------
     phonon_left : Phonopy
-        Left lead (e.g. Si with Si masses).
     phonon_right : Phonopy
-        Right lead (e.g. Si FC with Ge masses).
     phonon_device : Phonopy
-        Device region (e.g. Si FC with mixed Si/Ge masses).
     q_mesh_transverse : (Nkx, Nky)
-        Transverse Monkhorst-Pack mesh.
     freq_range_thz : (fmin, fmax, nfreq)
-        Frequency grid in THz.
     transport_direction : str
-        "x", "y", or "z".
     eta_factor : float
-        eta = dw^2 * eta_factor.
 
     Returns
     -------
@@ -316,8 +336,8 @@ def interface_transmission(
     fmin, fmax, nfreq = freq_range_thz
     nfreq = int(nfreq)
     freqs_thz = np.linspace(fmin, fmax, nfreq)
-    omega_sq = (freqs_thz * THZ_TO_RAD) ** 2
-    dw = (freqs_thz[1] - freqs_thz[0]) * THZ_TO_RAD
+    omega_sq = freqs_thz ** 2  # THz^2
+    dw = freqs_thz[1] - freqs_thz[0]
     eta = dw**2 * eta_factor
 
     nkx, nky = q_mesh_transverse
@@ -333,13 +353,16 @@ def interface_transmission(
 
         qp = (qx, qy)
         H_00_L, H_01_L = get_btd_blocks(
-            phonon_left, qp, transport_direction=transport_direction
+            phonon_left, qp, transport_direction=transport_direction,
+            conversion_factor=CONVERSION_THZ2,
         )
         H_00_R, H_01_R = get_btd_blocks(
-            phonon_right, qp, transport_direction=transport_direction
+            phonon_right, qp, transport_direction=transport_direction,
+            conversion_factor=CONVERSION_THZ2,
         )
         H_00_D, _ = get_btd_blocks(
-            phonon_device, qp, transport_direction=transport_direction
+            phonon_device, qp, transport_direction=transport_direction,
+            conversion_factor=CONVERSION_THZ2,
         )
 
         for iw, w2 in enumerate(omega_sq):
@@ -371,7 +394,7 @@ def thermal_conductance(
     Parameters
     ----------
     freqs_thz : ndarray
-        Frequency grid.
+        Frequency grid in THz.
     transmission : ndarray
         Transmission function.
     temperature_k : float
@@ -379,7 +402,6 @@ def thermal_conductance(
     lattice_vectors : ndarray, shape (3, 3)
         Lattice vectors in Angstrom.
     transport_direction : str
-        Transport direction ("x", "y", or "z").
 
     Returns
     -------
@@ -392,8 +414,8 @@ def thermal_conductance(
     a2 = lattice_vectors[perp[1]]
     A_c = np.linalg.norm(np.cross(a1, a2)) * 1e-20  # Angstrom^2 -> m^2
 
-    omegas = freqs_thz * THZ_TO_RAD
-    hw = HBAR_EV * omegas
+    omegas_rad = freqs_thz * THZ_TO_RAD
+    hw = HBAR_EV * omegas_rad  # eV
     x = hw / (KB_EV * temperature_k)
 
     dfdt = np.zeros_like(x)
@@ -402,6 +424,7 @@ def thermal_conductance(
         np.exp(x[valid]) / (np.exp(x[valid]) - 1) ** 2
     )
 
-    dw = (freqs_thz[1] - freqs_thz[0]) * THZ_TO_RAD
-    integrand = transmission * hw * dfdt * dw / (2 * np.pi)
-    return float(np.sum(integrand) * EV_TO_J / A_c)
+    # Integration: sum * dw_thz * 1e12 (since dw_rad/(2*pi) = dw_thz * 1e12)
+    dw_thz = freqs_thz[1] - freqs_thz[0]
+    integrand = transmission * hw * dfdt
+    return float(np.sum(integrand) * dw_thz * 1e12 * EV_TO_J / A_c)

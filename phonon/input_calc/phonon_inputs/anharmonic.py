@@ -14,6 +14,10 @@ The self-energy uses the LOCAL (q-averaged) Green's function:
     G_local(w) = (1/N_q) * sum_q G(q, w)
 This is Approximation III from Guo et al.
 
+Internal units: THz^2 for dynamical matrices and self-energies.
+This keeps magnitudes O(1)-O(100) for numerical stability, compared
+to (rad/s)^2 which gives O(10^25) magnitudes.
+
 This module provides a reference Python implementation for validation
 of the quatrex GPU solver, matching the style of validation.py.
 """
@@ -21,15 +25,15 @@ of the quatrex GPU solver, matching the style of validation.py.
 import numpy as np
 from numpy.linalg import inv
 
-from .constants import AMU_KG, CONVERSION, EV_TO_J, HBAR_EV, KB_EV, THZ_TO_RAD
-
-# Conversion factor for mass-weighted FC3: eV/(A^3 amu^{3/2}) -> SI J/(m^3 kg^{3/2}).
-# Dimensional analysis: Sigma = (i*hbar/2) * Phi3^2 * G^2 * dw/(2*pi)
-# gives [Sigma] = (rad/s)^2 when Phi3 is in SI.
-# CONVERSION converts eV/(amu*A^2) -> (rad/s)^2 for FC2;
-# FC3 has one extra 1/(A * amu^{1/2}) factor:
-CONVERSION_FC3 = CONVERSION / (1e-10 * np.sqrt(AMU_KG))
-HBAR_SI = HBAR_EV * EV_TO_J  # hbar in J*s
+from .constants import (
+    CONVERSION_FC3_THZ,
+    CONVERSION_THZ2,
+    EV_TO_J,
+    HBAR_EV,
+    HBAR_SI,
+    KB_EV,
+    THZ_TO_RAD,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -42,12 +46,13 @@ def load_fc3_for_transport(
     n_atoms_prim: int,
     prim_cell: np.ndarray,
 ) -> dict:
-    """Reorganise FC3 data from thirdorder format for transport.
+    """Reorganise FC3 data from thirdorder/phono3py format for transport.
 
     Parameters
     ----------
     fc3_data : dict
-        Output of ``force_constants.load_fc3_thirdorder()``.
+        Output of ``force_constants.load_fc3_thirdorder()`` or
+        ``force_constants.load_fc3_phono3py()``.
     n_atoms_prim : int
         Number of atoms in the primitive cell.
     prim_cell : ndarray, shape (3, 3)
@@ -103,7 +108,7 @@ def build_fc3_matrix(
 def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
     """Surface Green's function via Sancho-Rubio decimation.
 
-    Identical to validation._sancho_rubio.
+    All quantities in THz^2.
     """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
@@ -171,14 +176,16 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
                                 n_slabs=1):
     """Compute contact self-energies embedded in the N-slab device space.
 
+    All dynamical matrix quantities in THz^2.
+
     Parameters
     ----------
     omega_sq : float
-        w^2 in (rad/s)^2.
+        w^2 in THz^2.
     H_00, H_01 : ndarray
-        On-site and coupling blocks for the lead.
+        On-site and coupling blocks for the lead (THz^2).
     eta : float
-        Broadening.
+        Broadening in THz^2.
     n_bose_L, n_bose_R : float
         Bose-Einstein occupation at the left/right contacts.
     n_slabs : int
@@ -205,14 +212,13 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
 
     # Embed into device space
     def _embed(block, position):
-        """Embed n_dof x n_dof block at diagonal position in N_D x N_D."""
         M = np.zeros((N_D, N_D), dtype=complex)
         sl = slice(position * n_dof, (position + 1) * n_dof)
         M[sl, sl] = block
         return M
 
-    Sigma_L_R = _embed(sig_L, 0)           # top-left block
-    Sigma_R_R = _embed(sig_R, n_slabs - 1)  # bottom-right block
+    Sigma_L_R = _embed(sig_L, 0)
+    Sigma_R_R = _embed(sig_R, n_slabs - 1)
     Gamma_L = _embed(gam_L, 0)
     Gamma_R = _embed(gam_R, n_slabs - 1)
 
@@ -240,20 +246,7 @@ def _solve_green_functions(omega_sq, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser
     G^R = [(w^2 + i*eta)*I - H_D - Sigma_L^R - Sigma_R^R - Sigma_scatt^R]^{-1}
     G^{<,>} = G^R * Sigma^{<,>}_total * G^A
 
-    Parameters
-    ----------
-    omega_sq : float
-    H_D : ndarray, shape (N_D, N_D)
-        Device Hamiltonian (block-tridiagonal for multi-slab).
-    obc : dict
-        Contact self-energies from _compute_obc_self_energies.
-    Sigma_scatt_R, Sigma_scatt_lesser, Sigma_scatt_greater : ndarray (N_D, N_D)
-        Scattering self-energies (block-diagonal for ph-ph).
-    eta : float
-
-    Returns
-    -------
-    G_R, G_lesser, G_greater : ndarray, shape (N_D, N_D)
+    All in THz^2 units.
     """
     N = H_D.shape[0]
 
@@ -277,47 +270,53 @@ def _compute_phph_self_energy(
     G_greater: np.ndarray,
     fc3_tensor: np.ndarray,
     n_dof: int,
-    omega_grid: np.ndarray,
-    dw: float,
+    omega_grid_thz: np.ndarray,
+    dw_thz: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute phonon-phonon scattering self-energy via FFT convolution.
 
     Implements Guo Eq. (8) for a single slab (diagonal block only,
     Approximation III), decay channel only.
 
-    Sigma^<_{ab}(w) = (i*hbar/2) * sum_{c,d,e,f} Phi3_{a,c,d}
-        * [integral dw'/(2*pi) G^<_{cf}(w') G^<_{de}(w-w')]
-        * Phi3_{b,e,f}
+    All internal quantities in THz^2 units. The self-energy output
+    is in THz^2 (consistent with the Green's functions being in 1/THz^2).
 
-    The frequency grid is padded to start at w=0 so that the FFT
-    convolution correctly computes C(w) = int G(w') G(w-w') dw'.
+    The frequency integral (changing variables from ω to ν in THz):
+        ∫ dω'/(2π) G_ω(ω') G_ω(ω-ω')
+        = (1/Λ³) × ∫ dν'/(2π) G_ν(ν') G_ν(ν-ν')
+
+    where Λ = THZ_TO_RAD. With Φ_ν = Φ_ω/Λ^{5/2}, the self-energy becomes:
+        Σ_ν = (iℏ/2) × Φ_ν² × ∫ dν'/(2π) G_ν(ν') G_ν(ν-ν')
+
+    Discretized: prefactor = (iℏ/2) × Δν/(2π), where Δν is in THz.
 
     Parameters
     ----------
     G_lesser : ndarray, shape (n_freq, n_dof, n_dof)
+        In 1/THz^2.
     G_greater : ndarray, shape (n_freq, n_dof, n_dof)
+        In 1/THz^2.
     fc3_tensor : ndarray, shape (n_dof, n_dof, n_dof)
-        FC3 tensor already in SI units (mass-weighted + CONVERSION_FC3 applied).
+        FC3 tensor in THz^{5/2} (mass-weighted + CONVERSION_FC3_THZ applied).
     n_dof : int
-    omega_grid : ndarray, shape (n_freq,)
-        Frequency grid in rad/s.
-    dw : float
-        Frequency spacing in rad/s.
+    omega_grid_thz : ndarray, shape (n_freq,)
+        Frequency grid in THz.
+    dw_thz : float
+        Frequency spacing in THz.
 
     Returns
     -------
     Sigma_lesser, Sigma_greater, Sigma_retarded : ndarray, shape (n_freq, n_dof, n_dof)
+        In THz^2.
     """
-    n_freq = len(omega_grid)
+    n_freq = len(omega_grid_thz)
     Sigma_lesser = np.zeros((n_freq, n_dof, n_dof), dtype=complex)
     Sigma_greater = np.zeros((n_freq, n_dof, n_dof), dtype=complex)
 
-    Phi3 = fc3_tensor  # shape (n_dof, n_dof, n_dof)
+    Phi3 = fc3_tensor
 
     # Pad G arrays so the frequency axis starts at w=0.
-    # Without padding, the FFT convolution result at index n
-    # corresponds to frequency 2*w_min + n*dw instead of w_min + n*dw.
-    n_low = max(0, int(np.round(omega_grid[0] / dw)))
+    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
     n_ext = n_low + n_freq
 
     G_l_pad = np.zeros((n_ext, n_dof, n_dof), dtype=complex)
@@ -331,25 +330,23 @@ def _compute_phph_self_energy(
     G_l_fft = np.fft.fft(G_l_pad, n=n_fft, axis=0)
     G_g_fft = np.fft.fft(G_g_pad, n=n_fft, axis=0)
 
-    # Combined prefactor: (i*hbar_SI / 2) * (dw / (2*pi))
-    prefactor = 0.5j * HBAR_SI * dw / (2 * np.pi)
+    # Prefactor: (i*hbar_SI / 2) * dw_thz / (2*pi)
+    # The integral is ∫ dν'/(2π) G(ν') G(ν-ν') where ν is in THz.
+    # Discretizing: Σ_m × Δν/(2π). This gives self-energy in THz^2 when
+    # FC3 is in THz^{5/2} and G is in 1/THz^2.
+    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
 
-    # Loop over FC3 index pairs, accumulating Sigma directly.
-    # Skip zero FC3 entries for efficiency.
     for c in range(n_dof):
         for d in range(n_dof):
-            phi_left = Phi3[:, c, d]  # Phi3[a, c, d] for all a
+            phi_left = Phi3[:, c, d]
             if np.max(np.abs(phi_left)) < 1e-30:
                 continue
             for e in range(n_dof):
                 for f in range(n_dof):
-                    phi_right = Phi3[:, e, f]  # Phi3[b, e, f] for all b
+                    phi_right = Phi3[:, e, f]
                     if np.max(np.abs(phi_right)) < 1e-30:
                         continue
 
-                    # Decay convolution: C(w) = sum_m G_{cf}(w_m) G_{de}(w-w_m)
-                    # Extract result at indices [n_low : n_low + n_freq]
-                    # which correspond to our original frequency grid
                     conv_l = np.fft.ifft(
                         G_l_fft[:, c, f] * G_l_fft[:, d, e], n=n_fft
                     )[n_low: n_low + n_freq]
@@ -357,13 +354,11 @@ def _compute_phph_self_energy(
                         G_g_fft[:, c, f] * G_g_fft[:, d, e], n=n_fft
                     )[n_low: n_low + n_freq]
 
-                    # Outer product of FC3 vertices
-                    outer = phi_left[:, None] * phi_right[None, :]  # (n_dof, n_dof)
+                    outer = phi_left[:, None] * phi_right[None, :]
                     Sigma_lesser += (prefactor * conv_l)[:, None, None] * outer[None, :, :]
                     Sigma_greater += (prefactor * conv_g)[:, None, None] * outer[None, :, :]
 
     # Retarded: Sigma^R = (1/2)(Sigma^> - Sigma^<)
-    # Neglects the principal-value Hilbert transform contribution.
     Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
 
     return Sigma_lesser, Sigma_greater, Sigma_retarded
@@ -376,13 +371,11 @@ def _assemble_fc3_dense(fc3_data, n_atoms, masses_amu):
     interactions within a single unit cell. This is Approximation (III)
     from Guo et al.
 
-    thirdorder.py outputs RAW FC3 in eV/A^3 (not mass-weighted).
-    This function applies: Phi3_mw = Phi3_raw / sqrt(M_i * M_j * M_k).
-
     Parameters
     ----------
     fc3_data : dict
-        Output of ``force_constants.load_fc3_thirdorder()``.
+        Output of ``force_constants.load_fc3_thirdorder()`` or
+        ``force_constants.load_fc3_phono3py()``.
     n_atoms : int
         Number of atoms in the primitive cell.
     masses_amu : array-like, shape (n_atoms,)
@@ -428,7 +421,8 @@ def _assemble_fc3_full(fc3_data, n_atoms, masses_amu, prim_cell,
     Parameters
     ----------
     fc3_data : dict
-        Output of ``force_constants.load_fc3_thirdorder()``.
+        Output of ``force_constants.load_fc3_thirdorder()`` or
+        ``force_constants.load_fc3_phono3py()``.
     n_atoms : int
         Number of atoms in the primitive cell.
     masses_amu : array-like, shape (n_atoms,)
@@ -457,7 +451,7 @@ def _assemble_fc3_full(fc3_data, n_atoms, masses_amu, prim_cell,
     n_total = len(fc3_data["blocks"])
 
     for block in fc3_data["blocks"]:
-        cell_j_cart = block["cell_j"]  # Cartesian Angstrom
+        cell_j_cart = block["cell_j"]
         cell_k_cart = block["cell_k"]
 
         frac_j = inv_cell @ cell_j_cart
@@ -514,12 +508,15 @@ def anharmonic_transmission(
     Green's function (diagonal block of each slab), following
     Guo Eq. 8 with Approximation III.
 
+    Internal units: THz^2 for all dynamical matrix quantities.
+
     Parameters
     ----------
     phonon : Phonopy
         Phonopy object with harmonic force constants.
     fc3_data : dict
-        Third-order force constants from ``load_fc3_thirdorder()``.
+        Third-order force constants from ``load_fc3_thirdorder()``
+        or ``load_fc3_phono3py()``.
     q_mesh_transverse : (int, int)
         Transverse q-mesh.
     freq_range_thz : (fmin, fmax, nfreq)
@@ -527,23 +524,22 @@ def anharmonic_transmission(
     transport_direction : str
         Transport direction.
     eta_factor : float
-        Broadening: eta = dw^2 * eta_factor.
+        Broadening: eta = dw^2 * eta_factor (in THz^2).
     temperature : float
         Mean temperature in Kelvin.
     delta_T : float
         Temperature difference between contacts in Kelvin.
-        Left contact: T + delta_T/2, right contact: T - delta_T/2.
     max_scba_iter : int
         Maximum SCBA iterations.
     scba_tol : float
-        Convergence tolerance for heat flow conservation (Guo et al. Sec. II.C.3).
+        Convergence tolerance for heat flow conservation.
     mixing : float
         Self-energy mixing factor (0 < alpha <= 1).
     fc3_mode : str
         "onsite": only R'=R''=0 blocks.
         "full": all blocks with delta_l_transport=0.
     n_slabs : int
-        Number of unit-cell slabs in the device region (default 1).
+        Number of unit-cell slabs in the device region.
     verbose : bool
         Print progress.
 
@@ -569,14 +565,13 @@ def anharmonic_transmission(
     fmin, fmax, nfreq = freq_range_thz
     nfreq = int(nfreq)
     freqs_thz = np.linspace(fmin, fmax, nfreq)
-    omega_rad = freqs_thz * THZ_TO_RAD
-    omega_sq = omega_rad ** 2
-    dw = (freqs_thz[1] - freqs_thz[0]) * THZ_TO_RAD
-    eta = dw ** 2 * eta_factor
+    omega_sq_thz2 = freqs_thz ** 2  # THz^2
+    dw_thz = freqs_thz[1] - freqs_thz[0]  # THz
+    eta = dw_thz ** 2 * eta_factor  # THz^2
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
-    N_D = n_slabs * n_dof  # total device DOFs
+    N_D = n_slabs * n_dof
     masses_amu = phonon.primitive.masses
     prim_cell = phonon.primitive.cell
 
@@ -597,11 +592,11 @@ def anharmonic_transmission(
     else:
         raise ValueError(f"Unknown fc3_mode: {fc3_mode}")
 
-    # Convert FC3 to SI units
-    Phi3_converted = Phi3 * CONVERSION_FC3
+    # Convert FC3 to THz^{5/2} units
+    Phi3_converted = Phi3 * CONVERSION_FC3_THZ
 
     if verbose:
-        print(f"  FC3 max (SI): {np.max(np.abs(Phi3_converted)):.4e}")
+        print(f"  FC3 max (THz^5/2): {np.max(np.abs(Phi3_converted)):.4e}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
 
     # Set up q-mesh
@@ -611,9 +606,9 @@ def anharmonic_transmission(
     q_points = [(qx, qy) for qx in q_1d_x for qy in q_1d_y]
     n_kpts = len(q_points)
 
-    # Bose-Einstein distribution
-    def bose_einstein(omega_rad_arr, T):
-        hw = HBAR_EV * np.abs(omega_rad_arr)
+    # Bose-Einstein distribution (needs hbar*omega in eV)
+    def bose_einstein(freq_thz_arr, T):
+        hw = HBAR_EV * np.abs(freq_thz_arr) * THZ_TO_RAD  # eV
         x = hw / (KB_EV * T)
         n = np.zeros_like(x)
         valid = x > 1e-10
@@ -622,40 +617,34 @@ def anharmonic_transmission(
 
     T_L = temperature + delta_T / 2.0
     T_R = temperature - delta_T / 2.0
-    n_bose_L = bose_einstein(omega_rad, T_L)
-    n_bose_R = bose_einstein(omega_rad, T_R)
+    n_bose_L = bose_einstein(freqs_thz, T_L)
+    n_bose_R = bose_einstein(freqs_thz, T_R)
 
     if verbose:
         print(f"  q-mesh: {nkx}x{nky} = {n_kpts} points")
         print(f"  Frequency grid: {nfreq} points, {fmin:.2f} to {fmax:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
-        print(f"  eta = {eta:.2e} (rad/s)^2")
+        print(f"  eta = {eta:.4e} THz^2")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, mix={mixing}")
 
-    # Precompute BTD blocks for all q-points
+    # Precompute BTD blocks for all q-points (in THz^2)
     btd_blocks = []
     for qx, qy in q_points:
         H_00, H_01 = get_btd_blocks(
-            phonon, (qx, qy), transport_direction=transport_direction
+            phonon, (qx, qy), transport_direction=transport_direction,
+            conversion_factor=CONVERSION_THZ2,
         )
         btd_blocks.append((H_00, H_01))
 
     # --- Ballistic transmission ---
-    # For N slabs of homogeneous material, build the full device Hamiltonian
     trans_ballistic = np.zeros(nfreq)
     for iq, (H_00, H_01) in enumerate(btd_blocks):
         H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
-        # Coupling to leads: H_LD = H_01 (left lead couples to slab 0)
-        # H_DR = H_01 (slab N-1 couples to right lead)
-        # For n_slabs > 1 these are rectangular: n_dof x N_D embedded
-        # But _ballistic_transmission expects H_LD and H_DR as the
-        # coupling between lead and device edge.
-        # H_LD couples left lead to first slab, H_DR couples last slab to right lead
         H_LD = np.zeros((n_dof, N_D), dtype=complex)
         H_LD[:, :n_dof] = H_01
         H_DR = np.zeros((N_D, n_dof), dtype=complex)
         H_DR[-n_dof:, :] = H_01
-        for iw, w2 in enumerate(omega_sq):
+        for iw, w2 in enumerate(omega_sq_thz2):
             trans_ballistic[iw] += _ballistic_transmission(
                 w2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR, eta=eta
             )
@@ -672,18 +661,20 @@ def anharmonic_transmission(
     a2 = lattice[perp_idx[1]]
     A_c = np.linalg.norm(np.cross(a1, a2)) * 1e-20  # Ang^2 -> m^2
 
-    # Ballistic spectral heat current from Caroli transmission (exact for
-    # ballistic transport): J(w) = hbar*w * (n_L(w) - n_R(w)) * T(w)
+    # Ballistic spectral heat current from Caroli transmission:
+    # J(w) = hbar*omega * (n_L(w) - n_R(w)) * T(w)
+    # omega in rad/s for physical current (Watts)
+    omega_rad = freqs_thz * THZ_TO_RAD
     spectral_J_ball = (HBAR_SI * omega_rad
                        * (n_bose_L - n_bose_R) * trans_ballistic)
-    J_ball_total = np.sum(spectral_J_ball) * dw / (2 * np.pi)
+    # Integration: sum * dw_rad / (2*pi) = sum * dw_thz * 1e12
+    J_ball_total = np.sum(spectral_J_ball) * dw_thz * 1e12
     G_ball = J_ball_total / (A_c * delta_T)
 
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
     # --- SCBA with per-slab q-averaged Green's functions ---
-    # Per-slab self-energy: shape (n_slabs, nfreq, n_dof, n_dof)
     Sigma_slab_R = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
     Sigma_slab_lesser = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
     Sigma_slab_greater = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
@@ -693,7 +684,6 @@ def anharmonic_transmission(
     conservation_err = 1.0
     J_total_prev = 0.0
 
-    # Saved state for divergence revert
     Sigma_slab_lesser_prev = Sigma_slab_lesser.copy()
     Sigma_slab_greater_prev = Sigma_slab_greater.copy()
     Sigma_slab_R_prev = Sigma_slab_R.copy()
@@ -703,8 +693,6 @@ def anharmonic_transmission(
     spectral_J_R = np.zeros(nfreq)
 
     for scba_iter in range(max_scba_iter):
-        # Step 1: Compute full-device G at all q-points,
-        # extract per-slab diagonal blocks and heat current at boundaries
         G_lesser_slab = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
         G_greater_slab = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
         spectral_J_L[:] = 0.0
@@ -713,8 +701,7 @@ def anharmonic_transmission(
         for iq, (H_00, H_01) in enumerate(btd_blocks):
             H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
 
-            for iw, w2 in enumerate(omega_sq):
-                # Build block-diagonal scattering self-energy in device space
+            for iw, w2 in enumerate(omega_sq_thz2):
                 Sigma_R_dev = np.zeros((N_D, N_D), dtype=complex)
                 Sigma_l_dev = np.zeros((N_D, N_D), dtype=complex)
                 Sigma_g_dev = np.zeros((N_D, N_D), dtype=complex)
@@ -732,22 +719,20 @@ def anharmonic_transmission(
                     w2, H_D, obc, Sigma_R_dev, Sigma_l_dev, Sigma_g_dev, eta,
                 )
 
-                # Extract per-slab diagonal blocks
                 for l in range(n_slabs):
                     sl = slice(l * n_dof, (l + 1) * n_dof)
                     G_lesser_slab[l, iw] += G_less[sl, sl]
                     G_greater_slab[l, iw] += G_great[sl, sl]
 
-                # Heat current at boundaries (Meir-Wingreen formula,
-                # equivalent to Guo et al. Eq. 25/26)
-                # J_L = hbar*w * Tr[Sigma_L^> G^< - Sigma_L^< G^>]
+                # Meir-Wingreen heat current at boundaries
+                # J_L = hbar*omega * Tr[Sigma_L^> G^< - Sigma_L^< G^>]
+                # omega in rad/s for physical current (W)
                 sl0 = slice(0, n_dof)
                 spectral_J_L[iw] += HBAR_SI * omega_rad[iw] * np.real(
                     np.trace(
                         obc["Sigma_L_greater"][sl0, sl0] @ G_less[sl0, sl0]
                         - obc["Sigma_L_lesser"][sl0, sl0] @ G_great[sl0, sl0]
                     ))
-                # J_R = hbar*w * Tr[Sigma_R^< G^> - Sigma_R^> G^<]
                 sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
                 spectral_J_R[iw] += HBAR_SI * omega_rad[iw] * np.real(
                     np.trace(
@@ -762,9 +747,10 @@ def anharmonic_transmission(
         spectral_J_L /= n_kpts
         spectral_J_R /= n_kpts
 
-        # Total heat current (Guo et al. Eq. 25)
-        J_L_total = np.sum(spectral_J_L) * dw / (2 * np.pi)
-        J_R_total = np.sum(spectral_J_R) * dw / (2 * np.pi)
+        # Total heat current: integrate spectral current
+        # sum * dw_rad / (2*pi) = sum * dw_thz * 1e12
+        J_L_total = np.sum(spectral_J_L) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R) * dw_thz * 1e12
         J_total = 0.5 * (J_L_total + J_R_total)
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
@@ -774,7 +760,7 @@ def anharmonic_transmission(
             gl_max = np.max(np.abs(G_lesser_slab))
             print(f"    G diagnostic (q-avg, per-slab): max|G^<| = {gl_max:.4e}")
 
-        # Step 2: Compute per-slab phonon-phonon self-energy
+        # Compute per-slab phonon-phonon self-energy
         Sigma_slab_l_new = np.zeros_like(Sigma_slab_lesser)
         Sigma_slab_g_new = np.zeros_like(Sigma_slab_greater)
         Sigma_slab_r_new = np.zeros_like(Sigma_slab_R)
@@ -782,7 +768,7 @@ def anharmonic_transmission(
         for l in range(n_slabs):
             sl_new, sg_new, sr_new = _compute_phph_self_energy(
                 G_lesser_slab[l], G_greater_slab[l],
-                Phi3_converted, n_dof, omega_rad, dw,
+                Phi3_converted, n_dof, freqs_thz, dw_thz,
             )
             Sigma_slab_l_new[l] = sl_new
             Sigma_slab_g_new[l] = sg_new
@@ -792,10 +778,10 @@ def anharmonic_transmission(
 
         if verbose and scba_iter == 0:
             h00_max = max(np.max(np.abs(H)) for H, _ in btd_blocks)
-            print(f"    Self-energy: max|Sigma^R| = {sig_r_new_norm:.4e}, "
+            print(f"    Self-energy: max|Sigma^R| = {sig_r_new_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_new_norm/h00_max:.4e}")
 
-        # Step 3: Mix with adaptive damping
+        # Mix with adaptive damping
         if scba_iter > 0:
             alpha = current_mixing
             Sigma_slab_lesser = ((1 - alpha) * Sigma_slab_lesser
@@ -809,13 +795,11 @@ def anharmonic_transmission(
             Sigma_slab_greater = Sigma_slab_g_new.copy()
             Sigma_slab_R = Sigma_slab_r_new.copy()
 
-        # Save state for potential revert
         Sigma_slab_lesser_prev = Sigma_slab_lesser.copy()
         Sigma_slab_greater_prev = Sigma_slab_greater.copy()
         Sigma_slab_R_prev = Sigma_slab_R.copy()
 
-        # Step 4: Check convergence via heat flow conservation
-        # (Guo et al. Sec. II.C.3: J must be uniform across all interfaces)
+        # Check convergence
         if scba_iter > 0:
             rel_change = (abs(J_total - J_total_prev)
                           / (abs(J_total_prev) + 1e-30))
@@ -826,7 +810,7 @@ def anharmonic_transmission(
                       f"J = {J_total:.4e} W, "
                       f"conservation = {conservation_err:.4e}, "
                       f"rel. change = {rel_change:.4e}, "
-                      f"max|Sigma^R| = {sig_r_now:.2e}")
+                      f"max|Sigma^R| = {sig_r_now:.2e} THz^2")
             if conservation_err < scba_tol:
                 if verbose:
                     print(f"    Converged after {scba_iter + 1} iterations "
@@ -839,10 +823,9 @@ def anharmonic_transmission(
 
         J_total_prev = J_total
 
-    # Anharmonic thermal conductance from heat current (Guo et al. Eq. 25)
-    # Average of left and right boundary currents (equal at convergence)
+    # Anharmonic thermal conductance
     spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
-    J_anh_total = np.sum(spectral_J_anh) * dw / (2 * np.pi)
+    J_anh_total = np.sum(spectral_J_anh) * dw_thz * 1e12
     G_anh = J_anh_total / (A_c * delta_T)
 
     if verbose:
@@ -851,7 +834,7 @@ def anharmonic_transmission(
 
     return {
         "freqs_thz": freqs_thz,
-        "omega_rad": omega_rad,
+        "omega_rad": freqs_thz * THZ_TO_RAD,
         "transmission_ballistic": trans_ballistic,
         "spectral_heat_current_ballistic": spectral_J_ball,
         "spectral_heat_current": spectral_J_anh,
