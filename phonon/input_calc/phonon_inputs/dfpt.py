@@ -6,11 +6,16 @@ and third-order DFPT for FC3 (d3q.x + d3_qq2rr.x).
 
 Workflow:
     1. scf:    pw.x self-consistent calculation on unit cell
-    2. ph:     ph.x DFPT phonon calculation on q-grid
+    2. ph:     ph.x DFPT phonon calculation on q-grid, saving drho_star
     3. q2r:    q2r.x Fourier transform dynamical matrices -> FC2
-    4. d3q:    d3q.x third-order DFPT for each triplet
+    4. d3q:    d3q.x third-order DFPT on the full q-grid
     5. qq2rr:  d3_qq2rr.x Fourier transform -> real-space FC3
     6. save:   Convert to phono3py format, write fc3.hdf5
+
+This implementation follows the intended D3Q design for regular grids:
+    - ph.x runs with drho_star enabled
+    - d3q.x runs once in mode='full'
+    - d3_qq2rr.x Fourier-transforms the produced D3 matrices
 
 Requires:
     - QE >= 7.0 with ph.x
@@ -38,92 +43,13 @@ from .config import DFPTConfig, QEConfig
 # ---------------------------------------------------------------------------
 BOHR_TO_ANG = 0.52917721067
 RY_TO_EV = 13.605693009
-RY_BOHR2_TO_EV_ANG2 = RY_TO_EV / BOHR_TO_ANG**2  # ~48.587
-RY_BOHR3_TO_EV_ANG3 = RY_TO_EV / BOHR_TO_ANG**3  # ~91.835
+RY_BOHR2_TO_EV_ANG2 = RY_TO_EV / BOHR_TO_ANG**2
+RY_BOHR3_TO_EV_ANG3 = RY_TO_EV / BOHR_TO_ANG**3
 
 DFPT_PREFIX = "dfpt_fc"
 DRHO_EXT = "drho"
 DRHO_DIRNAME = "FILDRHO"
-
-# ---------------------------------------------------------------------------
-# Q-point utilities
-# ---------------------------------------------------------------------------
-
-
-def _generate_q_grid(q_mesh: list[int]) -> np.ndarray:
-    """Generate q-points on a regular Monkhorst-Pack grid.
-
-    Parameters
-    ----------
-    q_mesh : list of 3 int
-        Grid dimensions [nq1, nq2, nq3].
-
-    Returns
-    -------
-    q_points : (N, 3) array
-        Q-points in crystal (fractional reciprocal) coordinates.
-    """
-    nq1, nq2, nq3 = q_mesh
-    pts = []
-    for i in range(nq1):
-        for j in range(nq2):
-            for k in range(nq3):
-                pts.append([i / nq1, j / nq2, k / nq3])
-    return np.array(pts)
-
-
-def _crystal_to_qe_cartesian(
-    q_cryst: np.ndarray, cell_ang: np.ndarray
-) -> np.ndarray:
-    """Convert q-point from crystal to QE Cartesian coordinates (2pi/alat).
-
-    QE uses Cartesian q-points in units of 2pi/alat, where
-    alat = |a1| in bohr.
-
-    Parameters
-    ----------
-    q_cryst : (3,) array
-        Q-point in crystal reciprocal coordinates.
-    cell_ang : (3, 3) array
-        Lattice vectors in Angstrom (rows).
-
-    Returns
-    -------
-    q_cart : (3,) array
-        Q-point in QE 2pi/alat Cartesian units.
-    """
-    alat_ang = np.linalg.norm(cell_ang[0])
-    A_hat = cell_ang / alat_ang  # dimensionless
-    B_hat = np.linalg.inv(A_hat).T  # reciprocal in 2pi/alat units
-    return q_cryst @ B_hat
-
-
-def _generate_triplets(q_mesh: list[int]) -> list[tuple[np.ndarray, ...]]:
-    """Generate all (q1, q2, q3=-q1-q2) triplets on the grid.
-
-    Parameters
-    ----------
-    q_mesh : list of 3 int
-
-    Returns
-    -------
-    triplets : list of (q1, q2, q3) tuples in crystal coordinates.
-        q3 is folded back into [0, 1).
-    """
-    q_points = _generate_q_grid(q_mesh)
-    nq = len(q_points)
-    triplets = []
-    seen = set()
-    for i in range(nq):
-        for j in range(nq):
-            q1 = q_points[i]
-            q2 = q_points[j]
-            q3 = (-q1 - q2) % 1.0
-            key = (i, j)
-            if key not in seen:
-                seen.add(key)
-                triplets.append((q1.copy(), q2.copy(), q3.copy()))
-    return triplets
+D3_MODE = "full"
 
 
 # ---------------------------------------------------------------------------
@@ -187,36 +113,34 @@ def _write_q2r_input(path: Path) -> None:
 
 def _write_d3q_input(
     path: Path,
-    q1_cart: np.ndarray,
-    q2_cart: np.ndarray,
+    dfpt_config: DFPTConfig,
     prefix: str = DFPT_PREFIX,
 ) -> None:
-    """Write d3q.x input for one q-point pair in mode='single'.
+    """Write d3q.x input for a full-grid FC3 calculation.
 
-    For d3q.x single mode, only q1 and q2 are written after the namelist.
-    q3 is inferred internally from momentum conservation.
+    For mode='full', d3q.x expects the q-grid dimensions after the namelist.
 
     Parameters
     ----------
     path : Path
         Output file path.
-    q1_cart, q2_cart : (3,) arrays
-        Q-points in QE Cartesian coordinates (2pi/alat).
+    dfpt_config : DFPTConfig
+        DFPT configuration.
     prefix : str
         QE prefix (must match pw.x and ph.x).
     """
+    nq1, nq2, nq3 = dfpt_config.q_mesh
     with open(path, "w") as f:
         f.write("&inputd3q\n")
-        f.write("   mode        = 'single'\n")
+        f.write(f"   mode        = '{D3_MODE}'\n")
         f.write(f"   prefix      = '{prefix}'\n")
         f.write("   outdir      = './results'\n")
+        f.write("   d3dir       = './d3_save'\n")
         f.write(f"   fildrho     = '{DRHO_EXT}'\n")
         f.write(f"   fildrho_dir = './{DRHO_DIRNAME}'\n")
         f.write("   fild3dyn    = 'd3dyn'\n")
-        f.write("   d3dir       = './d3_save'\n")
         f.write("/\n")
-        f.write(f"  {q1_cart[0]:.10f}  {q1_cart[1]:.10f}  {q1_cart[2]:.10f}\n")
-        f.write(f"  {q2_cart[0]:.10f}  {q2_cart[1]:.10f}  {q2_cart[2]:.10f}\n")
+        f.write(f"  {nq1}  {nq2}  {nq3}\n")
 
 
 def _write_qq2rr_input(path: Path, dfpt_config: DFPTConfig) -> None:
@@ -262,9 +186,7 @@ def _write_d3_asr_input(path: Path, dfpt_config: DFPTConfig) -> None:
         f.write("/\n")
 
 
-def _write_d3_sparse_input(
-    path: Path, dfpt_config: DFPTConfig
-) -> None:
+def _write_d3_sparse_input(path: Path, dfpt_config: DFPTConfig) -> None:
     """Write d3_sparse.x input for FC3 sparsification.
 
     Parameters
@@ -306,7 +228,7 @@ def _run_step(
     work_dir : Path
         Working directory.
     command : str
-        Command to run (e.g., "mpirun -np 4 ph.x").
+        Command to run (e.g. "mpirun -np 4 ph.x").
     input_file : str
         Input filename (relative to work_dir).
     output_file : str
@@ -377,7 +299,7 @@ def _parse_q2r_fc2(
     Parameters
     ----------
     flfrc_path : Path
-        Path to the flfrc file (e.g., fc2.dat).
+        Path to the flfrc file (e.g. fc2.dat).
     nat : int
         Number of atoms in the unit cell.
     q_mesh : list of int
@@ -451,8 +373,8 @@ def _parse_q2r_fc2(
     for na in range(1, nat + 1):
         for nb in range(1, nat + 1):
             idx += 1
-            for alpha in range(1, 4):
-                for beta in range(1, 4):
+            for _alpha in range(1, 4):
+                for _beta in range(1, 4):
                     parts = lines[idx].split()
                     i_dir, j_dir = int(parts[0]), int(parts[1])
                     idx += 1
@@ -471,10 +393,6 @@ def _parse_q2r_fc2(
         l1 = (m1 - 1) % n1
         l2 = (m2 - 1) % n2
         l3 = (m3 - 1) % n3
-
-        lp_idx = l1 * n2 * n3 + l2 * n3 + l3
-        j = lp_idx * nat + (nb - 1)
-        _ = j
 
         for t1 in range(n1):
             for t2 in range(n2):
@@ -562,8 +480,6 @@ def _parse_mat3r_fc3(
 
             r1 = np.array([int(parts[0]), int(parts[1]), int(parts[2])])
             r2 = np.array([int(parts[3]), int(parts[4]), int(parts[5])])
-            weight = float(parts[6])
-            _ = weight
 
             for _ in range(n_entries_per_block):
                 parts = f.readline().split()
@@ -615,7 +531,7 @@ def sow(
 ) -> int:
     """Generate all DFPT input files.
 
-    Creates: scf.in, ph.in, q2r.in, d3q-NNNNN.in (per triplet), qq2rr.in.
+    Creates: scf.in, ph.in, q2r.in, d3q.in, qq2rr.in.
 
     Parameters
     ----------
@@ -630,8 +546,8 @@ def sow(
 
     Returns
     -------
-    n_triplets : int
-        Number of d3q.x input files generated.
+    n_d3q_jobs : int
+        Number of d3q.x jobs generated (always 1 in full-grid mode).
     """
     from .qe_interface import write_qe_scf_input
 
@@ -668,21 +584,8 @@ def sow(
     _write_q2r_input(work_dir / "q2r.in")
     print("  Wrote q2r.in")
 
-    triplets = _generate_triplets(dfpt_config.q_mesh)
-    cell_ang = np.array(cell.cell)
-
-    for idx, (q1, q2, q3) in enumerate(triplets):
-        q1_cart = _crystal_to_qe_cartesian(q1, cell_ang)
-        q2_cart = _crystal_to_qe_cartesian(q2, cell_ang)
-        _ = q3
-        _write_d3q_input(
-            work_dir / f"d3q-{idx + 1:05d}.in",
-            q1_cart,
-            q2_cart,
-        )
-
-    n_triplets = len(triplets)
-    print(f"  Wrote {n_triplets} d3q.x input files")
+    _write_d3q_input(work_dir / "d3q.in", dfpt_config)
+    print(f"  Wrote d3q.in (mode={D3_MODE}, q-mesh: {dfpt_config.q_mesh})")
 
     _write_qq2rr_input(work_dir / "qq2rr.in", dfpt_config)
     print("  Wrote qq2rr.in")
@@ -694,7 +597,7 @@ def sow(
         _write_d3_sparse_input(work_dir / "d3_sparse.in", dfpt_config)
         print(f"  Wrote d3_sparse.in (thr={dfpt_config.sparse_thr})")
 
-    return n_triplets
+    return 1
 
 
 def run_scf(work_dir: Path, qe_config: QEConfig, timeout: int = 3600) -> None:
@@ -734,25 +637,15 @@ def run_q2r(work_dir: Path, dfpt_config: DFPTConfig) -> None:
 
 
 def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run d3q.x for all triplets."""
-    work_dir = Path(work_dir)
-    inp_files = sorted(work_dir.glob("d3q-*.in"))
-    n = len(inp_files)
-
-    if n == 0:
-        raise FileNotFoundError("No d3q input files found. Run sow first.")
-
-    print(f"Running {n} d3q.x triplets...")
-    for i, inp in enumerate(inp_files):
-        out_name = inp.stem + ".out"
-        _run_step(
-            work_dir,
-            dfpt_config.d3q_command,
-            inp.name,
-            out_name,
-            dfpt_config.d3q_timeout,
-            label=f"d3q {i + 1}/{n}",
-        )
+    """Run d3q.x once in full-grid mode."""
+    _run_step(
+        work_dir,
+        dfpt_config.d3q_command,
+        "d3q.in",
+        "d3q.out",
+        dfpt_config.d3q_timeout,
+        label="d3q",
+    )
 
 
 def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
@@ -822,7 +715,7 @@ def run_all(
     print(f"Step 3/{n_steps}: q2r.x (FC2)")
     run_q2r(work_dir, dfpt_config)
 
-    print(f"Step 4/{n_steps}: d3q.x (FC3 triplets)")
+    print(f"Step 4/{n_steps}: d3q.x (FC3 full grid)")
     run_d3q(work_dir, dfpt_config)
 
     print(f"Step 5/{n_steps}: d3_qq2rr.x (FC3 real-space)")
@@ -869,8 +762,7 @@ def reap(
     if not fc2_file.exists():
         raise FileNotFoundError(f"FC2 file not found: {fc2_file}")
     print("Parsing FC2 from q2r.x output...")
-    fc2, fc2_info = _parse_q2r_fc2(fc2_file, nat, q_mesh)
-    _ = fc2_info
+    fc2, _fc2_info = _parse_q2r_fc2(fc2_file, nat, q_mesh)
     print(f"  FC2 shape: {fc2.shape}, max: {np.max(np.abs(fc2)):.4e} eV/A^2")
 
     mat3r_file = work_dir / "mat3R"
