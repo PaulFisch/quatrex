@@ -1,2 +1,7 @@
 examples/**/* filter=lfs diff=lfs merge=lfs -text
 examples/**/*.toml text filter= diff= merge=
+
+# Phonon DFT results and pseudopotentials
+phonon/input_calc/scf_disp/results/**/* filter=lfs diff=lfs merge=lfs -text
+phonon/input_calc/fc3_si/results/**/* filter=lfs diff=lfs merge=lfs -text
+phonon/input_calc/pseudo/*.UPF filter=lfs diff=lfs merge=lfs -text

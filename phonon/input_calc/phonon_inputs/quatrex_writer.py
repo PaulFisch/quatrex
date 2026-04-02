@@ -91,6 +91,15 @@ def write_quatrex_config_toml(
     ks = list(config.kpoint_shift)
     nc = list(config.neighbor_cell_cutoff)
 
+    # Heterogeneous L|D|R fields
+    hetero_section = ""
+    if config.left_matrix is not None:
+        hetero_section = f"""num_left_cells = {config.num_left_cells}
+num_right_cells = {config.num_right_cells}
+left_matrix = '{config.left_matrix}'
+right_matrix = '{config.right_matrix}'
+"""
+
     text = f"""simulation_dir = "."
 input_dir = "."
 
@@ -104,7 +113,7 @@ num_transport_cells = {config.num_transport_cells}
 neighbor_cell_cutoff = [{nc[0]}, {nc[1]}, {nc[2]}]
 kpoint_grid = [{kg[0]}, {kg[1]}, {kg[2]}]
 kpoint_shift = [{ks[0]}, {ks[1]}, {ks[2]}]
-
+{hetero_section}
 [device.num_orbitals_per_atom]
 {orbitals_section}
 
@@ -147,6 +156,8 @@ def write_all(
     blocks: dict[tuple[int, int, int], np.ndarray],
     config: QuatrexOutputConfig,
     transport_direction: str = "z",
+    left_blocks: dict[tuple[int, int, int], np.ndarray] | None = None,
+    right_blocks: dict[tuple[int, int, int], np.ndarray] | None = None,
 ) -> Path:
     """Write all quatrex input files.
 
@@ -155,11 +166,15 @@ def write_all(
     cell : PhonopyAtoms
         Unit cell.
     blocks : dict
-        Real-space dynamical matrix blocks.
+        Real-space dynamical matrix blocks (device region for heterogeneous).
     config : QuatrexOutputConfig
         Output settings.
     transport_direction : str
         Transport direction.
+    left_blocks : dict, optional
+        Left-lead blocks (heterogeneous device only).
+    right_blocks : dict, optional
+        Right-lead blocks (heterogeneous device only).
 
     Returns
     -------
@@ -171,5 +186,10 @@ def write_all(
     write_dynamical_matrix_mat(blocks, out / "dynamical_matrix.mat")
     write_structure_xyz(cell, out / "structure.xyz")
     write_quatrex_config_toml(cell, config, transport_direction, out / "quatrex_config.toml")
+
+    if left_blocks is not None and config.left_matrix is not None:
+        write_dynamical_matrix_mat(left_blocks, out / f"{config.left_matrix}.mat")
+    if right_blocks is not None and config.right_matrix is not None:
+        write_dynamical_matrix_mat(right_blocks, out / f"{config.right_matrix}.mat")
 
     return out

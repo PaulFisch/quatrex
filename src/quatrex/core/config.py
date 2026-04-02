@@ -747,6 +747,34 @@ class DeviceConfig(BaseModel):
 
     contacts: list[ContactConfig] = Field(default_factory=list)
 
+    # --- Heterogeneous device (L|D|R) --------------------------------
+    num_left_cells: PositiveInt | None = None
+    """Number of left-lead cells (tiled from ``left_matrix``).
+
+    When set together with ``num_right_cells``, the device is built as
+    three regions: left lead | device | right lead.  The remaining
+    ``num_transport_cells - num_left_cells - num_right_cells`` cells in
+    the middle are the device region and use the default matrix file.
+
+    !!! note
+
+        Only used when ``construct_from_unit_cell`` is ``True``.
+
+    """
+
+    num_right_cells: PositiveInt | None = None
+    """Number of right-lead cells (tiled from ``right_matrix``)."""
+
+    left_matrix: str | None = None
+    """Matrix file name (without ``.mat``) for left-lead cells.
+
+    Must be located in ``input_dir``.  If ``None``, the default
+    ``matrix_name`` is used for all cells (homogeneous device).
+    """
+
+    right_matrix: str | None = None
+    """Matrix file name (without ``.mat``) for right-lead cells."""
+
     num_orbitals_per_atom: dict[str, int] = {"X": 1}
 
     kpoint_grid: tuple[PositiveInt, PositiveInt, PositiveInt] = (1, 1, 1)
@@ -789,6 +817,43 @@ class DeviceConfig(BaseModel):
                 f"At least one neighboring cell in transport direction "
                 f"('{self.transport_direction}') must be included."
             )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_heterogeneous_device(self) -> Self:
+        """Validates heterogeneous L|D|R device configuration."""
+        has_left = self.num_left_cells is not None
+        has_right = self.num_right_cells is not None
+        has_left_mat = self.left_matrix is not None
+        has_right_mat = self.right_matrix is not None
+
+        # All-or-nothing: if any is set, all four must be set.
+        any_set = has_left or has_right or has_left_mat or has_right_mat
+        all_set = has_left and has_right and has_left_mat and has_right_mat
+        if any_set and not all_set:
+            raise ValueError(
+                "Heterogeneous device requires all four fields: "
+                "num_left_cells, num_right_cells, left_matrix, right_matrix."
+            )
+
+        if all_set:
+            if not self.construct_from_unit_cell:
+                raise ValueError(
+                    "Heterogeneous device (left_matrix/right_matrix) "
+                    "requires construct_from_unit_cell = true."
+                )
+            n_device = (
+                self.num_transport_cells
+                - self.num_left_cells
+                - self.num_right_cells
+            )
+            if n_device < 1:
+                raise ValueError(
+                    f"num_left_cells ({self.num_left_cells}) + "
+                    f"num_right_cells ({self.num_right_cells}) must be "
+                    f"less than num_transport_cells ({self.num_transport_cells})."
+                )
 
         return self
 

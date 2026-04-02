@@ -1,0 +1,38 @@
+## FC3 configuration: Si primitive cell (2-atom FCC)
+## Usage:
+##   python -m phonon_inputs fc3-sow  --config config_fc3_si.yaml
+##   python -m phonon_inputs fc3-run  --config config_fc3_si.yaml
+##   python -m phonon_inputs fc3-reap --config config_fc3_si.yaml
+## Or all at once:
+##   python -m phonon_inputs fc3-all  --config config_fc3_si.yaml
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,      2.7009, 2.7009]
+    - [2.7009,   0.0,    2.7009]
+    - [2.7009,   2.7009, 0.0]
+  scaled_positions:
+    - [0.0, 0.0, 0.0]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: ./scf_disp/pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 36
+  ecutrho_factor: 8
+  kpoints_scf: [4, 4, 4]      # for supercell displacement calculations
+  kpoints_relax: [8, 8, 8]    # for unitcell.in (finer k-mesh)
+  conv_thr: 1.0e-10
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "pw.x"
+
+thirdorder:
+  supercell: [2, 2, 2]
+  cutoff: "-3"                 # 3rd-neighbor shell
+  thirdorder_cmd: thirdorder_espresso.py
+  work_dir: ./fc3_si
+  pw_timeout: 3600

@@ -1,0 +1,5 @@
+# Override parent: literature data should be tracked
+!*.npz
+
+# Generated plots
+*.png
