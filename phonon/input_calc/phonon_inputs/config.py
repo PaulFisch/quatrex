@@ -101,6 +101,10 @@ class DFPTConfig:
     q2r_command: str = "q2r.x"
     d3q_command: str = "d3q.x"
     d3_qq2rr_command: str = "d3_qq2rr.x"
+    d3_asr_command: str = "d3_asr.x"
+    d3_sparse_command: str = "d3_sparse.x"
+    asr: str = "simple"  # acoustic sum rule: "simple", "crystal", or "no"
+    sparse_thr: float | None = 1e-5  # FC3 sparsification threshold (Ry/bohr^3); None = skip
     work_dir: str = "./dfpt"
     ph_timeout: int = 7200  # seconds per ph.x run
     d3q_timeout: int = 14400  # seconds per d3q.x run
