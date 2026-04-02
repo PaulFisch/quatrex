@@ -87,6 +87,26 @@ class ThirdOrderConfig:
 
 
 @dataclass
+class DFPTConfig:
+    """DFPT force constant settings via QE ph.x + D3Q.
+
+    Uses Density Functional Perturbation Theory for FC2 (ph.x + q2r.x)
+    and third-order DFPT for FC3 (d3q.x + d3_qq2rr.x).
+    """
+
+    q_mesh: list[int] = field(default_factory=lambda: [2, 2, 2])
+    kpoints: list[int] = field(default_factory=lambda: [8, 8, 8])
+    tr2_ph: float = 1e-14  # ph.x SCF convergence threshold
+    ph_command: str = "ph.x"
+    q2r_command: str = "q2r.x"
+    d3q_command: str = "d3q.x"
+    d3_qq2rr_command: str = "d3_qq2rr.x"
+    work_dir: str = "./dfpt"
+    ph_timeout: int = 7200  # seconds per ph.x run
+    d3q_timeout: int = 14400  # seconds per d3q.x run
+
+
+@dataclass
 class RelaxConfig:
     """Structural relaxation parameters."""
 
@@ -108,6 +128,8 @@ class PhononInputConfig:
     )
     quatrex_output: QuatrexOutputConfig = field(default_factory=QuatrexOutputConfig)
     thirdorder: ThirdOrderConfig = field(default_factory=ThirdOrderConfig)
+    dfpt: DFPTConfig = field(default_factory=DFPTConfig)
+    fc_method: str = "finite_displacement"  # "finite_displacement" or "dfpt"
     relax: RelaxConfig = field(default_factory=RelaxConfig)
 
 

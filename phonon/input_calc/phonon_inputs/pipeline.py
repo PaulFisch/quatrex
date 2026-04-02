@@ -77,28 +77,46 @@ def run_pipeline(
     summary["cell"] = cell
 
     # ------------------------------------------------------------------
-    # Step 2: FC2 + FC3 via phono3py + symfc
+    # Step 2: FC2 + FC3
     # ------------------------------------------------------------------
-    from .thirdorder import generate_fc3
+    method = config.fc_method
 
-    tc = config.thirdorder
-    fc3_dir = base_dir / tc.work_dir
-    supercell = tuple(tc.supercell)
+    if method == "dfpt":
+        from .dfpt import generate_fc_dfpt
 
-    print("\n" + "=" * 60)
-    print("Step 2: Force constants (FC2 + FC3) via phono3py + symfc")
-    print(f"  Supercell: {supercell}, work_dir: {fc3_dir}")
-    if tc.cutoff_pair_distance:
-        print(f"  Pair cutoff: {tc.cutoff_pair_distance} A")
-    print(f"  FC calculator: {tc.fc_calculator}")
-    print("=" * 60)
+        dc = config.dfpt
+        fc_dir = base_dir / dc.work_dir
 
-    fc3_path = generate_fc3(
-        cell, fc3_dir, config.qe, supercell,
-        cutoff_pair_distance=tc.cutoff_pair_distance,
-        distance=tc.displacement_distance,
-        fc_calculator=tc.fc_calculator,
-    )
+        print("\n" + "=" * 60)
+        print("Step 2: Force constants (FC2 + FC3) via DFPT (ph.x + D3Q)")
+        print(f"  q-mesh: {dc.q_mesh}, work_dir: {fc_dir}")
+        print(f"  k-mesh (SCF): {dc.kpoints}")
+        print("=" * 60)
+
+        fc3_path = generate_fc_dfpt(cell, fc_dir, config.qe, dc)
+
+    else:
+        from .thirdorder import generate_fc3
+
+        tc = config.thirdorder
+        fc_dir = base_dir / tc.work_dir
+        supercell = tuple(tc.supercell)
+
+        print("\n" + "=" * 60)
+        print("Step 2: Force constants (FC2 + FC3) via phono3py + symfc")
+        print(f"  Supercell: {supercell}, work_dir: {fc_dir}")
+        if tc.cutoff_pair_distance:
+            print(f"  Pair cutoff: {tc.cutoff_pair_distance} A")
+        print(f"  FC calculator: {tc.fc_calculator}")
+        print("=" * 60)
+
+        fc3_path = generate_fc3(
+            cell, fc_dir, config.qe, supercell,
+            cutoff_pair_distance=tc.cutoff_pair_distance,
+            distance=tc.displacement_distance,
+            fc_calculator=tc.fc_calculator,
+        )
+
     print(f"\n  FC2 + FC3 saved to: {fc3_path}")
     summary["fc3_path"] = fc3_path
 

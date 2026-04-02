@@ -1,0 +1,54 @@
+## phonon_inputs configuration: Si FCC primitive cell — DFPT pathway
+## Uses ph.x (FC2) + D3Q d3q.x (FC3) instead of finite displacements.
+##
+## Requires: QE >= 7.0 with ph.x, D3Q plugin (d3q.x, d3_qq2rr.x)
+##
+## Usage:
+##   python -m phonon_inputs pipeline  --config config_dfpt.yaml           # full: relax -> DFPT FC2+FC3
+##   python -m phonon_inputs pipeline  --config config_dfpt.yaml --skip-relax
+##   python -m phonon_inputs dfpt-sow  --config config_dfpt.yaml           # generate input files
+##   python -m phonon_inputs dfpt-run  --config config_dfpt.yaml           # run SCF -> ph -> d3q -> qq2rr
+##   python -m phonon_inputs dfpt-reap --config config_dfpt.yaml           # parse outputs -> fc3.hdf5
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,       2.7331, 2.7331]   # a1 = a/2 * (0,1,1)
+    - [2.7331,    0.0,    2.7331]   # a2 = a/2 * (1,0,1)
+    - [2.7331,    2.7331, 0.0]      # a3 = a/2 * (1,1,0)
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: ./pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 60
+  ecutrho_factor: 8
+  kpoints_relax: [8, 8, 8]     # for unit cell relaxation
+  conv_thr: 1.0e-10
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "mpirun -np 4 pw.x"
+
+relax:
+  calculation: vc-relax
+  forc_conv_thr: 1.0e-4
+  press_conv_thr: 0.5
+  work_dir: ./relax
+
+fc_method: dfpt
+
+dfpt:
+  q_mesh: [2, 2, 2]               # q-grid for ph.x and d3q (= effective supercell)
+  kpoints: [8, 8, 8]              # SCF k-mesh for unit cell
+  tr2_ph: 1.0e-14                 # ph.x self-consistency threshold
+  ph_command: "mpirun -np 4 ph.x"
+  q2r_command: "q2r.x"
+  d3q_command: "mpirun -np 4 d3q.x"
+  d3_qq2rr_command: "d3_qq2rr.x"
+  work_dir: ./dfpt
+  ph_timeout: 7200                 # seconds
+  d3q_timeout: 14400               # seconds (per triplet)
