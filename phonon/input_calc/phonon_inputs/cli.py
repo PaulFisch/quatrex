@@ -165,6 +165,66 @@ def cmd_fc3_all(config_path: str) -> None:
     print(f"\nFC3 file: {fc3_path}")
 
 
+def cmd_dfpt_sow(config_path: str) -> None:
+    """Generate DFPT input files (SCF + ph.x + d3q.x)."""
+    from .config import load_config
+    from .dfpt import sow
+    from .structure import load_structure
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+
+    dc = config.dfpt
+    work_dir = Path(config_path).parent / dc.work_dir
+
+    n = sow(cell, work_dir, config.qe, dc)
+    print(f"\n{n} d3q.x triplet inputs + SCF/ph/q2r/qq2rr in {work_dir}")
+    print("Run 'dfpt-run' to execute, then 'dfpt-reap' to produce FC2+FC3.")
+
+
+def cmd_dfpt_run(config_path: str) -> None:
+    """Run all DFPT calculations (SCF -> ph -> q2r -> d3q -> qq2rr)."""
+    from .config import load_config
+    from .dfpt import run_all
+
+    config = load_config(config_path)
+    dc = config.dfpt
+    work_dir = Path(config_path).parent / dc.work_dir
+
+    run_all(work_dir, config.qe, dc)
+
+
+def cmd_dfpt_reap(config_path: str) -> None:
+    """Parse DFPT outputs and produce fc3.hdf5."""
+    from .config import load_config
+    from .dfpt import reap
+    from .structure import load_structure
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+    dc = config.dfpt
+    work_dir = Path(config_path).parent / dc.work_dir
+
+    fc3_path = reap(work_dir, cell, dc.q_mesh)
+    print(f"\nFC2+FC3 file: {fc3_path}")
+
+
+def cmd_dfpt_all(config_path: str) -> None:
+    """Full DFPT pipeline: sow + run + reap."""
+    from .config import load_config
+    from .dfpt import generate_fc_dfpt
+    from .structure import load_structure
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+
+    dc = config.dfpt
+    work_dir = Path(config_path).parent / dc.work_dir
+
+    fc3_path = generate_fc_dfpt(cell, work_dir, config.qe, dc)
+    print(f"\nFC2+FC3 file: {fc3_path}")
+
+
 def cmd_pipeline(config_path: str, skip_relax: bool = False) -> None:
     """Full pipeline: relax -> FC2 + FC3 (via phono3py + symfc)."""
     from .pipeline import run_pipeline
@@ -256,6 +316,18 @@ def main():
     p_fc3_all = sub.add_parser("fc3-all", help="Full FC3 pipeline: sow + run + reap")
     p_fc3_all.add_argument("--config", required=True, help="YAML config file")
 
+    p_dfpt_sow = sub.add_parser("dfpt-sow", help="Generate DFPT input files")
+    p_dfpt_sow.add_argument("--config", required=True, help="YAML config file")
+
+    p_dfpt_run = sub.add_parser("dfpt-run", help="Run DFPT calculations")
+    p_dfpt_run.add_argument("--config", required=True, help="YAML config file")
+
+    p_dfpt_reap = sub.add_parser("dfpt-reap", help="Parse DFPT outputs -> fc3.hdf5")
+    p_dfpt_reap.add_argument("--config", required=True, help="YAML config file")
+
+    p_dfpt_all = sub.add_parser("dfpt-all", help="Full DFPT: sow + run + reap")
+    p_dfpt_all.add_argument("--config", required=True, help="YAML config file")
+
     p_pipe = sub.add_parser("pipeline", help="Full pipeline: relax -> FC2 + FC3")
     p_pipe.add_argument("--config", required=True, help="YAML config file")
     p_pipe.add_argument("--skip-relax", action="store_true",
@@ -271,6 +343,10 @@ def main():
         "fc3-run": lambda: cmd_fc3_run(args.config),
         "fc3-reap": lambda: cmd_fc3_reap(args.config),
         "fc3-all": lambda: cmd_fc3_all(args.config),
+        "dfpt-sow": lambda: cmd_dfpt_sow(args.config),
+        "dfpt-run": lambda: cmd_dfpt_run(args.config),
+        "dfpt-reap": lambda: cmd_dfpt_reap(args.config),
+        "dfpt-all": lambda: cmd_dfpt_all(args.config),
         "pipeline": lambda: cmd_pipeline(
             args.config, skip_relax=args.skip_relax,
         ),

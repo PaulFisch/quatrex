@@ -23,6 +23,8 @@ def write_qe_scf_input(
     calculation: str = "scf",
     forc_conv_thr: float | None = None,
     press_conv_thr: float | None = None,
+    prefix: str = "phonon_fc",
+    relative_paths: bool = False,
 ) -> None:
     """Write a pw.x input file for a (displaced) supercell.
 
@@ -56,14 +58,18 @@ def write_qe_scf_input(
     is_relax = calculation in ("relax", "vc-relax")
     kpts = qe_config.kpoints_relax if is_relax else qe_config.kpoints_scf
 
-    pseudo_dir = Path(qe_config.pseudo_dir).absolute()
-    outdir = (filepath.parent / "results").absolute()
+    if relative_paths:
+        pseudo_dir = qe_config.pseudo_dir
+        outdir = "./results"
+    else:
+        pseudo_dir = Path(qe_config.pseudo_dir).absolute()
+        outdir = (filepath.parent / "results").absolute()
 
     with open(filepath, "w") as f:
         f.write("&CONTROL\n")
         f.write(f"   calculation      = '{calculation}'\n")
         f.write("   restart_mode     = 'from_scratch'\n")
-        f.write("   prefix           = 'phonon_fc'\n")
+        f.write(f"   prefix           = '{prefix}'\n")
         f.write(f"   pseudo_dir       = '{pseudo_dir}'\n")
         f.write(f"   outdir           = '{outdir}'\n")
         f.write("   tprnfor          = .true.\n")

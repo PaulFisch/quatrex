@@ -25,7 +25,37 @@ pip install phonopy phono3py symfc
 # Ensure pw.x is available in PATH or specify via config
 ```
 
-### 3. Pseudopotentials
+### 3. D3Q (for DFPT FC3 pathway)
+
+D3Q computes third-order force constants via DFPT, as an alternative
+to finite displacements (phono3py + symfc). It must be compiled against
+the same QE version you use for `pw.x` and `ph.x`.
+
+```bash
+# Option A: Build D3Q as a QE plugin (recommended)
+# In your QE source directory:
+cd ~/qe-7.x
+git clone https://github.com/anharmonic/d3q.git
+cd d3q
+./configure
+make
+
+# This produces: d3q.x, d3_qq2rr.x, d3_q2r.x, d3_lw.x, d3_tk.x
+# Add to PATH:
+export PATH=$PWD/bin:$PATH
+
+# Option B: From the QE test-suite (if D3Q is bundled)
+cd ~/qe-7.x
+make d3q
+```
+
+Verify installation:
+```bash
+d3q.x --version
+d3_qq2rr.x --version
+```
+
+### 4. Pseudopotentials
 
 PBE pseudopotentials are in `pseudo/`. The config references them via
 `qe.pseudo_dir`. If running QE from a different machine, copy or symlink
@@ -45,6 +75,42 @@ python -m phonon_inputs pipeline --config config_prim.yaml --skip-relax
 # Or skip FC3 (harmonic only):
 python -m phonon_inputs pipeline --config config_prim.yaml --skip-relax --skip-fc3
 ```
+
+### DFPT pathway (ph.x + D3Q)
+
+Alternative to finite displacements. Uses perturbation theory for FC2
+(ph.x) and FC3 (d3q.x), requiring no supercell calculations.
+
+```bash
+# Set fc_method: dfpt in your config, then:
+python -m phonon_inputs pipeline --config config_dfpt.yaml --skip-relax
+
+# Or step-by-step:
+python -m phonon_inputs dfpt-sow  --config config_dfpt.yaml   # write QE/D3Q inputs
+python -m phonon_inputs dfpt-run  --config config_dfpt.yaml   # run SCF -> ph -> d3q -> qq2rr
+python -m phonon_inputs dfpt-reap --config config_dfpt.yaml   # parse outputs -> fc3.hdf5
+```
+
+The DFPT config section:
+```yaml
+fc_method: dfpt
+
+dfpt:
+  q_mesh: [2, 2, 2]           # q-grid for ph.x and d3q.x
+  kpoints: [8, 8, 8]          # SCF k-mesh for unit cell
+  tr2_ph: 1.0e-14             # ph.x convergence
+  ph_command: "mpirun -np 4 ph.x"
+  d3q_command: "mpirun -np 4 d3q.x"
+  d3_qq2rr_command: "d3_qq2rr.x"
+  q2r_command: "q2r.x"
+  work_dir: ./dfpt
+```
+
+DFPT computes 5 sequential steps: pw.x SCF -> ph.x -> q2r.x (FC2) ->
+d3q.x (one run per q-triplet) -> d3_qq2rr.x (FC3). The d3q.x triplets
+can be run in parallel on a cluster.
+
+### Finite displacement pathway (default)
 
 ### Step-by-step
 
@@ -134,6 +200,10 @@ python -m phonon_inputs fc3-sow        # Generate phono3py displacements
 python -m phonon_inputs fc3-run        # Run QE for FC3 displacements
 python -m phonon_inputs fc3-reap       # Produce FC3 via symfc
 python -m phonon_inputs fc3-all        # Full FC3: sow + run + reap
+python -m phonon_inputs dfpt-sow       # Generate DFPT input files (SCF, ph, d3q)
+python -m phonon_inputs dfpt-run       # Run DFPT calculations
+python -m phonon_inputs dfpt-reap      # Parse DFPT outputs -> fc3.hdf5
+python -m phonon_inputs dfpt-all       # Full DFPT: sow + run + reap
 python -m phonon_inputs extract-blocks # Extract NEGF blocks from existing FC
 python -m phonon_inputs validate       # Check band structure + transmission
 ```
@@ -151,6 +221,7 @@ input_calc/
     config.py               # Config dataclasses
     constants.py            # Physical constants and unit conversions
     convention.py           # Block extraction (Convention A/B)
+    dfpt.py                 # DFPT pathway: ph.x + D3Q
     force_constants.py      # FC2/FC3 loading
     qe_interface.py         # QE input/output + relaxation
     quatrex_writer.py       # Write quatrex input files
