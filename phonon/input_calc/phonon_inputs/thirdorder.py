@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 from phonopy.structure.atoms import PhonopyAtoms
 
+import shlex
 from .config import QEConfig
 
 
@@ -225,34 +226,36 @@ def run_displacements(
     for i, inp_file in enumerate(inp_files):
         out_file = inp_file.with_suffix(".out")
 
-        # Skip completed jobs
         if out_file.exists():
             with open(out_file) as f:
                 if "JOB DONE" in f.read():
-                    print(f"  [{i+1}/{n_disp}] Skipping (done)")
+                    print(f"  [{i + 1}/{n_disp}] Skipping (done)")
                     continue
 
-        print(f"  [{i+1}/{n_disp}] Running {inp_file.name}...")
+        print(f"  [{i + 1}/{n_disp}] Running {inp_file.name}...")
+
+        cmd = shlex.split(pw_command) + ["-in", inp_file.name]
+
         result = subprocess.run(
-            [pw_command, "-in", str(inp_file)],
-            capture_output=True, text=True,
+            cmd,
+            capture_output=True,
+            text=True,
             cwd=str(work_dir),
             timeout=timeout,
         )
+
         with open(out_file, "w") as f:
             f.write(result.stdout)
+            if result.stderr:
+                f.write("\n\n===== STDERR =====\n")
+                f.write(result.stderr)
 
-        if "JOB DONE" not in result.stdout:
-            print(f"  ERROR: {inp_file.name} did not converge!")
+        if result.returncode != 0 or "JOB DONE" not in result.stdout:
+            print(f"  ERROR: {inp_file.name} failed")
+            print(f"  Command: {' '.join(cmd)}")
             if result.stderr:
                 print(f"  stderr: {result.stderr[-500:]}")
             raise RuntimeError(f"QE displacement {inp_file.name} failed")
-
-        for line in result.stdout.split("\n"):
-            if "WALL" in line and "PWSCF" in line:
-                print(f"    {line.strip()}")
-                break
-
     print(f"\nAll {n_disp} displacements completed.")
 
 
