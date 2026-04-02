@@ -3,10 +3,15 @@
 from pathlib import Path
 
 import numpy as np
-from phonopy import Phonopy
+from phonopy import Phonopy, load as phonopy_load
 from phonopy.structure.atoms import PhonopyAtoms
 
 from .config import PhononInputConfig, StructureConfig
+
+# Unit conversion: phonopy QE internal (Ry/bohr²) -> eV/Å²
+BOHR_TO_ANG = 0.52917721067
+RY_TO_EV = 13.605693009
+RY_BOHR2_TO_EV_ANG2 = RY_TO_EV / BOHR_TO_ANG**2  # ≈ 48.587
 
 
 def load_structure(config: StructureConfig) -> PhonopyAtoms:
@@ -125,3 +130,121 @@ def create_phonopy_from_config(config: PhononInputConfig) -> Phonopy:
         primitive_matrix=np.eye(3),
         displacement_distance=config.supercell.displacement_distance,
     )
+
+
+def load_phonopy_calculation(
+    phonopy_yaml: str | Path,
+    force_sets_filename: str | Path | None = None,
+    force_constants_filename: str | Path | None = None,
+    primitive_matrix: np.ndarray | str = np.eye(3),
+    calculator: str = "qe",
+) -> Phonopy:
+    """Load an existing phonopy calculation and normalize to eV/Angstrom units.
+
+    Phonopy's QE interface stores lengths in bohr and force constants in
+    Ry/bohr². This function converts everything to Angstrom / eV/Å² so
+    that downstream code can use the standard CONVERSION factor.
+
+    Parameters
+    ----------
+    phonopy_yaml : Path
+        Path to phonopy_disp.yaml or phonopy.yaml.
+    force_sets_filename : Path, optional
+        Path to FORCE_SETS file.
+    force_constants_filename : Path, optional
+        Path to FORCE_CONSTANTS file.
+    primitive_matrix : array or "auto"
+        Primitive matrix for the output Phonopy object. Default np.eye(3)
+        gives the conventional cell (same as unit cell).
+    calculator : str
+        Calculator used for the original DFT. "qe" applies bohr/Ry
+        conversion; "vasp" assumes eV/Å already.
+
+    Returns
+    -------
+    Phonopy
+        Phonopy object with FC in eV/Å², lattice in Å, ready for use
+        with CONVERSION factor.
+    """
+    ph_native = phonopy_load(
+        phonopy_yaml=str(phonopy_yaml),
+        force_sets_filename=str(force_sets_filename) if force_sets_filename else None,
+        force_constants_filename=(
+            str(force_constants_filename) if force_constants_filename else None
+        ),
+    )
+    ph_native.produce_force_constants()
+
+    if calculator.lower() == "qe":
+        cell_native = ph_native.unitcell.cell
+        cell_ang = cell_native * BOHR_TO_ANG
+        fc_scale = RY_BOHR2_TO_EV_ANG2
+    else:
+        cell_ang = ph_native.unitcell.cell
+        fc_scale = 1.0
+
+    unitcell = PhonopyAtoms(
+        symbols=ph_native.unitcell.symbols,
+        cell=cell_ang,
+        scaled_positions=ph_native.unitcell.scaled_positions,
+    )
+
+    sc_matrix = ph_native.supercell_matrix
+    if isinstance(primitive_matrix, str):
+        pm = primitive_matrix
+    else:
+        pm = np.array(primitive_matrix)
+
+    ph = Phonopy(unitcell, supercell_matrix=sc_matrix, primitive_matrix=pm)
+    ph.force_constants = ph_native.force_constants * fc_scale
+
+    return ph
+
+
+def clone_with_masses(
+    phonon: Phonopy,
+    symbols: list[str] | None = None,
+    masses: list[float] | None = None,
+) -> Phonopy:
+    """Create a Phonopy object with different masses but same force constants.
+
+    For mass-mismatch interface models: use FC from one material (e.g. Si)
+    but substitute atomic masses (e.g. Ge) so the dynamical matrix
+    D = Phi / sqrt(m_i m_j) reflects the mass difference.
+
+    Parameters
+    ----------
+    phonon : Phonopy
+        Source Phonopy object with force constants set.
+    symbols : list of str, optional
+        New chemical symbols for the unit cell atoms. If given, masses
+        are taken from the periodic table for these symbols.
+    masses : list of float, optional
+        Explicit masses in amu. Overrides symbols if both are given.
+
+    Returns
+    -------
+    Phonopy
+        New Phonopy object with same lattice, positions, supercell, and FC,
+        but different masses.
+    """
+    if phonon.force_constants is None:
+        raise ValueError("Source phonopy must have force_constants set.")
+
+    old_cell = phonon.unitcell
+
+    new_cell = PhonopyAtoms(
+        symbols=symbols if symbols is not None else old_cell.symbols,
+        cell=old_cell.cell,
+        scaled_positions=old_cell.scaled_positions,
+    )
+    if masses is not None:
+        new_cell.masses = masses
+
+    ph = Phonopy(
+        new_cell,
+        supercell_matrix=phonon.supercell_matrix,
+        primitive_matrix=phonon.primitive_matrix,
+    )
+    ph.force_constants = phonon.force_constants
+    return ph

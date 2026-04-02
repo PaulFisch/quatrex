@@ -59,7 +59,7 @@ class BlockExtractionConfig:
 class QuatrexOutputConfig:
     """quatrex input generation settings."""
 
-    output_dir: str = "./quatrex_inputs"
+    output_dir: str = "./outputs/quatrex_inputs"
     num_transport_cells: int = 4
     kpoint_grid: list[int] = field(default_factory=lambda: [4, 4, 1])
     kpoint_shift: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
@@ -67,6 +67,22 @@ class QuatrexOutputConfig:
     eta: float = 1e-8
     left_temperature: float = 301.0
     right_temperature: float = 299.0
+    # Heterogeneous L|D|R device (all four must be set together or all None)
+    num_left_cells: int | None = None
+    num_right_cells: int | None = None
+    left_matrix: str | None = None
+    right_matrix: str | None = None
+
+
+@dataclass
+class ThirdOrderConfig:
+    """Third-order force constant (FC3) settings for thirdorder.py."""
+
+    supercell: list[int] = field(default_factory=lambda: [2, 2, 2])
+    cutoff: str = "-3"  # Negative int = neighbor shell, positive float = distance in nm
+    thirdorder_cmd: str = "thirdorder_espresso.py"
+    work_dir: str = "./fc3"
+    pw_timeout: int = 3600  # seconds per QE job
 
 
 @dataclass
@@ -80,6 +96,7 @@ class PhononInputConfig:
         default_factory=BlockExtractionConfig
     )
     quatrex_output: QuatrexOutputConfig = field(default_factory=QuatrexOutputConfig)
+    thirdorder: ThirdOrderConfig = field(default_factory=ThirdOrderConfig)
 
 
 def _dict_to_dataclass(cls, d):

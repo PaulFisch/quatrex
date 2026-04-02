@@ -1,0 +1,46 @@
+&CONTROL
+   calculation      = 'scf'
+   restart_mode     = 'from_scratch'
+   prefix           = 'fc3_disp'
+   pseudo_dir       = '../scf_disp/pseudo'
+   outdir           = './results'
+   tprnfor          = .true.
+/
+&SYSTEM
+   ibrav            = 0
+   nat              = 16
+   ntyp             = 1
+   ecutwfc          = 36
+   ecutrho          = 288
+   occupations      = 'smearing'
+   smearing         = 'gaussian'
+   degauss          = 0.01
+/
+&ELECTRONS
+   conv_thr         = 1e-10
+/
+ATOMIC_SPECIES
+  Si  28.085  Si.pbe-n-rrkjus_psl.1.0.0.UPF
+ATOMIC_POSITIONS crystal
+Si -0.000925617386796994 0.000925617386796994 0.000925617386796994
+Si                0.125                0.125                0.125
+Si    0.500925617386797 -0.000925617386796994 -0.000925617386796994
+Si                0.625                0.125                0.125
+Si                    0                  0.5                    0
+Si                0.125                0.625                0.125
+Si                  0.5                  0.5                    0
+Si                0.625                0.625                0.125
+Si                    0                    0                  0.5
+Si                0.125                0.125                0.625
+Si                  0.5                    0                  0.5
+Si                0.625                0.125                0.625
+Si                    0                  0.5                  0.5
+Si                0.125                0.625                0.625
+Si                  0.5                  0.5                  0.5
+Si                0.625                0.625                0.625
+CELL_PARAMETERS angstrom
+                   0               5.4018               5.4018
+              5.4018                    0               5.4018
+              5.4018               5.4018                    0
+K_POINTS automatic
+  4 4 4  0 0 0

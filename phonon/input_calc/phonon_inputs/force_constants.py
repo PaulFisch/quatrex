@@ -122,23 +122,24 @@ def load_fc3_thirdorder(path: Path | str) -> dict:
     with open(path) as f:
         n_blocks = int(f.readline().strip())
         for _ in range(n_blocks):
-            # Cell indices for atoms j and k
-            cell_j = np.array([int(x) for x in f.readline().split()])
-            cell_k = np.array([int(x) for x in f.readline().split()])
+            # Blank line + block number
+            f.readline()  # blank
+            f.readline()  # block index (1-based, not used)
+            # Lattice vectors for cells j and k (in nm, float)
+            cell_j = np.array([float(x) for x in f.readline().split()])
+            cell_k = np.array([float(x) for x in f.readline().split()])
             # Atom indices (1-based in file -> 0-based)
             atom_i, atom_j, atom_k = [
                 int(x) - 1 for x in f.readline().split()
             ]
             # 3x3x3 tensor
             tensor = np.zeros((3, 3, 3))
-            for a in range(3):
-                for b in range(3):
-                    for c in range(3):
-                        parts = f.readline().split()
-                        # File format: alpha beta gamma value
-                        tensor[int(parts[0]) - 1, int(parts[1]) - 1, int(parts[2]) - 1] = float(
-                            parts[3]
-                        )
+            for _ in range(27):
+                parts = f.readline().split()
+                # File format: alpha beta gamma value
+                tensor[int(parts[0]) - 1, int(parts[1]) - 1, int(parts[2]) - 1] = float(
+                    parts[3]
+                )
             blocks.append(
                 {
                     "cell_j": cell_j,

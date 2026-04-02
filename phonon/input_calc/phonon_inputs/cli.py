@@ -92,6 +92,81 @@ def cmd_extract_blocks(config_path: str) -> None:
     print(f"Wrote quatrex inputs to {out}")
 
 
+def cmd_fc3_sow(config_path: str) -> None:
+    """Generate FC3 displaced supercells (thirdorder sow)."""
+    from .config import load_config
+    from .structure import load_structure
+    from .thirdorder import sow
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+
+    tc = config.thirdorder
+    work_dir = Path(config_path).parent / tc.work_dir
+    supercell = tuple(tc.supercell)
+
+    n_disp = sow(cell, work_dir, config.qe, supercell, tc.cutoff, tc.thirdorder_cmd)
+    print(f"\n{n_disp} QE input files generated in {work_dir}")
+    print("Run QE for each DISP.supercell_template.in.* file, then run 'fc3-reap'.")
+
+
+def cmd_fc3_run(config_path: str) -> None:
+    """Run QE for all FC3 displacements."""
+    from .config import load_config
+    from .thirdorder import run_displacements
+
+    config = load_config(config_path)
+    tc = config.thirdorder
+    work_dir = Path(config_path).parent / tc.work_dir
+
+    disp_files = sorted(work_dir.glob("DISP.supercell_template.in.*"))
+    n_disp = len(disp_files)
+    if n_disp == 0:
+        print("No displacement files found. Run 'fc3-sow' first.")
+        sys.exit(1)
+
+    run_displacements(work_dir, n_disp, config.qe.pw_command, tc.pw_timeout)
+
+
+def cmd_fc3_reap(config_path: str) -> None:
+    """Collect forces and produce FORCE_CONSTANTS_3RD."""
+    from .config import load_config
+    from .thirdorder import reap
+
+    config = load_config(config_path)
+    tc = config.thirdorder
+    work_dir = Path(config_path).parent / tc.work_dir
+    supercell = tuple(tc.supercell)
+
+    disp_files = sorted(work_dir.glob("DISP.supercell_template.out.*"))
+    n_disp = len(disp_files)
+    if n_disp == 0:
+        print("No output files found. Run QE displacements first.")
+        sys.exit(1)
+
+    fc3_path = reap(work_dir, n_disp, supercell, tc.cutoff, tc.thirdorder_cmd)
+    print(f"\nFC3 file: {fc3_path}")
+
+
+def cmd_fc3_all(config_path: str) -> None:
+    """Full FC3 pipeline: sow + run + reap."""
+    from .config import load_config
+    from .structure import load_structure
+    from .thirdorder import generate_fc3
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+
+    tc = config.thirdorder
+    work_dir = Path(config_path).parent / tc.work_dir
+    supercell = tuple(tc.supercell)
+
+    fc3_path = generate_fc3(
+        cell, work_dir, config.qe, supercell, tc.cutoff, tc.thirdorder_cmd
+    )
+    print(f"\nFC3 file: {fc3_path}")
+
+
 def cmd_validate(config_path: str) -> None:
     """Run validation checks on extracted blocks."""
     from .config import load_config
@@ -164,6 +239,18 @@ def main():
     p_val = sub.add_parser("validate", help="Run validation checks")
     p_val.add_argument("--config", required=True, help="YAML config file")
 
+    p_fc3_sow = sub.add_parser("fc3-sow", help="Generate FC3 displaced supercells")
+    p_fc3_sow.add_argument("--config", required=True, help="YAML config file")
+
+    p_fc3_run = sub.add_parser("fc3-run", help="Run QE for FC3 displacements")
+    p_fc3_run.add_argument("--config", required=True, help="YAML config file")
+
+    p_fc3_reap = sub.add_parser("fc3-reap", help="Collect forces -> FORCE_CONSTANTS_3RD")
+    p_fc3_reap.add_argument("--config", required=True, help="YAML config file")
+
+    p_fc3_all = sub.add_parser("fc3-all", help="Full FC3 pipeline: sow + run + reap")
+    p_fc3_all.add_argument("--config", required=True, help="YAML config file")
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -172,6 +259,14 @@ def main():
         cmd_extract_blocks(args.config)
     elif args.command == "validate":
         cmd_validate(args.config)
+    elif args.command == "fc3-sow":
+        cmd_fc3_sow(args.config)
+    elif args.command == "fc3-run":
+        cmd_fc3_run(args.config)
+    elif args.command == "fc3-reap":
+        cmd_fc3_reap(args.config)
+    elif args.command == "fc3-all":
+        cmd_fc3_all(args.config)
     else:
         parser.print_help()
         sys.exit(1)

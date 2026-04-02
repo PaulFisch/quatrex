@@ -1,0 +1,56 @@
+## phonon_inputs configuration: Si diamond conventional cell
+## PBE equilibrium lattice constant from vc-relax: a = 5.4662 Å
+## Usage:
+##   python -m phonon_inputs generate --config config.yaml
+##   python -m phonon_inputs validate  --config config.yaml
+
+structure:
+  source: inline
+  symbols: [Si, Si, Si, Si, Si, Si, Si, Si]
+  lattice:
+    - [5.4662, 0.0, 0.0]
+    - [0.0, 5.4662, 0.0]
+    - [0.0, 0.0, 5.4662]
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.50, 0.50, 0.00]
+    - [0.50, 0.00, 0.50]
+    - [0.00, 0.50, 0.50]
+    - [0.25, 0.25, 0.25]
+    - [0.75, 0.75, 0.25]
+    - [0.75, 0.25, 0.75]
+    - [0.25, 0.75, 0.75]
+
+supercell:
+  matrix:
+    - [2, 0, 0]
+    - [0, 2, 0]
+    - [0, 0, 2]
+  displacement_distance: 0.01
+
+qe:
+  pseudo_dir: ./scf_disp/pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 60
+  ecutrho_factor: 8
+  kpoints_scf: [4, 4, 4]
+  conv_thr: 1.0e-10
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "pw.x"
+
+block_extraction:
+  q_mesh: [3, 3, 3]
+  transport_direction: z
+  amplitude_cutoff: 1.0e+10
+
+quatrex_output:
+  output_dir: ./outputs/quatrex_inputs
+  num_transport_cells: 4
+  kpoint_grid: [4, 4, 1]
+  kpoint_shift: [0.0, 0.0, 0.0]
+  neighbor_cell_cutoff: [1, 1, 1]
+  eta: 1.0e+20
+  left_temperature: 301.0
+  right_temperature: 299.0

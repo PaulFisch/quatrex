@@ -32,6 +32,7 @@ def write_qe_scf_input(
     calculation : str
         QE calculation type ("scf", "relax", etc.).
     """
+    filepath = Path(filepath)
     symbols = supercell.symbols
     unique_species = list(dict.fromkeys(symbols))
     cell = supercell.cell
@@ -46,13 +47,17 @@ def write_qe_scf_input(
     ecutrho = qe_config.ecutwfc * qe_config.ecutrho_factor
     kpts = qe_config.kpoints_scf
 
+    # Use absolute paths so QE works regardless of CWD
+    pseudo_dir = Path(qe_config.pseudo_dir).absolute()
+    outdir = (filepath.parent / "results").absolute()
+
     with open(filepath, "w") as f:
         f.write("&CONTROL\n")
         f.write(f"   calculation      = '{calculation}'\n")
         f.write("   restart_mode     = 'from_scratch'\n")
         f.write("   prefix           = 'phonon_fc'\n")
-        f.write(f"   pseudo_dir       = '{qe_config.pseudo_dir}'\n")
-        f.write("   outdir           = './results'\n")
+        f.write(f"   pseudo_dir       = '{pseudo_dir}'\n")
+        f.write(f"   outdir           = '{outdir}'\n")
         f.write("   tprnfor          = .true.\n")
         f.write("/\n")
 

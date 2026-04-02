@@ -276,6 +276,89 @@ def reference_transmission(
     return freqs_thz, trans
 
 
+def interface_transmission(
+    phonon_left: Phonopy,
+    phonon_right: Phonopy,
+    phonon_device: Phonopy,
+    q_mesh_transverse: tuple[int, int],
+    freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 201),
+    transport_direction: str = "z",
+    eta_factor: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute ballistic transmission through an interface.
+
+    Uses the mass-mismatch model: same FC everywhere, different masses
+    in L/R leads and device. The coupling H_LD = H_01 of the left lead,
+    H_DR = H_01 of the right lead (nearest-neighbor coupling to device).
+
+    Parameters
+    ----------
+    phonon_left : Phonopy
+        Left lead (e.g. Si with Si masses).
+    phonon_right : Phonopy
+        Right lead (e.g. Si FC with Ge masses).
+    phonon_device : Phonopy
+        Device region (e.g. Si FC with mixed Si/Ge masses).
+    q_mesh_transverse : (Nkx, Nky)
+        Transverse Monkhorst-Pack mesh.
+    freq_range_thz : (fmin, fmax, nfreq)
+        Frequency grid in THz.
+    transport_direction : str
+        "x", "y", or "z".
+    eta_factor : float
+        eta = dw^2 * eta_factor.
+
+    Returns
+    -------
+    freqs_thz : ndarray
+    transmission : ndarray
+    """
+    fmin, fmax, nfreq = freq_range_thz
+    nfreq = int(nfreq)
+    freqs_thz = np.linspace(fmin, fmax, nfreq)
+    omega_sq = (freqs_thz * THZ_TO_RAD) ** 2
+    dw = (freqs_thz[1] - freqs_thz[0]) * THZ_TO_RAD
+    eta = dw**2 * eta_factor
+
+    nkx, nky = q_mesh_transverse
+    q_1d_x = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
+    q_1d_y = [(2 * n - nky - 1) / (2 * nky) for n in range(1, nky + 1)]
+    q_points = [(qx, qy) for qx in q_1d_x for qy in q_1d_y]
+
+    trans = np.zeros(nfreq)
+
+    for iq, (qx, qy) in enumerate(q_points):
+        if (iq + 1) % 50 == 0 or iq == 0:
+            print(f"  k-point {iq + 1}/{len(q_points)}")
+
+        qp = (qx, qy)
+        H_00_L, H_01_L = get_btd_blocks(
+            phonon_left, qp, transport_direction=transport_direction
+        )
+        H_00_R, H_01_R = get_btd_blocks(
+            phonon_right, qp, transport_direction=transport_direction
+        )
+        H_00_D, _ = get_btd_blocks(
+            phonon_device, qp, transport_direction=transport_direction
+        )
+
+        for iw, w2 in enumerate(omega_sq):
+            trans[iw] += _ballistic_transmission(
+                w2,
+                H_D=H_00_D,
+                H_L00=H_00_L,
+                H_L01=H_01_L,
+                H_R00=H_00_R,
+                H_R01=H_01_R,
+                H_LD=H_01_L,
+                H_DR=H_01_R,
+                eta=eta,
+            )
+
+    trans /= len(q_points)
+    return freqs_thz, trans
+
+
 def thermal_conductance(
     freqs_thz: np.ndarray,
     transmission: np.ndarray,

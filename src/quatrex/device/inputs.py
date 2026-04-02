@@ -492,28 +492,311 @@ def _create_matrix_from_unit_cells(
     return matrix_sparray, matrix_dict, block_sizes_array
 
 
-def _load_matrix_from_unit_cell(
+def _extract_btd_blocks(
+    tight_binding_matrix: NDArray,
+    transport_direction: int | str,
+    periodic_shift: tuple,
+) -> tuple[sparse.coo_matrix, sparse.coo_matrix, sparse.coo_matrix]:
+    """Extract sub-diagonal, diagonal, super-diagonal blocks for one periodic shift.
+
+    Parameters
+    ----------
+    tight_binding_matrix : NDArray
+        Unit-cell data, shape (Nx, Ny, Nz, n_orb, n_orb).
+    transport_direction : int or str
+        Transport direction (0/1/2 or 'x'/'y'/'z').
+    periodic_shift : tuple of int, length 2
+        Transverse periodic shift.
+
+    Returns
+    -------
+    sub_diag : sparse.coo_matrix
+        H_{-1} block (coupling to previous cell).
+    diag : sparse.coo_matrix
+        H_0 block (on-site).
+    super_diag : sparse.coo_matrix
+        H_{+1} block (coupling to next cell).
+    """
+    if isinstance(transport_direction, str):
+        transport_direction = "xyz".index(transport_direction)
+
+    supercell_size = tuple(
+        shape // 2 if i == transport_direction else 1
+        for i, shape in enumerate(tight_binding_matrix.shape[:3])
+    )
+
+    block_inds = [
+        list(copy(periodic_shift))[:transport_direction]
+        + [b]
+        + list(copy(periodic_shift))[transport_direction:]
+        for b in [-1, 0, 1]
+    ]
+
+    blocks = []
+    for ind in block_inds:
+        if (np.abs(ind) > np.array(tight_binding_matrix.shape[:3]) // 2).any():
+            # Outside available range — zero block.
+            n = tight_binding_matrix.shape[-1]
+            sc_n = int(np.prod(supercell_size)) * n
+            blocks.append(sparse.coo_matrix((sc_n, sc_n), dtype=tight_binding_matrix.dtype))
+        else:
+            block = sparse.coo_matrix(
+                _get_transport_block(tight_binding_matrix, supercell_size, ind)
+            )
+            if not block.has_canonical_format:
+                block.sum_duplicates()
+            blocks.append(block)
+
+    return blocks[0], blocks[1], blocks[2]
+
+
+def _expand_heterogeneous_matrix(
+    unit_cells_left: NDArray,
+    unit_cells_device: NDArray,
+    unit_cells_right: NDArray,
+    num_transport_cells: int,
+    num_left_cells: int,
+    num_right_cells: int,
+    transport_direction: int | str,
+    block_start: int = 0,
+    block_end: int | None = None,
+    periodic_shift: tuple = (0, 0),
+) -> tuple[sparse.csr_matrix, NDArray]:
+    """Build a heterogeneous block-tridiagonal matrix from L|D|R unit cells.
+
+    Within each region the same blocks are tiled.  At region boundaries
+    the sub- and super-diagonal coupling blocks are taken from the
+    lead-side region (both sub *and* sup, not conjugate transposes):
+
+    - Left/device boundary: sub_L and sup_L.
+    - Device/right boundary: sub_R and sup_R.
+
+    This ensures the OBC at block 0 sees pure left-lead blocks and the
+    OBC at block N-1 sees pure right-lead blocks.  Using the actual
+    sub/sup blocks (rather than ``sup^H`` as ``sub``) is essential
+    because at non-zero transverse periodic shifts
+    ``sub(R_perp) = sup(-R_perp)^H``, NOT ``sup(R_perp)^H``.
+
+    Parameters
+    ----------
+    unit_cells_left, unit_cells_device, unit_cells_right : NDArray
+        Unit-cell tight-binding data for each region.
+    num_transport_cells : int
+        Total number of transport cells.
+    num_left_cells, num_right_cells : int
+        How many cells belong to left / right lead.
+    transport_direction : int or str
+        Transport direction.
+    block_start, block_end : int
+        Arrow-shape partition range (for MPI distribution).
+    periodic_shift : tuple
+        Transverse periodic shift.
+
+    Returns
+    -------
+    matrix : sparse.csr_matrix
+        The assembled block-tridiagonal matrix.
+    block_sizes : NDArray
+        Block sizes array.
+    """
+    if isinstance(transport_direction, str):
+        transport_direction = "xyz".index(transport_direction)
+
+    block_end = block_end or num_transport_cells
+    num_device_cells = num_transport_cells - num_left_cells - num_right_cells
+
+    # Extract BTD blocks from each region.
+    sub_L, diag_L, sup_L = _extract_btd_blocks(
+        unit_cells_left, transport_direction, periodic_shift
+    )
+    sub_D, diag_D, sup_D = _extract_btd_blocks(
+        unit_cells_device, transport_direction, periodic_shift
+    )
+    sub_R, diag_R, sup_R = _extract_btd_blocks(
+        unit_cells_right, transport_direction, periodic_shift
+    )
+
+    block_size = diag_L.shape[0]
+    matrix_shape = num_transport_cells * block_size
+    num_blocks = block_end - block_start
+
+    # Determine which region each cell belongs to.
+    def _region_of(cell_idx):
+        if cell_idx < num_left_cells:
+            return "left"
+        elif cell_idx < num_left_cells + num_device_cells:
+            return "device"
+        else:
+            return "right"
+
+    def _blocks_for(region):
+        if region == "left":
+            return sub_L, diag_L, sup_L
+        elif region == "device":
+            return sub_D, diag_D, sup_D
+        else:
+            return sub_R, diag_R, sup_R
+
+    all_rows = []
+    all_cols = []
+    all_data = []
+
+    def _place_block(block, row_cell, col_cell):
+        """Place a sparse block at (row_cell, col_cell) in the BTD matrix."""
+        if block.nnz == 0:
+            return
+        r_offset = row_cell * block_size
+        c_offset = col_cell * block_size
+        all_rows.append(block.row + r_offset)
+        all_cols.append(block.col + c_offset)
+        all_data.append(block.data)
+
+    for cell in range(block_start, block_end):
+        region = _region_of(cell)
+        sub, diag, sup = _blocks_for(region)
+
+        # Diagonal block: always from this cell's region.
+        _place_block(diag, cell, cell)
+
+        # Super-diagonal (cell, cell+1): coupling to next cell.
+        if cell + 1 < num_transport_cells:
+            next_region = _region_of(cell + 1)
+            if region == next_region:
+                # Within the same region: use this region's super-diagonal.
+                _place_block(sup, cell, cell + 1)
+            elif next_region == "right" and region != "right":
+                # Device/right boundary: use RIGHT region's super-diagonal.
+                _place_block(sup_R, cell, cell + 1)
+            else:
+                # Left/device boundary: use LEFT region's super-diagonal.
+                _place_block(sup_L, cell, cell + 1)
+
+        # Sub-diagonal (cell, cell-1): coupling to previous cell.
+        if cell - 1 >= 0:
+            prev_region = _region_of(cell - 1)
+            if region == prev_region:
+                _place_block(sub, cell, cell - 1)
+            elif prev_region == "left" and region != "left":
+                # Left/device boundary: use LEFT region's sub-diagonal.
+                _place_block(sub_L, cell, cell - 1)
+            else:
+                # Device/right boundary: use RIGHT region's sub-diagonal.
+                _place_block(sub_R, cell, cell - 1)
+
+    if all_rows:
+        full_rows = xp.hstack(all_rows)
+        full_cols = xp.hstack(all_cols)
+        full_data = xp.hstack(all_data)
+    else:
+        full_rows = xp.array([], dtype=xp.int64)
+        full_cols = xp.array([], dtype=xp.int64)
+        full_data = xp.array([], dtype=xp.complex128)
+
+    # Clip to valid range
+    valid = (full_rows < matrix_shape) & (full_cols < matrix_shape)
+    full_rows = full_rows[valid]
+    full_cols = full_cols[valid]
+    full_data = full_data[valid]
+
+    block_sizes = np.ones(num_blocks, dtype=int) * block_size
+    return (
+        sparse.csr_matrix(
+            (full_data, (full_rows, full_cols)),
+            shape=(matrix_shape, matrix_shape),
+        ),
+        block_sizes,
+    )
+
+
+def _create_heterogeneous_matrix(
     config: QuatrexConfig,
-    matrix_name: str,
+    unit_cells_left: NDArray,
+    unit_cells_device: NDArray,
+    unit_cells_right: NDArray,
 ) -> tuple[sparse.coo_matrix, dict | None, NDArray | None]:
-    """Loads a matrix from unit cell data.
+    """Creates a heterogeneous L|D|R matrix with transverse periodic shifts.
+
+    Parallel to ``_create_matrix_from_unit_cells`` but builds a
+    device where the first ``num_left_cells`` cells use
+    ``unit_cells_left``, the last ``num_right_cells`` cells use
+    ``unit_cells_right``, and the middle cells use
+    ``unit_cells_device``.
 
     Parameters
     ----------
     config : QuatrexConfig
-        The quatrex simulation configuration.
-    matrix_name : str
-        Name of the matrix ('hamiltonian','overlap' or
-        'coulomb_matrix').
+        Must have ``num_left_cells``, ``num_right_cells`` set.
+    unit_cells_left, unit_cells_device, unit_cells_right : NDArray
+        Unit-cell data for each region.
 
     Returns
     -------
-    tuple[sparse.coo_matrix, dict | None, NDArray | None]
-        The matrix, optional k-point dictionary, and optional block sizes.
-
+    matrix_sparray : sparse.coo_matrix
+        Gamma-point assembled matrix.
+    matrix_dict : dict
+        Per-periodic-shift matrices (for k-point assembly).
+    block_sizes_array : NDArray
+        Block sizes.
     """
-    matrices = distributed_load(config.input_dir / f"{matrix_name}.mat")
+    section_sizes, __ = get_section_sizes(
+        config.device.num_transport_cells, comm.block.size
+    )
+    section_offsets = np.hstack(([0], np.cumsum(section_sizes)))
+    start_block = section_offsets[comm.block.rank]
+    end_block = section_offsets[comm.block.rank + 1]
 
+    transport_ind = "xyz".index(config.device.transport_direction)
+
+    # Use device unit cells for transverse repetitions (all three must
+    # have the same transverse structure).
+    transverse_repetitions = list(unit_cells_device.shape[:3])
+    transverse_repetitions.pop(transport_ind)
+    transverse_repetitions = tuple(transverse_repetitions)
+
+    matrix_dict = {}
+    for periodic_shift in xp.ndindex(transverse_repetitions):
+        periodic_shift = tuple(
+            ps - (us // 2) for ps, us in zip(periodic_shift, transverse_repetitions)
+        )
+
+        matrix_sparray, block_sizes = _expand_heterogeneous_matrix(
+            unit_cells_left=unit_cells_left,
+            unit_cells_device=unit_cells_device,
+            unit_cells_right=unit_cells_right,
+            num_transport_cells=config.device.num_transport_cells,
+            num_left_cells=config.device.num_left_cells,
+            num_right_cells=config.device.num_right_cells,
+            transport_direction=config.device.transport_direction,
+            block_start=start_block,
+            block_end=end_block,
+            periodic_shift=periodic_shift,
+        )
+        matrix_dict[periodic_shift] = matrix_sparray.astype(xp.complex128)
+
+    matrix_sparray = sum(matrix_dict.values())
+    matrix_sparray.sum_duplicates()
+    block_sizes = get_host(block_sizes)
+    block_sizes_array = np.asarray(
+        [block_sizes[0]] * config.device.num_transport_cells
+    )
+
+    return matrix_sparray, matrix_dict, block_sizes_array
+
+
+def _mat_to_unit_cells(matrices: dict) -> NDArray:
+    """Convert a ``distributed_load`` result to a unit-cell array.
+
+    Parameters
+    ----------
+    matrices : dict
+        Mapping from (i, j, k) cell indices to 2-D arrays, as returned
+        by ``distributed_load``.
+
+    Returns
+    -------
+    NDArray
+        Dense array of shape ``(Nx, Ny, Nz, n_orb, n_orb)``.
+    """
     keys = np.array(list(matrices.keys()))
 
     min_coords = keys.min(axis=0)
@@ -537,11 +820,57 @@ def _load_matrix_from_unit_cell(
     for coord, matrix in matrices.items():
         unit_cells[coord] = xp.asarray(matrix).astype(xp.complex128)
 
+    return unit_cells
+
+
+def _load_matrix_from_unit_cell(
+    config: QuatrexConfig,
+    matrix_name: str,
+) -> tuple[sparse.coo_matrix, dict | None, NDArray | None]:
+    """Loads a matrix from unit cell data.
+
+    Parameters
+    ----------
+    config : QuatrexConfig
+        The quatrex simulation configuration.
+    matrix_name : str
+        Name of the matrix ('hamiltonian','overlap' or
+        'coulomb_matrix').
+
+    Returns
+    -------
+    tuple[sparse.coo_matrix, dict | None, NDArray | None]
+        The matrix, optional k-point dictionary, and optional block sizes.
+
+    """
+    matrices = distributed_load(config.input_dir / f"{matrix_name}.mat")
+    unit_cells = _mat_to_unit_cells(matrices)
+
     # Apply cutoff if requested and available
     trimmed_unit_cells = trim_tight_binding_matrix(
         tight_binding_matrix=unit_cells,
         neighbor_cell_cutoff=config.device.neighbor_cell_cutoff,
     )
+
+    # Heterogeneous L|D|R device?
+    if config.device.left_matrix is not None:
+        left_matrices = distributed_load(
+            config.input_dir / f"{config.device.left_matrix}.mat"
+        )
+        right_matrices = distributed_load(
+            config.input_dir / f"{config.device.right_matrix}.mat"
+        )
+        uc_left = trim_tight_binding_matrix(
+            _mat_to_unit_cells(left_matrices),
+            neighbor_cell_cutoff=config.device.neighbor_cell_cutoff,
+        )
+        uc_right = trim_tight_binding_matrix(
+            _mat_to_unit_cells(right_matrices),
+            neighbor_cell_cutoff=config.device.neighbor_cell_cutoff,
+        )
+        return _create_heterogeneous_matrix(
+            config, uc_left, trimmed_unit_cells, uc_right
+        )
 
     return _create_matrix_from_unit_cells(config, trimmed_unit_cells)
 
