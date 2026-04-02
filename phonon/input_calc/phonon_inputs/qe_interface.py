@@ -1,5 +1,6 @@
 """Quantum ESPRESSO input/output interface."""
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -12,12 +13,16 @@ from .config import QEConfig
 # Ry/bohr -> eV/Angstrom
 RY_BOHR_TO_EV_ANG = 25.71104309541616
 
+BOHR_TO_ANG = 0.52917721067
+
 
 def write_qe_scf_input(
     filepath: Path,
     supercell: PhonopyAtoms,
     qe_config: QEConfig,
     calculation: str = "scf",
+    forc_conv_thr: float | None = None,
+    press_conv_thr: float | None = None,
 ) -> None:
     """Write a pw.x input file for a (displaced) supercell.
 
@@ -30,7 +35,11 @@ def write_qe_scf_input(
     qe_config : QEConfig
         QE calculation parameters.
     calculation : str
-        QE calculation type ("scf", "relax", etc.).
+        QE calculation type ("scf", "relax", "vc-relax").
+    forc_conv_thr : float, optional
+        Force convergence threshold for relax/vc-relax (Ry/bohr).
+    press_conv_thr : float, optional
+        Pressure convergence threshold for vc-relax (kbar).
     """
     filepath = Path(filepath)
     symbols = supercell.symbols
@@ -39,15 +48,14 @@ def write_qe_scf_input(
     positions = supercell.scaled_positions
     natoms = len(symbols)
 
-    # Get masses from phonopy atoms (amu)
     masses = {}
     for sym, mass in zip(symbols, supercell.masses):
         masses[sym] = mass
 
     ecutrho = qe_config.ecutwfc * qe_config.ecutrho_factor
-    kpts = qe_config.kpoints_scf
+    is_relax = calculation in ("relax", "vc-relax")
+    kpts = qe_config.kpoints_relax if is_relax else qe_config.kpoints_scf
 
-    # Use absolute paths so QE works regardless of CWD
     pseudo_dir = Path(qe_config.pseudo_dir).absolute()
     outdir = (filepath.parent / "results").absolute()
 
@@ -59,6 +67,10 @@ def write_qe_scf_input(
         f.write(f"   pseudo_dir       = '{pseudo_dir}'\n")
         f.write(f"   outdir           = '{outdir}'\n")
         f.write("   tprnfor          = .true.\n")
+        if calculation == "vc-relax":
+            f.write("   tstress          = .true.\n")
+        if forc_conv_thr is not None:
+            f.write(f"   forc_conv_thr    = {forc_conv_thr}\n")
         f.write("/\n")
 
         f.write("&SYSTEM\n")
@@ -76,11 +88,14 @@ def write_qe_scf_input(
         f.write(f"   conv_thr         = {qe_config.conv_thr}\n")
         f.write("/\n")
 
-        if calculation == "relax":
+        if is_relax:
             f.write("&IONS\n")
             f.write("   ion_dynamics     = 'bfgs'\n")
             f.write("/\n")
+        if calculation == "vc-relax":
             f.write("&CELL\n")
+            if press_conv_thr is not None:
+                f.write(f"   press_conv_thr   = {press_conv_thr}\n")
             f.write("/\n")
 
         f.write("ATOMIC_SPECIES\n")
@@ -247,3 +262,152 @@ def load_existing_forces(
         forces.append(read_qe_forces(out, natoms))
 
     return forces
+
+
+# ---------------------------------------------------------------------------
+# Structural relaxation
+# ---------------------------------------------------------------------------
+
+
+def parse_qe_relax_output(filepath: Path) -> PhonopyAtoms:
+    """Parse relaxed structure from a QE relax/vc-relax output.
+
+    For vc-relax, reads from the "Begin final coordinates" block.
+    For relax (fixed cell), reads final ATOMIC_POSITIONS and the
+    input CELL_PARAMETERS.
+
+    Parameters
+    ----------
+    filepath : Path
+        QE output file.
+
+    Returns
+    -------
+    cell : PhonopyAtoms
+        Relaxed structure.
+    """
+    filepath = Path(filepath)
+    with open(filepath) as f:
+        text = f.read()
+
+    if "JOB DONE" not in text:
+        raise RuntimeError(f"QE did not finish successfully: {filepath}")
+
+    # --- Try vc-relax: "Begin final coordinates" block ---
+    m_final = re.search(
+        r"Begin final coordinates(.*?)End final coordinates",
+        text, re.DOTALL,
+    )
+
+    if m_final:
+        block = m_final.group(1)
+    else:
+        # Fixed-cell relax: use the full output text
+        block = text
+
+    # Parse CELL_PARAMETERS (last occurrence in block)
+    cell_matches = list(re.finditer(
+        r"CELL_PARAMETERS\s*\(?\s*(\w+)\s*\)?\s*\n"
+        r"((?:\s*[\d.eE+-]+\s+[\d.eE+-]+\s+[\d.eE+-]+\s*\n){3})",
+        block,
+    ))
+    if not cell_matches:
+        raise ValueError(f"Could not parse CELL_PARAMETERS in {filepath}")
+
+    m_cell = cell_matches[-1]
+    cell_unit = m_cell.group(1).lower()
+    cell_lines = m_cell.group(2).strip().split("\n")
+    cell = np.array([[float(x) for x in line.split()] for line in cell_lines])
+    if cell_unit == "bohr":
+        cell *= BOHR_TO_ANG
+
+    # Parse ATOMIC_POSITIONS (last occurrence in block)
+    pos_matches = list(re.finditer(
+        r"ATOMIC_POSITIONS\s*\(?\s*(\w+)\s*\)?\s*\n"
+        r"((?:\s*\w+\s+[\d.eE+-]+\s+[\d.eE+-]+\s+[\d.eE+-]+\s*\n)+)",
+        block,
+    ))
+    if not pos_matches:
+        raise ValueError(f"Could not parse ATOMIC_POSITIONS in {filepath}")
+
+    m_pos = pos_matches[-1]
+    pos_unit = m_pos.group(1).lower()
+    symbols = []
+    positions = []
+    for line in m_pos.group(2).strip().split("\n"):
+        parts = line.split()
+        symbols.append(parts[0])
+        positions.append([float(x) for x in parts[1:4]])
+    positions = np.array(positions)
+
+    if pos_unit == "crystal":
+        return PhonopyAtoms(
+            symbols=symbols, cell=cell, scaled_positions=positions,
+        )
+    if pos_unit == "bohr":
+        positions *= BOHR_TO_ANG
+    # angstrom or converted bohr -> Cartesian positions
+    inv_cell = np.linalg.inv(cell)
+    scaled = positions @ inv_cell
+    return PhonopyAtoms(symbols=symbols, cell=cell, scaled_positions=scaled)
+
+
+def run_qe_relax(
+    cell: PhonopyAtoms,
+    work_dir: Path,
+    qe_config: QEConfig,
+    calculation: str = "vc-relax",
+    forc_conv_thr: float = 1e-4,
+    press_conv_thr: float = 0.5,
+    skip_existing: bool = True,
+) -> PhonopyAtoms:
+    """Run a QE structural relaxation and return the relaxed structure.
+
+    Parameters
+    ----------
+    cell : PhonopyAtoms
+        Initial structure.
+    work_dir : Path
+        Working directory for relax files.
+    qe_config : QEConfig
+        QE parameters. Uses ``kpoints_relax`` for the k-mesh.
+    calculation : str
+        "relax" (ions only) or "vc-relax" (ions + cell).
+    forc_conv_thr : float
+        Force convergence threshold (Ry/bohr).
+    press_conv_thr : float
+        Pressure convergence threshold (kbar), for vc-relax.
+    skip_existing : bool
+        If True and output already contains "JOB DONE", skip re-running.
+
+    Returns
+    -------
+    relaxed : PhonopyAtoms
+        Relaxed structure.
+    """
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    (work_dir / "results").mkdir(exist_ok=True)
+
+    inp = work_dir / "relax.in"
+    out = work_dir / "relax.out"
+
+    if skip_existing and out.exists():
+        with open(out) as f:
+            if "JOB DONE" in f.read():
+                print(f"  Relax already done, loading {out}")
+                return parse_qe_relax_output(out)
+
+    write_qe_scf_input(
+        inp, cell, qe_config, calculation=calculation,
+        forc_conv_thr=forc_conv_thr,
+        press_conv_thr=press_conv_thr if calculation == "vc-relax" else None,
+    )
+    print(f"  Running {calculation}...")
+    run_qe(inp, out, qe_config.pw_command)
+
+    relaxed = parse_qe_relax_output(out)
+    a_new = np.linalg.norm(relaxed.cell, axis=1)
+    print(f"  Relaxed lattice vectors: |a|={a_new[0]:.4f}, "
+          f"|b|={a_new[1]:.4f}, |c|={a_new[2]:.4f} A")
+    return relaxed

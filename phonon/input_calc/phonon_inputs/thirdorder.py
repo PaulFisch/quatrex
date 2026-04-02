@@ -1,11 +1,20 @@
-"""Third-order force constant generation via thirdorder.py + QE.
+"""Force constant generation via phono3py + symfc + QE.
 
-Wraps the thirdorder_espresso.py sow/reap workflow for any crystal structure.
+Replaces the previous thirdorder_espresso.py workflow with phono3py for
+displacement generation and symfc for efficient FC3 (and optionally FC2)
+production.
 
 Workflow:
-    1. sow:  Write unitcell.in + template, run thirdorder sow -> DISP files
-    2. run:  Execute QE pw.x for each displacement
-    3. reap: Pipe output filenames to thirdorder reap -> FORCE_CONSTANTS_3RD
+    1. sow:  Create phono3py object, generate displacements, write QE inputs
+    2. run:  Execute QE pw.x for each displaced supercell
+    3. reap: Read forces from QE outputs, produce FC3 via symfc
+    4. save: Write fc3.hdf5 and phono3py_disp.yaml
+
+Usage via CLI:
+    python -m phonon_inputs fc3-sow  --config config.yaml
+    python -m phonon_inputs fc3-run  --config config.yaml
+    python -m phonon_inputs fc3-reap --config config.yaml
+    python -m phonon_inputs fc3-all  --config config.yaml
 """
 
 import subprocess
@@ -18,33 +27,49 @@ from phonopy.structure.atoms import PhonopyAtoms
 from .config import QEConfig
 
 
-def write_unitcell_qe(cell: PhonopyAtoms, path: Path, qe_config: QEConfig) -> None:
-    """Write a QE-format unitcell.in for thirdorder.
+def _write_qe_input(
+    path: Path,
+    cell: np.ndarray,
+    symbols: list[str],
+    positions_cart: np.ndarray,
+    qe_config: QEConfig,
+    prefix: str = "fc3_disp",
+) -> None:
+    """Write a QE pw.x SCF input file.
 
     Parameters
     ----------
-    cell : PhonopyAtoms
-        Unit cell (primitive).
     path : Path
         Output file path.
+    cell : (3, 3) array
+        Lattice vectors in Angstrom (rows).
+    symbols : list of str
+        Atomic symbols.
+    positions_cart : (N, 3) array
+        Cartesian positions in Angstrom.
     qe_config : QEConfig
-        QE parameters (pseudo_dir, ecutwfc, etc.).
+        QE parameters.
+    prefix : str
+        QE prefix for output files.
     """
-    symbols = cell.symbols
     unique_species = list(dict.fromkeys(symbols))
-    lattice = cell.cell
-    positions = cell.scaled_positions
     natoms = len(symbols)
-
-    masses = {}
-    for sym, mass in zip(symbols, cell.masses):
-        masses[sym] = mass
-
     ecutrho = qe_config.ecutwfc * qe_config.ecutrho_factor
+
+    # Collect masses from PhonopyAtoms standard values
+    from phonopy.structure.atoms import atom_data
+    masses = {}
+    for sym in unique_species:
+        for entry in atom_data:
+            if entry and entry[1] == sym:
+                masses[sym] = entry[3]
+                break
 
     with open(path, "w") as f:
         f.write("&CONTROL\n")
         f.write("   calculation      = 'scf'\n")
+        f.write("   restart_mode     = 'from_scratch'\n")
+        f.write(f"   prefix           = '{prefix}'\n")
         f.write(f"   pseudo_dir       = '{qe_config.pseudo_dir}'\n")
         f.write("   outdir           = './results'\n")
         f.write("   tprnfor          = .true.\n")
@@ -53,67 +78,6 @@ def write_unitcell_qe(cell: PhonopyAtoms, path: Path, qe_config: QEConfig) -> No
         f.write("&SYSTEM\n")
         f.write("   ibrav            = 0\n")
         f.write(f"   nat              = {natoms}\n")
-        f.write(f"   ntyp             = {len(unique_species)}\n")
-        f.write(f"   ecutwfc          = {qe_config.ecutwfc}\n")
-        f.write(f"   ecutrho          = {ecutrho}\n")
-        f.write("/\n")
-
-        f.write("&ELECTRONS\n")
-        f.write(f"   conv_thr         = {qe_config.conv_thr}\n")
-        f.write("/\n")
-
-        f.write("ATOMIC_SPECIES\n")
-        for sp in unique_species:
-            pseudo = qe_config.pseudopotentials.get(sp, f"{sp}.UPF")
-            f.write(f"  {sp}  {masses[sp]}  {pseudo}\n")
-
-        f.write("ATOMIC_POSITIONS crystal\n")
-        for sym, pos in zip(symbols, positions):
-            f.write(f"  {sym}  {pos[0]:.10f}  {pos[1]:.10f}  {pos[2]:.10f}\n")
-
-        f.write("CELL_PARAMETERS angstrom\n")
-        for v in lattice:
-            f.write(f"  {v[0]:.10f}  {v[1]:.10f}  {v[2]:.10f}\n")
-
-        kpts = qe_config.kpoints_relax  # unitcell uses finer k-mesh
-        f.write("K_POINTS automatic\n")
-        f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}  0 0 0\n")
-
-
-def write_supercell_template(
-    path: Path,
-    qe_config: QEConfig,
-    unique_species: list[str],
-    masses: dict[str, float],
-) -> None:
-    """Write the supercell template with ##NATOMS##, ##COORDINATES##, ##CELL## placeholders.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    qe_config : QEConfig
-        QE parameters.
-    unique_species : list of str
-        Unique atomic species.
-    masses : dict
-        Masses keyed by symbol.
-    """
-    ecutrho = qe_config.ecutwfc * qe_config.ecutrho_factor
-
-    with open(path, "w") as f:
-        f.write("&CONTROL\n")
-        f.write("   calculation      = 'scf'\n")
-        f.write("   restart_mode     = 'from_scratch'\n")
-        f.write("   prefix           = 'fc3_disp'\n")
-        f.write(f"   pseudo_dir       = '{qe_config.pseudo_dir}'\n")
-        f.write("   outdir           = './results'\n")
-        f.write("   tprnfor          = .true.\n")
-        f.write("/\n")
-
-        f.write("&SYSTEM\n")
-        f.write("   ibrav            = 0\n")
-        f.write("   nat              = ##NATOMS##\n")
         f.write(f"   ntyp             = {len(unique_species)}\n")
         f.write(f"   ecutwfc          = {qe_config.ecutwfc}\n")
         f.write(f"   ecutrho          = {ecutrho}\n")
@@ -129,12 +93,17 @@ def write_supercell_template(
         f.write("ATOMIC_SPECIES\n")
         for sp in unique_species:
             pseudo = qe_config.pseudopotentials.get(sp, f"{sp}.UPF")
-            f.write(f"  {sp}  {masses[sp]}  {pseudo}\n")
+            f.write(f"  {sp}  {masses.get(sp, 0.0):.4f}  {pseudo}\n")
 
-        f.write("##COORDINATES##\n")
-        f.write("##CELL##\n")
+        f.write("ATOMIC_POSITIONS angstrom\n")
+        for sym, pos in zip(symbols, positions_cart):
+            f.write(f"  {sym}  {pos[0]:.10f}  {pos[1]:.10f}  {pos[2]:.10f}\n")
 
-        kpts = qe_config.kpoints_scf  # supercell uses coarser k-mesh
+        f.write("CELL_PARAMETERS angstrom\n")
+        for v in cell:
+            f.write(f"  {v[0]:.10f}  {v[1]:.10f}  {v[2]:.10f}\n")
+
+        kpts = qe_config.kpoints_scf
         f.write("K_POINTS automatic\n")
         f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}  0 0 0\n")
 
@@ -144,100 +113,126 @@ def sow(
     work_dir: Path,
     qe_config: QEConfig,
     supercell: tuple[int, int, int] = (2, 2, 2),
-    cutoff: str = "-3",
-    thirdorder_cmd: str = "thirdorder_espresso.py",
+    cutoff_pair_distance: float | None = None,
+    distance: float = 0.03,
+    is_plusminus: bool = True,
 ) -> int:
-    """Run thirdorder sow to generate displaced supercells.
+    """Generate phono3py displaced supercells and write QE inputs.
 
     Parameters
     ----------
     cell : PhonopyAtoms
-        Primitive unit cell.
+        Unit cell.
     work_dir : Path
-        Working directory (will be created).
+        Working directory (created if needed).
     qe_config : QEConfig
         QE parameters.
     supercell : tuple of int
-        Supercell dimensions (na, nb, nc).
-    cutoff : str
-        Cutoff for thirdorder ("-3" = 3rd neighbor, or distance in nm).
-    thirdorder_cmd : str
-        Command for thirdorder_espresso.py.
+        Supercell dimensions.
+    cutoff_pair_distance : float, optional
+        Cutoff distance for FC3 atom pairs in Angstrom.
+        None = no cutoff (all pairs). Reduces displacement count.
+    distance : float
+        Displacement amplitude in Angstrom (default 0.03).
+    is_plusminus : bool
+        Use +/- displacements for better accuracy.
 
     Returns
     -------
     n_disp : int
         Number of displacement files generated.
     """
+    from phono3py import Phono3py
+
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write unitcell.in
-    unitcell_path = work_dir / "unitcell.in"
-    write_unitcell_qe(cell, unitcell_path, qe_config)
-
-    # Write supercell_template.in
-    template_path = work_dir / "supercell_template.in"
-    symbols = cell.symbols
-    unique_species = list(dict.fromkeys(symbols))
-    masses = {sym: mass for sym, mass in zip(symbols, cell.masses)}
-    write_supercell_template(template_path, qe_config, unique_species, masses)
-
-    # Run thirdorder sow
-    na, nb, nc = supercell
-    result = subprocess.run(
-        [thirdorder_cmd, "unitcell.in", "sow",
-         str(na), str(nb), str(nc), cutoff, "supercell_template.in"],
-        capture_output=True, text=True,
-        cwd=str(work_dir),
+    sc_matrix = np.diag(supercell)
+    ph3 = Phono3py(cell, supercell_matrix=sc_matrix)
+    ph3.generate_displacements(
+        distance=distance,
+        cutoff_pair_distance=cutoff_pair_distance,
+        is_plusminus=is_plusminus,
     )
-    print(result.stdout)
-    if result.returncode != 0:
-        print(f"thirdorder sow failed:\n{result.stderr}", file=sys.stderr)
-        raise RuntimeError("thirdorder sow failed")
 
-    # Count generated DISP files
-    disp_files = sorted(work_dir.glob("DISP.supercell_template.in.*"))
-    n_disp = len(disp_files)
-    print(f"Generated {n_disp} displacement files in {work_dir}")
+    # Save phono3py state for reaping later
+    ph3.save(work_dir / "phono3py_disp.yaml")
+
+    supercells = ph3.supercells_with_displacements
+    n_disp = len(supercells)
+    sc_cell = ph3.supercell.cell
+
+    print(f"Generated {n_disp} displacements (phono3py)")
+    print(f"  Unit cell: {len(cell.symbols)} atoms")
+    print(f"  Supercell: {supercell}, {len(ph3.supercell.symbols)} atoms")
+    if cutoff_pair_distance is not None:
+        print(f"  Pair cutoff: {cutoff_pair_distance:.1f} A")
+
+    # Resolve pseudo_dir relative to work_dir
+    pseudo_dir_abs = Path(qe_config.pseudo_dir).resolve()
+    try:
+        pseudo_dir_rel = pseudo_dir_abs.relative_to(work_dir.resolve())
+    except ValueError:
+        pseudo_dir_rel = pseudo_dir_abs
+    # Create a modified config with resolved pseudo path
+    from dataclasses import replace
+    qe_local = replace(qe_config, pseudo_dir=str(pseudo_dir_rel))
+
+    # Write QE inputs
+    (work_dir / "results").mkdir(exist_ok=True)
+
+    for i, sc in enumerate(supercells):
+        if sc is None:
+            continue
+        inp_path = work_dir / f"disp-{i+1:05d}.in"
+        _write_qe_input(
+            inp_path, sc_cell, list(sc.symbols), sc.positions, qe_local,
+            prefix=f"fc3_{i+1:05d}",
+        )
+
+    print(f"Wrote {n_disp} QE input files in {work_dir}")
     return n_disp
 
 
 def run_displacements(
     work_dir: Path,
-    n_disp: int,
     pw_command: str = "pw.x",
     timeout: int = 3600,
+    n_parallel: int = 1,
 ) -> None:
     """Run QE pw.x for each displacement.
 
     Parameters
     ----------
     work_dir : Path
-        Directory containing DISP.supercell_template.in.* files.
-    n_disp : int
-        Number of displacements.
+        Directory containing disp-*.in files.
     pw_command : str
         Command to invoke pw.x.
     timeout : int
         Timeout per job in seconds.
+    n_parallel : int
+        Number of parallel QE jobs (future use, currently sequential).
     """
     work_dir = Path(work_dir)
-    results_dir = work_dir / "results"
-    results_dir.mkdir(exist_ok=True)
+    inp_files = sorted(work_dir.glob("disp-*.in"))
+    n_disp = len(inp_files)
 
-    for i in range(1, n_disp + 1):
-        width = len(str(n_disp))
-        inp_file = work_dir / f"DISP.supercell_template.in.{i:0{width}d}"
-        out_file = work_dir / f"DISP.supercell_template.out.{i:0{width}d}"
+    if n_disp == 0:
+        raise FileNotFoundError("No displacement input files found. Run sow first.")
 
+    print(f"Running {n_disp} QE displacements...")
+
+    for i, inp_file in enumerate(inp_files):
+        out_file = inp_file.with_suffix(".out")
+
+        # Skip completed jobs
         if out_file.exists():
             with open(out_file) as f:
                 if "JOB DONE" in f.read():
-                    print(f"  Skipping disp {i}/{n_disp} (done)")
+                    print(f"  [{i+1}/{n_disp}] Skipping (done)")
                     continue
 
-        print(f"  Running disp {i}/{n_disp}...")
+        print(f"  [{i+1}/{n_disp}] Running {inp_file.name}...")
         result = subprocess.run(
             [pw_command, "-in", str(inp_file)],
             capture_output=True, text=True,
@@ -248,77 +243,140 @@ def run_displacements(
             f.write(result.stdout)
 
         if "JOB DONE" not in result.stdout:
-            print(f"  ERROR: disp {i} did not converge!")
+            print(f"  ERROR: {inp_file.name} did not converge!")
             if result.stderr:
-                print(f"  stderr: {result.stderr[-300:]}")
-            raise RuntimeError(f"QE displacement {i} failed")
+                print(f"  stderr: {result.stderr[-500:]}")
+            raise RuntimeError(f"QE displacement {inp_file.name} failed")
 
         for line in result.stdout.split("\n"):
             if "WALL" in line and "PWSCF" in line:
-                print(f"  Done: {line.strip()}")
+                print(f"    {line.strip()}")
                 break
 
     print(f"\nAll {n_disp} displacements completed.")
 
 
+def _parse_qe_forces(output_path: Path, n_atoms: int) -> np.ndarray:
+    """Parse forces from QE output file.
+
+    QE outputs forces in Ry/bohr. Converts to eV/Angstrom.
+
+    Parameters
+    ----------
+    output_path : Path
+        QE output file.
+    n_atoms : int
+        Expected number of atoms.
+
+    Returns
+    -------
+    forces : (n_atoms, 3) array in eV/Angstrom.
+    """
+    RY_BOHR_TO_EV_ANG = 25.71104309541616
+
+    forces = []
+    reading = False
+    with open(output_path) as f:
+        for line in f:
+            if "Forces acting on atoms" in line:
+                forces = []
+                reading = True
+                continue
+            if reading and "force =" in line:
+                parts = line.split("force =")[1].split()
+                forces.append([float(x) for x in parts[:3]])
+            if reading and len(forces) == n_atoms:
+                reading = False
+
+    if len(forces) != n_atoms:
+        raise ValueError(
+            f"Expected {n_atoms} force lines in {output_path}, got {len(forces)}"
+        )
+
+    return np.array(forces) * RY_BOHR_TO_EV_ANG
+
+
 def reap(
     work_dir: Path,
-    n_disp: int,
-    supercell: tuple[int, int, int] = (2, 2, 2),
-    cutoff: str = "-3",
-    thirdorder_cmd: str = "thirdorder_espresso.py",
+    fc_calculator: str = "symfc",
+    symmetrize: bool = True,
 ) -> Path:
-    """Run thirdorder reap to produce FORCE_CONSTANTS_3RD.
+    """Read QE forces and produce FC3 (and FC2) via phono3py.
 
     Parameters
     ----------
     work_dir : Path
-        Directory containing unitcell.in and output files.
-    n_disp : int
-        Number of displacements.
-    supercell : tuple of int
-        Supercell dimensions (na, nb, nc).
-    cutoff : str
-        Cutoff matching the sow call.
-    thirdorder_cmd : str
-        Command for thirdorder_espresso.py.
+        Directory containing phono3py_disp.yaml and disp-*.out files.
+    fc_calculator : str
+        FC calculator backend: "symfc" (recommended) or None (ALM/default).
+    symmetrize : bool
+        Apply symmetrization to force constants.
 
     Returns
     -------
     fc3_path : Path
-        Path to the generated FORCE_CONSTANTS_3RD file.
+        Path to the saved fc3.hdf5 file.
     """
+    from phono3py import load as phono3py_load
+
     work_dir = Path(work_dir)
-    width = len(str(n_disp))
+    yaml_path = work_dir / "phono3py_disp.yaml"
 
-    file_list = []
-    for i in range(1, n_disp + 1):
-        out_file = work_dir / f"DISP.supercell_template.out.{i:0{width}d}"
-        if not out_file.exists():
-            raise FileNotFoundError(f"Missing output: {out_file}")
-        file_list.append(str(out_file))
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"phono3py_disp.yaml not found in {work_dir}")
 
-    stdin_text = "\n".join(file_list) + "\n"
-    na, nb, nc = supercell
-
-    print(f"Reaping {n_disp} displacement outputs...")
-    result = subprocess.run(
-        [thirdorder_cmd, "unitcell.in", "reap",
-         str(na), str(nb), str(nc), cutoff],
-        input=stdin_text, text=True,
-        capture_output=True,
-        cwd=str(work_dir),
+    # Load the phono3py object (without producing FC yet)
+    ph3 = phono3py_load(
+        phono3py_yaml=str(yaml_path),
+        produce_fc=False,
+        log_level=0,
     )
-    print(result.stdout)
-    if result.returncode != 0:
-        print(f"Reap failed:\n{result.stderr}", file=sys.stderr)
-        raise RuntimeError("thirdorder reap failed")
 
-    fc3_path = work_dir / "FORCE_CONSTANTS_3RD"
-    if fc3_path.exists():
-        print(f"FORCE_CONSTANTS_3RD written ({fc3_path.stat().st_size} bytes)")
-    else:
-        raise RuntimeError("FORCE_CONSTANTS_3RD not created")
+    n_super = len(ph3.supercell.symbols)
+    n_disp = len(ph3.supercells_with_displacements)
+
+    # Read forces from QE outputs
+    print(f"Reading forces from {n_disp} QE output files...")
+    force_sets = []
+    for i in range(n_disp):
+        out_file = work_dir / f"disp-{i+1:05d}.out"
+        if not out_file.exists():
+            raise FileNotFoundError(f"Missing: {out_file}")
+        forces = _parse_qe_forces(out_file, n_super)
+        force_sets.append(forces)
+
+    ph3.forces = np.array(force_sets)
+    print(f"  Loaded forces: shape {ph3.forces.shape}")
+
+    # Produce FC3 (and FC2)
+    print(f"Producing FC3 via {fc_calculator or 'default'}...")
+    ph3.produce_fc3(
+        symmetrize_fc3r=symmetrize,
+        fc_calculator=fc_calculator,
+    )
+
+    # Also produce FC2 for harmonic calculations
+    print("Producing FC2...")
+    ph3.produce_fc2(
+        symmetrize_fc2=symmetrize,
+        fc_calculator=fc_calculator,
+    )
+
+    fc3 = ph3.fc3
+    fc2 = ph3.fc2
+    print(f"  FC3 shape: {fc3.shape}, max: {np.max(np.abs(fc3)):.4e} eV/A^3")
+    print(f"  FC2 shape: {fc2.shape}, max: {np.max(np.abs(fc2)):.4e} eV/A^2")
+
+    # Save
+    fc3_path = work_dir / "fc3.hdf5"
+    import h5py
+    with h5py.File(fc3_path, "w") as f:
+        f.create_dataset("fc3", data=fc3, compression="gzip")
+        f.create_dataset("fc2", data=fc2, compression="gzip")
+    print(f"  Saved: {fc3_path} ({fc3_path.stat().st_size / 1e6:.1f} MB)")
+
+    # Also save phono3py yaml with forces
+    ph3.save(work_dir / "phono3py_params.yaml")
 
     return fc3_path
 
@@ -328,8 +386,9 @@ def generate_fc3(
     work_dir: Path,
     qe_config: QEConfig,
     supercell: tuple[int, int, int] = (2, 2, 2),
-    cutoff: str = "-3",
-    thirdorder_cmd: str = "thirdorder_espresso.py",
+    cutoff_pair_distance: float | None = None,
+    distance: float = 0.03,
+    fc_calculator: str = "symfc",
     skip_existing: bool = True,
 ) -> Path:
     """Full FC3 pipeline: sow + run + reap.
@@ -337,25 +396,27 @@ def generate_fc3(
     Parameters
     ----------
     cell : PhonopyAtoms
-        Primitive unit cell.
+        Unit cell.
     work_dir : Path
         Working directory.
     qe_config : QEConfig
         QE parameters.
     supercell : tuple of int
         Supercell dimensions.
-    cutoff : str
-        Neighbor cutoff for thirdorder.
-    thirdorder_cmd : str
-        Command for thirdorder_espresso.py.
+    cutoff_pair_distance : float, optional
+        Cutoff for FC3 atom pairs (Angstrom).
+    distance : float
+        Displacement amplitude.
+    fc_calculator : str
+        "symfc" for symmetry-adapted FC fitting.
     skip_existing : bool
-        Skip QE jobs that already completed.
+        Skip completed QE jobs.
 
     Returns
     -------
     fc3_path : Path
-        Path to FORCE_CONSTANTS_3RD.
+        Path to fc3.hdf5.
     """
-    n_disp = sow(cell, work_dir, qe_config, supercell, cutoff, thirdorder_cmd)
-    run_displacements(work_dir, n_disp, qe_config.pw_command)
-    return reap(work_dir, n_disp, supercell, cutoff, thirdorder_cmd)
+    sow(cell, work_dir, qe_config, supercell, cutoff_pair_distance, distance)
+    run_displacements(work_dir, qe_config.pw_command)
+    return reap(work_dir, fc_calculator=fc_calculator)

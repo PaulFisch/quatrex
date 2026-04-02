@@ -76,13 +76,24 @@ class QuatrexOutputConfig:
 
 @dataclass
 class ThirdOrderConfig:
-    """Third-order force constant (FC3) settings for thirdorder.py."""
+    """Third-order force constant (FC3) settings via phono3py + symfc."""
 
     supercell: list[int] = field(default_factory=lambda: [2, 2, 2])
-    cutoff: str = "-3"  # Negative int = neighbor shell, positive float = distance in nm
-    thirdorder_cmd: str = "thirdorder_espresso.py"
+    cutoff_pair_distance: float | None = None  # Angstrom; None = all pairs
+    displacement_distance: float = 0.03  # Angstrom
+    fc_calculator: str = "symfc"  # "symfc" or None
     work_dir: str = "./fc3"
     pw_timeout: int = 3600  # seconds per QE job
+
+
+@dataclass
+class RelaxConfig:
+    """Structural relaxation parameters."""
+
+    calculation: str = "vc-relax"  # "relax" or "vc-relax"
+    forc_conv_thr: float = 1e-4  # Ry/bohr
+    press_conv_thr: float = 0.5  # kbar (vc-relax only)
+    work_dir: str = "./relax"
 
 
 @dataclass
@@ -97,6 +108,7 @@ class PhononInputConfig:
     )
     quatrex_output: QuatrexOutputConfig = field(default_factory=QuatrexOutputConfig)
     thirdorder: ThirdOrderConfig = field(default_factory=ThirdOrderConfig)
+    relax: RelaxConfig = field(default_factory=RelaxConfig)
 
 
 def _dict_to_dataclass(cls, d):

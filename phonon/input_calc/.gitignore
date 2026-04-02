@@ -10,6 +10,7 @@ __pycache__/
 
 # SCBA checkpoint files
 anharmonic_multislab_checkpoint.json
+anharmonic/anharmonic_multislab_checkpoint.json
 
 # QE relaxation (can be regenerated)
 relax/
@@ -17,3 +18,16 @@ relax/
 # QE runtime artifacts
 CRASH
 input_tmp.in
+
+# Old calculations (moved to backup)
+old/
+
+# phono3py/QE work directories (regenerated)
+fc3_prim/results/
+fc3_prim/*.out
+
+# Checkpoint files
+anharmonic_checkpoint.npz
+
+# Auto-generated configs
+config_prim_auto.yaml

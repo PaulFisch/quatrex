@@ -4,6 +4,10 @@ Usage:
     python -m phonon_inputs generate --config config.yaml
     python -m phonon_inputs extract-blocks --config config.yaml
     python -m phonon_inputs validate --config config.yaml
+    python -m phonon_inputs fc3-sow --config config.yaml
+    python -m phonon_inputs fc3-run --config config.yaml
+    python -m phonon_inputs fc3-reap --config config.yaml
+    python -m phonon_inputs fc3-all --config config.yaml
 """
 
 import argparse
@@ -93,7 +97,7 @@ def cmd_extract_blocks(config_path: str) -> None:
 
 
 def cmd_fc3_sow(config_path: str) -> None:
-    """Generate FC3 displaced supercells (thirdorder sow)."""
+    """Generate phono3py displaced supercells and write QE inputs."""
     from .config import load_config
     from .structure import load_structure
     from .thirdorder import sow
@@ -105,9 +109,13 @@ def cmd_fc3_sow(config_path: str) -> None:
     work_dir = Path(config_path).parent / tc.work_dir
     supercell = tuple(tc.supercell)
 
-    n_disp = sow(cell, work_dir, config.qe, supercell, tc.cutoff, tc.thirdorder_cmd)
-    print(f"\n{n_disp} QE input files generated in {work_dir}")
-    print("Run QE for each DISP.supercell_template.in.* file, then run 'fc3-reap'.")
+    n_disp = sow(
+        cell, work_dir, config.qe, supercell,
+        cutoff_pair_distance=tc.cutoff_pair_distance,
+        distance=tc.displacement_distance,
+    )
+    print(f"\n{n_disp} QE input files in {work_dir}")
+    print("Run 'fc3-run' to execute QE, then 'fc3-reap' to produce FC3.")
 
 
 def cmd_fc3_run(config_path: str) -> None:
@@ -119,32 +127,19 @@ def cmd_fc3_run(config_path: str) -> None:
     tc = config.thirdorder
     work_dir = Path(config_path).parent / tc.work_dir
 
-    disp_files = sorted(work_dir.glob("DISP.supercell_template.in.*"))
-    n_disp = len(disp_files)
-    if n_disp == 0:
-        print("No displacement files found. Run 'fc3-sow' first.")
-        sys.exit(1)
-
-    run_displacements(work_dir, n_disp, config.qe.pw_command, tc.pw_timeout)
+    run_displacements(work_dir, config.qe.pw_command, tc.pw_timeout)
 
 
 def cmd_fc3_reap(config_path: str) -> None:
-    """Collect forces and produce FORCE_CONSTANTS_3RD."""
+    """Read QE forces and produce FC3 via phono3py + symfc."""
     from .config import load_config
     from .thirdorder import reap
 
     config = load_config(config_path)
     tc = config.thirdorder
     work_dir = Path(config_path).parent / tc.work_dir
-    supercell = tuple(tc.supercell)
 
-    disp_files = sorted(work_dir.glob("DISP.supercell_template.out.*"))
-    n_disp = len(disp_files)
-    if n_disp == 0:
-        print("No output files found. Run QE displacements first.")
-        sys.exit(1)
-
-    fc3_path = reap(work_dir, n_disp, supercell, tc.cutoff, tc.thirdorder_cmd)
+    fc3_path = reap(work_dir, fc_calculator=tc.fc_calculator)
     print(f"\nFC3 file: {fc3_path}")
 
 
@@ -162,9 +157,19 @@ def cmd_fc3_all(config_path: str) -> None:
     supercell = tuple(tc.supercell)
 
     fc3_path = generate_fc3(
-        cell, work_dir, config.qe, supercell, tc.cutoff, tc.thirdorder_cmd
+        cell, work_dir, config.qe, supercell,
+        cutoff_pair_distance=tc.cutoff_pair_distance,
+        distance=tc.displacement_distance,
+        fc_calculator=tc.fc_calculator,
     )
     print(f"\nFC3 file: {fc3_path}")
+
+
+def cmd_pipeline(config_path: str, skip_relax: bool = False) -> None:
+    """Full pipeline: relax -> FC2 + FC3 (via phono3py + symfc)."""
+    from .pipeline import run_pipeline
+
+    run_pipeline(config_path, skip_relax=skip_relax)
 
 
 def cmd_validate(config_path: str) -> None:
@@ -239,34 +244,40 @@ def main():
     p_val = sub.add_parser("validate", help="Run validation checks")
     p_val.add_argument("--config", required=True, help="YAML config file")
 
-    p_fc3_sow = sub.add_parser("fc3-sow", help="Generate FC3 displaced supercells")
+    p_fc3_sow = sub.add_parser("fc3-sow", help="Generate phono3py displacements + QE inputs")
     p_fc3_sow.add_argument("--config", required=True, help="YAML config file")
 
     p_fc3_run = sub.add_parser("fc3-run", help="Run QE for FC3 displacements")
     p_fc3_run.add_argument("--config", required=True, help="YAML config file")
 
-    p_fc3_reap = sub.add_parser("fc3-reap", help="Collect forces -> FORCE_CONSTANTS_3RD")
+    p_fc3_reap = sub.add_parser("fc3-reap", help="Read forces, produce FC3 via symfc")
     p_fc3_reap.add_argument("--config", required=True, help="YAML config file")
 
     p_fc3_all = sub.add_parser("fc3-all", help="Full FC3 pipeline: sow + run + reap")
     p_fc3_all.add_argument("--config", required=True, help="YAML config file")
 
+    p_pipe = sub.add_parser("pipeline", help="Full pipeline: relax -> FC2 + FC3")
+    p_pipe.add_argument("--config", required=True, help="YAML config file")
+    p_pipe.add_argument("--skip-relax", action="store_true",
+                        help="Skip structural relaxation")
+
     args = parser.parse_args()
 
-    if args.command == "generate":
-        cmd_generate(args.config, skip_dft=args.skip_dft)
-    elif args.command == "extract-blocks":
-        cmd_extract_blocks(args.config)
-    elif args.command == "validate":
-        cmd_validate(args.config)
-    elif args.command == "fc3-sow":
-        cmd_fc3_sow(args.config)
-    elif args.command == "fc3-run":
-        cmd_fc3_run(args.config)
-    elif args.command == "fc3-reap":
-        cmd_fc3_reap(args.config)
-    elif args.command == "fc3-all":
-        cmd_fc3_all(args.config)
+    commands = {
+        "generate": lambda: cmd_generate(args.config, skip_dft=args.skip_dft),
+        "extract-blocks": lambda: cmd_extract_blocks(args.config),
+        "validate": lambda: cmd_validate(args.config),
+        "fc3-sow": lambda: cmd_fc3_sow(args.config),
+        "fc3-run": lambda: cmd_fc3_run(args.config),
+        "fc3-reap": lambda: cmd_fc3_reap(args.config),
+        "fc3-all": lambda: cmd_fc3_all(args.config),
+        "pipeline": lambda: cmd_pipeline(
+            args.config, skip_relax=args.skip_relax,
+        ),
+    }
+
+    if args.command in commands:
+        commands[args.command]()
     else:
         parser.print_help()
         sys.exit(1)

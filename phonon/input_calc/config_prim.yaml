@@ -1,0 +1,51 @@
+## phonon_inputs configuration: Si FCC primitive cell (2 atoms)
+## PBE equilibrium lattice constant: a = 5.4662 A (from vc-relax)
+## FCC primitive vectors: a/2 * {(0,1,1), (1,0,1), (1,1,0)}
+##
+## Transport along a1 = [011], i.e., the first FCC lattice vector.
+## For cubic symmetry, all directions give the same bulk thermal conductance.
+##
+## Usage:
+##   python -m phonon_inputs pipeline  --config config_prim.yaml           # full: relax -> FC2+FC3
+##   python -m phonon_inputs pipeline  --config config_prim.yaml --skip-relax  # FC2+FC3 only
+##   python -m phonon_inputs fc3-sow   --config config_prim.yaml           # generate QE inputs
+##   python -m phonon_inputs fc3-run   --config config_prim.yaml           # run QE
+##   python -m phonon_inputs fc3-reap  --config config_prim.yaml           # produce FC2+FC3 via symfc
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,       2.7331, 2.7331]   # a1 = a/2 * (0,1,1)
+    - [2.7331,    0.0,    2.7331]   # a2 = a/2 * (1,0,1)
+    - [2.7331,    2.7331, 0.0]      # a3 = a/2 * (1,1,0)
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: ./pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 60
+  ecutrho_factor: 8
+  kpoints_scf: [2, 2, 2]       # for 2x2x2 supercell (16 atoms)
+  kpoints_relax: [8, 8, 8]     # for unit cell relaxation (2 atoms)
+  conv_thr: 1.0e-10
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "mpirun -np 4 pw.x"
+
+relax:
+  calculation: vc-relax
+  forc_conv_thr: 1.0e-4        # Ry/bohr
+  press_conv_thr: 0.5          # kbar
+  work_dir: ./relax
+
+thirdorder:
+  supercell: [2, 2, 2]
+  cutoff_pair_distance: 5.5     # ~2nd nearest neighbor distance in Angstrom
+  displacement_distance: 0.03   # Angstrom (phono3py standard)
+  fc_calculator: symfc
+  work_dir: ./fc3_prim
+  pw_timeout: 3600
