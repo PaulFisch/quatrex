@@ -11,24 +11,9 @@ Workflow:
     4. d3q:    d3q.x third-order DFPT on the full q-grid
     5. qq2rr:  d3_qq2rr.x Fourier transform -> real-space FC3
     6. save:   Convert to phono3py format, write fc3.hdf5
-
-This implementation follows the intended D3Q design for regular grids:
-    - ph.x runs with drho_star enabled
-    - d3q.x runs once in mode='full'
-    - d3_qq2rr.x Fourier-transforms the produced D3 matrices
-
-Requires:
-    - QE >= 7.0 with ph.x
-    - D3Q plugin (d3q.x, d3_qq2rr.x) compiled against the same QE version
-    See README.md for installation instructions.
-
-Usage via CLI:
-    python -m phonon_inputs dfpt-sow   --config config.yaml
-    python -m phonon_inputs dfpt-run   --config config.yaml
-    python -m phonon_inputs dfpt-reap  --config config.yaml
-    python -m phonon_inputs dfpt-all   --config config.yaml
 """
 
+import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -49,6 +34,9 @@ RY_BOHR3_TO_EV_ANG3 = RY_TO_EV / BOHR_TO_ANG ** 3
 DFPT_PREFIX = "dfpt_fc"
 DRHO_EXT = "drho"
 DRHO_DIRNAME = "FILDRHO"
+D3_TMP_DIRNAME = "d3_tmp"
+D3_OUT_DIRNAME = "d3_save"
+D3_OUT_PREFIX = "anh"
 D3_MODE = "full"
 
 
@@ -58,23 +46,11 @@ D3_MODE = "full"
 
 
 def _write_ph_input(
-        path: Path,
-        dfpt_config: DFPTConfig,
-        prefix: str = DFPT_PREFIX,
+    path: Path,
+    dfpt_config: DFPTConfig,
+    prefix: str = DFPT_PREFIX,
 ) -> None:
-    """Write ph.x input for DFPT phonon calculation on a q-grid.
-
-    The response-density files needed by d3q.x are enabled via drho_star.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    dfpt_config : DFPTConfig
-        DFPT configuration.
-    prefix : str
-        QE prefix (must match pw.x).
-    """
+    """Write ph.x input for DFPT phonon calculation on a q-grid."""
     nq1, nq2, nq3 = dfpt_config.q_mesh
     with open(path, "w") as f:
         f.write("Phonon calculation on grid\n")
@@ -96,13 +72,7 @@ def _write_ph_input(
 
 
 def _write_q2r_input(path: Path) -> None:
-    """Write q2r.x input for FC2 Fourier transform.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    """
+    """Write q2r.x input for FC2 Fourier transform."""
     with open(path, "w") as f:
         f.write("&INPUT\n")
         f.write("   fildyn  = 'matdyn'\n")
@@ -112,36 +82,30 @@ def _write_q2r_input(path: Path) -> None:
 
 
 def _write_d3q_input(
-        path: Path,
-        dfpt_config: DFPTConfig,
-        prefix: str = DFPT_PREFIX,
+    path: Path,
+    dfpt_config: DFPTConfig,
+    prefix: str = DFPT_PREFIX,
 ) -> None:
+    """Write d3q.x input for a full-grid FC3 calculation."""
     nq1, nq2, nq3 = dfpt_config.q_mesh
     with open(path, "w") as f:
         f.write("&inputd3q\n")
-        f.write("   mode        = 'full'\n")
+        f.write(f"   mode        = '{D3_MODE}'\n")
         f.write(f"   prefix      = '{prefix}'\n")
         f.write("   outdir      = './results'\n")
-        f.write("   d3dir       = './d3_tmp'\n")
-        f.write("   fildrho     = 'drho'\n")
-        f.write("   fildrho_dir = './FILDRHO'\n")
-        f.write("   fild3dyn    = './d3_save/d3dyn'\n")
+        f.write(f"   d3dir       = './{D3_TMP_DIRNAME}'\n")
+        f.write(f"   fildrho     = '{DRHO_EXT}'\n")
+        f.write(f"   fildrho_dir = './{DRHO_DIRNAME}'\n")
+        f.write(f"   fild3dyn    = './{D3_OUT_DIRNAME}/{D3_OUT_PREFIX}'\n")
         f.write("   restart     = .false.\n")
         f.write("   safe_io     = .false.\n")
+        f.write("   print_star  = .true.\n")
         f.write("/\n")
         f.write(f"  {nq1}  {nq2}  {nq3}\n")
 
 
 def _write_d3_asr_input(path: Path, dfpt_config: DFPTConfig) -> None:
-    """Write d3_asr.x input for acoustic sum rule enforcement on FC3.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    dfpt_config : DFPTConfig
-        DFPT configuration (for q_mesh and asr type).
-    """
+    """Write d3_asr.x input for acoustic sum rule enforcement on FC3."""
     nq1, nq2, nq3 = dfpt_config.q_mesh
     with open(path, "w") as f:
         f.write("&input\n")
@@ -154,15 +118,7 @@ def _write_d3_asr_input(path: Path, dfpt_config: DFPTConfig) -> None:
 
 
 def _write_d3_sparse_input(path: Path, dfpt_config: DFPTConfig) -> None:
-    """Write d3_sparse.x input for FC3 sparsification.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    dfpt_config : DFPTConfig
-        DFPT configuration (for q_mesh and sparse_thr).
-    """
+    """Write d3_sparse.x input for FC3 sparsification."""
     nq1, nq2, nq3 = dfpt_config.q_mesh
     with open(path, "w") as f:
         f.write("&input\n")
@@ -178,19 +134,19 @@ def _write_d3_sparse_input(path: Path, dfpt_config: DFPTConfig) -> None:
 # Step runner
 # ---------------------------------------------------------------------------
 
+
 def _run_step(
-        work_dir: Path,
-        command: str,
-        input_file: str,
-        output_file: str,
-        timeout: int,
-        label: str = "",
-        skip_existing: bool = True,
-        required_files: tuple[str, ...] = (),
-        input_mode: str = "flag",  # "flag" or "stdin"
+    work_dir: Path,
+    command: str,
+    input_file: str,
+    output_file: str,
+    timeout: int,
+    label: str = "",
+    skip_existing: bool = True,
+    required_files: tuple[str, ...] = (),
+    input_mode: str = "flag",
 ) -> None:
     """Run a QE/D3Q calculation step."""
-
     inp = work_dir / input_file
     out = work_dir / output_file
 
@@ -252,31 +208,11 @@ def _run_step(
 
 
 def _parse_q2r_fc2(
-        flfrc_path: Path,
-        nat: int,
-        q_mesh: list[int],
+    flfrc_path: Path,
+    nat: int,
+    q_mesh: list[int],
 ) -> tuple[np.ndarray, dict]:
-    """Parse q2r.x force constant file (flfrc format).
-
-    The flfrc file contains real-space FC2 indexed by lattice vector
-    and unit cell atom pairs.
-
-    Parameters
-    ----------
-    flfrc_path : Path
-        Path to the flfrc file (e.g. fc2.dat).
-    nat : int
-        Number of atoms in the unit cell.
-    q_mesh : list of int
-        Supercell dimensions [n1, n2, n3] (= q-mesh for DFPT).
-
-    Returns
-    -------
-    fc2 : (n_super, n_super, 3, 3) array
-        FC2 in eV/Ang^2, phono3py supercell convention.
-    info : dict
-        Metadata (ntyp, masses, etc.).
-    """
+    """Parse q2r.x force constant file (flfrc format)."""
     n1, n2, n3 = q_mesh
     n_images = n1 * n2 * n3
     n_super = n_images * nat
@@ -378,37 +314,11 @@ def _parse_q2r_fc2(
 
 
 def _parse_mat3r_fc3(
-        mat3r_path: Path,
-        nat: int,
-        q_mesh: list[int],
+    mat3r_path: Path,
+    nat: int,
+    q_mesh: list[int],
 ) -> np.ndarray:
-    """Parse d3_qq2rr.x mat3R output into dense FC3 array.
-
-    The mat3R file format (D3Q >= 2.0):
-        Line 1: nq1 nq2 nq3
-        Line 2: nat
-        For each (R1, R2) block:
-            R1(1) R1(2) R1(3)  R2(1) R2(2) R2(3)  weight
-            For each non-zero element:
-                k1 k2 k3  a1 a2 a3  Re(Phi3) Im(Phi3)
-
-    FC3 values in the file are in Ry/bohr^3.
-
-    Parameters
-    ----------
-    mat3r_path : Path
-        Path to the mat3R file.
-    nat : int
-        Number of atoms in the unit cell.
-    q_mesh : list of int
-        Grid dimensions [n1, n2, n3].
-
-    Returns
-    -------
-    fc3 : (nat, n_super, n_super, 3, 3, 3) array
-        FC3 in eV/Ang^3, compact phono3py convention.
-        First index: unit cell atoms, other indices: supercell atoms.
-    """
+    """Parse d3_qq2rr.x mat3R output into dense FC3 array."""
     n1, n2, n3 = q_mesh
     n_images = n1 * n2 * n3
     n_super = n_images * nat
@@ -489,37 +399,19 @@ def _parse_mat3r_fc3(
 
 
 def sow(
-        cell: PhonopyAtoms,
-        work_dir: Path,
-        qe_config: QEConfig,
-        dfpt_config: DFPTConfig,
+    cell: PhonopyAtoms,
+    work_dir: Path,
+    qe_config: QEConfig,
+    dfpt_config: DFPTConfig,
 ) -> int:
-    """Generate all DFPT input files.
-
-    Creates: scf.in, ph.in, q2r.in, d3q.in, qq2rr.in.
-
-    Parameters
-    ----------
-    cell : PhonopyAtoms
-        Unit cell.
-    work_dir : Path
-        Working directory (created if needed).
-    qe_config : QEConfig
-        QE parameters.
-    dfpt_config : DFPTConfig
-        DFPT parameters.
-
-    Returns
-    -------
-    n_d3q_jobs : int
-        Number of d3q.x jobs generated (always 1 in full-grid mode).
-    """
+    """Generate all DFPT input files."""
     from .qe_interface import write_qe_scf_input
 
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     (work_dir / "results").mkdir(exist_ok=True)
-    (work_dir / "d3_save").mkdir(exist_ok=True)
+    (work_dir / D3_OUT_DIRNAME).mkdir(exist_ok=True)
+    (work_dir / D3_TMP_DIRNAME).mkdir(exist_ok=True)
     (work_dir / DRHO_DIRNAME).mkdir(exist_ok=True)
 
     pseudo_dir_abs = Path(qe_config.pseudo_dir).resolve()
@@ -581,12 +473,11 @@ def run_ph(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "ph.out",
         dfpt_config.ph_timeout,
         label="ph.x",
-        required_files=("results/_ph0/dfpt_fc.phsave/dynmat.1.0.xml",),
+        required_files=("FILDRHO",),
     )
 
 
 def run_q2r(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run q2r.x Fourier transform for FC2."""
     _run_step(
         work_dir,
         dfpt_config.q2r_command,
@@ -600,6 +491,12 @@ def run_q2r(work_dir: Path, dfpt_config: DFPTConfig) -> None:
 
 
 def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
+    work_dir = Path(work_dir)
+
+    # Ensure temp/output dirs exist even if user deleted them between sow and run
+    (work_dir / D3_TMP_DIRNAME).mkdir(parents=True, exist_ok=True)
+    (work_dir / D3_OUT_DIRNAME).mkdir(parents=True, exist_ok=True)
+
     _run_step(
         work_dir,
         dfpt_config.d3q_command,
@@ -609,9 +506,9 @@ def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         label="d3q",
     )
 
-    d3dir = work_dir / "d3_save"
-    if not d3dir.exists() or not any(d3dir.iterdir()):
-        raise RuntimeError("d3q completed with return code 0, but d3_save is empty.")
+    d3_files = sorted((work_dir / D3_OUT_DIRNAME).glob(f"{D3_OUT_PREFIX}*"))
+    if not d3_files:
+        raise RuntimeError("d3q completed with return code 0, but no D3 XML outputs were found.")
 
 
 def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
@@ -620,9 +517,9 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
     out = work_dir / "qq2rr.out"
     mat3r = work_dir / "mat3R"
 
-    d3_files = sorted((work_dir / "d3_save").glob("d3dyn_Q*"))
+    d3_files = sorted((work_dir / D3_OUT_DIRNAME).glob(f"{D3_OUT_PREFIX}*"))
     if not d3_files:
-        raise FileNotFoundError("No d3dyn_Q* files found in d3_save")
+        raise FileNotFoundError(f"No {D3_OUT_PREFIX}* files found in {D3_OUT_DIRNAME}")
 
     stdin_list = "\n".join(str(p.relative_to(work_dir)) for p in d3_files) + "\n"
     cmd = f"{dfpt_config.d3_qq2rr_command} {nq1} {nq2} {nq3} -o mat3R"
@@ -679,23 +576,11 @@ def run_d3_sparse(work_dir: Path, dfpt_config: DFPTConfig) -> None:
 
 
 def run_all(
-        work_dir: Path,
-        qe_config: QEConfig,
-        dfpt_config: DFPTConfig,
+    work_dir: Path,
+    qe_config: QEConfig,
+    dfpt_config: DFPTConfig,
 ) -> None:
-    """Execute the full DFPT workflow.
-
-    SCF -> ph -> q2r -> d3q -> qq2rr -> asr -> sparse (optional).
-
-    Parameters
-    ----------
-    work_dir : Path
-        Working directory with input files from sow().
-    qe_config : QEConfig
-        QE parameters (for pw_command).
-    dfpt_config : DFPTConfig
-        DFPT parameters.
-    """
+    """Execute the full DFPT workflow."""
     work_dir = Path(work_dir)
     use_sparse = dfpt_config.sparse_thr is not None
     n_steps = 7 if use_sparse else 6
@@ -724,29 +609,11 @@ def run_all(
 
 
 def reap(
-        work_dir: Path,
-        cell: PhonopyAtoms,
-        q_mesh: list[int],
+    work_dir: Path,
+    cell: PhonopyAtoms,
+    q_mesh: list[int],
 ) -> Path:
-    """Parse DFPT outputs and produce fc3.hdf5.
-
-    Reads q2r.x FC2 output and d3_qq2rr.x FC3 output, converts to
-    phono3py dense array format, and saves to HDF5.
-
-    Parameters
-    ----------
-    work_dir : Path
-        Working directory with completed calculations.
-    cell : PhonopyAtoms
-        Unit cell.
-    q_mesh : list of int
-        Grid dimensions (also determines the effective supercell).
-
-    Returns
-    -------
-    fc3_path : Path
-        Path to the saved fc3.hdf5 file.
-    """
+    """Parse DFPT outputs and produce fc3.hdf5."""
     import h5py
 
     work_dir = Path(work_dir)
@@ -778,29 +645,12 @@ def reap(
 
 
 def generate_fc_dfpt(
-        cell: PhonopyAtoms,
-        work_dir: Path,
-        qe_config: QEConfig,
-        dfpt_config: DFPTConfig,
+    cell: PhonopyAtoms,
+    work_dir: Path,
+    qe_config: QEConfig,
+    dfpt_config: DFPTConfig,
 ) -> Path:
-    """Full DFPT pipeline: sow + run + reap.
-
-    Parameters
-    ----------
-    cell : PhonopyAtoms
-        Unit cell.
-    work_dir : Path
-        Working directory.
-    qe_config : QEConfig
-        QE parameters.
-    dfpt_config : DFPTConfig
-        DFPT parameters.
-
-    Returns
-    -------
-    fc3_path : Path
-        Path to fc3.hdf5.
-    """
+    """Full DFPT pipeline: sow + run + reap."""
     sow(cell, work_dir, qe_config, dfpt_config)
     run_all(work_dir, qe_config, dfpt_config)
     return reap(work_dir, cell, dfpt_config.q_mesh)
