@@ -220,25 +220,17 @@ def _run_step(
     timeout: int,
     label: str = "",
     skip_existing: bool = True,
+    success_markers: tuple[str, ...] = ("JOB DONE",),
+    required_files: tuple[str, ...] = (),
 ) -> None:
     """Run a QE/D3Q calculation step.
 
-    Parameters
-    ----------
-    work_dir : Path
-        Working directory.
-    command : str
-        Command to run (e.g. "mpirun -np 4 ph.x").
-    input_file : str
-        Input filename (relative to work_dir).
-    output_file : str
-        Output filename (relative to work_dir).
-    timeout : int
-        Timeout in seconds.
-    label : str
-        Label for progress messages.
-    skip_existing : bool
-        Skip if output already contains "JOB DONE".
+    A step is considered successful if:
+      1. the process exits with return code 0, and
+      2. all required_files exist (if any are specified).
+
+    success_markers are only used for logging and skip detection, not as the
+    sole criterion for success.
     """
     inp = work_dir / input_file
     out = work_dir / output_file
@@ -247,10 +239,13 @@ def _run_step(
         raise FileNotFoundError(f"Input file not found: {inp}")
 
     if skip_existing and out.exists():
-        with open(out) as f:
-            if "JOB DONE" in f.read():
-                print(f"  [{label}] Skipping (already done)")
-                return
+        text = out.read_text(errors="replace")
+        if any(marker in text for marker in success_markers):
+            print(f"  [{label}] Skipping (already done: marker found)")
+            return
+        if required_files and all((work_dir / f).exists() for f in required_files):
+            print(f"  [{label}] Skipping (already done: required files found)")
+            return
 
     print(f"  [{label}] Running {command} -in {input_file} ...")
     cmd = f"{command} -in {input_file}"
@@ -269,11 +264,23 @@ def _run_step(
             f.write("\n--- STDERR ---\n")
             f.write(result.stderr)
 
-    if "JOB DONE" not in result.stdout:
-        print(f"  ERROR: {input_file} did not complete successfully!")
+    if result.returncode != 0:
+        print(f"  ERROR: {input_file} exited with return code {result.returncode}")
         if result.stderr:
-            print(f"  stderr (last 500 chars): {result.stderr[-500:]}")
-        raise RuntimeError(f"Step '{label}' failed: {input_file}")
+            print(f"  stderr (last 1000 chars): {result.stderr[-1000:]}")
+        raise RuntimeError(
+            f"Step '{label}' failed with return code {result.returncode}: {input_file}"
+        )
+
+    missing = [fname for fname in required_files if not (work_dir / fname).exists()]
+    if missing:
+        raise RuntimeError(
+            f"Step '{label}' finished with return code 0 but missing expected files: "
+            f"{', '.join(missing)}"
+        )
+
+    if success_markers and not any(marker in result.stdout for marker in success_markers):
+        print(f"  [{label}] Completed (no success marker found, but return code was 0)")
 
     for line in result.stdout.split("\n"):
         if "WALL" in line:
