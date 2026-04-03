@@ -641,26 +641,20 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
     if not d3dir.exists():
         raise FileNotFoundError(f"d3_save directory not found: {d3dir}")
 
-    # D3Q stores one directory per triplet, each containing dfpt_fc.xml
     xml_files = sorted(d3dir.glob("D3_*/dfpt_fc.xml"))
     if not xml_files:
-        raise FileNotFoundError(
-            f"No D3_*/dfpt_fc.xml files found under {d3dir}"
-        )
+        raise FileNotFoundError(f"No D3_*/dfpt_fc.xml files found under {d3dir}")
 
-    # Feed paths relative to work_dir, since cwd=work_dir below
-    file_list = "\n".join(str(p.relative_to(work_dir)) for p in xml_files) + "\n"
+    # Important: these paths are relative to work_dir, because cwd=work_dir below
+    stdin_list = "\n".join(str(p.relative_to(work_dir)) for p in xml_files) + "\n"
 
-    cmd = (
-        f"{dfpt_config.d3_qq2rr_command} "
-        f"{nq1} {nq2} {nq3} -o mat3R"
-    )
+    cmd = f"{dfpt_config.d3_qq2rr_command} {nq1} {nq2} {nq3} -o mat3R"
 
     print(f"  [qq2rr] Running with {len(xml_files)} XML files ...")
     result = subprocess.run(
         cmd,
         shell=True,
-        input=file_list,
+        input=stdin_list,
         capture_output=True,
         text=True,
         cwd=str(work_dir),
@@ -676,9 +670,7 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
     if result.returncode != 0:
         if result.stderr:
             print(f"  stderr (last 1000 chars): {result.stderr[-1000:]}")
-        raise RuntimeError(
-            f"Step 'qq2rr' failed with return code {result.returncode}"
-        )
+        raise RuntimeError(f"Step 'qq2rr' failed with return code {result.returncode}")
 
     if not mat3r.exists():
         raise RuntimeError("qq2rr finished but mat3R was not created.")
