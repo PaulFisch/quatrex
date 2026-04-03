@@ -142,29 +142,6 @@ def _write_d3q_input(
         f.write("/\n")
         f.write(f"  {nq1}  {nq2}  {nq3}\n")
 
-
-def _write_qq2rr_input(path: Path, dfpt_config: DFPTConfig) -> None:
-    """Write d3_qq2rr.x input for FC3 Fourier transform.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    dfpt_config : DFPTConfig
-        DFPT configuration (for q_mesh).
-    """
-    nq1, nq2, nq3 = dfpt_config.q_mesh
-    with open(path, "w") as f:
-        f.write("&input\n")
-        f.write("   fild3dyn = 'd3dyn'\n")
-        f.write("   d3dir    = './d3_save'\n")
-        f.write(f"   nq1      = {nq1}\n")
-        f.write(f"   nq2      = {nq2}\n")
-        f.write(f"   nq3      = {nq3}\n")
-        f.write("   fild3    = 'mat3R'\n")
-        f.write("/\n")
-
-
 def _write_d3_asr_input(path: Path, dfpt_config: DFPTConfig) -> None:
     """Write d3_asr.x input for acoustic sum rule enforcement on FC3.
 
@@ -584,9 +561,6 @@ def sow(
     _write_d3q_input(work_dir / "d3q.in", dfpt_config)
     print(f"  Wrote d3q.in (mode={D3_MODE}, q-mesh: {dfpt_config.q_mesh})")
 
-    _write_qq2rr_input(work_dir / "qq2rr.in", dfpt_config)
-    print("  Wrote qq2rr.in")
-
     _write_d3_asr_input(work_dir / "d3_asr.in", dfpt_config)
     print(f"  Wrote d3_asr.in (asr={dfpt_config.asr})")
 
@@ -650,17 +624,65 @@ def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
 
 
 def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run d3_qq2rr.x to Fourier-transform FC3 to real space."""
-    _run_step(
-        work_dir,
-        dfpt_config.d3_qq2rr_command,
-        "qq2rr.in",
-        "qq2rr.out",
-        600,
-        label="qq2rr",
-        required_files=("mat3R",),
-        input_mode="stdin",
+    """Run d3_qq2rr.x to Fourier-transform FC3 to real space.
+
+    d3_qq2rr.x does NOT read a QE-style namelist input file.
+    It expects:
+      - q-grid dimensions as command-line arguments
+      - the list of D3 XML files on stdin
+    """
+    work_dir = Path(work_dir)
+    nq1, nq2, nq3 = dfpt_config.q_mesh
+    out = work_dir / "qq2rr.out"
+    d3dir = work_dir / "d3_save"
+    mat3r = work_dir / "mat3R"
+
+    if not d3dir.exists():
+        raise FileNotFoundError(f"d3_save directory not found: {d3dir}")
+
+    # Collect d3dyn files produced by d3q.x
+    d3_files = sorted(p for p in d3dir.iterdir() if p.name.startswith("d3dyn"))
+    if not d3_files:
+        raise FileNotFoundError(f"No d3dyn* files found in {d3dir}")
+
+    file_list = "\n".join(p.name for p in d3_files) + "\n"
+
+    cmd = (
+        f"{dfpt_config.d3_qq2rr_command} "
+        f"{nq1} {nq2} {nq3} -o mat3R"
     )
+
+    print(f"  [qq2rr] Running with {len(d3_files)} d3dyn files ...")
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        input=file_list,
+        capture_output=True,
+        text=True,
+        cwd=str(d3dir),   # important: stdin file names are relative to d3_save
+        timeout=600,
+    )
+
+    with open(out, "w") as f:
+        f.write(result.stdout)
+        if result.stderr:
+            f.write("\n--- STDERR ---\n")
+            f.write(result.stderr)
+
+    if result.returncode != 0:
+        if result.stderr:
+            print(f"  stderr (last 1000 chars): {result.stderr[-1000:]}")
+        raise RuntimeError(
+            f"Step 'qq2rr' failed with return code {result.returncode}"
+        )
+
+    # d3_qq2rr.x was run inside d3_save, so mat3R may be there
+    generated = d3dir / "mat3R"
+    if generated.exists() and not mat3r.exists():
+        generated.replace(mat3r)
+
+    if not mat3r.exists():
+        raise RuntimeError("qq2rr finished but mat3R was not created.")
 
 
 def run_d3_asr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
