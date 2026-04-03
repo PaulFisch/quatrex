@@ -49,6 +49,10 @@ dfpt:
   q2r_command: "q2r.x"
   d3q_command: "mpirun -np 4 d3q.x"
   d3_qq2rr_command: "d3_qq2rr.x"
+  d3_asr_command: "d3_asr.x"
+  d3_sparse_command: "d3_sparse.x"
+  asr: simple                      # acoustic sum rule: "simple", "crystal", or "no"
+  sparse_thr: 1.0e-5               # FC3 sparsification threshold (Ry/bohr^3); null to skip
   work_dir: ./dfpt
   ph_timeout: 7200                 # seconds
   d3q_timeout: 14400               # seconds (per triplet)
