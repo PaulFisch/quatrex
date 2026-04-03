@@ -116,29 +116,18 @@ def _write_d3q_input(
         dfpt_config: DFPTConfig,
         prefix: str = DFPT_PREFIX,
 ) -> None:
-    """Write d3q.x input for a full-grid FC3 calculation.
-
-    For mode='full', d3q.x expects the q-grid dimensions after the namelist.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    dfpt_config : DFPTConfig
-        DFPT configuration.
-    prefix : str
-        QE prefix (must match pw.x and ph.x).
-    """
     nq1, nq2, nq3 = dfpt_config.q_mesh
     with open(path, "w") as f:
         f.write("&inputd3q\n")
-        f.write(f"   mode        = '{D3_MODE}'\n")
+        f.write("   mode        = 'full'\n")
         f.write(f"   prefix      = '{prefix}'\n")
         f.write("   outdir      = './results'\n")
-        f.write("   d3dir       = './d3_save'\n")
-        f.write(f"   fildrho     = '{DRHO_EXT}'\n")
-        f.write(f"   fildrho_dir = './{DRHO_DIRNAME}'\n")
-        f.write("   fild3dyn    = 'd3dyn'\n")
+        f.write("   d3dir       = './d3_tmp'\n")
+        f.write("   fildrho     = 'drho'\n")
+        f.write("   fildrho_dir = './FILDRHO'\n")
+        f.write("   fild3dyn    = './d3_save/d3dyn'\n")
+        f.write("   restart     = .false.\n")
+        f.write("   safe_io     = .false.\n")
         f.write("/\n")
         f.write(f"  {nq1}  {nq2}  {nq3}\n")
 
@@ -626,31 +615,19 @@ def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
 
 
 def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run d3_qq2rr.x to Fourier-transform FC3 to real space.
-
-    d3_qq2rr.x expects:
-      - nq1 nq2 nq3 as command-line arguments
-      - a list of XML files produced by d3q.x on stdin
-    """
     work_dir = Path(work_dir).resolve()
     nq1, nq2, nq3 = dfpt_config.q_mesh
     out = work_dir / "qq2rr.out"
-    d3dir = work_dir / "d3_save"
     mat3r = work_dir / "mat3R"
 
-    if not d3dir.exists():
-        raise FileNotFoundError(f"d3_save directory not found: {d3dir}")
+    d3_files = sorted((work_dir / "d3_save").glob("d3dyn_Q*"))
+    if not d3_files:
+        raise FileNotFoundError("No d3dyn_Q* files found in d3_save")
 
-    xml_files = sorted(d3dir.glob("D3_*/dfpt_fc.xml"))
-    if not xml_files:
-        raise FileNotFoundError(f"No D3_*/dfpt_fc.xml files found under {d3dir}")
+    stdin_list = "\n".join(str(p.relative_to(work_dir)) for p in d3_files) + "\n"
+    cmd = f"{dfpt_config.d3_qq2rr_command} {nq1} {nq2} {nq3} -o mat3R"
 
-    # Use absolute paths to avoid any cwd/path-resolution ambiguity
-    stdin_list = "\n".join(str(p.resolve()) for p in xml_files) + "\n"
-
-    cmd = f"{dfpt_config.d3_qq2rr_command} {nq1} {nq2} {nq3} -o {mat3r.name}"
-
-    print(f"  [qq2rr] Running with {len(xml_files)} XML files ...")
+    print(f"  [qq2rr] Running with {len(d3_files)} D3 files ...")
     result = subprocess.run(
         cmd,
         shell=True,
