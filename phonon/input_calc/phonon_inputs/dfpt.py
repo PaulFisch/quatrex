@@ -43,8 +43,8 @@ from .config import DFPTConfig, QEConfig
 # ---------------------------------------------------------------------------
 BOHR_TO_ANG = 0.52917721067
 RY_TO_EV = 13.605693009
-RY_BOHR2_TO_EV_ANG2 = RY_TO_EV / BOHR_TO_ANG**2
-RY_BOHR3_TO_EV_ANG3 = RY_TO_EV / BOHR_TO_ANG**3
+RY_BOHR2_TO_EV_ANG2 = RY_TO_EV / BOHR_TO_ANG ** 2
+RY_BOHR3_TO_EV_ANG3 = RY_TO_EV / BOHR_TO_ANG ** 3
 
 DFPT_PREFIX = "dfpt_fc"
 DRHO_EXT = "drho"
@@ -58,9 +58,9 @@ D3_MODE = "full"
 
 
 def _write_ph_input(
-    path: Path,
-    dfpt_config: DFPTConfig,
-    prefix: str = DFPT_PREFIX,
+        path: Path,
+        dfpt_config: DFPTConfig,
+        prefix: str = DFPT_PREFIX,
 ) -> None:
     """Write ph.x input for DFPT phonon calculation on a q-grid.
 
@@ -112,9 +112,9 @@ def _write_q2r_input(path: Path) -> None:
 
 
 def _write_d3q_input(
-    path: Path,
-    dfpt_config: DFPTConfig,
-    prefix: str = DFPT_PREFIX,
+        path: Path,
+        dfpt_config: DFPTConfig,
+        prefix: str = DFPT_PREFIX,
 ) -> None:
     """Write d3q.x input for a full-grid FC3 calculation.
 
@@ -141,6 +141,7 @@ def _write_d3q_input(
         f.write("   fild3dyn    = 'd3dyn'\n")
         f.write("/\n")
         f.write(f"  {nq1}  {nq2}  {nq3}\n")
+
 
 def _write_d3_asr_input(path: Path, dfpt_config: DFPTConfig) -> None:
     """Write d3_asr.x input for acoustic sum rule enforcement on FC3.
@@ -189,15 +190,15 @@ def _write_d3_sparse_input(path: Path, dfpt_config: DFPTConfig) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_step(
-    work_dir: Path,
-    command: str,
-    input_file: str,
-    output_file: str,
-    timeout: int,
-    label: str = "",
-    skip_existing: bool = True,
-    required_files: tuple[str, ...] = (),
-    input_mode: str = "flag",  # "flag" or "stdin"
+        work_dir: Path,
+        command: str,
+        input_file: str,
+        output_file: str,
+        timeout: int,
+        label: str = "",
+        skip_existing: bool = True,
+        required_files: tuple[str, ...] = (),
+        input_mode: str = "flag",  # "flag" or "stdin"
 ) -> None:
     """Run a QE/D3Q calculation step."""
 
@@ -255,15 +256,16 @@ def _run_step(
             print(f"    {line.strip()}")
             break
 
+
 # ---------------------------------------------------------------------------
 # Output parsers
 # ---------------------------------------------------------------------------
 
 
 def _parse_q2r_fc2(
-    flfrc_path: Path,
-    nat: int,
-    q_mesh: list[int],
+        flfrc_path: Path,
+        nat: int,
+        q_mesh: list[int],
 ) -> tuple[np.ndarray, dict]:
     """Parse q2r.x force constant file (flfrc format).
 
@@ -387,9 +389,9 @@ def _parse_q2r_fc2(
 
 
 def _parse_mat3r_fc3(
-    mat3r_path: Path,
-    nat: int,
-    q_mesh: list[int],
+        mat3r_path: Path,
+        nat: int,
+        q_mesh: list[int],
 ) -> np.ndarray:
     """Parse d3_qq2rr.x mat3R output into dense FC3 array.
 
@@ -437,7 +439,7 @@ def _parse_mat3r_fc3(
         if nat_file != nat:
             raise ValueError(f"nat mismatch: config={nat}, file={nat_file}")
 
-        n_entries_per_block = nat**3 * 27
+        n_entries_per_block = nat ** 3 * 27
 
         n_blocks = 0
         while True:
@@ -498,10 +500,10 @@ def _parse_mat3r_fc3(
 
 
 def sow(
-    cell: PhonopyAtoms,
-    work_dir: Path,
-    qe_config: QEConfig,
-    dfpt_config: DFPTConfig,
+        cell: PhonopyAtoms,
+        work_dir: Path,
+        qe_config: QEConfig,
+        dfpt_config: DFPTConfig,
 ) -> int:
     """Generate all DFPT input files.
 
@@ -626,10 +628,9 @@ def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
 def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
     """Run d3_qq2rr.x to Fourier-transform FC3 to real space.
 
-    d3_qq2rr.x does NOT read a QE-style namelist input file.
-    It expects:
-      - q-grid dimensions as command-line arguments
-      - the list of D3 XML files on stdin
+    d3_qq2rr.x expects:
+      - nq1 nq2 nq3 as command-line arguments
+      - a list of XML files produced by d3q.x on stdin
     """
     work_dir = Path(work_dir)
     nq1, nq2, nq3 = dfpt_config.q_mesh
@@ -640,26 +641,29 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
     if not d3dir.exists():
         raise FileNotFoundError(f"d3_save directory not found: {d3dir}")
 
-    # Collect d3dyn files produced by d3q.x
-    d3_files = sorted(p for p in d3dir.iterdir() if p.name.startswith("d3dyn"))
-    if not d3_files:
-        raise FileNotFoundError(f"No d3dyn* files found in {d3dir}")
+    # D3Q stores one directory per triplet, each containing dfpt_fc.xml
+    xml_files = sorted(d3dir.glob("D3_*/dfpt_fc.xml"))
+    if not xml_files:
+        raise FileNotFoundError(
+            f"No D3_*/dfpt_fc.xml files found under {d3dir}"
+        )
 
-    file_list = "\n".join(p.name for p in d3_files) + "\n"
+    # Feed paths relative to work_dir, since cwd=work_dir below
+    file_list = "\n".join(str(p.relative_to(work_dir)) for p in xml_files) + "\n"
 
     cmd = (
         f"{dfpt_config.d3_qq2rr_command} "
         f"{nq1} {nq2} {nq3} -o mat3R"
     )
 
-    print(f"  [qq2rr] Running with {len(d3_files)} d3dyn files ...")
+    print(f"  [qq2rr] Running with {len(xml_files)} XML files ...")
     result = subprocess.run(
         cmd,
         shell=True,
         input=file_list,
         capture_output=True,
         text=True,
-        cwd=str(d3dir),   # important: stdin file names are relative to d3_save
+        cwd=str(work_dir),
         timeout=600,
     )
 
@@ -675,11 +679,6 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         raise RuntimeError(
             f"Step 'qq2rr' failed with return code {result.returncode}"
         )
-
-    # d3_qq2rr.x was run inside d3_save, so mat3R may be there
-    generated = d3dir / "mat3R"
-    if generated.exists() and not mat3r.exists():
-        generated.replace(mat3r)
 
     if not mat3r.exists():
         raise RuntimeError("qq2rr finished but mat3R was not created.")
@@ -708,10 +707,11 @@ def run_d3_sparse(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         input_mode="stdin",
     )
 
+
 def run_all(
-    work_dir: Path,
-    qe_config: QEConfig,
-    dfpt_config: DFPTConfig,
+        work_dir: Path,
+        qe_config: QEConfig,
+        dfpt_config: DFPTConfig,
 ) -> None:
     """Execute the full DFPT workflow.
 
@@ -754,9 +754,9 @@ def run_all(
 
 
 def reap(
-    work_dir: Path,
-    cell: PhonopyAtoms,
-    q_mesh: list[int],
+        work_dir: Path,
+        cell: PhonopyAtoms,
+        q_mesh: list[int],
 ) -> Path:
     """Parse DFPT outputs and produce fc3.hdf5.
 
@@ -808,10 +808,10 @@ def reap(
 
 
 def generate_fc_dfpt(
-    cell: PhonopyAtoms,
-    work_dir: Path,
-    qe_config: QEConfig,
-    dfpt_config: DFPTConfig,
+        cell: PhonopyAtoms,
+        work_dir: Path,
+        qe_config: QEConfig,
+        dfpt_config: DFPTConfig,
 ) -> Path:
     """Full DFPT pipeline: sow + run + reap.
 
