@@ -616,7 +616,7 @@ def run_ph(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "ph.out",
         dfpt_config.ph_timeout,
         label="ph.x",
-        required_files=("results/_ph0/dfpt_fc.phsave/tensors.xml",),
+        required_files=("results/_ph0/dfpt_fc.phsave/dynmat.1.0.xml",),
     )
 
 
