@@ -211,7 +211,6 @@ def _write_d3_sparse_input(path: Path, dfpt_config: DFPTConfig) -> None:
 # Step runner
 # ---------------------------------------------------------------------------
 
-
 def _run_step(
     work_dir: Path,
     command: str,
@@ -220,35 +219,31 @@ def _run_step(
     timeout: int,
     label: str = "",
     skip_existing: bool = True,
-    success_markers: tuple[str, ...] = ("JOB DONE",),
     required_files: tuple[str, ...] = (),
+    input_mode: str = "flag",  # "flag" or "stdin"
 ) -> None:
-    """Run a QE/D3Q calculation step.
+    """Run a QE/D3Q calculation step."""
 
-    A step is considered successful if:
-      1. the process exits with return code 0, and
-      2. all required_files exist (if any are specified).
-
-    success_markers are only used for logging and skip detection, not as the
-    sole criterion for success.
-    """
     inp = work_dir / input_file
     out = work_dir / output_file
 
     if not inp.exists():
         raise FileNotFoundError(f"Input file not found: {inp}")
 
-    if skip_existing and out.exists():
-        text = out.read_text(errors="replace")
-        if any(marker in text for marker in success_markers):
-            print(f"  [{label}] Skipping (already done: marker found)")
-            return
-        if required_files and all((work_dir / f).exists() for f in required_files):
-            print(f"  [{label}] Skipping (already done: required files found)")
+    if skip_existing and out.exists() and required_files:
+        if all((work_dir / f).exists() for f in required_files):
+            print(f"  [{label}] Skipping (required files already exist)")
             return
 
-    print(f"  [{label}] Running {command} -in {input_file} ...")
-    cmd = f"{command} -in {input_file}"
+    if input_mode == "flag":
+        cmd = f"{command} -in {input_file}"
+    elif input_mode == "stdin":
+        cmd = f"{command} < {input_file}"
+    else:
+        raise ValueError(f"Unknown input_mode: {input_mode}")
+
+    print(f"  [{label}] Running {cmd} ...")
+
     result = subprocess.run(
         cmd,
         shell=True,
@@ -275,18 +270,13 @@ def _run_step(
     missing = [fname for fname in required_files if not (work_dir / fname).exists()]
     if missing:
         raise RuntimeError(
-            f"Step '{label}' finished with return code 0 but missing expected files: "
-            f"{', '.join(missing)}"
+            f"Step '{label}' finished but missing expected files: {', '.join(missing)}"
         )
-
-    if success_markers and not any(marker in result.stdout for marker in success_markers):
-        print(f"  [{label}] Completed (no success marker found, but return code was 0)")
 
     for line in result.stdout.split("\n"):
         if "WALL" in line:
             print(f"    {line.strip()}")
             break
-
 
 # ---------------------------------------------------------------------------
 # Output parsers
@@ -608,7 +598,6 @@ def sow(
 
 
 def run_scf(work_dir: Path, qe_config: QEConfig, timeout: int = 3600) -> None:
-    """Run pw.x SCF step."""
     _run_step(
         work_dir,
         qe_config.pw_command,
@@ -620,7 +609,6 @@ def run_scf(work_dir: Path, qe_config: QEConfig, timeout: int = 3600) -> None:
 
 
 def run_ph(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run ph.x DFPT phonon calculation."""
     _run_step(
         work_dir,
         dfpt_config.ph_command,
@@ -628,6 +616,7 @@ def run_ph(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "ph.out",
         dfpt_config.ph_timeout,
         label="ph.x",
+        required_files=("results/_ph0/dfpt_fc.phsave/tensors.xml",),
     )
 
 
@@ -640,11 +629,12 @@ def run_q2r(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "q2r.out",
         300,
         label="q2r",
+        required_files=("fc2.dat",),
+        input_mode="stdin",
     )
 
 
 def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run d3q.x once in full-grid mode."""
     _run_step(
         work_dir,
         dfpt_config.d3q_command,
@@ -653,6 +643,10 @@ def run_d3q(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         dfpt_config.d3q_timeout,
         label="d3q",
     )
+
+    d3dir = work_dir / "d3_save"
+    if not d3dir.exists() or not any(d3dir.iterdir()):
+        raise RuntimeError("d3q completed with return code 0, but d3_save is empty.")
 
 
 def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
@@ -664,11 +658,12 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "qq2rr.out",
         600,
         label="qq2rr",
+        required_files=("mat3R",),
+        input_mode="stdin",
     )
 
 
 def run_d3_asr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run d3_asr.x to enforce acoustic sum rule on FC3."""
     _run_step(
         work_dir,
         dfpt_config.d3_asr_command,
@@ -676,11 +671,11 @@ def run_d3_asr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "d3_asr.out",
         600,
         label="d3_asr",
+        input_mode="stdin",
     )
 
 
 def run_d3_sparse(work_dir: Path, dfpt_config: DFPTConfig) -> None:
-    """Run d3_sparse.x to sparsify FC3."""
     _run_step(
         work_dir,
         dfpt_config.d3_sparse_command,
@@ -688,8 +683,8 @@ def run_d3_sparse(work_dir: Path, dfpt_config: DFPTConfig) -> None:
         "d3_sparse.out",
         600,
         label="d3_sparse",
+        input_mode="stdin",
     )
-
 
 def run_all(
     work_dir: Path,
