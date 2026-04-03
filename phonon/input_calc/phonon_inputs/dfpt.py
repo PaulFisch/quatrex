@@ -632,7 +632,7 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
       - nq1 nq2 nq3 as command-line arguments
       - a list of XML files produced by d3q.x on stdin
     """
-    work_dir = Path(work_dir)
+    work_dir = Path(work_dir).resolve()
     nq1, nq2, nq3 = dfpt_config.q_mesh
     out = work_dir / "qq2rr.out"
     d3dir = work_dir / "d3_save"
@@ -645,10 +645,10 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
     if not xml_files:
         raise FileNotFoundError(f"No D3_*/dfpt_fc.xml files found under {d3dir}")
 
-    # Important: these paths are relative to work_dir, because cwd=work_dir below
-    stdin_list = "\n".join(str(p.relative_to(work_dir)) for p in xml_files) + "\n"
+    # Use absolute paths to avoid any cwd/path-resolution ambiguity
+    stdin_list = "\n".join(str(p.resolve()) for p in xml_files) + "\n"
 
-    cmd = f"{dfpt_config.d3_qq2rr_command} {nq1} {nq2} {nq3} -o mat3R"
+    cmd = f"{dfpt_config.d3_qq2rr_command} {nq1} {nq2} {nq3} -o {mat3r.name}"
 
     print(f"  [qq2rr] Running with {len(xml_files)} XML files ...")
     result = subprocess.run(
@@ -668,6 +668,7 @@ def run_qq2rr(work_dir: Path, dfpt_config: DFPTConfig) -> None:
             f.write(result.stderr)
 
     if result.returncode != 0:
+        print(result.stdout[-2000:])
         if result.stderr:
             print(f"  stderr (last 1000 chars): {result.stderr[-1000:]}")
         raise RuntimeError(f"Step 'qq2rr' failed with return code {result.returncode}")
