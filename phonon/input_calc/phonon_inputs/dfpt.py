@@ -206,11 +206,10 @@ def _run_step(
 # Output parsers
 # ---------------------------------------------------------------------------
 
-
 def _parse_q2r_fc2(
-        flfrc_path: Path,
-        nat: int,
-        q_mesh: list[int],
+    flfrc_path: Path,
+    nat: int,
+    q_mesh: list[int],
 ) -> tuple[np.ndarray, dict]:
     """Parse q2r.x force constant file (flfrc format)."""
     n1, n2, n3 = q_mesh
@@ -222,49 +221,89 @@ def _parse_q2r_fc2(
 
     idx = 0
 
+    # Line 1: ntyp nat ibrav celldm(1:6)
     parts = lines[idx].split()
     ntyp = int(parts[0])
     nat_file = int(parts[1])
     if nat_file != nat:
         raise ValueError(f"nat mismatch: config={nat}, file={nat_file}")
+    ibrav = int(parts[2])
     idx += 1
 
     masses = {}
-    for _ in range(ntyp):
-        parts = lines[idx].split()
-        type_idx = int(parts[0])
-        symbol = parts[1].strip("'\"")
-        mass = float(parts[2])
-        masses[type_idx] = (symbol, mass)
-        idx += 1
 
-    ibrav = int(lines[0].split()[2])
+    def _is_three_floats(tokens: list[str]) -> bool:
+        if len(tokens) < 3:
+            return False
+        try:
+            float(tokens[0])
+            float(tokens[1])
+            float(tokens[2])
+            return True
+        except ValueError:
+            return False
+
+    # Some q2r/flfrc files contain type/mass lines here, others go directly
+    # to CELL vectors when ibrav == 0.
+    if not (ibrav == 0 and _is_three_floats(lines[idx].split())):
+        for it in range(1, ntyp + 1):
+            parts = lines[idx].split()
+            if len(parts) < 3:
+                raise ValueError(f"Malformed type line in {flfrc_path}: {lines[idx].rstrip()}")
+
+            # Expected format: ityp symbol mass
+            try:
+                type_idx = int(parts[0])
+                symbol = parts[1].strip("'\"")
+                mass = float(parts[2])
+            except ValueError as exc:
+                raise ValueError(
+                    f"Could not parse type/mass line in {flfrc_path}: {lines[idx].rstrip()}"
+                ) from exc
+
+            masses[type_idx] = (symbol, mass)
+            idx += 1
+
+    # Cell vectors if ibrav == 0
+    cell_bohr = None
     if ibrav == 0:
-        idx += 1
         cell_bohr = np.zeros((3, 3))
         for i in range(3):
-            cell_bohr[i] = [float(x) for x in lines[idx].split()]
+            parts = lines[idx].split()
+            if len(parts) < 3:
+                raise ValueError(f"Malformed cell line in {flfrc_path}: {lines[idx].rstrip()}")
+            cell_bohr[i] = [float(x) for x in parts[:3]]
             idx += 1
-        _ = cell_bohr
 
+    # Atom lines. In the files you are producing, these are typically:
+    #   x y z ityp
     atom_types = []
+    atom_positions = []
     for _ in range(nat):
         parts = lines[idx].split()
-        atom_types.append(int(parts[1]))
+        if len(parts) < 4:
+            raise ValueError(f"Malformed atom line in {flfrc_path}: {lines[idx].rstrip()}")
+        x, y, z = map(float, parts[:3])
+        ityp = int(parts[3])
+        atom_positions.append((x, y, z))
+        atom_types.append(ityp)
         idx += 1
-    _ = atom_types
 
+    # has_zstar
     has_zstar = "T" in lines[idx].upper()
     idx += 1
 
     if has_zstar:
+        # epsilon (3x3)
         for _ in range(3):
             idx += 1
+        # Z* for each atom (3x3 each)
         for _ in range(nat):
             idx += 1
             for _ in range(3):
                 idx += 1
 
+    # nr1 nr2 nr3
     parts = lines[idx].split()
     nr1, nr2, nr3 = int(parts[0]), int(parts[1]), int(parts[2])
     idx += 1
@@ -309,7 +348,14 @@ def _parse_q2r_fc2(
 
                     fc2[i_t, j_t] = tensor * RY_BOHR2_TO_EV_ANG2
 
-    info = {"ntyp": ntyp, "masses": masses, "nr": (nr1, nr2, nr3)}
+    info = {
+        "ntyp": ntyp,
+        "masses": masses,
+        "nr": (nr1, nr2, nr3),
+        "atom_types": atom_types,
+        "atom_positions": atom_positions,
+        "cell_bohr": cell_bohr,
+    }
     return fc2, info
 
 
