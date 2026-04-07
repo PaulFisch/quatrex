@@ -349,13 +349,28 @@ def _parse_q2r_fc2(
     }
     return fc2, info
 
-
 def _parse_mat3r_fc3(
-        mat3r_path: Path,
-        nat: int,
-        q_mesh: list[int],
+    mat3r_path: Path,
+    nat: int,
+    q_mesh: list[int],
 ) -> np.ndarray:
-    """Parse d3_qq2rr.x mat3R output into dense FC3 array."""
+    """Parse Thermal2/D3Q mat3R.asr full-grid FC3 output.
+
+    Expected format:
+      line 1: ntyp nat ibrav celldm(1:6)
+      next 3 lines if ibrav=0: cell vectors
+      next ntyp lines: type_idx symbol mass
+      next nat lines: atom_idx type_idx x y z
+      next line: T/F for zstar
+      next line: nq1 nq2 nq3
+      then repeated blocks:
+          k1 k2 k3 a1 a2 a3
+          n_entries
+          R1x R1y R1z R2x R2y R2z value   (repeated n_entries times)
+
+    Returns compact phono3py-style FC3:
+      (nat, n_super, n_super, 3, 3, 3)
+    """
     n1, n2, n3 = q_mesh
     n_images = n1 * n2 * n3
     n_super = n_images * nat
@@ -363,72 +378,115 @@ def _parse_mat3r_fc3(
     fc3 = np.zeros((nat, n_super, n_super, 3, 3, 3))
 
     with open(mat3r_path) as f:
-        header = f.readline().split()
-        nq1_file, nq2_file, nq3_file = int(header[0]), int(header[1]), int(header[2])
-        if [nq1_file, nq2_file, nq3_file] != q_mesh:
+        lines = f.readlines()
+
+    idx = 0
+
+    # Header line
+    parts = lines[idx].split()
+    ntyp = int(parts[0])
+    nat_file = int(parts[1])
+    if nat_file != nat:
+        raise ValueError(f"nat mismatch: config={nat}, file={nat_file}")
+    ibrav = int(parts[2])
+    idx += 1
+
+    # Cell vectors
+    if ibrav == 0:
+        for _ in range(3):
+            idx += 1
+
+    # Type lines, e.g. "1 'Si' 25598..."
+    for _ in range(ntyp):
+        idx += 1
+
+    # Atom lines, e.g. "1 1 x y z"
+    for _ in range(nat):
+        idx += 1
+
+    # has_zstar line
+    has_zstar = lines[idx].split()[0].upper().startswith("T")
+    idx += 1
+
+    if has_zstar:
+        # dielectric tensor
+        for _ in range(3):
+            idx += 1
+        # Born charges
+        for _ in range(nat):
+            idx += 1
+            for _ in range(3):
+                idx += 1
+
+    # Grid line
+    parts = lines[idx].split()
+    nq1_file, nq2_file, nq3_file = int(parts[0]), int(parts[1]), int(parts[2])
+    if [nq1_file, nq2_file, nq3_file] != q_mesh:
+        raise ValueError(
+            f"q_mesh mismatch: config={q_mesh}, file={[nq1_file, nq2_file, nq3_file]}"
+        )
+    idx += 1
+
+    n_blocks = 0
+
+    while idx < len(lines):
+        line = lines[idx].strip()
+        if not line:
+            idx += 1
+            continue
+
+        parts = line.split()
+
+        # Expect block header: k1 k2 k3 a1 a2 a3
+        if len(parts) != 6:
             raise ValueError(
-                f"q_mesh mismatch: config={q_mesh}, "
-                f"file=[{nq1_file},{nq2_file},{nq3_file}]"
+                f"Malformed FC3 block header in {mat3r_path}: {lines[idx].rstrip()}"
             )
 
-        nat_file = int(f.readline().split()[0])
-        if nat_file != nat:
-            raise ValueError(f"nat mismatch: config={nat}, file={nat_file}")
+        k1, k2, k3, a1, a2, a3 = map(int, parts)
+        k1 -= 1
+        k2 -= 1
+        k3 -= 1
+        a1 -= 1
+        a2 -= 1
+        a3 -= 1
+        idx += 1
 
-        n_entries_per_block = nat ** 3 * 27
+        # Number of entries in this block
+        n_entries = int(lines[idx].split()[0])
+        idx += 1
 
-        n_blocks = 0
-        while True:
-            line = f.readline()
-            if not line:
-                break
-            line = line.strip()
-            if not line:
-                continue
-
-            parts = line.split()
+        for _ in range(n_entries):
+            parts = lines[idx].split()
             if len(parts) < 7:
-                continue
+                raise ValueError(
+                    f"Malformed FC3 entry in {mat3r_path}: {lines[idx].rstrip()}"
+                )
 
-            r1 = np.array([int(parts[0]), int(parts[1]), int(parts[2])])
-            r2 = np.array([int(parts[3]), int(parts[4]), int(parts[5])])
+            r1x, r1y, r1z, r2x, r2y, r2z = map(int, parts[:6])
+            val = float(parts[6])
+            idx += 1
 
-            for _ in range(n_entries_per_block):
-                parts = f.readline().split()
-                if not parts:
-                    raise ValueError("Unexpected end of mat3R block while reading FC3 data.")
+            # Map lattice vectors to supercell image indices
+            l1_j = r1x % n1
+            l2_j = r1y % n2
+            l3_j = r1z % n3
+            lp_j = l1_j * n2 * n3 + l2_j * n3 + l3_j
+            j = lp_j * nat + k2
 
-                k1 = int(parts[0]) - 1
-                k2 = int(parts[1]) - 1
-                k3 = int(parts[2]) - 1
-                a1 = int(parts[3]) - 1
-                a2 = int(parts[4]) - 1
-                a3 = int(parts[5]) - 1
-                re_val = float(parts[6])
+            l1_k = r2x % n1
+            l2_k = r2y % n2
+            l3_k = r2z % n3
+            lp_k = l1_k * n2 * n3 + l2_k * n3 + l3_k
+            k = lp_k * nat + k3
 
-                if abs(re_val) < 1e-30:
-                    continue
+            fc3[k1, j, k, a1, a2, a3] = val * RY_BOHR3_TO_EV_ANG3
 
-                l1_j = r1[0] % n1
-                l2_j = r1[1] % n2
-                l3_j = r1[2] % n3
-                lp_j = l1_j * n2 * n3 + l2_j * n3 + l3_j
-                j = lp_j * nat + k2
+        n_blocks += 1
 
-                l1_k = r2[0] % n1
-                l2_k = r2[1] % n2
-                l3_k = r2[2] % n3
-                lp_k = l1_k * n2 * n3 + l2_k * n3 + l3_k
-                k = lp_k * nat + k3
-
-                fc3[k1, j, k, a1, a2, a3] = re_val * RY_BOHR3_TO_EV_ANG3
-
-            n_blocks += 1
-
-    print(f"  Parsed {n_blocks} (R1, R2) blocks from mat3R")
+    print(f"  Parsed {n_blocks} FC3 blocks from {mat3r_path.name}")
     print(f"  FC3 shape: {fc3.shape}, max: {np.max(np.abs(fc3)):.4e} eV/A^3")
     return fc3
-
 
 # ---------------------------------------------------------------------------
 # Pipeline functions
@@ -694,7 +752,6 @@ def reap(
     print(f"  FC2 shape: {fc2.shape}, max: {np.max(np.abs(fc2)):.4e} eV/A^2")
 
     candidate_files = [
-        work_dir / "mat3R.asr.sparse",
         work_dir / "mat3R.asr",
         work_dir / "mat3R",
     ]
