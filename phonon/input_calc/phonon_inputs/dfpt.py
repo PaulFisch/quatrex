@@ -656,9 +656,14 @@ def reap(
     fc2, _fc2_info = _parse_q2r_fc2(fc2_file, nat, q_mesh)
     print(f"  FC2 shape: {fc2.shape}, max: {np.max(np.abs(fc2)):.4e} eV/A^2")
 
-    mat3r_file = work_dir / "mat3R"
-    if not mat3r_file.exists():
-        raise FileNotFoundError(f"FC3 file not found: {mat3r_file}")
+    candidate_files = [
+        work_dir / "mat3R.asr.sparse",
+        work_dir / "mat3R.asr",
+        work_dir / "mat3R",
+    ]
+    mat3r_file = next((p for p in candidate_files if p.exists()), None)
+    if mat3r_file is None:
+        raise FileNotFoundError("No FC3 file found: expected mat3R, mat3R.asr, or mat3R.asr.sparse")
     print("Parsing FC3 from d3_qq2rr.x output...")
     fc3 = _parse_mat3r_fc3(mat3r_file, nat, q_mesh)
 
