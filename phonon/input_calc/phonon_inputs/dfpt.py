@@ -207,11 +207,11 @@ def _run_step(
 # ---------------------------------------------------------------------------
 
 def _parse_q2r_fc2(
-        flfrc_path: Path,
-        nat: int,
-        q_mesh: list[int],
+    flfrc_path: Path,
+    nat: int,
+    q_mesh: list[int],
 ) -> tuple[np.ndarray, dict]:
-    """Parse q2r.x force constant file (flfrc format)."""
+    """Parse q2r.x force constant file (flfrc format) for the layout produced here."""
     n1, n2, n3 = q_mesh
     n_images = n1 * n2 * n3
     n_super = n_images * nat
@@ -230,11 +230,8 @@ def _parse_q2r_fc2(
     ibrav = int(parts[2])
     idx += 1
 
-    # Type info
-    masses = {}
+    # For ibrav=0: next 3 lines are lattice vectors
     cell_bohr = None
-
-    # For ibrav=0, next 3 lines are the lattice vectors
     if ibrav == 0:
         cell_bohr = np.zeros((3, 3))
         for i in range(3):
@@ -242,17 +239,21 @@ def _parse_q2r_fc2(
             cell_bohr[i] = [float(x) for x in parts[:3]]
             idx += 1
 
-    # Then come ntyp type lines:
-    #   type_idx  'symbol'  mass
+    # Type lines, e.g.:
+    #   1  'Si    '  25598.367289828169
+    masses = {}
     for _ in range(ntyp):
-        parts = lines[idx].split()
-        type_idx = int(parts[0])
-        symbol = parts[1].strip("'\"")
-        mass = float(parts[2])
+        line = lines[idx].rstrip("\n")
+        # split once from left for type index, once from right for mass
+        left, mass_str = line.rsplit(maxsplit=1)
+        type_str, symbol_str = left.split(maxsplit=1)
+        type_idx = int(type_str)
+        symbol = symbol_str.strip().strip("'").strip()
+        mass = float(mass_str)
         masses[type_idx] = (symbol, mass)
         idx += 1
 
-    # Then nat atomic lines:
+    # Atom lines:
     #   atom_index  ityp  x  y  z
     atom_types = []
     atom_positions = []
@@ -268,8 +269,9 @@ def _parse_q2r_fc2(
         atom_positions.append((x, y, z))
         idx += 1
 
-    # has_zstar line, e.g. "F 0.000000..."
-    has_zstar = lines[idx].split()[0].upper().startswith("T")
+    # has_zstar line, e.g. "F   0.0000000000000000"
+    parts = lines[idx].split()
+    has_zstar = parts[0].upper().startswith("T")
     idx += 1
 
     if has_zstar:
@@ -287,27 +289,36 @@ def _parse_q2r_fc2(
     nr1, nr2, nr3 = int(parts[0]), int(parts[1]), int(parts[2])
     idx += 1
 
+    # Now FC blocks:
+    #   i_dir j_dir na nb
+    #   m1 m2 m3 fc_val   repeated nr1*nr2*nr3 times
     fc2_r = {}
 
-    for na in range(1, nat + 1):
-        for nb in range(1, nat + 1):
-            # header line: na nb ipol jpol? or similar block marker
-            idx += 1
-            for _alpha in range(1, 4):
-                for _beta in range(1, 4):
-                    parts = lines[idx].split()
-                    i_dir, j_dir = int(parts[0]), int(parts[1])
-                    idx += 1
-                    for _ in range(nr1 * nr2 * nr3):
-                        parts = lines[idx].split()
-                        m1, m2, m3 = int(parts[0]), int(parts[1]), int(parts[2])
-                        fc_val = float(parts[3])
-                        idx += 1
-                        key = (m1, m2, m3, na, nb)
-                        if key not in fc2_r:
-                            fc2_r[key] = np.zeros((3, 3))
-                        fc2_r[key][i_dir - 1, j_dir - 1] = fc_val
+    n_rpts = nr1 * nr2 * nr3
+    n_blocks = nat * nat * 9
 
+    for _ in range(n_blocks):
+        parts = lines[idx].split()
+        if len(parts) < 4:
+            raise ValueError(f"Malformed FC block header in {flfrc_path}: {lines[idx].rstrip()}")
+        i_dir, j_dir, na, nb = map(int, parts[:4])
+        idx += 1
+
+        key = (na, nb)
+        for _ in range(n_rpts):
+            parts = lines[idx].split()
+            if len(parts) < 4:
+                raise ValueError(f"Malformed FC entry in {flfrc_path}: {lines[idx].rstrip()}")
+            m1, m2, m3 = int(parts[0]), int(parts[1]), int(parts[2])
+            fc_val = float(parts[3])
+            idx += 1
+
+            rkey = (m1, m2, m3, na, nb)
+            if rkey not in fc2_r:
+                fc2_r[rkey] = np.zeros((3, 3))
+            fc2_r[rkey][i_dir - 1, j_dir - 1] = fc_val
+
+    # Convert to phono3py supercell format
     fc2 = np.zeros((n_super, n_super, 3, 3))
     for (m1, m2, m3, na, nb), tensor in fc2_r.items():
         l1 = (m1 - 1) % n1
