@@ -364,7 +364,7 @@ def _parse_mat3r_fc3(
       next line: T/F for zstar
       next line: nq1 nq2 nq3
       then repeated blocks:
-          k1 k2 k3 a1 a2 a3
+          a1 a2 a3 k1 k2 k3
           n_entries
           R1x R1y R1z R2x R2y R2z value   (repeated n_entries times)
 
@@ -396,11 +396,11 @@ def _parse_mat3r_fc3(
         for _ in range(3):
             idx += 1
 
-    # Type lines, e.g. "1 'Si' 25598..."
+    # Type lines
     for _ in range(ntyp):
         idx += 1
 
-    # Atom lines, e.g. "1 1 x y z"
+    # Atom lines
     for _ in range(nat):
         idx += 1
 
@@ -409,10 +409,8 @@ def _parse_mat3r_fc3(
     idx += 1
 
     if has_zstar:
-        # dielectric tensor
         for _ in range(3):
             idx += 1
-        # Born charges
         for _ in range(nat):
             idx += 1
             for _ in range(3):
@@ -436,23 +434,31 @@ def _parse_mat3r_fc3(
             continue
 
         parts = line.split()
-
-        # Expect block header: k1 k2 k3 a1 a2 a3
         if len(parts) != 6:
             raise ValueError(
                 f"Malformed FC3 block header in {mat3r_path}: {lines[idx].rstrip()}"
             )
 
-        k1, k2, k3, a1, a2, a3 = map(int, parts)
-        k1 -= 1
-        k2 -= 1
-        k3 -= 1
+        # IMPORTANT: header is directions first, atom indices second
+        a1, a2, a3, k1, k2, k3 = map(int, parts)
         a1 -= 1
         a2 -= 1
         a3 -= 1
+        k1 -= 1
+        k2 -= 1
+        k3 -= 1
+
+        if not (0 <= k1 < nat and 0 <= k2 < nat and 0 <= k3 < nat):
+            raise ValueError(
+                f"Atom indices out of range in FC3 block header: {lines[idx].rstrip()}"
+            )
+        if not (0 <= a1 < 3 and 0 <= a2 < 3 and 0 <= a3 < 3):
+            raise ValueError(
+                f"Cartesian indices out of range in FC3 block header: {lines[idx].rstrip()}"
+            )
+
         idx += 1
 
-        # Number of entries in this block
         n_entries = int(lines[idx].split()[0])
         idx += 1
 
@@ -467,7 +473,6 @@ def _parse_mat3r_fc3(
             val = float(parts[6])
             idx += 1
 
-            # Map lattice vectors to supercell image indices
             l1_j = r1x % n1
             l2_j = r1y % n2
             l3_j = r1z % n3
