@@ -136,8 +136,9 @@ class RelaxConfig:
     """Structural relaxation parameters."""
 
     calculation: str = "vc-relax"  # "relax" or "vc-relax"
-    forc_conv_thr: float = 1e-4  # Ry/bohr
+    forc_conv_thr: float = 1e-4  # Ry/bohr (QE) or eV/A (VASP, mapped to EDIFFG)
     press_conv_thr: float = 0.5  # kbar (vc-relax only)
+    calculator: str = "qe"        # "qe" or "vasp"
     work_dir: str = "./relax"
 
 

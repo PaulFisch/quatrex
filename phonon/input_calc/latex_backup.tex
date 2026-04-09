@@ -1,0 +1,1624 @@
+\chapter{Notes}
+\label{ch:notes}
+
+% ======================================================================
+\section{Units}
+\label{sec:units}
+% ======================================================================
+
+
+% ----------------------------------------------------------------------
+\subsection{Phonopy / QE Units}
+\label{sec:phonopy_units}
+% ----------------------------------------------------------------------
+
+Phonopy stores force constants in eV/\AA$^2$, masses in amu, and
+positions in \AA.  When phonopy is used with QE, the internal representation
+uses atomic units (bohr, Ry/bohr$^2$).  Everything is normalised to the
+eV/\AA\ system upon loading.
+
+The dynamical matrix eigenvalues $\lambda$ have units
+eV/(amu$\cdot$\AA$^2$).  Phonopy converts to THz via
+\begin{equation}\label{eq:VaspToTHz}
+  f\;[\text{THz}]
+  = \mathrm{sgn}(\lambda)\;\sqrt{|\lambda|}
+    \times \underbrace{
+      \frac{1}{2\pi}\sqrt{\frac{e}{m_u \cdot A^2}}
+    }_{\displaystyle \approx 15.633\;\text{THz}},
+\end{equation}
+where $e = 1.602\times10^{-19}$\,J, $m_u = 1.661\times10^{-27}$\,kg,
+$A = 10^{-10}$\,m.
+
+When loading a phonopy calculation performed via the QE interface,
+lengths are in bohr and force constants in Ry/bohr$^2$. Conversion is
+\begin{align}
+  \text{lattice [}\text{\AA}\text{]}
+    &= \text{lattice [bohr]} \times a_0,
+    &a_0 &= 0.52918\;\text{\AA/bohr}, \\
+  \Phi\;[\text{eV/\AA}^2]
+    &= \Phi\;[\text{Ry/bohr}^2] \times \frac{E_h/2}{a_0^2},
+    &\frac{E_h/2}{a_0^2} &\approx 48.59\;\text{eV\,bohr}^2\text{/(Ry\,\AA}^2).
+\end{align}
+
+
+% ----------------------------------------------------------------------
+\subsection{quatrex Units}
+\label{sec:solver_units}
+% ----------------------------------------------------------------------
+
+The quatrex NEGF solver operates in angular frequency squared:
+$\omega^2$ in $(\mathrm{rad/s})^2$.  The conversion factor from
+phonopy eigenvalue units eV/(amu$\cdot$\AA$^2$) to $(\mathrm{rad/s})^2$
+is
+\begin{equation}\label{eq:conversion}
+  C = \frac{e}{m_u \cdot A^2}
+  \approx 9.648 \times 10^{27}\;\text{(rad/s)}^2.
+\end{equation}
+The real-space blocks stored for the solver are therefore
+$H(\vc{R}) = C \cdot \Phi(0,\vc{R}) / \sqrt{m\,m'}$, in units of
+$(\mathrm{rad/s})^2$.
+
+
+\section{Quatrex input format}
+\label{sec:quatrex_input}
+
+The quatrex NEGF solver reads three input files that together specify
+the real-space Hamiltonian, the crystal structure, and the simulation
+parameters.
+
+
+% ----------------------------------------------------------------------
+\subsection{Input files}
+\label{sec:input_files}
+% ----------------------------------------------------------------------
+
+\subsubsection{dynamical\_matrix.mat}
+
+A MATLAB \texttt{.mat} file containing real-space blocks $H(\vc{R})$
+in Convention~B (see \cref{sec:dynmat}) (i.e. Force Constants), in units of $(\mathrm{rad/s})^2$.  Each key is a
+string \texttt{[nx, ny, nz]} mapping to an
+$(n_\mathrm{dof} \times n_\mathrm{dof})$ real matrix, where
+$n_\mathrm{dof} = 3N_b$ and $N_b$ is the number of atoms per unit
+cell.  For nearest-neighbour interactions, the file contains up to 27
+blocks with $n_x, n_y, n_z \in \{-1, 0, +1\}$.
+
+The solver loads these blocks, constructs a BTD matrix along the
+transport direction, and performs the transverse Fourier sum
+\begin{equation}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x, n_y)} M(n_x, n_y)\;
+    e^{2\pi i\,(k_x n_x + k_y n_y)},
+\end{equation}
+
+\subsubsection{structure.xyz}
+
+An extended XYZ file with lattice vectors in the header (ASE
+convention):
+\begin{verbatim}
+8
+Lattice="5.4018 0.0 0.0 0.0 5.4018 0.0 0.0 0.0 5.4018" ...
+Si  0.00000000  0.00000000  0.00000000
+...
+\end{verbatim}
+The loader (\texttt{distributed\_read\_xyz}) extracts the $3\times3$
+lattice matrix and Cartesian atom positions.  The number of atoms times
+\texttt{num\_orbitals\_per\_atom} determines $n_\mathrm{dof}$.
+
+\subsubsection{quatrex\_config.toml}
+See \texttt{src/quatrex/core/config.py}
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Field & Example value & Purpose \\
+  \midrule
+  \texttt{transport\_direction}       & \texttt{'z'}              & BTD direction \\
+  \texttt{construct\_from\_unit\_cell}& \texttt{true}             & input mode (see below) \\
+  \texttt{num\_transport\_cells}      & 4                         & device length in unit cells \\
+  \texttt{neighbor\_cell\_cutoff}     & \texttt{[1,1,1]}          & maximum block range \\
+  \texttt{kpoint\_grid}               & \texttt{[4,4,1]}          & transverse MP mesh \\
+  \texttt{kpoint\_shift}              & \texttt{[0,0,0]}          & mesh offset \\
+  \texttt{num\_orbitals\_per\_atom.Si}& 3                         & DOFs per atom \\
+  \texttt{phonon.eta}                 & \texttt{1e-8}             & broadening $(\mathrm{rad/s})^2$ \\
+  \texttt{phonon.obc.algorithm}       & \texttt{"sancho-rubio"}   & OBC method \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ----------------------------------------------------------------------
+\subsection{Input modes}
+\label{sec:input_modes}
+% ----------------------------------------------------------------------
+
+quatrex supports two modes selected by
+\texttt{construct\_from\_unit\_cell}.  In both modes the input is a
+MATLAB \texttt{.mat} file loaded by \texttt{scipy.io.loadmat}.  The
+loader (\texttt{distributed\_load} in
+\texttt{qttools/utils/mpi\_utils.py}) parses keys that start with
+\texttt{[} and interprets them as integer tuples:
+\begin{lstlisting}
+arr = loadmat(path)
+arr = {
+    tuple(map(int, r.strip("[]").split(","))): h_r
+    for r, h_r in arr.items()
+    if r.startswith("[")
+}
+\end{lstlisting}
+i.e., a key string \texttt{"[0, 1, -1]"} becomes the Python
+tuple \texttt{(0, 1, -1)}.  Each value is a 2D NumPy array (real or
+complex) representing a matrix block.
+
+\subsubsection{Mode 1: Pre-assembled device matrix
+  (\texttt{construct\_from\_unit\_cell = false})}
+
+The \texttt{.mat} file contains a single pre-assembled device matrix
+(already tiled and including all transport cells), stored under the
+key \texttt{(0,0,0)}:
+\begin{lstlisting}
+matrix_sparray = distributed_load(f"{matrix_name}.mat")
+assert (0, 0, 0) in matrix_sparray.keys()
+matrix_sparray = matrix_sparray[(0, 0, 0)]
+\end{lstlisting}
+The result is a single sparse matrix of size
+$(N_\mathrm{blocks} \times B)^2$, where $B$ is the block size and
+$N_\mathrm{blocks}$ is the number of transport cells.
+
+No transverse $k$-point Fourier assembly is performed, since
+the matrix is pre-assembled and has no dictionary of periodic shifts.
+This mode is suited for non-periodic heterostructures.
+
+\subsubsection{Mode 2: Unit-cell blocks
+  (\texttt{construct\_from\_unit\_cell = true})}
+\label{sec:mode2}
+
+The \texttt{.mat} file contains real-space blocks $H(n_x, n_y, n_z)$
+of the unit cell, keyed by lattice translation indices.
+
+\paragraph{Loading and grid construction.}
+The function \texttt{\_load\_matrix\_from\_unit\_cell} loads all keys,
+determines the bounding box from the minimum and maximum key
+coordinates, and packs the blocks into a 5D array:
+\begin{lstlisting}
+# keys: array of all (nx, ny, nz) tuples
+min_coords = keys.min(axis=0)
+max_coords = keys.max(axis=0)
+grid_shape = max_coords - min_coords + 1
+unit_cells = zeros(grid_shape + matrix_shape)
+for coord, matrix in matrices.items():
+    unit_cells[coord] = matrix
+\end{lstlisting}
+The resulting array has shape
+$(G_x, G_y, G_z, n_\mathrm{dof}, n_\mathrm{dof})$, where
+$(G_x, G_y, G_z)$ is the grid shape (e.g.\ $(3, 3, 3)$ for
+$\{-1,0,+1\}^3$).
+
+The loader checks that
+$G_x \times G_y \times G_z = \text{number of keys}$, i.e.\ the grid
+must be \emph{dense}: no missing entries are permitted.  Missing
+blocks should be stored as zero matrices.
+
+\paragraph{Neighbour cell cutoff.}
+If \texttt{neighbor\_cell\_cutoff} is set (e.g.\ \texttt{[1,1,1]}),
+\\\texttt{trim\_tight\_binding\_matrix} zeros out all blocks beyond that
+range.  For cutoff $(c_x, c_y, c_z)$, a block at index
+$(n_x, n_y, n_z)$ (centred at zero) is kept only if
+$|n_x| \le c_x$, $|n_y| \le c_y$, $|n_z| \le c_z$.
+
+\paragraph{Transport cell (supercell) construction.}
+The function \texttt{expand\_tight\_binding\_matrix} converts the
+unit-cell blocks into a BTD sparse matrix for a given transverse
+periodic shift.  Along the transport direction $z$:
+\begin{enumerate}
+  \item The supercell size in the transport direction (i.e. number of uc in
+        transport direction) is $G_z / 2$ (integer division), and 1 in the transverse
+        directions.  For $G_z = 3$, this gives a supercell of one unit
+        cell ($3 // 2 = 1$).
+  \item Three BTD blocks are extracted for each transverse periodic
+        shift $(n_x, n_y)$:
+        \begin{itemize}
+          \item $n_z = -1$: lower off-diagonal (coupling from the
+                previous layer),
+          \item $n_z =  0$: diagonal (on-site),
+          \item $n_z = +1$: upper off-diagonal (coupling to the next
+                layer).
+        \end{itemize}
+  \item Each block is assembled by \texttt{\_get\_transport\_block},
+        which loops over all pairs of local shifts within the supercell
+        and selects the appropriate unit-cell block for each pair.
+  \item The three blocks are tiled $N_\text{transport}$ times along the
+        diagonal to build the full BTD sparse matrix.
+\end{enumerate}
+
+\paragraph{Transverse $k$-point assembly.}
+The function \texttt{\_assemble\_kpoint} performs the Fourier sum over
+transverse periodic shifts.  For each $\vc{k}_\perp$ on a
+Monkhorst--Pack mesh:
+\begin{equation}\label{eq:assemble}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x, n_y)} M(n_x, n_y)\;
+    e^{2\pi i\,(k_x n_x + k_y n_y)},
+\end{equation}
+where $M(n_x, n_y)$ is the BTD sparse matrix for periodic shift
+$(n_x, n_y)$ (already expanded in the transport direction).  The
+$k$-points on the Monkhorst--Pack mesh are
+\begin{equation}
+  k_i = \frac{n_i + 0.5}{N_i} - 0.5 + \text{shift}_i,
+  \quad n_i = 0, \ldots, N_i - 1.
+\end{equation}
+This is Convention~B from \cref{sec:dynmat}.  The result is a stack of BTD matrices
+indexed by $(\omega, k_x, k_y)$.
+
+
+% ======================================================================
+\section{Ballistic Phonon}
+\label{sec:harmonic}
+% ======================================================================
+
+
+% ----------------------------------------------------------------------
+\subsection{Harmonic Force Constants}
+\label{sec:fd}
+% ----------------------------------------------------------------------
+
+In the harmonic approximation, the crystal potential energy is expanded
+to second order in the atomic displacements from equilibrium.  The
+corresponding second-order coefficients are the harmonic force constants,
+which quantify the restoring forces acting on the atoms. They are defined as
+\begin{equation}\label{eq:fc}
+  \Phi_{\alpha\beta}(0\kappa,\, l'\kappa')
+  = \frac{\partial^2 E}
+         {\partial u_\alpha(0\kappa)\,\partial u_\beta(l'\kappa')},
+\end{equation}
+where $u_\alpha(l\kappa)$ denotes the displacement of atom $\kappa$ in cell
+$l$ along Cartesian direction $\alpha$.
+$\Phi_{\alpha\beta}(0\kappa,l'\kappa')$ measures how a displacement of atom
+$\kappa'$ in cell $l'$ along direction $\beta$ changes the force on atom
+$\kappa$ in the home cell along direction $\alpha$. We have hence the
+linear force--displacement relation
+\begin{equation}\label{eq:force-disp}
+  F_\alpha(0\kappa)
+  = - \sum_{l'\kappa'\beta}
+      \Phi_{\alpha\beta}(0\kappa,\, l'\kappa')\,
+      u_\beta(l'\kappa').
+\end{equation}
+For a fixed pair of atoms $(0\kappa)$ and $(l'\kappa')$, the force constants
+form a $3\times 3$ matrix, with rows corresponding to force
+components and columns to displacement components.  If the unit cell
+contains $N$ atoms, the full force-constant matrix has dimension
+$(3N)\times(3N)$ for each lattice vector $\vc R_{l'}$.
+
+The corresponding dynamical matrix is obtained from the mass-weighted
+Fourier transform of $\Phi$, and its eigenvalues and eigenvectors yield
+the phonon frequencies and polarization vectors (See \cite{dove_introduction_1993}).
+
+In the finite-displacement method, the force constants are
+obtained by displacing atoms in a supercell and computing the resulting DFT forces.
+phonopy constructs a set of symmetry-inequivalent displaced
+supercells, performs a self-consistent DFT calculation for each displaced
+structure, and reconstructs the full force-constant tensor by inverting the
+force--displacement relation \cref{eq:force-disp}.
+Space-group symmetry is used to reduce
+the number of independent displacements, and hence the number of required
+DFT calculations (original \cite{parlinski_first-principles_1997}, phonopy \cite{togo_first_2015}).
+
+The choice of supercell determines the real-space range over which the force
+constants can be resolved before periodic wrap-around produces aliasing.
+For a one-dimensional supercell of length $N$, the calculated force constants
+can be written as
+\begin{equation}
+  \Phi_{\mathrm{per}}^{(N)}(r)
+  = \sum_{p\in\mathbb Z} \Phi(r+pN).
+\end{equation}
+In a $2\times2\times2$ supercell, the resolved relative translations are limited
+to those representable within that finite periodic cell. Contributions from more
+distant cells are folded back onto these separations by periodic boundary
+conditions. A larger supercell therefore allows force constants to be resolved
+over a wider real-space range before aliasing occurs (see \cite[Chs.~2,~6]{dove_introduction_1993}).
+
+% ----------------------------------------------------------------------
+\subsection{Dynamical-Matrix}
+\label{sec:dynmat}
+% ----------------------------------------------------------------------
+
+The dynamical matrix at wave vector $\vc{q}$ is the mass-weighted
+Fourier transform of the force constants.  Phonopy and the quatrex
+solver use different conventions:
+
+\subsubsection{Convention A (phonopy)}
+
+\begin{equation}\label{eq:DA}
+  D_{\alpha\beta}^{(\mathrm{A})}(\kappa\kappa',\vc{q})
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'} \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\;
+    e^{2\pi i\,\vc{q}\cdot[\vc{R}_{l'} + \vc{\tau}_{\kappa'} - \vc{\tau}_\kappa]},
+\end{equation}
+where $\vc{q}$ is in fractional reciprocal coordinates (with the factor
+$2\pi$ explicit).  The phase depends on the interatomic vector
+$\vc{R}_{l'} + \vc{\tau}_{\kappa'} - \vc{\tau}_\kappa$ \cite{togo_first_2015}.
+
+\subsubsection{Convention B (quatrex)}
+\label{sec:convB}
+
+quatrex assumes in its k-points code
+\begin{equation}\label{eq:DB}
+  D_{\alpha\beta}^{(\mathrm{B})}(\kappa\kappa',\vc{q})
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'} \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\;
+    e^{2\pi i\,\vc{q}\cdot \vc{R}_{l'}},
+\end{equation}
+where the phase involves only the lattice vector $\vc{R}_{l'}$.  This
+makes $D^{(\mathrm{B})}$ a lattice Fourier series:
+\begin{equation}\label{eq:fourier_series}
+  D^{(\mathrm{B})}(\vc{q})
+  = \sum_{\vc{R}} H(\vc{R})\;e^{2\pi i\,\vc{q}\cdot\vc{R}},
+\end{equation}
+where $H(\vc{R}) = \Phi(0,\vc{R}) / \sqrt{m\,m'}$ are real-valued
+matrices.
+
+\subsubsection{Transformation between conventions}
+\label{sec:gauge}
+
+The two conventions are related by a unitary similarity transformation
+\begin{equation}\label{eq:gauge_eq}
+  D^{(\mathrm{B})}(\vc{q})
+  = P(\vc{q})\;D^{(\mathrm{A})}(\vc{q})\;P(\vc{q})^\dagger,
+\end{equation}
+with the diagonal gauge matrix
+\begin{equation}\label{eq:P}
+  P(\vc{q})_{\kappa\alpha,\,\kappa'\beta}
+  = \delta_{\kappa\kappa'}\delta_{\alpha\beta}\;
+    e^{2\pi i\,\vc{q}\cdot\vc{\tau}_\kappa},
+\end{equation}
+where $\vc{\tau}_\kappa$ is in fractional coordinates and each atomic
+phase is repeated three times for the $x, y, z$ degrees of freedom.
+
+
+% ----------------------------------------------------------------------
+\subsection{Real-Space Block Extraction}
+\label{sec:blocks}
+% ----------------------------------------------------------------------
+
+The inverse discrete Fourier transform (IDFT) of $D^{(\mathrm{B})}$
+on a uniform $N_q^3$ mesh yields
+\begin{equation}\label{eq:idft}
+  H(n_x, n_y, n_z)
+  = \frac{C}{N_q^3}
+    \sum_{i,j,k=0}^{N_q - 1}
+    D^{(\mathrm{B})}\!\left(\frac{i}{N_q}, \frac{j}{N_q}, \frac{k}{N_q}\right)
+    e^{-2\pi i(n_x i + n_y j + n_z k)/N_q},
+\end{equation}
+where $C$ is the unit-conversion factor defined in
+Section~\ref{sec:solver_units}.  Because $D^{(\mathrm{B})}$ is a
+lattice Fourier series of real matrices, the blocks $H(\vc{R})$ are
+real-valued.
+
+For $N_q = 3$, the IDFT resolves lattice translations
+$(n_x, n_y, n_z) \in \{-1, 0, +1\}^3$, giving up to 27 blocks with symmetry
+\begin{equation}\label{eq:sym}
+  H(\vc{R})^T = H(-\vc{R}),
+\end{equation}
+which implies Hermiticity of $D^{(\mathrm{B})}(\vc{q})$ at every $\vc{q}$.
+
+
+% ----------------------------------------------------------------------
+\subsection{Harmonic Phonon NEGF}
+\label{sec:negf}
+% ----------------------------------------------------------------------
+
+For a given transverse wavevector $\vc{k}_\perp = (k_x, k_y)$, the
+on-site and coupling blocks along the transport direction $z$ are
+obtained by a partial Fourier transform: performing the 1D
+IDFT gives:
+\begin{align}
+  H_{00}(\vc{k}_\perp)
+    &= \frac{C}{N_{q_z}}
+       \sum_{k=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(k_x, k_y, \frac{k}{N_{q_z}}\right),
+  \label{eq:H00} \\
+  H_{01}(\vc{k}_\perp)
+    &= \frac{C}{N_{q_z}}
+       \sum_{k=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(k_x, k_y, \frac{k}{N_{q_z}}\right)
+       e^{-2\pi i k / N_{q_z}}.
+  \label{eq:H01}
+\end{align}
+At non-zero $\vc{k}_\perp$, these blocks are in general
+complex-valued: they are
+\begin{equation}
+    \sum_{n_x,n_y} H(n_x,n_y,n_z)\,e^{2\pi i(k_x n_x + k_y n_y)},
+\end{equation}
+a 2D Fourier sum of real coefficients which is complex whenever
+$\vc{k}_\perp \neq 0$.  The coupling satisfies $H_{10} = H_{01}^\dagger$.
+
+\subsubsection{Sancho--Rubio decimation}
+
+The surface Green's function of a semi-infinite lead is obtained
+iteratively.  Starting from bulk blocks $H_{00}$ and $H_{01}$:
+\begin{enumerate}
+  \item Initialise $\epsilon = \epsilon_s = (\omega^2 + i\eta)I -
+        H_{00}$, $\alpha = -H_{10}$, $\beta = -H_{01}$.
+  \item Iterate:
+        $\epsilon_s \leftarrow \epsilon_s - \alpha\,\epsilon^{-1}\beta$,\quad
+        $\epsilon   \leftarrow \epsilon - \alpha\,\epsilon^{-1}\beta
+         - \beta\,\epsilon^{-1}\alpha$,\quad
+        $\alpha     \leftarrow \alpha\,\epsilon^{-1}\alpha$,\quad
+        $\beta      \leftarrow \beta\,\epsilon^{-1}\beta$.
+  \item Converge when $\|\alpha\| + \|\beta\| < \text{tol}$.
+  \item Surface Green's function: $g_s = \epsilon_s^{-1}$.
+\end{enumerate}
+For the left lead, $g_L = g_s(H_{00}, H_{01})$.  For the right lead,
+$g_R = g_s(H_{00}, H_{01}^\dagger)$ (See original papers \cite{sancho_quick_1984, sancho_highly_1985}).
+
+\subsubsection{Caroli (Landauer) formula}
+
+\begin{align}
+  \Sigma_L &= H_{10}\,g_L\,H_{01}, &
+  \Sigma_R &= H_{01}\,g_R\,H_{10}, \\
+  \Gamma_{L/R} &= i(\Sigma_{L/R} - \Sigma_{L/R}^\dagger), \\
+  G^R &= \bigl[(\omega^2 + i\eta)\,I - H_D - \Sigma_L - \Sigma_R\bigr]^{-1}, &
+  G^A &= (G^R)^\dagger.
+\end{align}
+The ballistic transmission at a single $\vc{k}_\perp$ is (Caroli)
+\begin{equation}\label{eq:caroli}
+  \mathcal{T}(\omega^2, \vc{k}_\perp)
+  = \mathrm{Tr}\bigl[\Gamma_L\,G^R\,\Gamma_R\,G^A\bigr].
+\end{equation}
+The total transmission is averaged over a Monkhorst--Pack mesh of
+transverse $k$-points:
+\begin{equation}
+  \bar{\mathcal{T}}(\omega^2)
+  = \frac{1}{N_{k_\perp}} \sum_{\vc{k}_\perp}
+    \mathcal{T}(\omega^2, \vc{k}_\perp).
+\end{equation}
+(E.g. reviews \cite{wang_nonequilibrium_2007, wang_quantum_2008} for formulas)
+
+\subsubsection{quatrex Implementation}
+\label{sec:phonon_solver}
+
+The quatrex \texttt{PhononSolver} assembles the system matrix
+\begin{equation}\label{eq:system}
+  \bigl[G^R(\omega^2, \vc{k}_\perp)\bigr]^{-1}
+  = (\omega^2 + i\eta)\,\mathbb{I}
+    - D(\vc{k}_\perp) - \Sigma^R(\omega^2, \vc{k}_\perp),
+\end{equation}
+where $D(\vc{k}_\perp)$ is the BTD dynamical matrix loaded from the
+\texttt{.mat} file.  For ballistic transport, self-energies come only from the open boundary conditions.
+
+The lesser and greater self-energies at the contacts encode thermal
+occupation via the Bose--Einstein distribution:
+\begin{align}
+  \Sigma^<_L &= i\,\Gamma_L\,n_\mathrm{BE}(\omega, T_L), &
+  \Sigma^>_L &= i\,\Gamma_L\,\bigl[n_\mathrm{BE}(\omega, T_L) + 1\bigr],
+\end{align}
+and equivalently for the right contact at temperature $T_R$.  The
+Keldysh Green's functions are then
+\begin{align}
+  G^< &= G^R\,\Sigma^<_\mathrm{total}\,(G^R)^\dagger, \\
+  G^> &= G^R\,\Sigma^>_\mathrm{total}\,(G^R)^\dagger.
+\end{align}
+
+\subsubsection{Thermal conductance}
+
+The ballistic thermal conductance per unit area is
+\begin{equation}\label{eq:G_thermal}
+  G(T) = \frac{1}{A_c}
+      \int_0^\infty \frac{d\omega}{2\pi}\;
+      \bar{\mathcal{T}}(\omega)\;\hbar\omega\;
+      \frac{\partial n_\mathrm{BE}}{\partial T},
+\end{equation}
+where $A_c$ is the unit-cell cross-section perpendicular to transport,
+$n_\mathrm{BE}(\omega, T)$ the Bose--Einstein distribution, and
+\begin{equation}
+  \frac{\partial n_\mathrm{BE}}{\partial T}
+  = \frac{\hbar\omega}{k_B T^2}\;
+    \frac{e^{\hbar\omega / k_B T}}{(e^{\hbar\omega / k_B T} - 1)^2}.
+\end{equation}
+The integral is evaluated numerically via the trapezoidal rule.
+
+
+\subsection{Extracting a phonopy calculation to quatrex input}
+\label{sec:extraction}
+
+The block-tridiagonal Hamiltonian $H(\vc{R})$ (i.e. FC matrix) that quatrex requires
+is reconstructed from the dynamical matrix $D(\vc{q})$ via an inverse discrete Fourier
+transform and a gauge transformation then removes the basis-atom phases (should not be necessary,
+could read the FC directly, but phonopy handles symmetries).  The pipeline is implemented in \texttt{phonon\_inputs}. The steps are:
+
+% ======================================================================
+\paragraph{Performing the DFT calculation.}
+\label{sec:performing_dft}The force constants are computed from phonopy/QE:
+
+\begin{enumerate}
+  \item \textbf{Structure setup.}
+        The unit cell is loaded via \texttt{structure.py:load\_structure}.
+        A \texttt{Phonopy} object with a $2\times2\times2$ supercell is
+        created by \\ \texttt{structure.py:create\_phonopy\_from\_config},
+        which generates symmetry-inequivalent displacements.
+
+  \item \textbf{DFT single-point calculations.}
+        For each displaced supercell, a QE \texttt{pw.x} input file is
+        written by \texttt{qe\_interface.py}.
+        Existing converged outputs are detected and reused.
+        Forces are parsed from QE output and converted from
+        Ry/bohr to eV/\AA{} using the factor
+        $1\;\text{Ry/bohr} = 25.711\;\text{eV/\AA}$.
+
+  \item \textbf{Force constant extraction.}
+        \texttt{force\_constants.py:produce\_force\_constants}
+        passes the forces to phonopy, which inverts the
+        force--displacement relation using space-group symmetry.
+
+\end{enumerate}
+
+For the Si reference case ($2\times2\times2$ supercell of the
+8-atom conventional cell, 64 atoms), phonopy requires one
+symmetry-inequivalent displacement.  The corresponding QE SCF
+calculation takes $\sim$30\,s on 4 cores at \texttt{ecutwfc}~=~60\,Ry
+with a $4\times4\times4$ $k$-mesh.
+
+% ----------------------------------------------------------------------
+\paragraph{Load the phonopy calculation and convert units.}
+The phonopy calculation must be brought into eV/\AA{} units (See \texttt{structure.py:load\_phonopy\_calculation}).
+For QE, phonopy stores lattice vectors in bohr and
+force constants in Ry/bohr$^2$.  Hence we need to multiply (see \cref{sec:phonopy_units}):
+\begin{itemize}
+  \item Lattice: $a_\text{\AA} = a_\text{bohr} \times 0.52918$
+  \item Force constants: $\Phi_{\text{eV/\AA\textsuperscript{2}}} = \Phi_{\text{Ry/bohr\textsuperscript{2}}} \times 48.587$
+\end{itemize}
+
+% ----------------------------------------------------------------------
+\paragraph{Evaluate the dynamical matrix on a $\vc{q}$-mesh.}
+The dynamical matrix $D^{(\mathrm{A})}(\vc{q})$ is evaluated on
+an $N_{q_x} \times N_{q_y} \times N_{q_z}$ uniform mesh using
+\texttt{phonon.get\_dynamical\_matrix\_at\_q(q)} in \texttt{convention.py:evaluate\_on\_mesh}.
+
+The default mesh size is $N_q = 3$ in each direction, which resolves
+lattice translations $\vc{R} \in \{-1,0,+1\}^3$ in the subsequent
+IDFT, matching the range of a $2\times2\times2$ supercell.
+
+% ----------------------------------------------------------------------
+\paragraph{Gauge transform to Convention~B.}
+At each $\vc{q}$, the phase convention is changed from~A (phonopy) to~B
+(quatrex) (see \cref{sec:dynmat}):
+\begin{equation}\label{eq:gauge}
+  D^{(\mathrm{B})}(\vc{q})
+  = P(\vc{q})\;D^{(\mathrm{A})}(\vc{q})\;P(\vc{q})^\dagger,
+\end{equation}
+with
+$P(\vc{q}) = \mathrm{diag}(\ldots,
+\underbrace{e^{2\pi i\,\vc{q}\cdot\vc{\tau}_\kappa},\,
+            e^{2\pi i\,\vc{q}\cdot\vc{\tau}_\kappa},\,
+            e^{2\pi i\,\vc{q}\cdot\vc{\tau}_\kappa}}_{x,y,z},
+\ldots)$,
+where $\vc{\tau}_\kappa$ are the fractional coordinates of basis atom
+$\kappa$.
+
+% ----------------------------------------------------------------------
+\paragraph{Inverse DFT to real-space blocks.}
+The Convention~B dynamical matrix is a pure lattice Fourier series
+(see. \eqref{eq:fourier_series}), so the real-space blocks are by IDFT
+\begin{equation}\label{eq:idft}
+  H(n_x, n_y, n_z)
+  = \frac{1}{N_{q_x} N_{q_y} N_{q_z}}
+    \sum_{i,j,k}
+    D^{(\mathrm{B})}\!\!\left(\frac{i}{N_{q_x}},\,
+                               \frac{j}{N_{q_y}},\,
+                               \frac{k}{N_{q_z}}\right)
+    e^{-2\pi i\left(\frac{n_x i}{N_{q_x}}
+                   + \frac{n_y j}{N_{q_y}}
+                   + \frac{n_z k}{N_{q_z}}\right)}.
+\end{equation}
+The result $H(\vc{R})$ is real-valued because $D^{(\mathrm{B})}$ is a
+lattice Fourier series of real force constants, the imaginary part
+(order $10^{-15}$ relative) is discarded. The implementation is
+in \texttt{convention.py:idft\_to\_blocks}.
+
+The IDFT produces blocks in phonopy eigenvalue units,
+eV/(amu$\cdot$\AA$^2$).  Each block is then multiplied by
+\begin{equation}
+  C = \frac{e\;[\text{J/eV}]}{m_u\;[\text{kg}] \times (10^{-10})^2\;[\text{m}^2/\text{\AA}^2]}
+    \approx 9.648 \times 10^{27}\;\frac{\text{rad}^2}{\text{s}^2}
+    \cdot \frac{\text{amu}\cdot\text{\AA}^2}{\text{eV}},
+\end{equation}
+converting them to $(\text{rad/s})^2$, and then reshaped to a dictionary
+$\{(n_x,n_y,n_z) \mapsto H \in \mathbb{R}^{n_\text{dof}\times n_\text{dof}}\}$.
+
+% ----------------------------------------------------------------------
+\paragraph{Quatrex Inputs.}
+The blocks are written to \texttt{dynamical\_matrix.mat} in\\
+\texttt{quatrex\_writer.py:write\_dynamical\_matrix\_mat}
+using \texttt{scipy.io.savemat} from the dict.
+Additionally, we write (\texttt{quatrex\_writer.py:write\_all}):
+\begin{itemize}
+  \item \texttt{structure.xyz} --- extended XYZ with lattice vectors in
+        the header and Cartesian atomic positions
+        (\texttt{write\_structure\_xyz}).
+  \item \texttt{quatrex\_config.toml} --- device configuration
+        (transport direction, $k$-point grid, neighbour cutoff, OBC
+        algorithm, etc.)\ \texttt{write\_quatrex\_config\_toml}.
+\end{itemize}
+For heterogeneous contacts, separate \texttt{.mat} files
+for the left and right contacts are written when the corresponding
+config fields are set.
+
+
+
+% ======================================================================
+\subsubsection{Validation}
+\label{sec:extraction_validation}
+
+All of the below is in \texttt{validation.py}:
+
+% --- Acoustic sum rule ------------------------------------------------
+\paragraph{Acoustic sum rule.}
+(\texttt{check\_gamma\_point})
+At the $\Gamma$ point \eqref{eq:fourier_series} reduces to
+$D^{(\mathrm{B})}(\vc{0}) = \sum_{\vc{R}} H(\vc{R})$.
+Translational invariance requires three eigenvalues to vanish
+(the acoustic modes at $\Gamma$).  The check computes
+\begin{equation}
+  D_\Gamma = \sum_{\vc{R}} H(\vc{R}),
+  \qquad
+  \omega_n = \mathrm{sign}(\lambda_n)\,
+             \sqrt{|\lambda_n|},
+  \qquad
+  \lambda_n = \text{eigenvalues of } D_\Gamma,
+\end{equation}
+and reports the three smallest $|\omega_n|$ in THz.
+Also, $\max|D_\Gamma - D_\Gamma^T|$ should be approximately zero.
+
+% --- Block symmetry ---------------------------------------------------
+\paragraph{Block symmetry.}
+(\texttt{check\_block\_symmetry})
+From \eqref{eq:DB}
+\begin{equation}\label{eq:block_sym}
+  H(\vc{R})^T = H(-\vc{R})
+  \qquad \forall\;\vc{R}.
+\end{equation}
+The check iterates over all block pairs $(\vc{R}, -\vc{R})$ in the
+dictionary and reports $\max_{\vc{R}} \|H(\vc{R})^T - H(-\vc{R})\|_\infty$.
+
+
+% --- Band structure comparison ----------------------------------------
+\paragraph{Band structure comparison.}
+(\texttt{compare\_band\_structure})
+This check verifies that the extracted real-space blocks reproduce the
+same phonon frequencies as phonopy's internal dynamical matrix.  At each
+$\vc{q}$ on a path, two sets of eigenfrequencies are
+computed:
+\begin{enumerate}
+  \item From phonopy:
+        $D_\text{ph} = P(\vc{q})\,D^{(\mathrm{A})}(\vc{q})\,P(\vc{q})^\dagger$,
+        converted to $(\text{rad/s})^2$ via $C$, then diagonalised.
+  \item From the extracted blocks:
+        $D_\text{rec}(\vc{q}) = \sum_{\vc{R}} H(\vc{R})\,
+         e^{2\pi i\,\vc{q}\cdot\vc{R}}$,
+        then diagonalised.
+\end{enumerate}
+The maximum eigenfrequency difference
+$\max_{n,\vc{q}} |\omega_n^\text{ph} - \omega_n^\text{rec}|$ is
+reported, a comparison plot is generated overlaying
+the two band structures along the chosen path.
+
+% ======================================================================
+\section{Quatrex Modifications}
+\label{sec:quatrex-mods}
+% ======================================================================
+
+
+% ----------------------------------------------------------------------
+\subsection{Heterogeneous-Device Implementation}
+\label{sec:heterogeneous}
+% ----------------------------------------------------------------------
+
+\subsubsection{Changes to quatrex for the L|D|R device}
+
+The original unit-cell input mode constructs a homogeneous device: the
+same dynamical matrix blocks are tiled across all transport cells.  To
+support material interfaces (e.g.\ Si/Ge), the device must be
+partitioned into three regions with distinct dynamical matrices:
+\begin{equation}\label{eq:ldr}
+  \underbrace{L \;\cdots\; L}_{n_L\;\text{cells}}
+  \;\;\underbrace{D \;\cdots\; D}_{n_D\;\text{cells}}
+  \;\;\underbrace{R \;\cdots\; R}_{n_R\;\text{cells}},
+  \qquad n_L + n_D + n_R = n_\text{transport}.
+\end{equation}
+
+Four new fields were added to \texttt{DeviceConfig}
+(\texttt{quatrex/core/config.py}):
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Field & Type & Purpose \\
+  \midrule
+  \texttt{num\_left\_cells}  & \texttt{PositiveInt | None} & $n_L$ \\
+  \texttt{num\_right\_cells} & \texttt{PositiveInt | None} & $n_R$ \\
+  \texttt{left\_matrix}      & \texttt{str | None} & left-lead \texttt{.mat} file \\
+  \texttt{right\_matrix}     & \texttt{str | None} & right-lead \texttt{.mat} file \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Necessarily $n_L + n_R < n_\text{transport}$ and it requires \texttt{construct\_from\_unit\_cell = true}.
+
+\subsubsection{Matrix assembly}
+
+Two new functions were added to \texttt{quatrex/device/inputs.py}.
+
+\textbf{\texttt{\_expand\_heterogeneous\_matrix}} builds a BTD sparse
+matrix for a single transverse periodic shift $(n_x, n_y)$.  Each
+cell is assigned to one of the three regions according to its index.
+The diagonal block always comes from the cell's own region:
+\begin{equation}
+  D_{ii} =
+  \begin{cases}
+    D_L & i < n_L, \\
+    D_D & n_L \le i < n_L + n_D, \\
+    D_R & i \ge n_L + n_D.
+  \end{cases}
+\end{equation}
+
+\textbf{\texttt{\_create\_heterogeneous\_matrix}} loops over all
+transverse periodic shifts, calling
+\\\texttt{\_expand\_heterogeneous\_matrix} for each, and sums all shifts
+at $\Gamma$ for the sparsity pattern.
+
+
+\paragraph{Boundary coupling.}
+The Hermiticity relation for real-space blocks at non-zero transverse
+shift is
+\begin{equation}\label{eq:hermiticity_perp}
+  H(\vc{R}_\perp, n_z)^\dagger = H(-\vc{R}_\perp, -n_z),
+\end{equation}
+at each boundary the coupling block is taken from the region of the neighbouring
+cell.  Specifically, at the left/device boundary ($i = n_L - 1$,
+$i+1 = n_L$), the super-diagonal uses the left-lead super-diagonal
+$H_{01}^L$ and the sub-diagonal uses $H_{10}^L$.  At the
+device/right boundary both couplings come from the right-lead blocks
+$H_{01}^R$ and $H_{10}^R$.
+
+
+% ======================================================================
+\section{Reference Calculations}
+\label{sec:validation}
+% ======================================================================
+
+A naive Sancho--Rubio + Caroli python code is used as reference.
+
+
+% ----------------------------------------------------------------------
+\subsection{Bulk Validation}
+\label{sec:bulk_validation}
+% ----------------------------------------------------------------------
+
+For a homogeneous Si system, the quatrex NEGF result and the
+standalone Caroli reference are run with identical parameters and
+compared directly.  Agreement between the two curves confirms that the
+unit-cell assembly and ballistic phonon solver work properly.
+
+
+% ----------------------------------------------------------------------
+\subsection{Si/Ge Interface}
+\label{sec:sige}
+% ----------------------------------------------------------------------
+
+\subsubsection{Model}
+
+Following~\cite{guo_quantum_2020,latour_ab_2017,tian_enhancing_2012},
+ballistic phonon transmission through a Si/Ge interface is computed
+using a mass-mismatch model: the harmonic force constants are taken
+from bulk Si throughout, and the only distinction between Si and Ge is
+the atomic mass ($m_\text{Si} = 28.09$\,amu,
+$m_\text{Ge} = 72.64$\,amu).  This approximation is justified because
+Si and Ge have similar interatomic force constants but substantially
+different masses.
+
+The system is partitioned into three regions:
+\begin{itemize}
+  \item \textbf{Left lead}: Si force constants + Si masses (pure Si).
+  \item \textbf{Device}: Si force constants + mixed Si/Ge masses
+        (atoms with fractional coordinate $z < 0.5$ are Si; the rest
+        are Ge).
+  \item \textbf{Right lead}: Si force constants + Ge masses
+        (mass-mismatch Ge).
+\end{itemize}
+The coupling between the left lead and the device is $H_{01}$ of the
+Si lead, the coupling between the device and the right lead is
+$H_{01}$ of the Ge lead.
+
+\subsubsection{Computational details}
+
+The Si force constants are obtained from a DFT calculation at the
+equilibrium lattice constant $a = 5.466$\,\AA, using the conventional
+8-atom diamond cell with a $2\times2\times2$ supercell (64 atoms), i.e.
+nearest neighbour. DFT parameters: plane-wave cutoff 60~Ry, charge-density cutoff
+480~Ry, $4\times4\times4$ $k$-point grid for the supercell, SCF
+convergence threshold $10^{-10}$~Ry, Gaussian smearing 0.01~Ry, PBE
+functional, \texttt{Si.pbe-n-rrkjus\_psl.1.0.0.UPF} pseudopotential.
+Diamond symmetry reduces this to a single displacement.
+
+The phonopy calculation was performed using phonopy's native QE
+interface, which stores lengths in bohr and forces in Ry/bohr.  Force
+constants are converted to eV/\AA$^2$ on loading
+(Section~\ref{sec:phonopy_units}).  The Ge and interface phonopy
+objects are created by cloning the Si object and substituting atomic
+masses.
+
+
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  Parameter & Value \\
+  \midrule
+  Transverse $k$-mesh & $20\times20$ \\
+  Frequency range & $0.01$--$16.0$\,THz, 101 points \\
+  Transport direction & $z$ (001) \\
+  Total transport cells / $n_L$ / $n_D$ / $n_R$ & 5 / 2 / 1 / 2 \\
+  Broadening $\eta$ & $\tfrac{1}{2}\Delta\omega^2 \approx 5.05\times10^{23}$ (rad/s)$^2$ \\
+  $T_L$, $T_R$ & 301\,K, 299\,K \\
+  OBC algorithm & Sancho--Rubio \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Results}
+
+\paragraph{$\Gamma$-point frequencies.}
+The Si calculation gives a maximum optical frequency of 15.55~THz at
+$\Gamma$, consistent with reference values.  The
+Ge clone (mass-mismatch) gives 9.67~THz, in exact agreement with the
+mass scaling $f_\text{Ge} = f_\text{Si}\sqrt{m_\text{Si}/m_\text{Ge}}$.
+
+\paragraph{Thermal conductance.}
+The interfacial thermal conductance at 300~K is
+\begin{equation}
+  G = 196\;\text{MW/(m}^2\text{\,K)}.
+\end{equation}
+
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  Reference &  $G$ [MW/(m$^2$\,K)] \\
+  \midrule
+  Latour et al.\ (2017) \cite{latour_ab_2017} & 210 \\
+  Tian et al.\ (2012) \cite{tian_enhancing_2012}     &209 \\
+  Here                                &  196 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The $\sim$7\% difference from the  literature is
+likely due to the coarser transverse $k$-mesh and DFT calculation.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=\textwidth]{fig/reference/si_ge_quatrex_comparison.png}
+  \caption{Ballistic phonon transmission on a $20\times20$ transverse
+    $k$-mesh with 101 frequency points.
+    \textbf{Left:} Homogeneous bulk Si.
+    \textbf{Right:} Si/Ge interface in the mass-mismatch approximation.}
+  \label{fig:quatrex_comparison}
+\end{figure}
+
+% ======================================================================
+\section{Anharmonic Phonon}
+\label{sec:anharmonic}
+% ======================================================================
+
+
+% ----------------------------------------------------------------------
+\subsection{Third-Order Force Constants}
+\label{sec:fc3}
+% ----------------------------------------------------------------------
+
+The third-order (cubic) interatomic force constant is
+\begin{equation}\label{eq:fc3_def}
+  \Phi^{(3)}_{\alpha\beta\gamma}(0\kappa,\, l'\kappa',\, l''\kappa'')
+  = \frac{\partial^3 E}
+         {\partial u_\alpha(0\kappa)\;
+          \partial u_\beta(l'\kappa')\;
+          \partial u_\gamma(l''\kappa'')}.
+\end{equation}
+By commutativity of partial derivatives, $\Phi^{(3)}$ is fully
+symmetric under any permutation of its three index triples
+$(\alpha, 0\kappa)$, $(\beta, l'\kappa')$, $(\gamma, l''\kappa'')$.
+Units: the raw FC3 from \texttt{thirdorder.py} is in eV/\AA$^3$, not mass-weighted.
+
+\subsubsection{Computation with thirdorder.py}
+\label{sec:thirdorder}
+
+The FC3 is computed using \texttt{thirdorder\_espresso.py} via finite-difference procedure:
+\begin{enumerate}
+  \item \textbf{Sow}: generate displaced supercell configurations.  For
+        each symmetry-inequivalent pair of atomic displacements, positive
+        and negative perturbations are created.
+  \item \textbf{DFT}: QE computes the forces for each
+        displaced configuration.
+  \item \textbf{Reap}: force differences yield the third derivatives
+\end{enumerate}
+The output file \texttt{FORCE\_CONSTANTS\_3RD} contains one block per
+symmetry-reduced triplet $(0\kappa, l'\kappa', l''\kappa'')$, each
+specifying the cell vectors $\vc{R}_{l'}$ and $\vc{R}_{l''}$ in
+Cartesian coordinates (\AA), atom indices (1-based in the file,
+converted to 0-based on read), and the $3\times3\times3$ tensor
+$\Phi^{(3)}_{\alpha\beta\gamma}$ in eV/\AA$^3$.
+
+
+% ----------------------------------------------------------------------
+\subsection{Extracting FC3 Matrices}
+\label{sec:fc3_extraction}
+% ----------------------------------------------------------------------
+
+\subsubsection{Remapping}
+
+\texttt{thirdorder.py} uses the 2-atom FCC primitive cell, while the phonopy
+harmonic force constants use the 8-atom
+conventional cubic cell.  The FC3 must therefore be
+remapped from the FCC basis to the conventional basis before being
+combined with the harmonic dynamical matrix.
+
+The FCC primitive vectors (in Cartesian coordinates) are
+$\vc{a}_1 = \tfrac{a}{2}(0,1,1)$,
+$\vc{a}_2 = \tfrac{a}{2}(1,0,1)$,
+$\vc{a}_3 = \tfrac{a}{2}(1,1,0)$, with 2 atoms at fractional
+positions $(0,0,0)$ and $(\tfrac{1}{4},\tfrac{1}{4},\tfrac{1}{4})$.
+Each conventional-cell atom can be expressed as an FCC atom plus an
+FCC lattice translation:
+$\vc{r}_i^\mathrm{conv} + \vc{s}
+= \vc{r}_{j}^\mathrm{FCC} + \sum_m n_m\,\vc{a}_m^\mathrm{FCC}$,
+where $\vc{s}$ is an origin shift and $j \in \{0, 1\}$ is the FCC
+sublattice index.
+
+The phonopy conventional cell has an origin offset relative to the
+standard diamond convention.  For silicon, the first
+conventional-cell atom sits at fractional position
+$(\tfrac{7}{8}, \tfrac{7}{8}, \tfrac{7}{8})$ rather than $(0,0,0)$.
+The required Cartesian shift is
+\begin{equation}\label{eq:shift}
+  \vc{s} = \left(\frac{a_\mathrm{conv}}{8},\,
+                  \frac{a_\mathrm{conv}}{8},\,
+                  \frac{a_\mathrm{conv}}{8}\right).
+\end{equation}
+
+For each FC3 block with FCC atom indices
+$(\kappa_i, \kappa_j, \kappa_k)$ and cell vectors
+$(\vc{R}_j, \vc{R}_k)$:
+\begin{enumerate}
+  \item Map each FCC (atom, position) to the conventional cell: find
+        the conventional atom index $i'$ and integer cell vector
+        $\vc{n}$ such that
+        $\vc{r}^\mathrm{FCC}_\kappa + \vc{R} - \vc{s}
+         = \vc{r}^\mathrm{conv}_{i'} + \vc{n}\cdot\vc{A}_\mathrm{conv}$.
+  \item Compute new cell vectors relative to atom $i$:
+        $\vc{R}'_j = (\vc{n}_j - \vc{n}_i)\cdot\vc{A}_\mathrm{conv}$,
+        $\vc{R}'_k = (\vc{n}_k - \vc{n}_i)\cdot\vc{A}_\mathrm{conv}$.
+  \item Store the remapped block with conventional atom indices
+        $(i', j', k')$ and new cell vectors $(\vc{R}'_j, \vc{R}'_k)$.
+\end{enumerate}
+
+For Si, there are 422 FC3 blocks (cutoff 3).
+
+\subsubsection{Mass-weighting}
+
+\begin{equation}\label{eq:fc3_mw}
+  \Psi_{\alpha\beta\gamma}(\kappa\kappa'\kappa'')
+  = \frac{\Phi^{(3)}_{\alpha\beta\gamma}(\kappa\kappa'\kappa'')}
+         {\sqrt{M_\kappa\,M_{\kappa'}\,M_{\kappa''}}},
+\end{equation}
+with $M_\kappa$ in amu.  Units:
+$[\Psi] = \mathrm{eV}/(\text{\AA}^3\cdot\mathrm{amu}^{3/2})$.
+
+\subsubsection{Unit Conversion}
+
+The harmonic conversion factor $C = e/(m_u A^2)$ converts
+eV/(amu$\cdot$\AA$^2$) to (rad/s)$^2$.  The FC3 has one additional
+factor of $1/(\text{\AA}\cdot\mathrm{amu}^{1/2})$ compared to FC2:
+\begin{equation}\label{eq:conversion_fc3}
+  \texttt{CONVERSION\_FC3}
+  = \frac{C}{A\cdot\sqrt{m_u}}
+  = \frac{e}{m_u^{3/2}\,A^3}
+  \approx 2.368 \times 10^{51}
+  \quad\bigl[\mathrm{J}/(\mathrm{m}^3\cdot\mathrm{kg}^{3/2})\bigr],
+\end{equation}
+converting eV/(\AA$^3$\,amu$^{3/2}$) to
+J/(m$^3$\,kg$^{3/2}$), equivalently to
+$(s^2\cdot\mathrm{m}\cdot\mathrm{kg}^{1/2})^{-1}$.
+
+
+% ----------------------------------------------------------------------
+\subsection{FC3 Assembly}
+\label{sec:assembly_fc3}
+% ----------------------------------------------------------------------
+
+For a single NEGF transport cell the device region is one unit cell
+in the transport direction, with a FC3 tensor
+$\Psi_{abc}$ (a $n_\mathrm{dof}\times n_\mathrm{dof}\times n_\mathrm{dof}$
+array, with $n_\mathrm{dof} = 3N_b = 24$ for Si).
+
+\paragraph{Onsite approximation.}
+Only FC3 blocks with both cell vectors equal to zero:
+\begin{equation}
+  \Psi_{abc}^\mathrm{onsite}
+  =
+    \frac{\Phi^{(3)}_{abc}(\vc{0}, \vc{0}, \vc{0})}
+         {\sqrt{M_a M_b M_c}}.
+\end{equation}
+
+\paragraph{Full $\delta l = 0$ approximation (Approximation~III in \cite{guo_quantum_2020}).}
+This approximation retains all FC3 blocks for which
+both $\vc{R}'$ and $\vc{R}''$ lie in the same transport slab as the
+origin, i.e.\ $\delta l' = \delta l'' = 0$, where
+\begin{equation}
+    \delta l' = \mathrm{round}\!\bigl([\vc{A}^{-T}\vc{R}']_z\bigr)
+\end{equation}
+so that
+\begin{equation}\label{eq:fc3_full}
+    \Psi_{abc}^\mathrm{full}
+    = \sum_{\substack{\vc{R}',\vc{R}'' \\ \delta l'=0,\;\delta l''=0}}
+      \frac{\Phi^{(3)}_{abc}(\vc{0}, \vc{R}', \vc{R}'')}
+           {\sqrt{M_a M_b M_c}}.
+\end{equation}
+
+For Si, 193 of the 422 FC3 blocks satisfy $\delta l' = \delta l'' = 0$ (i.e. $R_z = 0$),
+yielding 2126 non-zero elements out of $24^3 = 13\,824$ total.
+
+% ----------------------------------------------------------------------
+\subsection{Phonon--Phonon Self-Energy}
+\label{sec:self_energy}
+% ----------------------------------------------------------------------
+
+\subsubsection{Self-energy formula)}
+
+The phonon--phonon scattering self-energy for slab $L$ in the device,
+at second order in the cubic anharmonicity (\cite[Eq. 8]{guo_quantum_2020}):
+\begin{equation}\label{eq:sigma_guo}
+  \Sigma^{<}_{ab}(\omega)
+  = \frac{i\hbar}{2}\;
+    \sum_{c,d,e,f} \Psi_{acd}\;
+    \biggl[\int \frac{d\omega'}{2\pi}\;
+      G^{<}_{ce}(\omega')\,G^{<}_{df}(\omega - \omega')
+    \biggr]\;\Psi_{bef}
+\end{equation}
+where $G^<(\omega)$ is the lesser Green's function of the slab,
+$\Psi$ is the mass-weighted FC3 in SI units, and $\hbar = 1.055\times
+10^{-34}$\,J$\cdot$s.  The same formula with $G^<\to G^>$ gives
+$\Sigma^>$.  In the absence of the Hilbert-transform contribution:
+\begin{equation}\label{eq:sigma_r}
+  \Sigma^R(\omega) \approx \tfrac{1}{2}
+    \bigl[\Sigma^>(\omega) - \Sigma^<(\omega)\bigr].
+\end{equation}
+
+\subsubsection{Full Fourier-space self-energy (\cite[Eq. 14]{guo_quantum_2020})}
+\label{sec:sigma_fourier}
+
+For 3D nanostructures with transverse periodicity, the
+self-energy involves a sum over all transverse wavevectors \cite[Eq. 14]{guo_quantum_2020}:
+\begin{align}\label{eq:sigma_phph}
+  \Sigma^{\gtrless}_{s,\,ll'_s}(&\omega;\,\vc{q}_\perp)
+  = \frac{i\hbar}{2}
+    \sum_{\substack{l_1 l_2 l_3 l_{4s} \\ j_1 j_2 j_3 j_4}}
+    \frac{1}{N} \sum_{\vc{q}'_\perp}
+    \tilde{\Phi}^{ij_1 j_2}_{l,\,l_{1s} l_{2s}}
+      \!\left(\vc{q}'_\perp,\;\vc{q}_\perp - \vc{q}'_\perp\right)
+    \notag \\
+  &\qquad\times
+    \tilde{\Phi}^{j_3 j_4}_{l',\,l_{3s} l_{4s}}
+      \!\left(\vc{q}'_\perp - \vc{q}_\perp,\;-\vc{q}'_\perp\right)
+    \int_{-\infty}^{\infty}\!\frac{d\omega'}{2\pi}
+    \,G^{\gtrless,\,j_1 j_4}_{l_{1s} l_{4s}}(\omega';\,\vc{q}'_\perp)\,
+    G^{\gtrless,\,j_2 j_3}_{l_{2s} l_{3s}}
+      (\omega - \omega';\,\vc{q}_\perp - \vc{q}'_\perp),
+\end{align}
+where $l, l'$ index transport-direction slabs, $s$ denotes slab-local
+atom indices, $i, j$ are Cartesian components, $N$ is the number of
+transverse wavevectors, and the sum over $\vc{q}'_\perp$ enforces
+transverse momentum conservation.
+
+The quantity
+$\tilde{\Phi}^{ij_1 j_2}_{l,\,l_{1s} l_{2s}}(\vc{q}_\perp, \vc{q}'_\perp)$
+is the Fourier representation of the third-order FC matrix \cite[Eq. 16]{guo_quantum_2020}:
+\begin{equation}\label{eq:fc3_fourier}
+  \tilde{\Phi}^{ij_1 j_2}_{l,\,l_{1s} l_{2s}}
+  (\vc{q}_\perp,\,\vc{q}'_\perp)
+  = \sum_{\Delta\vc{R}_\perp}\sum_{\Delta\vc{R}'_\perp}
+    \Phi^{ij_1 j_2}_{l l_{1} l_{2}}\;
+    e^{-i\vc{q}_\perp\cdot\Delta\vc{R}_\perp}\;
+    e^{-i\vc{q}'_\perp\cdot\Delta\vc{R}'_\perp},
+\end{equation}
+where
+$\Delta\vc{R}_\perp = (l_y - l_{1y})\vc{a}_2 + (l_z - l_{1z})\vc{a}_3$
+and
+$\Delta\vc{R}'_\perp = (l_y - l_{2y})\vc{a}_2 + (l_z - l_{2z})\vc{a}_3$.
+
+Unlike the harmonic FC matrix $\tilde{\Phi}^{(2)}(\vc{q}_\perp)$, which
+depends on a single transverse wavevector, $\tilde{\Phi}^{(3)}$ depends
+on two independent wavevectors.  Scaling hence:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Object & Storage (dense) & Storage (NN-only) \\
+  \midrule
+  $\tilde{\Phi}^{(2)}(\vc{q}_\perp)$ &
+    $N_k \times N_s^2$ &
+    $N_k \times N_s \times z_2$ \\
+  $\tilde{\Phi}^{(3)}(\vc{q}_\perp,\,\vc{q}'_\perp)$ &
+    $N_k^2 \times N_s^3$ &
+    $N_k^2 \times N_s \times z_3$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+where $N_s = 3N_\mathrm{atoms}$ is the number of DOFs per slab,
+$z_2$ and $z_3$ are the average numbers of non-zero couplings per
+site from harmonic and anharmonic interactions, and
+$N_k = N_{q_y}\times N_{q_z}$ is the total number of transverse
+wavevectors.
+
+In the ballistic case each transverse wavevector $\vc{q}_\perp$ is
+independent: the retarded Green's function decouples across
+$\vc{q}_\perp$, so the problem is embarrassingly parallel over
+$(\omega, \vc{q}_\perp)$.  In the anharmonic case, the sum
+$N^{-1}\sum_{\vc{q}'_\perp}$ in Eq.~\eqref{eq:sigma_phph} couples
+all transverse wavevectors: evaluating
+$\Sigma(\omega; \vc{q}_\perp)$ requires
+$G(\omega'; \vc{q}'_\perp)$ for every $\vc{q}'_\perp$.
+
+% ----------------------------------------------------------------------
+\subsection{Frequency Discretisation and FFT Convolution}
+\label{sec:fft}
+% ----------------------------------------------------------------------
+
+\paragraph{Discrete frequency grid.}
+$\omega_n = \omega_\mathrm{min} + n\,\Delta\omega$ for
+$n = 0,\ldots,N_\omega-1$.  The broadening parameter is
+$\eta = (\Delta\omega)^2 \times \eta_\mathrm{factor}$ with
+$\eta_\mathrm{factor} = 0.5$ by default.
+
+\paragraph{FFT convolution.}
+The frequency integral in Eq.~\eqref{eq:sigma_guo} is discretised as
+\begin{equation}
+  C_{ce,df}[\omega_n]
+  = \frac{\Delta\omega}{2\pi}\;
+    \sum_{m} G^<_{ce}[\omega_m]\;G^<_{df}[\omega_n - \omega_m],
+\end{equation}
+computed via FFT: $C = \mathrm{IFFT}[\mathrm{FFT}(G_{ce})\cdot\mathrm{FFT}(G_{df})]$.
+
+\paragraph{Full self-energy.}
+\begin{equation}\label{eq:full-energy}
+  \Sigma^<_{ab}[\omega_n]
+  = \frac{i\hbar\,\Delta\omega}{4\pi}\;
+    \sum_{c,d,e,f} \Psi_{acd}\;C_{ce,df}[\omega_n]\;\Psi_{bef}.
+\end{equation}
+This is implemented as a loop over $(c,d)$ and $(e,f)$ pairs with
+sparsity checks on $|\Psi_{:,c,d}|$.  For Si
+there are $\sim10^4$ active pairs.  The overall
+computational cost is $\mathcal{O}(n_\mathrm{dof}^4 \times N_\omega
+\log N_\omega)$.
+
+
+% ----------------------------------------------------------------------
+\subsection{SCBA Loop}
+\label{sec:scba}
+% ----------------------------------------------------------------------
+
+\subsubsection{Algorithm}
+
+\begin{enumerate}
+  \item \textbf{Initialise}: $\Sigma^\mathrm{ph} = 0$.
+  \item \textbf{Green's functions}: for each $\vc{q}_\perp$ and
+        $\omega_n$, compute contact self-energies via Sancho--Rubio and
+        solve:
+        \begin{align}
+          G^R &= \bigl[(\omega^2 + i\eta)\,\mathbb{I}
+            - H_{00} - \Sigma^R_L - \Sigma^R_R
+            - \Sigma^R_\mathrm{ph}\bigr]^{-1}, \\
+          G^{<,>} &= G^R\,\Sigma^{<,>}_\mathrm{total}\,(G^R)^\dagger.
+        \end{align}
+  \item \textbf{Self-energy}: compute $\Sigma^{<,>,R}_\mathrm{ph}$
+        from $G^{<,>}$ using Eq.~\eqref{eq:full-energy}.
+  \item \textbf{Mixing}:
+        $\Sigma^{(n+1)} = (1-\alpha)\,\Sigma^{(n)} +
+        \alpha\,\Sigma^\mathrm{new}$, with $\alpha = 0.3$ by default.
+  \item \textbf{Transmission}: Incorrect, change
+  \item \textbf{Convergence check}:
+        \begin{equation}
+          \frac{\sum_n |\mathcal{T}^{(k)}_n - \mathcal{T}^{(k-1)}_n|}
+               {\sum_n |\mathcal{T}^{(k-1)}_n|}
+          < \mathrm{tol}.
+        \end{equation}
+  \item Repeat from step~2 until converged or maximum iterations
+        reached.
+\end{enumerate}
+
+\subsubsection{Computational cost per iteration}
+
+Per SCBA iteration:
+\begin{itemize}
+  \item \textbf{Green's functions}: $N_\perp \times N_\omega$ matrix
+        inversions of size $n_\mathrm{dof}\times n_\mathrm{dof}$, plus
+        Sancho--Rubio evaluations.
+  \item \textbf{Self-energy}:
+        $\mathcal{O}(n_\mathrm{dof}^4 \times N_\omega\log N_\omega)$
+        from the FFT convolution loop.
+  \item \textbf{Transmission}: TODO
+\end{itemize}
+The self-energy step dominates for large $n_\mathrm{dof}$.
+
+
+% ----------------------------------------------------------------------
+\subsection{Anharmonic Results and Validation}
+\label{sec:anharmonic_results}
+% ----------------------------------------------------------------------
+
+\subsubsection{Test configuration}
+
+Silicon, 8-atom conventional cell, $a = 5.4662$\,\AA; harmonic FC
+from phonopy (QE, $2\times2\times2$ supercell); FC3 from
+\texttt{thirdorder.py} (2-atom FCC cell, 422 blocks), remapped to the
+conventional cell.  Transport: $z$-direction, 300\,K, 51 frequency
+points from 0.5 to 15.0\,THz, mixing $\alpha = 0.3$, FC3 only keeping
+transport slab contribution (see \cref{sec:assembly_fc3})
+
+\begin{table}[h]
+\centering
+\caption{Self-energy magnitude and thermal conductance as a function
+of the transverse $q$-mesh.}
+\label{tab:scaling_anh}
+\begin{tabular}{cccccc}
+  \toprule
+  $q$-mesh & $N_\perp$ &
+    $|\Sigma^R|_\mathrm{max}/|H_{00}|_\mathrm{max}$ &
+    SCBA iter &
+    $G_\mathrm{ball}$ &
+    $G_\mathrm{anh}$ \\
+  & & & & [MW/(m$^2$K)] & [MW/(m$^2$K)] \\
+  \midrule
+  $2\times2$ & 4  & 0.49 & 11 & 1096 &  913 \\
+  $4\times4$ & 16 & 0.20 &  8 & 1162 & 1005 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsubsection{Transmission}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{fig/reference/anharmonic_test.png}
+  \caption{Left: ballistic (blue) and anharmonic SCBA (red dashed)
+    phonon transmission for bulk Si at 300\,K ($4\times4$ $q$-mesh,
+    51 frequency points).
+    Right: transmission ratio
+    $\mathcal{T}_\mathrm{anh}/\mathcal{T}_\mathrm{ball}$. (Wrong cause wrong formula)}
+  \label{fig:transmission}
+\end{figure}
+
+Acoustic modes ($<$6~THz): transmission ratio $\approx 1.0$;
+few available decay channels because conservation of energy limits
+the phase space for $\omega\to\omega'+\omega''$.  Optical modes
+(10--15~THz): ratio $\approx 0.7$--$0.9$; higher phonon density of
+states provides more decay channels.
+
+% ======================================================================
+\section{Solver Architecture and Scaling Analysis}
+\label{sec:scaling_arch}
+% ======================================================================
+
+Notation follows~\cite{vetsch_ab-initio_2025}:
+
+\begin{table}[htb]
+\centering
+\begin{tabular}{cl}
+  \toprule
+  Symbol & Description \\
+  \midrule
+  $N_E$                & Number of energy / frequency grid points \\
+  $N_B$                & Number of BTD blocks \\
+  $\widetilde{N}_{BS}$ & Size of one BTD block (DOFs per transport cell) \\
+  $N_{AO}$             & Total matrix dimension ($= N_B\times\widetilde{N}_{BS}$) \\
+  $N_k$                & Number of transverse $k$-points ($=\prod_i k_i$ for $k_i>1$) \\
+  $r_\mathrm{cut}$     & Interaction cutoff radius (determines sparsity) \\
+  $N_\mathrm{nnz}$     & Non-zero elements per matrix \\
+  $P_S$                & Number of spatial domain partitions (nested dissection) \\
+  $P$                  & Total MPI ranks (GPUs) \\
+  $N_\mathrm{iter}$    & Number of SCBA iterations \\
+  \bottomrule
+\end{tabular}
+\caption{Notation.}
+\label{tab:notation}
+\end{table}
+
+
+% ----------------------------------------------------------------------
+\subsection{Data Distribution Model}
+\label{sec:data_distribution}
+% ----------------------------------------------------------------------
+
+quatrex uses a two-level MPI communicator hierarchy
+(\texttt{QuatrexCommunicator} in \\\texttt{qttools/comm/comm.py}):
+\begin{itemize}
+  \item \textbf{Stack communicator} (\texttt{comm.stack}): distributes
+        the energy$\times k$-point grid across ranks.  Each rank owns a
+        contiguous slice of $N_E\times N_k$ stack entries; operations at
+        different energies and $k$-points are embarrassingly parallel.
+  \item \textbf{Block communicator} (\texttt{comm.block}): distributes
+        the spatial BTD blocks across ranks within each stack group,
+        enabling the distributed RGF algorithm (nested-dissection
+        spatial domain decomposition) of~\cite{vetsch_ab-initio_2025}.
+\end{itemize}
+
+\paragraph{DSDBSparse data structure.}
+All Green's functions, self-energies, dynamical matrices, and screened
+interactions are stored as \texttt{DSDBSparse} (Distributed Stack of
+Distributed Block-accessible Sparse) matrices.  Each matrix has shape
+\\$(n_{E,\text{local}}, n_{k_1},\ldots)\times(N_{AO}\times N_{AO})$,
+but only the non-zero entries within the BTD band are stored:
+$N_\mathrm{nnz} = \mathcal{O}(r_\mathrm{cut}\,\widetilde{N}_{BS}\,N_{AO})$.
+
+A DSDBSparse matrix exists in one of two states, toggled by
+\texttt{dtranspose()}:
+\begin{enumerate}
+  \item \textbf{Stack-distributed} (default): each rank holds all
+        $N_\mathrm{nnz}$ entries for its local stack slice.  Used
+        during OBC computation and RGF.
+  \item \textbf{NNZ-distributed}: each rank holds all $N_E N_k$ stack
+        entries for its local subset of $(i,j)$ non-zero pairs.  Used
+        during energy convolutions.
+\end{enumerate}
+When symmetry is enabled (\texttt{symmetry=True}), only the upper
+triangle is stored, halving both memory and communication.  The
+transposition all-to-all costs
+$\mathcal{O}(N_E N_k\,r_\mathrm{cut}\,\widetilde{N}_{BS}\,N_{AO})$
+bytes.
+
+
+% ----------------------------------------------------------------------
+\subsection{Component-Wise Scaling}
+\label{sec:component_scaling}
+% ----------------------------------------------------------------------
+
+\subsubsection{System matrix assembly}
+
+For each local stack entry the system matrix is assembled as
+\begin{equation}
+  \widetilde{M}(\omega^2) = (\omega^2 + i\eta)\,\mathbb{I} - D - \Sigma^R_\mathrm{scatt},
+\end{equation}
+involving element-wise subtraction on the BTD, touching
+$\mathcal{O}(N_B\,\widetilde{N}_{BS}^2)$ elements per stack entry.
+
+\subsubsection{Open boundary conditions}
+
+OBC is computed at both contacts for each stack entry.
+
+\paragraph{Sancho--Rubio}: iterations involving three
+$\widetilde{N}_{BS}\times\widetilde{N}_{BS}$ matrix multiplications
+and one inversion.  Computation:
+$\mathcal{O}(N_E N_k\,N_\mathrm{SR}\,\widetilde{N}_{BS}^3)$; memory:
+$\mathcal{O}(N_E N_k\,\widetilde{N}_{BS}^2)$; no communication (each
+contact computed only on the boundary rank).
+
+\paragraph{Spectral / Beyn}: solves a polynomial
+eigenvalue problem of size $N_U\widetilde{N}_{BS}$ (where $N_U$ is the
+number of block sections) via a contour integral. \\ Computation:
+$\mathcal{O}(N_E N_k\,N_\mathrm{quad}\,(N_U\widetilde{N}_{BS})^3)$;
+memory: $\mathcal{O}(N_E N_k\,(N_U\widetilde{N}_{BS})^2)$; no
+communication.
+
+\subsubsection{RGF selected solve}
+
+The forward sweep computes $N_B$ Schur complements; the backward
+sweep computes $N_B$ matrix multiplications.  Each involves
+$\widetilde{N}_{BS}\times\widetilde{N}_{BS}$ dense matrices.  For
+$P_S = 1$: computation
+$\mathcal{O}(N_E N_k\,N_B\,\widetilde{N}_{BS}^3)$.  For distributed
+RGF ($P_S > 1$), the nested-dissection scheme splits the BTD matrix
+into $P_S$ spatial partitions; a reduced system of size
+$P_S\,\widetilde{N}_{BS}$ must be solved between the forward and
+backward passes:
+\begin{equation}
+  \text{Computation: }
+  \mathcal{O}\!\left(N_E N_k\!\left(\frac{N_B}{P_S} + P_S\right)\widetilde{N}_{BS}^3\right).
+\end{equation}
+Communication cost is $\mathcal{O}(N_E(P_S-1)\widetilde{N}_{BS}^2)$
+(reduced system only).
+
+\subsubsection{Energy convolutions}
+
+For GW, the scattering self-energies and polarization are computed via FFT
+energy convolutions.  In the nnz-distributed state, the full energy
+spectrum for each $(i,j)$ non-zero entry is local, enabling an
+in-place FFT:
+\begin{equation}
+  \text{Computation: }
+  \mathcal{O}\!\left(N_E\log N_E \cdot N_k \cdot \frac{r_\mathrm{cut}\,
+  \widetilde{N}_{BS}\,N_{AO}}{P}\right).
+\end{equation}
+When transverse $k$-points are present the FFT is multi-dimensional
+(over both energy and $k$-axes), costing
+$\mathcal{O}(N_E N_k\log(N_E N_k)\cdot N_\mathrm{nnz,local})$.
+
+The retarded self-energy $\Sigma^R$ is obtained from $\Sigma^>-\Sigma^<$
+via a Hilbert transform, implemented as additional FFT convolutions with
+a $1/E$ kernel, doubling the FFT cost for each retarded component.
+
+On GPUs, memory for FFT buffers is dynamically batched: the code
+estimates available device memory, computes a batch size, and processes
+$(i,j)$ entries in batches to avoid OOM.
+
+
+\subsubsection{Summary table}
+
+\begin{table}[htb]
+\centering
+\footnotesize
+\begin{tabular}{lllc}
+  \toprule
+  Component & Computation & Memory (per rank) & Comm. \\
+  \midrule
+  OBC (Sancho--Rubio) &
+    $N_E N_k\,\widetilde{N}_{BS}^3$ &
+    $N_E N_k\,\widetilde{N}_{BS}^2$ & --- \\
+  G-assembly &
+    $N_E N_k\,N_B\,\widetilde{N}_{BS}^2$ &
+    $N_E N_k\,N_\mathrm{nnz}$ & --- \\
+  RGF ($P_S=1$) &
+    $N_E N_k\,N_B\,\widetilde{N}_{BS}^3$ &
+    $N_E N_k\,N_B\,\widetilde{N}_{BS}^2$ & --- \\
+  RGF ($P_S>1$) &
+    $N_E N_k(N_B/P_S+P_S)\widetilde{N}_{BS}^3$ &
+    $N_E N_k(N_B+P_S)\widetilde{N}_{BS}^2$ &
+    $N_E P_S\widetilde{N}_{BS}^2$ \\
+  W-assembly &
+    $N_E N_k\,N_{AO}\,P_{BW}^2$ &
+    $N_E N_k\,N_\mathrm{nnz}$ & halo \\
+  FFT convolution &
+    $N_E N_k\,N_\mathrm{nnz}\,\log N_E$ &
+    $N_E N_k\,N_\mathrm{nnz}$ & --- \\
+  All-to-all transpose &
+    $N_E N_k\,N_\mathrm{nnz}$ &
+    $N_E N_k\,N_\mathrm{nnz}$ &
+    $N_E N_k\,N_\mathrm{nnz}$ \\
+  \bottomrule
+\end{tabular}
+\caption{Scaling per SCBA iteration.  Prefactors and $P$-dependent
+  divisors are omitted.  Memory in units of $16\,\text{bytes}\times$
+  count (complex128).  The dominant terms for large devices are the
+  RGF (cubic in block size) and the all-to-all transposition
+  (communication-bound).}
+\label{tab:scaling_summary}
+\end{table}
+
+
+% ----------------------------------------------------------------------
+\subsection{Memory Scaling}
+\label{sec:memory}
+% ----------------------------------------------------------------------
+
+Each DSDBSparse matrix stores $N_\mathrm{nnz}$ complex-128 values per
+stack entry:
+$\text{Memory per matrix} = 16\,n_\mathrm{stack}\,N_\mathrm{nnz}$~bytes.
+
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  Subsystem & Matrices & Count \\
+  \midrule
+  Electron (G-solver) &
+    $G^<,G^>,G^R$; $\Sigma^{<,>,R}$;
+    $\Sigma^{<,>,R}_\mathrm{prev}$; system matrix; $D$
+    & 11 \\
+  Coulomb screening (W-solver) &
+    $P^<,P^>,P^R$; $W^{<,>}$; system; $L^{<,>}$; $V$
+    & 9 \\
+  Phonon ballistic (D-solver) &
+    $G^<,G^>,G^R$; system matrix; $D$
+    & 5 \\
+  Combined peak (NEGF+scGW) & $\sim$14 & \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ----------------------------------------------------------------------
+\subsection{Anharmonic Scaling and Resource Estimates}
+\label{sec:phph_scaling}
+% ----------------------------------------------------------------------
+
+\subsubsection{Computational complexity of the self-energy}
+
+Breaking down Eq.~\eqref{eq:sigma_phph}:
+
+\paragraph{Frequency convolution (inner loop).}
+The $\int d\omega'$ integral is an energy convolution of two Green's
+functions, $G(\omega')\otimes G(\omega-\omega')$.  This is evaluated
+via FFT in $\mathcal{O}(N_\omega\log N_\omega)$ per $(i,j)$ entry per
+$\vc{q}'_\perp$.
+
+\paragraph{$\vc{q}'_\perp$ summation (outer loop).}
+For each target $\vc{q}_\perp$, the sum over $\vc{q}'_\perp$ involves
+$N_k$ terms.  Because the two Green's function arguments are
+$\vc{q}'_\perp$ and $\vc{q}_\perp-\vc{q}'_\perp$, this is a
+transverse-momentum convolution:
+\begin{equation}
+  \sum_{\vc{q}'_\perp}
+  X(\vc{q}'_\perp)\,Y(\vc{q}_\perp - \vc{q}'_\perp)
+  = \mathrm{IFFT}\bigl[\mathrm{FFT}[X]\cdot\mathrm{FFT}[Y]\bigr](\vc{q}_\perp).
+\end{equation}
+The multi-dimensional FFT already implemented in quatrex's
+\texttt{fft\_convolve\_kpoints} takes the FFT jointly over
+$(\omega, q_y, q_z)$ axes, converting both the energy convolution
+\emph{and} the $\vc{q}$-summation into
+$\mathcal{O}(N_\omega N_k\log(N_\omega N_k))$ per $(i,j)$ entry.
+
+\paragraph{FC3 weighting.}
+The FC3 tensor $\tilde{\Phi}^{(3)}$ appears as a pre- and post-factor
+that contracts internal indices $(j_1,j_2,l_1,l_2)$ with the product
+of Green's functions.  In Approximation~(III) of \cite{guo_quantum_2020} (diagonal blocks
+only) the contraction involves $\mathcal{O}(N_s^2)$ index pairs per
+$(l,l')$ slab pair.
+
+\paragraph{Total operation count.}
+\begin{equation}\label{eq:phph_cost}
+  C_\Pi = \mathcal{O}\!\left(
+    N_\mathrm{nnz} \times N_\omega\,N_k\,\log(N_\omega N_k)
+  \right),
+\end{equation}
+where $N_\mathrm{nnz}^{(\Pi)} \approx N_d\times N_s^2$ (diagonal
+blocks only, Approximation~III) or $\approx 3N_d N_s^2$ (full BTD).
+\cite{guo_quantum_2020} show that the full BTD structure is needed for quantitative
+accuracy (8--12\% error with diagonal-only; divergence with the even
+simpler $3\times3$ diagonal approximation).
+
+\subsubsection{Comparison with GW polarization}
+
+The phonon--phonon self-energy has the same mathematical structure as
+the GW polarization $P = G\cdot G$, and in quatrex's
+\texttt{PCoulombScreening.compute()} an identical FFT-based convolution
+is already performed.  Differences:
+\begin{enumerate}
+  \item \textbf{FC3 weighting}: the phonon self-energy is a
+        ``sandwiched'' convolution
+        $\Phi^{(3)}\cdot(G\otimes G)\cdot\Phi^{(3)}$, requiring
+        contraction with the anharmonic tensor before and after the FFT.
+  \item \textbf{Grid size}: the phonon frequency grid
+        ($N_\omega\sim$100--200) is smaller than typical electronic
+        energy grids ($N_E\sim$1000--5000), but the $q$-mesh is denser
+        ($6\times6$ to $20\times20$ vs.\ often $1\times1$ or $3\times3$
+        for electrons).
+  \item \textbf{Block size}: phonon DOFs are 3 per atom (vs.\
+        $\mathcal{O}(10)$ orbitals/atom for electrons), giving smaller
+        $\widetilde{N}_{BS}$ but the same $N_B$ scaling.
+\end{enumerate}
+
+For ballistic transport, doubling the $q$-mesh from $n\times n$ to
+$2n\times 2n$ increases $N_k$ by $4\times$ and the total cost scales
+as $\mathcal{O}(N_k)$. For anharmonic transport the self-energy's $q$-convolution
+couples all wavevectors, so cost scales as $\mathcal{O}(N_k\log N_k)$
+per entry \emph{and} the FC3 storage grows as $\mathcal{O}(N_k^2)$
+(from the second wavevector dependence).  Concretely, the FC3 storage
+per rank is
+\begin{equation}\label{eq:fc3_mem}
+  M_{\Phi^{(3)}} \approx N_k \times N_\mathrm{trip} \times 16\;\text{bytes},
+\end{equation}
+where $N_\mathrm{trip}$ is the number of non-zero triplet elements per
+wavevector.
+
+\subsubsection{Resource estimates}
+
+\paragraph{Si thin film (\cite{guo_quantum_2020}).}
+8 atoms/cell ($N_s = 24$), $N_d = 20$, $6\times6$ mesh
+($N_k = 36$), $N_\omega = 101$.  Stack size: 3\,636.
+$N_\mathrm{nnz} \approx 20\times576\times3 = 34\,560$.
+Memory per matrix: $16\times3\,636\times34\,560 = 2.0$\,GB.
+Broken down by type:
+\begin{itemize}
+  \item $G^<, G^>, G^R$ (3 matrices): $3\times2.0 = 6.0$\,GB.
+  \item $\Sigma^<, \Sigma^>, \Sigma^R$ + three previous-iteration copies
+        (6 matrices): $6\times2.0 = 12.0$\,GB.
+  \item System matrix + dynamical matrix (2 matrices): $2\times2.0 =
+        4.0$\,GB.
+  \item Total DSDBSparse (11 matrices): $\sim$\textbf{22\,GB}.
+  \item FFT buffers (padded to $2N_\omega\times N_k$,
+        $\sim1.5\times$ above): $\sim$\textbf{5\,GB} temporary.
+  \item Total $\sim$\textbf{27\,GB per rank}.
+\end{itemize}
+
+Same geometry, $N_k = 400$.  Stack size: 40\,400.
+Memory per matrix: 22.4\,GB; 11 matrices: $\sim$246\,GB
