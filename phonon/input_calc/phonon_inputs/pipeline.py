@@ -110,11 +110,13 @@ def run_pipeline(
         print(f"  FC calculator: {tc.fc_calculator}")
         print("=" * 60)
 
+        dft_config = config.vasp if tc.calculator == "vasp" else config.qe
         fc3_path = generate_fc3(
-            cell, fc_dir, config.qe, supercell,
+            cell, fc_dir, dft_config, supercell,
             cutoff_pair_distance=tc.cutoff_pair_distance,
             distance=tc.displacement_distance,
             fc_calculator=tc.fc_calculator,
+            calculator=tc.calculator,
         )
 
     print(f"\n  FC2 + FC3 saved to: {fc3_path}")
