@@ -408,6 +408,50 @@ def _needs_shell(command: str) -> bool:
     return any(tok in command for tok in ("=", "|", ">", "<", ";", "&&"))
 
 
+def _run_and_tee(cmd, log_path: Path, cwd: str, timeout: int,
+                 use_shell: bool) -> int:
+    """Run a command, streaming stdout/stderr to both terminal and log file.
+
+    Returns the process exit code.
+    """
+    import select
+    import time
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w") as log_f:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            shell=use_shell,
+        )
+        t0 = time.monotonic()
+        fds = {proc.stdout.fileno(): ("stdout", proc.stdout, sys.stdout),
+               proc.stderr.fileno(): ("stderr", proc.stderr, sys.stderr)}
+        while fds:
+            elapsed = time.monotonic() - t0
+            if elapsed > timeout:
+                proc.kill()
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            remaining = max(0.1, timeout - elapsed)
+            ready, _, _ = select.select(list(fds.keys()), [], [],
+                                        min(remaining, 1.0))
+            for fd in ready:
+                label, pipe, tty = fds[fd]
+                data = pipe.read1(8192) if hasattr(pipe, "read1") else pipe.read(8192)
+                if not data:
+                    fds.pop(fd)
+                    continue
+                text = data.decode(errors="replace")
+                log_f.write(text)
+                log_f.flush()
+                tty.write(text)
+                tty.flush()
+        proc.wait()
+    return proc.returncode
+
+
 def run_displacements(
     work_dir: Path,
     dft_command: str = "pw.x",
@@ -415,6 +459,8 @@ def run_displacements(
     calculator: str = "qe",
 ) -> None:
     """Run DFT for each displacement.
+
+    Output is streamed live to the terminal and saved to a log file.
 
     Parameters
     ----------
@@ -451,20 +497,11 @@ def run_displacements(
                 cmd = f"{dft_command} -in {inp_file.name}"
             else:
                 cmd = shlex.split(dft_command) + ["-in", inp_file.name]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                cwd=str(work_dir), timeout=timeout, shell=use_shell,
-            )
-            with open(out_file, "w") as f:
-                f.write(result.stdout)
-                if result.stderr:
-                    f.write("\n\n===== STDERR =====\n")
-                    f.write(result.stderr)
 
-            if result.returncode != 0 or "JOB DONE" not in result.stdout:
-                print(f"  ERROR: {inp_file.name} failed")
-                if result.stderr:
-                    print(f"  stderr: {result.stderr[-500:]}")
+            rc = _run_and_tee(cmd, out_file, str(work_dir), timeout, use_shell)
+
+            if rc != 0 or not _is_qe_done(out_file):
+                print(f"  ERROR: {inp_file.name} failed (exit {rc})")
                 raise RuntimeError(f"QE displacement {inp_file.name} failed")
 
     elif calculator == "vasp":
@@ -486,23 +523,12 @@ def run_displacements(
                 cmd = dft_command
             else:
                 cmd = shlex.split(dft_command)
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                cwd=str(disp_dir), timeout=timeout, shell=use_shell,
-            )
 
-            # Write stdout/stderr log
             log_file = disp_dir / "vasp.log"
-            with open(log_file, "w") as f:
-                f.write(result.stdout)
-                if result.stderr:
-                    f.write("\n\n===== STDERR =====\n")
-                    f.write(result.stderr)
+            rc = _run_and_tee(cmd, log_file, str(disp_dir), timeout, use_shell)
 
-            if result.returncode != 0 or not _is_vasp_done(disp_dir):
-                print(f"  ERROR: {disp_dir.name} failed (exit {result.returncode})")
-                if result.stderr:
-                    print(f"  stderr: {result.stderr[-500:]}")
+            if rc != 0 or not _is_vasp_done(disp_dir):
+                print(f"  ERROR: {disp_dir.name} failed (exit {rc})")
                 raise RuntimeError(f"VASP displacement {disp_dir.name} failed")
     else:
         raise ValueError(f"Unknown calculator: {calculator!r}")
