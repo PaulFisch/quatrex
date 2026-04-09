@@ -35,7 +35,7 @@ vasp:
   lwave: false                    # don't write WAVECAR (saves disk)
   lcharg: false                   # don't write CHGCAR
   kpoints_scf: [4, 4, 4]         # for 3x3x3 supercell — Gamma-centered 4x4x4
-  vasp_command: "LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/ mpirun -np 26 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+  vasp_command: "export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; mpirun -np 26 -x LD_LIBRARY_PATH /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
 
 thirdorder:
   supercell: [3, 3, 3]           # 54 atoms — good FC3 convergence for Si
