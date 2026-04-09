@@ -40,12 +40,12 @@ relax:
   calculation: vc-relax
   forc_conv_thr: 1.0e-4        # Ry/bohr
   press_conv_thr: 0.5          # kbar
-  work_dir: ./relax
+  work_dir: ./relax_large
 
 thirdorder:
   supercell: [3, 3, 3]
   cutoff_pair_distance: 8     # ~2nd nearest neighbor distance in Angstrom
   displacement_distance: 0.01
   fc_calculator: symfc
-  work_dir: ./fc3_prim_high
+  work_dir: ./fc3_prim_large
   pw_timeout: 36000
