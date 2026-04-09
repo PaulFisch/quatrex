@@ -1,13 +1,17 @@
-"""Force constant generation via phono3py + symfc + QE.
+"""Force constant generation via phono3py + symfc + DFT (QE or VASP).
 
 Replaces the previous thirdorder_espresso.py workflow with phono3py for
 displacement generation and symfc for efficient FC3 (and optionally FC2)
 production.
 
+Supported DFT calculators:
+  - "qe":   Quantum ESPRESSO pw.x
+  - "vasp": VASP (vasp_std / vasp_gam / ...)
+
 Workflow:
-    1. sow:  Create phono3py object, generate displacements, write QE inputs
-    2. run:  Execute QE pw.x for each displaced supercell
-    3. reap: Read forces from QE outputs, produce FC3 via symfc
+    1. sow:  Create phono3py object, generate displacements, write DFT inputs
+    2. run:  Execute DFT for each displaced supercell
+    3. reap: Read forces from DFT outputs, produce FC3 via symfc
     4. save: Write fc3.hdf5 and phono3py_disp.yaml
 
 Usage via CLI:
@@ -25,7 +29,12 @@ import numpy as np
 from phonopy.structure.atoms import PhonopyAtoms
 
 import shlex
-from .config import QEConfig
+from .config import QEConfig, VASPConfig
+
+
+# ========================================================================
+# QE input / output
+# ========================================================================
 
 
 def _write_qe_input(
@@ -36,28 +45,11 @@ def _write_qe_input(
     qe_config: QEConfig,
     prefix: str = "fc3_disp",
 ) -> None:
-    """Write a QE pw.x SCF input file.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    cell : (3, 3) array
-        Lattice vectors in Angstrom (rows).
-    symbols : list of str
-        Atomic symbols.
-    positions_cart : (N, 3) array
-        Cartesian positions in Angstrom.
-    qe_config : QEConfig
-        QE parameters.
-    prefix : str
-        QE prefix for output files.
-    """
+    """Write a QE pw.x SCF input file."""
     unique_species = list(dict.fromkeys(symbols))
     natoms = len(symbols)
     ecutrho = qe_config.ecutwfc * qe_config.ecutrho_factor
 
-    # Collect masses from PhonopyAtoms standard values
     from phonopy.structure.atoms import atom_data
     masses = {}
     for sym in unique_species:
@@ -109,171 +101,10 @@ def _write_qe_input(
         f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}  0 0 0\n")
 
 
-def sow(
-    cell: PhonopyAtoms,
-    work_dir: Path,
-    qe_config: QEConfig,
-    supercell: tuple[int, int, int] = (2, 2, 2),
-    cutoff_pair_distance: float | None = None,
-    distance: float = 0.03,
-    is_plusminus: bool = True,
-) -> int:
-    """Generate phono3py displaced supercells and write QE inputs.
-
-    Parameters
-    ----------
-    cell : PhonopyAtoms
-        Unit cell.
-    work_dir : Path
-        Working directory (created if needed).
-    qe_config : QEConfig
-        QE parameters.
-    supercell : tuple of int
-        Supercell dimensions.
-    cutoff_pair_distance : float, optional
-        Cutoff distance for FC3 atom pairs in Angstrom.
-        None = no cutoff (all pairs). Reduces displacement count.
-    distance : float
-        Displacement amplitude in Angstrom (default 0.03).
-    is_plusminus : bool
-        Use +/- displacements for better accuracy.
-
-    Returns
-    -------
-    n_disp : int
-        Number of displacement files generated.
-    """
-    from phono3py import Phono3py
-
-    work_dir = Path(work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    sc_matrix = np.diag(supercell)
-    ph3 = Phono3py(cell, supercell_matrix=sc_matrix)
-    ph3.generate_displacements(
-        distance=distance,
-        cutoff_pair_distance=cutoff_pair_distance,
-        is_plusminus=is_plusminus,
-    )
-
-    # Save phono3py state for reaping later
-    ph3.save(work_dir / "phono3py_disp.yaml")
-
-    supercells = ph3.supercells_with_displacements
-    n_disp = len(supercells)
-    sc_cell = ph3.supercell.cell
-
-    print(f"Generated {n_disp} displacements (phono3py)")
-    print(f"  Unit cell: {len(cell.symbols)} atoms")
-    print(f"  Supercell: {supercell}, {len(ph3.supercell.symbols)} atoms")
-    if cutoff_pair_distance is not None:
-        print(f"  Pair cutoff: {cutoff_pair_distance:.1f} A")
-
-    # Resolve pseudo_dir relative to work_dir
-    pseudo_dir_abs = Path(qe_config.pseudo_dir).resolve()
-    try:
-        pseudo_dir_rel = pseudo_dir_abs.relative_to(work_dir.resolve())
-    except ValueError:
-        pseudo_dir_rel = pseudo_dir_abs
-    # Create a modified config with resolved pseudo path
-    from dataclasses import replace
-    qe_local = replace(qe_config, pseudo_dir=str(pseudo_dir_rel))
-
-    # Write QE inputs
-    (work_dir / "results").mkdir(exist_ok=True)
-
-    for i, sc in enumerate(supercells):
-        if sc is None:
-            continue
-        inp_path = work_dir / f"disp-{i+1:05d}.in"
-        _write_qe_input(
-            inp_path, sc_cell, list(sc.symbols), sc.positions, qe_local,
-            prefix=f"fc3_{i+1:05d}",
-        )
-
-    print(f"Wrote {n_disp} QE input files in {work_dir}")
-    return n_disp
-
-
-def run_displacements(
-    work_dir: Path,
-    pw_command: str = "pw.x",
-    timeout: int = 3600,
-    n_parallel: int = 1,
-) -> None:
-    """Run QE pw.x for each displacement.
-
-    Parameters
-    ----------
-    work_dir : Path
-        Directory containing disp-*.in files.
-    pw_command : str
-        Command to invoke pw.x.
-    timeout : int
-        Timeout per job in seconds.
-    n_parallel : int
-        Number of parallel QE jobs (future use, currently sequential).
-    """
-    work_dir = Path(work_dir)
-    inp_files = sorted(work_dir.glob("disp-*.in"))
-    n_disp = len(inp_files)
-
-    if n_disp == 0:
-        raise FileNotFoundError("No displacement input files found. Run sow first.")
-
-    print(f"Running {n_disp} QE displacements...")
-
-    for i, inp_file in enumerate(inp_files):
-        out_file = inp_file.with_suffix(".out")
-
-        if out_file.exists():
-            with open(out_file) as f:
-                if "JOB DONE" in f.read():
-                    print(f"  [{i + 1}/{n_disp}] Skipping (done)")
-                    continue
-
-        print(f"  [{i + 1}/{n_disp}] Running {inp_file.name}...")
-
-        cmd = shlex.split(pw_command) + ["-in", inp_file.name]
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(work_dir),
-            timeout=timeout,
-        )
-
-        with open(out_file, "w") as f:
-            f.write(result.stdout)
-            if result.stderr:
-                f.write("\n\n===== STDERR =====\n")
-                f.write(result.stderr)
-
-        if result.returncode != 0 or "JOB DONE" not in result.stdout:
-            print(f"  ERROR: {inp_file.name} failed")
-            print(f"  Command: {' '.join(cmd)}")
-            if result.stderr:
-                print(f"  stderr: {result.stderr[-500:]}")
-            raise RuntimeError(f"QE displacement {inp_file.name} failed")
-    print(f"\nAll {n_disp} displacements completed.")
-
-
 def _parse_qe_forces(output_path: Path, n_atoms: int) -> np.ndarray:
     """Parse forces from QE output file.
 
     QE outputs forces in Ry/bohr. Converts to eV/Angstrom.
-
-    Parameters
-    ----------
-    output_path : Path
-        QE output file.
-    n_atoms : int
-        Expected number of atoms.
-
-    Returns
-    -------
-    forces : (n_atoms, 3) array in eV/Angstrom.
     """
     RY_BOHR_TO_EV_ANG = 25.71104309541616
 
@@ -299,21 +130,404 @@ def _parse_qe_forces(output_path: Path, n_atoms: int) -> np.ndarray:
     return np.array(forces) * RY_BOHR_TO_EV_ANG
 
 
-def reap(
+def _is_qe_done(out_file: Path) -> bool:
+    """Check if a QE output file indicates a completed job."""
+    if not out_file.exists():
+        return False
+    with open(out_file) as f:
+        return "JOB DONE" in f.read()
+
+
+# ========================================================================
+# VASP input / output
+# ========================================================================
+
+
+def _write_vasp_inputs(
+    disp_dir: Path,
+    cell: np.ndarray,
+    symbols: list[str],
+    positions_cart: np.ndarray,
+    vasp_config: VASPConfig,
+) -> None:
+    """Write VASP input files (POSCAR, INCAR, KPOINTS, POTCAR) into disp_dir.
+
+    Parameters
+    ----------
+    disp_dir : Path
+        Directory for this displacement (created if needed).
+    cell : (3, 3) array
+        Lattice vectors in Angstrom (rows).
+    symbols : list of str
+        Atomic symbols per atom.
+    positions_cart : (N, 3) array
+        Cartesian positions in Angstrom.
+    vasp_config : VASPConfig
+        VASP parameters.
+    """
+    disp_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- POSCAR ---
+    # Group atoms by species, preserving order of first appearance
+    unique_species = list(dict.fromkeys(symbols))
+    species_counts = [symbols.count(sp) for sp in unique_species]
+    # Reorder atoms: group by species
+    sorted_indices = []
+    for sp in unique_species:
+        sorted_indices.extend(i for i, s in enumerate(symbols) if s == sp)
+    sorted_positions = positions_cart[sorted_indices]
+
+    with open(disp_dir / "POSCAR", "w") as f:
+        f.write("phono3py displacement\n")
+        f.write("1.0\n")
+        for v in cell:
+            f.write(f"  {v[0]:20.14f}  {v[1]:20.14f}  {v[2]:20.14f}\n")
+        f.write("  " + "  ".join(unique_species) + "\n")
+        f.write("  " + "  ".join(str(c) for c in species_counts) + "\n")
+        f.write("Cartesian\n")
+        for pos in sorted_positions:
+            f.write(f"  {pos[0]:20.14f}  {pos[1]:20.14f}  {pos[2]:20.14f}\n")
+
+    # Save the atom reordering so we can unsort the forces later
+    np.savetxt(disp_dir / ".atom_order", sorted_indices, fmt="%d")
+
+    # --- INCAR ---
+    with open(disp_dir / "INCAR", "w") as f:
+        f.write(f"PREC = {vasp_config.prec}\n")
+        f.write(f"ENCUT = {vasp_config.encut}\n")
+        f.write(f"EDIFF = {vasp_config.ediff}\n")
+        f.write(f"ISMEAR = {vasp_config.ismear}\n")
+        f.write(f"SIGMA = {vasp_config.sigma}\n")
+        f.write(f"LREAL = {vasp_config.lreal}\n")
+        f.write(f"LWAVE = .{'TRUE' if vasp_config.lwave else 'FALSE'}.\n")
+        f.write(f"LCHARG = .{'TRUE' if vasp_config.lcharg else 'FALSE'}.\n")
+        f.write("IBRION = -1\n")
+        f.write("NSW = 0\n")
+        f.write("ISYM = 0\n")
+
+    # --- KPOINTS ---
+    kpts = vasp_config.kpoints_scf
+    with open(disp_dir / "KPOINTS", "w") as f:
+        f.write("Automatic mesh\n")
+        f.write("0\n")
+        f.write("Gamma\n")
+        f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}\n")
+        f.write("  0 0 0\n")
+
+    # --- POTCAR ---
+    potcar_dir = Path(vasp_config.potcar_dir).resolve()
+    potcar_path = disp_dir / "POTCAR"
+    with open(potcar_path, "w") as potcar_out:
+        for sp in unique_species:
+            # Look up the POTCAR subdirectory for this species
+            subdir = vasp_config.potcar_map.get(sp, sp)
+            pp_path = potcar_dir / subdir / "POTCAR"
+            if not pp_path.exists():
+                # Try without subdirectory (flat layout)
+                pp_path = potcar_dir / f"POTCAR.{sp}"
+            if not pp_path.exists():
+                raise FileNotFoundError(
+                    f"POTCAR for {sp} not found. Tried:\n"
+                    f"  {potcar_dir / subdir / 'POTCAR'}\n"
+                    f"  {potcar_dir / f'POTCAR.{sp}'}\n"
+                    f"Set vasp.potcar_dir and vasp.potcar_map in config."
+                )
+            with open(pp_path) as pp_in:
+                potcar_out.write(pp_in.read())
+
+
+def _parse_vasp_forces(disp_dir: Path, n_atoms: int) -> np.ndarray:
+    """Parse forces from VASP vasprun.xml, restoring the original atom order.
+
+    Returns forces in eV/Angstrom (VASP native units).
+    """
+    import xml.etree.ElementTree as ET
+
+    vasprun = disp_dir / "vasprun.xml"
+    if not vasprun.exists():
+        raise FileNotFoundError(f"vasprun.xml not found in {disp_dir}")
+
+    tree = ET.parse(vasprun)
+    root = tree.getroot()
+
+    # Find the last <varray name="forces"> block
+    forces_elem = None
+    for va in root.iter("varray"):
+        if va.get("name") == "forces":
+            forces_elem = va
+
+    if forces_elem is None:
+        raise ValueError(f"No forces found in {vasprun}")
+
+    forces_sorted = []
+    for v in forces_elem.findall("v"):
+        forces_sorted.append([float(x) for x in v.text.split()])
+
+    forces_sorted = np.array(forces_sorted)
+    if len(forces_sorted) != n_atoms:
+        raise ValueError(
+            f"Expected {n_atoms} atoms in {vasprun}, got {len(forces_sorted)}"
+        )
+
+    # Unsort: POSCAR was written with atoms grouped by species
+    order_file = disp_dir / ".atom_order"
+    if order_file.exists():
+        sorted_indices = np.loadtxt(order_file, dtype=int)
+        forces = np.empty_like(forces_sorted)
+        forces[sorted_indices] = forces_sorted
+    else:
+        forces = forces_sorted
+
+    return forces
+
+
+def _is_vasp_done(disp_dir: Path) -> bool:
+    """Check if VASP completed successfully in disp_dir."""
+    outcar = disp_dir / "OUTCAR"
+    if not outcar.exists():
+        return False
+    # Check for convergence marker in OUTCAR (read tail)
+    with open(outcar, "rb") as f:
+        try:
+            f.seek(-2000, 2)
+        except OSError:
+            f.seek(0)
+        tail = f.read().decode(errors="replace")
+    return "Total CPU time used" in tail
+
+
+# ========================================================================
+# Calculator-agnostic workflow
+# ========================================================================
+
+
+def sow(
+    cell: PhonopyAtoms,
     work_dir: Path,
-    fc_calculator: str = "symfc",
-    symmetrize: bool = True,
-) -> Path:
-    """Read QE forces and produce FC3 (and FC2) via phono3py.
+    dft_config: QEConfig | VASPConfig,
+    supercell: tuple[int, int, int] = (2, 2, 2),
+    cutoff_pair_distance: float | None = None,
+    distance: float = 0.03,
+    is_plusminus: bool = True,
+    calculator: str = "qe",
+) -> int:
+    """Generate phono3py displaced supercells and write DFT inputs.
+
+    Parameters
+    ----------
+    cell : PhonopyAtoms
+        Unit cell.
+    work_dir : Path
+        Working directory (created if needed).
+    dft_config : QEConfig or VASPConfig
+        DFT parameters.
+    supercell : tuple of int
+        Supercell dimensions.
+    cutoff_pair_distance : float, optional
+        Cutoff distance for FC3 atom pairs in Angstrom.
+    distance : float
+        Displacement amplitude in Angstrom.
+    is_plusminus : bool
+        Use +/- displacements for better accuracy.
+    calculator : str
+        "qe" or "vasp".
+
+    Returns
+    -------
+    n_disp : int
+        Number of displacement files generated.
+    """
+    from phono3py import Phono3py
+
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    sc_matrix = np.diag(supercell)
+    ph3 = Phono3py(cell, supercell_matrix=sc_matrix)
+    ph3.generate_displacements(
+        distance=distance,
+        cutoff_pair_distance=cutoff_pair_distance,
+        is_plusminus=is_plusminus,
+    )
+
+    ph3.save(work_dir / "phono3py_disp.yaml")
+
+    supercells = ph3.supercells_with_displacements
+    n_disp = len(supercells)
+    sc_cell = ph3.supercell.cell
+
+    print(f"Generated {n_disp} displacements (phono3py)")
+    print(f"  Unit cell: {len(cell.symbols)} atoms")
+    print(f"  Supercell: {supercell}, {len(ph3.supercell.symbols)} atoms")
+    if cutoff_pair_distance is not None:
+        print(f"  Pair cutoff: {cutoff_pair_distance:.1f} A")
+    print(f"  Calculator: {calculator}")
+
+    if calculator == "qe":
+        assert isinstance(dft_config, QEConfig)
+        # Resolve pseudo_dir relative to work_dir
+        pseudo_dir_abs = Path(dft_config.pseudo_dir).resolve()
+        try:
+            pseudo_dir_rel = pseudo_dir_abs.relative_to(work_dir.resolve())
+        except ValueError:
+            pseudo_dir_rel = pseudo_dir_abs
+        from dataclasses import replace
+        qe_local = replace(dft_config, pseudo_dir=str(pseudo_dir_rel))
+
+        (work_dir / "results").mkdir(exist_ok=True)
+
+        for i, sc in enumerate(supercells):
+            if sc is None:
+                continue
+            inp_path = work_dir / f"disp-{i+1:05d}.in"
+            _write_qe_input(
+                inp_path, sc_cell, list(sc.symbols), sc.positions, qe_local,
+                prefix=f"fc3_{i+1:05d}",
+            )
+        print(f"Wrote {n_disp} QE input files in {work_dir}")
+
+    elif calculator == "vasp":
+        assert isinstance(dft_config, VASPConfig)
+        for i, sc in enumerate(supercells):
+            if sc is None:
+                continue
+            disp_dir = work_dir / f"disp-{i+1:05d}"
+            _write_vasp_inputs(
+                disp_dir, sc_cell, list(sc.symbols), sc.positions, dft_config,
+            )
+        print(f"Wrote {n_disp} VASP displacement directories in {work_dir}")
+
+    else:
+        raise ValueError(f"Unknown calculator: {calculator!r}. Use 'qe' or 'vasp'.")
+
+    return n_disp
+
+
+def _needs_shell(command: str) -> bool:
+    """Check if command needs shell=True (env vars, pipes, redirects)."""
+    return any(tok in command for tok in ("=", "|", ">", "<", ";", "&&"))
+
+
+def run_displacements(
+    work_dir: Path,
+    dft_command: str = "pw.x",
+    timeout: int = 3600,
+    calculator: str = "qe",
+) -> None:
+    """Run DFT for each displacement.
 
     Parameters
     ----------
     work_dir : Path
-        Directory containing phono3py_disp.yaml and disp-*.out files.
+        Directory containing displacement inputs.
+    dft_command : str
+        Command to invoke.  Supports shell syntax including inline
+        environment variables, e.g.
+        ``"LD_LIBRARY_PATH=/opt/lib /path/to/vasp_std"``.
+    timeout : int
+        Timeout per job in seconds.
+    calculator : str
+        "qe" or "vasp".
+    """
+    work_dir = Path(work_dir)
+    use_shell = _needs_shell(dft_command)
+
+    if calculator == "qe":
+        inp_files = sorted(work_dir.glob("disp-*.in"))
+        n_disp = len(inp_files)
+        if n_disp == 0:
+            raise FileNotFoundError("No QE input files found. Run sow first.")
+
+        print(f"Running {n_disp} QE displacements...")
+
+        for i, inp_file in enumerate(inp_files):
+            out_file = inp_file.with_suffix(".out")
+            if _is_qe_done(out_file):
+                print(f"  [{i + 1}/{n_disp}] Skipping (done)")
+                continue
+
+            print(f"  [{i + 1}/{n_disp}] Running {inp_file.name}...")
+            if use_shell:
+                cmd = f"{dft_command} -in {inp_file.name}"
+            else:
+                cmd = shlex.split(dft_command) + ["-in", inp_file.name]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                cwd=str(work_dir), timeout=timeout, shell=use_shell,
+            )
+            with open(out_file, "w") as f:
+                f.write(result.stdout)
+                if result.stderr:
+                    f.write("\n\n===== STDERR =====\n")
+                    f.write(result.stderr)
+
+            if result.returncode != 0 or "JOB DONE" not in result.stdout:
+                print(f"  ERROR: {inp_file.name} failed")
+                if result.stderr:
+                    print(f"  stderr: {result.stderr[-500:]}")
+                raise RuntimeError(f"QE displacement {inp_file.name} failed")
+
+    elif calculator == "vasp":
+        disp_dirs = sorted(work_dir.glob("disp-*/"))
+        disp_dirs = [d for d in disp_dirs if d.is_dir()]
+        n_disp = len(disp_dirs)
+        if n_disp == 0:
+            raise FileNotFoundError("No VASP displacement dirs found. Run sow first.")
+
+        print(f"Running {n_disp} VASP displacements...")
+
+        for i, disp_dir in enumerate(disp_dirs):
+            if _is_vasp_done(disp_dir):
+                print(f"  [{i + 1}/{n_disp}] Skipping {disp_dir.name} (done)")
+                continue
+
+            print(f"  [{i + 1}/{n_disp}] Running {disp_dir.name}...")
+            if use_shell:
+                cmd = dft_command
+            else:
+                cmd = shlex.split(dft_command)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                cwd=str(disp_dir), timeout=timeout, shell=use_shell,
+            )
+
+            # Write stdout/stderr log
+            log_file = disp_dir / "vasp.log"
+            with open(log_file, "w") as f:
+                f.write(result.stdout)
+                if result.stderr:
+                    f.write("\n\n===== STDERR =====\n")
+                    f.write(result.stderr)
+
+            if result.returncode != 0 or not _is_vasp_done(disp_dir):
+                print(f"  ERROR: {disp_dir.name} failed (exit {result.returncode})")
+                if result.stderr:
+                    print(f"  stderr: {result.stderr[-500:]}")
+                raise RuntimeError(f"VASP displacement {disp_dir.name} failed")
+    else:
+        raise ValueError(f"Unknown calculator: {calculator!r}")
+
+    print(f"\nAll {n_disp} displacements completed.")
+
+
+def reap(
+    work_dir: Path,
+    fc_calculator: str = "symfc",
+    symmetrize: bool = True,
+    calculator: str = "qe",
+) -> Path:
+    """Read DFT forces and produce FC3 (and FC2) via phono3py.
+
+    Parameters
+    ----------
+    work_dir : Path
+        Directory containing phono3py_disp.yaml and DFT outputs.
     fc_calculator : str
         FC calculator backend: "symfc" (recommended) or None (ALM/default).
     symmetrize : bool
         Apply symmetrization to force constants.
+    calculator : str
+        "qe" or "vasp".
 
     Returns
     -------
@@ -328,7 +542,6 @@ def reap(
     if not yaml_path.exists():
         raise FileNotFoundError(f"phono3py_disp.yaml not found in {work_dir}")
 
-    # Load the phono3py object (without producing FC yet)
     ph3 = phono3py_load(
         phono3py_yaml=str(yaml_path),
         produce_fc=False,
@@ -338,27 +551,36 @@ def reap(
     n_super = len(ph3.supercell.symbols)
     n_disp = len(ph3.supercells_with_displacements)
 
-    # Read forces from QE outputs
-    print(f"Reading forces from {n_disp} QE output files...")
+    print(f"Reading forces from {n_disp} {calculator.upper()} outputs...")
     force_sets = []
-    for i in range(n_disp):
-        out_file = work_dir / f"disp-{i+1:05d}.out"
-        if not out_file.exists():
-            raise FileNotFoundError(f"Missing: {out_file}")
-        forces = _parse_qe_forces(out_file, n_super)
-        force_sets.append(forces)
+
+    if calculator == "qe":
+        for i in range(n_disp):
+            out_file = work_dir / f"disp-{i+1:05d}.out"
+            if not out_file.exists():
+                raise FileNotFoundError(f"Missing: {out_file}")
+            forces = _parse_qe_forces(out_file, n_super)
+            force_sets.append(forces)
+
+    elif calculator == "vasp":
+        for i in range(n_disp):
+            disp_dir = work_dir / f"disp-{i+1:05d}"
+            if not disp_dir.exists():
+                raise FileNotFoundError(f"Missing: {disp_dir}")
+            forces = _parse_vasp_forces(disp_dir, n_super)
+            force_sets.append(forces)
+    else:
+        raise ValueError(f"Unknown calculator: {calculator!r}")
 
     ph3.forces = np.array(force_sets)
     print(f"  Loaded forces: shape {ph3.forces.shape}")
 
-    # Produce FC3 (and FC2)
     print(f"Producing FC3 via {fc_calculator or 'default'}...")
     ph3.produce_fc3(
         symmetrize_fc3r=symmetrize,
         fc_calculator=fc_calculator,
     )
 
-    # Also produce FC2 for harmonic calculations
     print("Producing FC2...")
     ph3.produce_fc2(
         symmetrize_fc2=symmetrize,
@@ -370,7 +592,6 @@ def reap(
     print(f"  FC3 shape: {fc3.shape}, max: {np.max(np.abs(fc3)):.4e} eV/A^3")
     print(f"  FC2 shape: {fc2.shape}, max: {np.max(np.abs(fc2)):.4e} eV/A^2")
 
-    # Save
     fc3_path = work_dir / "fc3.hdf5"
     import h5py
     with h5py.File(fc3_path, "w") as f:
@@ -378,7 +599,6 @@ def reap(
         f.create_dataset("fc2", data=fc2, compression="gzip")
     print(f"  Saved: {fc3_path} ({fc3_path.stat().st_size / 1e6:.1f} MB)")
 
-    # Also save phono3py yaml with forces
     ph3.save(work_dir / "phono3py_params.yaml")
 
     return fc3_path
@@ -387,12 +607,13 @@ def reap(
 def generate_fc3(
     cell: PhonopyAtoms,
     work_dir: Path,
-    qe_config: QEConfig,
+    dft_config: QEConfig | VASPConfig,
     supercell: tuple[int, int, int] = (2, 2, 2),
     cutoff_pair_distance: float | None = None,
     distance: float = 0.03,
     fc_calculator: str = "symfc",
     skip_existing: bool = True,
+    calculator: str = "qe",
 ) -> Path:
     """Full FC3 pipeline: sow + run + reap.
 
@@ -402,8 +623,8 @@ def generate_fc3(
         Unit cell.
     work_dir : Path
         Working directory.
-    qe_config : QEConfig
-        QE parameters.
+    dft_config : QEConfig or VASPConfig
+        DFT parameters.
     supercell : tuple of int
         Supercell dimensions.
     cutoff_pair_distance : float, optional
@@ -413,13 +634,18 @@ def generate_fc3(
     fc_calculator : str
         "symfc" for symmetry-adapted FC fitting.
     skip_existing : bool
-        Skip completed QE jobs.
+        Skip completed DFT jobs.
+    calculator : str
+        "qe" or "vasp".
 
     Returns
     -------
     fc3_path : Path
         Path to fc3.hdf5.
     """
-    sow(cell, work_dir, qe_config, supercell, cutoff_pair_distance, distance)
-    run_displacements(work_dir, qe_config.pw_command)
-    return reap(work_dir, fc_calculator=fc_calculator)
+    dft_command = (dft_config.pw_command if calculator == "qe"
+                   else dft_config.vasp_command)
+    sow(cell, work_dir, dft_config, supercell, cutoff_pair_distance, distance,
+        calculator=calculator)
+    run_displacements(work_dir, dft_command, calculator=calculator)
+    return reap(work_dir, fc_calculator=fc_calculator, calculator=calculator)
