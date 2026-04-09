@@ -96,8 +96,16 @@ def cmd_extract_blocks(config_path: str) -> None:
     print(f"Wrote quatrex inputs to {out}")
 
 
+def _get_dft_config(config):
+    """Return the DFT config and command for the active calculator."""
+    calc = config.thirdorder.calculator
+    if calc == "vasp":
+        return config.vasp, config.vasp.vasp_command
+    return config.qe, config.qe.pw_command
+
+
 def cmd_fc3_sow(config_path: str) -> None:
-    """Generate phono3py displaced supercells and write QE inputs."""
+    """Generate phono3py displaced supercells and write DFT inputs."""
     from .config import load_config
     from .structure import load_structure
     from .thirdorder import sow
@@ -106,32 +114,36 @@ def cmd_fc3_sow(config_path: str) -> None:
     cell = load_structure(config.structure)
 
     tc = config.thirdorder
+    dft_config, _ = _get_dft_config(config)
     work_dir = Path(config_path).parent / tc.work_dir
     supercell = tuple(tc.supercell)
 
     n_disp = sow(
-        cell, work_dir, config.qe, supercell,
+        cell, work_dir, dft_config, supercell,
         cutoff_pair_distance=tc.cutoff_pair_distance,
         distance=tc.displacement_distance,
+        calculator=tc.calculator,
     )
-    print(f"\n{n_disp} QE input files in {work_dir}")
-    print("Run 'fc3-run' to execute QE, then 'fc3-reap' to produce FC3.")
+    print(f"\n{n_disp} displacement inputs in {work_dir}")
+    print("Run 'fc3-run' to execute DFT, then 'fc3-reap' to produce FC3.")
 
 
 def cmd_fc3_run(config_path: str) -> None:
-    """Run QE for all FC3 displacements."""
+    """Run DFT for all FC3 displacements."""
     from .config import load_config
     from .thirdorder import run_displacements
 
     config = load_config(config_path)
     tc = config.thirdorder
+    _, dft_command = _get_dft_config(config)
     work_dir = Path(config_path).parent / tc.work_dir
 
-    run_displacements(work_dir, config.qe.pw_command, tc.pw_timeout)
+    run_displacements(work_dir, dft_command, tc.pw_timeout,
+                      calculator=tc.calculator)
 
 
 def cmd_fc3_reap(config_path: str) -> None:
-    """Read QE forces and produce FC3 via phono3py + symfc."""
+    """Read DFT forces and produce FC3 via phono3py + symfc."""
     from .config import load_config
     from .thirdorder import reap
 
@@ -139,7 +151,8 @@ def cmd_fc3_reap(config_path: str) -> None:
     tc = config.thirdorder
     work_dir = Path(config_path).parent / tc.work_dir
 
-    fc3_path = reap(work_dir, fc_calculator=tc.fc_calculator)
+    fc3_path = reap(work_dir, fc_calculator=tc.fc_calculator,
+                    calculator=tc.calculator)
     print(f"\nFC3 file: {fc3_path}")
 
 
@@ -153,14 +166,16 @@ def cmd_fc3_all(config_path: str) -> None:
     cell = load_structure(config.structure)
 
     tc = config.thirdorder
+    dft_config, _ = _get_dft_config(config)
     work_dir = Path(config_path).parent / tc.work_dir
     supercell = tuple(tc.supercell)
 
     fc3_path = generate_fc3(
-        cell, work_dir, config.qe, supercell,
+        cell, work_dir, dft_config, supercell,
         cutoff_pair_distance=tc.cutoff_pair_distance,
         distance=tc.displacement_distance,
         fc_calculator=tc.fc_calculator,
+        calculator=tc.calculator,
     )
     print(f"\nFC3 file: {fc3_path}")
 
@@ -304,10 +319,10 @@ def main():
     p_val = sub.add_parser("validate", help="Run validation checks")
     p_val.add_argument("--config", required=True, help="YAML config file")
 
-    p_fc3_sow = sub.add_parser("fc3-sow", help="Generate phono3py displacements + QE inputs")
+    p_fc3_sow = sub.add_parser("fc3-sow", help="Generate phono3py displacements + DFT inputs (QE/VASP)")
     p_fc3_sow.add_argument("--config", required=True, help="YAML config file")
 
-    p_fc3_run = sub.add_parser("fc3-run", help="Run QE for FC3 displacements")
+    p_fc3_run = sub.add_parser("fc3-run", help="Run DFT for FC3 displacements (QE/VASP)")
     p_fc3_run.add_argument("--config", required=True, help="YAML config file")
 
     p_fc3_reap = sub.add_parser("fc3-reap", help="Read forces, produce FC3 via symfc")

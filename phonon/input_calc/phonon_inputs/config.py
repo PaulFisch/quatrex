@@ -47,6 +47,24 @@ class QEConfig:
 
 
 @dataclass
+class VASPConfig:
+    """VASP parameters."""
+
+    potcar_dir: str = "./potcar"
+    potcar_map: dict[str, str] = field(default_factory=dict)
+    encut: float = 500.0
+    ediff: float = 1e-8
+    ismear: int = 0
+    sigma: float = 0.05
+    prec: str = "Accurate"
+    lreal: str = "Auto"
+    lwave: bool = False
+    lcharg: bool = False
+    kpoints_scf: list[int] = field(default_factory=lambda: [4, 4, 4])
+    vasp_command: str = "vasp_std"
+
+
+@dataclass
 class BlockExtractionConfig:
     """IDFT / convention transform settings."""
 
@@ -82,8 +100,9 @@ class ThirdOrderConfig:
     cutoff_pair_distance: float | None = None  # Angstrom; None = all pairs
     displacement_distance: float = 0.03  # Angstrom
     fc_calculator: str = "symfc"  # "symfc" or None
+    calculator: str = "qe"  # "qe" or "vasp"
     work_dir: str = "./fc3"
-    pw_timeout: int = 3600  # seconds per QE job
+    pw_timeout: int = 3600  # seconds per DFT job
 
 
 @dataclass
@@ -127,6 +146,7 @@ class PhononInputConfig:
     structure: StructureConfig = field(default_factory=StructureConfig)
     supercell: SupercellConfig = field(default_factory=SupercellConfig)
     qe: QEConfig = field(default_factory=QEConfig)
+    vasp: VASPConfig = field(default_factory=VASPConfig)
     block_extraction: BlockExtractionConfig = field(
         default_factory=BlockExtractionConfig
     )
