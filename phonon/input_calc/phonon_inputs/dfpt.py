@@ -738,6 +738,64 @@ def run_all(
         run_d3_sparse(work_dir, dfpt_config)
 
 
+def _dfpt_to_phono3py_permutation(
+        cell: PhonopyAtoms,
+        q_mesh: list[int],
+) -> np.ndarray:
+    """Build permutation mapping DFPT supercell atom ordering to phono3py ordering.
+
+    DFPT (q2r.x / mat3R) enumerates supercell atoms as::
+
+        index = (t1*n2*n3 + t2*n3 + t3) * nat + atom
+
+    where t1 is slowest and atom is fastest.  phono3py groups all images of
+    each basis atom together, with a cell enumeration that generally differs.
+
+    Returns
+    -------
+    perm : ndarray of int, shape (n_super,)
+        ``perm[dfpt_idx] = phono3py_idx``.  Use as
+        ``fc2_ph3 = fc2_dfpt[np.ix_(perm, perm)]``.
+    """
+    from phonopy import Phonopy
+
+    n1, n2, n3 = q_mesh
+    nat = len(cell.symbols)
+    sc_matrix = np.diag(q_mesh)
+
+    phonon = Phonopy(cell, supercell_matrix=sc_matrix, primitive_matrix=np.eye(3))
+    sc = phonon.supercell
+
+    # Build Cartesian positions in DFPT ordering
+    uc_frac = cell.scaled_positions
+    dfpt_cart = np.empty((n1 * n2 * n3 * nat, 3))
+    idx = 0
+    for t1 in range(n1):
+        for t2 in range(n2):
+            for t3 in range(n3):
+                for a in range(nat):
+                    frac_sc = (uc_frac[a] + [t1, t2, t3]) / [n1, n2, n3]
+                    dfpt_cart[idx] = frac_sc @ sc.cell
+                    idx += 1
+
+    # Match each DFPT atom to the nearest phono3py supercell atom
+    perm = np.empty(len(dfpt_cart), dtype=int)
+    for d in range(len(dfpt_cart)):
+        dists = np.linalg.norm(sc.positions - dfpt_cart[d], axis=1)
+        best = np.argmin(dists)
+        if dists[best] > 1e-3:
+            raise RuntimeError(
+                f"DFPT atom {d} at {dfpt_cart[d]} has no phono3py match "
+                f"(nearest dist={dists[best]:.4e})"
+            )
+        perm[d] = best
+
+    if len(set(perm)) != len(perm):
+        raise RuntimeError("DFPT-to-phono3py mapping is not one-to-one")
+
+    return perm
+
+
 def reap(
         work_dir: Path,
         cell: PhonopyAtoms,
@@ -765,6 +823,18 @@ def reap(
         raise FileNotFoundError("No FC3 file found: expected mat3R, mat3R.asr, or mat3R.asr.sparse")
     print("Parsing FC3 from d3_qq2rr.x output...")
     fc3 = _parse_mat3r_fc3(mat3r_file, nat, q_mesh)
+
+    # Reorder from DFPT supercell atom ordering to phono3py ordering
+    perm = _dfpt_to_phono3py_permutation(cell, q_mesh)
+    fc2 = fc2[np.ix_(perm, perm)]
+    fc3 = fc3[:, perm][:, :, perm]
+    print("  Reordered FC2/FC3 from DFPT to phono3py atom ordering")
+
+    # Enforce acoustic sum rule on FC2
+    for i in range(fc2.shape[0]):
+        fc2[i, i] -= np.sum(fc2[i], axis=0)
+    asr_check = max(np.max(np.abs(np.sum(fc2[i], axis=0))) for i in range(fc2.shape[0]))
+    print(f"  FC2 ASR enforced (residual: {asr_check:.2e})")
 
     fc3_path = work_dir / "fc3.hdf5"
     with h5py.File(fc3_path, "w") as f:

@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -33,10 +34,66 @@ from phonon_inputs.structure import load_phonopy_calculation
 from phonon_inputs.force_constants import load_fc3_thirdorder, load_fc3_phono3py
 from phonon_inputs.anharmonic import anharmonic_transmission
 
-
 # ---------------------------------------------------------------------------
 # Primitive cell workflow (preferred)
 # ---------------------------------------------------------------------------
+
+def load_primitive_cell_dfpt(work_dir):
+    """Load FC2 + FC3 from the DFPT pipeline on the same primitive/supercell basis.
+
+    Uses the DFPT-produced fc3.hdf5 together with the phono3py YAML from the
+    finite-displacement setup to reconstruct the same primitive/supercell mapping.
+    """
+    from phonopy import Phonopy
+    from phonopy.structure.atoms import PhonopyAtoms
+
+    from phonon_inputs.force_constants import load_fc3_dfpt_hdf5
+
+    dfpt_dir = work_dir / "dfpt"
+    dfpt_h5 = dfpt_dir / "fc3.hdf5"
+
+    # Reuse the same phono3py YAML that defines the primitive/supercell mapping.
+    ref_dir = work_dir / "fc3_prim"
+    yaml_path = ref_dir / "phono3py_disp.yaml"
+
+    if not dfpt_h5.exists():
+        raise FileNotFoundError(
+            f"DFPT FC3 not found at {dfpt_h5}.\n"
+            "Run the DFPT pipeline first:\n"
+            "  python -m phonon_inputs dfpt-sow  --config config_dfpt_dir.yaml\n"
+            "  python -m phonon_inputs dfpt-run  --config config_dfpt_dir.yaml\n"
+            "  python -m phonon_inputs dfpt-reap --config config_dfpt_dir.yaml"
+        )
+
+    print("Loading FC3 from DFPT HDF5...")
+    payload = load_fc3_dfpt_hdf5(
+        dfpt_hdf5=dfpt_h5,
+        phono3py_yaml=yaml_path,
+    )
+    fc2 = payload["fc2"]
+    fc3_data = payload["fc3_data"]
+    ph3 = payload["ph3"]
+
+    print(f"  FC3 blocks: {fc3_data['n_blocks']}")
+    print(f"  FC2 shape: {fc2.shape}")
+
+    cell = PhonopyAtoms(
+        symbols=ph3.unitcell.symbols,
+        cell=ph3.unitcell.cell,
+        scaled_positions=ph3.unitcell.scaled_positions,
+    )
+    phonon = Phonopy(
+        cell,
+        supercell_matrix=ph3.supercell_matrix,
+        primitive_matrix=np.eye(3),
+    )
+    phonon.force_constants = fc2
+
+    n_atoms = len(phonon.primitive.masses)
+    print(f"  Primitive cell: {n_atoms} atoms, a1 = {phonon.primitive.cell[0]}")
+
+    return phonon, fc3_data
+
 
 def load_primitive_cell(work_dir):
     """Load FC2 + FC3 from phono3py for the 2-atom FCC primitive cell.
@@ -266,7 +323,7 @@ def plot_results(results, output_path, temperature):
         ax.set_xlabel("Frequency (THz)")
         ax.set_ylabel("Spectral heat current (W)")
         ax.set_title(f"Si {n_slabs} slab(s), T={temperature} K\n"
-                     f"G_ball={G_ball/1e6:.0f}, G_anh={G_anh/1e6:.0f} MW/m²K "
+                     f"G_ball={G_ball / 1e6:.0f}, G_anh={G_anh / 1e6:.0f} MW/m²K "
                      f"({reduction:.0f}% reduction)")
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
@@ -347,10 +404,10 @@ def main():
         G_ball = result["thermal_conductance_ballistic"]
         G_anh = result["thermal_conductance_anharmonic"]
         print(f"\n  Completed in {elapsed:.1f} s")
-        print(f"  G_ballistic:  {G_ball/1e6:.1f} MW/(m^2 K)")
-        print(f"  G_anharmonic: {G_anh/1e6:.1f} MW/(m^2 K)")
+        print(f"  G_ballistic:  {G_ball / 1e6:.1f} MW/(m^2 K)")
+        print(f"  G_anharmonic: {G_anh / 1e6:.1f} MW/(m^2 K)")
         if G_ball > 0:
-            print(f"  Reduction:    {(1 - G_anh/G_ball)*100:.1f}%")
+            print(f"  Reduction:    {(1 - G_anh / G_ball) * 100:.1f}%")
 
         results[n_slabs] = result
         save_checkpoint(results, script_dir / args.checkpoint)
@@ -365,8 +422,8 @@ def main():
         G_ball = r["thermal_conductance_ballistic"]
         G_anh = r["thermal_conductance_anharmonic"]
         red = (1 - G_anh / G_ball) * 100 if G_ball > 0 else 0
-        print(f"  {n_slabs} slab(s): G_ball={G_ball/1e6:.1f}, "
-              f"G_anh={G_anh/1e6:.1f} MW/m²K ({red:.1f}% reduction)")
+        print(f"  {n_slabs} slab(s): G_ball={G_ball / 1e6:.1f}, "
+              f"G_anh={G_anh / 1e6:.1f} MW/m²K ({red:.1f}% reduction)")
 
 
 if __name__ == "__main__":

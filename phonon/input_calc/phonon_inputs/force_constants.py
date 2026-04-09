@@ -11,10 +11,10 @@ from phonopy import Phonopy
 
 
 def produce_force_constants(
-    phonon: Phonopy,
-    forces: list[np.ndarray] | None = None,
-    force_constants_file: Path | None = None,
-    force_sets_file: Path | None = None,
+        phonon: Phonopy,
+        forces: list[np.ndarray] | None = None,
+        force_constants_file: Path | None = None,
+        force_sets_file: Path | None = None,
 ) -> np.ndarray:
     """Produce second-order force constants.
 
@@ -59,7 +59,7 @@ def produce_force_constants(
 
 
 def load_forces_phonopy_qe(
-    n_atoms_supercell: int, output_files: list[str | Path]
+        n_atoms_supercell: int, output_files: list[str | Path]
 ) -> list[np.ndarray]:
     """Load forces using phonopy's QE parser.
 
@@ -154,15 +154,147 @@ def load_fc3_thirdorder(path: Path | str) -> dict:
     return {"n_blocks": n_blocks, "blocks": blocks}
 
 
+def _dense_fc3_to_blocks(fc3: np.ndarray, primitive, supercell) -> dict:
+    """Convert dense FC3 to sparse block format.
+
+    Parameters
+    ----------
+    fc3 : ndarray
+        Dense FC3 array, either compact:
+            (n_prim, n_super, n_super, 3, 3, 3)
+        or full:
+            (n_super, n_super, n_super, 3, 3, 3)
+    primitive : Primitive
+        phono3py primitive object.
+    supercell : Supercell
+        phono3py supercell object.
+
+    Returns
+    -------
+    fc3_data : dict
+        Sparse block format matching ``load_fc3_thirdorder()`` output.
+    """
+    p2s = primitive.p2s_map
+    s2u = supercell.s2u_map
+    n_super = len(supercell.masses)
+    n_prim = len(primitive.masses)
+
+    # Map each supercell atom to:
+    #   - primitive atom index
+    #   - lattice vector relative to the corresponding unit-cell atom
+    p2s_inv = {int(s_idx): p_idx for p_idx, s_idx in enumerate(p2s)}
+    sc_to_prim = np.array([p2s_inv[int(s2u[j])] for j in range(n_super)], dtype=int)
+    cell_vectors_cart = np.array(
+        [supercell.positions[j] - supercell.positions[int(s2u[j])] for j in range(n_super)]
+    )
+
+    is_compact = fc3.shape[0] == n_prim
+    blocks = []
+    threshold = 1e-15  # eV/Ang^3
+
+    # For compact format, i_idx is already the primitive atom index.
+    # For full format, only iterate over p2s_map atoms (reference cell)
+    # to avoid 8x overcounting and incorrect cell vector offsets.
+    if is_compact:
+        i_indices = range(n_prim)
+    else:
+        i_indices = [int(s) for s in p2s]
+
+    for i_idx in i_indices:
+        atom_i = i_idx if is_compact else p2s_inv[int(s2u[i_idx])]
+        for j in range(n_super):
+            for k in range(n_super):
+                tensor = fc3[i_idx, j, k]
+                if np.max(np.abs(tensor)) < threshold:
+                    continue
+
+                blocks.append(
+                    {
+                        "cell_j": cell_vectors_cart[j].copy(),
+                        "cell_k": cell_vectors_cart[k].copy(),
+                        "atom_i": int(atom_i),
+                        "atom_j": int(sc_to_prim[j]),
+                        "atom_k": int(sc_to_prim[k]),
+                        "tensor": tensor.copy(),
+                    }
+                )
+
+    return {"n_blocks": len(blocks), "blocks": blocks}
+
+
+def load_fc3_dfpt_hdf5(
+        dfpt_hdf5: Path | str,
+        phono3py_yaml: Path | str,
+        log_level: int = 0,
+) -> dict:
+    """Load DFPT FC2+FC3 from the HDF5 produced by your DFPT reap step.
+
+    Assumes:
+      - ``dfpt_hdf5`` contains datasets ``fc2`` and ``fc3``
+      - ``fc3`` is already in phono3py compact convention
+      - ``phono3py_yaml`` describes the same primitive/supercell mapping
+
+    Parameters
+    ----------
+    dfpt_hdf5 : Path or str
+        Path to DFPT ``fc3.hdf5`` written by your reap step.
+    phono3py_yaml : Path or str
+        Reference phono3py_disp.yaml used to reconstruct structure/mapping.
+    log_level : int
+        phono3py log level.
+
+    Returns
+    -------
+    payload : dict
+        Keys:
+        - ``fc2`` : ndarray
+        - ``fc3`` : ndarray
+        - ``fc3_data`` : sparse block dict
+        - ``ph3`` : loaded phono3py object
+    """
+    import h5py
+    from phono3py import load as phono3py_load
+
+    dfpt_hdf5 = Path(dfpt_hdf5)
+    if not dfpt_hdf5.exists():
+        raise FileNotFoundError(f"DFPT HDF5 not found: {dfpt_hdf5}")
+
+    with h5py.File(dfpt_hdf5, "r") as f:
+        fc2 = f["fc2"][:]
+        fc3 = f["fc3"][:]
+
+    ph3 = phono3py_load(
+        phono3py_yaml=str(phono3py_yaml),
+        produce_fc=False,
+        log_level=log_level,
+    )
+
+    fc3_data = _dense_fc3_to_blocks(fc3, ph3.primitive, ph3.supercell)
+
+    return {
+        "fc2": fc2,
+        "fc3": fc3,
+        "fc3_data": fc3_data,
+        "ph3": ph3,
+    }
+
+
+def _phono3py_fc3_to_blocks(ph3) -> dict:
+    """Convert phono3py dense FC3 to sparse block format."""
+    if ph3.fc3 is None:
+        raise RuntimeError("ph3.fc3 is not set.")
+    return _dense_fc3_to_blocks(ph3.fc3, ph3.primitive, ph3.supercell)
+
+
 def load_fc3_phono3py(
-    phono3py_yaml: Path | str | None = None,
-    fc3_hdf5: Path | str | None = None,
-    unitcell=None,
-    supercell_matrix: np.ndarray | None = None,
-    forces: list[np.ndarray] | None = None,
-    calculator: str | None = None,
-    fc_calculator: str | None = None,
-    log_level: int = 0,
+        phono3py_yaml: Path | str | None = None,
+        fc3_hdf5: Path | str | None = None,
+        unitcell=None,
+        supercell_matrix: np.ndarray | None = None,
+        forces: list[np.ndarray] | None = None,
+        calculator: str | None = None,
+        fc_calculator: str | None = None,
+        log_level: int = 0,
 ) -> dict:
     """Load or compute FC3 from phono3py.
 
@@ -277,56 +409,7 @@ def load_fc3_phono3py(
 
 
 def _phono3py_fc3_to_blocks(ph3) -> dict:
-    """Convert phono3py dense FC3 to sparse block format.
-
-    Parameters
-    ----------
-    ph3 : Phono3py
-        Phono3py object with fc3 set.
-
-    Returns
-    -------
-    fc3_data : dict
-        Sparse block format matching ``load_fc3_thirdorder()`` output.
-    """
-    fc3 = ph3.fc3  # (n_unitcell, n_super, n_super, 3, 3, 3) or (n_s, n_s, n_s, 3, 3, 3)
-    sc = ph3.supercell
-    uc = ph3.unitcell
-    p2s = ph3.primitive.p2s_map
-    s2u = sc.s2u_map
-    n_super = len(sc.masses)
-    n_prim = len(uc.masses)
-
-    # Build supercell atom -> (unit cell atom index, cell vector in Cartesian Angstrom)
-    p2s_inv = {int(s_idx): p_idx for p_idx, s_idx in enumerate(p2s)}
-    sc_to_prim = np.array([p2s_inv[int(s2u[j])] for j in range(n_super)])
-    cell_vectors_cart = np.array([
-        sc.positions[j] - sc.positions[int(s2u[j])] for j in range(n_super)
-    ])
-
-    is_compact = (fc3.shape[0] == n_prim)
-    blocks = []
-    threshold = 1e-15  # eV/A^3, skip negligible entries
-
-    for i_idx in range(fc3.shape[0]):
-        for j in range(n_super):
-            for k in range(n_super):
-                tensor = fc3[i_idx, j, k]
-                if np.max(np.abs(tensor)) < threshold:
-                    continue
-
-                if is_compact:
-                    atom_i = i_idx
-                else:
-                    atom_i = sc_to_prim[i_idx]
-
-                blocks.append({
-                    "cell_j": cell_vectors_cart[j].copy(),
-                    "cell_k": cell_vectors_cart[k].copy(),
-                    "atom_i": atom_i,
-                    "atom_j": sc_to_prim[j],
-                    "atom_k": sc_to_prim[k],
-                    "tensor": tensor.copy(),
-                })
-
-    return {"n_blocks": len(blocks), "blocks": blocks}
+    """Convert phono3py dense FC3 to sparse block format."""
+    if ph3.fc3 is None:
+        raise RuntimeError("ph3.fc3 is not set.")
+    return _dense_fc3_to_blocks(ph3.fc3, ph3.primitive, ph3.supercell)
