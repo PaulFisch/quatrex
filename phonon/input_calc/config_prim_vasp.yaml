@@ -1,0 +1,47 @@
+## phonon_inputs configuration: Si FCC primitive cell (2 atoms) — VASP
+## PBE equilibrium lattice constant: a = 5.4662 A (from vc-relax)
+## FCC primitive vectors: a/2 * {(0,1,1), (1,0,1), (1,1,0)}
+##
+## High-quality converged FC3 on a 3x3x3 supercell (54 atoms) using VASP.
+## Targeted at a single 26-core CPU node.
+##
+## Usage:
+##   python -m phonon_inputs fc3-sow   --config config_prim_vasp.yaml
+##   python -m phonon_inputs fc3-run   --config config_prim_vasp.yaml
+##   python -m phonon_inputs fc3-reap  --config config_prim_vasp.yaml
+##   python -m phonon_inputs fc3-all   --config config_prim_vasp.yaml
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,       2.7331, 2.7331]   # a1 = a/2 * (0,1,1)
+    - [2.7331,    0.0,    2.7331]   # a2 = a/2 * (1,0,1)
+    - [2.7331,    2.7331, 0.0]      # a3 = a/2 * (1,1,0)
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw  # directory containing element subdirs with POTCAR
+  potcar_map:
+    Si: Si                        # uses /home/jiacao/vasp/potpaw/Si/POTCAR
+  encut: 500                      # eV — well above Si ENMAX (~245 eV) for tight convergence
+  ediff: 1.0e-8                   # eV — tight SCF convergence for accurate forces
+  ismear: 0                       # Gaussian smearing (appropriate for semiconductors)
+  sigma: 0.01                     # eV — narrow smearing for semiconductor
+  prec: Accurate
+  lreal: Auto                     # real-space projection for 54-atom supercell
+  lwave: false                    # don't write WAVECAR (saves disk)
+  lcharg: false                   # don't write CHGCAR
+  kpoints_scf: [4, 4, 4]         # for 3x3x3 supercell — Gamma-centered 4x4x4
+  vasp_command: "LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/ mpirun -np 26 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+thirdorder:
+  supercell: [3, 3, 3]           # 54 atoms — good FC3 convergence for Si
+  cutoff_pair_distance: 8.0      # Angstrom — captures up to ~3rd neighbor shell
+  displacement_distance: 0.01    # Angstrom — small for better finite-difference accuracy
+  fc_calculator: symfc            # symmetry-adapted fitting
+  calculator: vasp
+  work_dir: ./fc3_prim_vasp
+  pw_timeout: 7200               # 2 hours per displacement (generous for 54-atom Si)
