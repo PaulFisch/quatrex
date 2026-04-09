@@ -19,9 +19,9 @@ from .convention import gauge_transform_A_to_B, get_btd_blocks
 
 
 def check_gamma_point(
-    blocks: dict[tuple[int, int, int], np.ndarray],
-    n_acoustic: int = 3,
-    conversion_factor: float | None = None,
+        blocks: dict[tuple[int, int, int], np.ndarray],
+        n_acoustic: int = 3,
+        conversion_factor: float | None = None,
 ) -> dict:
     """Check that summing all blocks gives n_acoustic zero eigenvalues.
 
@@ -61,7 +61,7 @@ def check_gamma_point(
 
 
 def check_block_symmetry(
-    blocks: dict[tuple[int, int, int], np.ndarray],
+        blocks: dict[tuple[int, int, int], np.ndarray],
 ) -> dict:
     """Check H(R)^T = H(-R) for all block pairs.
 
@@ -82,14 +82,55 @@ def check_block_symmetry(
     return {"max_error": max_err, "pair_errors": pair_errors}
 
 
+def compare_arrays(name: str, a: np.ndarray, b: np.ndarray) -> dict:
+    """Return simple comparison metrics for two arrays."""
+    if a.shape != b.shape:
+        raise ValueError(f"{name}: shape mismatch {a.shape} vs {b.shape}")
+
+    diff = a - b
+    a_norm = np.linalg.norm(a.ravel())
+    b_norm = np.linalg.norm(b.ravel())
+    d_norm = np.linalg.norm(diff.ravel())
+
+    result = {
+        "name": name,
+        "shape": a.shape,
+        "max_abs_a": float(np.max(np.abs(a))),
+        "max_abs_b": float(np.max(np.abs(b))),
+        "max_abs_diff": float(np.max(np.abs(diff))),
+        "rms_diff": float(np.sqrt(np.mean(diff ** 2))),
+        "fro_a": float(a_norm),
+        "fro_b": float(b_norm),
+        "fro_diff": float(d_norm),
+        "rel_diff_vs_a": float(d_norm / a_norm) if a_norm > 0 else np.nan,
+        "rel_diff_vs_b": float(d_norm / b_norm) if b_norm > 0 else np.nan,
+    }
+    return result
+
+
+def print_comparison(result: dict) -> None:
+    """Pretty-print comparison metrics."""
+    print(f"{result['name']}:")
+    print(f"  shape:         {result['shape']}")
+    print(f"  max |A|:       {result['max_abs_a']:.6e}")
+    print(f"  max |B|:       {result['max_abs_b']:.6e}")
+    print(f"  max |A-B|:     {result['max_abs_diff']:.6e}")
+    print(f"  RMS(A-B):      {result['rms_diff']:.6e}")
+    print(f"  ||A||_F:       {result['fro_a']:.6e}")
+    print(f"  ||B||_F:       {result['fro_b']:.6e}")
+    print(f"  ||A-B||_F:     {result['fro_diff']:.6e}")
+    print(f"  rel vs A:      {result['rel_diff_vs_a']:.6e}")
+    print(f"  rel vs B:      {result['rel_diff_vs_b']:.6e}")
+
+
 def compare_band_structure(
-    phonon: Phonopy,
-    blocks: dict[tuple[int, int, int], np.ndarray],
-    band_paths: list[list[list[float]]],
-    labels: list[str],
-    npoints: int = 51,
-    save_path=None,
-    conversion_factor: float = CONVERSION_THZ2,
+        phonon: Phonopy,
+        blocks: dict[tuple[int, int, int], np.ndarray],
+        band_paths: list[list[list[float]]],
+        labels: list[str],
+        npoints: int = 51,
+        save_path=None,
+        conversion_factor: float = CONVERSION_THZ2,
 ) -> dict:
     """Compare eigenfrequencies from extracted blocks vs phonopy.
 
@@ -250,11 +291,11 @@ def _ballistic_transmission(omega_sq, H_D, H_L00, H_L01, H_R00, H_R01,
 
 
 def reference_transmission(
-    phonon: Phonopy,
-    q_mesh_transverse: tuple[int, int],
-    freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 201),
-    transport_direction: str = "z",
-    eta_factor: float = 0.5,
+        phonon: Phonopy,
+        q_mesh_transverse: tuple[int, int],
+        freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 201),
+        transport_direction: str = "z",
+        eta_factor: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute reference ballistic transmission via Sancho-Rubio + Caroli.
 
@@ -306,13 +347,13 @@ def reference_transmission(
 
 
 def interface_transmission(
-    phonon_left: Phonopy,
-    phonon_right: Phonopy,
-    phonon_device: Phonopy,
-    q_mesh_transverse: tuple[int, int],
-    freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 201),
-    transport_direction: str = "z",
-    eta_factor: float = 0.5,
+        phonon_left: Phonopy,
+        phonon_right: Phonopy,
+        phonon_device: Phonopy,
+        q_mesh_transverse: tuple[int, int],
+        freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 201),
+        transport_direction: str = "z",
+        eta_factor: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute ballistic transmission through an interface.
 
@@ -338,7 +379,7 @@ def interface_transmission(
     freqs_thz = np.linspace(fmin, fmax, nfreq)
     omega_sq = freqs_thz ** 2  # THz^2
     dw = freqs_thz[1] - freqs_thz[0]
-    eta = dw**2 * eta_factor
+    eta = dw ** 2 * eta_factor
 
     nkx, nky = q_mesh_transverse
     q_1d_x = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
@@ -383,11 +424,11 @@ def interface_transmission(
 
 
 def thermal_conductance(
-    freqs_thz: np.ndarray,
-    transmission: np.ndarray,
-    temperature_k: float,
-    lattice_vectors: np.ndarray,
-    transport_direction: str = "z",
+        freqs_thz: np.ndarray,
+        transmission: np.ndarray,
+        temperature_k: float,
+        lattice_vectors: np.ndarray,
+        transport_direction: str = "z",
 ) -> float:
     """Ballistic thermal conductance per unit area [W/(m^2 K)].
 
@@ -421,7 +462,7 @@ def thermal_conductance(
     dfdt = np.zeros_like(x)
     valid = (x > 1e-10) & (x < 500)
     dfdt[valid] = (hw[valid] / (KB_EV * temperature_k ** 2)) * (
-        np.exp(x[valid]) / (np.exp(x[valid]) - 1) ** 2
+            np.exp(x[valid]) / (np.exp(x[valid]) - 1) ** 2
     )
 
     # Integration: sum * dw_thz * 1e12 (since dw_rad/(2*pi) = dw_thz * 1e12)
