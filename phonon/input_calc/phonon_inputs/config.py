@@ -60,6 +60,8 @@ class VASPConfig:
     lreal: str = "Auto"
     lwave: bool = False
     lcharg: bool = False
+    ncore: int | None = None       # cores per orbital (good: sqrt(ntasks/kpar))
+    kpar: int | None = None        # k-point parallelization groups
     kpoints_scf: list[int] = field(default_factory=lambda: [4, 4, 4])
     vasp_command: str = "vasp_std"
 
