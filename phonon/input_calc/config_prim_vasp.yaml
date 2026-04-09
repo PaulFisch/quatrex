@@ -3,13 +3,14 @@
 ## FCC primitive vectors: a/2 * {(0,1,1), (1,0,1), (1,1,0)}
 ##
 ## High-quality converged FC3 on a 3x3x3 supercell (54 atoms) using VASP.
-## Targeted at a single 26-core CPU node.
+## Targeted at a single 28-core CPU node.
 ##
 ## Usage:
+##   python -m phonon_inputs pipeline  --config config_prim_vasp.yaml
+##   python -m phonon_inputs pipeline  --config config_prim_vasp.yaml --skip-relax
 ##   python -m phonon_inputs fc3-sow   --config config_prim_vasp.yaml
 ##   python -m phonon_inputs fc3-run   --config config_prim_vasp.yaml
 ##   python -m phonon_inputs fc3-reap  --config config_prim_vasp.yaml
-##   python -m phonon_inputs fc3-all   --config config_prim_vasp.yaml
 
 structure:
   source: inline
@@ -38,6 +39,12 @@ vasp:
   kpar: 4                         # k-point parallel groups: 64 kpts / 4 = 16 per group
   kpoints_scf: [4, 4, 4]         # for 3x3x3 supercell — Gamma-centered 4x4x4
   vasp_command: "export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: vc-relax
+  forc_conv_thr: 0.001            # eV/A — tight force convergence for relaxation
+  calculator: vasp
+  work_dir: ./relax_vasp
 
 thirdorder:
   supercell: [3, 3, 3]           # 54 atoms — good FC3 convergence for Si

@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import load_config
-from .qe_interface import run_qe_relax
+from .qe_interface import run_qe_relax, run_vasp_relax
 from .structure import load_structure
 
 
@@ -59,14 +59,25 @@ def run_pipeline(
         relax_dir = base_dir / rc.work_dir
         print("=" * 60)
         print("Step 1: Structural relaxation")
-        print(f"  {rc.calculation}, work_dir: {relax_dir}")
+        print(f"  {rc.calculation}, calculator: {rc.calculator}, "
+              f"work_dir: {relax_dir}")
         print("=" * 60)
-        cell = run_qe_relax(
-            cell, relax_dir, config.qe,
-            calculation=rc.calculation,
-            forc_conv_thr=rc.forc_conv_thr,
-            press_conv_thr=rc.press_conv_thr,
-        )
+
+        if rc.calculator == "vasp":
+            cell = run_vasp_relax(
+                cell, relax_dir, config.vasp,
+                calculation=rc.calculation,
+                forc_conv_thr=rc.forc_conv_thr,
+                press_conv_thr=rc.press_conv_thr,
+            )
+        else:
+            cell = run_qe_relax(
+                cell, relax_dir, config.qe,
+                calculation=rc.calculation,
+                forc_conv_thr=rc.forc_conv_thr,
+                press_conv_thr=rc.press_conv_thr,
+            )
+
         print(f"  Relaxed: {len(cell.symbols)} atoms")
         for i, v in enumerate(cell.cell):
             print(f"    a{i+1} = [{v[0]:.6f}, {v[1]:.6f}, {v[2]:.6f}] "

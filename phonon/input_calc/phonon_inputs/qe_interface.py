@@ -1,14 +1,16 @@
-"""Quantum ESPRESSO input/output interface."""
+"""DFT input/output interface (QE and VASP)."""
 
 import re
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
 from phonopy import Phonopy
 from phonopy.structure.atoms import PhonopyAtoms
 
-from .config import QEConfig
+from .config import QEConfig, VASPConfig
+from .thirdorder import _run_and_tee, _needs_shell
 
 # Ry/bohr -> eV/Angstrom
 RY_BOHR_TO_EV_ANG = 25.71104309541616
@@ -413,6 +415,227 @@ def run_qe_relax(
     run_qe(inp, out, qe_config.pw_command)
 
     relaxed = parse_qe_relax_output(out)
+    a_new = np.linalg.norm(relaxed.cell, axis=1)
+    print(f"  Relaxed lattice vectors: |a|={a_new[0]:.4f}, "
+          f"|b|={a_new[1]:.4f}, |c|={a_new[2]:.4f} A")
+    return relaxed
+
+
+# ---------------------------------------------------------------------------
+# VASP relaxation
+# ---------------------------------------------------------------------------
+
+
+def _write_vasp_relax_inputs(
+    work_dir: Path,
+    cell: PhonopyAtoms,
+    vasp_config: VASPConfig,
+    calculation: str = "vc-relax",
+    forc_conv_thr: float = 1e-4,
+) -> None:
+    """Write VASP input files for a structural relaxation.
+
+    Parameters
+    ----------
+    work_dir : Path
+        Working directory (created if needed).
+    cell : PhonopyAtoms
+        Initial structure.
+    vasp_config : VASPConfig
+        VASP parameters.
+    calculation : str
+        "relax" (ions only, ISIF=2) or "vc-relax" (ions+cell, ISIF=3).
+    forc_conv_thr : float
+        Force convergence in eV/Angstrom (mapped to negative EDIFFG).
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    symbols = list(cell.symbols)
+    lattice = cell.cell
+    positions_frac = cell.scaled_positions
+
+    unique_species = list(dict.fromkeys(symbols))
+    species_counts = [symbols.count(sp) for sp in unique_species]
+    sorted_indices = []
+    for sp in unique_species:
+        sorted_indices.extend(i for i, s in enumerate(symbols) if s == sp)
+    sorted_positions = positions_frac[sorted_indices]
+
+    # --- POSCAR ---
+    with open(work_dir / "POSCAR", "w") as f:
+        f.write("relaxation\n")
+        f.write("1.0\n")
+        for v in lattice:
+            f.write(f"  {v[0]:20.14f}  {v[1]:20.14f}  {v[2]:20.14f}\n")
+        f.write("  " + "  ".join(unique_species) + "\n")
+        f.write("  " + "  ".join(str(c) for c in species_counts) + "\n")
+        f.write("Direct\n")
+        for pos in sorted_positions:
+            f.write(f"  {pos[0]:20.14f}  {pos[1]:20.14f}  {pos[2]:20.14f}\n")
+
+    # --- INCAR ---
+    isif = 3 if calculation == "vc-relax" else 2
+    with open(work_dir / "INCAR", "w") as f:
+        f.write(f"PREC = {vasp_config.prec}\n")
+        f.write(f"ENCUT = {vasp_config.encut}\n")
+        f.write(f"EDIFF = {vasp_config.ediff}\n")
+        f.write(f"EDIFFG = {-abs(forc_conv_thr)}\n")
+        f.write(f"ISMEAR = {vasp_config.ismear}\n")
+        f.write(f"SIGMA = {vasp_config.sigma}\n")
+        f.write(f"LREAL = .FALSE.\n")  # always reciprocal for small relax cells
+        f.write(f"LWAVE = .FALSE.\n")
+        f.write(f"LCHARG = .FALSE.\n")
+        f.write("IBRION = 2\n")      # CG relaxation
+        f.write("NSW = 100\n")        # max ionic steps
+        f.write(f"ISIF = {isif}\n")   # 2=ions, 3=ions+cell
+        f.write("ISYM = 2\n")         # symmetry on for relaxation
+        if vasp_config.ncore is not None:
+            f.write(f"NCORE = {vasp_config.ncore}\n")
+        if vasp_config.kpar is not None:
+            f.write(f"KPAR = {vasp_config.kpar}\n")
+
+    # --- KPOINTS (use denser mesh for relaxation) ---
+    kpts = vasp_config.kpoints_scf
+    with open(work_dir / "KPOINTS", "w") as f:
+        f.write("Automatic mesh\n")
+        f.write("0\n")
+        f.write("Gamma\n")
+        f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}\n")
+        f.write("  0 0 0\n")
+
+    # --- POTCAR ---
+    from .thirdorder import _write_vasp_inputs
+    # Reuse the POTCAR assembly logic
+    potcar_dir = Path(vasp_config.potcar_dir).resolve()
+    potcar_path = work_dir / "POTCAR"
+    with open(potcar_path, "w") as potcar_out:
+        for sp in unique_species:
+            subdir = vasp_config.potcar_map.get(sp, sp)
+            pp_path = potcar_dir / subdir / "POTCAR"
+            if not pp_path.exists():
+                pp_path = potcar_dir / f"POTCAR.{sp}"
+            if not pp_path.exists():
+                raise FileNotFoundError(
+                    f"POTCAR for {sp} not found at {potcar_dir / subdir / 'POTCAR'}"
+                )
+            with open(pp_path) as pp_in:
+                potcar_out.write(pp_in.read())
+
+
+def parse_vasp_relax_output(work_dir: Path) -> PhonopyAtoms:
+    """Parse relaxed structure from VASP CONTCAR.
+
+    Parameters
+    ----------
+    work_dir : Path
+        Directory containing VASP output files.
+
+    Returns
+    -------
+    cell : PhonopyAtoms
+        Relaxed structure.
+    """
+    contcar = work_dir / "CONTCAR"
+    if not contcar.exists():
+        raise FileNotFoundError(f"CONTCAR not found in {work_dir}")
+
+    with open(contcar) as f:
+        lines = f.readlines()
+
+    scale = float(lines[1].strip())
+    lattice = np.array([
+        [float(x) for x in lines[i].split()] for i in range(2, 5)
+    ]) * scale
+
+    species_line = lines[5].split()
+    counts_line = [int(x) for x in lines[6].split()]
+
+    symbols = []
+    for sp, count in zip(species_line, counts_line):
+        symbols.extend([sp] * count)
+
+    coord_type = lines[7].strip()[0].lower()
+    natoms = sum(counts_line)
+    positions = np.array([
+        [float(x) for x in lines[8 + i].split()[:3]] for i in range(natoms)
+    ])
+
+    if coord_type == "d":  # Direct/fractional
+        return PhonopyAtoms(symbols=symbols, cell=lattice,
+                            scaled_positions=positions)
+    else:  # Cartesian
+        positions *= scale
+        inv_cell = np.linalg.inv(lattice)
+        scaled = positions @ inv_cell
+        return PhonopyAtoms(symbols=symbols, cell=lattice,
+                            scaled_positions=scaled)
+
+
+def run_vasp_relax(
+    cell: PhonopyAtoms,
+    work_dir: Path,
+    vasp_config: VASPConfig,
+    calculation: str = "vc-relax",
+    forc_conv_thr: float = 0.01,
+    press_conv_thr: float = 0.5,
+    skip_existing: bool = True,
+) -> PhonopyAtoms:
+    """Run a VASP structural relaxation and return the relaxed structure.
+
+    Parameters
+    ----------
+    cell : PhonopyAtoms
+        Initial structure.
+    work_dir : Path
+        Working directory.
+    vasp_config : VASPConfig
+        VASP parameters.
+    calculation : str
+        "relax" or "vc-relax".
+    forc_conv_thr : float
+        Force convergence in eV/Angstrom (EDIFFG = -forc_conv_thr).
+    press_conv_thr : float
+        Not directly used by VASP (stress converges via EDIFFG + ISIF).
+    skip_existing : bool
+        If True and CONTCAR exists from a completed run, skip re-running.
+
+    Returns
+    -------
+    relaxed : PhonopyAtoms
+        Relaxed structure.
+    """
+    from .thirdorder import _is_vasp_done
+
+    work_dir = Path(work_dir)
+
+    if skip_existing and _is_vasp_done(work_dir):
+        contcar = work_dir / "CONTCAR"
+        if contcar.exists() and contcar.stat().st_size > 0:
+            print(f"  Relax already done, loading {contcar}")
+            relaxed = parse_vasp_relax_output(work_dir)
+            a_new = np.linalg.norm(relaxed.cell, axis=1)
+            print(f"  Relaxed: {len(relaxed.symbols)} atoms")
+            for i, v in enumerate(relaxed.cell):
+                print(f"    a{i+1} = [{v[0]:.6f}, {v[1]:.6f}, {v[2]:.6f}] "
+                      f"(|a{i+1}| = {np.linalg.norm(v):.4f} A)")
+            return relaxed
+
+    _write_vasp_relax_inputs(work_dir, cell, vasp_config, calculation,
+                             forc_conv_thr)
+
+    print(f"  Running VASP {calculation}...")
+    use_shell = _needs_shell(vasp_config.vasp_command)
+    cmd = vasp_config.vasp_command if use_shell else vasp_config.vasp_command.split()
+    log_file = work_dir / "vasp_relax.log"
+    import sys
+    rc = _run_and_tee(cmd, log_file, str(work_dir), timeout=7200,
+                      use_shell=use_shell)
+
+    if rc != 0 or not _is_vasp_done(work_dir):
+        raise RuntimeError(f"VASP relaxation failed (exit {rc}). "
+                           f"Check {log_file}")
+
+    relaxed = parse_vasp_relax_output(work_dir)
     a_new = np.linalg.norm(relaxed.cell, axis=1)
     print(f"  Relaxed lattice vectors: |a|={a_new[0]:.4f}, "
           f"|b|={a_new[1]:.4f}, |c|={a_new[2]:.4f} A")
