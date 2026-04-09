@@ -23,9 +23,9 @@ structure:
     - [0.25, 0.25, 0.25]
 
 vasp:
-  potcar_dir: /home/jiacao/vasp/potpaw  # directory containing element subdirs with POTCAR
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE  # PBE POTCARs (potpaw = LDA, potpaw_PBE = PBE)
   potcar_map:
-    Si: Si                        # uses /home/jiacao/vasp/potpaw/Si/POTCAR
+    Si: Si                        # uses potpaw_PBE/Si/POTCAR
   encut: 500                      # eV — well above Si ENMAX (~245 eV) for tight convergence
   ediff: 1.0e-8                   # eV — tight SCF convergence for accurate forces
   ismear: 0                       # Gaussian smearing (appropriate for semiconductors)
