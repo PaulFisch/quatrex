@@ -204,6 +204,10 @@ def _write_vasp_inputs(
         f.write("IBRION = -1\n")
         f.write("NSW = 0\n")
         f.write("ISYM = 0\n")
+        if vasp_config.ncore is not None:
+            f.write(f"NCORE = {vasp_config.ncore}\n")
+        if vasp_config.kpar is not None:
+            f.write(f"KPAR = {vasp_config.kpar}\n")
 
     # --- KPOINTS ---
     kpts = vasp_config.kpoints_scf
