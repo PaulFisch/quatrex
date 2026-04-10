@@ -1,9 +1,6 @@
 """Separable FC3 approximation for phonon-phonon self-energy.
 
-Unlike Approximation III (q-averaged G, q-summed FC3), this module:
-
-1. Decomposes the FC3 in supercell real space via stacked SVD,
-   matching the analysis in analysis/fc3_separability.py.
+1. Decomposes the FC3 in supercell real space via stacked SVD.
 
 2. Fourier-transforms the low-rank factors to q-space.
 
@@ -11,14 +8,14 @@ Unlike Approximation III (q-averaged G, q-summed FC3), this module:
    forms with FFT (omega) and explicit sum (q-convolution).
 
 Stacked SVD:  For each (i, mu) in the primitive cell, form the
-matrix fc3[i, :, :, mu, :, :] restricted to same-slab atoms, then
-stack all slices:
+mass-weighted matrix fc3[i, :, :, mu, :, :] using all supercell
+atoms, then stack all slices:
 
     M_stacked = [M_{0,x}; M_{0,y}; ...; M_{nat,z}]
     M_stacked approx= U_R diag(sigma) V_R^T
 
-This gives a SHARED right factor h_r = sigma_r * V_r (column of dim_trans)
-and per-DOF left factors f_r^a = U[(a*dim_trans):(a+1)*dim_trans, r].
+This gives a SHARED right factor h_r = sigma_r * V_r (column of dim_sc)
+and per-DOF left factors f_r^a = U[(a*dim_sc):(a+1)*dim_sc, r].
 
 The self-energy:
 
@@ -164,10 +161,10 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
     return M_stacked
 
 
-def enforce_asr_fc3_matrices(M_stacked, nat_prim, trans_atoms, prim_indices):
+def enforce_asr_fc3_matrices(M_stacked, nat_prim, prim_indices):
     """Enforce acoustic sum rule on FC3 matrices via projection.
 
-    For each M_a (dim_t x dim_t), removes the component that couples
+    For each M_a (dim_sc x dim_sc), removes the component that couples
     to uniform translations by projecting out the null space of T(Gamma).
 
     The ASR requires sum_{l,b} Phi(0b1, lb2, l'b3) = 0, which in
@@ -176,63 +173,52 @@ def enforce_asr_fc3_matrices(M_stacked, nat_prim, trans_atoms, prim_indices):
 
     Parameters
     ----------
-    M_stacked : ndarray, shape (n_dof * dim_t, dim_t)
+    M_stacked : ndarray, shape (n_dof * dim_sc, dim_sc)
     nat_prim : int
-    trans_atoms : ndarray
-    prim_indices : ndarray
+    prim_indices : ndarray, shape (n_super,)
 
     Returns
     -------
     M_corrected : ndarray, same shape as M_stacked
     """
     n_dof = nat_prim * 3
-    n_trans = len(trans_atoms)
-    dim_t = n_trans * 3
+    n_super = len(prim_indices)
+    dim_sc = n_super * 3
 
-    # Build projector that removes uniform-translation component
-    # For each prim atom kappa, the "uniform" vector has equal weight
-    # on all supercell images of kappa.
-    # P_null spans the 3*nat_prim dimensional null space.
-    # We project: M_a -> M_a - P @ P^T @ M_a - M_a @ P @ P^T + P @ P^T @ M_a @ P @ P^T
-
-    # Build P: (dim_t, n_dof) where P[s*3+beta, kappa*3+beta] = 1/sqrt(n_images_kappa)
-    # for s_local such that prim_indices[trans_atoms[s_local]] == kappa
-    P = np.zeros((dim_t, n_dof))
     counts = np.zeros(nat_prim)
-    for s_local, s_global in enumerate(trans_atoms):
-        kappa = prim_indices[s_global]
-        counts[kappa] += 1
+    for s in range(n_super):
+        counts[prim_indices[s]] += 1
 
-    for s_local, s_global in enumerate(trans_atoms):
-        kappa = prim_indices[s_global]
+    P = np.zeros((dim_sc, n_dof))
+    for s in range(n_super):
+        kappa = prim_indices[s]
         w = 1.0 / np.sqrt(counts[kappa])
         for beta in range(3):
-            P[s_local * 3 + beta, kappa * 3 + beta] = w
+            P[s * 3 + beta, kappa * 3 + beta] = w
 
-    # P @ P^T is the projector onto uniform translations
-    # We want (I - P @ P^T) @ M_a @ (I - P @ P^T)
-    PPt = P @ P.T  # (dim_t, dim_t)
-    I_minus_PPt = np.eye(dim_t) - PPt
+    PPt = P @ P.T  # (dim_sc, dim_sc)
+    I_minus_PPt = np.eye(dim_sc) - PPt
 
     M_corrected = np.zeros_like(M_stacked)
     for a in range(n_dof):
-        M_a = M_stacked[a * dim_t:(a + 1) * dim_t, :]
-        M_corrected[a * dim_t:(a + 1) * dim_t, :] = I_minus_PPt @ M_a @ I_minus_PPt
+        M_a = M_stacked[a * dim_sc:(a + 1) * dim_sc, :]
+        M_corrected[a * dim_sc:(a + 1) * dim_sc, :] = I_minus_PPt @ M_a @ I_minus_PPt
 
     return M_corrected
 
 
-def build_gathering_matrix(trans_atoms, prim_indices, cell_frac, q_frac,
+def build_gathering_matrix(prim_indices, cell_frac, q_frac,
                            nat_prim, transport_direction):
     """Build the gathering matrix T(q) for FC3 Fourier transform.
 
-    T[kappa*3+beta, s_local*3+beta] = exp(-2*pi*i * q . R_frac[s_local])
-    when prim_indices[trans_atoms[s_local]] == kappa, else 0.
+    T[kappa*3+beta, s*3+beta] = exp(-2*pi*i * q . R_frac[s])
+    when prim_indices[s] == kappa, else 0.
+
+    Uses ALL supercell atoms (no same-slab restriction).
 
     Parameters
     ----------
-    trans_atoms : ndarray
-    prim_indices : ndarray
+    prim_indices : ndarray, shape (n_super,)
     cell_frac : ndarray, shape (n_super, 3)
     q_frac : tuple (qx, qy)
     nat_prim : int
@@ -240,24 +226,26 @@ def build_gathering_matrix(trans_atoms, prim_indices, cell_frac, q_frac,
 
     Returns
     -------
-    T : ndarray, shape (n_dof, dim_t), complex
+    T : ndarray, shape (n_dof, dim_sc), complex
+        dim_sc = n_super * 3.
     """
     tidx = "xyz".index(transport_direction)
+    n_super = len(prim_indices)
     n_dof = nat_prim * 3
-    n_trans = len(trans_atoms)
+    dim_sc = n_super * 3
     perp_idx = [i for i in range(3) if i != tidx]
     q_full = np.zeros(3)
     q_full[perp_idx[0]] = q_frac[0]
     q_full[perp_idx[1]] = q_frac[1]
 
-    phases = np.exp(-2j * np.pi * cell_frac[trans_atoms] @ q_full)
+    phases = np.exp(-2j * np.pi * cell_frac @ q_full)
 
-    T = np.zeros((n_dof, n_trans * 3), dtype=complex)
-    for s_local, s_global in enumerate(trans_atoms):
-        kappa = prim_indices[s_global]
-        phase = phases[s_local]
+    T = np.zeros((n_dof, dim_sc), dtype=complex)
+    for s in range(n_super):
+        kappa = prim_indices[s]
+        phase = phases[s]
         for beta in range(3):
-            T[kappa * 3 + beta, s_local * 3 + beta] = phase
+            T[kappa * 3 + beta, s * 3 + beta] = phase
 
     return T
 
@@ -292,89 +280,52 @@ def decompose_fc3_supercell(
     nat_prim: int,
     masses_super: np.ndarray,
     prim_indices: np.ndarray,
-    slab_indices: np.ndarray,
     ref_sc_atoms: np.ndarray,
     rank: int | None = None,
     tol: float = 1e-8,
     enforce_asr: bool = False,
-) -> tuple[list[np.ndarray], np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
     """Low-rank decomposition of supercell FC3 with shared right factor.
 
     For each (i_prim, mu) in the primitive cell, forms the mass-weighted
-    matrix from fc3_raw[i, :, :, mu, :, :] restricted to same-slab
-    atoms (delta_l = 0).  Stacks all n_dof slices and SVDs:
+    matrix from fc3_raw[i, :, :, mu, :, :] using all supercell atoms.
+    Stacks all n_dof slices and SVDs:
 
-        M_stacked = U diag(sigma) V^T,  shape (n_dof * dim_t, dim_t)
+        M_stacked = U diag(sigma) V^T,  shape (n_dof * dim_sc, dim_sc)
 
-    where dim_t = n_trans_atoms * 3.
+    where dim_sc = n_super * 3.
 
     Parameters
     ----------
     fc3_raw : ndarray, shape (n_super, n_super, n_super, 3, 3, 3)
-        Raw FC3 from phono3py HDF5.
+        Raw FC3 from phono3py HDF5, or compact format.
     nat_prim : int
     masses_super : ndarray, shape (n_super,)
-        Supercell atom masses in amu.
     prim_indices : ndarray, shape (n_super,)
-    slab_indices : ndarray, shape (n_super,)
+    ref_sc_atoms : ndarray, shape (nat_prim,)
     rank, tol : SVD truncation control.
+    enforce_asr : bool
+        If True, project out uniform-translation components before SVD.
 
     Returns
     -------
-    F_list : list of ndarray, each shape (n_dof, dim_t)
+    F_list : list of ndarray, each shape (n_dof, dim_sc)
         F_r[a, c] — left factors, one per rank component.
-    H : ndarray, shape (dim_t, R)
+    H : ndarray, shape (dim_sc, R)
         Shared right factor; columns are h_r vectors.
     svals : ndarray, shape (R,)
-    trans_atoms : ndarray, shape (n_trans,)
-        Supercell atom indices of the same-slab atoms.
     """
-    is_compact = fc3_raw.shape[0] == nat_prim
-    n_super = fc3_raw.shape[1]  # always the supercell dimension
     n_dof = nat_prim * 3
-    dim_full = n_super * 3
+    n_super = fc3_raw.shape[1]
+    dim_sc = n_super * 3
 
-    # Identify same-slab atoms (slab == 0)
-    trans_atoms = np.where(slab_indices == 0)[0]
-    n_trans = len(trans_atoms)
-    dim_t = n_trans * 3
+    M_stacked = build_realspace_fc3_matrices(
+        fc3_raw, nat_prim, masses_super, ref_sc_atoms
+    )
 
-    # Row/col indices for filtering to same-slab in the (n_super*3) space
-    filt_idx = []
-    for s in trans_atoms:
-        filt_idx.extend([s * 3, s * 3 + 1, s * 3 + 2])
-    filt_idx = np.array(filt_idx)
-
-    # Build stacked matrix: (n_dof * dim_t, dim_t)
-    M_stacked = np.zeros((n_dof * dim_t, dim_t))
-
-    for i_prim in range(nat_prim):
-        s_i = ref_sc_atoms[i_prim]  # supercell atom for prim atom i at cell (0,0,0)
-        # For compact FC3, first index is primitive atom index directly
-        fc3_idx = i_prim if is_compact else s_i
-        m_i = masses_super[s_i]
-        for alpha in range(3):
-            a = 3 * i_prim + alpha
-            block = fc3_raw[fc3_idx, :, :, alpha, :, :]
-            mat = block.transpose(0, 2, 1, 3).reshape(dim_full, dim_full)
-
-            # Filter to same-slab atoms
-            mat_filt = mat[np.ix_(filt_idx, filt_idx)]
-
-            # Mass weighting: 1 / sqrt(m_i * m_{s2} * m_{s3})
-            m_row = np.repeat(np.sqrt(masses_super[trans_atoms]), 3)
-            m_col = np.repeat(np.sqrt(masses_super[trans_atoms]), 3)
-            mat_filt = mat_filt / (np.sqrt(m_i) * m_row[:, None] * m_col[None, :])
-
-            # Convert to THz^{5/2}
-            mat_filt *= CONVERSION_FC3_THZ
-
-            M_stacked[a * dim_t:(a + 1) * dim_t, :] = mat_filt
-
-    # Enforce acoustic sum rule before SVD
     if enforce_asr:
         M_stacked = enforce_asr_fc3_matrices(
-            M_stacked, nat_prim, trans_atoms, prim_indices
+            M_stacked, nat_prim, prim_indices
         )
 
     # SVD
@@ -391,42 +342,21 @@ def decompose_fc3_supercell(
     Vt_R = Vt[:R, :]
 
     # Absorb singular values into H (shared right factor)
-    H = (S_R[:, None] * Vt_R).T   # (dim_t, R)
+    H = (S_R[:, None] * Vt_R).T   # (dim_sc, R)
 
-    F_list = [U_R[:, r].reshape(n_dof, dim_t) for r in range(R)]
+    F_list = [U_R[:, r].reshape(n_dof, dim_sc) for r in range(R)]
 
-    return F_list, H, S_R, trans_atoms
+    return F_list, H, S_R
 
 
-def reconstruction_error(fc3_raw, nat_prim, masses_super, prim_indices,
-                         slab_indices, ref_sc_atoms, F_list, H, trans_atoms):
+def reconstruction_error(fc3_raw, nat_prim, masses_super,
+                         ref_sc_atoms, F_list, H):
     """Relative Frobenius error of the stacked reconstruction."""
-    is_compact = fc3_raw.shape[0] == nat_prim
-    n_dof = nat_prim * 3
-    dim_full = fc3_raw.shape[1] * 3
-    dim_t = len(trans_atoms) * 3
     R = H.shape[1]
 
-    filt_idx = []
-    for s in trans_atoms:
-        filt_idx.extend([s * 3, s * 3 + 1, s * 3 + 2])
-    filt_idx = np.array(filt_idx)
-
-    M_stacked = np.zeros((n_dof * dim_t, dim_t))
-    for i_prim in range(nat_prim):
-        s_i = ref_sc_atoms[i_prim]
-        fc3_idx = i_prim if is_compact else s_i
-        m_i = masses_super[s_i]
-        for alpha in range(3):
-            a = 3 * i_prim + alpha
-            block = fc3_raw[fc3_idx, :, :, alpha, :, :]
-            mat = block.transpose(0, 2, 1, 3).reshape(dim_full, dim_full)
-            mat_filt = mat[np.ix_(filt_idx, filt_idx)]
-            m_row = np.repeat(np.sqrt(masses_super[trans_atoms]), 3)
-            m_col = np.repeat(np.sqrt(masses_super[trans_atoms]), 3)
-            mat_filt = mat_filt / (np.sqrt(m_i) * m_row[:, None] * m_col[None, :])
-            mat_filt *= CONVERSION_FC3_THZ
-            M_stacked[a * dim_t:(a + 1) * dim_t, :] = mat_filt
+    M_stacked = build_realspace_fc3_matrices(
+        fc3_raw, nat_prim, masses_super, ref_sc_atoms
+    )
 
     M_approx = np.zeros_like(M_stacked)
     for r in range(R):
@@ -446,7 +376,6 @@ def reconstruction_error(fc3_raw, nat_prim, masses_super, prim_indices,
 def fourier_transform_factors(
     F_list: list[np.ndarray],
     H: np.ndarray,
-    trans_atoms: np.ndarray,
     prim_indices: np.ndarray,
     cell_frac: np.ndarray,
     q_perp_frac: tuple[float, float],
@@ -455,14 +384,15 @@ def fourier_transform_factors(
 ) -> tuple[list[np.ndarray], np.ndarray]:
     """Fourier-transform real-space factors to a transverse q-point.
 
-    f_hat_r^a(q)[kappa, beta] = sum_{R_perp} f_r^a(s(kappa, R_perp), beta)
+    f_hat_r^a(q)[kappa, beta] = sum_{R} f_r^a(s(kappa, R), beta)
                                   * exp(-2*pi*i * q . R_frac)
+
+    Uses ALL supercell atoms (no same-slab restriction).
 
     Parameters
     ----------
-    F_list : list of ndarray, each (n_dof, dim_t)
-    H : ndarray, shape (dim_t, R)
-    trans_atoms : ndarray of supercell atom indices in the same slab.
+    F_list : list of ndarray, each (n_dof, dim_sc)
+    H : ndarray, shape (dim_sc, R)
     prim_indices, cell_frac : from build_supercell_mapping.
     q_perp_frac : (qx, qy) in fractional coordinates of primitive cell.
     nat_prim : int
@@ -475,33 +405,11 @@ def fourier_transform_factors(
     H_hat : ndarray, shape (n_dof, R), complex
         Fourier-transformed shared right factor.
     """
-    tidx = "xyz".index(transport_direction)
-    n_dof = nat_prim * 3
-    n_trans = len(trans_atoms)
-    R = H.shape[1]
-
-    # Build full q-vector (q_transport = 0)
-    perp_idx = [i for i in range(3) if i != tidx]
-    q_full = np.zeros(3)
-    q_full[perp_idx[0]] = q_perp_frac[0]
-    q_full[perp_idx[1]] = q_perp_frac[1]
-
-    # Phase for each transverse atom: exp(-2*pi*i * q . R_frac)
-    phases = np.exp(-2j * np.pi * cell_frac[trans_atoms] @ q_full)  # (n_trans,)
-
-    # FT mapping: for each (kappa, beta) in primitive cell,
-    # sum over transverse atoms that map to kappa
-    # Build gathering matrix T: T[kappa*3+beta, s_local*3+beta] = phase[s_local]
-    # where prim_indices[trans_atoms[s_local]] == kappa
-    T = np.zeros((n_dof, n_trans * 3), dtype=complex)
-    for s_local, s_global in enumerate(trans_atoms):
-        kappa = prim_indices[s_global]
-        phase = phases[s_local]
-        for beta in range(3):
-            T[kappa * 3 + beta, s_local * 3 + beta] = phase
+    T = build_gathering_matrix(
+        prim_indices, cell_frac, q_perp_frac, nat_prim, transport_direction
+    )
 
     # F_hat_r(q) = F_r @ T^T,  shape (n_dof, n_dof)
-    # because F_r is (n_dof, dim_t) and T^T is (dim_t, n_dof)
     F_hat_list = [F_r @ T.T for F_r in F_list]
 
     # H_hat(q) = T @ H,  shape (n_dof, R)
@@ -704,6 +612,8 @@ def separable_anharmonic_transmission(
         phonon, transport_direction
     )
     masses_super = phonon.supercell.masses
+    n_super = len(masses_super)
+    dim_sc = n_super * 3
 
     # --- Load and decompose FC3 ---
     with h5py.File(fc3_hdf5, "r") as f:
@@ -712,20 +622,19 @@ def separable_anharmonic_transmission(
     if verbose:
         print(f"  FC3 raw shape: {fc3_raw.shape}")
 
-    F_list, H, svals, trans_atoms = decompose_fc3_supercell(
-        fc3_raw, n_atoms, masses_super, prim_indices, slab_indices,
+    F_list, H, svals = decompose_fc3_supercell(
+        fc3_raw, n_atoms, masses_super, prim_indices,
         ref_sc_atoms, rank=rank, tol=svd_tol, enforce_asr=enforce_asr,
     )
     R = len(F_list)
     recon_err = reconstruction_error(
-        fc3_raw, n_atoms, masses_super, prim_indices, slab_indices,
-        ref_sc_atoms, F_list, H, trans_atoms,
+        fc3_raw, n_atoms, masses_super,
+        ref_sc_atoms, F_list, H,
     )
 
     if verbose:
-        dim_t = len(trans_atoms) * 3
-        print(f"  Same-slab atoms: {len(trans_atoms)}, dim_trans: {dim_t}")
-        print(f"  SVD rank: {R}/{dim_t}, reconstruction error: {recon_err:.2e}")
+        print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
+        print(f"  SVD rank: {R}/{dim_sc}, reconstruction error: {recon_err:.2e}")
         print(f"  Singular values: {svals[:min(8, R)]}"
               + (" ..." if R > 8 else ""))
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
@@ -743,7 +652,7 @@ def separable_anharmonic_transmission(
     H_hat_q = []  # H_hat_q[iq] is (n_dof, R)
     for qx, qy in q_points:
         Fh, Hh = fourier_transform_factors(
-            F_list, H, trans_atoms, prim_indices, cell_frac,
+            F_list, H, prim_indices, cell_frac,
             (qx, qy), n_atoms, transport_direction,
         )
         F_hat_q.append(Fh)

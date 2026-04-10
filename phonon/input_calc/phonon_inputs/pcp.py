@@ -1071,16 +1071,16 @@ def pcp_anharmonic_transmission(
         phonon, transport_direction
     )
     masses_super = phonon.supercell.masses
-    trans_atoms = np.where(slab_indices == 0)[0]
+    n_super = len(masses_super)
+    dim_sc = n_super * 3
 
     M_stacked = build_realspace_fc3_matrices(
-        fc3_recon, n_atoms, masses_super, ref_sc_atoms, trans_atoms
+        fc3_recon, n_atoms, masses_super, ref_sc_atoms
     )
-    dim_t = len(trans_atoms) * 3
 
     if verbose:
         print(f"  Reconstructed FC3 -> M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
-        print(f"  Same-slab atoms: {len(trans_atoms)}, dim_trans: {dim_t}")
+        print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
 
     # --- q-mesh ---
@@ -1095,7 +1095,7 @@ def pcp_anharmonic_transmission(
     T_all_q = []
     for qx, qy in q_points:
         T = build_gathering_matrix(
-            trans_atoms, prim_indices, cell_frac,
+            prim_indices, cell_frac,
             (qx, qy), n_atoms, transport_direction,
         )
         T_all_q.append(T)
