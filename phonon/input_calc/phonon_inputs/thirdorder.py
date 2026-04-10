@@ -403,8 +403,14 @@ def _vasp_restart_files_valid(seed_dir: Path) -> tuple[bool, bool]:
     return has_wavecar, has_chgcar
 
 
-def _prepare_vasp_restart(target_dir: Path, seed_dir: Path | None) -> None:
-    """Seed a VASP run from a previous completed calculation if valid."""
+def _prepare_vasp_restart(target_dir: Path, seed_dir: Path | None) -> tuple[bool, bool]:
+    """Seed a VASP run from a previous completed calculation if valid.
+
+    Returns
+    -------
+    has_wavecar, has_chgcar : tuple[bool, bool]
+        Whether WAVECAR / CHGCAR were actually copied into target_dir.
+    """
     for fname in ("WAVECAR", "CHGCAR"):
         target = target_dir / fname
         if target.exists():
@@ -436,6 +442,8 @@ def _prepare_vasp_restart(target_dir: Path, seed_dir: Path | None) -> None:
 
     text = text.rstrip() + f"\nISTART = {istart}\nICHARG = {icharg}\n"
     incar.write_text(text)
+
+    return has_wavecar, has_chgcar
 
 
 # ========================================================================
