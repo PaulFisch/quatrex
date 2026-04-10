@@ -639,6 +639,13 @@ def _latest_completed_vasp_seed(work_dir: Path, before_index: int | None = None)
     return None
 
 
+def _cleanup_vasp_restart_files(disp_dir: Path) -> None:
+    """Delete large VASP restart files to save disk space."""
+    for fname in ("WAVECAR", "CHGCAR"):
+        path = disp_dir / fname
+        if path.exists():
+            path.unlink()
+
 def run_displacements(
     work_dir: Path,
     dft_command: str = "pw.x",
@@ -721,8 +728,14 @@ def run_displacements(
 
         print(f"Running reference + {n_disp} VASP displacements...")
 
+        last_completed_seed = None
+
+        # Reference
         if _is_vasp_done(ref_dir):
             print("  [ref] Skipping reference (done)")
+            has_wav, has_chg = _vasp_restart_files_valid(ref_dir)
+            if has_wav or has_chg:
+                last_completed_seed = ref_dir
         else:
             print("  [ref] Running reference supercell...")
             _prepare_vasp_restart(ref_dir, seed_dir=None)
@@ -735,16 +748,23 @@ def run_displacements(
                 print(f"  ERROR: {ref_dir.name} failed (exit {rc})")
                 raise RuntimeError("VASP reference calculation failed")
 
+            has_wav, has_chg = _vasp_restart_files_valid(ref_dir)
+            if has_wav or has_chg:
+                last_completed_seed = ref_dir
+
         for i, disp_dir in enumerate(disp_dirs, start=1):
             if _is_vasp_done(disp_dir):
                 print(f"  [{i}/{n_disp}] Skipping {disp_dir.name} (done)")
+                has_wav, has_chg = _vasp_restart_files_valid(disp_dir)
+                if has_wav or has_chg:
+                    # Old completed run may become the best current seed
+                    if last_completed_seed is not None and last_completed_seed != disp_dir:
+                        _cleanup_vasp_restart_files(last_completed_seed)
+                    last_completed_seed = disp_dir
                 continue
 
-            seed_dir = _latest_completed_vasp_seed(work_dir, before_index=i)
-            _prepare_vasp_restart(disp_dir, seed_dir=seed_dir)
-
-            has_wavecar = (disp_dir / "WAVECAR").exists() and (disp_dir / "WAVECAR").stat().st_size > 0
-            has_chgcar = (disp_dir / "CHGCAR").exists() and (disp_dir / "CHGCAR").stat().st_size > 0
+            seed_dir = last_completed_seed
+            has_wavecar, has_chgcar = _prepare_vasp_restart(disp_dir, seed_dir=seed_dir)
 
             print(
                 f"  [{i}/{n_disp}] Running {disp_dir.name} "
@@ -760,6 +780,21 @@ def run_displacements(
             if rc != 0 or not _is_vasp_done(disp_dir):
                 print(f"  ERROR: {disp_dir.name} failed (exit {rc})")
                 raise RuntimeError(f"VASP displacement {disp_dir.name} failed")
+
+            # New run completed successfully. Old seed no longer needed.
+            if seed_dir is not None and seed_dir != disp_dir:
+                _cleanup_vasp_restart_files(seed_dir)
+
+            # Current run becomes the seed for the next one.
+            new_has_wav, new_has_chg = _vasp_restart_files_valid(disp_dir)
+            if new_has_wav or new_has_chg:
+                last_completed_seed = disp_dir
+            else:
+                last_completed_seed = None
+
+        # Optional: remove restart files from the final remaining seed too.
+        if last_completed_seed is not None:
+            _cleanup_vasp_restart_files(last_completed_seed)
     else:
         raise ValueError(f"Unknown calculator: {calculator!r}")
 

@@ -120,39 +120,34 @@ def build_supercell_mapping(phonon, transport_direction="x"):
 
 
 def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
-                                 ref_sc_atoms, trans_atoms):
-    """Build mass-weighted, slab-filtered FC3 matrices in real space.
+                                 ref_sc_atoms):
+    """Build mass-weighted FC3 matrices in real space.
 
-    For each DOF a = (i_prim, alpha), builds M_a of shape (dim_t, dim_t)
-    from fc3_raw restricted to same-slab atoms.  Returns a stacked array.
+    For each DOF a = (i_prim, alpha), builds M_a of shape (dim_sc, dim_sc)
+    from fc3_raw using ALL supercell atoms (no same-slab restriction).
 
     Parameters
     ----------
     fc3_raw : ndarray, shape (n_super, n_super, n_super, 3, 3, 3)
+        or compact (nat_prim, n_super, n_super, 3, 3, 3).
     nat_prim : int
     masses_super : ndarray, shape (n_super,)
     ref_sc_atoms : ndarray, shape (nat_prim,)
-    trans_atoms : ndarray
-        Supercell indices of same-slab atoms.
 
     Returns
     -------
-    M_stacked : ndarray, shape (n_dof * dim_t, dim_t)
-        M_stacked[a*dim_t:(a+1)*dim_t, :] = M_a.
+    M_stacked : ndarray, shape (n_dof * dim_sc, dim_sc)
+        M_stacked[a*dim_sc:(a+1)*dim_sc, :] = M_a.
+        dim_sc = n_super * 3.
     """
     is_compact = fc3_raw.shape[0] == nat_prim
     n_dof = nat_prim * 3
-    n_super = fc3_raw.shape[1]  # always the supercell dimension
-    n_trans = len(trans_atoms)
-    dim_t = n_trans * 3
-    dim_full = n_super * 3
+    n_super = fc3_raw.shape[1]
+    dim_sc = n_super * 3
 
-    filt_idx = []
-    for s in trans_atoms:
-        filt_idx.extend([s * 3, s * 3 + 1, s * 3 + 2])
-    filt_idx = np.array(filt_idx)
+    m_all = np.repeat(np.sqrt(masses_super), 3)  # (dim_sc,)
 
-    M_stacked = np.zeros((n_dof * dim_t, dim_t))
+    M_stacked = np.zeros((n_dof * dim_sc, dim_sc))
 
     for i_prim in range(nat_prim):
         s_i = ref_sc_atoms[i_prim]
@@ -161,13 +156,10 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
         for alpha in range(3):
             a = 3 * i_prim + alpha
             block = fc3_raw[fc3_idx, :, :, alpha, :, :]
-            mat = block.transpose(0, 2, 1, 3).reshape(dim_full, dim_full)
-            mat_filt = mat[np.ix_(filt_idx, filt_idx)]
-            m_row = np.repeat(np.sqrt(masses_super[trans_atoms]), 3)
-            m_col = np.repeat(np.sqrt(masses_super[trans_atoms]), 3)
-            mat_filt = mat_filt / (np.sqrt(m_i) * m_row[:, None] * m_col[None, :])
-            mat_filt *= CONVERSION_FC3_THZ
-            M_stacked[a * dim_t:(a + 1) * dim_t, :] = mat_filt
+            mat = block.transpose(0, 2, 1, 3).reshape(dim_sc, dim_sc)
+            mat = mat / (np.sqrt(m_i) * m_all[:, None] * m_all[None, :])
+            mat *= CONVERSION_FC3_THZ
+            M_stacked[a * dim_sc:(a + 1) * dim_sc, :] = mat
 
     return M_stacked
 
