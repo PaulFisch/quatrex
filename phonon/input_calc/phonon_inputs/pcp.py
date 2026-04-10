@@ -24,7 +24,7 @@ where A_i^xi(Q) = sum_{l,b,a} (e^Q_{ab}/sqrt(m_b)) e^{iq.r_l} A_i^xi(l,b,a).
 import itertools
 
 import numpy as np
-from scipy.optimize import minimize
+import torch
 
 from .constants import CONVERSION_FC3_THZ, CONVERSION_THZ2, HBAR_SI, HBAR_EV, KB_EV, THZ_TO_RAD
 from .anharmonic import (
@@ -86,7 +86,6 @@ def build_cell_mapping(phonon):
     sc_mat = np.diag(phonon.supercell_matrix).astype(int)
     n_cells = int(np.prod(sc_mat))
 
-    # Map (t1, t2, t3) -> linear cell index
     def cell_to_idx(t):
         return ((t[0] % sc_mat[0]) * sc_mat[1] + (t[1] % sc_mat[1])) * sc_mat[2] + (t[2] % sc_mat[2])
 
@@ -133,255 +132,35 @@ def build_cell_diff_table(n_cells, sc_mat):
 
 
 # ---------------------------------------------------------------------------
-# PCP forward model
-# ---------------------------------------------------------------------------
-
-
-def evaluate_pcp(A_modes, lambdas, sc_to_cell, sc_to_prim, cell_diff,
-                 n_cells, nat_prim, n_super):
-    """Evaluate PCP ansatz to reconstruct FC3 in compact format.
-
-    Parameters
-    ----------
-    A_modes : ndarray, shape (3, N_c, n_cells, nat_prim, 3)
-        PCP mode vectors. A_modes[leg, xi, cell, atom, alpha].
-    lambdas : ndarray, shape (N_c,)
-        PCP singular values.
-    sc_to_cell, sc_to_prim : ndarray, shape (n_super,)
-    cell_diff : ndarray, shape (n_cells, n_cells)
-    n_cells, nat_prim, n_super : int
-
-    Returns
-    -------
-    fc3_approx : ndarray, shape (nat_prim, n_super, n_super, 3, 3, 3)
-    """
-    N_c = len(lambdas)
-    fc3 = np.zeros((nat_prim, n_super, n_super, 3, 3, 3))
-
-    # Cell index for the first atom (at cell 0): cell_b1 = 0 for all b1
-    cell_b1 = 0
-
-    for xi in range(N_c):
-        w = lambdas[xi] / 6.0  # lambda / 3!
-        for sigma in S3_PERMS:
-            s1, s2, s3 = sigma
-            for l in range(n_cells):
-                # Cell offsets: first atom at cell 0, shifted by -l
-                c1 = cell_diff[cell_b1, l]  # = (0 - l) mod sc
-                for b1 in range(nat_prim):
-                    mode1 = A_modes[s1, xi, c1, b1, :]  # (3,)
-                    for j in range(n_super):
-                        c2 = cell_diff[sc_to_cell[j], l]
-                        b2 = sc_to_prim[j]
-                        mode2 = A_modes[s2, xi, c2, b2, :]  # (3,)
-                        for k in range(n_super):
-                            c3 = cell_diff[sc_to_cell[k], l]
-                            b3 = sc_to_prim[k]
-                            mode3 = A_modes[s3, xi, c3, b3, :]  # (3,)
-                            # Outer product of 3 mode vectors
-                            fc3[b1, j, k] += w * np.einsum('a,b,c->abc', mode1, mode2, mode3)
-
-    return fc3
-
-
-def _evaluate_pcp_vectorized(A_flat, lambdas, nat_prim, n_super, n_cells, N_c,
-                              sc_to_cell, sc_to_prim, cell_diff):
-    """Vectorized PCP forward model for optimization.
-
-    Parameters
-    ----------
-    A_flat : ndarray, shape (3 * N_c * n_cells * nat_prim * 3,)
-    lambdas : ndarray, shape (N_c,)
-    Returns fc3_flat : ndarray, shape (nat_prim * n_super * n_super * 27,)
-    """
-    mode_size = n_cells * nat_prim * 3
-    A = A_flat.reshape(3, N_c, n_cells, nat_prim, 3)
-
-    # Precompute mode vectors for each (leg, xi, supercell_atom, cell_shift_l)
-    # For atom j at cell c_j, shifted by l: cell = cell_diff[c_j, l]
-    # mode_table[leg, xi, j, l, :] = A[leg, xi, cell_diff[sc_to_cell[j], l], sc_to_prim[j], :]
-    # Shape: (3, N_c, n_super, n_cells, 3)
-    mode_table = np.zeros((3, N_c, n_super, n_cells, 3))
-    for j in range(n_super):
-        cj = sc_to_cell[j]
-        bj = sc_to_prim[j]
-        for l in range(n_cells):
-            cl = cell_diff[cj, l]
-            mode_table[:, :, j, l, :] = A[:, :, cl, bj, :]
-
-    # First atom: b1 at cell 0, shift -l means cell_diff[0, l]
-    # mode1_table[leg, xi, b1, l, :] for first atom index
-    mode1_table = np.zeros((3, N_c, nat_prim, n_cells, 3))
-    for b1 in range(nat_prim):
-        for l in range(n_cells):
-            c1 = cell_diff[0, l]
-            mode1_table[:, :, b1, l, :] = A[:, :, c1, b1, :]
-
-    fc3 = np.zeros((nat_prim, n_super, n_super, 3, 3, 3))
-
-    for xi in range(N_c):
-        w = lambdas[xi] / 6.0
-        for sigma in S3_PERMS:
-            s1, s2, s3 = sigma
-            # For each l, build the contribution:
-            # fc3[b1, j, k, a, b, c] += w * mode1[s1,xi,b1,l,a] * mode_t[s2,xi,j,l,b] * mode_t[s3,xi,k,l,c]
-            for l in range(n_cells):
-                m1 = mode1_table[s1, xi, :, l, :]  # (nat_prim, 3)
-                m2 = mode_table[s2, xi, :, l, :]    # (n_super, 3)
-                m3 = mode_table[s3, xi, :, l, :]    # (n_super, 3)
-                # fc3[b1, j, k, a, b, c] += w * m1[b1, a] * m2[j, b] * m3[k, c]
-                fc3 += w * np.einsum('ia,jb,kc->ijkabc', m1, m2, m3)
-
-    return fc3
-
-
-# ---------------------------------------------------------------------------
-# Loss function and gradient
-# ---------------------------------------------------------------------------
-
-
-def _pcp_loss_and_grad(x, target, nat_prim, n_super, n_cells, N_c,
-                        sc_to_cell, sc_to_prim, cell_diff, asr_penalty,
-                        sc_mat):
-    """Compute PCP loss and analytic gradient.
-
-    x = [A_flat (3*N_c*mode_dim), lambdas (N_c)]
-    """
-    mode_dim = n_cells * nat_prim * 3
-    n_A = 3 * N_c * mode_dim
-    A_flat = x[:n_A]
-    lambdas = x[n_A:]
-    A = A_flat.reshape(3, N_c, n_cells, nat_prim, 3)
-
-    # Forward model
-    fc3_approx = _evaluate_pcp_vectorized(A_flat, lambdas, nat_prim, n_super,
-                                           n_cells, N_c, sc_to_cell, sc_to_prim, cell_diff)
-
-    # Residual
-    residual = fc3_approx - target
-    loss = np.sum(residual**2)
-
-    # ASR penalty: sum_{l,b} A_i^xi(l, b, alpha) = 0 for each (xi, i, alpha)
-    asr_loss = 0.0
-    if asr_penalty > 0:
-        asr_sum = np.sum(A, axis=(2, 3))  # (3, N_c, 3) — sum over cells and atoms
-        asr_loss = asr_penalty * np.sum(asr_sum**2)
-        loss += asr_loss
-
-    # ---- Gradient ----
-    grad_A = np.zeros_like(A)
-    grad_lam = np.zeros(N_c)
-
-    # Precompute mode tables (same as forward)
-    mode_table = np.zeros((3, N_c, n_super, n_cells, 3))
-    for j in range(n_super):
-        cj = sc_to_cell[j]
-        bj = sc_to_prim[j]
-        for l in range(n_cells):
-            cl = cell_diff[cj, l]
-            mode_table[:, :, j, l, :] = A[:, :, cl, bj, :]
-
-    mode1_table = np.zeros((3, N_c, nat_prim, n_cells, 3))
-    for b1 in range(nat_prim):
-        for l in range(n_cells):
-            c1 = cell_diff[0, l]
-            mode1_table[:, :, b1, l, :] = A[:, :, c1, b1, :]
-
-    # Gradient w.r.t. lambdas: dL/dlam_xi = (2/6) * sum_sigma sum_l
-    #   sum_{b1,j,k,a,b,c} residual * mode1*mode2*mode3
-    # This equals sum of element-wise product of residual with (fc3 from xi without lambda)
-    for xi in range(N_c):
-        fc3_xi = np.zeros_like(fc3_approx)
-        for sigma in S3_PERMS:
-            s1, s2, s3 = sigma
-            for l in range(n_cells):
-                m1 = mode1_table[s1, xi, :, l, :]
-                m2 = mode_table[s2, xi, :, l, :]
-                m3 = mode_table[s3, xi, :, l, :]
-                fc3_xi += (1.0 / 6.0) * np.einsum('ia,jb,kc->ijkabc', m1, m2, m3)
-        grad_lam[xi] = 2.0 * np.sum(residual * fc3_xi)
-
-    # Gradient w.r.t. A modes:
-    # For each (leg_p, xi), dL/dA_p^xi[l0, b0, alpha0] involves contracting
-    # residual with the other two mode vectors at all positions where
-    # A_p^xi contributes (through different sigma permutations and l-shifts).
-    R = 2.0 * residual  # dL/dPhi = 2 * residual
-
-    for xi in range(N_c):
-        w = lambdas[xi] / 6.0
-        for sigma in S3_PERMS:
-            s1, s2, s3 = sigma
-            for l in range(n_cells):
-                m1 = mode1_table[s1, xi, :, l, :]  # (nat_prim, 3)
-                m2 = mode_table[s2, xi, :, l, :]    # (n_super, 3)
-                m3 = mode_table[s3, xi, :, l, :]    # (n_super, 3)
-
-                # Gradient for leg s1 (appears as first index, i.e., b1 position):
-                # dL/dA_{s1}^xi at cell_diff[0,l], atom b1, alpha
-                # = w * R[b1,j,k,a,b,c] * m2[j,b] * m3[k,c]   summed over j,k,b,c
-                # = w * einsum('ijkabc,jb,kc->ia', R, m2, m3)
-                g1 = w * np.einsum('ijkabc,jb,kc->ia', R, m2, m3)
-                c1 = cell_diff[0, l]
-                for b1 in range(nat_prim):
-                    grad_A[s1, xi, c1, b1, :] += g1[b1, :]
-
-                # Gradient for leg s2 (appears as second index, j position):
-                # dL/dA_{s2}^xi at cell_diff[sc_to_cell[j], l], sc_to_prim[j]
-                # = w * R[b1,j,k,a,b,c] * m1[b1,a] * m3[k,c]  summed over b1,k,a,c
-                g2 = w * np.einsum('ijkabc,ia,kc->jb', R, m1, m3)
-                for j in range(n_super):
-                    c2 = cell_diff[sc_to_cell[j], l]
-                    b2 = sc_to_prim[j]
-                    grad_A[s2, xi, c2, b2, :] += g2[j, :]
-
-                # Gradient for leg s3 (appears as third index, k position):
-                g3 = w * np.einsum('ijkabc,ia,jb->kc', R, m1, m2)
-                for k in range(n_super):
-                    c3 = cell_diff[sc_to_cell[k], l]
-                    b3 = sc_to_prim[k]
-                    grad_A[s3, xi, c3, b3, :] += g3[k, :]
-
-    # ASR gradient
-    if asr_penalty > 0:
-        asr_sum = np.sum(A, axis=(2, 3))  # (3, N_c, 3)
-        grad_A += 2.0 * asr_penalty * asr_sum[:, :, None, None, :]
-
-    grad = np.concatenate([grad_A.ravel(), grad_lam])
-    return loss, grad
-
-
-# ---------------------------------------------------------------------------
-# PyTorch PCP forward model and fitting
+# Index tables for advanced indexing
 # ---------------------------------------------------------------------------
 
 
 def _build_index_tables(sc_to_cell, sc_to_prim, cell_diff, nat_prim, n_super, n_cells):
     """Precompute index tables for the PCP forward model.
 
-    Returns integer arrays that map (b1, j, k, l) to the appropriate
-    (cell, prim_atom) indices for all three legs. These are used for
-    advanced indexing in both NumPy and PyTorch.
-
     Returns
     -------
     idx1_cell : (nat_prim, n_cells) — cell indices for leg 1
-    idx1_atom : (nat_prim, n_cells) — atom indices for leg 1 (just b1)
     idx_jk_cell : (n_super, n_cells) — cell indices for legs 2,3
-    idx_jk_atom : (n_super,) — prim atom for each supercell atom
+    sc_to_prim : (n_super,) — prim atom for each supercell atom
     """
-    # Leg 1: atom b1 at cell 0, shift -l => cell_diff[0, l]
     idx1_cell = np.zeros((nat_prim, n_cells), dtype=np.int64)
     for b1 in range(nat_prim):
         for l in range(n_cells):
             idx1_cell[b1, l] = cell_diff[0, l]
 
-    # Legs 2,3: atom j at cell c_j, shift => cell_diff[c_j, l]
     idx_jk_cell = np.zeros((n_super, n_cells), dtype=np.int64)
     for j in range(n_super):
         for l in range(n_cells):
             idx_jk_cell[j, l] = cell_diff[sc_to_cell[j], l]
 
     return idx1_cell, idx_jk_cell, sc_to_prim.astype(np.int64)
+
+
+# ---------------------------------------------------------------------------
+# PCP forward model (PyTorch)
+# ---------------------------------------------------------------------------
 
 
 def _pcp_forward_torch(A, lambdas, idx1_cell, idx_jk_cell, sc_to_prim,
@@ -392,24 +171,12 @@ def _pcp_forward_torch(A, lambdas, idx1_cell, idx_jk_cell, sc_to_prim,
     lambdas : (N_c,)
     Returns fc3 : (nat_prim, n_super, n_super, 3, 3, 3)
     """
-    import torch
-
     # Build mode tables via advanced indexing
-    # mode1[leg, xi, b1, l, alpha] = A[leg, xi, idx1_cell[b1,l], b1, alpha]
-    # shape: (3, N_c, nat_prim, n_cells, 3)
     b1_range = torch.arange(nat_prim, device=A.device)
     mode1 = A[:, :, idx1_cell, b1_range[:, None], :]  # (3, N_c, nat_prim, n_cells, 3)
 
-    # mode_jk[leg, xi, j, l, alpha] = A[leg, xi, idx_jk_cell[j,l], sc_to_prim[j], alpha]
-    # shape: (3, N_c, n_super, n_cells, 3)
     mode_jk = A[:, :, idx_jk_cell, sc_to_prim[:, None].expand(-1, n_cells), :]
-
-    # Accumulate fc3 over permutations and cell shifts
-    # fc3[b1, j, k, a, b, c] = sum_xi (lam_xi/6) sum_sigma sum_l
-    #   mode_{s1}[xi, b1, l, a] * mode_{s2}[xi, j, l, b] * mode_{s3}[xi, k, l, c]
-    #
-    # For each permutation (s1, s2, s3) and each l:
-    #   contribution = einsum('xia, xjb, xkc -> ijkabc', m1, m2, m3) summed over x=xi
+    # shape: (3, N_c, n_super, n_cells, 3)
 
     fc3 = torch.zeros(nat_prim, n_super, n_super, 3, 3, 3,
                        dtype=A.dtype, device=A.device)
@@ -417,32 +184,109 @@ def _pcp_forward_torch(A, lambdas, idx1_cell, idx_jk_cell, sc_to_prim,
     w = lambdas / 6.0  # (N_c,)
 
     for s1, s2, s3 in S3_PERMS:
-        # Sum over l (cell shift) first, then do the triple outer product
-        # m1_sum[xi, b1, a] = sum_l mode1[s1, xi, b1, l, a]  — NO, we need per-l products
-        # Instead: for each l, accumulate the weighted outer product
-        # Vectorize over l by doing a single einsum with l as a contraction index
-
         m1 = mode1[s1]   # (N_c, nat_prim, n_cells, 3)
         m2 = mode_jk[s2] # (N_c, n_super, n_cells, 3)
         m3 = mode_jk[s3] # (N_c, n_super, n_cells, 3)
 
-        # Contract over l (cell shifts) and xi (ranks, with weights):
-        # fc3[b1,j,k,a,b,c] += sum_xi w[xi] * sum_l m1[xi,b1,l,a] * m2[xi,j,l,b] * m3[xi,k,l,c]
-        #
-        # Reshape for einsum: contract xi and l simultaneously
-        # w[xi]*m1[xi,b1,l,a] -> wm1[xi,b1,l,a]
         wm1 = w[:, None, None, None] * m1  # (N_c, nat_prim, n_cells, 3)
 
-        # einsum('xila, xjlb, xklc -> ijkabc', wm1, m2, m3)
-        # This is an outer product over (b1,a) x (j,b) x (k,c) contracted over (xi, l)
+        # Contract over xi (rank) and l (cell shifts)
         fc3 += torch.einsum('xila, xjlb, xklc -> ijkabc', wm1, m2, m3)
 
     return fc3
 
 
-def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
-            max_iter=2000, verbose=True):
-    """Fit PCP decomposition to FC3 via Adam optimizer (PyTorch).
+# ---------------------------------------------------------------------------
+# ASR projection
+# ---------------------------------------------------------------------------
+
+
+def _project_asr(A):
+    """Project modes onto the acoustic sum rule subspace.
+
+    The FC3 acoustic sum rule requires sum_j Phi(i,j,k) = 0 for all i,k.
+    In the PCP parameterization, this is equivalent to:
+
+        sum_{l, b} A_i^xi(l, b, alpha) = 0
+
+    for each (leg i, rank xi, Cartesian alpha).
+
+    Proof: summing the PCP forward model over supercell atom j,
+    the pair (cell_j, prim_j) covers all (cell, atom) pairs exactly once
+    as j varies. The cell shift cell_diff[c_j, l] is a bijection on cells
+    for each fixed l. Therefore the sum collapses to
+    sum_{l',b'} A_{s2}[l', b', alpha], which this projection zeroes out.
+
+    The same argument holds for summing over i or k (all three legs),
+    since the permanent symmetrization assigns each mode to each leg.
+
+    Parameters
+    ----------
+    A : Tensor, shape (3, N_c, n_cells, nat_prim, 3)
+
+    Returns
+    -------
+    A_proj : same shape, satisfying ASR exactly.
+    """
+    mean = A.mean(dim=(2, 3), keepdim=True)  # (3, N_c, 1, 1, 3)
+    return A - mean
+
+
+def _project_asr_grad(grad_A):
+    """Project gradients onto ASR-tangent subspace.
+
+    For projected gradient methods, the gradient must also lie in the
+    constraint tangent space. The ASR constraint is linear
+    (sum_{l,b} A = 0), so its tangent space is the same as the
+    constraint subspace: vectors with zero mean over (l, b).
+
+    Returns a contiguous tensor (required by L-BFGS which calls .view()).
+    """
+    return (grad_A - grad_A.mean(dim=(2, 3), keepdim=True)).contiguous()
+
+
+# ---------------------------------------------------------------------------
+# PCP fitting via torch (Adam + L-BFGS, ASR projection)
+# ---------------------------------------------------------------------------
+
+
+def _build_target(fc3_raw, phonon):
+    """Build mass-weighted target FC3 in compact format.
+
+    Returns
+    -------
+    target : ndarray, shape (nat_prim, n_super, n_super, 3, 3, 3)
+    """
+    nat_prim = len(phonon.primitive.masses)
+    n_super = len(phonon.supercell.masses)
+    masses = phonon.supercell.masses
+    p2s = phonon.primitive.p2s_map
+    is_compact = fc3_raw.shape[0] == nat_prim
+
+    target = np.zeros((nat_prim, n_super, n_super, 3, 3, 3))
+    for i_prim in range(nat_prim):
+        fc3_idx = i_prim if is_compact else int(p2s[i_prim])
+        m_i = masses[int(p2s[i_prim])]
+        for j in range(n_super):
+            m_j = masses[j]
+            for k in range(n_super):
+                m_k = masses[k]
+                mass_factor = np.sqrt(m_i * m_j * m_k)
+                target[i_prim, j, k] = fc3_raw[fc3_idx, j, k] / mass_factor * CONVERSION_FC3_THZ
+
+    return target
+
+
+def fit_pcp(fc3_raw, phonon, N_c=24, max_iter=2000, verbose=True):
+    """Fit PCP decomposition to FC3 using ASR-projected optimization.
+
+    Two-phase optimization with ASR enforced by projection (not penalty):
+      Phase 1: Adam with cosine warm restarts and ASR projection after
+               each step (Adam's momentum is robust to mild projection).
+      Phase 2: L-BFGS operating in ASR-projected gradient space.
+               Gradients are projected onto the ASR tangent plane BEFORE
+               L-BFGS sees them, so the Hessian approximation stays valid
+               within the constraint manifold.
 
     Parameters
     ----------
@@ -452,10 +296,8 @@ def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
     phonon : Phonopy
     N_c : int
         PCP rank.
-    asr_penalty : float
-        Weight for ASR violation penalty.
     max_iter : int
-        Number of Adam iterations.
+        Total optimization iterations (Adam + L-BFGS).
     verbose : bool
 
     Returns
@@ -464,43 +306,25 @@ def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
     lambdas : ndarray, shape (N_c,)
     info : dict
     """
-    import torch
-
     nat_prim = len(phonon.primitive.masses)
     n_super = len(phonon.supercell.masses)
-    masses = phonon.supercell.masses
 
     sc_to_cell, sc_to_prim_np, cell_frac_all, n_cells, sc_mat = build_cell_mapping(phonon)
     cell_diff, idx_to_t = build_cell_diff_table(n_cells, sc_mat)
 
-    # Handle compact vs full format
-    is_compact = fc3_raw.shape[0] == nat_prim
-    p2s = phonon.primitive.p2s_map
-
-    # Build mass-weighted target FC3 in compact format
-    target_np = np.zeros((nat_prim, n_super, n_super, 3, 3, 3))
-    for i_prim in range(nat_prim):
-        fc3_idx = i_prim if is_compact else int(p2s[i_prim])
-        m_i = masses[int(p2s[i_prim])]
-        for j in range(n_super):
-            m_j = masses[j]
-            for k in range(n_super):
-                m_k = masses[k]
-                mass_factor = np.sqrt(m_i * m_j * m_k)
-                target_np[i_prim, j, k] = fc3_raw[fc3_idx, j, k] / mass_factor * CONVERSION_FC3_THZ
-
+    # Build target
+    target_np = _build_target(fc3_raw, phonon)
     target_norm = np.linalg.norm(target_np)
+
     if verbose:
         print(f"  PCP fitting: N_c={N_c}, target norm={target_norm:.4e}")
         print(f"  Supercell: {n_super} atoms, {n_cells} cells, {nat_prim} prim atoms")
         n_params = 3 * N_c * n_cells * nat_prim * 3 + N_c
         n_target = nat_prim * n_super * n_super * 27
-        print(f"  Parameters: {n_params}, target entries: {n_target}, "
-              f"compression: {n_target / N_c:.0f}x")
+        print(f"  Parameters: {n_params}, target entries: {n_target}")
 
-    # Normalize target
-    target_np /= target_norm
-    target_t = torch.tensor(target_np, dtype=torch.float64)
+    # Normalize target for numerical stability
+    target_t = torch.tensor(target_np / target_norm, dtype=torch.float64)
 
     # Precompute index tables
     idx1_cell_np, idx_jk_cell_np, sc_to_prim_i = _build_index_tables(
@@ -509,69 +333,78 @@ def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
     idx_jk_cell = torch.tensor(idx_jk_cell_np, dtype=torch.long)
     sc_to_prim_t = torch.tensor(sc_to_prim_i, dtype=torch.long)
 
-    # Initialize parameters
-    mode_dim = n_cells * nat_prim * 3
+    # --- Initialization ---
+    # Scale so initial FC3 magnitude ~ O(1) (matching normalized target).
+    # FC3 ~ N_c * lam * n_cells * A^3, with lam=1: A ~ (1/(N_c * n_cells))^{1/3}
     rng = np.random.default_rng(42)
-    scale = (1.0 / (N_c * mode_dim)) ** (1.0 / 3.0)
+    scale = (1.0 / (N_c * n_cells)) ** (1.0 / 3.0)
 
-    A_param = torch.tensor(
-        rng.normal(0, scale, (3, N_c, n_cells, nat_prim, 3)),
-        dtype=torch.float64, requires_grad=True,
-    )
+    A_init = rng.normal(0, scale, (3, N_c, n_cells, nat_prim, 3))
+    A_init -= A_init.mean(axis=(2, 3), keepdims=True)  # enforce ASR from start
+
+    A_param = torch.tensor(A_init, dtype=torch.float64, requires_grad=True)
     lam_param = torch.tensor(
-        np.ones(N_c) / N_c,
-        dtype=torch.float64, requires_grad=True,
+        np.ones(N_c, dtype=np.float64),
+        requires_grad=True,
     )
 
-    # Two-phase optimization: Adam warm-up then L-BFGS refinement
     best_err = float('inf')
     best_A = A_param.detach().clone()
     best_lam = lam_param.detach().clone()
 
-    def compute_loss():
+    def forward():
         fc3_approx = _pcp_forward_torch(
             A_param, lam_param, idx1_cell, idx_jk_cell, sc_to_prim_t,
             nat_prim, n_super, n_cells, N_c,
         )
-        loss = torch.sum((fc3_approx - target_t) ** 2)
-        if asr_penalty > 0:
-            asr_sum = A_param.sum(dim=(2, 3))
-            loss = loss + asr_penalty * torch.sum(asr_sum ** 2)
-        return loss, fc3_approx
+        return torch.sum((fc3_approx - target_t) ** 2), fc3_approx
 
-    # Phase 1: Adam with high learning rate
-    adam_iters = min(max_iter // 4, 500)
-    optimizer = torch.optim.Adam([A_param, lam_param], lr=0.05)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=adam_iters, eta_min=1e-3,
+    def update_best(err_val):
+        nonlocal best_err, best_A, best_lam
+        if err_val < best_err:
+            best_err = err_val
+            best_A = A_param.detach().clone()
+            best_lam = lam_param.detach().clone()
+
+    # --- Phase 1: Adam with ASR projection ---
+    adam_iters = min(max_iter * 3 // 4, 1500)
+    optimizer = torch.optim.Adam([A_param, lam_param], lr=0.02)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=200, T_mult=2, eta_min=1e-4,
     )
 
     if verbose:
-        print(f"  Phase 1: Adam ({adam_iters} iters, lr=0.05)...")
+        print(f"  Phase 1: Adam ({adam_iters} iters, lr=0.02, cosine warm restarts)...")
 
     for it in range(1, adam_iters + 1):
         optimizer.zero_grad()
-        loss, fc3_approx = compute_loss()
+        loss, fc3_approx = forward()
         loss.backward()
         optimizer.step()
         scheduler.step()
+
+        # Project modes back onto ASR subspace after each Adam step.
+        # Adam's per-parameter momentum is tolerant of this mild projection.
+        with torch.no_grad():
+            A_param.data = _project_asr(A_param.data)
 
         if it % 100 == 0 or it == 1:
             with torch.no_grad():
                 err = torch.sqrt(torch.sum((fc3_approx - target_t) ** 2)).item()
                 asr_v = torch.max(torch.abs(A_param.sum(dim=(2, 3)))).item()
-            if err < best_err:
-                best_err = err
-                best_A = A_param.detach().clone()
-                best_lam = lam_param.detach().clone()
+            update_best(err)
             if verbose:
-                print(f"    iter {it:5d}: rel_err={err:.4e}, "
-                      f"max_asr={asr_v:.2e}")
+                print(f"    iter {it:5d}: rel_err={err:.6e}, "
+                      f"max_asr={asr_v:.2e}, lr={scheduler.get_last_lr()[0]:.2e}")
 
-    # Phase 2: L-BFGS for precise convergence
+    # --- Phase 2: L-BFGS with projected gradients ---
+    # Instead of projecting parameters post-step (which corrupts the
+    # L-BFGS Hessian approximation), we project GRADIENTS onto the ASR
+    # tangent plane inside the closure. This way L-BFGS builds a valid
+    # inverse-Hessian approximation within the constraint manifold.
     lbfgs_iters = max_iter - adam_iters
     if verbose:
-        print(f"  Phase 2: L-BFGS ({lbfgs_iters} iters)...")
+        print(f"  Phase 2: L-BFGS ({lbfgs_iters} iters, projected gradients)...")
 
     # Reset from best
     A_param.data.copy_(best_A)
@@ -585,36 +418,35 @@ def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
         line_search_fn='strong_wolfe',
     )
 
-    lbfgs_step = [0]
-
-    for outer in range(lbfgs_iters // 20 + 1):
+    n_lbfgs_steps = max(1, lbfgs_iters // 20)
+    for outer in range(n_lbfgs_steps):
         def closure():
             lbfgs.zero_grad()
-            loss, _ = compute_loss()
+            loss, _ = forward()
             loss.backward()
+            # Project A gradient onto ASR tangent plane so L-BFGS
+            # only explores the constraint manifold.
+            if A_param.grad is not None:
+                A_param.grad.data = _project_asr_grad(A_param.grad.data)
             return loss
 
         lbfgs.step(closure)
-        lbfgs_step[0] += 1
 
-        if (lbfgs_step[0]) % 5 == 0 or lbfgs_step[0] == 1:
+        if (outer + 1) % 5 == 0 or outer == 0:
             with torch.no_grad():
-                loss_val, fc3_approx = compute_loss()
+                loss_val, fc3_approx = forward()
                 err = torch.sqrt(torch.sum((fc3_approx - target_t) ** 2)).item()
                 asr_v = torch.max(torch.abs(A_param.sum(dim=(2, 3)))).item()
-            if err < best_err:
-                best_err = err
-                best_A = A_param.detach().clone()
-                best_lam = lam_param.detach().clone()
+            update_best(err)
             if verbose:
-                print(f"    L-BFGS step {lbfgs_step[0]:4d}: rel_err={err:.4e}, "
+                print(f"    L-BFGS step {outer+1:4d}: rel_err={err:.6e}, "
                       f"max_asr={asr_v:.2e}")
 
     # Use best parameters
     A_modes = best_A.numpy()
     lambdas = best_lam.numpy()
 
-    # Rescale lambdas
+    # Rescale lambdas to undo target normalization
     lambdas *= target_norm
 
     # Sort by |lambda| descending
@@ -623,12 +455,22 @@ def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
     lambdas = lambdas[order]
     asr_violation = np.max(np.abs(np.sum(A_modes, axis=(2, 3))))
 
+    # Verify ASR of reconstructed FC3
+    with torch.no_grad():
+        A_t = torch.tensor(A_modes, dtype=torch.float64)
+        lam_t = torch.tensor(lambdas / target_norm, dtype=torch.float64)
+        fc3_final = _pcp_forward_torch(
+            A_t, lam_t, idx1_cell, idx_jk_cell, sc_to_prim_t,
+            nat_prim, n_super, n_cells, N_c,
+        )
+        fc3_recon = fc3_final.numpy() * target_norm
+    asr_fc3 = np.max(np.abs(np.sum(fc3_recon, axis=1)))  # sum over j
+
     info = {
         'rel_err': best_err,
         'asr_violation': asr_violation,
+        'asr_fc3': asr_fc3,
         'n_iter': max_iter,
-        'success': best_err < 0.05,
-        'message': 'Adam optimization',
         'target_norm': target_norm,
         'n_cells': n_cells,
         'sc_mat': sc_mat,
@@ -639,7 +481,245 @@ def fit_pcp(fc3_raw, phonon, N_c=24, asr_penalty=10.0,
     }
 
     if verbose:
-        print(f"  PCP fit: rel_err={best_err:.4e}, asr={asr_violation:.2e}")
+        print(f"  PCP fit: rel_err={best_err:.6e}, asr_mode={asr_violation:.2e}, "
+              f"asr_fc3={asr_fc3:.2e}")
+
+    return A_modes, lambdas, info
+
+
+def fit_pcp_greedy(fc3_raw, phonon, N_c=24, iters_per_rank=500, verbose=True):
+    """Fit PCP decomposition greedily, one rank at a time.
+
+    For each new rank, fit the residual (target minus current approximation).
+    This avoids the difficult joint optimization over all ranks simultaneously
+    and guarantees monotonic error decrease.
+
+    Parameters
+    ----------
+    fc3_raw : ndarray
+        FC3 tensor.
+    phonon : Phonopy
+    N_c : int
+        Total PCP rank.
+    iters_per_rank : int
+        Adam iterations per rank.
+    verbose : bool
+
+    Returns
+    -------
+    A_modes : ndarray, shape (3, N_c, n_cells, nat_prim, 3)
+    lambdas : ndarray, shape (N_c,)
+    info : dict
+    """
+    nat_prim = len(phonon.primitive.masses)
+    n_super = len(phonon.supercell.masses)
+
+    sc_to_cell, sc_to_prim_np, cell_frac_all, n_cells, sc_mat = build_cell_mapping(phonon)
+    cell_diff, idx_to_t = build_cell_diff_table(n_cells, sc_mat)
+
+    target_np = _build_target(fc3_raw, phonon)
+    target_norm = np.linalg.norm(target_np)
+    target_t = torch.tensor(target_np / target_norm, dtype=torch.float64)
+
+    idx1_cell_np, idx_jk_cell_np, sc_to_prim_i = _build_index_tables(
+        sc_to_cell, sc_to_prim_np, cell_diff, nat_prim, n_super, n_cells)
+    idx1_cell = torch.tensor(idx1_cell_np, dtype=torch.long)
+    idx_jk_cell = torch.tensor(idx_jk_cell_np, dtype=torch.long)
+    sc_to_prim_t = torch.tensor(sc_to_prim_i, dtype=torch.long)
+
+    if verbose:
+        print(f"  PCP greedy fitting: N_c={N_c}, target norm={target_norm:.4e}")
+        print(f"  Supercell: {n_super} atoms, {n_cells} cells, {nat_prim} prim atoms")
+
+    # Accumulate fitted modes
+    all_A = []
+    all_lam = []
+    residual = target_t.clone()
+
+    rng = np.random.default_rng(42)
+
+    for rank_idx in range(N_c):
+        residual_norm = torch.sqrt(torch.sum(residual ** 2)).item()
+        if verbose and (rank_idx % max(1, N_c // 10) == 0 or rank_idx == 0):
+            print(f"  Rank {rank_idx+1}/{N_c}: residual_norm={residual_norm:.6e}")
+
+        if residual_norm < 1e-12:
+            if verbose:
+                print(f"  Converged at rank {rank_idx} (residual < 1e-12)")
+            break
+
+        # Initialize a single-rank PCP for the residual.
+        # Try multiple random starts and keep the best (rank-1 landscape
+        # is highly non-convex, so restarts are essential).
+        n_restarts = 3
+        best_loss = float('inf')
+        best_A_r = None
+        best_lam_r = None
+
+        for restart in range(n_restarts):
+            scale = (residual_norm / n_cells) ** (1.0 / 3.0)
+            A_init = rng.normal(0, scale, (3, 1, n_cells, nat_prim, 3))
+            A_init -= A_init.mean(axis=(2, 3), keepdims=True)
+
+            A_r = torch.tensor(A_init, dtype=torch.float64, requires_grad=True)
+            lam_r = torch.tensor([residual_norm], dtype=torch.float64, requires_grad=True)
+
+            # Adam phase
+            adam_its = iters_per_rank * 2 // 3
+            opt = torch.optim.Adam([A_r, lam_r], lr=0.03)
+            sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+                opt, T_max=adam_its, eta_min=1e-4,
+            )
+
+            for it in range(adam_its):
+                opt.zero_grad()
+                fc3_r = _pcp_forward_torch(
+                    A_r, lam_r, idx1_cell, idx_jk_cell, sc_to_prim_t,
+                    nat_prim, n_super, n_cells, 1,
+                )
+                loss = torch.sum((fc3_r - residual) ** 2)
+                loss.backward()
+                opt.step()
+                sched.step()
+                with torch.no_grad():
+                    A_r.data = _project_asr(A_r.data)
+
+            # L-BFGS refinement
+            lbfgs_r = torch.optim.LBFGS(
+                [A_r, lam_r], lr=1.0, max_iter=20,
+                history_size=20, line_search_fn='strong_wolfe',
+            )
+            for _ in range(iters_per_rank // 3 // 20 + 1):
+                def closure_r():
+                    lbfgs_r.zero_grad()
+                    fc3_r = _pcp_forward_torch(
+                        A_r, lam_r, idx1_cell, idx_jk_cell, sc_to_prim_t,
+                        nat_prim, n_super, n_cells, 1,
+                    )
+                    l = torch.sum((fc3_r - residual) ** 2)
+                    l.backward()
+                    if A_r.grad is not None:
+                        A_r.grad.data = _project_asr_grad(A_r.grad.data)
+                    return l
+                lbfgs_r.step(closure_r)
+
+            with torch.no_grad():
+                fc3_r = _pcp_forward_torch(
+                    A_r, lam_r, idx1_cell, idx_jk_cell, sc_to_prim_t,
+                    nat_prim, n_super, n_cells, 1,
+                )
+                final_loss = torch.sum((fc3_r - residual) ** 2).item()
+
+            if final_loss < best_loss:
+                best_loss = final_loss
+                best_A_r = A_r.detach().clone()
+                best_lam_r = lam_r.detach().clone()
+
+        # Only subtract if we actually reduced the residual
+        with torch.no_grad():
+            fc3_fitted = _pcp_forward_torch(
+                best_A_r, best_lam_r, idx1_cell, idx_jk_cell, sc_to_prim_t,
+                nat_prim, n_super, n_cells, 1,
+            )
+            new_residual = residual - fc3_fitted
+            new_norm = torch.sqrt(torch.sum(new_residual ** 2)).item()
+            if new_norm < residual_norm:
+                residual = new_residual
+            else:
+                if verbose:
+                    print(f"    Rank {rank_idx+1}: no improvement, stopping greedy phase")
+                break
+
+        all_A.append(best_A_r.numpy())
+        all_lam.append(best_lam_r.numpy()[0])
+
+    # Assemble
+    actual_rank = len(all_lam)
+    A_modes = np.zeros((3, N_c, n_cells, nat_prim, 3))
+    lambdas = np.zeros(N_c)
+    for r in range(actual_rank):
+        A_modes[:, r] = all_A[r][:, 0]
+        lambdas[r] = all_lam[r]
+
+    # Rescale lambdas
+    lambdas *= target_norm
+
+    # Sort by |lambda| descending
+    order = np.argsort(-np.abs(lambdas))
+    A_modes = A_modes[:, order]
+    lambdas = lambdas[order]
+    asr_violation = np.max(np.abs(np.sum(A_modes, axis=(2, 3))))
+
+    # --- Joint refinement of all ranks ---
+    if verbose:
+        print(f"  Joint refinement (L-BFGS, {min(200, iters_per_rank)} steps)...")
+
+    A_param = torch.tensor(A_modes, dtype=torch.float64, requires_grad=True)
+    lam_param = torch.tensor(lambdas / target_norm, dtype=torch.float64, requires_grad=True)
+
+    lbfgs = torch.optim.LBFGS(
+        [A_param, lam_param], lr=1.0, max_iter=20,
+        history_size=50, line_search_fn='strong_wolfe',
+    )
+
+    n_refine = min(200, iters_per_rank) // 20
+    for outer in range(max(1, n_refine)):
+        def closure():
+            lbfgs.zero_grad()
+            fc3_a = _pcp_forward_torch(
+                A_param, lam_param, idx1_cell, idx_jk_cell, sc_to_prim_t,
+                nat_prim, n_super, n_cells, N_c,
+            )
+            loss = torch.sum((fc3_a - target_t) ** 2)
+            loss.backward()
+            if A_param.grad is not None:
+                A_param.grad.data = _project_asr_grad(A_param.grad.data)
+            return loss
+        lbfgs.step(closure)
+
+    A_modes = A_param.detach().numpy()
+    lambdas = lam_param.detach().numpy() * target_norm
+
+    # Sort by |lambda| descending
+    order = np.argsort(-np.abs(lambdas))
+    A_modes = A_modes[:, order]
+    lambdas = lambdas[order]
+    asr_violation = np.max(np.abs(np.sum(A_modes, axis=(2, 3))))
+
+    # Compute final reconstruction error
+    with torch.no_grad():
+        A_t = torch.tensor(A_modes, dtype=torch.float64)
+        lam_t = torch.tensor(lambdas / target_norm, dtype=torch.float64)
+        fc3_final = _pcp_forward_torch(
+            A_t, lam_t, idx1_cell, idx_jk_cell, sc_to_prim_t,
+            nat_prim, n_super, n_cells, N_c,
+        )
+        final_err = torch.sqrt(torch.sum((fc3_final - target_t) ** 2)).item()
+
+    # Verify ASR of reconstructed FC3
+    fc3_recon = fc3_final.numpy() * target_norm
+    asr_fc3 = np.max(np.abs(np.sum(fc3_recon, axis=1)))  # sum over j
+    if verbose:
+        print(f"  FC3 ASR check: max|sum_j Phi(i,j,k)| = {asr_fc3:.2e}")
+
+    info = {
+        'rel_err': final_err,
+        'asr_violation': asr_violation,
+        'asr_fc3': asr_fc3,
+        'n_iter': iters_per_rank * actual_rank,
+        'actual_rank': actual_rank,
+        'target_norm': target_norm,
+        'n_cells': n_cells,
+        'sc_mat': sc_mat,
+        'sc_to_cell': sc_to_cell,
+        'sc_to_prim': sc_to_prim_np,
+        'cell_diff': cell_diff,
+        'idx_to_t': idx_to_t,
+    }
+
+    if verbose:
+        print(f"  PCP greedy fit: rel_err={final_err:.6e}, asr={asr_violation:.2e}, "
+              f"actual_rank={actual_rank}")
 
     return A_modes, lambdas, info
 
@@ -691,12 +771,9 @@ def fourier_transform_pcp(A_modes, lambdas, phonon, q_perp_frac,
         _, idx_to_t = build_cell_diff_table(n_cells, sc_mat)
 
     # Phase for each cell: exp(-2pi*i * q . R_frac_cell)
-    # R_frac_cell = idx_to_t[l] (in fractional coords of primitive cell)
     phases = np.exp(-2j * np.pi * idx_to_t @ q_full)  # (n_cells,)
 
     # FT: f_i^xi(q)[kappa*3+alpha] = sum_l phase[l] * A_i^xi(l, kappa, alpha)
-    # A_modes shape: (3, N_c, n_cells, nat_prim, 3)
-    # phases shape: (n_cells,) -> broadcast: (1, 1, n_cells, 1, 1)
     A_ft = np.sum(A_modes * phases[None, None, :, None, None], axis=2)  # (3, N_c, nat_prim, 3)
     f_q = A_ft.reshape(3, N_c, n_dof)  # (3, N_c, n_dof)
 
@@ -721,22 +798,13 @@ def _compute_phph_self_energy_pcp(
     g_{ij}^{xi,xi'}(w;q), convolves pairs of scalars, and reconstructs
     the matrix self-energy from the external mode vectors.
 
-    This is the exact PCP self-energy formula: the scalar projection
-    happens BEFORE the frequency convolution, which is not equivalent
-    to reconstructing Phi and using the dense kernel (that would be a
-    different approximation).
-
     Uses matmul accumulation (Sigma[w] = F^H @ C[w] @ conj(F)) for
     ~5-15x speedup over the naive einsum on the accumulation step.
-
-    Cost per (q,q') pair: O(9*N_c^2 * n_fft * log(n_fft)).
-    Faster than dense when 9*N_c^2 < n_dof^4, i.e., small PCP rank.
 
     Parameters
     ----------
     G_lesser_q, G_greater_q : ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
     f_modes_all_q : ndarray, shape (n_kpts, 3, N_c, n_dof), complex
-        FT'd PCP modes at each q-point.
     lambdas : ndarray, shape (N_c,)
     n_dof, n_kpts : int
     omega_grid_thz : ndarray, shape (n_freq,)
@@ -818,22 +886,17 @@ def _compute_phph_self_energy_pcp(
                     f_s1p = f_modes_all_q[iq_ext, s1p, :, :]
                     f_s1p_conj = np.conj(f_s1p)
 
-                    # C[w, xi, xi'] = lam_outer * conv[xi, xi', w]
                     CL = (lam_outer[:, :, None] * conv_all_L[:, :, s1, s1p, :]).transpose(2, 0, 1)
                     CG = (lam_outer[:, :, None] * conv_all_G[:, :, s1, s1p, :]).transpose(2, 0, 1)
 
-                    # T[w, xi, b] = C[w] @ conj(f')
                     TL = CL @ f_s1p_conj   # (n_freq, N_c, n_dof)
                     TG = CG @ f_s1p_conj
 
-                    # Sigma[w, a, b] += prefactor * f^T @ T[w]
                     Sigma_lesser[iq_ext] += prefactor * np.einsum('xa,wxy->way', f_s1, TL)
                     Sigma_greater[iq_ext] += prefactor * np.einsum('xa,wxy->way', f_s1, TG)
 
     Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
     return Sigma_lesser, Sigma_greater, Sigma_retarded
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -855,8 +918,8 @@ def pcp_anharmonic_transmission(
     mixing: float = 0.5,
     n_slabs: int = 1,
     pcp_rank: int = 24,
-    asr_penalty: float = 10.0,
     pcp_max_iter: int = 2000,
+    greedy: bool = False,
     verbose: bool = True,
 ) -> dict:
     """Anharmonic phonon transmission via PCP FC3 decomposition.
@@ -868,10 +931,10 @@ def pcp_anharmonic_transmission(
         Path to fc3.hdf5.
     pcp_rank : int
         PCP rank N_c.
-    asr_penalty : float
-        ASR penalty weight for PCP fitting.
     pcp_max_iter : int
         Max iterations for PCP fitting.
+    greedy : bool
+        Use greedy rank-1 fitting instead of joint optimization.
 
     Returns
     -------
@@ -901,10 +964,17 @@ def pcp_anharmonic_transmission(
     if verbose:
         print(f"  FC3 raw shape: {fc3_raw.shape}")
 
-    A_modes, lambdas, pcp_info = fit_pcp(
-        fc3_raw, phonon, N_c=pcp_rank,
-        asr_penalty=asr_penalty, max_iter=pcp_max_iter, verbose=verbose,
-    )
+    if greedy:
+        A_modes, lambdas, pcp_info = fit_pcp_greedy(
+            fc3_raw, phonon, N_c=pcp_rank,
+            iters_per_rank=pcp_max_iter // pcp_rank,
+            verbose=verbose,
+        )
+    else:
+        A_modes, lambdas, pcp_info = fit_pcp(
+            fc3_raw, phonon, N_c=pcp_rank,
+            max_iter=pcp_max_iter, verbose=verbose,
+        )
 
     if verbose:
         print(f"  PCP rank: {pcp_rank}, rel_err: {pcp_info['rel_err']:.4e}")

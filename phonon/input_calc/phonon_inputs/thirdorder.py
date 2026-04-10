@@ -12,22 +12,17 @@ Workflow:
     1. sow:  Create phono3py object, generate displacements, write DFT inputs
              including a reference (undisplaced) supercell calculation
     2. run:  Execute reference DFT first if needed, then each displaced supercell
-             while reusing the previous charge density / wavefunctions
+             while reusing previous charge density / wavefunctions
     3. reap: Read forces from DFT outputs, produce FC3 via symfc
     4. save: Write fc3.hdf5 and phono3py_disp.yaml
 
 Behavior added in this version:
     - Completed calculations are skipped automatically
     - A reference supercell calculation is created and run first if needed
-    - Subsequent QE runs reuse previous pot/wfc through shared outdir/prefix
-    - Subsequent VASP runs reuse previous WAVECAR/CHGCAR by copying from the
-      latest completed calculation
-
-Usage via CLI:
-    python -m phonon_inputs fc3-sow  --config config.yaml
-    python -m phonon_inputs fc3-run  --config config.yaml
-    python -m phonon_inputs fc3-reap --config config.yaml
-    python -m phonon_inputs fc3-all  --config config.yaml
+    - QE can reuse previous pot/wfc through shared outdir/prefix
+    - VASP reuses previous WAVECAR/CHGCAR only when valid restart files exist
+    - For VASP, existing displacement folders and existing input files are not
+      overwritten during sow()
 """
 
 import re
@@ -55,6 +50,29 @@ REFERENCE_VASP_DIRNAME = "reference"
 
 
 # ========================================================================
+# Small helpers
+# ========================================================================
+
+
+def _write_text_if_missing(path: Path, text: str) -> None:
+    """Write text file only if it does not already exist."""
+    if not path.exists():
+        path.write_text(text)
+
+
+def _copy_file_if_missing(src: Path, dst: Path) -> None:
+    """Copy src to dst only if dst does not already exist."""
+    if not dst.exists():
+        shutil.copy2(src, dst)
+
+
+def _copy_if_exists(src: Path, dst: Path) -> None:
+    """Copy a file if it exists."""
+    if src.exists():
+        shutil.copy2(src, dst)
+
+
+# ========================================================================
 # QE input / output
 # ========================================================================
 
@@ -68,25 +86,7 @@ def _write_qe_input(
     prefix: str = QE_RESTART_PREFIX,
     use_restart_data: bool = False,
 ) -> None:
-    """Write a QE pw.x SCF input file.
-
-    Parameters
-    ----------
-    path : Path
-        Output file path.
-    cell : (3, 3) ndarray
-        Lattice vectors in Angstrom.
-    symbols : list[str]
-        Atomic symbols.
-    positions_cart : (N, 3) ndarray
-        Cartesian positions in Angstrom.
-    qe_config : QEConfig
-        QE configuration.
-    prefix : str
-        QE prefix used in outdir.
-    use_restart_data : bool
-        If True, request reading charge density / wavefunctions from files.
-    """
+    """Write a QE pw.x SCF input file."""
     unique_species = list(dict.fromkeys(symbols))
     natoms = len(symbols)
     ecutrho = qe_config.ecutwfc * qe_config.ecutrho_factor
@@ -100,50 +100,52 @@ def _write_qe_input(
                 masses[sym] = entry[3]
                 break
 
-    with open(path, "w") as f:
-        f.write("&CONTROL\n")
-        f.write("   calculation      = 'scf'\n")
-        f.write("   restart_mode     = 'from_scratch'\n")
-        f.write(f"   prefix           = '{prefix}'\n")
-        f.write(f"   pseudo_dir       = '{qe_config.pseudo_dir}'\n")
-        f.write(f"   outdir           = './{QE_RESULTS_DIRNAME}'\n")
-        f.write("   tprnfor          = .true.\n")
-        f.write("/\n")
+    lines = []
+    lines.append("&CONTROL\n")
+    lines.append("   calculation      = 'scf'\n")
+    lines.append("   restart_mode     = 'from_scratch'\n")
+    lines.append(f"   prefix           = '{prefix}'\n")
+    lines.append(f"   pseudo_dir       = '{qe_config.pseudo_dir}'\n")
+    lines.append(f"   outdir           = './{QE_RESULTS_DIRNAME}'\n")
+    lines.append("   tprnfor          = .true.\n")
+    lines.append("/\n")
 
-        f.write("&SYSTEM\n")
-        f.write("   ibrav            = 0\n")
-        f.write(f"   nat              = {natoms}\n")
-        f.write(f"   ntyp             = {len(unique_species)}\n")
-        f.write(f"   ecutwfc          = {qe_config.ecutwfc}\n")
-        f.write(f"   ecutrho          = {ecutrho}\n")
-        f.write("   occupations      = 'smearing'\n")
-        f.write(f"   smearing         = '{qe_config.smearing}'\n")
-        f.write(f"   degauss          = {qe_config.degauss}\n")
-        f.write("/\n")
+    lines.append("&SYSTEM\n")
+    lines.append("   ibrav            = 0\n")
+    lines.append(f"   nat              = {natoms}\n")
+    lines.append(f"   ntyp             = {len(unique_species)}\n")
+    lines.append(f"   ecutwfc          = {qe_config.ecutwfc}\n")
+    lines.append(f"   ecutrho          = {ecutrho}\n")
+    lines.append("   occupations      = 'smearing'\n")
+    lines.append(f"   smearing         = '{qe_config.smearing}'\n")
+    lines.append(f"   degauss          = {qe_config.degauss}\n")
+    lines.append("/\n")
 
-        f.write("&ELECTRONS\n")
-        f.write(f"   conv_thr         = {qe_config.conv_thr}\n")
-        if use_restart_data:
-            f.write("   startingpot      = 'file'\n")
-            f.write("   startingwfc      = 'file'\n")
-        f.write("/\n")
+    lines.append("&ELECTRONS\n")
+    lines.append(f"   conv_thr         = {qe_config.conv_thr}\n")
+    if use_restart_data:
+        lines.append("   startingpot      = 'file'\n")
+        lines.append("   startingwfc      = 'file'\n")
+    lines.append("/\n")
 
-        f.write("ATOMIC_SPECIES\n")
-        for sp in unique_species:
-            pseudo = qe_config.pseudopotentials.get(sp, f"{sp}.UPF")
-            f.write(f"  {sp}  {masses.get(sp, 0.0):.4f}  {pseudo}\n")
+    lines.append("ATOMIC_SPECIES\n")
+    for sp in unique_species:
+        pseudo = qe_config.pseudopotentials.get(sp, f"{sp}.UPF")
+        lines.append(f"  {sp}  {masses.get(sp, 0.0):.4f}  {pseudo}\n")
 
-        f.write("ATOMIC_POSITIONS angstrom\n")
-        for sym, pos in zip(symbols, positions_cart):
-            f.write(f"  {sym}  {pos[0]:.10f}  {pos[1]:.10f}  {pos[2]:.10f}\n")
+    lines.append("ATOMIC_POSITIONS angstrom\n")
+    for sym, pos in zip(symbols, positions_cart):
+        lines.append(f"  {sym}  {pos[0]:.10f}  {pos[1]:.10f}  {pos[2]:.10f}\n")
 
-        f.write("CELL_PARAMETERS angstrom\n")
-        for v in cell:
-            f.write(f"  {v[0]:.10f}  {v[1]:.10f}  {v[2]:.10f}\n")
+    lines.append("CELL_PARAMETERS angstrom\n")
+    for v in cell:
+        lines.append(f"  {v[0]:.10f}  {v[1]:.10f}  {v[2]:.10f}\n")
 
-        kpts = qe_config.kpoints_scf
-        f.write("K_POINTS automatic\n")
-        f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}  0 0 0\n")
+    kpts = qe_config.kpoints_scf
+    lines.append("K_POINTS automatic\n")
+    lines.append(f"  {kpts[0]} {kpts[1]} {kpts[2]}  0 0 0\n")
+
+    path.write_text("".join(lines))
 
 
 def _parse_qe_forces(output_path: Path, n_atoms: int) -> np.ndarray:
@@ -196,12 +198,8 @@ def _rewrite_qe_restart_flags(inp_path: Path, use_restart_data: bool) -> None:
     """Rewrite QE input file so startingpot/startingwfc match seed availability."""
     text = inp_path.read_text()
 
-    text = re.sub(
-        r"(?m)^\s*startingpot\s*=.*\n?", "", text
-    )
-    text = re.sub(
-        r"(?m)^\s*startingwfc\s*=.*\n?", "", text
-    )
+    text = re.sub(r"(?m)^\s*startingpot\s*=.*\n?", "", text)
+    text = re.sub(r"(?m)^\s*startingwfc\s*=.*\n?", "", text)
 
     if use_restart_data:
         marker = "&ELECTRONS\n"
@@ -229,11 +227,15 @@ def _write_vasp_inputs(
     positions_cart: np.ndarray,
     vasp_config: VASPConfig,
     use_restart_data: bool = False,
+    overwrite: bool = False,
 ) -> None:
-    """Write VASP input files (POSCAR, INCAR, KPOINTS, POTCAR) into disp_dir."""
+    """Write VASP input files into disp_dir.
+
+    If overwrite=False, existing files are preserved.
+    """
     disp_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- POSCAR ---
+    # --- POSCAR content ---
     unique_species = list(dict.fromkeys(symbols))
     species_counts = [symbols.count(sp) for sp in unique_species]
 
@@ -247,73 +249,89 @@ def _write_vasp_inputs(
     sorted_frac %= 1.0
     sorted_frac[sorted_frac > 1.0 - 1e-10] = 0.0
 
-    with open(disp_dir / "POSCAR", "w") as f:
-        f.write("phono3py displacement\n")
-        f.write("1.0\n")
-        for v in cell:
-            f.write(f"  {v[0]:20.14f}  {v[1]:20.14f}  {v[2]:20.14f}\n")
-        f.write("  " + "  ".join(unique_species) + "\n")
-        f.write("  " + "  ".join(str(c) for c in species_counts) + "\n")
-        f.write("Direct\n")
-        for pos in sorted_frac:
-            f.write(f"  {pos[0]:20.14f}  {pos[1]:20.14f}  {pos[2]:20.14f}\n")
+    poscar_lines = []
+    poscar_lines.append("phono3py displacement\n")
+    poscar_lines.append("1.0\n")
+    for v in cell:
+        poscar_lines.append(f"  {v[0]:20.14f}  {v[1]:20.14f}  {v[2]:20.14f}\n")
+    poscar_lines.append("  " + "  ".join(unique_species) + "\n")
+    poscar_lines.append("  " + "  ".join(str(c) for c in species_counts) + "\n")
+    poscar_lines.append("Direct\n")
+    for pos in sorted_frac:
+        poscar_lines.append(f"  {pos[0]:20.14f}  {pos[1]:20.14f}  {pos[2]:20.14f}\n")
+    poscar_text = "".join(poscar_lines)
 
-    np.savetxt(disp_dir / ".atom_order", sorted_indices, fmt="%d")
+    atom_order_text = "\n".join(str(i) for i in sorted_indices) + "\n"
 
-    # --- INCAR ---
+    # --- INCAR content ---
     n_kpts = (
         vasp_config.kpoints_scf[0]
         * vasp_config.kpoints_scf[1]
         * vasp_config.kpoints_scf[2]
     )
 
-    with open(disp_dir / "INCAR", "w") as f:
-        f.write(f"PREC = {vasp_config.prec}\n")
-        f.write(f"ENCUT = {vasp_config.encut}\n")
-        f.write(f"EDIFF = {vasp_config.ediff}\n")
-        f.write(f"ISMEAR = {vasp_config.ismear}\n")
-        f.write(f"SIGMA = {vasp_config.sigma}\n")
-        f.write(f"LREAL = {vasp_config.lreal}\n")
-        f.write(f"LWAVE = .{'TRUE' if vasp_config.lwave else 'FALSE'}.\n")
-        f.write(f"LCHARG = .{'TRUE' if vasp_config.lcharg else 'FALSE'}.\n")
-        f.write("IBRION = -1\n")
-        f.write("NSW = 0\n")
-        f.write("ISYM = 0\n")
-        f.write(f"ISTART = {1 if use_restart_data else 0}\n")
-        f.write(f"ICHARG = {1 if use_restart_data else 2}\n")
-        if vasp_config.kpar is not None:
-            kpar = min(vasp_config.kpar, n_kpts)
-            f.write(f"KPAR = {kpar}\n")
-        if vasp_config.ncore is not None:
-            f.write(f"NCORE = {vasp_config.ncore}\n")
+    incar_lines = []
+    incar_lines.append(f"PREC = {vasp_config.prec}\n")
+    incar_lines.append(f"ENCUT = {vasp_config.encut}\n")
+    incar_lines.append(f"EDIFF = {vasp_config.ediff}\n")
+    incar_lines.append(f"ISMEAR = {vasp_config.ismear}\n")
+    incar_lines.append(f"SIGMA = {vasp_config.sigma}\n")
+    incar_lines.append(f"LREAL = {vasp_config.lreal}\n")
+    incar_lines.append(f"LWAVE = .{'TRUE' if vasp_config.lwave else 'FALSE'}.\n")
+    incar_lines.append(f"LCHARG = .{'TRUE' if vasp_config.lcharg else 'FALSE'}.\n")
+    incar_lines.append("IBRION = -1\n")
+    incar_lines.append("NSW = 0\n")
+    incar_lines.append("ISYM = 0\n")
+    incar_lines.append(f"ISTART = {1 if use_restart_data else 0}\n")
+    incar_lines.append(f"ICHARG = {1 if use_restart_data else 2}\n")
+    if vasp_config.kpar is not None:
+        kpar = min(vasp_config.kpar, n_kpts)
+        incar_lines.append(f"KPAR = {kpar}\n")
+    if vasp_config.ncore is not None:
+        incar_lines.append(f"NCORE = {vasp_config.ncore}\n")
+    incar_text = "".join(incar_lines)
 
-    # --- KPOINTS ---
+    # --- KPOINTS content ---
     kpts = vasp_config.kpoints_scf
-    with open(disp_dir / "KPOINTS", "w") as f:
-        f.write("Automatic mesh\n")
-        f.write("0\n")
-        f.write("Gamma\n")
-        f.write(f"  {kpts[0]} {kpts[1]} {kpts[2]}\n")
-        f.write("  0 0 0\n")
+    kpoints_text = (
+        "Automatic mesh\n"
+        "0\n"
+        "Gamma\n"
+        f"  {kpts[0]} {kpts[1]} {kpts[2]}\n"
+        "  0 0 0\n"
+    )
+
+    # --- write only if missing unless overwrite=True ---
+    if overwrite:
+        (disp_dir / "POSCAR").write_text(poscar_text)
+        (disp_dir / ".atom_order").write_text(atom_order_text)
+        (disp_dir / "INCAR").write_text(incar_text)
+        (disp_dir / "KPOINTS").write_text(kpoints_text)
+    else:
+        _write_text_if_missing(disp_dir / "POSCAR", poscar_text)
+        _write_text_if_missing(disp_dir / ".atom_order", atom_order_text)
+        _write_text_if_missing(disp_dir / "INCAR", incar_text)
+        _write_text_if_missing(disp_dir / "KPOINTS", kpoints_text)
 
     # --- POTCAR ---
     potcar_dir = Path(vasp_config.potcar_dir).resolve()
     potcar_path = disp_dir / "POTCAR"
-    with open(potcar_path, "w") as potcar_out:
-        for sp in unique_species:
-            subdir = vasp_config.potcar_map.get(sp, sp)
-            pp_path = potcar_dir / subdir / "POTCAR"
-            if not pp_path.exists():
-                pp_path = potcar_dir / f"POTCAR.{sp}"
-            if not pp_path.exists():
-                raise FileNotFoundError(
-                    f"POTCAR for {sp} not found. Tried:\n"
-                    f"  {potcar_dir / subdir / 'POTCAR'}\n"
-                    f"  {potcar_dir / f'POTCAR.{sp}'}\n"
-                    f"Set vasp.potcar_dir and vasp.potcar_map in config."
-                )
-            with open(pp_path) as pp_in:
-                potcar_out.write(pp_in.read())
+    if not potcar_path.exists() or overwrite:
+        with open(potcar_path, "w") as potcar_out:
+            for sp in unique_species:
+                subdir = vasp_config.potcar_map.get(sp, sp)
+                pp_path = potcar_dir / subdir / "POTCAR"
+                if not pp_path.exists():
+                    pp_path = potcar_dir / f"POTCAR.{sp}"
+                if not pp_path.exists():
+                    raise FileNotFoundError(
+                        f"POTCAR for {sp} not found. Tried:\n"
+                        f"  {potcar_dir / subdir / 'POTCAR'}\n"
+                        f"  {potcar_dir / f'POTCAR.{sp}'}\n"
+                        f"Set vasp.potcar_dir and vasp.potcar_map in config."
+                    )
+                with open(pp_path) as pp_in:
+                    potcar_out.write(pp_in.read())
 
 
 def _parse_vasp_forces(disp_dir: Path, n_atoms: int) -> np.ndarray:
@@ -359,55 +377,62 @@ def _parse_vasp_forces(disp_dir: Path, n_atoms: int) -> np.ndarray:
 def _is_vasp_done(disp_dir: Path) -> bool:
     """Check if VASP completed successfully in disp_dir."""
     outcar = disp_dir / "OUTCAR"
-    if not outcar.exists():
+    vasprun = disp_dir / "vasprun.xml"
+
+    if not outcar.exists() or not vasprun.exists():
         return False
+
     with open(outcar, "rb") as f:
         try:
-            f.seek(-2000, 2)
+            f.seek(-4000, 2)
         except OSError:
             f.seek(0)
         tail = f.read().decode(errors="replace")
-    return "Total CPU time used" in tail
+
+    return "General timing and accounting informations for this job" in tail
 
 
-def _copy_if_exists(src: Path, dst: Path) -> None:
-    """Copy a file if it exists."""
-    if src.exists():
-        shutil.copy2(src, dst)
+def _vasp_restart_files_valid(seed_dir: Path) -> tuple[bool, bool]:
+    """Return (has_valid_wavecar, has_valid_chgcar) for a seed directory."""
+    wavecar = seed_dir / "WAVECAR"
+    chgcar = seed_dir / "CHGCAR"
+
+    has_wavecar = wavecar.exists() and wavecar.stat().st_size > 0
+    has_chgcar = chgcar.exists() and chgcar.stat().st_size > 0
+
+    return has_wavecar, has_chgcar
 
 
 def _prepare_vasp_restart(target_dir: Path, seed_dir: Path | None) -> None:
-    """Seed a VASP run from the most recent completed calculation if available."""
-    wavecar_src = None
-    chgcar_src = None
-
-    if seed_dir is not None:
-        candidate = seed_dir / "WAVECAR"
-        if candidate.exists():
-            wavecar_src = candidate
-        candidate = seed_dir / "CHGCAR"
-        if candidate.exists():
-            chgcar_src = candidate
-
+    """Seed a VASP run from a previous completed calculation if valid."""
     for fname in ("WAVECAR", "CHGCAR"):
         target = target_dir / fname
         if target.exists():
             target.unlink()
 
-    if wavecar_src is not None:
-        shutil.copy2(wavecar_src, target_dir / "WAVECAR")
-    if chgcar_src is not None:
-        shutil.copy2(chgcar_src, target_dir / "CHGCAR")
+    has_wavecar = False
+    has_chgcar = False
+
+    if seed_dir is not None:
+        src_wavecar = seed_dir / "WAVECAR"
+        src_chgcar = seed_dir / "CHGCAR"
+
+        if src_wavecar.exists() and src_wavecar.stat().st_size > 0:
+            shutil.copy2(src_wavecar, target_dir / "WAVECAR")
+            has_wavecar = True
+
+        if src_chgcar.exists() and src_chgcar.stat().st_size > 0:
+            shutil.copy2(src_chgcar, target_dir / "CHGCAR")
+            has_chgcar = True
 
     incar = target_dir / "INCAR"
     text = incar.read_text()
 
-    text = re.sub(r"(?m)^\s*ISTART\s*=.*$", "", text)
-    text = re.sub(r"(?m)^\s*ICHARG\s*=.*$", "", text)
+    text = re.sub(r"(?m)^\s*ISTART\s*=.*\n?", "", text)
+    text = re.sub(r"(?m)^\s*ICHARG\s*=.*\n?", "", text)
 
-    use_restart = wavecar_src is not None or chgcar_src is not None
-    istart = 1 if wavecar_src is not None else 0
-    icharg = 1 if chgcar_src is not None else 2
+    istart = 1 if has_wavecar else 0
+    icharg = 1 if has_chgcar else 2
 
     text = text.rstrip() + f"\nISTART = {istart}\nICHARG = {icharg}\n"
     incar.write_text(text)
@@ -432,8 +457,12 @@ def sow(
 
     Also writes a reference (undisplaced) supercell calculation that is used
     as the first seed for subsequent displacement calculations.
+
+    For VASP, existing displacement directories and existing input files are
+    preserved and not overwritten.
     """
     from phono3py import Phono3py
+    from dataclasses import replace
 
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -470,13 +499,9 @@ def sow(
         except ValueError:
             pseudo_dir_rel = pseudo_dir_abs
 
-        from dataclasses import replace
-
         qe_local = replace(dft_config, pseudo_dir=str(pseudo_dir_rel))
-
         (work_dir / QE_RESULTS_DIRNAME).mkdir(exist_ok=True)
 
-        # Reference supercell
         _write_qe_input(
             work_dir / REFERENCE_QE_INPUT,
             sc_cell,
@@ -500,25 +525,37 @@ def sow(
                 prefix=QE_RESTART_PREFIX,
                 use_restart_data=False,
             )
+
         print(f"Wrote reference and {n_disp} QE input files in {work_dir}")
 
     elif calculator == "vasp":
         assert isinstance(dft_config, VASPConfig)
 
-        # Reference supercell
+        ref_dir = work_dir / REFERENCE_VASP_DIRNAME
+        if ref_dir.exists():
+            print(f"  Preserving existing VASP reference dir: {ref_dir.name}")
+        else:
+            print(f"  Creating VASP reference dir: {ref_dir.name}")
         _write_vasp_inputs(
-            work_dir / REFERENCE_VASP_DIRNAME,
+            ref_dir,
             sc_cell,
             sc_symbols,
             sc_positions,
             dft_config,
             use_restart_data=False,
+            overwrite=False,
         )
 
         for i, sc in enumerate(supercells):
             if sc is None:
                 continue
+
             disp_dir = work_dir / f"disp-{i+1:05d}"
+            if disp_dir.exists():
+                print(f"  Preserving existing VASP dir: {disp_dir.name}")
+            else:
+                print(f"  Creating VASP dir: {disp_dir.name}")
+
             _write_vasp_inputs(
                 disp_dir,
                 sc_cell,
@@ -526,8 +563,10 @@ def sow(
                 sc.positions,
                 dft_config,
                 use_restart_data=False,
+                overwrite=False,
             )
-        print(f"Wrote reference and {n_disp} VASP displacement directories in {work_dir}")
+
+        print(f"Prepared reference and {n_disp} VASP displacement directories in {work_dir}")
 
     else:
         raise ValueError(f"Unknown calculator: {calculator!r}. Use 'qe' or 'vasp'.")
@@ -567,7 +606,7 @@ def _run_and_tee(cmd, log_path: Path, cwd: str, timeout: int, use_shell: bool) -
             remaining = max(0.1, timeout - elapsed)
             ready, _, _ = select.select(list(fds.keys()), [], [], min(remaining, 1.0))
             for fd in ready:
-                label, pipe, tty = fds[fd]
+                _, pipe, tty = fds[fd]
                 data = pipe.read1(8192) if hasattr(pipe, "read1") else pipe.read(8192)
                 if not data:
                     fds.pop(fd)
@@ -582,21 +621,20 @@ def _run_and_tee(cmd, log_path: Path, cwd: str, timeout: int, use_shell: bool) -
 
 
 def _latest_completed_vasp_seed(work_dir: Path, before_index: int | None = None) -> Path | None:
-    """Return the latest completed VASP directory to use as a restart seed.
-
-    Search order:
-      1. Highest completed disp-xxxxx with index < before_index
-      2. reference/
-    """
+    """Return the latest completed VASP directory with usable restart files."""
     if before_index is not None:
         for idx in range(before_index - 1, 0, -1):
             disp_dir = work_dir / f"disp-{idx:05d}"
             if _is_vasp_done(disp_dir):
-                return disp_dir
+                has_wav, has_chg = _vasp_restart_files_valid(disp_dir)
+                if has_wav or has_chg:
+                    return disp_dir
 
     ref_dir = work_dir / REFERENCE_VASP_DIRNAME
     if _is_vasp_done(ref_dir):
-        return ref_dir
+        has_wav, has_chg = _vasp_restart_files_valid(ref_dir)
+        if has_wav or has_chg:
+            return ref_dir
 
     return None
 
@@ -630,7 +668,6 @@ def run_displacements(
 
         print(f"Running reference + {n_disp} QE displacements...")
 
-        # Run reference only if no restart data exist and the reference is not done.
         if _is_qe_done(ref_out):
             print("  [ref] Skipping reference (done)")
         elif not _qe_restart_data_available(work_dir):
@@ -689,12 +726,11 @@ def run_displacements(
         else:
             print("  [ref] Running reference supercell...")
             _prepare_vasp_restart(ref_dir, seed_dir=None)
-            if use_shell:
-                cmd = dft_command
-            else:
-                cmd = shlex.split(dft_command)
+
+            cmd = dft_command if use_shell else shlex.split(dft_command)
             log_file = ref_dir / "vasp.log"
             rc = _run_and_tee(cmd, log_file, str(ref_dir), timeout, use_shell)
+
             if rc != 0 or not _is_vasp_done(ref_dir):
                 print(f"  ERROR: {ref_dir.name} failed (exit {rc})")
                 raise RuntimeError("VASP reference calculation failed")
@@ -707,14 +743,17 @@ def run_displacements(
             seed_dir = _latest_completed_vasp_seed(work_dir, before_index=i)
             _prepare_vasp_restart(disp_dir, seed_dir=seed_dir)
 
-            seed_msg = seed_dir.name if seed_dir is not None else "fresh start"
-            print(f"  [{i}/{n_disp}] Running {disp_dir.name} (seed: {seed_msg})...")
+            has_wavecar = (disp_dir / "WAVECAR").exists() and (disp_dir / "WAVECAR").stat().st_size > 0
+            has_chgcar = (disp_dir / "CHGCAR").exists() and (disp_dir / "CHGCAR").stat().st_size > 0
 
-            if use_shell:
-                cmd = dft_command
-            else:
-                cmd = shlex.split(dft_command)
+            print(
+                f"  [{i}/{n_disp}] Running {disp_dir.name} "
+                f"(seed: {seed_dir.name if seed_dir else 'none'}, "
+                f"WAVECAR={'yes' if has_wavecar else 'no'}, "
+                f"CHGCAR={'yes' if has_chgcar else 'no'})..."
+            )
 
+            cmd = dft_command if use_shell else shlex.split(dft_command)
             log_file = disp_dir / "vasp.log"
             rc = _run_and_tee(cmd, log_file, str(disp_dir), timeout, use_shell)
 
@@ -823,6 +862,7 @@ def generate_fc3(
     dft_command = (
         dft_config.pw_command if calculator == "qe" else dft_config.vasp_command
     )
+
     sow(
         cell,
         work_dir,
