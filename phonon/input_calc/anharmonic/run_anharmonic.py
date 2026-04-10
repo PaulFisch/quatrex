@@ -250,11 +250,11 @@ def load_conventional_cell(work_dir):
 # Main
 # ---------------------------------------------------------------------------
 
-def run_scba(phonon, fc3_data, nk, nfreq, max_iter, n_slabs, temperature,
+def run_scba(phonon, fc3_hdf5, nk, nfreq, max_iter, n_slabs, temperature,
              delta_T, mixing, transport_direction):
-    """Run SCBA."""
-    return anharmonic_transmission(
-        phonon, fc3_data,
+    """Run SCBA with full q-dependent dense self-energy."""
+    return anharmonic_transmission_q(
+        phonon, fc3_hdf5,
         q_mesh_transverse=(nk, nk),
         freq_range_thz=(0.5, 15.0, nfreq),
         transport_direction=transport_direction,
@@ -264,7 +264,6 @@ def run_scba(phonon, fc3_data, nk, nfreq, max_iter, n_slabs, temperature,
         max_scba_iter=max_iter,
         scba_tol=0.005,
         mixing=mixing,
-        fc3_mode="full",
         n_slabs=n_slabs,
         verbose=True,
     )
