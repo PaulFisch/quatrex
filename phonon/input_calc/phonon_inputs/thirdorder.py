@@ -21,8 +21,11 @@ Behavior added in this version:
     - A reference supercell calculation is created and run first if needed
     - QE can reuse previous pot/wfc through shared outdir/prefix
     - VASP reuses previous WAVECAR/CHGCAR only when valid restart files exist
-    - For VASP, existing displacement folders and existing input files are not
-      overwritten during sow()
+    - For VASP, existing displacement folders are preserved during sow()
+    - For VASP, POSCAR / POTCAR / .atom_order are preserved in existing folders
+    - For VASP, INCAR and KPOINTS are refreshed in existing folders that are
+      not completed yet, so changed runtime / parallelization settings are
+      propagated without rerunning finished calculations
 """
 
 import re
@@ -220,6 +223,119 @@ def _rewrite_qe_restart_flags(inp_path: Path, use_restart_data: bool) -> None:
 # ========================================================================
 
 
+def _upsert_incar_tags(
+    incar_path: Path,
+    updates: dict[str, str | int | float | bool | None],
+) -> None:
+    """Update or insert selected INCAR tags without touching unrelated settings."""
+    if incar_path.exists():
+        text = incar_path.read_text()
+    else:
+        text = ""
+
+    for key, value in updates.items():
+        pattern = rf"(?mi)^\s*{re.escape(key)}\s*=.*\n?"
+        text = re.sub(pattern, "", text)
+
+        if value is None:
+            continue
+
+        if isinstance(value, bool):
+            value_str = f".{'TRUE' if value else 'FALSE'}."
+        else:
+            value_str = str(value)
+
+        text = text.rstrip() + f"\n{key} = {value_str}\n"
+
+    if text and not text.endswith("\n"):
+        text += "\n"
+    incar_path.write_text(text)
+
+
+def _build_vasp_incar_text(
+    vasp_config: VASPConfig,
+    use_restart_data: bool = False,
+) -> str:
+    """Create INCAR text from VASPConfig."""
+    n_kpts = (
+        vasp_config.kpoints_scf[0]
+        * vasp_config.kpoints_scf[1]
+        * vasp_config.kpoints_scf[2]
+    )
+
+    incar_lines = []
+    incar_lines.append(f"PREC = {vasp_config.prec}\n")
+    incar_lines.append(f"ENCUT = {vasp_config.encut}\n")
+    incar_lines.append(f"EDIFF = {vasp_config.ediff}\n")
+    incar_lines.append(f"ISMEAR = {vasp_config.ismear}\n")
+    incar_lines.append(f"SIGMA = {vasp_config.sigma}\n")
+    incar_lines.append(f"LREAL = {vasp_config.lreal}\n")
+    incar_lines.append(f"LWAVE = .{'TRUE' if vasp_config.lwave else 'FALSE'}.\n")
+    incar_lines.append(f"LCHARG = .{'TRUE' if vasp_config.lcharg else 'FALSE'}.\n")
+    incar_lines.append("IBRION = -1\n")
+    incar_lines.append("NSW = 0\n")
+    incar_lines.append("ISYM = 0\n")
+    incar_lines.append(f"ISTART = {1 if use_restart_data else 0}\n")
+    incar_lines.append(f"ICHARG = {1 if use_restart_data else 2}\n")
+    if vasp_config.kpar is not None:
+        kpar = min(vasp_config.kpar, n_kpts)
+        incar_lines.append(f"KPAR = {kpar}\n")
+    if vasp_config.ncore is not None:
+        incar_lines.append(f"NCORE = {vasp_config.ncore}\n")
+
+    return "".join(incar_lines)
+
+
+def _build_vasp_kpoints_text(vasp_config: VASPConfig) -> str:
+    """Create KPOINTS text from VASPConfig."""
+    kpts = vasp_config.kpoints_scf
+    return (
+        "Automatic mesh\n"
+        "0\n"
+        "Gamma\n"
+        f"  {kpts[0]} {kpts[1]} {kpts[2]}\n"
+        "  0 0 0\n"
+    )
+
+
+def _refresh_vasp_runtime_inputs(
+    disp_dir: Path,
+    vasp_config: VASPConfig,
+    use_restart_data: bool = False,
+) -> None:
+    """Refresh INCAR/KPOINTS for an existing VASP calculation directory.
+
+    Intended for jobs that are not yet completed, so parallelization or runtime
+    settings can be changed without touching POSCAR/POTCAR.
+    """
+    n_kpts = (
+        vasp_config.kpoints_scf[0]
+        * vasp_config.kpoints_scf[1]
+        * vasp_config.kpoints_scf[2]
+    )
+
+    incar_updates = {
+        "PREC": vasp_config.prec,
+        "ENCUT": vasp_config.encut,
+        "EDIFF": vasp_config.ediff,
+        "ISMEAR": vasp_config.ismear,
+        "SIGMA": vasp_config.sigma,
+        "LREAL": vasp_config.lreal,
+        "LWAVE": vasp_config.lwave,
+        "LCHARG": vasp_config.lcharg,
+        "IBRION": -1,
+        "NSW": 0,
+        "ISYM": 0,
+        "ISTART": 1 if use_restart_data else 0,
+        "ICHARG": 1 if use_restart_data else 2,
+        "KPAR": min(vasp_config.kpar, n_kpts) if vasp_config.kpar is not None else None,
+        "NCORE": vasp_config.ncore,
+    }
+
+    _upsert_incar_tags(disp_dir / "INCAR", incar_updates)
+    (disp_dir / "KPOINTS").write_text(_build_vasp_kpoints_text(vasp_config))
+
+
 def _write_vasp_inputs(
     disp_dir: Path,
     cell: np.ndarray,
@@ -231,7 +347,9 @@ def _write_vasp_inputs(
 ) -> None:
     """Write VASP input files into disp_dir.
 
-    If overwrite=False, existing files are preserved.
+    If overwrite=False, existing structure files are preserved.
+    Existing INCAR/KPOINTS are refreshed so config changes propagate to jobs
+    that have not run yet.
     """
     disp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -263,55 +381,24 @@ def _write_vasp_inputs(
 
     atom_order_text = "\n".join(str(i) for i in sorted_indices) + "\n"
 
-    # --- INCAR content ---
-    n_kpts = (
-        vasp_config.kpoints_scf[0]
-        * vasp_config.kpoints_scf[1]
-        * vasp_config.kpoints_scf[2]
+    incar_text = _build_vasp_incar_text(
+        vasp_config,
+        use_restart_data=use_restart_data,
     )
+    kpoints_text = _build_vasp_kpoints_text(vasp_config)
 
-    incar_lines = []
-    incar_lines.append(f"PREC = {vasp_config.prec}\n")
-    incar_lines.append(f"ENCUT = {vasp_config.encut}\n")
-    incar_lines.append(f"EDIFF = {vasp_config.ediff}\n")
-    incar_lines.append(f"ISMEAR = {vasp_config.ismear}\n")
-    incar_lines.append(f"SIGMA = {vasp_config.sigma}\n")
-    incar_lines.append(f"LREAL = {vasp_config.lreal}\n")
-    incar_lines.append(f"LWAVE = .{'TRUE' if vasp_config.lwave else 'FALSE'}.\n")
-    incar_lines.append(f"LCHARG = .{'TRUE' if vasp_config.lcharg else 'FALSE'}.\n")
-    incar_lines.append("IBRION = -1\n")
-    incar_lines.append("NSW = 0\n")
-    incar_lines.append("ISYM = 0\n")
-    incar_lines.append(f"ISTART = {1 if use_restart_data else 0}\n")
-    incar_lines.append(f"ICHARG = {1 if use_restart_data else 2}\n")
-    if vasp_config.kpar is not None:
-        kpar = min(vasp_config.kpar, n_kpts)
-        incar_lines.append(f"KPAR = {kpar}\n")
-    if vasp_config.ncore is not None:
-        incar_lines.append(f"NCORE = {vasp_config.ncore}\n")
-    incar_text = "".join(incar_lines)
-
-    # --- KPOINTS content ---
-    kpts = vasp_config.kpoints_scf
-    kpoints_text = (
-        "Automatic mesh\n"
-        "0\n"
-        "Gamma\n"
-        f"  {kpts[0]} {kpts[1]} {kpts[2]}\n"
-        "  0 0 0\n"
-    )
-
-    # --- write only if missing unless overwrite=True ---
+    # --- write structure files only if missing unless overwrite=True ---
     if overwrite:
         (disp_dir / "POSCAR").write_text(poscar_text)
         (disp_dir / ".atom_order").write_text(atom_order_text)
-        (disp_dir / "INCAR").write_text(incar_text)
-        (disp_dir / "KPOINTS").write_text(kpoints_text)
     else:
         _write_text_if_missing(disp_dir / "POSCAR", poscar_text)
         _write_text_if_missing(disp_dir / ".atom_order", atom_order_text)
-        _write_text_if_missing(disp_dir / "INCAR", incar_text)
-        _write_text_if_missing(disp_dir / "KPOINTS", kpoints_text)
+
+    # --- INCAR/KPOINTS are always refreshed unless overwrite=False and file absent ---
+    #     This allows updating parallelization/runtime settings in existing folders.
+    (disp_dir / "INCAR").write_text(incar_text)
+    (disp_dir / "KPOINTS").write_text(kpoints_text)
 
     # --- POTCAR ---
     potcar_dir = Path(vasp_config.potcar_dir).resolve()
@@ -466,8 +553,9 @@ def sow(
     Also writes a reference (undisplaced) supercell calculation that is used
     as the first seed for subsequent displacement calculations.
 
-    For VASP, existing displacement directories and existing input files are
-    preserved and not overwritten.
+    For VASP, existing displacement directories are preserved. Structure files
+    (POSCAR/POTCAR/.atom_order) are not overwritten, but INCAR/KPOINTS are
+    refreshed so configuration updates propagate to not-yet-run jobs.
     """
     from phono3py import Phono3py
     from dataclasses import replace
@@ -654,11 +742,13 @@ def _cleanup_vasp_restart_files(disp_dir: Path) -> None:
         if path.exists():
             path.unlink()
 
+
 def run_displacements(
     work_dir: Path,
     dft_command: str = "pw.x",
     timeout: int = 3600,
     calculator: str = "qe",
+    dft_config: QEConfig | VASPConfig | None = None,
 ) -> None:
     """Run DFT for each displacement.
 
@@ -666,6 +756,7 @@ def run_displacements(
       - Skip jobs that are already complete
       - If no prior calculation exists, run the reference supercell first
       - Reuse previous electronic data for subsequent jobs
+      - For VASP, refresh INCAR/KPOINTS for jobs that are not complete yet
     """
     work_dir = Path(work_dir)
     use_shell = _needs_shell(dft_command)
@@ -725,6 +816,11 @@ def run_displacements(
                 raise RuntimeError(f"QE displacement {inp_file.name} failed")
 
     elif calculator == "vasp":
+        if dft_config is None or not isinstance(dft_config, VASPConfig):
+            raise ValueError(
+                "VASPConfig must be provided to run_displacements for calculator='vasp'"
+            )
+
         ref_dir = work_dir / REFERENCE_VASP_DIRNAME
         disp_dirs = sorted(d for d in work_dir.glob("disp-*/") if d.is_dir())
         n_disp = len(disp_dirs)
@@ -746,6 +842,7 @@ def run_displacements(
                 last_completed_seed = ref_dir
         else:
             print("  [ref] Running reference supercell...")
+            _refresh_vasp_runtime_inputs(ref_dir, dft_config, use_restart_data=False)
             _prepare_vasp_restart(ref_dir, seed_dir=None)
 
             cmd = dft_command if use_shell else shlex.split(dft_command)
@@ -765,13 +862,19 @@ def run_displacements(
                 print(f"  [{i}/{n_disp}] Skipping {disp_dir.name} (done)")
                 has_wav, has_chg = _vasp_restart_files_valid(disp_dir)
                 if has_wav or has_chg:
-                    # Old completed run may become the best current seed
                     if last_completed_seed is not None and last_completed_seed != disp_dir:
                         _cleanup_vasp_restart_files(last_completed_seed)
                     last_completed_seed = disp_dir
                 continue
 
             seed_dir = last_completed_seed
+            use_restart_data = seed_dir is not None
+
+            _refresh_vasp_runtime_inputs(
+                disp_dir,
+                dft_config,
+                use_restart_data=use_restart_data,
+            )
             has_wavecar, has_chgcar = _prepare_vasp_restart(disp_dir, seed_dir=seed_dir)
 
             print(
@@ -789,18 +892,15 @@ def run_displacements(
                 print(f"  ERROR: {disp_dir.name} failed (exit {rc})")
                 raise RuntimeError(f"VASP displacement {disp_dir.name} failed")
 
-            # New run completed successfully. Old seed no longer needed.
             if seed_dir is not None and seed_dir != disp_dir:
                 _cleanup_vasp_restart_files(seed_dir)
 
-            # Current run becomes the seed for the next one.
             new_has_wav, new_has_chg = _vasp_restart_files_valid(disp_dir)
             if new_has_wav or new_has_chg:
                 last_completed_seed = disp_dir
             else:
                 last_completed_seed = None
 
-        # Optional: remove restart files from the final remaining seed too.
         if last_completed_seed is not None:
             _cleanup_vasp_restart_files(last_completed_seed)
     else:
@@ -915,5 +1015,10 @@ def generate_fc3(
         distance,
         calculator=calculator,
     )
-    run_displacements(work_dir, dft_command, calculator=calculator)
+    run_displacements(
+        work_dir,
+        dft_command,
+        calculator=calculator,
+        dft_config=dft_config,
+    )
     return reap(work_dir, fc_calculator=fc_calculator, calculator=calculator)
