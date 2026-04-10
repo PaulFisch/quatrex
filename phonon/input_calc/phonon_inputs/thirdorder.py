@@ -177,6 +177,11 @@ def _write_vasp_inputs(
         sorted_indices.extend(i for i, s in enumerate(symbols) if s == sp)
     sorted_positions = positions_cart[sorted_indices]
 
+    # Convert to fractional coordinates and wrap into [0, 1)
+    inv_cell = np.linalg.inv(cell)  # cell rows are lattice vectors
+    sorted_frac = sorted_positions @ inv_cell.T
+    sorted_frac -= np.floor(sorted_frac)  # wrap into [0, 1)
+
     with open(disp_dir / "POSCAR", "w") as f:
         f.write("phono3py displacement\n")
         f.write("1.0\n")
@@ -184,14 +189,17 @@ def _write_vasp_inputs(
             f.write(f"  {v[0]:20.14f}  {v[1]:20.14f}  {v[2]:20.14f}\n")
         f.write("  " + "  ".join(unique_species) + "\n")
         f.write("  " + "  ".join(str(c) for c in species_counts) + "\n")
-        f.write("Cartesian\n")
-        for pos in sorted_positions:
+        f.write("Direct\n")
+        for pos in sorted_frac:
             f.write(f"  {pos[0]:20.14f}  {pos[1]:20.14f}  {pos[2]:20.14f}\n")
 
     # Save the atom reordering so we can unsort the forces later
     np.savetxt(disp_dir / ".atom_order", sorted_indices, fmt="%d")
 
     # --- INCAR ---
+    # Determine number of k-points for KPAR sanity check
+    n_kpts = vasp_config.kpoints_scf[0] * vasp_config.kpoints_scf[1] * vasp_config.kpoints_scf[2]
+
     with open(disp_dir / "INCAR", "w") as f:
         f.write(f"PREC = {vasp_config.prec}\n")
         f.write(f"ENCUT = {vasp_config.encut}\n")
@@ -204,10 +212,12 @@ def _write_vasp_inputs(
         f.write("IBRION = -1\n")
         f.write("NSW = 0\n")
         f.write("ISYM = 0\n")
+        # KPAR must not exceed the number of k-points
+        if vasp_config.kpar is not None:
+            kpar = min(vasp_config.kpar, n_kpts)
+            f.write(f"KPAR = {kpar}\n")
         if vasp_config.ncore is not None:
             f.write(f"NCORE = {vasp_config.ncore}\n")
-        if vasp_config.kpar is not None:
-            f.write(f"KPAR = {vasp_config.kpar}\n")
 
     # --- KPOINTS ---
     kpts = vasp_config.kpoints_scf
