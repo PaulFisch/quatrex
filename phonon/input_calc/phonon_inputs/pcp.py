@@ -794,6 +794,14 @@ def _compute_phph_self_energy_pcp(
 ):
     """Compute phonon-phonon self-energy via PCP decomposition.
 
+    WARNING: This kernel uses the PCP momentum-space factorization
+    V = sum f(q_ext)*f(q')*f(q-q'), which requires q*N_supercell to be
+    integer-valued. For q-meshes finer than the supercell grid, the
+    factorization identity exp(-iq*R_{(t+l) mod N}) = exp(-iq*(R_t + R_l))
+    breaks, giving ~50-80% vertex errors at non-commensurate q-points.
+    Use pcp_anharmonic_transmission (which reconstructs FC3 and uses the
+    dense FT kernel) instead.
+
     Projects G onto the PCP mode vectors to obtain scalar functions
     g_{ij}^{xi,xi'}(w;q), convolves pairs of scalars, and reconstructs
     the matrix self-energy from the external mode vectors.
@@ -900,6 +908,67 @@ def _compute_phph_self_energy_pcp(
 
 
 # ---------------------------------------------------------------------------
+# FC3 reconstruction from PCP modes
+# ---------------------------------------------------------------------------
+
+
+def reconstruct_fc3_from_pcp(A_modes, lambdas, phonon, pcp_info):
+    """Reconstruct raw FC3 from fitted PCP modes.
+
+    Runs the PCP forward model to obtain the mass-weighted compact FC3,
+    then un-mass-weights to recover a raw-like FC3 in compact format
+    (nat_prim, n_super, n_super, 3, 3, 3).
+
+    Parameters
+    ----------
+    A_modes : ndarray, shape (3, N_c, n_cells, nat_prim, 3)
+    lambdas : ndarray, shape (N_c,)
+    phonon : Phonopy
+    pcp_info : dict
+        From fit_pcp / fit_pcp_greedy. Must contain 'target_norm'.
+
+    Returns
+    -------
+    fc3_recon : ndarray, shape (nat_prim, n_super, n_super, 3, 3, 3)
+        Un-mass-weighted FC3 in compact format, suitable for
+        build_realspace_fc3_matrices.
+    """
+    nat_prim = len(phonon.primitive.masses)
+    n_super = len(phonon.supercell.masses)
+    masses = phonon.supercell.masses
+    p2s = phonon.primitive.p2s_map
+
+    sc_to_cell, sc_to_prim_np, _, n_cells, sc_mat = build_cell_mapping(phonon)
+    cell_diff, _ = build_cell_diff_table(n_cells, sc_mat)
+    idx1_cell, idx_jk_cell, sc_to_prim_i = _build_index_tables(
+        sc_to_cell, sc_to_prim_np, cell_diff, nat_prim, n_super, n_cells)
+
+    N_c = len(lambdas)
+    target_norm = pcp_info['target_norm']
+
+    with torch.no_grad():
+        A_t = torch.tensor(A_modes, dtype=torch.float64)
+        lam_t = torch.tensor(lambdas / target_norm, dtype=torch.float64)
+        fc3_mw = _pcp_forward_torch(
+            A_t, lam_t,
+            torch.tensor(idx1_cell, dtype=torch.long),
+            torch.tensor(idx_jk_cell, dtype=torch.long),
+            torch.tensor(sc_to_prim_i, dtype=torch.long),
+            nat_prim, n_super, n_cells, N_c,
+        ).numpy() * target_norm
+
+    # Un-mass-weight: fc3_mw = fc3_raw / sqrt(m_i * m_j * m_k) * CONVERSION
+    # => fc3_raw = fc3_mw * sqrt(m_i * m_j * m_k) / CONVERSION
+    fc3_recon = np.zeros_like(fc3_mw)
+    for i_prim in range(nat_prim):
+        m_i = masses[int(p2s[i_prim])]
+        mass_jk = np.sqrt(m_i * masses[:, None] * masses[None, :])
+        fc3_recon[i_prim] = fc3_mw[i_prim] * mass_jk[:, :, None, None, None] / CONVERSION_FC3_THZ
+
+    return fc3_recon
+
+
+# ---------------------------------------------------------------------------
 # SCBA transport driver
 # ---------------------------------------------------------------------------
 
@@ -924,6 +993,16 @@ def pcp_anharmonic_transmission(
 ) -> dict:
     """Anharmonic phonon transmission via PCP FC3 decomposition.
 
+    Fits the PCP decomposition to FC3, reconstructs FC3 in real space,
+    then uses the dense q-dependent self-energy kernel for the SCBA loop.
+
+    Note: The PCP momentum-space factorization V = sum f(q_ext)*f(q')*f(q-q')
+    is only valid when q*N_supercell is integer-valued (q commensurate with
+    the supercell grid). For general q-meshes, the factorization identity
+    exp(-iq*R_{(t+l) mod N}) = exp(-iq*(R_t + R_l)) breaks down.
+    This function therefore reconstructs FC3 in real space and uses the
+    correct dense Fourier transform for arbitrary q-points.
+
     Parameters
     ----------
     phonon : Phonopy
@@ -943,7 +1022,13 @@ def pcp_anharmonic_transmission(
     import h5py
     from .convention import get_btd_blocks
     from .validation import _ballistic_transmission
-    from .separable import build_supercell_mapping, build_q_diff_map
+    from .separable import (
+        build_supercell_mapping,
+        build_realspace_fc3_matrices,
+        build_gathering_matrix,
+        build_q_diff_map,
+    )
+    from .anharmonic import _compute_phph_self_energy_q_dense
 
     # --- Setup ---
     fmin, fmax, nfreq = freq_range_thz
@@ -978,6 +1063,24 @@ def pcp_anharmonic_transmission(
 
     if verbose:
         print(f"  PCP rank: {pcp_rank}, rel_err: {pcp_info['rel_err']:.4e}")
+
+    # --- Reconstruct FC3 from PCP and build dense self-energy infrastructure ---
+    fc3_recon = reconstruct_fc3_from_pcp(A_modes, lambdas, phonon, pcp_info)
+
+    prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
+        phonon, transport_direction
+    )
+    masses_super = phonon.supercell.masses
+    trans_atoms = np.where(slab_indices == 0)[0]
+
+    M_stacked = build_realspace_fc3_matrices(
+        fc3_recon, n_atoms, masses_super, ref_sc_atoms, trans_atoms
+    )
+    dim_t = len(trans_atoms) * 3
+
+    if verbose:
+        print(f"  Reconstructed FC3 -> M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
+        print(f"  Same-slab atoms: {len(trans_atoms)}, dim_trans: {dim_t}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
 
     # --- q-mesh ---
@@ -988,12 +1091,14 @@ def pcp_anharmonic_transmission(
     n_kpts = len(q_points)
     q_diff_map = build_q_diff_map(nkx, nky)
 
-    # FT PCP modes for each q-point
-    f_modes_all_q = np.zeros((n_kpts, 3, pcp_rank, n_dof), dtype=complex)
-    for iq, (qx, qy) in enumerate(q_points):
-        f_modes_all_q[iq] = fourier_transform_pcp(
-            A_modes, lambdas, phonon, (qx, qy), transport_direction, info=pcp_info,
+    # Build gathering matrices T(q) for each q-point
+    T_all_q = []
+    for qx, qy in q_points:
+        T = build_gathering_matrix(
+            trans_atoms, prim_indices, cell_frac,
+            (qx, qy), n_atoms, transport_direction,
         )
+        T_all_q.append(T)
 
     # --- Bose-Einstein ---
     def bose_einstein(freq_thz_arr, T):
@@ -1058,7 +1163,7 @@ def pcp_anharmonic_transmission(
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
-    # --- SCBA ---
+    # --- SCBA with dense q-dependent self-energy from PCP-reconstructed FC3 ---
     Sigma_R_q = np.zeros((n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
     Sigma_l_q = np.zeros_like(Sigma_R_q)
     Sigma_g_q = np.zeros_like(Sigma_R_q)
@@ -1066,6 +1171,7 @@ def pcp_anharmonic_transmission(
     spectral_J_L = np.zeros(nfreq)
     spectral_J_R = np.zeros(nfreq)
     J_total_prev = 0.0
+    conservation_err = 1.0
 
     convergence_history = []
 
@@ -1118,17 +1224,16 @@ def pcp_anharmonic_transmission(
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = abs(J_L_total - J_R_total) / J_denom if J_denom > 0 else 0.0
 
-        # PCP self-energy
+        # Dense q-dependent self-energy from PCP-reconstructed FC3
         Sigma_l_new = np.zeros_like(Sigma_l_q)
         Sigma_g_new = np.zeros_like(Sigma_g_q)
         Sigma_r_new = np.zeros_like(Sigma_R_q)
 
         for sl_idx in range(n_slabs):
-            sl_n, sg_n, sr_n = _compute_phph_self_energy_pcp(
+            sl_n, sg_n, sr_n = _compute_phph_self_energy_q_dense(
                 G_lesser_slab_q[sl_idx], G_greater_slab_q[sl_idx],
-                f_modes_all_q, lambdas,
-                n_dof, n_kpts, freqs_thz, dw_thz,
-                q_diff_map=q_diff_map,
+                M_stacked, T_all_q, q_diff_map,
+                n_atoms, n_kpts, freqs_thz, dw_thz,
             )
             Sigma_l_new[sl_idx] = sl_n
             Sigma_g_new[sl_idx] = sg_n
