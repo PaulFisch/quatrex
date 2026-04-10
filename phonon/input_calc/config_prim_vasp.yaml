@@ -32,13 +32,13 @@ vasp:
   ismear: 0                       # Gaussian smearing (appropriate for semiconductors)
   sigma: 0.01                     # eV — narrow smearing for semiconductor
   prec: Accurate
-  lreal: ".FALSE."                 # reciprocal-space projection (safer; LREAL=Auto can segfault)
+  lreal: Auto                      # real-space projectors (recommended for large supercells)
   lwave: false                    # don't write WAVECAR (saves disk)
   lcharg: false                   # don't write CHGCAR
   ncore: 7                        # cores per orbital: 28 / KPAR=4 = 7
   kpar: 4                         # k-point parallel groups: 64 kpts / 4 = 16 per group
   kpoints_scf: [4, 4, 4]         # for 3x3x3 supercell — Gamma-centered 4x4x4
-  vasp_command: "export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
 
 relax:
   calculation: vc-relax
