@@ -10,10 +10,6 @@ The scattering self-energy (Guo Eq. 8, diagonal block):
         * integral dw'/(2*pi) G^<_{cf}(w') G^<_{de}(w-w')
         * Phi3_{b,e,f}
 
-The self-energy uses the LOCAL (q-averaged) Green's function:
-    G_local(w) = (1/N_q) * sum_q G(q, w)
-This is Approximation III from Guo et al.
-
 Internal units: THz^2 for dynamical matrices and self-energies.
 This keeps magnitudes O(1)-O(100) for numerical stability, compared
 to (rad/s)^2 which gives O(10^25) magnitudes.
@@ -998,11 +994,6 @@ def anharmonic_transmission_q(
     verbose: bool = True,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
-
-    Unlike the Approximation III ``anharmonic_transmission`` (which
-    q-averages G before computing a single self-energy), this function
-    retains the explicit q'-sum in the self-energy and Fourier-transforms
-    the raw supercell FC3 on-the-fly for each (q', q-q') pair.
 
     Uses a Gamma-centered q-mesh [0, 1/N, ..., (N-1)/N] for closure
     under subtraction (required for q-convolution).

@@ -180,7 +180,8 @@ def _write_vasp_inputs(
     # Convert to fractional coordinates and wrap into [0, 1)
     inv_cell = np.linalg.inv(cell)  # cell rows are lattice vectors
     sorted_frac = sorted_positions @ inv_cell.T
-    sorted_frac -= np.floor(sorted_frac)  # wrap into [0, 1)
+    sorted_frac %= 1.0
+    sorted_frac[sorted_frac > 1.0 - 1e-10] = 0.0  # clamp ~1.0 to 0.0
 
     with open(disp_dir / "POSCAR", "w") as f:
         f.write("phono3py displacement\n")
