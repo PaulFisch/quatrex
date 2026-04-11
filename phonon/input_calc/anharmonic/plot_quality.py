@@ -29,6 +29,7 @@ from phonon_inputs.separable import (
     separable_anharmonic_transmission,
 )
 from phonon_inputs.anharmonic import anharmonic_transmission_q
+from phonon_inputs.pcp import pcp_anharmonic_transmission
 
 OUT_DIR = script_dir / "figures"
 CACHE_DIR = script_dir / "quality_cache"
@@ -132,6 +133,21 @@ def run_separable_asr(phonon, fc3_path, R):
     return r
 
 
+def run_pcp(phonon, fc3_path, Nc):
+    """Run PCP at given rank."""
+    name = f"pcp_Nc{Nc}"
+    cached = load_result(name)
+    if cached is not None:
+        print(f"  [cached] {name}")
+        return cached
+    print(f"\n=== PCP Nc={Nc} ===")
+    t0 = time.time()
+    r = pcp_anharmonic_transmission(phonon, str(fc3_path), pcp_rank=Nc, **COMMON)
+    r["wall_time"] = time.time() - t0
+    save_result(r, name)
+    return r
+
+
 def compute_fc3_errors(phonon, fc3_path, R_values):
     """Compute FC3 reconstruction errors for SVD and SVD+ASR at various ranks."""
     import h5py
@@ -153,22 +169,22 @@ def compute_fc3_errors(phonon, fc3_path, R_values):
     svd_errors = []
     svd_svals = None
     for R in R_values:
-        F_list, H, svals, trans_atoms = decompose_fc3_supercell(
+        F_list, H, svals = decompose_fc3_supercell(
             fc3_raw, nat_prim,
-            masses_super, prim_indices, slab_indices, ref_sc_atoms,
+            masses_super, prim_indices, ref_sc_atoms,
             rank=R,
         )
         err = reconstruction_error(
             fc3_raw, nat_prim,
-            masses_super, prim_indices, slab_indices, ref_sc_atoms,
-            F_list, H, trans_atoms,
+            masses_super, ref_sc_atoms,
+            F_list, H,
         )
         svd_errors.append(err)
         if svd_svals is None:
             # Get full singular values for spectrum plot
-            F_full, H_full, svals_full, _ = decompose_fc3_supercell(
+            F_full, H_full, svals_full = decompose_fc3_supercell(
                 fc3_raw, nat_prim,
-                masses_super, prim_indices, slab_indices, ref_sc_atoms,
+                masses_super, prim_indices, ref_sc_atoms,
                 rank=None, tol=1e-15,
             )
             svd_svals = svals_full
@@ -177,15 +193,15 @@ def compute_fc3_errors(phonon, fc3_path, R_values):
     # SVD+ASR errors at same ranks
     svd_asr_errors = []
     for R in R_values:
-        F_list, H, svals, trans_atoms = decompose_fc3_supercell(
+        F_list, H, svals = decompose_fc3_supercell(
             fc3_raw, nat_prim,
-            masses_super, prim_indices, slab_indices, ref_sc_atoms,
+            masses_super, prim_indices, ref_sc_atoms,
             rank=R, enforce_asr=True,
         )
         err = reconstruction_error(
             fc3_raw, nat_prim,
-            masses_super, prim_indices, slab_indices, ref_sc_atoms,
-            F_list, H, trans_atoms,
+            masses_super, ref_sc_atoms,
+            F_list, H,
         )
         svd_asr_errors.append(err)
         print(f"  SVD+ASR R={R}: rel_err = {err:.4e}")
@@ -220,12 +236,9 @@ def collect_all(load_only=False):
     for R in [2, 4, 6, 12, 24]:
         results[f"sep_R{R}"] = run_separable(phonon, fc3_path, R)
 
-    # PCP (load cached only — no recomputation)
+    # PCP sweep
     for Nc in [2, 4, 8, 12, 24]:
-        cached = load_result(f"pcp_Nc{Nc}")
-        if cached is not None:
-            print(f"  [cached] pcp_Nc{Nc}")
-            results[f"pcp_Nc{Nc}"] = cached
+        results[f"pcp_Nc{Nc}"] = run_pcp(phonon, fc3_path, Nc)
 
     return results
 

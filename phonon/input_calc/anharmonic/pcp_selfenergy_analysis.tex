@@ -1,0 +1,457 @@
+% ======================================================================
+\subsection{PCP decomposition and the NEGF self-energy}
+\label{sub:pcp_selfenergy}
+% ======================================================================
+
+We analyse whether the Permanent CP (PCP) decomposition of Luo et
+al.~\cite{luo_tensor_2025} can yield a self-energy kernel that is both
+correct and cheaper than dense evaluation.
+
+
+% -------------------------------------------------------
+\subsubsection{PCP ansatz}
+\label{sssub:pcp_ansatz}
+% -------------------------------------------------------
+
+The PCP decomposition expresses the mass-weighted FC3 as
+\begin{equation}\label{eq:pcp_ansatz}
+  \Psi_{\alpha\beta\gamma}(0\kappa,\, l'\kappa',\, l''\kappa'')
+  \;=\; \sum_{\xi=1}^{N_c} \frac{\lambda_\xi}{3!}
+  \sum_{\sigma\in S_3}
+    A_{\sigma_1}^\xi(0,\kappa,\alpha)\;
+    A_{\sigma_2}^\xi(l',\kappa',\beta)\;
+    A_{\sigma_3}^\xi(l'',\kappa'',\gamma),
+\end{equation}
+where $A_i^\xi(\vc{R},\kappa,\alpha)$ are three real-valued mode
+functions (``legs'') for each rank~$\xi$, and $S_3$ denotes the six
+permutations of the three legs.  Each leg is a \emph{vector} in the
+combined (cell, atom, Cartesian) index space.
+
+Fourier-transforming each mode,
+\begin{equation}\label{eq:pcp_ft}
+  \hat{f}_i^\xi(\vq)_a
+  = \sum_{\vc{R},\kappa}
+    \frac{e^{-i\vq\cdot\vc{R}}}{\sqrt{M_\kappa}}\;
+    A_i^\xi(\vc{R},\kappa,\alpha),
+  \qquad a = 3\kappa + \alpha,
+\end{equation}
+gives $\hat{f}_i^\xi(\vq) \in \CC^M$ where $M = 3n_\mathrm{at}$ is
+the number of primitive DOFs.  The Fourier-transformed FC3 vertex is
+\begin{equation}\label{eq:pcp_vertex}
+  \hat\Phi_{acd}(\vq_1,\vq_2)
+  = \sum_{\xi} \frac{\lambda_\xi}{3!}
+    \sum_{\sigma\in S_3}
+    \hat{f}_{\sigma_1}^\xi(\vq_\mathrm{ext})_a\;
+    \hat{f}_{\sigma_2}^\xi(\vq_1)_c\;
+    \hat{f}_{\sigma_3}^\xi(\vq_2)_d\,.
+\end{equation}
+
+
+% -------------------------------------------------------
+\subsubsection{Substitution into the self-energy}
+\label{sssub:pcp_substitution}
+% -------------------------------------------------------
+
+The phonon--phonon self-energy (\cref{eq:sigma_phph}) has the form
+\begin{equation}\label{eq:sigma_structure}
+  \Sigma^{\gtrless}_{ab}(\omega;\vq)
+  = \frac{i\hbar}{2N}\sum_{\vq'}
+    \sum_{c,d,e,f}
+    \hat\Phi_{acd}(\vq',\vq{-}\vq')\;
+    K_{cdfe}(\omega;\vq',\vq{-}\vq')\;
+    \hat\Phi^*_{bef}(\vq{-}\vq',\vq'),
+\end{equation}
+where
+$K_{cdfe}(\omega;\vq_1,\vq_2) = \int \frac{d\omega'}{2\pi}\,
+G^{\gtrless}_{cf}(\omega';\vq_1)\,G^{\gtrless}_{de}(\omega{-}\omega';\vq_2)$
+is the Green's function frequency convolution.  The index pairing
+in~$K$ is crucial:
+\begin{itemize}
+  \item $G(\vq')$ carries indices $(c, f)$,
+  \item $G(\vq - \vq')$ carries indices $(d, e)$.
+\end{itemize}
+
+Substituting the PCP vertex \cref{eq:pcp_vertex} for the left
+factor and its conjugate for the right factor:
+\begin{align}\label{eq:pcp_sigma_full}
+  \Sigma^{\gtrless}_{ab}(\omega;\vq)
+  &= \frac{i\hbar}{2N}\sum_{\vq'}
+    \sum_{\xi,\xi'} \frac{\lambda_\xi \lambda_{\xi'}}{36}
+    \sum_{\sigma,\sigma'\in S_3}
+    \hat{f}_{\sigma_1}^\xi(\vq)_a\;
+    \hat{f}_{\sigma'_1}^{\xi'\,*}(\vq)_b
+    \notag\\
+  &\quad\times
+    \sum_{c,d,e,f}
+    \hat{f}_{\sigma_2}^\xi(\vq')_c\;
+    \hat{f}_{\sigma_3}^\xi(\vq{-}\vq')_d\;
+    K_{cdfe}\;
+    \hat{f}_{\sigma'_2}^{\xi'\,*}(\vq{-}\vq')_e\;
+    \hat{f}_{\sigma'_3}^{\xi'\,*}(\vq')_f\,.
+\end{align}
+The external legs $\hat{f}_{\sigma_1}^\xi(\vq)_a$ and
+$\hat{f}_{\sigma'_1}^{\xi'\,*}(\vq)_b$ depend only on $\vq$ (not
+$\vq'$) and can be pulled out of the $\vq'$-sum.
+
+
+% -------------------------------------------------------
+\subsubsection{Factorization of the internal contraction}
+\label{sssub:pcp_factorization}
+% -------------------------------------------------------
+
+The internal contraction over $(c,d,e,f)$ factors because the
+index pairing in $K$ aligns with the PCP mode structure.
+Expanding $K_{cdfe} = \int G_{cf}(\omega';\vq')\,G_{de}(\omega{-}\omega';\vq{-}\vq')\,d\omega'/2\pi$:
+\begin{align}
+  &\sum_{c,d,e,f}
+    f_{\sigma_2,c}\,f_{\sigma_3,d}\,
+    G_{cf}(\omega';\vq')\,G_{de}(\omega{-}\omega';\vq{-}\vq')\,
+    f^*_{\sigma'_2,e}\,f^*_{\sigma'_3,f}
+  \notag\\
+  &\quad=
+    \underbrace{
+      \Bigl[\sum_c f_{\sigma_2,c}\;\sum_f G_{cf}(\omega';\vq')\;
+      f^*_{\sigma'_3,f}\Bigr]
+    }_{g_{\sigma_2,\sigma'_3}^{\xi\xi'}(\omega';\vq')}
+    \;\times\;
+    \underbrace{
+      \Bigl[\sum_d f_{\sigma_3,d}\;\sum_e G_{de}(\omega{-}\omega';\vq{-}\vq')\;
+      f^*_{\sigma'_2,e}\Bigr]
+    }_{g_{\sigma_3,\sigma'_2}^{\xi\xi'}(\omega{-}\omega';\vq{-}\vq')},
+  \label{eq:factorization}
+\end{align}
+where we define the scalar Green's function projections:
+\begin{equation}\label{eq:scalar_gf}
+  g_{ij}^{\xi\xi'}(\omega;\vq)
+  \;=\; \hat{f}_i^{\xi}(\vq)^\dagger\,
+    G^{\gtrless}(\omega;\vq)\,
+    \hat{f}_j^{\xi'}(\vq).
+\end{equation}
+The factorization \cref{eq:factorization} is \emph{exact} because
+indices $(c, f)$ both belong to $G(\vq')$ and indices $(d, e)$
+both belong to $G(\vq - \vq')$---the two Green's functions
+never share an internal index.
+
+The full PCP self-energy is therefore:
+\begin{equation}\label{eq:pcp_sigma_scalar}
+  \boxed{
+  \Sigma^{\gtrless}_{ab}(\omega;\vq)
+  = \frac{i\hbar}{2N}\sum_{\vq'}
+    \sum_{\xi,\xi'} \frac{\lambda_\xi \lambda_{\xi'}}{36}
+    \sum_{\sigma,\sigma'}
+    \hat{f}_{\sigma_1}^\xi(\vq)_a\;
+    \underbrace{
+      \mathrm{IFFT}_\omega\Bigl\{
+        \hat{g}_{\sigma_2,\sigma'_3}^{\xi\xi'}(\vq')\;\cdot\;
+        \hat{g}_{\sigma_3,\sigma'_2}^{\xi\xi'}(\vq{-}\vq')
+      \Bigr\}
+    }_{\text{scalar convolution}}
+    \;\hat{f}_{\sigma'_1}^{\xi'\,*}(\vq)_b\,.
+  }
+\end{equation}
+
+\paragraph{Permutation sum simplification.}
+The code groups the double sum over $S_3 \times S_3$ by
+$(\sigma_1, \sigma'_1)$ indices, forming
+\begin{equation}
+  \mathcal{S}[\xi,\xi',s_1,s_1',\omega]
+  = \sum_{\substack{(s_1,s_2,s_3)\in S_3 \\ (s_1',s_2',s_3')\in S_3}}
+    g_{s_2,s_2'}(\vq')\;\cdot\; g_{s_3,s_3'}(\vq{-}\vq'),
+\end{equation}
+which uses index pairing $(s_2, s_2')$ and $(s_3, s_3')$ rather
+than the derived pairing $(s_2, s_3')$ and $(s_3, s_2')$.  These
+are \textbf{equivalent}: summing over all permutations of
+$\{0,1,2\}\setminus\{s_1\}$ and
+$\{0,1,2\}\setminus\{s_1'\}$ generates all four combinations of
+the remaining two elements on both sides, so both orderings
+produce the same sum.  Numerically verified to machine precision
+(Test~4, relative difference $\sim 10^{-17}$).
+
+
+% -------------------------------------------------------
+\subsubsection{Comparison with the separable (SVD) factorization}
+\label{sssub:pcp_vs_svd_structure}
+% -------------------------------------------------------
+
+Both the PCP and separable decompositions lead to \emph{exact}
+factorizations of the self-energy internal contraction, but for
+different structural reasons.
+
+\paragraph{SVD.}
+$\hat\Phi_{acd}(\vq_1,\vq_2) = \sum_r F_{r,ac}(\vq_1)\,h_{r,d}(\vq_2)$
+has a \emph{matrix} left factor $F_r \in \CC^{M\times M}$ and a
+\emph{vector} right factor $h_r \in \CC^M$.  The Green's function
+$G(\vq')$ with indices $(c,f)$ is contracted:
+$F_{r,ac}\,G_{cf}\,h^*_{s,f} = [F_r\,G\,h_s^*]_a \in \CC^M$
+(a vector), and $G(\vq-\vq')$ with indices $(d,e)$:
+$h_{r,d}\,G_{de}\,F^*_{s,be} = [h_r^T G F_s^\dagger]_b \in \CC^M$.
+The frequency convolution is between two $M$-vectors, yielding
+an $M \times M$ outer product---correct by construction.
+
+\paragraph{PCP.}
+$\hat\Phi_{acd}$ has \emph{vector} factors on all three indices.
+The Green's function projections yield \emph{scalars}
+$g = f^\dagger G f \in \CC$.  The frequency convolution is between
+two scalars, and the result is expanded back to $M \times M$ via
+the external mode vectors.  This is also correct because the
+index pairing in $K_{cdfe}$ guarantees that all four internal
+indices are covered by mode vectors at the correct $\vq$-points.
+
+
+% -------------------------------------------------------
+\subsubsection{The Fourier transform problem}
+\label{sssub:ft_problem}
+% -------------------------------------------------------
+
+While the self-energy factorization is exact, the \emph{vertex}
+computation via PCP mode FTs is not.  The PCP real-space ansatz
+\cref{eq:pcp_ansatz} involves a sum over cell index~$l$ with
+modular arithmetic:
+\begin{equation}
+  \Psi(0, l', l'')
+  = \sum_\xi \frac{\lambda_\xi}{6} \sum_\sigma \sum_{l=0}^{N-1}
+    A_{\sigma_1}\bigl((-l) \bmod N\bigr)\;
+    A_{\sigma_2}\bigl((l'-l) \bmod N\bigr)\;
+    A_{\sigma_3}\bigl((l''-l) \bmod N\bigr).
+\end{equation}
+Fourier-transforming $\Psi$ over $(l', l'')$ and factorizing into
+individual mode FTs requires
+\begin{equation}\label{eq:phase_identity}
+  e^{-i\vq\cdot\vc{R}_{(m+l)\bmod N}}
+  \;=\; e^{-i\vq\cdot\vc{R}_m}\;e^{-i\vq\cdot\vc{R}_l},
+\end{equation}
+which holds if and only if
+$\vq \cdot N_i\vc{a}_i = 2\pi n_i$ for each lattice
+direction~$i$, i.e., $\vq$ is \emph{commensurate} with the
+supercell.  When $(m + l) \bmod N$ wraps around a boundary,
+$\vc{R}_{(m+l)\bmod N} = \vc{R}_m + \vc{R}_l - N_i\vc{a}_i$
+for some direction~$i$, introducing a spurious phase
+$e^{i\vq\cdot N_i\vc{a}_i} \neq 1$.
+
+For a $4\times 4$ $q$-mesh on a $2\times 2\times 2$ supercell,
+12 of 16 $q$-points are non-commensurate.  The vertex error
+at these points reaches 50--110\% (\cref{tab:vertex_errors}).
+
+\begin{table}[htbp]
+  \centering
+  \caption{PCP vertex errors: factorized FT vs.\ correct dense FT
+    (from PCP-reconstructed FC3). Commensurate $q$-points have
+    $\vq \cdot N_i\vc{a}_i \in 2\pi\ZZ$ for all~$i$.}
+  \label{tab:vertex_errors}
+  \begin{tabular}{llrl}
+    \toprule
+    $\vq'$ & $\vq-\vq'$ & $\|\hat\Phi_\mathrm{PCP} - \hat\Phi_\mathrm{dense}\|/\|\hat\Phi_\mathrm{dense}\|$ & Status \\
+    \midrule
+    $(0, \tfrac{1}{2})$       & $(0, \tfrac{1}{2})$       & $6.5\times10^{-16}$ & Commensurate \\
+    $(\tfrac{1}{2}, 0)$       & $(\tfrac{1}{2}, \tfrac{1}{2})$ & $7.7\times10^{-16}$ & Commensurate \\
+    \midrule
+    $(0, \tfrac{1}{4})$       & $(0, \tfrac{3}{4})$       & $5.1\times10^{-1}$ & Non-commensurate \\
+    $(\tfrac{1}{4}, \tfrac{1}{4})$ & $(\tfrac{3}{4}, \tfrac{1}{2})$ & $1.1\times10^{0}$ & Non-commensurate \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+% -------------------------------------------------------
+\subsubsection{Numerical verification: factorized PCP is exact}
+\label{sssub:pcp_numerical}
+% -------------------------------------------------------
+
+To isolate the FT issue from the factorization question, we
+test at commensurate $q$-points where the mode FTs are exact.
+
+\paragraph{Test setup.}
+Si $2\times2\times2$ supercell, PCP fit with $N_c = 24$
+(rel.\ error $3.9\times10^{-4}$).  Random anti-Hermitian
+Green's functions $G^<, G^>$ on a $2\times2$ $q$-mesh (all 4
+points commensurate) and 31 frequency points.
+
+\paragraph{Self-energy comparison.}
+\begin{center}
+\begin{tabular}{lc}
+  \toprule
+  Component & $\|\Sigma_\mathrm{PCP} - \Sigma_\mathrm{dense}\| / \|\Sigma_\mathrm{dense}\|$ \\
+  \midrule
+  $\Sigma^<$ & $8.7\times10^{-16}$ \\
+  $\Sigma^>$ & $9.3\times10^{-16}$ \\
+  $\Sigma^R$ & $9.1\times10^{-16}$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+At every $q$-point individually, the error is $\sim 10^{-16}$
+(machine precision).  \textbf{The factorized PCP self-energy
+is mathematically exact}---the error is entirely in the Fourier
+transform, not the contraction structure.
+
+On a $4\times4$ $q$-mesh (12 non-commensurate points), the
+self-energy error rises to $\sim 94\%$.
+
+\paragraph{Why it works.}
+The self-energy contraction $\Sigma_{ab} = \Phi^L_{acd}\,K_{cdfe}\,\Phi^R_{bef}$
+involves $K_{cdfe} = \mathrm{IFFT}\{G_{cf}(\vq')\,G_{de}(\vq-\vq')\}$.
+The PCP mode vectors project $G(\vq')$ via indices $(c,f)$ and
+$G(\vq-\vq')$ via indices $(d,e)$---the two Green's functions
+never share an internal index.  Therefore the scalar projections
+$g = f^\dagger G f$ are applied to independent tensor factors,
+and the sums commute exactly.
+
+
+% -------------------------------------------------------
+\subsubsection{Cost analysis}
+\label{sssub:pcp_cost}
+% -------------------------------------------------------
+
+Since the factorized PCP self-energy is exact (given correct vertices),
+the cost comparison with dense and separable kernels is meaningful.
+
+\paragraph{Per-pair cost structure.}
+\begin{enumerate}
+  \item \textbf{Scalar projections} (precomputed per $\vq$):
+    $g_{ij}^{\xi\xi'}(\omega;\vq) = \hat{f}_i^{\xi\dagger}\,G(\omega;\vq)\,\hat{f}_j^{\xi'}$.
+    Cost: $3N_c$ matrix-vector products $(M^2)$ + $9N_c^2$ inner
+    products $(M)$, over $N_\omega$ frequencies.
+
+  \item \textbf{Permutation sums and FFT convolution}: For each
+    $(\vq,\vq')$ pair, form the $S_3 \times S_3$ permutation sums
+    and convolve via FFT.
+    Cost: $36 N_c^2 N_\tau + 9 N_c^2 N_\tau\log N_\tau$.
+
+  \item \textbf{Accumulation}: Expand to matrix self-energy via
+    $\Sigma_{ab} \mathrel{+}= f_a\,[C \cdot f_b^*]$.
+    Cost: $9 N_\omega (N_c^2 M + N_c M^2)$.
+\end{enumerate}
+
+Total per-pair:
+\begin{equation}\label{eq:pcp_cost}
+  \cW_\mathrm{PCP}^\mathrm{pair}
+  = \underbrace{9 N_c^2\,N_\tau \log N_\tau}_{\text{FFT}}
+  + \underbrace{9 N_\omega\,(N_c^2 M + N_c M^2)}_{\text{accumulation}}.
+\end{equation}
+Compare:
+\begin{align}
+  \cW_\mathrm{dense}^\mathrm{pair}
+  &= M^4\,N_\tau\log N_\tau + N_\omega\,M^5,
+  \label{eq:dense_cost_recap} \\
+  \cW_\mathrm{sep}^\mathrm{pair}
+  &= R^2\,N_\tau\log N_\tau + R^2\,N_\omega\,M^2.
+  \label{eq:sep_cost_recap}
+\end{align}
+
+\paragraph{PCP vs.\ dense.}
+PCP is cheaper when $9N_c^2 < M^4$, i.e., $N_c < M^2/3$.
+For Si ($M = 6$): $N_c < 12$ gives a speedup in the FFT step.
+At $N_c = 4$: FFT cost $144$ vs.\ $1296$ ($9\times$ cheaper);
+accumulation $9(96 + 144) = 2160$ vs.\ $7776$ ($3.6\times$).
+
+\paragraph{PCP vs.\ separable.}
+At equal compression ($N_c = R$), the PCP FFT cost carries a
+factor of 9 from the permutation structure.  However, the PCP
+accumulation is $N_c^2 M + N_c M^2$ vs.\ SVD's $R^2 M^2$, which
+is cheaper when $N_c < M$ (since $N_c M + M^2 < R M^2$ for
+$N_c < M$).  For Si at $R = N_c = 6$: PCP accumulation
+$= 9(216 + 216) = 3888$ vs.\ SVD $= 36 \cdot 36 = 1296$.  The
+factor of 9 overhead makes PCP slower at $M = 6$.
+
+For large primitive cells ($M \gg N_c$), the PCP accumulation
+term $9 N_c M^2$ matches SVD's $R^2 M^2$ when $9 N_c \approx R^2$,
+i.e., at $R \approx 3\sqrt{N_c}$.
+
+
+% -------------------------------------------------------
+\subsubsection{Resolving the Fourier transform problem}
+\label{sssub:ft_resolution}
+% -------------------------------------------------------
+
+Three approaches to obtain correct PCP vertices at arbitrary
+$\vq$-points:
+
+\paragraph{1.\ Commensurate $q$-mesh.}
+Use a $q$-mesh whose grid spacing divides the supercell, so all
+$q$-points satisfy \cref{eq:phase_identity}.  For a $2\times2\times2$
+supercell, this limits the mesh to $2\times2$.  Coarser than
+desirable for converged results but trivially correct.
+
+\paragraph{2.\ Real-space reconstruction.}
+Reconstruct FC3 from PCP modes, build $M_\mathrm{stacked}$ and
+gathering matrices $T(\vq)$, compute vertices via
+$\hat\Phi_a(\vq_1,\vq_2) = T(\vq_1)\,M_a\,T(\vq_2)^T$.  This is
+the current implementation.  Correct at arbitrary $\vq$ but uses
+the dense FT machinery, losing the $N_c^2$ cost advantage.
+
+\paragraph{3.\ Direct vertex evaluation.}
+For each $(\vq_1, \vq_2)$, evaluate the PCP vertex by summing
+over cell index~$l$ \emph{without} factorizing the phases:
+\begin{equation}\label{eq:direct_vertex}
+  \hat\Phi_{acd}(\vq_1,\vq_2)
+  = \sum_\xi \frac{\lambda_\xi}{6} \sum_\sigma \sum_{l=0}^{N-1}
+    A_{\sigma_1}((-l)\bmod N)_a\;
+    \Bigl[\sum_m A_{\sigma_2}(m)_c\,
+      e^{-i\vq_1\cdot\vc{R}_{(m+l)\bmod N}}\Bigr]\;
+    \Bigl[\sum_n A_{\sigma_3}(n)_d\,
+      e^{-i\vq_2\cdot\vc{R}_{(n+l)\bmod N}}\Bigr].
+\end{equation}
+The bracketed ``shifted FTs'' have cost $\cO(N_\mathrm{cell} \cdot M)$
+each.  For $N_c$ modes, 3 legs, $N_\mathrm{cell}$ shifts, and
+6 permutations: $6 N_c \cdot N_\mathrm{cell} \cdot 2 N_\mathrm{cell} M$
+$= 12 N_c N_\mathrm{cell}^2 M$.  This must be done for each
+of the $N_q^2$ pairs $(\vq', \vq-\vq')$.
+
+For Si ($N_c = 8$, $N_\mathrm{cell} = 8$, $M = 6$, $N_q = 16$):
+vertex cost per pair $\approx 12 \cdot 8 \cdot 64 \cdot 6 = 36864$,
+vs.\ dense vertex $M \cdot (d_t^2 + d_t M) = 6 \cdot 2592 = 15552$.
+Direct vertex is $\sim 2.4\times$ more expensive than the
+$M_\mathrm{stacked}$ approach per pair.
+
+However, the PCP vertex can be \emph{precomputed} once and
+cached for all SCBA iterations.  If the SCBA loop runs for
+$K$ iterations, the vertex precomputation cost is amortized
+and the per-iteration cost reduces to the scalar convolution
+\cref{eq:pcp_cost}---potentially much cheaper than dense.
+
+\paragraph{4.\ Supercell-commensurate interpolation.}
+Compute the factorized vertex exactly at the
+$N_\mathrm{cell}$ commensurate $q$-points and interpolate to the
+finer mesh.  The vertex is smooth in $\vq$-space (it is the DFT
+of a finite-range real-space object), so trigonometric
+interpolation is exact up to the supercell cutoff range.  This
+is equivalent to zero-padding the real-space FC3 and DFT'ing,
+i.e., the reconstruction approach but potentially more memory-efficient
+for large systems where storing the full FC3 is prohibitive.
+
+
+% -------------------------------------------------------
+\subsubsection{Summary}
+\label{sssub:pcp_summary}
+% -------------------------------------------------------
+
+\begin{enumerate}
+  \item The factorized PCP self-energy
+    (\cref{eq:pcp_sigma_scalar}) is \textbf{mathematically exact}.
+    The scalar projection of $G$ onto PCP mode vectors commutes
+    with the frequency convolution because the two Green's functions
+    in $K_{cdfe}$ carry disjoint index pairs $(c,f)$ and $(d,e)$
+    that each pair with mode vectors at a single $\vq$-point.
+
+  \item The sole source of error is the \textbf{Fourier transform}:
+    the PCP mode FTs factorize only at $q$-points commensurate with
+    the supercell.  At non-commensurate points, the modular
+    cell-index arithmetic produces phase errors of $\cO(1)$.
+
+  \item With correct vertices (via direct evaluation or real-space
+    reconstruction), the PCP kernel at $N_c = 4$ would be
+    $\sim 9\times$ cheaper than dense in the FFT step and
+    $\sim 3.6\times$ cheaper in accumulation (for Si, $M = 6$).
+
+  \item The current implementation uses real-space reconstruction
+    (approach~2), which is correct but loses the cost advantage.
+    Implementing the direct vertex evaluation (approach~3) with
+    SCBA-amortized caching would enable the factorized PCP kernel
+    at arbitrary $q$-points with the correct cost scaling.
+
+  \item For the NEGF self-energy, the relevant comparison is with
+    the separable (SVD) kernel, which also gives exact results and
+    has cost $R^2 M^2$ vs.\ PCP's $9 N_c^2 M$.  The factor of 9
+    from $S_3$ permutations makes PCP slower at small $M$, but for
+    large primitive cells ($M \gg N_c$), the $N_c M$ accumulation
+    term becomes favorable if $9 N_c < R^2$.
+\end{enumerate}

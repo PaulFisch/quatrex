@@ -780,6 +780,90 @@ def fourier_transform_pcp(A_modes, lambdas, phonon, q_perp_frac,
     return f_q
 
 
+def fourier_transform_pcp_shifted(A_modes, lambdas, phonon, q_points,
+                                   transport_direction='x', info=None):
+    """Compute shifted-FT PCP mode vectors for all q-points and cell shifts.
+
+    For each cell shift l, builds the supercell-indexed vector
+        v_{s,xi,l}[j*3+beta] = A_s^xi(cell_diff[cell_j, l], prim_j, beta)
+    and applies the gathering matrix T(q) to get the q-space vector:
+        f_{s,xi,l}(q) = T(q) @ v_{s,xi,l}
+
+    Unlike the standard FT (fourier_transform_pcp), this does NOT rely on
+    the phase factorization identity exp(-iq*R_{(t+l)%N}) = exp(-iq*R_t)*exp(-iq*R_l),
+    which only holds at commensurate q-points. The shifted-FT is exact at any q.
+
+    Also returns the external mode weights c[l, xi, s1, :n_dof] = A_{s1}^xi((-l)%N, ...)
+    needed for the vertex reconstruction.
+
+    Parameters
+    ----------
+    A_modes : ndarray, shape (3, N_c, n_cells, nat_prim, 3)
+    lambdas : ndarray, shape (N_c,)
+    phonon : Phonopy
+    q_points : list of (qx, qy) tuples
+    transport_direction : str
+    info : dict from fit_pcp
+
+    Returns
+    -------
+    f_shifted : ndarray, shape (n_cells, n_kpts, 3, N_c, n_dof), complex
+        Shifted-FT mode vectors for each cell shift, q-point, leg, rank.
+    ext_weights : ndarray, shape (n_cells, 3, N_c, n_dof), real
+        External mode weights A_{s1}^xi((-l)%N, ...) for each l.
+    """
+    from .separable import build_supercell_mapping, build_gathering_matrix
+
+    prim = phonon.primitive
+    nat_prim = len(prim.masses)
+    n_dof = nat_prim * 3
+    N_c = len(lambdas)
+    n_super = len(phonon.supercell.masses)
+    n_kpts = len(q_points)
+
+    sc_to_cell, sc_to_prim, _, n_cells, sc_mat = build_cell_mapping(phonon)
+    cell_diff, idx_to_t = build_cell_diff_table(n_cells, sc_mat)
+
+    prim_indices, cell_frac, _, _ = build_supercell_mapping(
+        phonon, transport_direction)
+
+    # Build gathering matrices T(q) for all q-points
+    T_all = []
+    for qx, qy in q_points:
+        T = build_gathering_matrix(prim_indices, cell_frac,
+                                   (qx, qy), nat_prim, transport_direction)
+        T_all.append(T)
+
+    # Precompute supercell vectors for each (s, xi, l) and apply T(q)
+    f_shifted = np.zeros((n_cells, n_kpts, 3, N_c, n_dof), dtype=complex)
+
+    # Build all supercell vectors at once: v[l, s, xi, j*3+beta]
+    v_all = np.zeros((n_cells, 3, N_c, n_super * 3))
+    for l in range(n_cells):
+        for j in range(n_super):
+            cj = cell_diff[sc_to_cell[j], l]
+            pj = sc_to_prim[j]
+            # A_modes[s, xi, cj, pj, :] for all s, xi
+            v_all[l, :, :, j*3:j*3+3] = A_modes[:, :, cj, pj, :]
+
+    # Apply T(q) @ v for all (l, s, xi, q)
+    for iq in range(n_kpts):
+        T_q = T_all[iq]  # (n_dof, dim_sc)
+        for l in range(n_cells):
+            # v_all[l] has shape (3, N_c, dim_sc)
+            # T_q has shape (n_dof, dim_sc)
+            # Result: (3, N_c, n_dof) = v_all[l] @ T_q.T
+            f_shifted[l, iq] = v_all[l] @ T_q.T
+
+    # External weights: A_{s1}^xi((-l)%N, kappa, alpha) for each l
+    ext_weights = np.zeros((n_cells, 3, N_c, n_dof))
+    for l in range(n_cells):
+        cell_neg_l = cell_diff[0, l]  # (-l) % N
+        ext_weights[l] = A_modes[:, :, cell_neg_l, :, :].reshape(3, N_c, n_dof)
+
+    return f_shifted, ext_weights
+
+
 # ---------------------------------------------------------------------------
 # PCP self-energy kernel
 # ---------------------------------------------------------------------------
@@ -791,33 +875,31 @@ def _compute_phph_self_energy_pcp(
     n_dof, n_kpts,
     omega_grid_thz, dw_thz,
     q_diff_map=None,
+    f_ext=None,
 ):
-    """Compute phonon-phonon self-energy via PCP decomposition.
+    """Compute phonon-phonon self-energy via CP/PCP decomposition.
 
-    WARNING: This kernel uses the PCP momentum-space factorization
-    V = sum f(q_ext)*f(q')*f(q-q'), which requires q*N_supercell to be
-    integer-valued. For q-meshes finer than the supercell grid, the
-    factorization identity exp(-iq*R_{(t+l) mod N}) = exp(-iq*(R_t + R_l))
-    breaks, giving ~50-80% vertex errors at non-commensurate q-points.
-    Use pcp_anharmonic_transmission (which reconstructs FC3 and uses the
-    dense FT kernel) instead.
+    Projects G onto CP mode vectors (internal legs 2,3 at q', q-q')
+    to get scalar functions, convolves pairs, then reconstructs the
+    matrix self-energy using the external mode vectors (leg 1).
 
-    Projects G onto the PCP mode vectors to obtain scalar functions
-    g_{ij}^{xi,xi'}(w;q), convolves pairs of scalars, and reconstructs
-    the matrix self-energy from the external mode vectors.
-
-    Uses matmul accumulation (Sigma[w] = F^H @ C[w] @ conj(F)) for
-    ~5-15x speedup over the naive einsum on the accumulation step.
+    The internal legs are Fourier-transformed via T(q), but the external
+    leg uses cell-0-restricted modes (not FT'd), matching the convention
+    that the self-energy's external indices are primitive-cell DOFs.
 
     Parameters
     ----------
     G_lesser_q, G_greater_q : ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
     f_modes_all_q : ndarray, shape (n_kpts, 3, N_c, n_dof), complex
+        FT'd mode vectors for internal projections at each q-point.
     lambdas : ndarray, shape (N_c,)
     n_dof, n_kpts : int
     omega_grid_thz : ndarray, shape (n_freq,)
     dw_thz : float
     q_diff_map : ndarray, shape (n_kpts, n_kpts), optional
+    f_ext : ndarray, shape (3, N_c, n_dof), real, optional
+        External (cell-0) mode vectors for accumulation step.
+        If None, uses f_modes_all_q[iq_ext] (only valid at commensurate q).
 
     Returns
     -------
@@ -850,11 +932,14 @@ def _compute_phph_self_energy_pcp(
         f_flat = f_modes_all_q[iq].reshape(3 * N_c, n_dof)
         f_conj = np.conj(f_flat)
 
-        Gf_L = GL[iq] @ f_flat.T
-        Gf_G = GG[iq] @ f_flat.T
+        # Correct projection: g = f^T @ G @ f*  (conjugate RIGHT side)
+        # From the self-energy diagram: V_{acd} G_{cc'} V*_{a'c'd'}
+        # gives internal contraction f_s(q)[c] G_{cc'} f*_{s'}(q)[c']
+        Gf_L = GL[iq] @ f_conj.T   # G @ f*^T
+        Gf_G = GG[iq] @ f_conj.T
 
-        g_flat_L = np.einsum('ia,waj->ijw', f_conj, Gf_L)
-        g_flat_G = np.einsum('ia,waj->ijw', f_conj, Gf_G)
+        g_flat_L = np.einsum('ia,waj->ijw', f_flat, Gf_L)  # f @ (G @ f*^T)
+        g_flat_G = np.einsum('ia,waj->ijw', f_flat, Gf_G)
 
         gL[:, :, :, :, iq, :] = g_flat_L.reshape(3, N_c, 3, N_c, n_fft).transpose(1, 3, 0, 2, 4)
         gG[:, :, :, :, iq, :] = g_flat_G.reshape(3, N_c, 3, N_c, n_fft).transpose(1, 3, 0, 2, 4)
@@ -887,24 +972,192 @@ def _compute_phph_self_energy_pcp(
             conv_all_L = np.fft.ifft(sum_prod_L, axis=-1)[:, :, :, :, freq_sl]
             conv_all_G = np.fft.ifft(sum_prod_G, axis=-1)[:, :, :, :, freq_sl]
 
-            # Matmul accumulation: Sigma[w] = F^H @ C[w] @ conj(F)
+            # Matmul accumulation: Sigma[w] = ext @ C[w] @ ext^T
+            # External leg uses cell-0 modes (NOT FT'd at q_ext)
             for s1 in range(3):
-                f_s1 = f_modes_all_q[iq_ext, s1, :, :]    # (N_c, n_dof)
+                e_s1 = f_ext[s1] if f_ext is not None else f_modes_all_q[iq_ext, s1]
                 for s1p in range(3):
-                    f_s1p = f_modes_all_q[iq_ext, s1p, :, :]
-                    f_s1p_conj = np.conj(f_s1p)
+                    e_s1p = f_ext[s1p] if f_ext is not None else f_modes_all_q[iq_ext, s1p]
 
                     CL = (lam_outer[:, :, None] * conv_all_L[:, :, s1, s1p, :]).transpose(2, 0, 1)
                     CG = (lam_outer[:, :, None] * conv_all_G[:, :, s1, s1p, :]).transpose(2, 0, 1)
 
-                    TL = CL @ f_s1p_conj   # (n_freq, N_c, n_dof)
-                    TG = CG @ f_s1p_conj
+                    TL = CL @ e_s1p   # (n_freq, N_c, n_dof)
+                    TG = CG @ e_s1p
 
-                    Sigma_lesser[iq_ext] += prefactor * np.einsum('xa,wxy->way', f_s1, TL)
-                    Sigma_greater[iq_ext] += prefactor * np.einsum('xa,wxy->way', f_s1, TG)
+                    Sigma_lesser[iq_ext] += prefactor * np.einsum('xa,wxy->way', e_s1, TL)
+                    Sigma_greater[iq_ext] += prefactor * np.einsum('xa,wxy->way', e_s1, TG)
 
     Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
     return Sigma_lesser, Sigma_greater, Sigma_retarded
+
+
+def _compute_phph_self_energy_pcp_shifted(
+    G_lesser_q, G_greater_q,
+    f_shifted, ext_weights, lambdas,
+    n_dof, n_kpts,
+    omega_grid_thz, dw_thz,
+    q_diff_map=None,
+):
+    """Compute phonon-phonon self-energy via PCP with shifted-FT modes.
+
+    Uses the universal shifted-FT formulation (exact at any q-point).
+    Streams over (l, l') cell-shift pairs to keep memory bounded.
+
+    Parameters
+    ----------
+    G_lesser_q, G_greater_q : ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
+    f_shifted : ndarray, shape (n_cells, n_kpts, 3, N_c, n_dof), complex
+        Shifted-FT mode vectors h_s^xi(q, l).
+    ext_weights : ndarray, shape (n_cells, 3, N_c, n_dof), real
+        External weights w_a^{(s, xi, l)} = A_s^xi((-l) mod N, kappa, alpha).
+    lambdas : ndarray, shape (N_c,)
+    n_dof, n_kpts : int
+    omega_grid_thz : ndarray, shape (n_freq,)
+    dw_thz : float
+    q_diff_map : ndarray, shape (n_kpts, n_kpts), optional
+
+    Returns
+    -------
+    Sigma_lesser, Sigma_greater, Sigma_retarded :
+        ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
+    """
+    n_freq = len(omega_grid_thz)
+    N_c = len(lambdas)
+    n_cells = f_shifted.shape[0]
+
+    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
+    n_ext = n_low + n_freq
+    n_fft = 2 * n_ext
+    freq_sl = slice(n_low, n_low + n_freq)
+
+    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
+
+    def _pad(G_q):
+        out = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
+        out[:, n_low:n_low + n_freq] = G_q
+        return out
+
+    GL = _pad(G_lesser_q)
+    GG = _pad(G_greater_q)
+
+    Sigma_lesser = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
+    Sigma_greater = np.zeros_like(Sigma_lesser)
+
+    lam_outer = np.outer(lambdas, lambdas) / 36.0
+    P = 3 * N_c  # combined (s, xi) dimension
+
+    # Precompute q_diff_map if not provided
+    if q_diff_map is None:
+        q_diff_map = np.zeros((n_kpts, n_kpts), dtype=int)
+        for i in range(n_kpts):
+            for j in range(n_kpts):
+                q_diff_map[i, j] = (i - j) % n_kpts
+
+    # Stream over (l, l') pairs to bound memory
+    for l in range(n_cells):
+        for lp in range(n_cells):
+            # Phase 1: Scalar projections g for all (iq, w)
+            gL = np.zeros((N_c, N_c, 3, 3, n_kpts, n_fft), dtype=complex)
+            gG = np.zeros_like(gL)
+
+            for iq in range(n_kpts):
+                h_left = f_shifted[l, iq].reshape(P, n_dof)
+                h_right_conj = np.conj(f_shifted[lp, iq].reshape(P, n_dof))
+
+                Gh_L = GL[iq] @ h_right_conj.T
+                Gh_G = GG[iq] @ h_right_conj.T
+
+                g_flat_L = np.einsum('pm,wmq->pwq', h_left, Gh_L)
+                g_flat_G = np.einsum('pm,wmq->pwq', h_left, Gh_G)
+
+                gL[:, :, :, :, iq, :] = (
+                    g_flat_L.reshape(3, N_c, n_fft, 3, N_c)
+                    .transpose(1, 4, 0, 3, 2)
+                )
+                gG[:, :, :, :, iq, :] = (
+                    g_flat_G.reshape(3, N_c, n_fft, 3, N_c)
+                    .transpose(1, 4, 0, 3, 2)
+                )
+
+            # Phase 2: FFT over omega
+            gL_hat = np.fft.fft(gL, axis=-1)
+            gG_hat = np.fft.fft(gG, axis=-1)
+
+            # Vectorized convolution: for each iq_ext, gather g at q-q'
+            # for all iq_prime, compute permutation products, IFFT, sum over q'
+            for iq_ext in range(n_kpts):
+                iq_diffs = q_diff_map[iq_ext]  # (n_kpts,)
+
+                # g at q': gL_hat indexed by all iq_prime
+                # shape: (N_c, N_c, 3, 3, n_kpts, n_fft)
+                # g at q-q': gather via iq_diffs
+                gLd = gL_hat[:, :, :, :, iq_diffs, :]  # (N_c, N_c, 3, 3, n_kpts, n_fft)
+                gGd = gG_hat[:, :, :, :, iq_diffs, :]
+
+                # Permutation sum vectorized over iq_prime
+                # gL_hat[.., s2, s3p, iq_prime, w] * gLd[.., s3, s2p, iq_prime, w]
+                sum_prod_L = np.zeros((N_c, N_c, 3, 3, n_kpts, n_fft), dtype=complex)
+                sum_prod_G = np.zeros_like(sum_prod_L)
+                for s1, s2, s3 in S3_PERMS:
+                    for s1p, s2p, s3p in S3_PERMS:
+                        sum_prod_L[:, :, s1, s1p, :, :] += (
+                            gL_hat[:, :, s2, s3p, :, :] * gLd[:, :, s3, s2p, :, :])
+                        sum_prod_G[:, :, s1, s1p, :, :] += (
+                            gG_hat[:, :, s2, s3p, :, :] * gGd[:, :, s3, s2p, :, :])
+
+                # IFFT, extract freq range, sum over iq_prime
+                conv_L = np.sum(
+                    np.fft.ifft(sum_prod_L, axis=-1)[:, :, :, :, :, freq_sl],
+                    axis=4)  # (N_c, N_c, 3, 3, n_freq)
+                conv_G = np.sum(
+                    np.fft.ifft(sum_prod_G, axis=-1)[:, :, :, :, :, freq_sl],
+                    axis=4)
+
+                # Phase 3: Accumulate with external weights
+                for s1 in range(3):
+                    w_a = ext_weights[l, s1, :, :]      # (N_c, n_dof)
+                    for s1p in range(3):
+                        w_b = ext_weights[lp, s1p, :, :]  # (N_c, n_dof)
+
+                        CL = (lam_outer[:, :, None]
+                              * conv_L[:, :, s1, s1p, :]).transpose(2, 0, 1)
+                        CG = (lam_outer[:, :, None]
+                              * conv_G[:, :, s1, s1p, :]).transpose(2, 0, 1)
+
+                        TL = CL @ w_b
+                        TG = CG @ w_b
+
+                        Sigma_lesser[iq_ext] += prefactor * np.einsum(
+                            'xa,wxy->way', w_a, TL)
+                        Sigma_greater[iq_ext] += prefactor * np.einsum(
+                            'xa,wxy->way', w_a, TG)
+
+    Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
+    return Sigma_lesser, Sigma_greater, Sigma_retarded
+
+
+# ---------------------------------------------------------------------------
+# Commensurability check
+# ---------------------------------------------------------------------------
+
+
+def _is_commensurate(q_mesh_transverse, phonon, transport_direction='x'):
+    """Check if the q-mesh is commensurate with the supercell grid.
+
+    The PCP momentum-space factorization requires that for every q-point
+    in the mesh, q * N_supercell is integer-valued in all transverse
+    directions.  For a Gamma-centered mesh with q_i = k/n_k, this holds
+    iff n_k divides N_sc in that direction.
+
+    Returns True if the factorized PCP kernel can be used.
+    """
+    sc_mat = np.diag(phonon.supercell_matrix).astype(int)
+    tidx = "xyz".index(transport_direction)
+    perp_idx = [i for i in range(3) if i != tidx]
+
+    nkx, nky = q_mesh_transverse
+    return (sc_mat[perp_idx[0]] % nkx == 0) and (sc_mat[perp_idx[1]] % nky == 0)
 
 
 # ---------------------------------------------------------------------------
@@ -993,15 +1246,9 @@ def pcp_anharmonic_transmission(
 ) -> dict:
     """Anharmonic phonon transmission via PCP FC3 decomposition.
 
-    Fits the PCP decomposition to FC3, reconstructs FC3 in real space,
-    then uses the dense q-dependent self-energy kernel for the SCBA loop.
-
-    Note: The PCP momentum-space factorization V = sum f(q_ext)*f(q')*f(q-q')
-    is only valid when q*N_supercell is integer-valued (q commensurate with
-    the supercell grid). For general q-meshes, the factorization identity
-    exp(-iq*R_{(t+l) mod N}) = exp(-iq*(R_t + R_l)) breaks down.
-    This function therefore reconstructs FC3 in real space and uses the
-    correct dense Fourier transform for arbitrary q-points.
+    Uses the shifted-FT PCP self-energy kernel, which is exact at any q-point.
+    Projects G onto PCP shifted-FT mode vectors and works with N_c^2 * L^2
+    scalar functions (L = n_cells in supercell).
 
     Parameters
     ----------
@@ -1022,13 +1269,7 @@ def pcp_anharmonic_transmission(
     import h5py
     from .convention import get_btd_blocks
     from .validation import _ballistic_transmission
-    from .separable import (
-        build_supercell_mapping,
-        build_realspace_fc3_matrices,
-        build_gathering_matrix,
-        build_q_diff_map,
-    )
-    from .anharmonic import _compute_phph_self_energy_q_dense
+    from .separable import build_q_diff_map
 
     # --- Setup ---
     fmin, fmax, nfreq = freq_range_thz
@@ -1064,41 +1305,27 @@ def pcp_anharmonic_transmission(
     if verbose:
         print(f"  PCP rank: {pcp_rank}, rel_err: {pcp_info['rel_err']:.4e}")
 
-    # --- Reconstruct FC3 from PCP and build dense self-energy infrastructure ---
-    fc3_recon = reconstruct_fc3_from_pcp(A_modes, lambdas, phonon, pcp_info)
-
-    prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
-        phonon, transport_direction
-    )
-    masses_super = phonon.supercell.masses
-    n_super = len(masses_super)
-    dim_sc = n_super * 3
-
-    M_stacked = build_realspace_fc3_matrices(
-        fc3_recon, n_atoms, masses_super, ref_sc_atoms
-    )
-
-    if verbose:
-        print(f"  Reconstructed FC3 -> M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
-        print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
-        print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
-
-    # --- q-mesh ---
+    # --- Precompute shifted-FT modes (universal, works at any q) ---
     nkx, nky = q_mesh_transverse
     q_1d_x = [i / nkx for i in range(nkx)]
     q_1d_y = [j / nky for j in range(nky)]
     q_points = [(qx, qy) for qx in q_1d_x for qy in q_1d_y]
     n_kpts = len(q_points)
-    q_diff_map = build_q_diff_map(nkx, nky)
 
-    # Build gathering matrices T(q) for each q-point
-    T_all_q = []
-    for qx, qy in q_points:
-        T = build_gathering_matrix(
-            prim_indices, cell_frac,
-            (qx, qy), n_atoms, transport_direction,
-        )
-        T_all_q.append(T)
+    if verbose:
+        print(f"  Precomputing shifted-FT PCP modes...")
+    f_shifted, ext_weights = fourier_transform_pcp_shifted(
+        A_modes, lambdas, phonon, q_points,
+        transport_direction=transport_direction, info=pcp_info,
+    )
+    if verbose:
+        print(f"  Shifted-FT modes: {f_shifted.shape}, "
+              f"memory: {f_shifted.nbytes / 1e6:.1f} MB")
+
+    if verbose:
+        print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
+
+    q_diff_map = build_q_diff_map(nkx, nky)
 
     # --- Bose-Einstein ---
     def bose_einstein(freq_thz_arr, T):
@@ -1163,7 +1390,7 @@ def pcp_anharmonic_transmission(
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
-    # --- SCBA with dense q-dependent self-energy from PCP-reconstructed FC3 ---
+    # --- SCBA loop ---
     Sigma_R_q = np.zeros((n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
     Sigma_l_q = np.zeros_like(Sigma_R_q)
     Sigma_g_q = np.zeros_like(Sigma_R_q)
@@ -1224,16 +1451,17 @@ def pcp_anharmonic_transmission(
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = abs(J_L_total - J_R_total) / J_denom if J_denom > 0 else 0.0
 
-        # Dense q-dependent self-energy from PCP-reconstructed FC3
+        # Self-energy: shifted-FT PCP kernel (universal)
         Sigma_l_new = np.zeros_like(Sigma_l_q)
         Sigma_g_new = np.zeros_like(Sigma_g_q)
         Sigma_r_new = np.zeros_like(Sigma_R_q)
 
         for sl_idx in range(n_slabs):
-            sl_n, sg_n, sr_n = _compute_phph_self_energy_q_dense(
+            sl_n, sg_n, sr_n = _compute_phph_self_energy_pcp_shifted(
                 G_lesser_slab_q[sl_idx], G_greater_slab_q[sl_idx],
-                M_stacked, T_all_q, q_diff_map,
-                n_atoms, n_kpts, freqs_thz, dw_thz,
+                f_shifted, ext_weights, lambdas,
+                n_dof, n_kpts, freqs_thz, dw_thz,
+                q_diff_map=q_diff_map,
             )
             Sigma_l_new[sl_idx] = sl_n
             Sigma_g_new[sl_idx] = sg_n
@@ -1294,3 +1522,293 @@ def pcp_anharmonic_transmission(
         "self_energy_greater": Sigma_g_q,
         "pcp_info": pcp_info,
     }
+
+
+# ---------------------------------------------------------------------------
+# Supercell CP decomposition (no cell shifts)
+# ---------------------------------------------------------------------------
+
+
+def _supercell_cp_forward_torch(u, lambdas, p2s_map, nat_prim, n_super, N_c):
+    """Fully vectorized forward model for supercell-indexed symmetric CP.
+
+    FC3[i_prim, j, k, a, b, c]
+        = sum_xi (lam_xi/6) sum_{sigma in S3}
+          u_{s1}^xi(p2s[i_prim], a) * u_{s2}^xi(j, b) * u_{s3}^xi(k, c)
+
+    No cell-shift sum — modes are indexed by supercell atom directly.
+
+    Parameters
+    ----------
+    u : Tensor, shape (3, N_c, n_super, 3)
+    lambdas : Tensor, shape (N_c,)
+    p2s_map : Tensor, shape (nat_prim,), long
+        Maps primitive atom index -> supercell atom index (cell-0 atoms).
+    nat_prim, n_super, N_c : int
+
+    Returns
+    -------
+    fc3 : Tensor, shape (nat_prim, n_super, n_super, 3, 3, 3)
+    """
+    fc3 = torch.zeros(nat_prim, n_super, n_super, 3, 3, 3,
+                       dtype=u.dtype, device=u.device)
+    w = lambdas / 6.0
+
+    for s1, s2, s3 in S3_PERMS:
+        m1 = u[s1, :, p2s_map, :]   # (N_c, nat_prim, 3)
+        m2 = u[s2]                   # (N_c, n_super, 3)
+        m3 = u[s3]                   # (N_c, n_super, 3)
+
+        wm1 = w[:, None, None] * m1  # (N_c, nat_prim, 3)
+        fc3 += torch.einsum('xia, xjb, xkc -> ijkabc', wm1, m2, m3)
+
+    return fc3
+
+
+def _project_asr_supercell(u):
+    """Project supercell CP modes onto the ASR subspace.
+
+    ASR requires sum_j u_s^xi(j, beta) = 0 for each (s, xi, beta).
+
+    Parameters
+    ----------
+    u : Tensor, shape (3, N_c, n_super, 3)
+
+    Returns
+    -------
+    u_proj : same shape, satisfying ASR exactly.
+    """
+    mean = u.mean(dim=2, keepdim=True)  # (3, N_c, 1, 3)
+    return u - mean
+
+
+def _project_asr_grad_supercell(grad_u):
+    """Project gradients onto ASR-tangent subspace for supercell CP."""
+    return (grad_u - grad_u.mean(dim=2, keepdim=True)).contiguous()
+
+
+def fit_supercell_cp(fc3_raw, phonon, N_c=24, max_iter=2000, verbose=True):
+    """Fit supercell-indexed symmetric CP decomposition to FC3.
+
+    Like PCP but with modes u_s^xi(j, beta) indexed by supercell atom j
+    instead of (cell l, primitive atom kappa). Eliminates the cell-shift
+    sum entirely, giving O(N_c^2) complexity per (q, q') pair in the
+    self-energy kernel (same as SVD), with S3 symmetry and ASR.
+
+    Parameters
+    ----------
+    fc3_raw : ndarray
+        FC3 in compact or full format.
+    phonon : Phonopy
+    N_c : int
+        CP rank.
+    max_iter : int
+    verbose : bool
+
+    Returns
+    -------
+    u_modes : ndarray, shape (3, N_c, n_super, 3)
+    lambdas : ndarray, shape (N_c,)
+    info : dict
+    """
+    nat_prim = len(phonon.primitive.masses)
+    n_super = len(phonon.supercell.masses)
+    p2s = phonon.primitive.p2s_map.astype(np.int64)
+
+    target_np = _build_target(fc3_raw, phonon)
+    target_norm = np.linalg.norm(target_np)
+
+    if verbose:
+        print(f"  Supercell CP fitting: N_c={N_c}, target norm={target_norm:.4e}")
+        n_params = 3 * N_c * n_super * 3 + N_c
+        n_target = nat_prim * n_super * n_super * 27
+        print(f"  Parameters: {n_params}, target entries: {n_target}")
+        print(f"  Supercell: {n_super} atoms, {nat_prim} prim atoms")
+
+    target_t = torch.tensor(target_np / target_norm, dtype=torch.float64)
+    p2s_t = torch.tensor(p2s, dtype=torch.long)
+
+    # --- Initialization ---
+    rng = np.random.default_rng(42)
+    scale = (1.0 / (N_c * n_super)) ** (1.0 / 3.0)
+
+    u_init = rng.normal(0, scale, (3, N_c, n_super, 3))
+    u_init -= u_init.mean(axis=2, keepdims=True)  # enforce ASR
+
+    u_param = torch.tensor(u_init, dtype=torch.float64, requires_grad=True)
+    lam_param = torch.tensor(
+        np.ones(N_c, dtype=np.float64), requires_grad=True,
+    )
+
+    best_err = float('inf')
+    best_u = u_param.detach().clone()
+    best_lam = lam_param.detach().clone()
+
+    def forward():
+        fc3_approx = _supercell_cp_forward_torch(
+            u_param, lam_param, p2s_t,
+            nat_prim, n_super, N_c,
+        )
+        return torch.sum((fc3_approx - target_t) ** 2), fc3_approx
+
+    def update_best(err_val):
+        nonlocal best_err, best_u, best_lam
+        if err_val < best_err:
+            best_err = err_val
+            best_u = u_param.detach().clone()
+            best_lam = lam_param.detach().clone()
+
+    # --- Phase 1: Adam with ASR projection ---
+    adam_iters = min(max_iter * 3 // 4, 1500)
+    optimizer = torch.optim.Adam([u_param, lam_param], lr=0.02)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=200, T_mult=2, eta_min=1e-4,
+    )
+
+    if verbose:
+        print(f"  Phase 1: Adam ({adam_iters} iters)...")
+
+    for it in range(1, adam_iters + 1):
+        optimizer.zero_grad()
+        loss, fc3_approx = forward()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        with torch.no_grad():
+            u_param.data = _project_asr_supercell(u_param.data)
+
+        if it % 100 == 0 or it == 1:
+            with torch.no_grad():
+                err = torch.sqrt(torch.sum((fc3_approx - target_t) ** 2)).item()
+                asr_v = torch.max(torch.abs(u_param.sum(dim=2))).item()
+            update_best(err)
+            if verbose:
+                print(f"    iter {it:5d}: rel_err={err:.6e}, "
+                      f"max_asr={asr_v:.2e}, lr={scheduler.get_last_lr()[0]:.2e}")
+
+    # --- Phase 2: L-BFGS with projected gradients ---
+    lbfgs_iters = max_iter - adam_iters
+    if verbose:
+        print(f"  Phase 2: L-BFGS ({lbfgs_iters} iters)...")
+
+    u_param.data.copy_(best_u)
+    lam_param.data.copy_(best_lam)
+
+    lbfgs = torch.optim.LBFGS(
+        [u_param, lam_param],
+        lr=1.0, max_iter=20, history_size=50,
+        line_search_fn='strong_wolfe',
+    )
+
+    n_lbfgs_steps = max(1, lbfgs_iters // 20)
+    for outer in range(n_lbfgs_steps):
+        def closure():
+            lbfgs.zero_grad()
+            loss, _ = forward()
+            loss.backward()
+            if u_param.grad is not None:
+                u_param.grad.data = _project_asr_grad_supercell(u_param.grad.data)
+            return loss
+
+        lbfgs.step(closure)
+
+        if (outer + 1) % 5 == 0 or outer == 0:
+            with torch.no_grad():
+                loss_val, fc3_approx = forward()
+                err = torch.sqrt(torch.sum((fc3_approx - target_t) ** 2)).item()
+                asr_v = torch.max(torch.abs(u_param.sum(dim=2))).item()
+            update_best(err)
+            if verbose:
+                print(f"    L-BFGS step {outer+1:4d}: rel_err={err:.6e}, "
+                      f"max_asr={asr_v:.2e}")
+
+    # Use best parameters
+    u_modes = best_u.numpy()
+    lambdas = best_lam.numpy()
+    lambdas *= target_norm
+
+    # Sort by |lambda| descending
+    order = np.argsort(-np.abs(lambdas))
+    u_modes = u_modes[:, order]
+    lambdas = lambdas[order]
+    asr_violation = np.max(np.abs(np.sum(u_modes, axis=2)))
+
+    # Verify ASR of reconstructed FC3
+    with torch.no_grad():
+        u_t = torch.tensor(u_modes, dtype=torch.float64)
+        lam_t = torch.tensor(lambdas / target_norm, dtype=torch.float64)
+        fc3_final = _supercell_cp_forward_torch(
+            u_t, lam_t, p2s_t, nat_prim, n_super, N_c,
+        )
+        fc3_recon = fc3_final.numpy() * target_norm
+    asr_fc3 = np.max(np.abs(np.sum(fc3_recon, axis=1)))
+
+    info = {
+        'rel_err': best_err,
+        'asr_violation': asr_violation,
+        'asr_fc3': asr_fc3,
+        'n_iter': max_iter,
+        'target_norm': target_norm,
+    }
+
+    if verbose:
+        print(f"  Supercell CP fit: rel_err={best_err:.6e}, asr_mode={asr_violation:.2e}, "
+              f"asr_fc3={asr_fc3:.2e}")
+
+    return u_modes, lambdas, info
+
+
+def fourier_transform_supercell_cp(u_modes, lambdas, phonon, q_points,
+                                    transport_direction='x'):
+    """Fourier-transform supercell CP modes to q-space via T(q).
+
+    f_s^xi(q) = T(q) @ u_s^xi   (no cell shifts)
+
+    Also returns the cell-0 external modes (for accumulation step in
+    the self-energy kernel).
+
+    Parameters
+    ----------
+    u_modes : ndarray, shape (3, N_c, n_super, 3)
+    lambdas : ndarray, shape (N_c,)
+    phonon : Phonopy
+    q_points : list of (qx, qy) tuples
+    transport_direction : str
+
+    Returns
+    -------
+    f_modes_all_q : ndarray, shape (n_kpts, 3, N_c, n_dof), complex
+        FT'd mode vectors for internal projections.
+    f_ext : ndarray, shape (3, N_c, n_dof), real
+        External (cell-0) mode vectors: u_s^xi(p2s[kappa], alpha).
+    """
+    from .separable import build_supercell_mapping, build_gathering_matrix
+
+    nat_prim = len(phonon.primitive.masses)
+    n_dof = nat_prim * 3
+    N_c = len(lambdas)
+    n_super = len(phonon.supercell.masses)
+    n_kpts = len(q_points)
+    p2s = phonon.primitive.p2s_map
+
+    prim_indices, cell_frac, _, _ = build_supercell_mapping(
+        phonon, transport_direction)
+
+    # u flat: (3, N_c, n_super*3)
+    u_flat = u_modes.reshape(3, N_c, n_super * 3)
+
+    f_modes_all_q = np.zeros((n_kpts, 3, N_c, n_dof), dtype=complex)
+    for iq, (qx, qy) in enumerate(q_points):
+        T_q = build_gathering_matrix(prim_indices, cell_frac,
+                                     (qx, qy), nat_prim, transport_direction)
+        f_modes_all_q[iq] = u_flat @ T_q.T
+
+    # External modes: u restricted to cell-0 atoms
+    # f_ext[s, xi, kappa*3+alpha] = u[s, xi, p2s[kappa], alpha]
+    f_ext = np.zeros((3, N_c, n_dof))
+    for kappa in range(nat_prim):
+        j_sc = int(p2s[kappa])
+        f_ext[:, :, kappa*3:kappa*3+3] = u_modes[:, :, j_sc, :]
+
+    return f_modes_all_q, f_ext
