@@ -426,14 +426,15 @@ def _fourier_transform_fc3_pair(M_stacked, T_q1, T_q2, nat_prim):
 def _se_worker_iq(args):
     """Process one chunk of iq_ext values using FFT-domain Phi contraction.
 
-    Key optimization: contracts Phi with Green's functions in the FFT domain
-    BEFORE the IFFT, reducing the IFFT from (n_fft, n_dof^4) to (n_fft, n_dof^2).
-    This avoids the 6-index temporary tensor entirely.
+    Key optimizations:
+    1. Contracts Phi with G in FFT domain before IFFT, reducing the
+       IFFT from (n_fft, n_dof^4) to (n_fft, n_dof^2).
+    2. Uses np.matmul (BLAS gemm) instead of einsum for ~2.5x speedup.
 
-    For each (iq_ext, iq_prime):
-        A[W,a,c,e] = sum_d Phi_L[a,c,d] * G2_hat[W,d,e]
-        B[W,a,f,e] = sum_c A[W,a,c,e] * G1_hat[W,c,f]
-        S_hat[W,a,b] += sum_{f,e} B[W,a,f,e] * Phi_R[b,e,f]
+    Contraction chain per (iq_ext, q'):
+        A[p,W,ac,e] = PL_flat[p,ac,d] @ G2[p,W,d,e]   (matmul over d)
+        B[p,W,a,e,f] = A[p,W,a,e,c] @ G1[p,W,c,f]     (matmul over c)
+        S_hat[Wa,b]  += B_flat[p,Wa,ef] @ PR_flat[p,ef,b].T  (matmul over ef)
     Then Sigma = prefactor * IFFT(S_hat)[freq_sl]
     """
     (iq_ext_list, GL_fft, GG_fft, Phi_all, q_diff_map,
@@ -442,38 +443,53 @@ def _se_worker_iq(args):
 
     freq_sl = slice(freq_sl_start, freq_sl_stop)
     n_out = len(iq_ext_list)
-    sig_l = np.zeros((n_out, n_freq, n_dof, n_dof), dtype=complex)
-    sig_g = np.zeros((n_out, n_freq, n_dof, n_dof), dtype=complex)
+    nd = n_dof
+    nd2 = nd * nd
+    sig_l = np.zeros((n_out, n_freq, nd, nd), dtype=complex)
+    sig_g = np.zeros((n_out, n_freq, nd, nd), dtype=complex)
 
     iq_prime_all = np.arange(n_kpts)
 
     for idx, iq_ext in enumerate(iq_ext_list):
         iq_diff_arr = q_diff_map[iq_ext]  # (n_kpts,)
 
-        # Gather Phi for all q' pairs
-        Phi_L_all = Phi_all[iq_prime_all, iq_diff_arr]          # (nq, nd, nd, nd)
-        Phi_R_all = np.conj(Phi_all[iq_diff_arr, iq_prime_all]) # (nq, nd, nd, nd)
+        # Gather Phi for all q' pairs: (nq, nd, nd, nd)
+        PL_all = Phi_all[iq_prime_all, iq_diff_arr]
+        PR_all = np.conj(Phi_all[iq_diff_arr, iq_prime_all])
 
         for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
-            S_hat = np.zeros((n_fft, n_dof, n_dof), dtype=complex)
+            S_hat = np.zeros((n_fft, nd, nd), dtype=complex)
 
-            # Batch q' in chunks to balance vectorization vs memory
             for p0 in range(0, n_kpts, qp_batch):
                 p1 = min(p0 + qp_batch, n_kpts)
+                B = p1 - p0
                 ps = slice(p0, p1)
                 iq_d = iq_diff_arr[ps]
 
-                PL = Phi_L_all[ps]        # (B, nd, nd, nd)
-                PR = Phi_R_all[ps]        # (B, nd, nd, nd)
-                G1 = G_fft[p0:p1]         # (B, nfft, nd, nd)
-                G2 = G_fft[iq_d]          # (B, nfft, nd, nd)
+                PL = PL_all[ps]     # (B, nd, nd, nd)
+                PR = PR_all[ps]     # (B, nd, nd, nd)
+                G1 = G_fft[p0:p1]   # (B, nfft, nd, nd)
+                G2 = G_fft[iq_d]    # (B, nfft, nd, nd)
 
-                # A[p,W,a,c,e] = Phi_L[p,a,c,d] * G2[p,W,d,e]
-                A = np.einsum('pacd,pWde->pWace', PL, G2)
-                # B[p,W,a,f,e] = A[p,W,a,c,e] * G1[p,W,c,f]
-                B = np.einsum('pWace,pWcf->pWafe', A, G1)
-                # S_hat[W,a,b] += B[p,W,a,f,e] * Phi_R[p,b,e,f]
-                S_hat += np.einsum('pWafe,pbef->Wab', B, PR)
+                # Step 1: A[p,W,ac,e] = PL[p,ac,d] @ G2[p,W,d,e]
+                # PL_flat: (B, nd*nd, nd) @ G2: (B, nfft, nd, nd)
+                # broadcast: (B, 1, nd*nd, nd) @ (B, nfft, nd, nd) -> (B, nfft, nd*nd, nd)
+                PL_flat = PL.reshape(B, nd2, nd)
+                A = np.matmul(PL_flat[:, None, :, :], G2)  # (B, nfft, nd2, nd)
+                A = A.reshape(B, n_fft, nd, nd, nd)         # (B, nfft, a, c, e)
+
+                # Step 2: B5[p,W,a,e,f] = A[p,W,a,e,c] @ G1[p,W,c,f]
+                # transpose A -> (B, nfft, a, e, c), matmul with G1 (B, nfft, 1, c, f)
+                A = A.transpose(0, 1, 2, 4, 3)             # (B, nfft, a, e, c)
+                B5 = np.matmul(A, G1[:, :, None, :, :])    # (B, nfft, a, e, f)
+
+                # Step 3: S_hat[W,a,b] += sum_{p,e,f} B5[p,W,a,e,f] * PR[p,b,e,f]
+                # reshape to (B, nfft*nd, nd*nd) and (B, nd, nd*nd)
+                B5_flat = B5.reshape(B, n_fft * nd, nd2)
+                PR_flat = PR.reshape(B, nd, nd2)
+                # (B, nfft*nd, nd2) @ (B, nd2, nd) -> (B, nfft*nd, nd), sum over B
+                S_chunk = np.matmul(B5_flat, PR_flat.transpose(0, 2, 1))
+                S_hat += S_chunk.sum(axis=0).reshape(n_fft, nd, nd)
 
             sig_out[idx] = prefactor * np.fft.ifft(S_hat, axis=0)[freq_sl]
 
