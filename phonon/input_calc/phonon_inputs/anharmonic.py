@@ -915,9 +915,11 @@ def anharmonic_transmission_q(
                       f"conservation = {conservation_err:.4e}, "
                       f"rel. change = {rel_change:.4e}, "
                       f"max|Sigma^R| = {np.max(np.abs(Sigma_R_q)):.2e} THz^2")
-            if conservation_err < scba_tol:
+            if rel_change < scba_tol:
                 if verbose:
-                    print(f"    Converged after {scba_iter + 1} iterations")
+                    print(f"    Converged after {scba_iter + 1} iterations "
+                          f"(rel_change={rel_change:.2e}, "
+                          f"conservation={conservation_err:.2e})")
                 break
         else:
             if verbose:
