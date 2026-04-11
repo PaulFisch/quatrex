@@ -20,8 +20,7 @@ of the quatrex GPU solver, matching the style of validation.py.
 
 import numpy as np
 from numpy.linalg import inv
-from concurrent.futures import ThreadPoolExecutor
-
+from multiprocessing import shared_memory, get_context
 from .constants import (
     CONVERSION_FC3_THZ,
     CONVERSION_THZ2,
@@ -424,42 +423,94 @@ def _fourier_transform_fc3_pair(M_stacked, T_q1, T_q2, nat_prim):
     return np.einsum('ci,aij,dj->acd', T_q1, M_blocks, T_q2.conj())
 
 
+def _se_worker_iq(args):
+    """Process one chunk of iq_ext values using FFT-domain Phi contraction.
+
+    Key optimization: contracts Phi with Green's functions in the FFT domain
+    BEFORE the IFFT, reducing the IFFT from (n_fft, n_dof^4) to (n_fft, n_dof^2).
+    This avoids the 6-index temporary tensor entirely.
+
+    For each (iq_ext, iq_prime):
+        A[W,a,c,e] = sum_d Phi_L[a,c,d] * G2_hat[W,d,e]
+        B[W,a,f,e] = sum_c A[W,a,c,e] * G1_hat[W,c,f]
+        S_hat[W,a,b] += sum_{f,e} B[W,a,f,e] * Phi_R[b,e,f]
+    Then Sigma = prefactor * IFFT(S_hat)[freq_sl]
+    """
+    (iq_ext_list, GL_fft, GG_fft, Phi_all, q_diff_map,
+     n_freq, n_dof, n_kpts, n_fft, freq_sl_start, freq_sl_stop,
+     prefactor, qp_batch) = args
+
+    freq_sl = slice(freq_sl_start, freq_sl_stop)
+    n_out = len(iq_ext_list)
+    sig_l = np.zeros((n_out, n_freq, n_dof, n_dof), dtype=complex)
+    sig_g = np.zeros((n_out, n_freq, n_dof, n_dof), dtype=complex)
+
+    iq_prime_all = np.arange(n_kpts)
+
+    for idx, iq_ext in enumerate(iq_ext_list):
+        iq_diff_arr = q_diff_map[iq_ext]  # (n_kpts,)
+
+        # Gather Phi for all q' pairs
+        Phi_L_all = Phi_all[iq_prime_all, iq_diff_arr]          # (nq, nd, nd, nd)
+        Phi_R_all = np.conj(Phi_all[iq_diff_arr, iq_prime_all]) # (nq, nd, nd, nd)
+
+        for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
+            S_hat = np.zeros((n_fft, n_dof, n_dof), dtype=complex)
+
+            # Batch q' in chunks to balance vectorization vs memory
+            for p0 in range(0, n_kpts, qp_batch):
+                p1 = min(p0 + qp_batch, n_kpts)
+                ps = slice(p0, p1)
+                iq_d = iq_diff_arr[ps]
+
+                PL = Phi_L_all[ps]        # (B, nd, nd, nd)
+                PR = Phi_R_all[ps]        # (B, nd, nd, nd)
+                G1 = G_fft[p0:p1]         # (B, nfft, nd, nd)
+                G2 = G_fft[iq_d]          # (B, nfft, nd, nd)
+
+                # A[p,W,a,c,e] = Phi_L[p,a,c,d] * G2[p,W,d,e]
+                A = np.einsum('pacd,pWde->pWace', PL, G2)
+                # B[p,W,a,f,e] = A[p,W,a,c,e] * G1[p,W,c,f]
+                B = np.einsum('pWace,pWcf->pWafe', A, G1)
+                # S_hat[W,a,b] += B[p,W,a,f,e] * Phi_R[p,b,e,f]
+                S_hat += np.einsum('pWafe,pbef->Wab', B, PR)
+
+            sig_out[idx] = prefactor * np.fft.ifft(S_hat, axis=0)[freq_sl]
+
+    return iq_ext_list, sig_l, sig_g
+
+
 def _compute_phph_self_energy_q_dense(
-    G_lesser_q: np.ndarray,
-    G_greater_q: np.ndarray,
-    M_stacked: np.ndarray,
-    T_all_q: list[np.ndarray],
-    q_diff_map: np.ndarray,
-    nat_prim: int,
-    n_kpts: int,
-    omega_grid_thz: np.ndarray,
-    dw_thz: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute q-dependent self-energy via full dense FC3 Fourier transform.
+    G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
+    nat_prim, n_kpts, omega_grid_thz, dw_thz, n_workers=None,
+):
+    """Compute q-dependent phonon-phonon self-energy.
 
-    For each (q, q'), Fourier-transforms the FC3 on-the-fly at (q', q-q')
-    and performs the ring contraction via FFT convolution over omega.
-
-    Cost: O(N_q^2 * n_dof^4 * n_fft * log(n_fft))
+    Uses two key optimizations:
+    1. Contracts Phi with G in the FFT domain before IFFT, reducing
+       the 6-index (n_fft, n_dof^4) temporary to 5-index (n_fft, n_dof^3)
+       and the final IFFT to (n_fft, n_dof^2).
+    2. Distributes iq_ext over OS processes (fork) to bypass GIL.
+       Workers auto-tuned to min(n_kpts, available_cores).
 
     Parameters
     ----------
-    G_lesser_q : ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
-    G_greater_q : ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
-    M_stacked : ndarray, shape (n_dof * dim_sc, dim_sc)
-        Real-space FC3 matrices from build_realspace_fc3_matrices.
-    T_all_q : list of ndarray, each (n_dof, dim_sc)
-        Gathering matrices T(q) for each q-point.
-    q_diff_map : ndarray, shape (n_kpts, n_kpts)
+    G_lesser_q, G_greater_q : (n_kpts, n_freq, n_dof, n_dof)
+    M_stacked : (n_dof * dim_sc, dim_sc)
+    T_all_q : list of (n_dof, dim_sc) arrays
+    q_diff_map : (n_kpts, n_kpts) int array
     nat_prim, n_kpts : int
-    omega_grid_thz : ndarray, shape (n_freq,)
+    omega_grid_thz : (n_freq,)
     dw_thz : float
+    n_workers : int or None
+        Number of worker processes. None = auto (min of n_kpts, cpu_count).
 
     Returns
     -------
-    Sigma_lesser, Sigma_greater, Sigma_retarded :
-        ndarray, shape (n_kpts, n_freq, n_dof, n_dof)
+    Sigma_lesser, Sigma_greater, Sigma_retarded : (n_kpts, n_freq, n_dof, n_dof)
     """
+    import os
+
     n_freq = len(omega_grid_thz)
     n_dof = nat_prim * 3
     dim_t = M_stacked.shape[1]
@@ -472,116 +523,63 @@ def _compute_phph_self_energy_q_dense(
 
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
 
-    Sigma_lesser = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
-    Sigma_greater = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
+    # Pad + FFT all Green's functions: (n_kpts, n_fft, n_dof, n_dof)
+    G_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
+    G_padded[:, n_low:n_low + n_freq] = G_lesser_q
+    GL_fft = np.fft.fft(G_padded, axis=1)
+    G_padded[:, :] = 0
+    G_padded[:, n_low:n_low + n_freq] = G_greater_q
+    GG_fft = np.fft.fft(G_padded, axis=1)
+    del G_padded
 
-    # Pad and FFT all Green's functions: (n_kpts, n_fft, n_dof, n_dof)
-    GL_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-    GG_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-    GL_padded[:, n_low:n_low + n_freq] = G_lesser_q
-    GG_padded[:, n_low:n_low + n_freq] = G_greater_q
-    GL_fft = np.fft.fft(GL_padded, axis=1)
-    GG_fft = np.fft.fft(GG_padded, axis=1)
-
-    # Precompute TM[iq] = T(q) @ M_blocks, shape (n_kpts, n_dof, n_dof, dim_t)
-    # M_blocks: (n_dof, dim_t, dim_t)
+    # Precompute ALL Phi matrices: Phi_all[q1, q2, a, c, d]
     M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
     T_arr = np.array(T_all_q)  # (n_kpts, n_dof, dim_t)
-    # TM[iq, a, c, j] = T_arr[iq, c, i] * M_blocks[a, i, j]
-    TM = np.einsum('qci,aij->qacj', T_arr, M_blocks)  # (n_kpts, n_dof, n_dof, dim_t)
-
-    # Precompute T^T array: (n_kpts, dim_t, n_dof)
-    T_arr_T = T_arr.transpose(0, 2, 1)  # (n_kpts, dim_t, n_dof)
-
-    for iq_ext in range(n_kpts):
-        for iq_prime in range(n_kpts):
-            iq_diff = q_diff_map[iq_ext, iq_prime]
-
-            # Phi_L[a,c,d] = TM[q',a,c,j] * T_arr_T[q-q',j,d]
-            Phi_L = TM[iq_prime] @ T_arr_T[iq_diff]  # (n_dof, n_dof, n_dof)
-            # Phi_R = conj(TM[q-q'] @ T^T[q'])
-            Phi_R = np.conj(TM[iq_diff] @ T_arr_T[iq_prime])
-
-            for G_fft, Sigma_out in [(GL_fft, Sigma_lesser),
-                                     (GG_fft, Sigma_greater)]:
-                # K[w,c,d,f,e] = IFFT(G_fft[q',w,c,f] * G_fft[q-q',w,d,e])
-                product = (G_fft[iq_prime][:, :, None, :, None]
-                           * G_fft[iq_diff][:, None, :, None, :])
-                K = np.fft.ifft(product, axis=0)[freq_sl]
-
-                # Sigma[w,a,b] += pref * Phi_L[a,c,d] K[w,c,d,f,e] Phi_R[b,e,f]
-                temp = np.einsum('acd,wcdfe->wafe', Phi_L, K)
-                Sigma_out[iq_ext] += prefactor * np.einsum(
-                    'wafe,bef->wab', temp, Phi_R
-                )
-
-    Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
-    return Sigma_lesser, Sigma_greater, Sigma_retarded
-
-
-def _compute_self_energy_parallel(
-    G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
-    nat_prim, n_kpts, omega_grid_thz, dw_thz, n_threads=128,
-):
-    """Parallelized self-energy: distribute iq_ext over threads.
-
-    Same interface as _compute_phph_self_energy_q_dense but uses
-    ThreadPoolExecutor to parallelize the outer q-loop.
-    Threads work because the inner loop releases the GIL via NumPy.
-    """
-    n_freq = len(omega_grid_thz)
-    n_dof = nat_prim * 3
-    dim_t = M_stacked.shape[1]
-
-    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
-    n_ext = n_low + n_freq
-    n_fft = 2 * n_ext
-    freq_sl = slice(n_low, n_low + n_freq)
-    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
-
-    # Pad + FFT Green's functions
-    GL_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-    GG_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-    GL_padded[:, n_low:n_low + n_freq] = G_lesser_q
-    GG_padded[:, n_low:n_low + n_freq] = G_greater_q
-    GL_fft = np.fft.fft(GL_padded, axis=1)
-    GG_fft = np.fft.fft(GG_padded, axis=1)
-
-    # Precompute
-    M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
-    T_arr = np.array(T_all_q)
     TM = np.einsum('qci,aij->qacj', T_arr, M_blocks)
-    T_arr_T = T_arr.transpose(0, 2, 1)
+    T_arr_T = T_arr.transpose(0, 2, 1).copy()
+    Phi_all = np.einsum('qacj,rjd->qracd', TM, T_arr_T)
+    del TM, T_arr_T, T_arr, M_blocks
 
-    def process_iq_ext(iq_ext):
-        """Compute Sigma contributions for a single external q-point."""
-        sig_l = np.zeros((n_freq, n_dof, n_dof), dtype=complex)
-        sig_g = np.zeros((n_freq, n_dof, n_dof), dtype=complex)
+    # Batch size for q' loop: keep intermediates in L2/L3 cache
+    # Each batch creates (B, n_fft, n_dof, n_dof, n_dof) ~ B*n_fft*n_dof^3*16 bytes
+    target_bytes = 16 * 1024 * 1024  # 16 MB target per intermediate
+    bytes_per_qp = n_fft * n_dof**3 * 16  # complex128
+    qp_batch = max(1, min(n_kpts, target_bytes // max(bytes_per_qp, 1)))
 
-        for iq_prime in range(n_kpts):
-            iq_diff = q_diff_map[iq_ext, iq_prime]
+    if n_workers is None:
+        n_workers = min(n_kpts, os.cpu_count() or 1)
+    n_workers = min(n_workers, n_kpts)
 
-            Phi_L = TM[iq_prime] @ T_arr_T[iq_diff]
-            Phi_R = np.conj(TM[iq_diff] @ T_arr_T[iq_prime])
+    # Ensure each worker has >= 2 iq_ext to amortize fork overhead
+    if n_kpts > 1:
+        n_workers = min(n_workers, max(1, n_kpts // 2))
 
-            for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
-                product = (G_fft[iq_prime][:, :, None, :, None]
-                           * G_fft[iq_diff][:, None, :, None, :])
-                K = np.fft.ifft(product, axis=0)[freq_sl]
-                temp = np.einsum('acd,wcdfe->wafe', Phi_L, K)
-                sig_out += prefactor * np.einsum('wafe,bef->wab', temp, Phi_R)
+    common = (GL_fft, GG_fft, Phi_all, q_diff_map,
+              n_freq, n_dof, n_kpts, n_fft,
+              freq_sl.start, freq_sl.stop, prefactor, qp_batch)
 
-        return iq_ext, sig_l, sig_g
+    if n_workers <= 1:
+        _, sig_l, sig_g = _se_worker_iq(
+            (list(range(n_kpts)), *common))
+        return sig_l, sig_g, 0.5 * (sig_g - sig_l)
+
+    # Round-robin iq_ext across workers
+    chunks = [[] for _ in range(n_workers)]
+    for iq in range(n_kpts):
+        chunks[iq % n_workers].append(iq)
+    chunks = [c for c in chunks if c]
+
+    work_args = [(chunk, *common) for chunk in chunks]
 
     Sigma_lesser = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
     Sigma_greater = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
 
-    with ThreadPoolExecutor(max_workers=n_threads) as pool:
-        futures = [pool.submit(process_iq_ext, iq) for iq in range(n_kpts)]
-        for f in futures:
-            iq_ext, sig_l, sig_g = f.result()
-            Sigma_lesser[iq_ext] = sig_l
-            Sigma_greater[iq_ext] = sig_g
+    ctx = get_context("fork")
+    with ctx.Pool(processes=len(chunks)) as pool:
+        for iq_list, sig_l, sig_g in pool.map(_se_worker_iq, work_args):
+            for i, iq in enumerate(iq_list):
+                Sigma_lesser[iq] = sig_l[i]
+                Sigma_greater[iq] = sig_g[i]
 
     Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
     return Sigma_lesser, Sigma_greater, Sigma_retarded
@@ -602,7 +600,6 @@ def anharmonic_transmission_q(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    n_threads: int = 4,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -622,8 +619,6 @@ def anharmonic_transmission_q(
     verbose : bool
     M_stacked_override : ndarray, optional
         If provided, use this M_stacked instead of loading from fc3_hdf5.
-    n_threads : int
-        Number of threads for self-energy parallelization.
 
     Returns
     -------
@@ -713,7 +708,7 @@ def anharmonic_transmission_q(
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
         print(f"  eta = {eta:.4e} THz^2")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, mix={mixing}")
-        print(f"  Threads: {n_threads}")
+
 
     # --- BTD blocks per q-point ---
     btd_blocks = []
@@ -847,11 +842,10 @@ def anharmonic_transmission_q(
         Sigma_r_new = np.zeros_like(Sigma_R_q)
 
         for l in range(n_slabs):
-            sl_n, sg_n, sr_n = _compute_self_energy_parallel(
+            sl_n, sg_n, sr_n = _compute_phph_self_energy_q_dense(
                 G_lesser_slab_q[l], G_greater_slab_q[l],
                 M_stacked, T_all_q, q_diff_map,
                 n_atoms, n_kpts, freqs_thz, dw_thz,
-                n_threads=n_threads,
             )
             Sigma_l_new[l] = sl_n
             Sigma_g_new[l] = sg_n
