@@ -61,11 +61,113 @@ def main():
     print(f"\nSystem:")
     print(f"  CPU count:            {os.cpu_count()}")
     print(f"  Requested workers:    {args.workers or 'auto'}")
-    for var in ["OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS"]:
-        print(f"  {var:24s} {os.environ.get(var, '(unset)')}")
+    for var in ["OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS",
+                "BLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+                "GOTO_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"]:
+        print(f"  {var:28s} {os.environ.get(var, '(unset)')}")
     print(f"  q-mesh:               {args.q_mesh[0]}x{args.q_mesh[1]}")
     print(f"  max SCBA iter:        {args.max_iter}")
     print(f"  RSS at start:         {rss_mb():.0f} MB")
+
+    # BLAS diagnostics
+    print(f"\nBLAS diagnostics:")
+    print(f"  numpy version:        {np.__version__}")
+    print(f"  numpy location:       {np.__file__}")
+
+    # np.show_config() — the authoritative source
+    try:
+        # numpy >= 2.0: show_config(mode='dicts') returns a dict
+        cfg = np.show_config(mode='dicts')
+        for section in ["Build Dependencies", "Python Dependencies"]:
+            if section in cfg:
+                for lib, info in cfg[section].items():
+                    if any(k in lib.lower() for k in ["blas", "lapack"]):
+                        print(f"    {lib}: {info}")
+        # Also try to get the raw build info
+        if "BLAS" in cfg.get("Build Dependencies", {}):
+            print(f"    BLAS detail: {cfg['Build Dependencies']['BLAS']}")
+    except (TypeError, AttributeError):
+        # older numpy: show_config() prints to stdout
+        import contextlib
+        from io import StringIO
+        buf = StringIO()
+        with contextlib.redirect_stdout(buf):
+            np.show_config()
+        config_str = buf.getvalue()
+        for line in config_str.splitlines():
+            ll = line.lower()
+            if any(k in ll for k in ["blas", "lapack", "openblas", "mkl",
+                                       "library", "threading"]):
+                print(f"    {line.strip()}")
+
+    # Check linked .so files for numpy
+    try:
+        import subprocess
+        np_dir = str(Path(np.__file__).parent)
+        ldd_out = subprocess.run(
+            ["bash", "-c",
+             f"find {np_dir} -name '*.so' | head -5 | xargs ldd 2>/dev/null"
+             " | grep -iE 'blas|lapack|mkl|openblas|libgomp|libiomp'"],
+            capture_output=True, text=True, timeout=5
+        )
+        if ldd_out.stdout.strip():
+            print(f"\n  Linked BLAS/LAPACK libraries (ldd):")
+            for line in ldd_out.stdout.strip().splitlines():
+                print(f"    {line.strip()}")
+        else:
+            print(f"\n  (no BLAS .so found via ldd — may be statically linked)")
+    except Exception as e:
+        print(f"\n  (ldd check failed: {e})")
+
+    # Runtime thread count test: time a matmul and watch thread count
+    print(f"\n  matmul thread test (1000x1000 @ 1000x1000):")
+    A = np.random.randn(1000, 1000)
+    B = np.random.randn(1000, 1000)
+    # Warmup
+    _ = A @ B
+    # Check /proc/self/status for thread count during matmul
+    try:
+        import threading
+        import subprocess
+        thread_counts = []
+        stop_flag = threading.Event()
+        def poll_threads():
+            while not stop_flag.is_set():
+                try:
+                    with open("/proc/self/status") as f:
+                        for line in f:
+                            if line.startswith("Threads:"):
+                                thread_counts.append(int(line.split()[1]))
+                                break
+                except Exception:
+                    pass
+                time.sleep(0.005)
+        t = threading.Thread(target=poll_threads, daemon=True)
+        t.start()
+        t0 = time.perf_counter()
+        for _ in range(10):
+            _ = A @ B
+        dt = time.perf_counter() - t0
+        stop_flag.set()
+        t.join(timeout=1)
+        if thread_counts:
+            print(f"    10x matmul:  {dt:.3f}s  ({dt/10*1000:.1f}ms per call)")
+            print(f"    Threads observed: min={min(thread_counts)}, "
+                  f"max={max(thread_counts)}, "
+                  f"samples={len(thread_counts)}")
+            if max(thread_counts) <= 2:
+                print(f"    WARNING: BLAS appears single-threaded!")
+                print(f"    This means numpy is using a non-threaded BLAS.")
+                print(f"    Fix: install openblas/mkl or set threads env var.")
+        else:
+            print(f"    10x matmul:  {dt:.3f}s  (could not poll threads)")
+    except Exception as e:
+        print(f"    (thread polling failed: {e})")
+        t0 = time.perf_counter()
+        for _ in range(10):
+            _ = A @ B
+        dt = time.perf_counter() - t0
+        print(f"    10x matmul:  {dt:.3f}s  ({dt/10*1000:.1f}ms per call)")
 
     # Monkey-patch _compute_phph_self_energy_q_dense to instrument it
     import phonon_inputs.anharmonic as anh_mod
