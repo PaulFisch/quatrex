@@ -20,6 +20,7 @@ of the quatrex GPU solver, matching the style of validation.py.
 
 import numpy as np
 from numpy.linalg import inv
+from concurrent.futures import ThreadPoolExecutor
 
 from .constants import (
     CONVERSION_FC3_THZ,
@@ -126,6 +127,48 @@ def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
             break
 
     return inv(eps_s)
+
+
+def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
+    """Batched surface Green's function for multiple frequencies at once.
+
+    Parameters
+    ----------
+    omega_sq_arr : ndarray, shape (nfreq,)
+    H_00, H_01 : ndarray, shape (N, N)
+
+    Returns
+    -------
+    g_surf : ndarray, shape (nfreq, N, N), complex
+    """
+    nfreq = len(omega_sq_arr)
+    N = H_00.shape[0]
+    H_10 = H_01.conj().T
+    eye = np.eye(N)
+
+    # (nfreq, N, N) broadcast
+    a_ii = (omega_sq_arr[:, None, None] + 1j * eta) * eye[None] - H_00[None]
+    eps = a_ii.copy()
+    eps_s = a_ii.copy()
+    alpha = np.broadcast_to(-H_10, (nfreq, N, N)).copy()
+    beta = np.broadcast_to(-H_01, (nfreq, N, N)).copy()
+
+    for _ in range(max_iter):
+        inv_eps = np.linalg.inv(eps)
+        aib = alpha @ inv_eps @ beta
+        bia = beta @ inv_eps @ alpha
+        eps_s -= aib
+        eps -= aib + bia
+        alpha_new = alpha @ inv_eps @ alpha
+        beta_new = beta @ inv_eps @ beta
+        alpha, beta = alpha_new, beta_new
+        # Check convergence on the worst-case frequency
+        norm_max = max(np.linalg.norm(alpha.reshape(nfreq, -1), axis=1).max(),
+                       np.linalg.norm(beta.reshape(nfreq, -1), axis=1).max())
+        if norm_max < tol:
+            break
+
+    return np.linalg.inv(eps_s)
 
 
 def _build_device_hamiltonian(H_00, H_01, n_slabs):
@@ -235,6 +278,60 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
     }
 
 
+def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
+                        n_slabs=1):
+    """Batched OBC self-energies for all frequencies at once.
+
+    Returns arrays of shape (nfreq,) for scalar quantities and
+    (nfreq, N_D, N_D) for matrices.
+    """
+    nfreq = len(omega_sq_arr)
+    n_dof = H_00.shape[0]
+    N_D = n_slabs * n_dof
+
+    # Batched Sancho-Rubio: (nfreq, n_dof, n_dof)
+    g_L_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta)
+    g_R_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01.conj().T, eta)
+
+    H_01_dag = H_01.conj().T
+    # sig_L[w] = H_01^dag @ g_L[w] @ H_01, batched
+    sig_L_all = H_01_dag[None] @ g_L_all @ H_01[None]  # (nfreq, n_dof, n_dof)
+    sig_R_all = H_01[None] @ g_R_all @ H_01_dag[None]
+
+    gam_L_all = 1j * (sig_L_all - sig_L_all.conj().transpose(0, 2, 1))
+    gam_R_all = 1j * (sig_R_all - sig_R_all.conj().transpose(0, 2, 1))
+
+    # Embed into device space
+    Sigma_L_R = np.zeros((nfreq, N_D, N_D), dtype=complex)
+    Sigma_R_R = np.zeros((nfreq, N_D, N_D), dtype=complex)
+    Gamma_L = np.zeros((nfreq, N_D, N_D), dtype=complex)
+    Gamma_R = np.zeros((nfreq, N_D, N_D), dtype=complex)
+
+    sl0 = slice(0, n_dof)
+    sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
+    Sigma_L_R[:, sl0, sl0] = sig_L_all
+    Sigma_R_R[:, sl_last, sl_last] = sig_R_all
+    Gamma_L[:, sl0, sl0] = gam_L_all
+    Gamma_R[:, sl_last, sl_last] = gam_R_all
+
+    # lesser/greater: (nfreq, N_D, N_D)
+    Sigma_L_lesser = 1j * n_bose_L[:, None, None] * Gamma_L
+    Sigma_L_greater = 1j * (n_bose_L[:, None, None] + 1) * Gamma_L
+    Sigma_R_lesser = 1j * n_bose_R[:, None, None] * Gamma_R
+    Sigma_R_greater = 1j * (n_bose_R[:, None, None] + 1) * Gamma_R
+
+    return {
+        "Sigma_L_R": Sigma_L_R,
+        "Sigma_L_lesser": Sigma_L_lesser,
+        "Sigma_L_greater": Sigma_L_greater,
+        "Sigma_R_R": Sigma_R_R,
+        "Sigma_R_lesser": Sigma_R_lesser,
+        "Sigma_R_greater": Sigma_R_greater,
+        "Gamma_L": Gamma_L,
+        "Gamma_R": Gamma_R,
+    }
+
+
 def _solve_green_functions(omega_sq, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser,
                            Sigma_scatt_greater, eta):
     """Solve for retarded, lesser, and greater Green's functions.
@@ -253,6 +350,43 @@ def _solve_green_functions(omega_sq, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser
     Sigma_lesser_total = (obc["Sigma_L_lesser"] + obc["Sigma_R_lesser"]
                           + Sigma_scatt_lesser)
     Sigma_greater_total = (obc["Sigma_L_greater"] + obc["Sigma_R_greater"]
+                           + Sigma_scatt_greater)
+
+    G_lesser = G_R @ Sigma_lesser_total @ G_A
+    G_greater = G_R @ Sigma_greater_total @ G_A
+
+    return G_R, G_lesser, G_greater
+
+
+def _solve_green_batch(omega_sq_arr, H_D, obc_batch,
+                       Sigma_scatt_R, Sigma_scatt_lesser, Sigma_scatt_greater,
+                       eta):
+    """Batched Green's function solve for all frequencies.
+
+    Parameters
+    ----------
+    omega_sq_arr : (nfreq,)
+    H_D : (N_D, N_D)
+    obc_batch : dict with (nfreq, N_D, N_D) arrays
+    Sigma_scatt_R/lesser/greater : (nfreq, N_D, N_D)
+
+    Returns
+    -------
+    G_R, G_lesser, G_greater : (nfreq, N_D, N_D)
+    """
+    nfreq = len(omega_sq_arr)
+    N = H_D.shape[0]
+    eye = np.eye(N)
+
+    Sigma_R_total = obc_batch["Sigma_L_R"] + obc_batch["Sigma_R_R"] + Sigma_scatt_R
+    # A[w] = (w^2 + i*eta)*I - H_D - Sigma_R_total[w]
+    A = (omega_sq_arr[:, None, None] + 1j * eta) * eye[None] - H_D[None] - Sigma_R_total
+    G_R = np.linalg.inv(A)  # (nfreq, N, N)
+    G_A = G_R.conj().transpose(0, 2, 1)
+
+    Sigma_lesser_total = (obc_batch["Sigma_L_lesser"] + obc_batch["Sigma_R_lesser"]
+                          + Sigma_scatt_lesser)
+    Sigma_greater_total = (obc_batch["Sigma_L_greater"] + obc_batch["Sigma_R_greater"]
                            + Sigma_scatt_greater)
 
     G_lesser = G_R @ Sigma_lesser_total @ G_A
@@ -283,12 +417,11 @@ def _fourier_transform_fc3_pair(M_stacked, T_q1, T_q2, nat_prim):
     """
     n_dof = nat_prim * 3
     dim_t = T_q1.shape[1]
-    Phi_hat = np.zeros((n_dof, n_dof, n_dof), dtype=complex)
-    T_q2_T = T_q2.T  # (dim_t, n_dof)
-    for a in range(n_dof):
-        M_a = M_stacked[a * dim_t:(a + 1) * dim_t, :]
-        Phi_hat[a] = T_q1 @ M_a @ T_q2_T
-    return Phi_hat
+    # Reshape M_stacked -> (n_dof, dim_t, dim_t), compute all a at once
+    M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
+    # Phi_hat[a] = T_q1 @ M_blocks[a] @ T_q2^T
+    # = (n_dof, dim_t) @ (n_dof, dim_t, dim_t) @ (dim_t, n_dof)
+    return np.einsum('ci,aij,dj->acd', T_q1, M_blocks, T_q2.conj())
 
 
 def _compute_phph_self_energy_q_dense(
@@ -342,36 +475,32 @@ def _compute_phph_self_energy_q_dense(
     Sigma_lesser = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
     Sigma_greater = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
 
-    # Pad and FFT all Green's functions
-    def _pad_fft(G_q):
-        out = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-        out[:, n_low:n_low + n_freq] = G_q
-        return np.fft.fft(out, axis=1)
+    # Pad and FFT all Green's functions: (n_kpts, n_fft, n_dof, n_dof)
+    GL_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
+    GG_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
+    GL_padded[:, n_low:n_low + n_freq] = G_lesser_q
+    GG_padded[:, n_low:n_low + n_freq] = G_greater_q
+    GL_fft = np.fft.fft(GL_padded, axis=1)
+    GG_fft = np.fft.fft(GG_padded, axis=1)
 
-    GL_fft = _pad_fft(G_lesser_q)
-    GG_fft = _pad_fft(G_greater_q)
+    # Precompute TM[iq] = T(q) @ M_blocks, shape (n_kpts, n_dof, n_dof, dim_t)
+    # M_blocks: (n_dof, dim_t, dim_t)
+    M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
+    T_arr = np.array(T_all_q)  # (n_kpts, n_dof, dim_t)
+    # TM[iq, a, c, j] = T_arr[iq, c, i] * M_blocks[a, i, j]
+    TM = np.einsum('qci,aij->qacj', T_arr, M_blocks)  # (n_kpts, n_dof, n_dof, dim_t)
 
-    # Precompute TM[iq][a] = T(q) @ M_a, shape (n_dof, dim_t) per (iq, a)
-    TM = np.zeros((n_kpts, n_dof, n_dof, dim_t), dtype=complex)
-    for iq in range(n_kpts):
-        for a in range(n_dof):
-            TM[iq, a] = T_all_q[iq] @ M_stacked[a * dim_t:(a + 1) * dim_t, :]
+    # Precompute T^T array: (n_kpts, dim_t, n_dof)
+    T_arr_T = T_arr.transpose(0, 2, 1)  # (n_kpts, dim_t, n_dof)
 
     for iq_ext in range(n_kpts):
         for iq_prime in range(n_kpts):
             iq_diff = q_diff_map[iq_ext, iq_prime]
 
-            # Phi_L(q', q-q')[a] = TM[q', a] @ T(q-q')^T
-            # Phi_R = conj(Phi_hat(q-q', q'))
-            T_diff_T = T_all_q[iq_diff].T   # (dim_t, n_dof)
-            T_prime_T = T_all_q[iq_prime].T  # (dim_t, n_dof)
-
-            Phi_L = np.zeros((n_dof, n_dof, n_dof), dtype=complex)
-            Phi_R_raw = np.zeros((n_dof, n_dof, n_dof), dtype=complex)
-            for a in range(n_dof):
-                Phi_L[a] = TM[iq_prime, a] @ T_diff_T
-                Phi_R_raw[a] = TM[iq_diff, a] @ T_prime_T
-            Phi_R = np.conj(Phi_R_raw)
+            # Phi_L[a,c,d] = TM[q',a,c,j] * T_arr_T[q-q',j,d]
+            Phi_L = TM[iq_prime] @ T_arr_T[iq_diff]  # (n_dof, n_dof, n_dof)
+            # Phi_R = conj(TM[q-q'] @ T^T[q'])
+            Phi_R = np.conj(TM[iq_diff] @ T_arr_T[iq_prime])
 
             for G_fft, Sigma_out in [(GL_fft, Sigma_lesser),
                                      (GG_fft, Sigma_greater)]:
@@ -381,11 +510,78 @@ def _compute_phph_self_energy_q_dense(
                 K = np.fft.ifft(product, axis=0)[freq_sl]
 
                 # Sigma[w,a,b] += pref * Phi_L[a,c,d] K[w,c,d,f,e] Phi_R[b,e,f]
-                # Two-step einsum for efficiency
                 temp = np.einsum('acd,wcdfe->wafe', Phi_L, K)
                 Sigma_out[iq_ext] += prefactor * np.einsum(
                     'wafe,bef->wab', temp, Phi_R
                 )
+
+    Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
+    return Sigma_lesser, Sigma_greater, Sigma_retarded
+
+
+def _compute_self_energy_parallel(
+    G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
+    nat_prim, n_kpts, omega_grid_thz, dw_thz, n_threads=128,
+):
+    """Parallelized self-energy: distribute iq_ext over threads.
+
+    Same interface as _compute_phph_self_energy_q_dense but uses
+    ThreadPoolExecutor to parallelize the outer q-loop.
+    Threads work because the inner loop releases the GIL via NumPy.
+    """
+    n_freq = len(omega_grid_thz)
+    n_dof = nat_prim * 3
+    dim_t = M_stacked.shape[1]
+
+    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
+    n_ext = n_low + n_freq
+    n_fft = 2 * n_ext
+    freq_sl = slice(n_low, n_low + n_freq)
+    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
+
+    # Pad + FFT Green's functions
+    GL_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
+    GG_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
+    GL_padded[:, n_low:n_low + n_freq] = G_lesser_q
+    GG_padded[:, n_low:n_low + n_freq] = G_greater_q
+    GL_fft = np.fft.fft(GL_padded, axis=1)
+    GG_fft = np.fft.fft(GG_padded, axis=1)
+
+    # Precompute
+    M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
+    T_arr = np.array(T_all_q)
+    TM = np.einsum('qci,aij->qacj', T_arr, M_blocks)
+    T_arr_T = T_arr.transpose(0, 2, 1)
+
+    def process_iq_ext(iq_ext):
+        """Compute Sigma contributions for a single external q-point."""
+        sig_l = np.zeros((n_freq, n_dof, n_dof), dtype=complex)
+        sig_g = np.zeros((n_freq, n_dof, n_dof), dtype=complex)
+
+        for iq_prime in range(n_kpts):
+            iq_diff = q_diff_map[iq_ext, iq_prime]
+
+            Phi_L = TM[iq_prime] @ T_arr_T[iq_diff]
+            Phi_R = np.conj(TM[iq_diff] @ T_arr_T[iq_prime])
+
+            for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
+                product = (G_fft[iq_prime][:, :, None, :, None]
+                           * G_fft[iq_diff][:, None, :, None, :])
+                K = np.fft.ifft(product, axis=0)[freq_sl]
+                temp = np.einsum('acd,wcdfe->wafe', Phi_L, K)
+                sig_out += prefactor * np.einsum('wafe,bef->wab', temp, Phi_R)
+
+        return iq_ext, sig_l, sig_g
+
+    Sigma_lesser = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
+    Sigma_greater = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
+
+    with ThreadPoolExecutor(max_workers=n_threads) as pool:
+        futures = [pool.submit(process_iq_ext, iq) for iq in range(n_kpts)]
+        for f in futures:
+            iq_ext, sig_l, sig_g = f.result()
+            Sigma_lesser[iq_ext] = sig_l
+            Sigma_greater[iq_ext] = sig_g
 
     Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
     return Sigma_lesser, Sigma_greater, Sigma_retarded
@@ -406,6 +602,7 @@ def anharmonic_transmission_q(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
+    n_threads: int = 4,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -423,6 +620,10 @@ def anharmonic_transmission_q(
     eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
     n_slabs : int
     verbose : bool
+    M_stacked_override : ndarray, optional
+        If provided, use this M_stacked instead of loading from fc3_hdf5.
+    n_threads : int
+        Number of threads for self-energy parallelization.
 
     Returns
     -------
@@ -512,6 +713,7 @@ def anharmonic_transmission_q(
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
         print(f"  eta = {eta:.4e} THz^2")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, mix={mixing}")
+        print(f"  Threads: {n_threads}")
 
     # --- BTD blocks per q-point ---
     btd_blocks = []
@@ -522,10 +724,23 @@ def anharmonic_transmission_q(
         )
         btd_blocks.append((H_00, H_01))
 
-    # --- Ballistic transmission ---
-    trans_ballistic = np.zeros(nfreq)
+    # --- Precompute OBC self-energies for all q and all frequencies ---
+    # This replaces per-(iq, iw) calls with batched computation
+    if verbose:
+        print("  Precomputing OBC self-energies (batched)...")
+    obc_all = []  # list of dicts, one per q-point
+    H_D_all = []
     for iq, (H_00, H_01) in enumerate(btd_blocks):
         H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
+        H_D_all.append(H_D)
+        obc = _compute_obc_batch(omega_sq_thz2, H_00, H_01, eta,
+                                 n_bose_L, n_bose_R, n_slabs=n_slabs)
+        obc_all.append(obc)
+
+    # --- Ballistic transmission (vectorized over frequencies) ---
+    trans_ballistic = np.zeros(nfreq)
+    for iq, (H_00, H_01) in enumerate(btd_blocks):
+        H_D = H_D_all[iq]
         H_LD = np.zeros((n_dof, N_D), dtype=complex)
         H_LD[:, :n_dof] = H_01
         H_DR = np.zeros((N_D, n_dof), dtype=complex)
@@ -568,6 +783,9 @@ def anharmonic_transmission_q(
     spectral_J_L = np.zeros(nfreq)
     spectral_J_R = np.zeros(nfreq)
 
+    sl0 = slice(0, n_dof)
+    sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
+
     for scba_iter in range(max_scba_iter):
         G_lesser_slab_q = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex
@@ -576,46 +794,42 @@ def anharmonic_transmission_q(
         spectral_J_L[:] = 0.0
         spectral_J_R[:] = 0.0
 
-        for iq, (H_00, H_01) in enumerate(btd_blocks):
-            H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
+        # --- Vectorized Green's function solve per q-point ---
+        for iq in range(n_kpts):
+            H_D = H_D_all[iq]
+            obc = obc_all[iq]
 
-            for iw, w2 in enumerate(omega_sq_thz2):
-                Sig_R_dev = np.zeros((N_D, N_D), dtype=complex)
-                Sig_l_dev = np.zeros((N_D, N_D), dtype=complex)
-                Sig_g_dev = np.zeros((N_D, N_D), dtype=complex)
-                for l in range(n_slabs):
-                    sl = slice(l * n_dof, (l + 1) * n_dof)
-                    Sig_R_dev[sl, sl] = Sigma_R_q[l, iq, iw]
-                    Sig_l_dev[sl, sl] = Sigma_l_q[l, iq, iw]
-                    Sig_g_dev[sl, sl] = Sigma_g_q[l, iq, iw]
+            # Build scattering self-energy arrays: (nfreq, N_D, N_D)
+            Sig_R_dev = np.zeros((nfreq, N_D, N_D), dtype=complex)
+            Sig_l_dev = np.zeros((nfreq, N_D, N_D), dtype=complex)
+            Sig_g_dev = np.zeros((nfreq, N_D, N_D), dtype=complex)
+            for l in range(n_slabs):
+                sl = slice(l * n_dof, (l + 1) * n_dof)
+                Sig_R_dev[:, sl, sl] = Sigma_R_q[l, iq]  # (nfreq, n_dof, n_dof)
+                Sig_l_dev[:, sl, sl] = Sigma_l_q[l, iq]
+                Sig_g_dev[:, sl, sl] = Sigma_g_q[l, iq]
 
-                obc = _compute_obc_self_energies(
-                    w2, H_00, H_01, eta, n_bose_L[iw], n_bose_R[iw],
-                    n_slabs=n_slabs,
-                )
-                _, G_less, G_great = _solve_green_functions(
-                    w2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev, eta,
-                )
+            # Batched solve: all frequencies at once
+            _, G_less, G_great = _solve_green_batch(
+                omega_sq_thz2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev, eta)
 
-                for l in range(n_slabs):
-                    sl = slice(l * n_dof, (l + 1) * n_dof)
-                    G_lesser_slab_q[l, iq, iw] = G_less[sl, sl]
-                    G_greater_slab_q[l, iq, iw] = G_great[sl, sl]
+            # Extract slab-diagonal blocks
+            for l in range(n_slabs):
+                sl = slice(l * n_dof, (l + 1) * n_dof)
+                G_lesser_slab_q[l, iq] = G_less[:, sl, sl]
+                G_greater_slab_q[l, iq] = G_great[:, sl, sl]
 
-                sl0 = slice(0, n_dof)
-                spectral_J_L[iw] += HBAR_SI * omega_rad[iw] * np.real(
-                    np.trace(
-                        obc["Sigma_L_greater"][sl0, sl0] @ G_less[sl0, sl0]
-                        - obc["Sigma_L_lesser"][sl0, sl0] @ G_great[sl0, sl0]
-                    ))
-                sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
-                spectral_J_R[iw] += HBAR_SI * omega_rad[iw] * np.real(
-                    np.trace(
-                        obc["Sigma_R_lesser"][sl_last, sl_last]
-                        @ G_great[sl_last, sl_last]
-                        - obc["Sigma_R_greater"][sl_last, sl_last]
-                        @ G_less[sl_last, sl_last]
-                    ))
+            # Spectral current from contacts (vectorized over freq)
+            # J_L[w] += hbar*omega * Tr(Sig_L^> G^< - Sig_L^< G^>)
+            SLg_Gl = obc["Sigma_L_greater"][:, sl0, sl0] @ G_less[:, sl0, sl0]
+            SLl_Gg = obc["Sigma_L_lesser"][:, sl0, sl0] @ G_great[:, sl0, sl0]
+            spectral_J_L += HBAR_SI * omega_rad * np.real(
+                np.trace(SLg_Gl - SLl_Gg, axis1=-2, axis2=-1))
+
+            SRl_Gg = obc["Sigma_R_lesser"][:, sl_last, sl_last] @ G_great[:, sl_last, sl_last]
+            SRg_Gl = obc["Sigma_R_greater"][:, sl_last, sl_last] @ G_less[:, sl_last, sl_last]
+            spectral_J_R += HBAR_SI * omega_rad * np.real(
+                np.trace(SRl_Gg - SRg_Gl, axis1=-2, axis2=-1))
 
         spectral_J_L /= n_kpts
         spectral_J_R /= n_kpts
@@ -633,10 +847,11 @@ def anharmonic_transmission_q(
         Sigma_r_new = np.zeros_like(Sigma_R_q)
 
         for l in range(n_slabs):
-            sl_n, sg_n, sr_n = _compute_phph_self_energy_q_dense(
+            sl_n, sg_n, sr_n = _compute_self_energy_parallel(
                 G_lesser_slab_q[l], G_greater_slab_q[l],
                 M_stacked, T_all_q, q_diff_map,
                 n_atoms, n_kpts, freqs_thz, dw_thz,
+                n_threads=n_threads,
             )
             Sigma_l_new[l] = sl_n
             Sigma_g_new[l] = sg_n
