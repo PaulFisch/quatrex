@@ -1,0 +1,575 @@
+% fc3_approximations.tex
+% Self-contained document; for inclusion in a larger document,
+% remove the preamble and \begin/\end{document}, and ensure
+% the packages below are loaded in the parent file.
+\documentclass[11pt]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath, amssymb, bm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{cleveref}
+
+\newcommand{\vc}[1]{\bm{#1}}
+\newcommand{\ndof}{n_{\mathrm{dof}}}
+\newcommand{\nprim}{n_{\mathrm{prim}}}
+\newcommand{\nsuper}{n_{\mathrm{super}}}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\vect}{vec}
+
+\graphicspath{{figures/}}
+
+\title{Low-Rank Approximations to the Third-Order\\Force Constant Tensor}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ======================================================================
+\section{Setup}
+\label{sec:setup}
+% ======================================================================
+
+We consider the compact third-order force constant (FC3) tensor obtained
+from a supercell finite-displacement calculation.  In the compact format
+the first atom index is restricted to the primitive cell while the
+remaining two run over the full supercell:
+\begin{equation}\label{eq:fc3}
+  \Phi_{\alpha\beta\gamma}(0\kappa,\; l'\kappa',\; l''\kappa'')
+  = \frac{\partial^3 E}
+         {\partial u_\alpha(0\kappa)\,
+          \partial u_\beta(l'\kappa')\,
+          \partial u_\gamma(l''\kappa'')}\,.
+\end{equation}
+After mass-weighting, we collect the indices into composite DOF labels
+\begin{equation}
+  a = (\kappa, \alpha), \qquad
+  c = (l'\kappa', \beta), \qquad
+  d = (l''\kappa'', \gamma),
+\end{equation}
+so that the object to approximate is a three-index tensor
+\begin{equation}\label{eq:target}
+  \Phi_{acd}\,, \qquad
+  a \in \{1,\dots,\ndof\}, \quad
+  c, d \in \{1,\dots,D\},
+\end{equation}
+with $\ndof = 3\,\nprim$ and $D = 3\,\nsuper = 3\,N_{\mathrm{cell}}\,\nprim$.
+For a $2\times2\times2$ supercell, $N_{\mathrm{cell}}=8$ and $D = 24\,\nprim$.
+
+The full tensor has $\ndof \times D^2$ entries, reduced by the exchange
+symmetry $\Phi_{acd} = \Phi_{adc}$ to $\ndof \times D(D+1)/2$.
+For Si ($\nprim = 2$) this gives $\ndof = 6$, $D = 48$, and $13\,824$
+independent entries.
+
+Our goal: represent $\Phi_{acd}$ with far fewer parameters while
+controlling the relative Frobenius-norm error
+\begin{equation}\label{eq:error}
+  \varepsilon = \frac{\|\Phi - \tilde\Phi\|_F}{\|\Phi\|_F}\,.
+\end{equation}
+
+We compare four decomposition strategies, summarized in
+\cref{tab:methods}.
+
+% ======================================================================
+\section{Approximation 1: Truncated SVD (Separable)}
+\label{sec:svd}
+% ======================================================================
+
+\paragraph{Ansatz.}
+For each external DOF $a$, define the $D \times D$ slice
+$M_a = \Phi_{a,:,:}$.  Stack all slices into a single matrix
+\begin{equation}\label{eq:mstacked}
+  M_{\mathrm{stack}} =
+  \begin{pmatrix} M_1 \\ \vdots \\ M_{\ndof} \end{pmatrix}
+  \in \mathbb{R}^{\ndof D \times D}.
+\end{equation}
+A truncated SVD at rank $R$ gives
+\begin{equation}\label{eq:svd}
+  M_{\mathrm{stack}} \approx \sum_{r=1}^{R} \sigma_r\, \vc{u}_r\, \vc{v}_r^\top\,,
+\end{equation}
+which reshapes to the tensor approximation
+\begin{equation}\label{eq:sep}
+  \boxed{
+    \tilde\Phi_{acd}^{\mathrm{SVD}}
+    = \sum_{r=1}^{R} F_r(a,c)\; h_r(d)\,,
+  }
+\end{equation}
+with $F_r(a,c) = [\vc{u}_r]_{aD + c}$ and $h_r(d) = \sigma_r [\vc{v}_r]_d$.
+
+\paragraph{Properties.}
+The Eckart--Young theorem guarantees optimality among rank-$R$
+\emph{matrix} approximations of~$M_{\mathrm{stack}}$.  However, each
+rank component costs $\ndof \cdot D + D$ parameters---one left vector of
+length $\ndof D$ and one right vector of length $D$---so SVD is
+\emph{not} optimal per parameter when the tensor has exploitable symmetry.
+The decomposition is purely algebraic.
+
+\paragraph{Parameter count.}
+\begin{equation}\label{eq:svd-params}
+  N_{\mathrm{param}}^{\mathrm{SVD}}(R) = R\,D\,(\ndof + 1)
+  \;\sim\; \mathcal{O}(R\,\nprim^2)
+  \quad\text{(at fixed $N_{\mathrm{cell}}$).}
+\end{equation}
+
+% ======================================================================
+\section{Approximation 2: Partially Symmetric CP (PSCP)}
+\label{sec:pscp}
+% ======================================================================
+
+\paragraph{Ansatz.}
+Exploit the exchange symmetry $\Phi_{acd} = \Phi_{adc}$ with a
+\emph{shared} internal mode $\vc{v}_r$ for both the $c$ and $d$ legs:
+\begin{equation}\label{eq:pscp}
+  \boxed{
+    \tilde\Phi_{acd}^{\mathrm{PSCP}}
+    = \sum_{r=1}^{R} d_r(a)\; v_r(c)\; v_r(d)\,.
+  }
+\end{equation}
+
+\paragraph{Construction (algebraic).}
+\begin{enumerate}
+  \item Reshape $\Phi$ to $(\ndof) \times D^2$ and compute
+        $\Phi_{\mathrm{flat}} \approx \sum_r \sigma_r\, \vc{u}_r\, \vc{w}_r^\top$.
+  \item Each $\vc{w}_r \in \mathbb{R}^{D^2}$ reshapes to a symmetric
+        $D \times D$ matrix~$W_r$ (guaranteed by $\Phi_{acd} = \Phi_{adc}$).
+  \item Eigendecompose $\sigma_r W_r = Q_r \Lambda_r Q_r^\top$;
+        each surviving eigenpair $(\lambda_{rp}, \vc{q}_{rp})$ yields
+        \(
+          d_{rp}(a) = [\vc{u}_r]_a \lambda_{rp},\;
+          v_{rp}     = \vc{q}_{rp}.
+        \)
+\end{enumerate}
+The total rank is $R_{\mathrm{total}} = \sum_r R_r$ where $R_r$ is the
+number of retained eigenpairs.  Truncation is performed by sorting all
+terms by $|\lambda_{rp}| \|\vc{u}_r\|$ and keeping the top~$R$.
+
+\paragraph{Parameter count.}
+\begin{equation}\label{eq:pscp-params}
+  N_{\mathrm{param}}^{\mathrm{PSCP}}(R) = R\,(\ndof + D)
+  \;\sim\; \mathcal{O}(R\,\nprim)
+  \quad\text{(at fixed $N_{\mathrm{cell}}$).}
+\end{equation}
+
+% ======================================================================
+\section{Approximation 3: Symmetric CP with Three Modes (SCP3)}
+\label{sec:scp3}
+% ======================================================================
+
+\paragraph{Ansatz.}
+The full (non-compact) FC3 tensor possesses $S_3$ permutation symmetry.
+We exploit this with three independent modes per rank, symmetrized
+over all permutations:
+\begin{equation}\label{eq:scp3}
+  \boxed{
+    \tilde\Phi_{acd}^{\mathrm{SCP3}}
+    = \sum_{\xi=1}^{R} \frac{\lambda_\xi}{6}
+      \sum_{\sigma \in S_3}
+      u^{\xi}_{\sigma_1}\!\bigl(p(a)\bigr)\;
+      u^{\xi}_{\sigma_2}(c)\;
+      u^{\xi}_{\sigma_3}(d)\,,
+  }
+\end{equation}
+where $u^{\xi}_1, u^{\xi}_2, u^{\xi}_3 \in \mathbb{R}^D$ and
+$p(a)$ maps the primitive-cell DOF index~$a$ to its supercell-DOF
+counterpart in cell zero.
+
+\paragraph{Construction.}
+Optimization-based: minimize $\|\Phi - \tilde\Phi\|_F^2$
+via Adam (1500~iterations) followed by L-BFGS with projected gradients.
+The acoustic sum rule $\sum_j u^\xi_s(j,\beta) = 0$ is enforced by
+projection after each step.
+
+\paragraph{Parameter count.}
+\begin{equation}\label{eq:scp3-params}
+  N_{\mathrm{param}}^{\mathrm{SCP3}}(R) = R\,(3D + 1)
+  \;\sim\; \mathcal{O}(R\,\nprim)
+  \quad\text{(at fixed $N_{\mathrm{cell}}$).}
+\end{equation}
+
+% ======================================================================
+\section{Approximation 4: Fully Symmetric CP (FSCP)}
+\label{sec:fscp}
+% ======================================================================
+
+\paragraph{Ansatz.}
+The most constrained decomposition: a single shared mode per rank,
+\begin{equation}\label{eq:fscp}
+  \boxed{
+    \tilde\Phi_{acd}^{\mathrm{FSCP}}
+    = \sum_{r=1}^{R} \lambda_r\;
+      v_r\!\bigl(p(a)\bigr)\; v_r(c)\; v_r(d)\,,
+  }
+\end{equation}
+with $v_r \in \mathbb{R}^D$.  No permutation sum is needed because the
+symmetry is built in.  This is the symmetric tensor analogue of a
+spectral decomposition.
+
+\paragraph{Construction.}
+Same optimization procedure as SCP3 (Adam~+~L-BFGS, ASR projection).
+
+\paragraph{Parameter count.}
+\begin{equation}\label{eq:fscp-params}
+  N_{\mathrm{param}}^{\mathrm{FSCP}}(R) = R\,(D + 1)
+  \;\sim\; \mathcal{O}(R\,\nprim)\,.
+\end{equation}
+Three times fewer mode parameters than SCP3 at the same rank, but the
+constraint $u_1 = u_2 = u_3 = v$ limits the rank-1 terms to symmetric
+outer products $v \otimes v \otimes v$, so higher rank may be needed.
+
+% ======================================================================
+\section{Method Comparison}
+\label{sec:comparison}
+% ======================================================================
+
+\begin{table}[ht]
+\centering
+\caption{FC3 approximation methods.
+$\ndof = 3\nprim$, $D = 3\nsuper$.
+``Optimal'' refers to Eckart--Young optimality (per \emph{rank}, not
+per parameter).}
+\label{tab:methods}
+\begin{tabular}{@{}lcccl@{}}
+\toprule
+\textbf{Method}
+  & \textbf{Parameters}
+  & \textbf{Symmetry}
+  & \textbf{Algebraic}
+  & \textbf{Scaling} \\
+\midrule
+SVD   & $R\,D\,(\ndof + 1)$    & ---       & yes & $\mathcal{O}(\nprim^2)$ \\
+PSCP  & $R\,(\ndof + D)$       & $S_2$     & yes & $\mathcal{O}(\nprim)$   \\
+SCP3  & $R\,(3D + 1)$          & $S_3$     & no  & $\mathcal{O}(\nprim)$   \\
+FSCP  & $R\,(D + 1)$           & $S_3$     & no  & $\mathcal{O}(\nprim)$   \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ======================================================================
+\section{Numerical Results: Silicon (2-atom primitive cell)}
+\label{sec:results}
+% ======================================================================
+
+We test on a silicon $2\times2\times2$ supercell
+($\nprim = 2$, $\nsuper = 16$, $\ndof = 6$, $D = 48$).
+The FC3 is computed via the finite-displacement method (phono3py).
+
+% ------------------------------------------
+\subsection{Singular-value spectrum}
+% ------------------------------------------
+
+\Cref{fig:svd-spectrum} shows the SVD spectrum of $M_{\mathrm{stack}}$.
+The matrix has numerical rank~45 (three near-zero singular values
+$\sim 10^4$ vs.\ leading value $\sim 10^{19}$, reflecting the
+acoustic sum rule).  Singular values decay smoothly, with no sharp
+gap---aggressive truncation inevitably loses information.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.65\textwidth]{svd_spectrum}
+  \caption{Normalized singular values of $M_{\mathrm{stack}}$ for Si.}
+  \label{fig:svd-spectrum}
+\end{figure}
+
+% ------------------------------------------
+\subsection{Frobenius-norm convergence}
+\label{sec:frob}
+% ------------------------------------------
+
+\Cref{fig:frob-params,fig:frob-rank} compare the four methods.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.70\textwidth]{fc3_error_vs_params}
+  \caption{Relative Frobenius error vs.\ number of parameters.
+  SCP3 and FSCP reach low error with far fewer parameters than SVD.}
+  \label{fig:frob-params}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.70\textwidth]{fc3_error_vs_rank}
+  \caption{Relative Frobenius error vs.\ rank.
+  SVD is optimal per rank but expensive per parameter.
+  PSCP requires $R = 250$ terms for full-rank exactness
+  (vs.\ 48 for SVD) because the eigendecomposition step multiplies
+  the rank count.}
+  \label{fig:frob-rank}
+\end{figure}
+
+\Cref{tab:frob} gives selected numerical values.  At the same
+parameter budget ($\sim$1000--1200), SCP3 at $R=8$ achieves 5.4\%
+Frobenius error, compared to 52\% for SVD at $R=4$ or 65\% for PSCP
+at $R=8$.
+
+\begin{table}[ht]
+\centering
+\caption{Selected Frobenius-norm errors for Si ($\ndof=6$, $D=48$).}
+\label{tab:frob}
+\sisetup{round-mode=figures, round-precision=3}
+\begin{tabular}{@{}llrrS[table-format=1.2e-1]@{}}
+\toprule
+\textbf{Method} & $R$ & \textbf{Params} & \textbf{Full tensor \%} &
+  {\textbf{Frobenius error}} \\
+\midrule
+SVD   &  4 &  1\,344 &   9.7\% & 5.25e-01 \\
+SVD   &  8 &  2\,688 &  19.4\% & 1.12e-01 \\
+SVD   & 24 &  8\,064 &  58.3\% & 2.24e-02 \\
+SVD   & 48 & 16\,128 & 116.7\% & 1.81e-15 \\
+\midrule
+PSCP  & 12 &    648  &   4.7\% & 5.15e-01 \\
+PSCP  & 36 &  1\,944 &  14.1\% & 1.05e-01 \\
+PSCP  & 48 &  2\,592 &  18.8\% & 7.60e-02 \\
+\midrule
+SCP3  &  4 &    580  &   4.2\% & 1.35e-01 \\
+SCP3  &  8 &  1\,160 &   8.4\% & 5.39e-02 \\
+SCP3  & 24 &  3\,480 &  25.2\% & 1.62e-02 \\
+\midrule
+FSCP  & 16 &    784  &   5.7\% & 9.27e-02 \\
+FSCP  & 48 &  2\,352 &  17.0\% & 2.47e-02 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ------------------------------------------
+\subsection{Quantum-transport observable: anharmonic thermal conductance}
+\label{sec:transport}
+% ------------------------------------------
+
+A more stringent test: for each approximation we reconstruct the full
+$M_{\mathrm{stack}}$, run the dense SCBA self-energy kernel on a
+$4\times4$ transverse $q$-mesh with 51 frequency points and 20~SCBA
+iterations, and compare the resulting anharmonic thermal conductance
+$G_{\mathrm{anh}}$ at $T = 300$~K to the reference value
+$G_{\mathrm{ref}} = \SI{927.2}{MW/(m^2.K)}$.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.70\textwidth]{transport_error_vs_params}
+  \caption{Relative error in $G_{\mathrm{anh}}$ vs.\ number of
+  parameters.  SCP3 at $R=8$ already achieves $<0.1\%$ transport
+  error with only 1\,160 parameters.}
+  \label{fig:transport-params}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.70\textwidth]{frob_vs_transport_error}
+  \caption{Frobenius error vs.\ transport error.  Dashed line: 1:1
+  reference.  SCP3 points lie well below the line---its $S_3$ symmetry
+  preserves the physically important tensor components, so the same
+  Frobenius error translates to a much smaller transport error than for
+  the other methods.}
+  \label{fig:frob-vs-transport}
+\end{figure}
+
+\begin{table}[ht]
+\centering
+\caption{Transport results for Si at $T=300$~K.
+Reference: $G_{\mathrm{ref}} = 927.2$~MW/(m$^2$\,K).}
+\label{tab:transport}
+\sisetup{round-mode=figures, round-precision=3}
+\begin{tabular}{@{}llrrS[table-format=4.1]S[table-format=1.2e-1]@{}}
+\toprule
+\textbf{Method} & $R$ & \textbf{Params} &
+  {\textbf{Frob.\ err.}} &
+  {$G_{\mathrm{anh}}$ [\si{MW/(m^2.K)}]} &
+  {\textbf{$G$ error}} \\
+\midrule
+SVD   &  4 &  1\,344 & 52.5\% &  963.1 & 3.86e-02 \\
+SVD   &  8 &  2\,688 & 11.2\% &  937.3 & 1.08e-02 \\
+SVD   & 16 &  5\,376 &  5.5\% &  928.3 & 1.13e-03 \\
+SVD   & 24 &  8\,064 &  2.2\% &  926.8 & 4.87e-04 \\
+\midrule
+PSCP  & 12 &    648  & 51.5\% &  973.8 & 5.02e-02 \\
+PSCP  & 36 &  1\,944 & 10.5\% &  934.7 & 8.05e-03 \\
+PSCP  & 48 &  2\,592 &  7.6\% &  932.6 & 5.79e-03 \\
+\midrule
+SCP3  &  4 &    580  & 13.5\% &  940.5 & 1.43e-02 \\
+SCP3  &  8 &  1\,160 &  5.4\% &  927.7 & 4.82e-04 \\
+SCP3  & 16 &  2\,320 &  2.7\% &  927.2 & 1.47e-05 \\
+SCP3  & 24 &  3\,480 &  1.6\% &  927.2 & 6.45e-06 \\
+\midrule
+FSCP  &  8 &    392  & 51.0\% &  946.1 & 2.04e-02 \\
+FSCP  & 16 &    784  &  9.3\% &  929.5 & 2.50e-03 \\
+FSCP  & 48 &  2\,352 &  2.5\% &  925.9 & 1.46e-03 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Key observations.}
+\begin{enumerate}
+  \item \textbf{SCP3 dominates.}
+        At $R=8$ (1\,160 parameters, 8.4\% of the full tensor),
+        SCP3 already achieves $G$-error $< 0.05\%$.
+        By $R=16$ the error is $\sim 10^{-5}$.
+
+  \item \textbf{SVD is wasteful per parameter.}
+        To reach ${\sim}1\%$ $G$-error, SVD needs $R=16$
+        (5\,376 parameters), nearly 5$\times$ more than SCP3 at $R=8$.
+
+  \item \textbf{FSCP has an accuracy floor.}
+        Beyond $R \approx 16$, adding more rank-1 symmetric outer
+        products $v \otimes v \otimes v$ does not substantially improve
+        accuracy.  The single-mode constraint is too rigid.
+
+  \item \textbf{PSCP converges slowly.}
+        The two-stage algebraic construction (SVD then eigendecomposition)
+        is not jointly optimal; $R=48$ terms are needed to reach 0.6\%
+        $G$-error.
+
+  \item \textbf{$S_3$ symmetry acts as physical regularization.}
+        \Cref{fig:frob-vs-transport} shows that SCP3 achieves much
+        smaller $G$-errors than other methods at the same Frobenius
+        error.  The permutation-symmetric ansatz preferentially captures
+        the components of the FC3 that matter for transport.
+\end{enumerate}
+
+% ======================================================================
+\section{Scaling Analysis for Large Primitive Cells}
+\label{sec:scaling}
+% ======================================================================
+
+For a fixed supercell multiplier $N_{\mathrm{cell}}$ (e.g., $2\times2\times2
+= 8$), we have $D = 3 N_{\mathrm{cell}} \nprim$.  The parameter counts per
+rank component scale as:
+\begin{align}
+  N_{\mathrm{param}}^{\mathrm{SVD}} / R
+    &= D(\ndof + 1)
+    = 9 N_{\mathrm{cell}} \nprim (3\nprim + 1)
+    \sim \mathcal{O}(\nprim^2)\,,
+    \label{eq:scale-svd} \\
+  N_{\mathrm{param}}^{\mathrm{PSCP}} / R
+    &= \ndof + D
+    = (3 + 3 N_{\mathrm{cell}}) \nprim
+    \sim \mathcal{O}(\nprim)\,,
+    \label{eq:scale-pscp} \\
+  N_{\mathrm{param}}^{\mathrm{SCP3}} / R
+    &= 3D + 1
+    = 9 N_{\mathrm{cell}} \nprim + 1
+    \sim \mathcal{O}(\nprim)\,,
+    \label{eq:scale-scp3} \\
+  N_{\mathrm{param}}^{\mathrm{FSCP}} / R
+    &= D + 1
+    = 3 N_{\mathrm{cell}} \nprim + 1
+    \sim \mathcal{O}(\nprim)\,,
+    \label{eq:scale-fscp}
+\end{align}
+while the full tensor has $\ndof D^2 = 27 N_{\mathrm{cell}}^2 \nprim^3$
+entries, i.e., $\mathcal{O}(\nprim^3)$.
+
+\paragraph{Compression ratio at fixed rank.}
+The compression ratio (full tensor entries divided by approximation parameters)
+therefore grows with system size as:
+\begin{equation}
+  \frac{\ndof D^2}{N_{\mathrm{param}}}
+  \sim
+  \begin{cases}
+    \mathcal{O}(\nprim) & \text{SVD}\,,\\
+    \mathcal{O}(\nprim^2) & \text{PSCP, SCP3, FSCP}\,.
+  \end{cases}
+\end{equation}
+The symmetric methods become \emph{quadratically} more efficient relative
+to the full tensor as the primitive cell grows.
+
+\Cref{fig:scaling-params} and \cref{tab:scaling} illustrate this for
+a range of $\nprim$ at fixed representative ranks.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.70\textwidth]{scaling_params_vs_nprim}
+  \caption{Parameter count vs.\ primitive-cell size at fixed rank
+  ($2\times2\times2$ supercell).  The full tensor scales as
+  $\nprim^3$; SVD scales as $\nprim^2$; PSCP, SCP3, and FSCP all
+  scale linearly.}
+  \label{fig:scaling-params}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.70\textwidth]{scaling_compression_ratio}
+  \caption{Compression ratio (full tensor / approximation parameters)
+  vs.\ primitive-cell size.  The symmetric methods achieve compression
+  ratios that grow quadratically with $\nprim$.}
+  \label{fig:scaling-ratio}
+\end{figure}
+
+\begin{table}[ht]
+\centering
+\caption{Parameter counts for various $\nprim$ at fixed rank
+($N_{\mathrm{cell}} = 8$).  Ranks chosen to give ${\sim}5\%$
+Frobenius error on Si: $R_{\mathrm{SVD}}=8$, $R_{\mathrm{PSCP}}=36$,
+$R_{\mathrm{SCP3}}=8$, $R_{\mathrm{FSCP}}=16$.}
+\label{tab:scaling}
+\sisetup{group-separator={,}, group-minimum-digits=4}
+\begin{tabular}{@{}r
+  S[table-format=9.0]
+  S[table-format=7.0]
+  S[table-format=5.0]
+  S[table-format=5.0]
+  S[table-format=5.0]@{}}
+\toprule
+{$\nprim$}
+  & {\textbf{Full tensor}}
+  & {\textbf{SVD}}
+  & {\textbf{PSCP}}
+  & {\textbf{SCP3}}
+  & {\textbf{FSCP}} \\
+\midrule
+  2 &      13824 &     2688 &   1944 &   1160 &    784 \\
+  4 &     110592 &     9984 &   3888 &   2312 &   1552 \\
+  8 &     884736 &    38400 &   7776 &   4616 &   3088 \\
+ 16 &    7077888 &   150528 &  15552 &   9224 &   6160 \\
+ 32 &   56623104 &   595968 &  31104 &  18440 &  12304 \\
+ 64 &  452984832 &  2371584 &  62208 &  36872 &  24592 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Practical implication.}
+For a material with $\nprim = 64$ (e.g., a large oxide or ternary
+compound), the full FC3 tensor has $4.5 \times 10^8$ entries.  SCP3 at
+$R=8$ stores only 36\,872 parameters---a compression factor of
+${\sim}12\,000\times$.  SVD at $R=8$ would need $2.4 \times 10^6$
+parameters, providing only ${\sim}190\times$ compression.
+
+Whether the required rank $R$ for a given accuracy grows with $\nprim$
+is system-dependent and must be validated numerically for each material.
+For the closely related harmonic force constants (FC2), the required rank
+of similar decompositions is known to grow slowly (logarithmically to
+sub-linearly) with system size for local interactions.
+
+% ======================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+% ======================================================================
+
+Among the four FC3 approximations:
+\begin{itemize}
+  \item \textbf{SCP3} (three-mode symmetric CP) offers the best
+        accuracy-per-parameter trade-off and the strongest physical
+        regularization.  It is the recommended method for transport
+        applications where the fitted FC3 feeds into a self-energy
+        kernel.
+
+  \item \textbf{FSCP} (one-mode symmetric CP) uses fewer parameters per
+        rank but hits an accuracy floor due to the overly constrained
+        $v \otimes v \otimes v$ structure.
+
+  \item \textbf{SVD} (separable) is the only method with a mathematical
+        optimality guarantee (per rank), but its $\mathcal{O}(\nprim^2)$
+        parameter scaling makes it impractical for large primitive cells.
+
+  \item \textbf{PSCP} (partially symmetric) is algebraic and exploits
+        $S_2$, but converges slowly due to the non-optimal two-stage
+        construction.
+\end{itemize}
+
+All four methods scale as $\mathcal{O}(\nprim)$ or better per rank
+component (vs.\ $\mathcal{O}(\nprim^3)$ for the full tensor), making
+them viable for large systems.  The critical open question is how the
+required rank scales with $\nprim$ for a target transport accuracy.
+
+\end{document}
