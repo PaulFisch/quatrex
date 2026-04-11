@@ -21,6 +21,7 @@ of the quatrex GPU solver, matching the style of validation.py.
 import numpy as np
 from numpy.linalg import inv
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import get_context
 from .constants import (
     CONVERSION_FC3_THZ,
     CONVERSION_THZ2,
@@ -590,15 +591,29 @@ def _compute_phph_self_energy_q_dense(
     Sigma_lesser = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
     Sigma_greater = np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
 
-    # Use threads (not processes) — numpy releases the GIL during matmul/FFT,
-    # and threads avoid the fork+OpenMP deadlock on OpenMP-enabled BLAS.
-    with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
-        futures = [executor.submit(_se_worker_iq, wa) for wa in work_args]
-        for fut in futures:
-            iq_list, sig_l, sig_g = fut.result()
-            for i, iq in enumerate(iq_list):
-                Sigma_lesser[iq] = sig_l[i]
-                Sigma_greater[iq] = sig_g[i]
+    # Two parallelism strategies:
+    # - Threads: safe with any BLAS, but all share one OpenMP pool.
+    #   Best with OMP_NUM_THREADS=1 and many workers.
+    # - Processes (forkserver): each gets its own BLAS/OpenMP runtime.
+    #   Best with fewer workers × more BLAS threads per worker.
+    #   forkserver avoids fork+OpenMP deadlock (unlike plain fork).
+    use_threads = os.environ.get("QUATREX_SE_THREADS", "1") == "1"
+
+    if use_threads:
+        with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+            futures = [executor.submit(_se_worker_iq, wa) for wa in work_args]
+            for fut in futures:
+                iq_list, sig_l, sig_g = fut.result()
+                for i, iq in enumerate(iq_list):
+                    Sigma_lesser[iq] = sig_l[i]
+                    Sigma_greater[iq] = sig_g[i]
+    else:
+        ctx = get_context("forkserver")
+        with ctx.Pool(processes=len(chunks)) as pool:
+            for iq_list, sig_l, sig_g in pool.map(_se_worker_iq, work_args):
+                for i, iq in enumerate(iq_list):
+                    Sigma_lesser[iq] = sig_l[i]
+                    Sigma_greater[iq] = sig_g[i]
 
     Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
     return Sigma_lesser, Sigma_greater, Sigma_retarded
