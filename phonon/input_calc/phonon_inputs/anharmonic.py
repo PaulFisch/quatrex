@@ -393,7 +393,7 @@ def _compute_phph_self_energy_q_dense(
 
 def anharmonic_transmission_q(
     phonon,
-    fc3_hdf5: str,
+    fc3_hdf5: str = None,
     q_mesh_transverse: tuple[int, int] = (4, 4),
     freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 101),
     transport_direction: str = "x",
@@ -405,6 +405,7 @@ def anharmonic_transmission_q(
     mixing: float = 0.5,
     n_slabs: int = 1,
     verbose: bool = True,
+    M_stacked_override: np.ndarray = None,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -458,15 +459,18 @@ def anharmonic_transmission_q(
     dim_sc = n_super * 3
 
     # --- Load raw FC3 and build real-space matrices ---
-    with h5py.File(fc3_hdf5, "r") as f:
-        fc3_raw = np.array(f["fc3"])
-
-    M_stacked = build_realspace_fc3_matrices(
-        fc3_raw, n_atoms, masses_super, ref_sc_atoms
-    )
+    if M_stacked_override is not None:
+        M_stacked = M_stacked_override
+    else:
+        with h5py.File(fc3_hdf5, "r") as f:
+            fc3_raw = np.array(f["fc3"])
+        M_stacked = build_realspace_fc3_matrices(
+            fc3_raw, n_atoms, masses_super, ref_sc_atoms
+        )
 
     if verbose:
-        print(f"  FC3 raw shape: {fc3_raw.shape}")
+        if M_stacked_override is None:
+            print(f"  FC3 raw shape: {fc3_raw.shape}")
         print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
         print(f"  M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
@@ -694,6 +698,8 @@ def anharmonic_transmission_q(
         "transmission_ballistic": trans_ballistic,
         "spectral_heat_current_ballistic": spectral_J_ball,
         "spectral_heat_current": spectral_J_anh,
+        "spectral_heat_current_L": spectral_J_L.copy(),
+        "spectral_heat_current_R": spectral_J_R.copy(),
         "heat_current_ballistic": J_ball_total,
         "heat_current": J_anh_total,
         "thermal_conductance_ballistic": G_ball,
