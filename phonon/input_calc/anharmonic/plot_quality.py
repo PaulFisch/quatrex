@@ -38,8 +38,11 @@ from compare_fc3_approximations import (
     fit_fscp, fscp_reconstruct_M_stacked, fscp_n_params,
 )
 
+# Use 3x3x3 supercell data
+FC3_SUBDIR = "fc3_prim_vasp"
+
 FIG_DIR = script_dir / "figures"
-CACHE_DIR = script_dir / "quality_cache"
+CACHE_DIR = script_dir / "quality_cache_333"
 
 TRANSPORT_KW = dict(
     q_mesh_transverse=(8, 8),
@@ -48,9 +51,9 @@ TRANSPORT_KW = dict(
     eta_factor=0.5,
     temperature=300.0,
     delta_T=10.0,
-    max_scba_iter=100,
+    max_scba_iter=200,
     scba_tol=0.005,
-    mixing=0.3,
+    mixing=0.1,
     n_slabs=1,
     verbose=True,
 )
@@ -139,8 +142,8 @@ def n_params_for(method, rank, n_dof, dim_sc):
 # =========================================================================
 
 def collect_all(load_only=False):
-    phonon, _ = load_primitive_cell(work_dir)
-    fc3_path = work_dir / "fc3_prim" / "fc3.hdf5"
+    phonon, _ = load_primitive_cell(work_dir, fc3_subdir=FC3_SUBDIR)
+    fc3_path = work_dir / FC3_SUBDIR / "fc3.hdf5"
     with h5py.File(fc3_path, "r") as f:
         fc3_raw = np.array(f["fc3"])
 

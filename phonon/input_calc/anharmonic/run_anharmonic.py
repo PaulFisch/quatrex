@@ -95,7 +95,7 @@ def load_primitive_cell_dfpt(work_dir):
     return phonon, fc3_data
 
 
-def load_primitive_cell(work_dir):
+def load_primitive_cell(work_dir, fc3_subdir="fc3_prim"):
     """Load FC2 + FC3 from phono3py for the 2-atom FCC primitive cell.
 
     The phono3py calculation provides both FC2 and FC3 computed on the
@@ -105,7 +105,7 @@ def load_primitive_cell(work_dir):
     from phonopy import Phonopy
     from phonopy.structure.atoms import PhonopyAtoms
 
-    fc3_dir = work_dir / "fc3_prim"
+    fc3_dir = work_dir / fc3_subdir
     fc3_h5 = fc3_dir / "fc3.hdf5"
     yaml_path = fc3_dir / "phono3py_disp.yaml"
 
