@@ -809,7 +809,7 @@ def anharmonic_transmission_q(
     J_total_prev = 0.0
     conservation_err = 1.0
     best_conservation = 1.0
-    best_state = None  # will hold (Sigma_l, Sigma_g, Sigma_R, J_L, J_R) at min conservation
+    best_state = None  # will hold spectral currents at min conservation
 
     spectral_J_L = np.zeros(nfreq)
     spectral_J_R = np.zeros(nfreq)
@@ -908,7 +908,10 @@ def anharmonic_transmission_q(
             print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
 
-        # Mix
+        # Mix: linear mixing with the user-specified damping parameter.
+        # Anderson mixing was tested but overshoots for stiff problems
+        # (large q-meshes); plain linear mixing reaches deeper conservation
+        # minima, which is what matters for the best-state tracking.
         if scba_iter > 0:
             alpha = mixing
             Sigma_l_q = (1 - alpha) * Sigma_l_q + alpha * Sigma_l_new
