@@ -631,6 +631,8 @@ def anharmonic_transmission_q(
     max_scba_iter: int = 10,
     scba_tol: float = 0.01,
     mixing: float = 0.5,
+    anderson_mixing: bool = False,
+    anderson_depth: int = 5,
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
@@ -649,6 +651,12 @@ def anharmonic_transmission_q(
     freq_range_thz : (fmin, fmax, nfreq)
     transport_direction : str
     eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
+    anderson_mixing : bool
+        Use Anderson acceleration instead of plain linear mixing.
+        Works well when q-mesh matches supercell resolution (e.g. 4x4
+        for 3x3x3 supercell). May overshoot for large q-meshes.
+    anderson_depth : int
+        Number of history vectors for Anderson mixing (default 5).
     n_slabs : int
     verbose : bool
     M_stacked_override : ndarray, optional
@@ -741,7 +749,10 @@ def anharmonic_transmission_q(
         print(f"  Frequency grid: {nfreq} points, {fmin:.2f} to {fmax:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
         print(f"  eta = {eta:.4e} THz^2")
-        print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, mix={mixing}")
+        mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
+                   else "linear")
+        print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
+              f"mix={mixing}, method={mix_str}")
 
 
     # --- BTD blocks per q-point ---
@@ -810,6 +821,10 @@ def anharmonic_transmission_q(
     conservation_err = 1.0
     best_conservation = 1.0
     best_state = None  # will hold spectral currents at min conservation
+
+    # Anderson mixing history
+    _anderson_x_hist = []
+    _anderson_f_hist = []
 
     spectral_J_L = np.zeros(nfreq)
     spectral_J_R = np.zeros(nfreq)
@@ -908,19 +923,57 @@ def anharmonic_transmission_q(
             print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
 
-        # Mix: linear mixing with the user-specified damping parameter.
-        # Anderson mixing was tested but overshoots for stiff problems
-        # (large q-meshes); plain linear mixing reaches deeper conservation
-        # minima, which is what matters for the best-state tracking.
-        if scba_iter > 0:
+        # Mix self-energies
+        if scba_iter == 0:
+            Sigma_l_q = Sigma_l_new.copy()
+            Sigma_g_q = Sigma_g_new.copy()
+            Sigma_R_q = Sigma_r_new.copy()
+        elif anderson_mixing and scba_iter >= 1:
+            # Anderson acceleration: quasi-Newton using residual history.
+            # Works well when q-mesh matches supercell resolution.
+            x_in = np.concatenate([
+                Sigma_l_q.ravel(), Sigma_g_q.ravel(), Sigma_R_q.ravel()])
+            x_out = np.concatenate([
+                Sigma_l_new.ravel(), Sigma_g_new.ravel(), Sigma_r_new.ravel()])
+            f_k = x_out - x_in
+            _anderson_x_hist.append(x_in)
+            _anderson_f_hist.append(f_k)
+
+            m = len(_anderson_f_hist)
+            if m >= 2:
+                # Use up to anderson_depth history pairs
+                n_use = min(m - 1, anderson_depth)
+                dF = np.column_stack([
+                    _anderson_f_hist[-n_use + j] - _anderson_f_hist[-n_use + j - 1]
+                    for j in range(n_use)])
+                dX = np.column_stack([
+                    _anderson_x_hist[-n_use + j] - _anderson_x_hist[-n_use + j - 1]
+                    for j in range(n_use)])
+                FtF = dF.conj().T @ dF
+                Ftf = dF.conj().T @ f_k
+                reg = 1e-8 * np.trace(FtF).real / max(FtF.shape[0], 1)
+                gamma = np.linalg.solve(
+                    FtF + reg * np.eye(FtF.shape[0]), Ftf).real
+                x_mixed = (x_in + mixing * f_k) - (dX + mixing * dF) @ gamma
+            else:
+                # First iteration: plain linear mixing
+                x_mixed = x_in + mixing * f_k
+
+            sz = Sigma_l_q.size
+            Sigma_l_q = x_mixed[:sz].reshape(Sigma_l_q.shape)
+            Sigma_g_q = x_mixed[sz:2*sz].reshape(Sigma_g_q.shape)
+            Sigma_R_q = x_mixed[2*sz:].reshape(Sigma_R_q.shape)
+
+            # Keep history bounded
+            if len(_anderson_x_hist) > anderson_depth + 2:
+                _anderson_x_hist.pop(0)
+                _anderson_f_hist.pop(0)
+        else:
+            # Plain linear mixing
             alpha = mixing
             Sigma_l_q = (1 - alpha) * Sigma_l_q + alpha * Sigma_l_new
             Sigma_g_q = (1 - alpha) * Sigma_g_q + alpha * Sigma_g_new
             Sigma_R_q = (1 - alpha) * Sigma_R_q + alpha * Sigma_r_new
-        else:
-            Sigma_l_q = Sigma_l_new.copy()
-            Sigma_g_q = Sigma_g_new.copy()
-            Sigma_R_q = Sigma_r_new.copy()
 
         # Convergence: stop when conservation passes through minimum
         # and starts rising, or when rel_change is small enough
