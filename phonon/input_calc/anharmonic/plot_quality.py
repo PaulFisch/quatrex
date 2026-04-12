@@ -45,15 +45,17 @@ FIG_DIR = script_dir / "figures"
 CACHE_DIR = script_dir / "quality_cache_333"
 
 TRANSPORT_KW = dict(
-    q_mesh_transverse=(8, 8),
+    q_mesh_transverse=(4, 4),
     freq_range_thz=(0.1, 18.0, 141),
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,
     delta_T=10.0,
+    anderson_mixing=True,
+    anderson_depth=5,
     max_scba_iter=50,
     scba_tol=1e-10,
-    mixing=0.1,
+    mixing=0.2,
     n_slabs=1,
     verbose=True,
 )
