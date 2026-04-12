@@ -808,6 +808,8 @@ def anharmonic_transmission_q(
     convergence_history = []
     J_total_prev = 0.0
     conservation_err = 1.0
+    best_conservation = 1.0
+    best_state = None  # will hold (Sigma_l, Sigma_g, Sigma_R, J_L, J_R) at min conservation
 
     spectral_J_L = np.zeros(nfreq)
     spectral_J_R = np.zeros(nfreq)
@@ -870,6 +872,18 @@ def anharmonic_transmission_q(
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
                             if J_denom > 0 else 0.0)
 
+        # Track best-conservation state (SCBA fixed point may overshoot)
+        # Skip first 3 iterations — conservation is trivially good before
+        # self-energy has been mixed in properly
+        if scba_iter >= 3 and conservation_err < best_conservation:
+            best_conservation = conservation_err
+            best_state = {
+                "spectral_J_L": spectral_J_L.copy(),
+                "spectral_J_R": spectral_J_R.copy(),
+                "conservation_err": conservation_err,
+                "iter": scba_iter + 1,
+            }
+
         # Compute per-slab self-energy via dense q-dependent kernel
         Sigma_l_new = np.zeros_like(Sigma_l_q)
         Sigma_g_new = np.zeros_like(Sigma_g_q)
@@ -905,16 +919,29 @@ def anharmonic_transmission_q(
             Sigma_g_q = Sigma_g_new.copy()
             Sigma_R_q = Sigma_r_new.copy()
 
-        # Convergence
+        # Convergence: stop when conservation passes through minimum
+        # and starts rising, or when rel_change is small enough
         if scba_iter > 0:
             rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
             convergence_history.append(rel_change)
             if verbose:
+                best_mark = " *" if conservation_err <= best_conservation else ""
                 print(f"    SCBA iter {scba_iter + 1}: "
                       f"J = {J_total:.4e} W, "
                       f"conservation = {conservation_err:.4e}, "
                       f"rel. change = {rel_change:.4e}, "
-                      f"max|Sigma^R| = {np.max(np.abs(Sigma_R_q)):.2e} THz^2")
+                      f"max|Sigma^R| = {np.max(np.abs(Sigma_R_q)):.2e} THz^2"
+                      f"{best_mark}")
+            # Stop when conservation starts rising above 2x its minimum
+            # (the minimum has been passed, further iterations make it worse)
+            if (best_conservation < 0.5
+                    and conservation_err > 2 * best_conservation
+                    and scba_iter >= 5):
+                if verbose:
+                    print(f"    Stopping: conservation rising "
+                          f"({conservation_err:.2e} > 2 * best {best_conservation:.2e}). "
+                          f"Using best state from iter {best_state['iter']}.")
+                break
             if rel_change < scba_tol:
                 if verbose:
                     print(f"    Converged after {scba_iter + 1} iterations "
@@ -927,6 +954,16 @@ def anharmonic_transmission_q(
                       f"J_L = {J_L_total:.4e} W, J_R = {J_R_total:.4e} W")
 
         J_total_prev = J_total
+
+    # Use best-conservation state if it's significantly better than final
+    if (best_state is not None
+            and best_state["conservation_err"] < 0.5 * conservation_err):
+        spectral_J_L = best_state["spectral_J_L"]
+        spectral_J_R = best_state["spectral_J_R"]
+        conservation_err = best_state["conservation_err"]
+        if verbose:
+            print(f"  Using best-conservation state from iter {best_state['iter']} "
+                  f"(conservation={conservation_err:.4e})")
 
     # Final results
     spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
