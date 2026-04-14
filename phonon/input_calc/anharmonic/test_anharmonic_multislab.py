@@ -54,7 +54,6 @@ COMMON = dict(
     max_scba_iter=40,
     scba_tol=0.005,
     mixing=0.15,
-    fc3_mode="full",
 )
 
 
@@ -256,11 +255,12 @@ if __name__ == "__main__":
 
     # --- Computation mode ---
     from run_anharmonic import load_primitive_cell
-    from phonon_inputs.anharmonic import anharmonic_transmission
+    from phonon_inputs.anharmonic import anharmonic_transmission_q
 
     print("=" * 60)
     print("Loading Si primitive cell (phono3py)...")
-    phonon, fc3_data = load_primitive_cell(work_dir)
+    phonon, _ = load_primitive_cell(work_dir)
+    fc3_hdf5 = str(work_dir / "fc3_prim" / "fc3.hdf5")
 
     a1_len = np.linalg.norm(phonon.primitive.cell[0])
     print(f"  |a1| = {a1_len:.4f} A")
@@ -281,8 +281,8 @@ if __name__ == "__main__":
     print("=" * 60)
     for ns in [1, 3, 5]:
         ballistic_params = {**COMMON, "max_scba_iter": 0}
-        res = anharmonic_transmission(
-            phonon, fc3_data, **ballistic_params,
+        res = anharmonic_transmission_q(
+            phonon, fc3_hdf5, **ballistic_params,
             n_slabs=ns, verbose=False,
         )
         print(f"  n_slabs={ns}: max T_ballistic = "
@@ -309,8 +309,8 @@ if __name__ == "__main__":
 
         print(f"\n--- n_slabs = {ns} (device = {ns * a1_len:.1f} A) ---")
         t0 = time.time()
-        res = anharmonic_transmission(
-            phonon, fc3_data, **COMMON,
+        res = anharmonic_transmission_q(
+            phonon, fc3_hdf5, **COMMON,
             n_slabs=ns, verbose=True,
         )
         t1 = time.time()
