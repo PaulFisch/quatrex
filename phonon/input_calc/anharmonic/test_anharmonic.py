@@ -67,7 +67,7 @@ if __name__ == "__main__":
         phonon,
         fc3_data,
         q_mesh_transverse=(4, 4),
-        freq_range_thz=(0.5, 15.0, 51),
+        freq_range_thz=(0.0, 15.0, 51),
         transport_direction="x",
         eta_factor=0.5,
         temperature=300.0,

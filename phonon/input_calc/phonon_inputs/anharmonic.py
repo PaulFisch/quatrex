@@ -20,10 +20,8 @@ from multiprocessing import get_context
 from .constants import (
     CONVERSION_FC3_THZ,
     CONVERSION_THZ2,
-    EV_TO_J,
-    HBAR_EV,
     HBAR_SI,
-    KB_EV,
+    KB_SI,
     THZ_TO_RAD,
 )
 
@@ -133,9 +131,9 @@ def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e
     omega_sq_arr : ndarray, shape (nfreq,)
     H_00, H_01 : ndarray, shape (N, N)
     lead_sigma_r : ndarray, shape (nfreq, N, N), optional
-        Retarded scattering self-energy in the lead bulk.  When given,
-        it is subtracted from the on-site term of every cell in the
-        semi-infinite lead (i.e. the lead is no longer ballistic).
+        Retarded scattering self-energy in the lead bulk.  Included in
+        the on-site block of the semi-infinite lead, following the
+        standard NEGF approach (cf. qttools / OMEN / TranSIESTA).
 
     Returns
     -------
@@ -146,7 +144,8 @@ def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e
     H_10 = H_01.conj().T
     eye = np.eye(N)
 
-    # (nfreq, N, N) broadcast
+    # (nfreq, N, N) broadcast — system-matrix diagonal block:
+    # a_ii = (w^2 + i*eta)*I - H_00 - Sigma_scatt^R
     a_ii = (omega_sq_arr[:, None, None] + 1j * eta) * eye[None] - H_00[None]
     if lead_sigma_r is not None:
         a_ii = a_ii - lead_sigma_r
@@ -281,15 +280,15 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
 
 
 def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
-                        n_slabs=1, lead_sigma_r=None):
+                        n_slabs=1, lead_sigma_r_L=None, lead_sigma_r_R=None):
     """Batched OBC self-energies for all frequencies at once.
 
     Parameters
     ----------
-    lead_sigma_r : ndarray, shape (nfreq, n_dof, n_dof), optional
-        Retarded scattering self-energy in the lead bulk.
-        Included in the Sancho-Rubio decimation so that the
-        contacts are no longer ballistic.
+    lead_sigma_r_L, lead_sigma_r_R : ndarray (nfreq, n_dof, n_dof), optional
+        Retarded scattering self-energy for the left / right lead.
+        Included in the Sancho-Rubio on-site block so that the
+        contacts carry the same scattering as the device boundary.
 
     Returns arrays of shape (nfreq,) for scalar quantities and
     (nfreq, N_D, N_D) for matrices.
@@ -300,9 +299,9 @@ def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
 
     # Batched Sancho-Rubio: (nfreq, n_dof, n_dof)
     g_L_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta,
-                                  lead_sigma_r=lead_sigma_r)
+                                  lead_sigma_r=lead_sigma_r_L)
     g_R_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01.conj().T, eta,
-                                  lead_sigma_r=lead_sigma_r)
+                                  lead_sigma_r=lead_sigma_r_R)
 
     H_01_dag = H_01.conj().T
     # sig_L[w] = H_01^dag @ g_L[w] @ H_01, batched
@@ -444,30 +443,6 @@ def _hilbert_transform_axis(f, axis=1):
     return np.fft.ifft(Ff * (-1j * np.array(h).reshape(shape)), axis=axis)
 
 
-def _fourier_transform_fc3_pair(M_stacked, T_q1, T_q2, nat_prim):
-    """Compute FC3 Fourier transform Phi_hat(q1, q2) on the fly.
-
-    Phi_hat(q1, q2)[a, c, d] = (T(q1) @ M_a @ T(q2)^T)[c, d]
-
-    Parameters
-    ----------
-    M_stacked : ndarray, shape (n_dof * dim_t, dim_t)
-    T_q1, T_q2 : ndarray, shape (n_dof, dim_t)
-    nat_prim : int
-
-    Returns
-    -------
-    Phi_hat : ndarray, shape (n_dof, n_dof, n_dof), complex
-    """
-    n_dof = nat_prim * 3
-    dim_t = T_q1.shape[1]
-    # Reshape M_stacked -> (n_dof, dim_t, dim_t), compute all a at once
-    M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
-    # Phi_hat[a] = T_q1 @ M_blocks[a] @ T_q2^T
-    # = (n_dof, dim_t) @ (n_dof, dim_t, dim_t) @ (dim_t, n_dof)
-    return np.einsum('ci,aij,dj->acd', T_q1, M_blocks, T_q2.conj())
-
-
 def _se_worker_iq(args):
     """Process one chunk of iq_ext values using FFT-domain Phi contraction.
 
@@ -581,20 +556,26 @@ def _compute_phph_self_energy_q_dense(
     n_dof = nat_prim * 3
     dim_t = M_stacked.shape[1]
 
-    # Frequency padding for linear convolution
-    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
-    n_ext = n_low + n_freq
-    n_fft = 2 * n_ext
-    freq_sl = slice(n_low, n_low + n_freq)
+    # Linear convolution via zero-padded FFT.
+    # With a symmetric grid [-fmax,...,0,...,fmax], the convolution of
+    # two n_freq-length signals has length 2*n_freq-1.  The output
+    # mapping back to our grid starts at index mid = (n_freq-1)//2.
+    n_fft = 2 * n_freq - 1
+    mid = (n_freq - 1) // 2
+    freq_sl = slice(mid, mid + n_freq)
 
+    # Prefactor: (i*hbar/2) * dw_THz/(2*pi) / n_kpts.
+    # dw_thz/(2*pi) is correct (not dw_thz*1e12) because the FC3
+    # conversion factor CONVERSION_FC3_THZ absorbs THZ_TO_RAD^{5/2},
+    # so G is in THz^{-2} and the convolution integral measure is dw'_THz/(2*pi).
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
 
     # Pad + FFT all Green's functions: (n_kpts, n_fft, n_dof, n_dof)
     G_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-    G_padded[:, n_low:n_low + n_freq] = G_lesser_q
+    G_padded[:, :n_freq] = G_lesser_q
     GL_fft = np.fft.fft(G_padded, axis=1)
     G_padded[:, :] = 0
-    G_padded[:, n_low:n_low + n_freq] = G_greater_q
+    G_padded[:, :n_freq] = G_greater_q
     GG_fft = np.fft.fft(G_padded, axis=1)
     del G_padded
 
@@ -708,7 +689,12 @@ def anharmonic_transmission_q(
     fc3_hdf5 : str or Path
         Path to raw fc3.hdf5 from phono3py.
     q_mesh_transverse : (int, int)
-    freq_range_thz : (fmin, fmax, nfreq)
+    freq_range_thz : (_, fmax, nfreq_pos)
+        The first element is ignored (kept for backward compatibility).
+        ``nfreq_pos`` uniformly-spaced points from 0 to ``fmax`` THz
+        are generated; the internal grid is the symmetric mirror
+        ``[-fmax, ..., 0, ..., fmax]`` (``2*nfreq_pos - 1`` points).
+        Only the positive-frequency side is returned.
     transport_direction : str
     eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
     anderson_mixing : bool
@@ -727,10 +713,13 @@ def anharmonic_transmission_q(
         Sigma^> - Sigma^<) instead of the default instantaneous
         approximation 0.5*(Sigma^> - Sigma^<).
     scattering_contacts : bool
-        If True, include the phonon-phonon scattering self-energy in
-        the semi-infinite lead surface Green's functions (recomputed
-        each SCBA iteration using the boundary-slab self-energy as
-        approximation for the bulk lead).
+        If True, include the device-boundary scattering self-energy in
+        the lead surface Green's functions (recomputed each SCBA
+        iteration).  The system-matrix on-site block passed to
+        Sancho-Rubio becomes (w^2+i*eta)I - H_00 - Sigma^R_scatt,
+        mirroring what production NEGF codes do for electrons.  Falls
+        back to ballistic OBC for any q-point where Sancho-Rubio
+        diverges.
 
     Returns
     -------
@@ -746,13 +735,19 @@ def anharmonic_transmission_q(
         build_q_diff_map,
     )
 
-    # --- Setup ---
-    fmin, fmax, nfreq = freq_range_thz
-    nfreq = int(nfreq)
-    freqs_thz = np.linspace(fmin, fmax, nfreq)
+    # --- Setup: symmetric frequency grid [-fmax, ..., 0, ..., fmax] ---
+    # Grid must be uniform for FFT convolution. nfreq_pos points from 0 to fmax,
+    # mirrored to negative side. fmin is ignored for grid construction (the full
+    # symmetric grid always includes 0). Output returns ω >= 0 only.
+    _fmin, fmax, nfreq_pos = freq_range_thz
+    nfreq_pos = int(nfreq_pos)
+    freqs_pos = np.linspace(0.0, fmax, nfreq_pos)
+    freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
+    nfreq = len(freqs_thz)
+    dw_thz = freqs_pos[1] - freqs_pos[0]
     omega_sq_thz2 = freqs_thz ** 2
-    dw_thz = freqs_thz[1] - freqs_thz[0]
     eta = dw_thz ** 2 * eta_factor
+    pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
@@ -800,13 +795,13 @@ def anharmonic_transmission_q(
         )
         T_all_q.append(T)
 
-    # --- Bose-Einstein ---
+    # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
     def bose_einstein(freq_thz_arr, T):
-        hw = HBAR_EV * np.abs(freq_thz_arr) * THZ_TO_RAD
-        x = hw / (KB_EV * T)
+        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
+        x = HBAR_SI * omega_rad_s / (KB_SI * T)
         n = np.zeros_like(x)
-        valid = x > 1e-10
-        n[valid] = 1.0 / (np.exp(x[valid]) - 1.0)
+        valid = x > 1e-12
+        n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
     T_L = temperature + delta_T / 2.0
@@ -816,7 +811,8 @@ def anharmonic_transmission_q(
 
     if verbose:
         print(f"  q-mesh: {nkx}x{nky} = {n_kpts} (Gamma-centered)")
-        print(f"  Frequency grid: {nfreq} points, {fmin:.2f} to {fmax:.2f} THz")
+        print(f"  Frequency grid: {nfreq} points ({nfreq_pos} positive), "
+              f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
         print(f"  eta = {eta:.4e} THz^2")
         mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
@@ -875,7 +871,8 @@ def anharmonic_transmission_q(
     omega_rad = freqs_thz * THZ_TO_RAD
     spectral_J_ball = (HBAR_SI * omega_rad
                        * (n_bose_L - n_bose_R) * trans_ballistic)
-    J_ball_total = np.sum(spectral_J_ball) * dw_thz * 1e12
+    # Integrate only over positive frequencies (physical spectrum)
+    J_ball_total = np.sum(spectral_J_ball[pos_mask]) * dw_thz * 1e12
     G_ball = J_ball_total / (A_c * delta_T)
 
     if verbose:
@@ -906,17 +903,17 @@ def anharmonic_transmission_q(
         # Update OBC with scattering in the leads
         if scattering_contacts and scba_iter > 0:
             for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks):
-                # Use only the imaginary part (scattering rate) of the
-                # boundary-slab retarded SE as lead broadening.  The real
-                # part (energy shift) from the non-equilibrium device is
-                # not representative of the equilibrium bulk lead and can
-                # destabilise the Sancho-Rubio decimation.
-                sr_avg = 0.5 * (Sigma_R_q[0, iq] + Sigma_R_q[-1, iq])
-                lead_sr = 1j * sr_avg.imag
-                obc_all[iq] = _compute_obc_batch(
+                obc_try = _compute_obc_batch(
                     omega_sq_thz2, H_00_iq, H_01_iq, eta,
                     n_bose_L, n_bose_R, n_slabs=n_slabs,
-                    lead_sigma_r=lead_sr)
+                    lead_sigma_r_L=Sigma_R_q[0, iq],
+                    lead_sigma_r_R=Sigma_R_q[-1, iq])
+                if np.any(np.isnan(obc_try["Sigma_L_R"])):
+                    if verbose:
+                        print(f"    WARNING: scattering-contact OBC "
+                              f"diverged for iq={iq}, using ballistic")
+                else:
+                    obc_all[iq] = obc_try
 
         G_lesser_slab_q = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex
@@ -965,8 +962,9 @@ def anharmonic_transmission_q(
         spectral_J_L /= n_kpts
         spectral_J_R /= n_kpts
 
-        J_L_total = np.sum(spectral_J_L) * dw_thz * 1e12
-        J_R_total = np.sum(spectral_J_R) * dw_thz * 1e12
+        # Integrate only over positive frequencies (physical spectrum)
+        J_L_total = np.sum(spectral_J_L[pos_mask]) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R[pos_mask]) * dw_thz * 1e12
         J_total = 0.5 * (J_L_total + J_R_total)
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
@@ -1106,23 +1104,24 @@ def anharmonic_transmission_q(
             print(f"  Using best-conservation state from iter {best_state['iter']} "
                   f"(conservation={conservation_err:.4e})")
 
-    # Final results
+    # Final results — integrate positive frequencies only
     spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
-    J_anh_total = np.sum(spectral_J_anh) * dw_thz * 1e12
+    J_anh_total = np.sum(spectral_J_anh[pos_mask]) * dw_thz * 1e12
     G_anh = J_anh_total / (A_c * delta_T)
 
     if verbose:
         print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
         print(f"  Heat flow conservation: {conservation_err:.4e}")
 
+    # Return positive-frequency side only
     return {
-        "freqs_thz": freqs_thz,
-        "omega_rad": freqs_thz * THZ_TO_RAD,
-        "transmission_ballistic": trans_ballistic,
-        "spectral_heat_current_ballistic": spectral_J_ball,
-        "spectral_heat_current": spectral_J_anh,
-        "spectral_heat_current_L": spectral_J_L.copy(),
-        "spectral_heat_current_R": spectral_J_R.copy(),
+        "freqs_thz": freqs_thz[pos_mask],
+        "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
+        "transmission_ballistic": trans_ballistic[pos_mask],
+        "spectral_heat_current_ballistic": spectral_J_ball[pos_mask],
+        "spectral_heat_current": spectral_J_anh[pos_mask],
+        "spectral_heat_current_L": spectral_J_L[pos_mask].copy(),
+        "spectral_heat_current_R": spectral_J_R[pos_mask].copy(),
         "heat_current_ballistic": J_ball_total,
         "heat_current": J_anh_total,
         "thermal_conductance_ballistic": G_ball,
@@ -1131,9 +1130,9 @@ def anharmonic_transmission_q(
         "delta_T": delta_T,
         "n_scba_iterations": len(convergence_history) + 1,
         "convergence_history": convergence_history,
-        "self_energy_retarded": Sigma_R_q,
-        "self_energy_lesser": Sigma_l_q,
-        "self_energy_greater": Sigma_g_q,
+        "self_energy_retarded": Sigma_R_q[:, :, pos_mask],
+        "self_energy_lesser": Sigma_l_q[:, :, pos_mask],
+        "self_energy_greater": Sigma_g_q[:, :, pos_mask],
     }
 
 
@@ -1170,20 +1169,19 @@ def _compute_phph_self_energy_finite(
     nd = Phi.shape[0]
     nd2 = nd * nd
 
-    # Frequency padding for linear convolution via FFT
-    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
-    n_ext = n_low + n_freq
-    n_fft = 2 * n_ext
-    freq_sl = slice(n_low, n_low + n_freq)
+    # Linear convolution via zero-padded FFT (see q-dense version for details).
+    n_fft = 2 * n_freq - 1
+    mid = (n_freq - 1) // 2
+    freq_sl = slice(mid, mid + n_freq)
 
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
 
     # Pad + FFT Green's functions: (n_fft, nd, nd)
     G_pad = np.zeros((n_fft, nd, nd), dtype=complex)
-    G_pad[n_low:n_low + n_freq] = G_lesser
+    G_pad[:n_freq] = G_lesser
     GL_fft = np.fft.fft(G_pad, axis=0)
     G_pad[:] = 0
-    G_pad[n_low:n_low + n_freq] = G_greater
+    G_pad[:n_freq] = G_greater
     GG_fft = np.fft.fft(G_pad, axis=0)
     del G_pad
 
@@ -1245,7 +1243,8 @@ def anharmonic_transmission_finite(
     phonon : Phonopy
     fc3_hdf5 : str or Path
         Path to raw fc3.hdf5 from phono3py.
-    freq_range_thz : (fmin, fmax, nfreq)
+    freq_range_thz : (_, fmax, nfreq_pos)
+        See ``anharmonic_transmission_q`` for details.
     transport_direction : str
     eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
     anderson_mixing : bool
@@ -1256,7 +1255,9 @@ def anharmonic_transmission_finite(
     hilbert_retarded : bool
         Use Hilbert-transform retarded self-energy.
     scattering_contacts : bool
-        Include scattering self-energy in lead surface Green's functions.
+        Include device-boundary scattering self-energy in the lead
+        surface Green's functions.  Falls back to ballistic OBC if
+        Sancho-Rubio diverges.
 
     Returns
     -------
@@ -1271,13 +1272,16 @@ def anharmonic_transmission_finite(
         build_gathering_matrix,
     )
 
-    # --- Setup ---
-    fmin, fmax, nfreq = freq_range_thz
-    nfreq = int(nfreq)
-    freqs_thz = np.linspace(fmin, fmax, nfreq)
+    # --- Setup: symmetric frequency grid [-fmax, ..., 0, ..., fmax] ---
+    _fmin, fmax, nfreq_pos = freq_range_thz
+    nfreq_pos = int(nfreq_pos)
+    freqs_pos = np.linspace(0.0, fmax, nfreq_pos)
+    freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
+    nfreq = len(freqs_thz)
+    dw_thz = freqs_pos[1] - freqs_pos[0]
     omega_sq_thz2 = freqs_thz ** 2
-    dw_thz = freqs_thz[1] - freqs_thz[0]
     eta = dw_thz ** 2 * eta_factor
+    pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
@@ -1317,13 +1321,13 @@ def anharmonic_transmission_finite(
         print(f"  Phi norm: {np.linalg.norm(Phi):.4e}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs (finite, Gamma only)")
 
-    # --- Bose-Einstein ---
+    # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
     def bose_einstein(freq_thz_arr, T):
-        hw = HBAR_EV * np.abs(freq_thz_arr) * THZ_TO_RAD
-        x = hw / (KB_EV * T)
+        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
+        x = HBAR_SI * omega_rad_s / (KB_SI * T)
         n = np.zeros_like(x)
-        valid = x > 1e-10
-        n[valid] = 1.0 / (np.exp(x[valid]) - 1.0)
+        valid = x > 1e-12
+        n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
     T_L = temperature + delta_T / 2.0
@@ -1332,7 +1336,8 @@ def anharmonic_transmission_finite(
     n_bose_R = bose_einstein(freqs_thz, T_R)
 
     if verbose:
-        print(f"  Frequency grid: {nfreq} points, {fmin:.2f} to {fmax:.2f} THz")
+        print(f"  Frequency grid: {nfreq} points ({nfreq_pos} positive), "
+              f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
         print(f"  eta = {eta:.4e} THz^2")
         mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
@@ -1381,7 +1386,8 @@ def anharmonic_transmission_finite(
     omega_rad = freqs_thz * THZ_TO_RAD
     spectral_J_ball = (HBAR_SI * omega_rad
                        * (n_bose_L - n_bose_R) * trans_ballistic)
-    J_ball_total = np.sum(spectral_J_ball) * dw_thz * 1e12
+    # Integrate only over positive frequencies (physical spectrum)
+    J_ball_total = np.sum(spectral_J_ball[pos_mask]) * dw_thz * 1e12
     G_ball = J_ball_total / (A_c * delta_T)
 
     if verbose:
@@ -1410,12 +1416,17 @@ def anharmonic_transmission_finite(
     for scba_iter in range(max_scba_iter):
         # Update OBC with scattering in the leads
         if scattering_contacts and scba_iter > 0:
-            sr_avg = 0.5 * (Sigma_R[0] + Sigma_R[-1])
-            lead_sr = 1j * sr_avg.imag
-            obc = _compute_obc_batch(
+            obc_try = _compute_obc_batch(
                 omega_sq_thz2, H_00, H_01, eta,
                 n_bose_L, n_bose_R, n_slabs=n_slabs,
-                lead_sigma_r=lead_sr)
+                lead_sigma_r_L=Sigma_R[0],
+                lead_sigma_r_R=Sigma_R[-1])
+            if np.any(np.isnan(obc_try["Sigma_L_R"])):
+                if verbose:
+                    print("    WARNING: scattering-contact OBC "
+                          "diverged, using ballistic")
+            else:
+                obc = obc_try
 
         G_lesser_slab = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
         G_greater_slab = np.zeros_like(G_lesser_slab)
@@ -1451,8 +1462,9 @@ def anharmonic_transmission_finite(
         spectral_J_R = HBAR_SI * omega_rad * np.real(
             np.trace(SRl_Gg - SRg_Gl, axis1=-2, axis2=-1))
 
-        J_L_total = np.sum(spectral_J_L) * dw_thz * 1e12
-        J_R_total = np.sum(spectral_J_R) * dw_thz * 1e12
+        # Integrate only over positive frequencies (physical spectrum)
+        J_L_total = np.sum(spectral_J_L[pos_mask]) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R[pos_mask]) * dw_thz * 1e12
         J_total = 0.5 * (J_L_total + J_R_total)
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
@@ -1581,23 +1593,24 @@ def anharmonic_transmission_finite(
                   f"{best_state['iter']} "
                   f"(conservation={conservation_err:.4e})")
 
-    # Final results
+    # Final results — integrate positive frequencies only
     spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
-    J_anh_total = np.sum(spectral_J_anh) * dw_thz * 1e12
+    J_anh_total = np.sum(spectral_J_anh[pos_mask]) * dw_thz * 1e12
     G_anh = J_anh_total / (A_c * delta_T)
 
     if verbose:
         print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
         print(f"  Heat flow conservation: {conservation_err:.4e}")
 
+    # Return positive-frequency side only
     return {
-        "freqs_thz": freqs_thz,
-        "omega_rad": freqs_thz * THZ_TO_RAD,
-        "transmission_ballistic": trans_ballistic,
-        "spectral_heat_current_ballistic": spectral_J_ball,
-        "spectral_heat_current": spectral_J_anh,
-        "spectral_heat_current_L": spectral_J_L.copy(),
-        "spectral_heat_current_R": spectral_J_R.copy(),
+        "freqs_thz": freqs_thz[pos_mask],
+        "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
+        "transmission_ballistic": trans_ballistic[pos_mask],
+        "spectral_heat_current_ballistic": spectral_J_ball[pos_mask],
+        "spectral_heat_current": spectral_J_anh[pos_mask],
+        "spectral_heat_current_L": spectral_J_L[pos_mask].copy(),
+        "spectral_heat_current_R": spectral_J_R[pos_mask].copy(),
         "heat_current_ballistic": J_ball_total,
         "heat_current": J_anh_total,
         "thermal_conductance_ballistic": G_ball,
@@ -1606,7 +1619,7 @@ def anharmonic_transmission_finite(
         "delta_T": delta_T,
         "n_scba_iterations": len(convergence_history) + 1,
         "convergence_history": convergence_history,
-        "self_energy_retarded": Sigma_R,
-        "self_energy_lesser": Sigma_l,
-        "self_energy_greater": Sigma_g,
+        "self_energy_retarded": Sigma_R[:, pos_mask],
+        "self_energy_lesser": Sigma_l[:, pos_mask],
+        "self_energy_greater": Sigma_g[:, pos_mask],
     }

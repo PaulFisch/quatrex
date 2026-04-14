@@ -29,7 +29,7 @@ sys.path.insert(0, str(work_dir))
 
 from run_anharmonic import load_primitive_cell
 from phonon_inputs.constants import (
-    CONVERSION_FC3_THZ, CONVERSION_THZ2, HBAR_EV, HBAR_SI, KB_EV, THZ_TO_RAD,
+    CONVERSION_FC3_THZ, CONVERSION_THZ2, HBAR_SI, KB_SI, THZ_TO_RAD,
 )
 from phonon_inputs.separable import (
     build_supercell_mapping,
@@ -62,7 +62,7 @@ from compare_fc3_approximations import (
 def compute_transport(
     phonon, M_stacked,
     q_mesh_transverse=(4, 4),
-    freq_range_thz=(0.5, 15.0, 51),
+    freq_range_thz=(0.0, 15.0, 51),
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,
@@ -78,12 +78,15 @@ def compute_transport(
     Same as anharmonic_transmission_q but takes M_stacked directly.
     Returns dict with thermal_conductance_anharmonic, etc.
     """
-    fmin, fmax, nfreq = freq_range_thz
-    nfreq = int(nfreq)
-    freqs_thz = np.linspace(fmin, fmax, nfreq)
+    _fmin, fmax, nfreq_pos = freq_range_thz
+    nfreq_pos = int(nfreq_pos)
+    freqs_pos = np.linspace(0.0, fmax, nfreq_pos)
+    freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
+    nfreq = len(freqs_thz)
+    dw_thz = freqs_pos[1] - freqs_pos[0]
     omega_sq_thz2 = freqs_thz ** 2
-    dw_thz = freqs_thz[1] - freqs_thz[0]
     eta = dw_thz ** 2 * eta_factor
+    pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
@@ -101,13 +104,13 @@ def compute_transport(
     T_all_q = [build_gathering_matrix(prim_indices, cell_frac, q, n_atoms,
                                        transport_direction) for q in q_points]
 
-    # Bose-Einstein
+    # Bose-Einstein (SI units, expm1 for numerical stability)
     def bose_einstein(freq_thz_arr, T):
-        hw = HBAR_EV * np.abs(freq_thz_arr) * THZ_TO_RAD
-        x = hw / (KB_EV * T)
+        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
+        x = HBAR_SI * omega_rad_s / (KB_SI * T)
         n = np.zeros_like(x)
-        valid = x > 1e-10
-        n[valid] = 1.0 / (np.exp(x[valid]) - 1.0)
+        valid = x > 1e-12
+        n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
     T_L = temperature + delta_T / 2.0
@@ -145,7 +148,7 @@ def compute_transport(
 
     omega_rad = freqs_thz * THZ_TO_RAD
     spectral_J_ball = HBAR_SI * omega_rad * (n_bose_L - n_bose_R) * trans_ballistic
-    J_ball_total = np.sum(spectral_J_ball) * dw_thz * 1e12
+    J_ball_total = np.sum(spectral_J_ball[pos_mask]) * dw_thz * 1e12
     G_ball = J_ball_total / (A_c * delta_T)
 
     # SCBA
@@ -198,8 +201,8 @@ def compute_transport(
         spectral_J_L /= n_kpts
         spectral_J_R /= n_kpts
 
-        J_L_total = np.sum(spectral_J_L) * dw_thz * 1e12
-        J_R_total = np.sum(spectral_J_R) * dw_thz * 1e12
+        J_L_total = np.sum(spectral_J_L[pos_mask]) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R[pos_mask]) * dw_thz * 1e12
         J_total = 0.5 * (J_L_total + J_R_total)
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = abs(J_L_total - J_R_total) / J_denom if J_denom > 0 else 0.0
@@ -242,18 +245,18 @@ def compute_transport(
         J_total_prev = J_total
 
     spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
-    J_anh_total = np.sum(spectral_J_anh) * dw_thz * 1e12
+    J_anh_total = np.sum(spectral_J_anh[pos_mask]) * dw_thz * 1e12
     G_anh = J_anh_total / (A_c * delta_T)
 
     return {
         "thermal_conductance_ballistic": G_ball,
         "thermal_conductance_anharmonic": G_anh,
         "heat_flow_conservation": conservation_err,
-        "spectral_heat_current": spectral_J_anh,
-        "spectral_heat_current_L": spectral_J_L.copy(),
-        "spectral_heat_current_R": spectral_J_R.copy(),
-        "spectral_heat_current_ballistic": spectral_J_ball,
-        "freqs_thz": freqs_thz,
+        "spectral_heat_current": spectral_J_anh[pos_mask],
+        "spectral_heat_current_L": spectral_J_L[pos_mask].copy(),
+        "spectral_heat_current_R": spectral_J_R[pos_mask].copy(),
+        "spectral_heat_current_ballistic": spectral_J_ball[pos_mask],
+        "freqs_thz": freqs_thz[pos_mask],
         "n_scba_iterations": scba_iter + 1,
         "convergence_history": convergence_history,
     }
@@ -295,7 +298,7 @@ def main():
     # Transport parameters (small mesh for reasonable runtime)
     transport_kw = dict(
         q_mesh_transverse=(4, 4),
-        freq_range_thz=(0.5, 15.0, 51),
+        freq_range_thz=(0.0, 15.0, 51),
         transport_direction="x",
         eta_factor=0.5,
         temperature=300.0,

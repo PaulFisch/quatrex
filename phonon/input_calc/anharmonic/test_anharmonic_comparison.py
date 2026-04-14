@@ -61,7 +61,7 @@ t0 = time.time()
 result_300 = anharmonic_transmission(
     phonon, fc3_data,
     q_mesh_transverse=(4, 4),
-    freq_range_thz=(0.5, 15.0, 101),
+    freq_range_thz=(0.0, 15.0, 101),
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,
@@ -127,7 +127,7 @@ for T in temperatures:
     res = anharmonic_transmission(
         phonon, fc3_data,
         q_mesh_transverse=(4, 4),
-        freq_range_thz=(0.5, 15.0, 51),
+        freq_range_thz=(0.0, 15.0, 51),
         transport_direction="x",
         eta_factor=0.5,
         temperature=float(T),

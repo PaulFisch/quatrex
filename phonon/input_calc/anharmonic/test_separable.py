@@ -220,7 +220,7 @@ def test_scba(phonon_fd, fc3_hdf5_fd, phonon_dfpt, fc3_hdf5_dfpt):
     print("=" * 60)
 
     common = dict(
-        freq_range_thz=(1.0, 14.0, 31),
+        freq_range_thz=(0.0, 14.0, 31),
         transport_direction="x",
         eta_factor=0.5,
         temperature=300.0,
