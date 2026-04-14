@@ -55,6 +55,9 @@ COMMON = dict(
     max_scba_iter=40,
     scba_tol=0.005,
     mixing=0.15,
+    scattering_contacts=False,
+    anderson_mixing = True,
+    anderson_depth = 5,
 )
 
 

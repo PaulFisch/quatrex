@@ -124,13 +124,18 @@ def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
     return inv(eps_s)
 
 
-def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
+def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8,
+                        lead_sigma_r=None):
     """Batched surface Green's function for multiple frequencies at once.
 
     Parameters
     ----------
     omega_sq_arr : ndarray, shape (nfreq,)
     H_00, H_01 : ndarray, shape (N, N)
+    lead_sigma_r : ndarray, shape (nfreq, N, N), optional
+        Retarded scattering self-energy in the lead bulk.  When given,
+        it is subtracted from the on-site term of every cell in the
+        semi-infinite lead (i.e. the lead is no longer ballistic).
 
     Returns
     -------
@@ -143,6 +148,8 @@ def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e
 
     # (nfreq, N, N) broadcast
     a_ii = (omega_sq_arr[:, None, None] + 1j * eta) * eye[None] - H_00[None]
+    if lead_sigma_r is not None:
+        a_ii = a_ii - lead_sigma_r
     eps = a_ii.copy()
     eps_s = a_ii.copy()
     alpha = np.broadcast_to(-H_10, (nfreq, N, N)).copy()
@@ -274,8 +281,15 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
 
 
 def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
-                        n_slabs=1):
+                        n_slabs=1, lead_sigma_r=None):
     """Batched OBC self-energies for all frequencies at once.
+
+    Parameters
+    ----------
+    lead_sigma_r : ndarray, shape (nfreq, n_dof, n_dof), optional
+        Retarded scattering self-energy in the lead bulk.
+        Included in the Sancho-Rubio decimation so that the
+        contacts are no longer ballistic.
 
     Returns arrays of shape (nfreq,) for scalar quantities and
     (nfreq, N_D, N_D) for matrices.
@@ -285,8 +299,10 @@ def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
     N_D = n_slabs * n_dof
 
     # Batched Sancho-Rubio: (nfreq, n_dof, n_dof)
-    g_L_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta)
-    g_R_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01.conj().T, eta)
+    g_L_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta,
+                                  lead_sigma_r=lead_sigma_r)
+    g_R_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01.conj().T, eta,
+                                  lead_sigma_r=lead_sigma_r)
 
     H_01_dag = H_01.conj().T
     # sig_L[w] = H_01^dag @ g_L[w] @ H_01, batched
@@ -679,6 +695,7 @@ def anharmonic_transmission_q(
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
     hilbert_retarded: bool = False,
+    scattering_contacts: bool = False,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -709,6 +726,11 @@ def anharmonic_transmission_q(
         (includes the Hilbert-transform / principal-value integral of
         Sigma^> - Sigma^<) instead of the default instantaneous
         approximation 0.5*(Sigma^> - Sigma^<).
+    scattering_contacts : bool
+        If True, include the phonon-phonon scattering self-energy in
+        the semi-infinite lead surface Green's functions (recomputed
+        each SCBA iteration using the boundary-slab self-energy as
+        approximation for the bulk lead).
 
     Returns
     -------
@@ -814,7 +836,8 @@ def anharmonic_transmission_q(
 
     # --- Precompute OBC self-energies for all q and all frequencies ---
     if verbose:
-        print("  Precomputing OBC self-energies (batched)...")
+        suffix = " (will update each SCBA iter)" if scattering_contacts else ""
+        print(f"  Precomputing OBC self-energies (batched)...{suffix}")
     obc_all = []  # list of dicts, one per q-point
     H_D_all = []
     for iq, (H_00, H_01) in enumerate(btd_blocks):
@@ -880,6 +903,16 @@ def anharmonic_transmission_q(
     sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
 
     for scba_iter in range(max_scba_iter):
+        # Update OBC with scattering in the leads
+        if scattering_contacts and scba_iter > 0:
+            for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks):
+                # Average boundary-slab retarded SE as lead bulk estimate
+                lead_sr = 0.5 * (Sigma_R_q[0, iq] + Sigma_R_q[-1, iq])
+                obc_all[iq] = _compute_obc_batch(
+                    omega_sq_thz2, H_00_iq, H_01_iq, eta,
+                    n_bose_L, n_bose_R, n_slabs=n_slabs,
+                    lead_sigma_r=lead_sr)
+
         G_lesser_slab_q = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex
         )
@@ -937,7 +970,7 @@ def anharmonic_transmission_q(
         # Track best-conservation state (SCBA fixed point may overshoot)
         # Skip first 3 iterations — conservation is trivially good before
         # self-energy has been mixed in properly
-        if scba_iter >= 3 and conservation_err < best_conservation:
+        if scba_iter >= 200 and conservation_err < best_conservation:
             best_conservation = conservation_err
             best_state = {
                 "spectral_J_L": spectral_J_L.copy(),
@@ -1039,7 +1072,7 @@ def anharmonic_transmission_q(
             # (the minimum has been passed, further iterations make it worse)
             if (best_conservation < 0.5
                     and conservation_err > 2 * best_conservation
-                    and scba_iter >= 5):
+                    and scba_iter >= 200):
                 if verbose:
                     print(f"    Stopping: conservation rising "
                           f"({conservation_err:.2e} > 2 * best {best_conservation:.2e}). "
@@ -1096,4 +1129,478 @@ def anharmonic_transmission_q(
         "self_energy_retarded": Sigma_R_q,
         "self_energy_lesser": Sigma_l_q,
         "self_energy_greater": Sigma_g_q,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Finite-device (Gamma-point) self-energy and transport
+# ---------------------------------------------------------------------------
+
+
+def _compute_phph_self_energy_finite(
+    G_lesser, G_greater, Phi, omega_grid_thz, dw_thz,
+    hilbert_retarded=False,
+):
+    """Phonon-phonon self-energy for a finite device (no transverse q).
+
+    Same bubble diagram as the q-dependent version but evaluated at the
+    Gamma point only, appropriate for devices that are finite in the
+    transverse directions.
+
+    Parameters
+    ----------
+    G_lesser, G_greater : ndarray, shape (n_freq, n_dof, n_dof)
+        Slab-diagonal lesser/greater Green's functions.
+    Phi : ndarray, shape (n_dof, n_dof, n_dof)
+        Mass-weighted FC3 tensor at Gamma: Phi[a, c, d].
+    omega_grid_thz : ndarray, shape (n_freq,)
+    dw_thz : float
+    hilbert_retarded : bool
+
+    Returns
+    -------
+    Sigma_lesser, Sigma_greater, Sigma_retarded : (n_freq, n_dof, n_dof)
+    """
+    n_freq = len(omega_grid_thz)
+    nd = Phi.shape[0]
+    nd2 = nd * nd
+
+    # Frequency padding for linear convolution via FFT
+    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
+    n_ext = n_low + n_freq
+    n_fft = 2 * n_ext
+    freq_sl = slice(n_low, n_low + n_freq)
+
+    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
+
+    # Pad + FFT Green's functions: (n_fft, nd, nd)
+    G_pad = np.zeros((n_fft, nd, nd), dtype=complex)
+    G_pad[n_low:n_low + n_freq] = G_lesser
+    GL_fft = np.fft.fft(G_pad, axis=0)
+    G_pad[:] = 0
+    G_pad[n_low:n_low + n_freq] = G_greater
+    GG_fft = np.fft.fft(G_pad, axis=0)
+    del G_pad
+
+    PL_flat = Phi.reshape(nd2, nd)          # Phi[ac, d]
+    PR_flat = Phi.conj().reshape(nd, nd2)   # Phi*[b, ef]
+
+    sig_l = np.zeros((n_freq, nd, nd), dtype=complex)
+    sig_g = np.zeros_like(sig_l)
+
+    for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
+        # Step 1: A[W,ac,e] = PL[ac,d] @ G[W,d,e]
+        A = PL_flat[None] @ G_fft                       # (nfft, nd2, nd)
+        A = A.reshape(n_fft, nd, nd, nd)                 # (nfft, a, c, e)
+
+        # Step 2: B[W,a,e,f] = A[W,a,e,c] @ G[W,c,f]
+        A = A.transpose(0, 1, 3, 2)                      # (nfft, a, e, c)
+        B = A @ G_fft[:, None, :, :]                     # (nfft, a, e, f)
+
+        # Step 3: S[W,a,b] = sum_{ef} B[W,a,ef] @ PR[ef,b]
+        S = B.reshape(n_fft * nd, nd2) @ PR_flat.T       # (nfft*nd, nd)
+        sig_out[:] = prefactor * np.fft.ifft(
+            S.reshape(n_fft, nd, nd), axis=0)[freq_sl]
+
+    delta = sig_g - sig_l
+    if hilbert_retarded:
+        sig_r = 0.5 * delta + 0.5j * _hilbert_transform_axis(delta, axis=0)
+    else:
+        sig_r = 0.5 * delta
+    return sig_l, sig_g, sig_r
+
+
+def anharmonic_transmission_finite(
+    phonon,
+    fc3_hdf5: str = None,
+    freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 101),
+    transport_direction: str = "x",
+    eta_factor: float = 0.5,
+    temperature: float = 300.0,
+    delta_T: float = 10.0,
+    max_scba_iter: int = 10,
+    scba_tol: float = 0.01,
+    mixing: float = 0.5,
+    anderson_mixing: bool = False,
+    anderson_depth: int = 5,
+    n_slabs: int = 1,
+    verbose: bool = True,
+    M_stacked_override: np.ndarray = None,
+    hilbert_retarded: bool = False,
+    scattering_contacts: bool = False,
+) -> dict:
+    """Anharmonic phonon transport for a finite device (no transverse q).
+
+    Equivalent to ``anharmonic_transmission_q`` with a 1x1 q-mesh (Gamma
+    point only), but avoids all q-space machinery for clarity and lower
+    overhead.
+
+    Parameters
+    ----------
+    phonon : Phonopy
+    fc3_hdf5 : str or Path
+        Path to raw fc3.hdf5 from phono3py.
+    freq_range_thz : (fmin, fmax, nfreq)
+    transport_direction : str
+    eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
+    anderson_mixing : bool
+    anderson_depth : int
+    n_slabs : int
+    verbose : bool
+    M_stacked_override : ndarray, optional
+    hilbert_retarded : bool
+        Use Hilbert-transform retarded self-energy.
+    scattering_contacts : bool
+        Include scattering self-energy in lead surface Green's functions.
+
+    Returns
+    -------
+    result : dict
+    """
+    import h5py
+    from .convention import get_btd_blocks
+    from .validation import _ballistic_transmission
+    from .separable import (
+        build_supercell_mapping,
+        build_realspace_fc3_matrices,
+        build_gathering_matrix,
+    )
+
+    # --- Setup ---
+    fmin, fmax, nfreq = freq_range_thz
+    nfreq = int(nfreq)
+    freqs_thz = np.linspace(fmin, fmax, nfreq)
+    omega_sq_thz2 = freqs_thz ** 2
+    dw_thz = freqs_thz[1] - freqs_thz[0]
+    eta = dw_thz ** 2 * eta_factor
+
+    n_atoms = len(phonon.primitive.masses)
+    n_dof = 3 * n_atoms
+    N_D = n_slabs * n_dof
+
+    # --- Supercell mapping ---
+    prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
+        phonon, transport_direction
+    )
+    masses_super = phonon.supercell.masses
+    n_super = len(masses_super)
+    dim_sc = n_super * 3
+
+    # --- Load raw FC3 and build real-space matrices ---
+    if M_stacked_override is not None:
+        M_stacked = M_stacked_override
+    else:
+        with h5py.File(fc3_hdf5, "r") as f:
+            fc3_raw = np.array(f["fc3"])
+        M_stacked = build_realspace_fc3_matrices(
+            fc3_raw, n_atoms, masses_super, ref_sc_atoms
+        )
+
+    # --- Phi at Gamma: Phi[a,c,d] = T(0) @ M_a @ T(0)^T ---
+    T0 = build_gathering_matrix(
+        prim_indices, cell_frac,
+        (0.0, 0.0), n_atoms, transport_direction,
+    )
+    M_blocks = M_stacked.reshape(n_dof, dim_sc, dim_sc)
+    Phi = np.einsum('ci,aij,dj->acd', T0, M_blocks, T0.conj())
+
+    if verbose:
+        if M_stacked_override is None:
+            print(f"  FC3 raw shape: {fc3_raw.shape}")
+        print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
+        print(f"  M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
+        print(f"  Phi norm: {np.linalg.norm(Phi):.4e}")
+        print(f"  Device: {n_slabs} slab(s), {N_D} DOFs (finite, Gamma only)")
+
+    # --- Bose-Einstein ---
+    def bose_einstein(freq_thz_arr, T):
+        hw = HBAR_EV * np.abs(freq_thz_arr) * THZ_TO_RAD
+        x = hw / (KB_EV * T)
+        n = np.zeros_like(x)
+        valid = x > 1e-10
+        n[valid] = 1.0 / (np.exp(x[valid]) - 1.0)
+        return n
+
+    T_L = temperature + delta_T / 2.0
+    T_R = temperature - delta_T / 2.0
+    n_bose_L = bose_einstein(freqs_thz, T_L)
+    n_bose_R = bose_einstein(freqs_thz, T_R)
+
+    if verbose:
+        print(f"  Frequency grid: {nfreq} points, {fmin:.2f} to {fmax:.2f} THz")
+        print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
+        print(f"  eta = {eta:.4e} THz^2")
+        mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
+                   else "linear")
+        print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
+              f"mix={mixing}, method={mix_str}")
+        if hilbert_retarded:
+            print("  Retarded SE: Hilbert transform (Kramers-Kronig)")
+
+    # --- BTD blocks at Gamma ---
+    H_00, H_01 = get_btd_blocks(
+        phonon, (0.0, 0.0), transport_direction=transport_direction,
+        conversion_factor=CONVERSION_THZ2,
+    )
+    H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
+
+    # --- OBC self-energies (batched over frequency) ---
+    if verbose:
+        suffix = " (will update each SCBA iter)" if scattering_contacts else ""
+        print(f"  Precomputing OBC self-energies (batched)...{suffix}")
+    obc = _compute_obc_batch(omega_sq_thz2, H_00, H_01, eta,
+                             n_bose_L, n_bose_R, n_slabs=n_slabs)
+
+    # --- Ballistic transmission ---
+    H_LD = np.zeros((n_dof, N_D), dtype=complex)
+    H_LD[:, :n_dof] = H_01
+    H_DR = np.zeros((N_D, n_dof), dtype=complex)
+    H_DR[-n_dof:, :] = H_01
+    trans_ballistic = np.zeros(nfreq)
+    for iw, w2 in enumerate(omega_sq_thz2):
+        trans_ballistic[iw] = _ballistic_transmission(
+            w2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR, eta=eta
+        )
+
+    if verbose:
+        print(f"  Ballistic max T: {trans_ballistic.max():.4f}")
+
+    # Cross-sectional area
+    lattice = phonon.primitive.cell
+    tidx = "xyz".index(transport_direction)
+    perp_idx = [i for i in range(3) if i != tidx]
+    a1 = lattice[perp_idx[0]]
+    a2 = lattice[perp_idx[1]]
+    A_c = np.linalg.norm(np.cross(a1, a2)) * 1e-20
+
+    omega_rad = freqs_thz * THZ_TO_RAD
+    spectral_J_ball = (HBAR_SI * omega_rad
+                       * (n_bose_L - n_bose_R) * trans_ballistic)
+    J_ball_total = np.sum(spectral_J_ball) * dw_thz * 1e12
+    G_ball = J_ball_total / (A_c * delta_T)
+
+    if verbose:
+        print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
+
+    # --- SCBA ---
+    Sigma_R = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
+    Sigma_l = np.zeros_like(Sigma_R)
+    Sigma_g = np.zeros_like(Sigma_R)
+
+    convergence_history = []
+    J_total_prev = 0.0
+    conservation_err = 1.0
+    best_conservation = 1.0
+    best_state = None
+
+    _anderson_x_hist = []
+    _anderson_f_hist = []
+
+    spectral_J_L = np.zeros(nfreq)
+    spectral_J_R = np.zeros(nfreq)
+
+    sl0 = slice(0, n_dof)
+    sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
+
+    for scba_iter in range(max_scba_iter):
+        # Update OBC with scattering in the leads
+        if scattering_contacts and scba_iter > 0:
+            lead_sr = 0.5 * (Sigma_R[0] + Sigma_R[-1])
+            obc = _compute_obc_batch(
+                omega_sq_thz2, H_00, H_01, eta,
+                n_bose_L, n_bose_R, n_slabs=n_slabs,
+                lead_sigma_r=lead_sr)
+
+        G_lesser_slab = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
+        G_greater_slab = np.zeros_like(G_lesser_slab)
+        spectral_J_L[:] = 0.0
+        spectral_J_R[:] = 0.0
+
+        # --- Green's function solve ---
+        Sig_R_dev = np.zeros((nfreq, N_D, N_D), dtype=complex)
+        Sig_l_dev = np.zeros_like(Sig_R_dev)
+        Sig_g_dev = np.zeros_like(Sig_R_dev)
+        for l in range(n_slabs):
+            sl = slice(l * n_dof, (l + 1) * n_dof)
+            Sig_R_dev[:, sl, sl] = Sigma_R[l]
+            Sig_l_dev[:, sl, sl] = Sigma_l[l]
+            Sig_g_dev[:, sl, sl] = Sigma_g[l]
+
+        _, G_less, G_great = _solve_green_batch(
+            omega_sq_thz2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev, eta)
+
+        for l in range(n_slabs):
+            sl = slice(l * n_dof, (l + 1) * n_dof)
+            G_lesser_slab[l] = G_less[:, sl, sl]
+            G_greater_slab[l] = G_great[:, sl, sl]
+
+        # Spectral current from contacts
+        SLg_Gl = obc["Sigma_L_greater"][:, sl0, sl0] @ G_less[:, sl0, sl0]
+        SLl_Gg = obc["Sigma_L_lesser"][:, sl0, sl0] @ G_great[:, sl0, sl0]
+        spectral_J_L = HBAR_SI * omega_rad * np.real(
+            np.trace(SLg_Gl - SLl_Gg, axis1=-2, axis2=-1))
+
+        SRl_Gg = obc["Sigma_R_lesser"][:, sl_last, sl_last] @ G_great[:, sl_last, sl_last]
+        SRg_Gl = obc["Sigma_R_greater"][:, sl_last, sl_last] @ G_less[:, sl_last, sl_last]
+        spectral_J_R = HBAR_SI * omega_rad * np.real(
+            np.trace(SRl_Gg - SRg_Gl, axis1=-2, axis2=-1))
+
+        J_L_total = np.sum(spectral_J_L) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R) * dw_thz * 1e12
+        J_total = 0.5 * (J_L_total + J_R_total)
+        J_denom = abs(J_L_total) + abs(J_R_total)
+        conservation_err = (abs(J_L_total - J_R_total) / J_denom
+                            if J_denom > 0 else 0.0)
+
+        if scba_iter >= 3 and conservation_err < best_conservation:
+            best_conservation = conservation_err
+            best_state = {
+                "spectral_J_L": spectral_J_L.copy(),
+                "spectral_J_R": spectral_J_R.copy(),
+                "conservation_err": conservation_err,
+                "iter": scba_iter + 1,
+            }
+
+        # Compute per-slab self-energy (finite device, no q)
+        Sigma_l_new = np.zeros_like(Sigma_l)
+        Sigma_g_new = np.zeros_like(Sigma_g)
+        Sigma_r_new = np.zeros_like(Sigma_R)
+
+        for l in range(n_slabs):
+            sl_n, sg_n, sr_n = _compute_phph_self_energy_finite(
+                G_lesser_slab[l], G_greater_slab[l],
+                Phi, freqs_thz, dw_thz,
+                hilbert_retarded=hilbert_retarded,
+            )
+            Sigma_l_new[l] = sl_n
+            Sigma_g_new[l] = sg_n
+            Sigma_r_new[l] = sr_n
+
+        sig_r_norm = np.max(np.abs(Sigma_r_new))
+
+        if verbose and scba_iter == 0:
+            gl_max = np.max(np.abs(G_lesser_slab))
+            h00_max = np.max(np.abs(H_00))
+            print(f"    G diagnostic: max|G^<| = {gl_max:.4e}")
+            print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
+                  f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
+
+        # Mix self-energies
+        if scba_iter == 0:
+            Sigma_l = Sigma_l_new.copy()
+            Sigma_g = Sigma_g_new.copy()
+            Sigma_R = Sigma_r_new.copy()
+        elif anderson_mixing and scba_iter >= 1:
+            x_in = np.concatenate([
+                Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
+            x_out = np.concatenate([
+                Sigma_l_new.ravel(), Sigma_g_new.ravel(), Sigma_r_new.ravel()])
+            f_k = x_out - x_in
+            _anderson_x_hist.append(x_in)
+            _anderson_f_hist.append(f_k)
+
+            m = len(_anderson_f_hist)
+            if m >= 2:
+                n_use = min(m - 1, anderson_depth)
+                dF = np.column_stack([
+                    _anderson_f_hist[-n_use + j] - _anderson_f_hist[-n_use + j - 1]
+                    for j in range(n_use)])
+                dX = np.column_stack([
+                    _anderson_x_hist[-n_use + j] - _anderson_x_hist[-n_use + j - 1]
+                    for j in range(n_use)])
+                FtF = dF.conj().T @ dF
+                Ftf = dF.conj().T @ f_k
+                reg = 1e-8 * np.trace(FtF).real / max(FtF.shape[0], 1)
+                gamma = np.linalg.solve(
+                    FtF + reg * np.eye(FtF.shape[0]), Ftf).real
+                x_mixed = (x_in + mixing * f_k) - (dX + mixing * dF) @ gamma
+            else:
+                x_mixed = x_in + mixing * f_k
+
+            sz = Sigma_l.size
+            Sigma_l = x_mixed[:sz].reshape(Sigma_l.shape)
+            Sigma_g = x_mixed[sz:2*sz].reshape(Sigma_g.shape)
+            Sigma_R = x_mixed[2*sz:].reshape(Sigma_R.shape)
+
+            if len(_anderson_x_hist) > anderson_depth + 2:
+                _anderson_x_hist.pop(0)
+                _anderson_f_hist.pop(0)
+        else:
+            alpha = mixing
+            Sigma_l = (1 - alpha) * Sigma_l + alpha * Sigma_l_new
+            Sigma_g = (1 - alpha) * Sigma_g + alpha * Sigma_g_new
+            Sigma_R = (1 - alpha) * Sigma_R + alpha * Sigma_r_new
+
+        if scba_iter > 0:
+            rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
+            convergence_history.append(rel_change)
+            if verbose:
+                best_mark = " *" if conservation_err <= best_conservation else ""
+                print(f"    SCBA iter {scba_iter + 1}: "
+                      f"J = {J_total:.4e} W, "
+                      f"conservation = {conservation_err:.4e}, "
+                      f"rel. change = {rel_change:.4e}, "
+                      f"max|Sigma^R| = {np.max(np.abs(Sigma_R)):.2e} THz^2"
+                      f"{best_mark}")
+            if (best_conservation < 0.5
+                    and conservation_err > 2 * best_conservation
+                    and scba_iter >= 5):
+                if verbose:
+                    print(f"    Stopping: conservation rising "
+                          f"({conservation_err:.2e} > 2 * best "
+                          f"{best_conservation:.2e}). "
+                          f"Using best state from iter {best_state['iter']}.")
+                break
+            if rel_change < scba_tol:
+                if verbose:
+                    print(f"    Converged after {scba_iter + 1} iterations "
+                          f"(rel_change={rel_change:.2e}, "
+                          f"conservation={conservation_err:.2e})")
+                break
+        else:
+            if verbose:
+                print(f"    SCBA iter 1: "
+                      f"J_L = {J_L_total:.4e} W, J_R = {J_R_total:.4e} W")
+
+        J_total_prev = J_total
+
+    # Use best-conservation state if significantly better than final
+    if (best_state is not None
+            and best_state["conservation_err"] < 0.5 * conservation_err):
+        spectral_J_L = best_state["spectral_J_L"]
+        spectral_J_R = best_state["spectral_J_R"]
+        conservation_err = best_state["conservation_err"]
+        if verbose:
+            print(f"  Using best-conservation state from iter "
+                  f"{best_state['iter']} "
+                  f"(conservation={conservation_err:.4e})")
+
+    # Final results
+    spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
+    J_anh_total = np.sum(spectral_J_anh) * dw_thz * 1e12
+    G_anh = J_anh_total / (A_c * delta_T)
+
+    if verbose:
+        print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
+        print(f"  Heat flow conservation: {conservation_err:.4e}")
+
+    return {
+        "freqs_thz": freqs_thz,
+        "omega_rad": freqs_thz * THZ_TO_RAD,
+        "transmission_ballistic": trans_ballistic,
+        "spectral_heat_current_ballistic": spectral_J_ball,
+        "spectral_heat_current": spectral_J_anh,
+        "spectral_heat_current_L": spectral_J_L.copy(),
+        "spectral_heat_current_R": spectral_J_R.copy(),
+        "heat_current_ballistic": J_ball_total,
+        "heat_current": J_anh_total,
+        "thermal_conductance_ballistic": G_ball,
+        "thermal_conductance_anharmonic": G_anh,
+        "heat_flow_conservation": conservation_err,
+        "delta_T": delta_T,
+        "n_scba_iterations": len(convergence_history) + 1,
+        "convergence_history": convergence_history,
+        "self_energy_retarded": Sigma_R,
+        "self_energy_lesser": Sigma_l,
+        "self_energy_greater": Sigma_g,
     }
