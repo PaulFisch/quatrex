@@ -906,8 +906,13 @@ def anharmonic_transmission_q(
         # Update OBC with scattering in the leads
         if scattering_contacts and scba_iter > 0:
             for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks):
-                # Average boundary-slab retarded SE as lead bulk estimate
-                lead_sr = 0.5 * (Sigma_R_q[0, iq] + Sigma_R_q[-1, iq])
+                # Use only the imaginary part (scattering rate) of the
+                # boundary-slab retarded SE as lead broadening.  The real
+                # part (energy shift) from the non-equilibrium device is
+                # not representative of the equilibrium bulk lead and can
+                # destabilise the Sancho-Rubio decimation.
+                sr_avg = 0.5 * (Sigma_R_q[0, iq] + Sigma_R_q[-1, iq])
+                lead_sr = 1j * sr_avg.imag
                 obc_all[iq] = _compute_obc_batch(
                     omega_sq_thz2, H_00_iq, H_01_iq, eta,
                     n_bose_L, n_bose_R, n_slabs=n_slabs,
@@ -1405,7 +1410,8 @@ def anharmonic_transmission_finite(
     for scba_iter in range(max_scba_iter):
         # Update OBC with scattering in the leads
         if scattering_contacts and scba_iter > 0:
-            lead_sr = 0.5 * (Sigma_R[0] + Sigma_R[-1])
+            sr_avg = 0.5 * (Sigma_R[0] + Sigma_R[-1])
+            lead_sr = 1j * sr_avg.imag
             obc = _compute_obc_batch(
                 omega_sq_thz2, H_00, H_01, eta,
                 n_bose_L, n_bose_R, n_slabs=n_slabs,
