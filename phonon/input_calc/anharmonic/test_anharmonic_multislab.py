@@ -12,8 +12,9 @@ immediately.  On restart the script loads existing results and
 skips already-completed cases.
 
 Usage:
-    python test_anharmonic_multislab.py            # run / resume
-    python test_anharmonic_multislab.py --plot      # replot from saved data
+    python test_anharmonic_multislab.py              # run / resume
+    python test_anharmonic_multislab.py --plot        # replot from saved data
+    python test_anharmonic_multislab.py --hilbert     # use Hilbert-transform Sigma^R
 """
 
 import argparse
@@ -229,7 +230,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--plot", action="store_true",
                         help="Only replot from saved data, no computation")
+    parser.add_argument("--hilbert", action="store_true",
+                        help="Use Hilbert-transform retarded self-energy")
     args = parser.parse_args()
+
+    if args.hilbert:
+        COMMON["hilbert_retarded"] = True
+        CHECKPOINT_FILE = script_dir / "anharmonic_multislab_checkpoint_hilbert.json"
+        DATA_FILE = script_dir / "anharmonic_multislab_data_hilbert.npz"
+        PLOT_FILE = script_dir / "anharmonic_multislab_hilbert.png"
+        print("*** Hilbert-transform retarded self-energy enabled ***")
 
     # Plot-only mode
     if args.plot:
