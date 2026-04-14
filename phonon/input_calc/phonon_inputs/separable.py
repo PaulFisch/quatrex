@@ -121,7 +121,7 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
     """Build mass-weighted FC3 matrices in real space.
 
     For each DOF a = (i_prim, alpha), builds M_a of shape (dim_sc, dim_sc)
-    from fc3_raw using ALL supercell atoms (no same-slab restriction).
+    from fc3_raw using all supercell atoms (no same-slab restriction).
 
     Parameters
     ----------
@@ -213,8 +213,6 @@ def build_gathering_matrix(prim_indices, cell_frac, q_frac,
 
     T[kappa*3+beta, s*3+beta] = exp(-2*pi*i * q . R_frac[s])
     when prim_indices[s] == kappa, else 0.
-
-    Uses ALL supercell atoms (no same-slab restriction).
 
     Parameters
     ----------
