@@ -584,8 +584,8 @@ def _compute_phph_self_energy_q_dense(
     T_arr = np.array(T_all_q)  # (n_kpts, n_dof, dim_t)
     TM = np.einsum('qci,aij->qacj', T_arr, M_blocks)
     T_arr_H = T_arr.conj().transpose(0, 2, 1).copy()
-    Phi_all = np.einsum('qacj,rjd->qracd', TM, T_arr_T)
-    del TM, T_arr_T, T_arr, M_blocks
+    Phi_all = np.einsum('qacj,rjd->qracd', TM, T_arr_H)
+    del TM, T_arr_H, T_arr, M_blocks
 
     # Batch size for q' loop: keep intermediates in L2/L3 cache
     # Each batch creates (B, n_fft, n_dof, n_dof, n_dof) ~ B*n_fft*n_dof^3*16 bytes
