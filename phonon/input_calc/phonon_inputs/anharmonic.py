@@ -583,7 +583,7 @@ def _compute_phph_self_energy_q_dense(
     M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
     T_arr = np.array(T_all_q)  # (n_kpts, n_dof, dim_t)
     TM = np.einsum('qci,aij->qacj', T_arr, M_blocks)
-    T_arr_T = T_arr.transpose(0, 2, 1).copy()
+    T_arr_H = T_arr.conj().transpose(0, 2, 1).copy()
     Phi_all = np.einsum('qacj,rjd->qracd', TM, T_arr_T)
     del TM, T_arr_T, T_arr, M_blocks
 
