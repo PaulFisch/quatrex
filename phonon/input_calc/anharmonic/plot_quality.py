@@ -4,8 +4,10 @@ Uses anharmonic_transmission_q from phonon_inputs with M_stacked_override
 to run the same SCBA code path for all methods.
 
 Usage:
-    python plot_quality.py           # run all computations (slow)
-    python plot_quality.py --load    # only regenerate plots from cache
+    python plot_quality.py                    # run all computations
+    python plot_quality.py --load             # only regenerate plots from cache
+    python plot_quality.py --hilbert          # use Hilbert-transform retarded SE
+    python plot_quality.py --hilbert --load   # plots from Hilbert cache
 """
 
 import sys
@@ -42,7 +44,8 @@ from compare_fc3_approximations import (
 FC3_SUBDIR = "fc3_prim_vasp"
 
 FIG_DIR = script_dir / "figures"
-CACHE_DIR = script_dir / "quality_cache_333"
+CACHE_DIR_BASE = script_dir / "quality_cache_333"
+CACHE_DIR = CACHE_DIR_BASE  # overridden in main() when --hilbert
 
 TRANSPORT_KW = dict(
     q_mesh_transverse=(4, 4),
@@ -546,6 +549,88 @@ def fig_spectral_current_lr(results):
     _save(fig, "spectral_current_lr")
 
 
+def fig_hilbert_comparison():
+    """Compare instantaneous vs Hilbert-transform retarded self-energy.
+
+    Loads cached results from both cache directories (with and without
+    --hilbert) and plots the difference.  Skips silently if either is
+    missing.
+    """
+    cache_plain = CACHE_DIR_BASE
+    cache_hilb = CACHE_DIR_BASE.parent / (CACHE_DIR_BASE.name + "_hilbert")
+
+    def _load_from(cache, name):
+        p = cache / f"{name}.npz"
+        if not p.exists():
+            return None
+        data = np.load(p, allow_pickle=True)
+        return {k: (data[k].item() if data[k].ndim == 0 else data[k])
+                for k in data.files}
+
+    r_plain = _load_from(cache_plain, "dense")
+    r_hilb = _load_from(cache_hilb, "dense")
+    if r_plain is None or r_hilb is None:
+        return
+
+    freqs = r_plain["freqs_thz"]
+    J_plain = r_plain["spectral_heat_current"]
+    J_hilb = r_hilb["spectral_heat_current"]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    ax1.plot(freqs, r_plain["spectral_heat_current_ballistic"],
+             ":", color="gray", lw=1, alpha=0.6, label="Ballistic")
+    ax1.plot(freqs, J_plain, "-", color=COLOR_DENSE, lw=2,
+             label=r"Dense (instant. $\Sigma^R$)")
+    ax1.plot(freqs, J_hilb, "--", color="#1f77b4", lw=2,
+             label=r"Dense (Hilbert $\Sigma^R$)")
+
+    # Also compare representative approximations if available
+    for method, rank, ls in [("SCP3", 8, "-"), ("SVD", 8, "-")]:
+        key = f"{method}_R{rank}"
+        rp = _load_from(cache_plain, key)
+        rh = _load_from(cache_hilb, key)
+        if rp is not None:
+            ax1.plot(rp["freqs_thz"], rp["spectral_heat_current"],
+                     ls, color=COLORS[method], lw=1, alpha=0.6,
+                     label=f"{method} R={rank} (inst.)")
+        if rh is not None:
+            ax1.plot(rh["freqs_thz"], rh["spectral_heat_current"],
+                     "--", color=COLORS[method], lw=1, alpha=0.6,
+                     label=f"{method} R={rank} (Hilb.)")
+
+    ax1.set_xlabel("Frequency (THz)", fontsize=12)
+    ax1.set_ylabel("Spectral heat current (W/THz)", fontsize=12)
+    ax1.set_title(r"(a) Instantaneous vs Hilbert $\Sigma^R$")
+    ax1.legend(fontsize=7, ncol=2)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(freqs[0], freqs[-1])
+
+    ax2.plot(freqs, J_hilb - J_plain, "-", color="#1f77b4", lw=2,
+             label="Dense")
+    for method, rank in [("SCP3", 8), ("SVD", 8)]:
+        key = f"{method}_R{rank}"
+        rp = _load_from(cache_plain, key)
+        rh = _load_from(cache_hilb, key)
+        if rp is not None and rh is not None:
+            ax2.plot(rp["freqs_thz"],
+                     rh["spectral_heat_current"] - rp["spectral_heat_current"],
+                     f"-{MARKERS[method]}", color=COLORS[method], lw=1, ms=3,
+                     label=f"{method} R={rank}")
+
+    ax2.axhline(0, color="gray", lw=0.5)
+    ax2.set_xlabel("Frequency (THz)", fontsize=12)
+    ax2.set_ylabel(r"$\Delta J(\omega)$ (Hilbert $-$ instant.) (W/THz)",
+                   fontsize=12)
+    ax2.set_title(r"(b) Effect of Hilbert transform on $\Sigma^R$")
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(freqs[0], freqs[-1])
+
+    fig.tight_layout()
+    _save(fig, "hilbert_comparison")
+
+
 # =========================================================================
 # Summary
 # =========================================================================
@@ -581,6 +666,14 @@ def print_summary(results):
 # =========================================================================
 
 def main():
+    global CACHE_DIR
+
+    use_hilbert = "--hilbert" in sys.argv
+    if use_hilbert:
+        CACHE_DIR = CACHE_DIR_BASE.parent / (CACHE_DIR_BASE.name + "_hilbert")
+        TRANSPORT_KW["hilbert_retarded"] = True
+        print("*** Hilbert-transform retarded self-energy enabled ***")
+
     results = collect_all(load_only="--load" in sys.argv)
 
     if "dense" not in results:
@@ -595,6 +688,7 @@ def main():
     fig_scba_convergence(results)
     fig_spectral_current(results)
     fig_spectral_current_lr(results)
+    fig_hilbert_comparison()
 
     print_summary(results)
     print(f"\nAll figures saved to {FIG_DIR}/")

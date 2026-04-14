@@ -11,11 +11,6 @@ The scattering self-energy (Guo Eq. 8, diagonal block):
         * Phi3_{b,e,f}
 
 Internal units: THz^2 for dynamical matrices and self-energies.
-This keeps magnitudes O(1)-O(100) for numerical stability, compared
-to (rad/s)^2 which gives O(10^25) magnitudes.
-
-This module provides a reference Python implementation for validation
-of the quatrex GPU solver, matching the style of validation.py.
 """
 
 import numpy as np
@@ -400,6 +395,39 @@ def _solve_green_batch(omega_sq_arr, H_D, obc_batch,
 # ---------------------------------------------------------------------------
 
 
+def _hilbert_transform_axis(f, axis=1):
+    """Hilbert transform along *axis* via FFT (sign-multiplier method).
+
+    Computes  H[f](x) = (1/pi) P int f(x') / (x - x') dx'
+    on a uniformly spaced grid, assuming periodic boundary conditions.
+
+    Parameters
+    ----------
+    f : ndarray, complex
+    axis : int
+        Axis along which to transform (frequency axis).
+
+    Returns
+    -------
+    Hf : ndarray, same shape as *f*
+    """
+    N = f.shape[axis]
+    Ff = np.fft.fft(f, axis=axis)
+
+    # Multiplier: -i * sign(k)
+    h = np.zeros(N)
+    if N % 2 == 0:
+        h[1:N // 2] = 1
+        h[N // 2 + 1:] = -1
+    else:
+        h[1:(N + 1) // 2] = 1
+        h[(N + 1) // 2:] = -1
+
+    shape = [1] * f.ndim
+    shape[axis] = N
+    return np.fft.ifft(Ff * (-1j * np.array(h).reshape(shape)), axis=axis)
+
+
 def _fourier_transform_fc3_pair(M_stacked, T_q1, T_q2, nat_prim):
     """Compute FC3 Fourier transform Phi_hat(q1, q2) on the fly.
 
@@ -500,6 +528,7 @@ def _se_worker_iq(args):
 def _compute_phph_self_energy_q_dense(
     G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
     nat_prim, n_kpts, omega_grid_thz, dw_thz, n_workers=None,
+    hilbert_retarded=False,
 ):
     """Compute q-dependent phonon-phonon self-energy.
 
@@ -521,6 +550,10 @@ def _compute_phph_self_energy_q_dense(
     dw_thz : float
     n_workers : int or None
         Number of worker processes. None = auto (min of n_kpts, cpu_count).
+    hilbert_retarded : bool
+        If True, compute the retarded self-energy via the full
+        Kramers-Kronig relation (Hilbert transform of Sigma^> - Sigma^<)
+        instead of just the instantaneous part 0.5*(Sigma^> - Sigma^<).
 
     Returns
     -------
@@ -578,7 +611,12 @@ def _compute_phph_self_energy_q_dense(
     if n_workers <= 1:
         _, sig_l, sig_g = _se_worker_iq(
             (list(range(n_kpts)), *common))
-        return sig_l, sig_g, 0.5 * (sig_g - sig_l)
+        delta = sig_g - sig_l
+        if hilbert_retarded:
+            sig_r = 0.5 * delta + 0.5j * _hilbert_transform_axis(delta, axis=1)
+        else:
+            sig_r = 0.5 * delta
+        return sig_l, sig_g, sig_r
 
     # Round-robin iq_ext across workers
     chunks = [[] for _ in range(n_workers)]
@@ -615,7 +653,11 @@ def _compute_phph_self_energy_q_dense(
                     Sigma_lesser[iq] = sig_l[i]
                     Sigma_greater[iq] = sig_g[i]
 
-    Sigma_retarded = 0.5 * (Sigma_greater - Sigma_lesser)
+    delta = Sigma_greater - Sigma_lesser
+    if hilbert_retarded:
+        Sigma_retarded = 0.5 * delta + 0.5j * _hilbert_transform_axis(delta, axis=1)
+    else:
+        Sigma_retarded = 0.5 * delta
     return Sigma_lesser, Sigma_greater, Sigma_retarded
 
 
@@ -636,6 +678,7 @@ def anharmonic_transmission_q(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
+    hilbert_retarded: bool = False,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -661,6 +704,11 @@ def anharmonic_transmission_q(
     verbose : bool
     M_stacked_override : ndarray, optional
         If provided, use this M_stacked instead of loading from fc3_hdf5.
+    hilbert_retarded : bool
+        If True, compute Sigma^R via the full Kramers-Kronig relation
+        (includes the Hilbert-transform / principal-value integral of
+        Sigma^> - Sigma^<) instead of the default instantaneous
+        approximation 0.5*(Sigma^> - Sigma^<).
 
     Returns
     -------
@@ -713,7 +761,7 @@ def anharmonic_transmission_q(
         print(f"  M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
 
-    # --- Gamma-centered q-mesh (closed under subtraction) ---
+    # --- Gamma-centered q-mesh ---
     nkx, nky = q_mesh_transverse
     q_1d_x = [i / nkx for i in range(nkx)]
     q_1d_y = [j / nky for j in range(nky)]
@@ -765,7 +813,6 @@ def anharmonic_transmission_q(
         btd_blocks.append((H_00, H_01))
 
     # --- Precompute OBC self-energies for all q and all frequencies ---
-    # This replaces per-(iq, iw) calls with batched computation
     if verbose:
         print("  Precomputing OBC self-energies (batched)...")
     obc_all = []  # list of dicts, one per q-point
@@ -777,7 +824,7 @@ def anharmonic_transmission_q(
                                  n_bose_L, n_bose_R, n_slabs=n_slabs)
         obc_all.append(obc)
 
-    # --- Ballistic transmission (vectorized over frequencies) ---
+    # --- Ballistic transmission ---
     trans_ballistic = np.zeros(nfreq)
     for iq, (H_00, H_01) in enumerate(btd_blocks):
         H_D = H_D_all[iq]
@@ -909,6 +956,7 @@ def anharmonic_transmission_q(
                 G_lesser_slab_q[l], G_greater_slab_q[l],
                 M_stacked, T_all_q, q_diff_map,
                 n_atoms, n_kpts, freqs_thz, dw_thz,
+                hilbert_retarded=hilbert_retarded,
             )
             Sigma_l_new[l] = sl_n
             Sigma_g_new[l] = sg_n
@@ -930,7 +978,6 @@ def anharmonic_transmission_q(
             Sigma_R_q = Sigma_r_new.copy()
         elif anderson_mixing and scba_iter >= 1:
             # Anderson acceleration: quasi-Newton using residual history.
-            # Works well when q-mesh matches supercell resolution.
             x_in = np.concatenate([
                 Sigma_l_q.ravel(), Sigma_g_q.ravel(), Sigma_R_q.ravel()])
             x_out = np.concatenate([
