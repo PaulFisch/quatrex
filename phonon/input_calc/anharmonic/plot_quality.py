@@ -49,7 +49,7 @@ CACHE_DIR = CACHE_DIR_BASE  # overridden in main() when --hilbert
 
 TRANSPORT_KW = dict(
     q_mesh_transverse=(4, 4),
-    freq_range_thz=(0.1, 18.0, 141),
+    freq_range_thz=(0.0, 18.0, 141),  # (_, fmax, nfreq_pos); symmetric grid 0..fmax
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,

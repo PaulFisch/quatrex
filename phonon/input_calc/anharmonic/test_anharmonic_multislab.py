@@ -48,7 +48,7 @@ SLAB_COUNTS = [1, 3, 5, 10]
 
 COMMON = dict(
     q_mesh_transverse=(4, 4),
-    freq_range_thz=(0.5, 15.0, 51),
+    freq_range_thz=(0.0, 15.0, 51),  # (_, fmax, nfreq_pos); symmetric grid 0..fmax
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,

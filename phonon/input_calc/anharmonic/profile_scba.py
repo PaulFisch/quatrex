@@ -230,7 +230,7 @@ def main():
     result = anharmonic_transmission_q(
         phonon, fc3_path,
         q_mesh_transverse=tuple(args.q_mesh),
-        freq_range_thz=(0.1, 18.0, 141),
+        freq_range_thz=(0.0, 18.0, 141),
         transport_direction="x",
         eta_factor=0.5,
         temperature=300.0,

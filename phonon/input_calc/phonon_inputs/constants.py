@@ -15,6 +15,7 @@ EV_TO_J = 1.602176634e-19  # electron-volt [J]
 HBAR_EV = 6.582119569e-16  # reduced Planck constant [eV*s]
 HBAR_SI = HBAR_EV * EV_TO_J  # reduced Planck constant [J*s]
 KB_EV = 8.617333262e-5  # Boltzmann constant [eV/K]
+KB_SI = KB_EV * EV_TO_J  # Boltzmann constant [J/K]
 
 # Derived conversion factors
 EV_PER_A2_TO_SI = EV_TO_J / (1e-10) ** 2  # eV/Angstrom^2 -> kg/s^2

@@ -256,7 +256,7 @@ def run_scba(phonon, fc3_hdf5, nk, nfreq, max_iter, n_slabs, temperature,
     return anharmonic_transmission_q(
         phonon, fc3_hdf5,
         q_mesh_transverse=(nk, nk),
-        freq_range_thz=(0.5, 15.0, nfreq),
+        freq_range_thz=(0.0, 15.0, nfreq),
         transport_direction=transport_direction,
         eta_factor=0.5,
         temperature=temperature,

@@ -1,0 +1,3666 @@
+\chapter{Notes}
+\label{ch:notes}
+
+% ======================================================================
+\section{Conventions and Units}
+\label{sec:conventions_units}
+% ======================================================================
+
+This section collects the unit systems, notation, and Fourier
+conventions used in this document.  The harmonic force
+constants may originate either from phonopy finite-displacement
+calculations or from Quantum ESPRESSO (QE) density-functional
+perturbation theory, while the QuaTrEx solver uses its own internal
+frequency-squared convention.  Since the later extraction, transport,
+and anharmonic self-energy steps all rely on consistent units and phase
+conventions, we summarize them here once and refer back to this section
+throughout the chapter.
+
+% ----------------------------------------------------------------------
+\subsection{Units in phonopy and Quantum ESPRESSO}
+\label{sec:phonopy_units}
+% ----------------------------------------------------------------------
+
+Phonopy stores force constants in eV/\AA$^2$, atomic masses in amu, and
+atomic positions in \AA.  The dynamical matrix eigenvalues therefore
+have units
+\begin{equation}
+  [\lambda] = \frac{\mathrm{eV}}{\mathrm{amu}\cdot\mathrm{\AA}^2}.
+\end{equation}
+Phonopy converts these eigenvalues to frequencies in THz via
+\begin{equation}\label{eq:VaspToTHz}
+  f\;[\mathrm{THz}]
+  = \mathrm{sgn}(\lambda)\,\sqrt{|\lambda|}
+    \times
+    \frac{1}{2\pi}\sqrt{\frac{e}{m_u A^2}}  \approx 15.633\;\mathrm{THz},
+\end{equation}
+where $e = 1.602\times 10^{-19}$\,J is the elementary charge,
+$m_u = 1.661\times 10^{-27}$\,kg is the atomic mass unit, and
+$A = 10^{-10}$\,m is the metre-to-\AA\ conversion factor.
+
+When phonopy is used together with the QE interface, the internal
+representation inherited from QE uses atomic units: lattice vectors are
+in bohr and force constants in Ry/bohr$^2$.  These quantities are
+therefore converted before being used together with the rest of the
+workflow.  The required relations are
+\begin{align}
+  a\;[\mathrm{\AA}]
+    &= a\;[\mathrm{bohr}] \times a_0,
+    & a_0 &= 0.52918\;\mathrm{\AA/bohr}, \\
+  \Phi\;[\mathrm{eV/\AA^2}]
+    &= \Phi\;[\mathrm{Ry/bohr^2}] \times \frac{E_h/2}{a_0^2},
+    & \frac{E_h/2}{a_0^2} &\approx 48.59.
+\end{align}
+Here $E_h$ denotes the Hartree energy, so that $E_h/2 = 1$\,Ry.  In the
+same way, Cartesian forces parsed from QE output are converted using
+\begin{equation}
+  1\;\mathrm{Ry/bohr} \approx 25.711\;\mathrm{eV/\AA}.
+\end{equation}
+
+The downstream workflow therefore treats eV, \AA, and amu as the common
+intermediate unit system, independent of whether the original data came
+from phonopy directly or through QE.  In other words, everything is
+normalized to the phonopy eV/\AA/amu convention upon loading.
+
+% ----------------------------------------------------------------------
+\subsection{QuaTrEx solver units}
+\label{sec:solver_units}
+% ----------------------------------------------------------------------
+
+The QuaTrEx phonon solver operates in angular frequency squared,
+\begin{equation}
+  \omega^2 \quad \text{in} \quad (\mathrm{rad/s})^2.
+\end{equation}
+Accordingly, the mass-weighted real-space blocks passed to the solver
+must be converted from the phonopy eigenvalue units
+eV/(amu$\cdot$\AA$^2$) to $(\mathrm{rad/s})^2$.  The corresponding
+conversion factor is
+\begin{equation}\label{eq:conversion}
+  C = \frac{e}{m_u A^2}
+  \approx 9.648 \times 10^{27}\;\mathrm{(rad/s)^2}.
+\end{equation}
+If $\Phi(0,\vc{R})$ denotes a harmonic force-constant block in
+eV/\AA$^2$, then the real-space matrix block used by QuaTrEx is
+\begin{equation}
+  H(\vc{R})
+  = C\,
+    \frac{\Phi(0,\vc{R})}{\sqrt{m\,m'}},
+\end{equation}
+with $m$ and $m'$ in amu.  The resulting $H(\vc{R})$ therefore has units
+of $(\mathrm{rad/s})^2$.
+
+The same logic extends to cubic force constants.  After mass-weighting,
+the third-order tensor
+\begin{equation}
+  \Psi_{\alpha\beta\gamma}
+  = \frac{\Phi^{(3)}_{\alpha\beta\gamma}}
+         {\sqrt{M_\kappa M_{\kappa'} M_{\kappa''}}}
+\end{equation}
+has units
+\begin{equation}
+  [\Psi] = \frac{\mathrm{eV}}
+                 {\mathrm{\AA}^3\cdot\mathrm{amu}^{3/2}}.
+\end{equation}
+Its SI conversion factor is
+\begin{equation}\label{eq:conversion_fc3}
+  \texttt{CONVERSION\_FC3}
+  = \frac{C}{A\sqrt{m_u}}
+  = \frac{e}{m_u^{3/2} A^3}
+  \approx 2.368\times10^{51},
+\end{equation}
+which converts
+eV/(\AA$^3\cdot$amu$^{3/2}$) to the SI units required in the
+phonon--phonon self-energy expressions.
+
+% ----------------------------------------------------------------------
+\subsection{Notation and Fourier conventions}
+\label{sec:notation_fourier}
+% ----------------------------------------------------------------------
+
+We use bold symbols such as $\vc{R}$ and $\vc{q}$ for lattice vectors
+and wavevectors.  Basis atoms within the unit cell are indexed by
+Greek letters $\kappa,\kappa',\kappa''$, and Cartesian directions by
+$\alpha,\beta,\gamma \in \{x,y,z\}$.  The displacement of atom
+$\kappa$ in cell $l$ along Cartesian direction $\alpha$ is denoted
+$u_\alpha(l\kappa)$.
+
+The lattice vector of cell $l$ is written $\vc{R}_l$, while
+$\vc{\tau}_\kappa$ denotes the basis-atom position within the unit
+cell.  Unless stated otherwise, $\vc{\tau}_\kappa$ and $\vc{q}$ are
+expressed in fractional crystal coordinates, so that factors of
+$2\pi$ appear explicitly in all Fourier phases.
+
+The harmonic force constants are written as
+\begin{equation}
+  \Phi_{\alpha\beta}(0\kappa,\,l'\kappa'),
+\end{equation}
+and the corresponding mass-weighted dynamical matrix at wavevector
+$\vc{q}$ is a Fourier transform of these real-space couplings.
+
+Two phase conventions are used in this work.  In the phonopy
+convention,
+\begin{equation}\label{eq:DA_conv}
+  D_{\alpha\beta}^{(\mathrm{A})}(\kappa\kappa',\vc{q})
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'} \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\,
+    e^{2\pi i\,\vc{q}\cdot
+      [\vc{R}_{l'} + \vc{\tau}_{\kappa'} - \vc{\tau}_\kappa]},
+\end{equation}
+whereas the QuaTrEx convention uses only the lattice vector in the
+phase,
+\begin{equation}\label{eq:DB_conv}
+  D_{\alpha\beta}^{(\mathrm{B})}(\kappa\kappa',\vc{q})
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'} \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\,
+    e^{2\pi i\,\vc{q}\cdot\vc{R}_{l'}}.
+\end{equation}
+The two are related by a diagonal unitary gauge transformation,
+\begin{equation}\label{eq:gauge_conv}
+  D^{(\mathrm{B})}(\vc{q})
+  = P(\vc{q})\,D^{(\mathrm{A})}(\vc{q})\,P^\dagger(\vc{q}),
+\end{equation}
+with
+\begin{equation}
+  P(\vc{q})_{\kappa\alpha,\kappa'\beta}
+  = \delta_{\kappa\kappa'}\delta_{\alpha\beta}\,
+    e^{2\pi i\,\vc{q}\cdot\vc{\tau}_\kappa}.
+\end{equation}
+Under Convention~B, the dynamical matrix is a pure lattice Fourier
+series,
+\begin{equation}\label{eq:fourier_series_conv}
+  D^{(\mathrm{B})}(\vc{q})
+  = \sum_{\vc{R}} H(\vc{R})\,e^{2\pi i\,\vc{q}\cdot\vc{R}}.
+\end{equation}
+
+For the transverse directions, we use the notation
+$\vc{k}_\perp = (k_x,k_y)$ or $\vc{q}_\perp$ depending on context.  A
+partial Fourier sum over transverse shifts then takes the form
+\begin{equation}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x,n_y)} M(n_x,n_y)\,
+    e^{2\pi i (k_x n_x + k_y n_y)}.
+\end{equation}
+The transverse wavevectors are sampled on a Monkhorst--Pack mesh,
+\begin{equation}
+  k_i = \frac{n_i + 0.5}{N_i} - 0.5 + \mathrm{shift}_i,
+  \qquad n_i = 0,\ldots,N_i-1.
+\end{equation}
+
+We also define the discrete Fourier-transform pair
+\begin{align}
+  G(\omega;\vq) &= \sum_{\vR} g(\omega;\vR)\,e^{-i\vq\cdot\vR},
+  \label{eq:dft_fwd} \\
+  g(\omega;\vR) &= \frac{1}{N}\sum_{\vq} G(\omega;\vq)\,e^{+i\vq\cdot\vR},
+  \label{eq:dft_inv}
+\end{align}
+with the associated discrete convolution theorem
+\begin{equation}\label{eq:conv_theorem}
+  \frac{1}{N}\sum_{\vq'} A(\vq')\,B(\vq-\vq')
+  = \sum_{\vR} a(\vR)\,b(\vR)\,e^{-i\vq\cdot\vR}.
+\end{equation}
+
+% ======================================================================
+\section{Interatomic Force Constants}
+\label{sec:ifc}
+% ======================================================================
+
+This section introduces the second- and third-order force
+constants (FCs) used throughout the harmonic and anharmonic phonon
+workflow.  FC2 and FC3 are generated as part of a common preprocessing
+pipeline and stored in a unified output format.
+
+% ----------------------------------------------------------------------
+\subsection{Second- and third-order force constants}
+\label{sec:ifc_definitions}
+% ----------------------------------------------------------------------
+
+In the harmonic approximation, the crystal potential energy is expanded
+to second order in the atomic displacements from equilibrium.  The
+second-order coefficients are the harmonic force constants,
+\begin{equation}\label{eq:fc}
+  \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')
+  = \frac{\partial^2 E}
+         {\partial u_\alpha(0\kappa)\,\partial u_\beta(l'\kappa')},
+\end{equation}
+where $u_\alpha(l\kappa)$ denotes the displacement of atom $\kappa$ in
+cell $l$ along Cartesian direction $\alpha$.  These coefficients relate
+forces and displacements through
+\begin{equation}\label{eq:force-disp}
+  F_\alpha(0\kappa)
+  = - \sum_{l'\kappa'\beta}
+      \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\,
+      u_\beta(l'\kappa').
+\end{equation}
+For a fixed atom pair $(0\kappa)$ and $(l'\kappa')$, the FCs form a
+$3\times 3$ matrix, with rows corresponding to force components and
+columns to displacement components.  If the unit cell contains $N$
+atoms, then each lattice translation $\vc{R}_{l'}$ carries a
+$(3N)\times(3N)$ force-constant block.
+
+The corresponding dynamical matrix is obtained from the mass-weighted
+Fourier transform of $\Phi$, and its eigenvalues and eigenvectors yield
+the phonon frequencies and polarization vectors.
+
+The third-order, or cubic, interatomic force constants are defined as
+\begin{equation}\label{eq:fc3_def}
+  \Phi^{(3)}_{\alpha\beta\gamma}(0\kappa,\,l'\kappa',\,l''\kappa'')
+  = \frac{\partial^3 E}
+         {\partial u_\alpha(0\kappa)\;
+          \partial u_\beta(l'\kappa')\;
+          \partial u_\gamma(l''\kappa'')}.
+\end{equation}
+By commutativity of partial derivatives, $\Phi^{(3)}$ is fully
+symmetric under permutations of the three index triples
+$(\alpha,0\kappa)$, $(\beta,l'\kappa')$, and
+$(\gamma,l''\kappa'')$.
+
+In the finite-displacement method, both FC2 and FC3 are obtained from
+differences of DFT forces induced by small atomic displacements.  The
+supercell size determines the real-space interaction range that can be
+resolved before periodic wrap-around introduces aliasing.  For a
+one-dimensional supercell of length $N$, the effective periodic force
+constants satisfy
+\begin{equation}
+  \Phi_{\mathrm{per}}^{(N)}(r)
+  = \sum_{p\in\mathbb Z} \Phi(r+pN).
+\end{equation}
+A larger supercell therefore increases the real-space range that can be
+represented explicitly before distant interactions are folded back by
+periodic boundary conditions.
+
+% ----------------------------------------------------------------------
+\subsection{Finite-displacement FCs}
+\label{sec:finite_displacement}
+% ----------------------------------------------------------------------
+
+The FCs can be generated based on a finite-displacement workflow
+using \texttt{phono3py}, QE, and the \texttt{symfc} fitting backend.  In this
+approach, displaced supercells are generated explicitly, DFT forces are
+computed for each displaced configuration, and both FC2 and FC3 are
+reconstructed from the resulting force data.
+
+The following steps are performed:
+\begin{enumerate}
+  \item \textbf{Structure setup.}
+        The crystal structure is loaded and a phonopy object is
+        created. The unit cell is loaded via \\
+        \texttt{structure.py:load\_structure}, and a
+        \texttt{Phonopy} object with a supercell is
+        created by
+        \texttt{structure.py:create\_phonopy\_from\_config}, which
+        generates symmetry-inequivalent displacements.
+  \item \textbf{DFT force calculations.}
+        For each displaced supercell, a QE \texttt{pw.x}
+        input is written and executed.  A QE \texttt{pw.x} SCF input
+        file is written by\\
+        \texttt{qe\_interface.py:write\_qe\_scf\_input}.  Existing
+        converged outputs are detected and reused.  Forces parsed from
+        QE output are converted from Ry/bohr to eV/\AA.
+
+  \item \textbf{Force-constant reconstruction.}
+        The set of forces is passed to phono3py, which reconstructs FC3
+        and FC2 using the symmetry-adapted \texttt{symfc} backend, both
+        FC2 and FC3 are written to a common \texttt{fc3.hdf5} file
+        containing dense arrays in eV/\AA$^2$ and eV/\AA$^3$,
+        respectively.
+\end{enumerate}
+
+For the Si FCC primitive cell with a $2\times2\times2$ supercell
+(16 atoms), phono3py generates 114 symmetry-inequivalent displacements
+for a pair cutoff of 5.5\,\AA.  On the mont-fort workstations, each QE SCF
+calculation takes roughly 30\,s  with
+\texttt{ecutwfc}=60\,Ry and a $2\times2\times2$ $k$-point mesh.
+
+% ----------------------------------------------------------------------
+\subsection{DFPT FCs}
+\label{sec:dfpt}
+% ----------------------------------------------------------------------
+
+Third order FCs can be generated efficiently directly from density-functional
+perturbation theory (DFPT) due to the $2n+1$ theorem.  One possibility is to obtain FC2 from QE's linear-response phonon code \texttt{ph.x} and compute FC3 with the D3Q plugin,
+which implements third-order DFPT.  In contrast to the
+finite-displacement method, the DFPT route works directly on the unit
+cell and avoids supercell calculations. However, QE does only supports a restricted set of
+norm-conserving potentials for third-order DFPT calculations, limiting the achievable accuracy.
+
+The DFPT workflow does the following:
+\begin{enumerate}
+  \item \textbf{SCF ground state} (\texttt{pw.x}).
+        A self-consistent calculation on the unit cell with a dense
+        $k$-mesh (configured via \texttt{dfpt.kpoints}).
+
+  \item \textbf{Phonon calculation} (\texttt{ph.x}).
+        DFPT phonon calculation on a uniform $\vc{q}$-grid
+        (\texttt{dfpt.q\_mesh}) with
+        \texttt{ldisp\,=\,.true.} and \texttt{lqdir\,=\,.true.}.  This
+        produces the dynamical matrices $D(\vc{q})$ and saves the
+        first-order perturbation wavefunctions needed by D3Q.
+
+  \item \textbf{FC2 Fourier transform} (\texttt{q2r.x}).
+        The dynamical matrices are Fourier-transformed to real-space FC2
+        via QE's \texttt{q2r.x}, producing the \texttt{flfrc} file.
+        The acoustic sum rule is enforced
+        (\texttt{zasr\,=\,'crystal'}).
+
+  \item \textbf{Third-order DFPT} (\texttt{d3q.x}).
+        For each $(\vc{q}_1,\vc{q}_2)$ pair on the grid, \texttt{d3q.x}
+        computes the third-order dynamical tensor
+        $D_3(\vc{q}_1,\vc{q}_2,-\vc{q}_1-\vc{q}_2)$.  The
+        $\vc{q}$-points are specified in QE Cartesian coordinates
+        ($2\pi/a_\text{lat}$ units), the conversion from crystal
+        reciprocal coordinates is
+        \begin{equation}\label{eq:q_conversion}
+          \vc{q}_\text{cart}
+          = q_1 \hat{\vc{b}}_1 + q_2 \hat{\vc{b}}_2 + q_3 \hat{\vc{b}}_3,
+          \qquad
+          \hat{B} = (A / |\vc{a}_1|)^{-\top},
+        \end{equation}
+        where $A$ is the matrix of lattice vectors (rows, in \AA) and
+        $\hat{\vc{b}}_i$ are the rows of $\hat{B}$.
+
+        For a $2\times2\times2$ grid there are $8^2 = 64$ pairs.
+        Crystal symmetry can reduce this (e.g.\ to ${\sim}10$--15 for
+        FCC Si with $O_h$ symmetry). The current implementation
+        generates all pairs and relies on \texttt{d3q.x}'s internal
+        symmetry handling.
+
+  \item \textbf{FC3 Fourier transform} (\texttt{d3\_qq2rr.x}).
+        The $(\vc{q}_1,\vc{q}_2)$-space third-order tensors are
+        Fourier-transformed to real-space FC3
+        $\Phi_3(\vc{R}_1,\vc{R}_2)$, producing the \texttt{mat3R} file.
+
+  \item \textbf{Acoustic sum rule} (\texttt{d3\_asr.x}).
+        Enforces translational invariance on the real-space FC3,
+        $\sum_\kappa \Phi_3(\kappa,\kappa',\kappa'') = 0$ for each
+        pair $(\kappa',\kappa'')$.  The ASR type is configurable
+        (\texttt{asr}: \texttt{simple}, \texttt{crystal}, or
+        \texttt{no}).
+
+  \item \textbf{Sparsification} (\texttt{d3\_sparse.x}).
+        Zeroes FC3 entries with magnitude below a threshold
+        (\texttt{sparse\_thr}, in Ry/bohr$^3$), reducing storage
+        and downstream computation cost.
+\end{enumerate}
+
+\paragraph{Output conversion.}
+The \texttt{reap} step parses both the \texttt{q2r.x} FC2 output
+(\texttt{fc2.dat}, in Ry/bohr$^2$) and the D3Q \texttt{mat3R} file (in
+Ry/bohr$^3$) and converts to eV/\AA$^2$ and eV/\AA$^3$:
+\begin{align}
+  \Phi_2\;[\mathrm{eV/\AA^2}]
+    &= \Phi_2\;[\mathrm{Ry/bohr^2}]
+       \times \frac{E_h/2}{a_0^2},
+    &&\approx 48.59, \label{eq:fc2_conv} \\
+  \Phi_3\;[\mathrm{eV/\AA^3}]
+    &= \Phi_3\;[\mathrm{Ry/bohr^3}]
+       \times \frac{E_h/2}{a_0^3},
+    &&\approx 91.84. \label{eq:fc3_conv}
+\end{align}
+The real-space lattice vectors $\vc{R}$ in the D3Q output (integer
+crystal coordinates) are mapped to supercell atom indices
+$j = (l_1 n_2 n_3 + l_2 n_3 + l_3)\, n_\text{at} + \kappa$ with
+$l_i = R_i \bmod n_i$, matching phonopy's supercell convention.  FC2
+is expanded to the full $(N_\text{super})^2$ array via translational
+invariance.  Both arrays are saved to \texttt{fc3.hdf5} in the same
+format as the finite-displacement method.
+
+The DFPT-specific parameters are in the \texttt{dfpt} section of the
+YAML config:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Key & Default & Description \\
+  \midrule
+  \texttt{q\_mesh}   & $[2,2,2]$ & $\vc{q}$-grid for \texttt{ph.x} and \texttt{d3q.x} \\
+  \texttt{kpoints}   & $[8,8,8]$ & SCF $k$-mesh for the unit cell \\
+  \texttt{tr2\_ph}   & $10^{-14}$& \texttt{ph.x} self-consistency threshold \\
+  \texttt{ph\_command}       & \texttt{ph.x}          & \texttt{ph.x} executable \\
+  \texttt{d3q\_command}      & \texttt{d3q.x}         & \texttt{d3q.x} executable \\
+  \texttt{d3\_qq2rr\_command}& \texttt{d3\_qq2rr.x}   & Fourier transform executable \\
+  \texttt{d3\_asr\_command}  & \texttt{d3\_asr.x}     & Acoustic sum rule executable \\
+  \texttt{d3\_sparse\_command}& \texttt{d3\_sparse.x} & Sparsification executable \\
+  \texttt{asr}               & \texttt{simple}        & ASR type: \texttt{simple}, \texttt{crystal}, or \texttt{no} \\
+  \texttt{sparse\_thr}       & $10^{-5}$              & FC3 threshold (Ry/bohr$^3$); \texttt{null} to skip \\
+  \texttt{q2r\_command}      & \texttt{q2r.x}         & \texttt{q2r.x} executable \\
+  \texttt{work\_dir}         & \texttt{./dfpt}        & Working directory \\
+  \texttt{ph\_timeout}       & 7200\,s                & Timeout per \texttt{ph.x} run \\
+  \texttt{d3q\_timeout}      & 14400\,s               & Timeout per \texttt{d3q.x} triplet \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ----------------------------------------------------------------------
+\subsection{Mass-weighting and unit conversion}
+\label{sec:ifc_mass_weighting}
+% ----------------------------------------------------------------------
+
+The harmonic transport problem is formulated in terms of mass-weighted
+FC2 blocks.  Given a harmonic IFC block
+$\Phi_{\alpha\beta}(0\kappa,l'\kappa')$, the corresponding mass-weighted
+quantity is
+\begin{equation}
+  H_{\alpha\beta}(0\kappa,l'\kappa')
+  = \frac{\Phi_{\alpha\beta}(0\kappa,l'\kappa')}
+         {\sqrt{M_\kappa M_{\kappa'}}},
+\end{equation}
+with masses in amu.  In the common phonopy unit system,
+$H_{\alpha\beta}$ therefore has units
+eV/(amu$\cdot$\AA$^2$), which are later converted to
+$(\mathrm{rad/s})^2$ using the factor defined in
+\cref{sec:solver_units}.
+
+For FC3, the analogous mass-weighted tensor is
+\begin{equation}\label{eq:fc3_mw}
+  \Psi_{\alpha\beta\gamma}(\kappa\kappa'\kappa'')
+  = \frac{\Phi^{(3)}_{\alpha\beta\gamma}(\kappa\kappa'\kappa'')}
+         {\sqrt{M_\kappa M_{\kappa'} M_{\kappa''}}},
+\end{equation}
+with units
+\begin{equation}
+  [\Psi]
+  = \frac{\mathrm{eV}}
+         {\mathrm{\AA}^3\cdot\mathrm{amu}^{3/2}}.
+\end{equation}
+
+For DFPT-generated FCs, the real-space force constants are parsed in
+atomic units and converted as
+\begin{align}
+  \Phi_2\;[\mathrm{eV/\AA^2}]
+    &= \Phi_2\;[\mathrm{Ry/bohr^2}]
+       \times \frac{E_h/2}{a_0^2},
+    &&\approx 48.59, \\
+  \Phi_3\;[\mathrm{eV/\AA^3}]
+    &= \Phi_3\;[\mathrm{Ry/bohr^3}]
+       \times \frac{E_h/2}{a_0^3},
+    &&\approx 91.84.
+\end{align}
+
+Finally, the FC3 tensor can be converted to SI units for use in the
+anharmonic self-energy.  Using the harmonic conversion factor
+$C = e/(m_u A^2)$, the cubic conversion becomes
+\begin{equation}\label{eq:conversion_fc3_ifc}
+  \texttt{CONVERSION\_FC3}
+  = \frac{C}{A\sqrt{m_u}}
+  = \frac{e}{m_u^{3/2} A^3}.
+\end{equation}
+This converts
+eV/(\AA$^3\cdot$amu$^{3/2}$) into the corresponding SI units required
+by the phonon--phonon self-energy expressions.
+
+% ======================================================================
+\section{QuaTrEx Input Generation}
+\label{sec:quatrex_harmonic_input}
+% ======================================================================
+
+This section describes how the harmonic second-order force constants
+(FC2) are converted into the real-space block representation required
+by the QuaTrEx phonon solver.  In particular, we construct the
+harmonic dynamical matrix, transform it from phonopy's phase
+convention to the lattice-Fourier convention used by QuaTrEx,
+extract real-space blocks by an inverse discrete Fourier transform,
+and writing the resulting data to the solver input files. This can likely be
+done more efficiently by avoiding the Full Dynamical matrix in Finite Displacement
+or directly starting from the Dynamical matrix with DFPT.
+
+% ----------------------------------------------------------------------
+\subsection{Dynamical matrix and phase conventions}
+\label{sec:dynmat}
+% ----------------------------------------------------------------------
+
+The dynamical matrix is the mass-weighted Fourier transform of
+the second-order force constants.  Its eigenvalues are the squared
+phonon frequencies and its eigenvectors the polarization vectors. There are
+two different common conventions for the dynamical matrix:
+phonopy includes basis-atom phase factors, QuaTrEx uses a pure lattice Fourier
+series in the cell translations.
+
+\subsubsection{Convention A (phonopy)}
+
+In phonopy, the dynamical matrix at wavevector $\vc{q}$ is written as
+\begin{equation}\label{eq:DA}
+  D_{\alpha\beta}^{(\mathrm{A})}(\kappa\kappa',\vc{q})
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'}
+    \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\;
+    e^{2\pi i\,\vc{q}\cdot
+      [\vc{R}_{l'} + \vc{\tau}_{\kappa'} - \vc{\tau}_\kappa]},
+\end{equation}
+where $\vc{q}$ is expressed in fractional reciprocal coordinates,
+$\vc{R}_{l'}$ is the lattice vector of cell $l'$, and
+$\vc{\tau}_\kappa$ denotes the basis-atom position within the unit
+cell.  The phase therefore depends on the full interatomic separation
+\begin{equation}
+  \vc{R}_{l'} + \vc{\tau}_{\kappa'} - \vc{\tau}_\kappa.
+\end{equation}
+This is what is returned by \texttt{phonon.get\_dynamical\_matrix\_at\_q(q)}.
+
+\subsubsection{Convention B (QuaTrEx)}
+
+QuaTrEx uses a lattice-only Fourier convention in which the phase
+depends only on the cell translation:
+\begin{equation}\label{eq:DB}
+  D_{\alpha\beta}^{(\mathrm{B})}(\kappa\kappa',\vc{q})
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'}
+    \Phi_{\alpha\beta}(0\kappa,\,l'\kappa')\;
+    e^{2\pi i\,\vc{q}\cdot \vc{R}_{l'}}.
+\end{equation}
+In this convention the dependence on basis-atom positions is removed
+from the Fourier phase.  The dynamical matrix is then a pure lattice
+Fourier series,
+\begin{equation}\label{eq:fourier_series}
+  D^{(\mathrm{B})}(\vc{q})
+  = \sum_{\vc{R}} H(\vc{R})\;e^{2\pi i\,\vc{q}\cdot\vc{R}},
+\end{equation}
+where
+\begin{equation}
+  H(\vc{R}) = \frac{\Phi(0,\vc{R})}{\sqrt{m\,m'}}
+\end{equation}
+denotes the corresponding mass-weighted real-space block.
+
+\subsubsection{Gauge transformation between conventions}
+\label{sec:gauge}
+
+The two conventions are related by a unitary similarity
+transformation,
+\begin{equation}\label{eq:gauge_eq}
+  D^{(\mathrm{B})}(\vc{q})
+  = P(\vc{q})\;D^{(\mathrm{A})}(\vc{q})\;P^\dagger(\vc{q}),
+\end{equation}
+with diagonal gauge matrix
+\begin{equation}\label{eq:P}
+  P(\vc{q})_{\kappa\alpha,\kappa'\beta}
+  = \delta_{\kappa\kappa'}\delta_{\alpha\beta}\;
+    e^{2\pi i\,\vc{q}\cdot\vc{\tau}_\kappa}.
+\end{equation}
+Each basis-atom phase is repeated three times, once for each Cartesian
+degree of freedom. This is a similarity transformation and hence leaves
+the eigenvalues of the dynamical matrix unchanged and only modifies the
+phase convention of the eigenvectors.
+
+% ----------------------------------------------------------------------
+\subsection{Real-space block extraction}
+\label{sec:blocks}
+% ----------------------------------------------------------------------
+
+The mass-weighted real-space blocks are obtained by an inverse discrete
+Fourier transform on a uniform $\vc{q}$-mesh.  For a cubic
+$N_q\times N_q\times N_q$ mesh, the extracted block at lattice
+translation $(n_x,n_y,n_z)$ is
+\begin{equation}\label{eq:idft}
+  H(n_x,n_y,n_z)
+  = \frac{C}{N_q^3}
+    \sum_{i,j,k=0}^{N_q-1}
+    D^{(\mathrm{B})}\!\left(\frac{i}{N_q},
+                            \frac{j}{N_q},
+                            \frac{k}{N_q}\right)
+    e^{-2\pi i(n_x i + n_y j + n_z k)/N_q},
+\end{equation}
+where $C$ is the unit-conversion factor from
+eV/(amu$\cdot$\AA$^2$) to $(\mathrm{rad/s})^2$, defined in
+\cref{sec:solver_units}.
+
+Because $D^{(\mathrm{B})}$ is a lattice Fourier series of real
+force-constant matrices, the extracted blocks $H(\vc{R})$ are real up
+to numerical roundoff.  Their imaginary part is therefore discarded. The blocks satisfy the symmetry relation
+\begin{equation}\label{eq:sym}
+  H(\vc{R})^T = H(-\vc{R}),
+\end{equation}
+which guarantees Hermiticity of the reconstructed dynamical matrix at
+every $\vc{q}$.
+
+% ----------------------------------------------------------------------
+\subsection{QuaTrEx Input format}
+\label{sec:quatrex_input}
+% ----------------------------------------------------------------------
+
+The QuaTrEx solver reads three input files which
+specify the real-space Hamiltonian, the crystal structure, and the
+transport parameters.
+
+\subsubsection{Input files}
+\label{sec:input_files}
+
+\paragraph{\texttt{dynamical\_matrix.mat}}
+This MATLAB \texttt{.mat} file stores the real-space blocks
+$H(\vc{R})$ in Convention~B, already converted to
+$(\mathrm{rad/s})^2$.  Each block is stored under a string key of the
+form
+\begin{equation}
+  \texttt{"[nx, ny, nz]"},
+\end{equation}
+mapping to a real matrix of dimension
+$(n_\mathrm{dof}\times n_\mathrm{dof})$, where
+$n_\mathrm{dof}=3N_b$ and $N_b$ is the number of atoms in the unit
+cell.  For nearest-neighbour interactions extracted on a
+$3\times3\times3$ mesh, the file contains up to 27 blocks.
+
+The solver interprets these blocks as real-space couplings and, for
+periodic transverse directions, performs the Fourier sum
+\begin{equation}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x,n_y)} M(n_x,n_y)\;
+    e^{2\pi i\,(k_x n_x + k_y n_y)}.
+\end{equation}
+
+\paragraph{\texttt{structure.xyz}}
+This is an extended XYZ file containing the lattice vectors in the
+header and Cartesian atomic positions in the body.  It follows the ASE
+extended-XYZ convention, for example
+\begin{verbatim}
+8
+Lattice="5.4018 0.0 0.0 0.0 5.4018 0.0 0.0 0.0 5.4018" ...
+Si  0.00000000  0.00000000  0.00000000
+...
+\end{verbatim}
+The loader (\texttt{distributed\_read\_xyz}) extracts the $3\times3$
+lattice matrix and Cartesian atom positions.  The number of atoms times
+\texttt{num\_orbitals\_per\_atom} determines $n_\mathrm{dof}$.
+
+\paragraph{\texttt{quatrex\_config.toml}}
+This file specifies the transport setup, such as transport direction,
+number of transport cells, neighbour cutoff, transverse $k$-mesh,
+broadening, and the open-boundary-condition algorithm.  Important fields are
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Field & Example value & Purpose \\
+  \midrule
+  \texttt{transport\_direction}       & \texttt{'z'}            & transport axis \\
+  \texttt{construct\_from\_unit\_cell}& \texttt{true}           & input mode selector \\
+  \texttt{num\_transport\_cells}      & 4                       & device length in unit cells \\
+  \texttt{neighbor\_cell\_cutoff}     & \texttt{[1,1,1]}        & block-range cutoff \\
+  \texttt{kpoint\_grid}               & \texttt{[4,4,1]}        & transverse mesh \\
+  \texttt{kpoint\_shift}              & \texttt{[0,0,0]}        & Monkhorst--Pack shift \\
+  \texttt{num\_orbitals\_per\_atom.Si}& 3                       & DOFs per atom \\
+  \texttt{phonon.eta}                 & \texttt{1e-8}           & broadening $(\mathrm{rad/s})^2$ \\
+  \texttt{phonon.obc.algorithm}       & \texttt{"sancho-rubio"} & OBC method \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Input modes}
+\label{sec:input_modes}
+
+QuaTrEx supports two input modes, selected by
+\texttt{construct\_from\_unit\_cell}.  In both modes the input is a
+MATLAB \texttt{.mat} file loaded by \texttt{scipy.io.loadmat}.  The
+loader (\\\texttt{distributed\_load} in
+\texttt{qttools/utils/mpi\_utils.py}) parses keys that start with
+\texttt{[} and interprets them as integer tuples:
+\begin{lstlisting}
+arr = loadmat(path)
+arr = {
+    tuple(map(int, r.strip("[]").split(","))): h_r
+    for r, h_r in arr.items()
+    if r.startswith("[")
+}
+\end{lstlisting}
+That is, a key string such as \texttt{"[0, 1, -1]"} becomes the Python
+tuple \texttt{(0, 1, -1)}.  Each value is a 2D NumPy array (real or
+complex) representing a matrix block.
+
+\paragraph{Mode 1: pre-assembled device matrix}
+If \texttt{construct\_from\_unit\_cell = false}, the
+\texttt{dynamical\_matrix.mat} file contains a single pre-assembled
+device matrix stored under the key \texttt{(0,0,0)}:
+\begin{lstlisting}
+matrix_sparray = distributed_load(f"{matrix_name}.mat")
+assert (0, 0, 0) in matrix_sparray.keys()
+matrix_sparray = matrix_sparray[(0, 0, 0)]
+\end{lstlisting}
+The result is a single sparse matrix of size
+$(N_\mathrm{blocks}\times B)^2$, where $B$ is the block size and
+$N_\mathrm{blocks}$ is the number of transport cells.  No transverse
+$k$-point Fourier assembly is performed.
+
+\paragraph{Mode 2: unit-cell blocks}
+If \texttt{construct\_from\_unit\_cell = true}, the file contains the
+dictionary of real-space unit-cell blocks
+$H(n_x,n_y,n_z)$.  The solver loads all blocks, constructs a dense
+translation grid, optionally trims it using
+\texttt{neighbor\_cell\_cutoff}, expands the blocks into
+transport-direction BTD matrices, and performs the transverse
+Fourier assembly on the chosen Monkhorst--Pack mesh.
+
+The function \texttt{\_load\_matrix\_from\_unit\_cell} loads all keys,
+determines the bounding box from the minimum and maximum key
+coordinates, and packs the blocks into a 5D array:
+\begin{lstlisting}
+# keys: array of all (nx, ny, nz) tuples
+min_coords = keys.min(axis=0)
+max_coords = keys.max(axis=0)
+grid_shape = max_coords - min_coords + 1
+unit_cells = zeros(grid_shape + matrix_shape)
+for coord, matrix in matrices.items():
+    unit_cells[coord] = matrix
+\end{lstlisting}
+The resulting array has shape
+$(G_x,G_y,G_z,n_\mathrm{dof},n_\mathrm{dof})$, where
+$(G_x,G_y,G_z)$ is the grid shape (e.g.\ $(3,3,3)$ for
+$\{-1,0,+1\}^3$).  The loader checks that
+$G_x \times G_y \times G_z = \text{number of keys}$, i.e.\ the grid
+must be dense: no missing entries are permitted.  Missing blocks must
+be stored as zero matrices.
+
+If \texttt{neighbor\_cell\_cutoff} is set (e.g.\ \texttt{[1,1,1]}),
+\texttt{trim\_tight\_binding\_matrix} zeros out all blocks beyond that
+range.  For cutoff $(c_x,c_y,c_z)$, a block at index
+$(n_x,n_y,n_z)$ (centred at zero) is kept only if
+$|n_x| \le c_x$, $|n_y| \le c_y$, $|n_z| \le c_z$.
+
+The function \texttt{expand\_tight\_binding\_matrix} converts the
+unit-cell blocks into a BTD sparse matrix for a given transverse
+periodic shift.  Along the transport direction $z$:
+\begin{enumerate}
+  \item The supercell size in the transport direction is $G_z / 2$
+        (integer division), and 1 in the transverse directions.  For
+        $G_z = 3$, this gives a supercell of one unit cell
+        ($3 // 2 = 1$).
+  \item Three BTD blocks are extracted for each transverse periodic
+        shift $(n_x,n_y)$:
+        \begin{itemize}
+          \item $n_z=-1$: lower off-diagonal,
+          \item $n_z=0$: diagonal,
+          \item $n_z=+1$: upper off-diagonal.
+        \end{itemize}
+  \item Each block is assembled by \texttt{\_get\_transport\_block},
+        which loops over all pairs of local shifts within the supercell
+        and selects the appropriate unit-cell block for each pair.
+  \item The three blocks are tiled $N_\text{transport}$ times along the
+        diagonal to build the full BTD sparse matrix.
+\end{enumerate}
+
+The function \texttt{\_assemble\_kpoint} then performs the Fourier sum
+over transverse periodic shifts.  For each $\vc{k}_\perp$ on a
+Monkhorst--Pack mesh:
+\begin{equation}\label{eq:assemble}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x,n_y)} M(n_x,n_y)\;
+    e^{2\pi i\,(k_x n_x + k_y n_y)},
+\end{equation}
+where $M(n_x,n_y)$ is the BTD sparse matrix for periodic shift
+$(n_x,n_y)$, already expanded in the transport direction.  The
+$k$-points on the Monkhorst--Pack mesh are
+\begin{equation}
+  k_i = \frac{n_i + 0.5}{N_i} - 0.5 + \text{shift}_i,
+  \qquad n_i = 0,\ldots,N_i-1.
+\end{equation}
+The result is a stack of BTD matrices indexed by
+$(\omega,k_x,k_y)$.
+
+% ======================================================================
+\section{Harmonic Transport Validation}
+\label{sec:harmonic_validation}
+% ======================================================================
+
+This section summarizes the harmonic transport problem solver in
+QuaTrEx, the validation checks used to verify the model, and the
+reference calculations used as baselines for later
+anharmonic extensions.
+
+% ----------------------------------------------------------------------
+\subsection{Ballistic phonon NEGF}
+\label{sec:negf}
+% ----------------------------------------------------------------------
+
+In the ballistic limit, phonon transport is described by the harmonic
+dynamical matrix together with open boundary conditions representing the
+semi-infinite contacts.  For each transverse wavevector
+$\vc{k}_\perp$, the problem reduces to a one-dimensional transport
+problem along the transport direction, here taken to be $z$.  The
+relevant objects are the transport-direction block matrices, the contact
+surface Green's functions, and the retarded and Keldysh Green's
+functions of the device.
+
+\subsubsection{Transport-direction block decomposition}
+
+For a fixed transverse wavevector
+$\vc{k}_\perp = (k_x,k_y)$, the on-site and nearest-neighbour coupling
+blocks along the transport direction are obtained by a partial Fourier
+transform over the $q_z$ mesh.  Defining the harmonic real-space blocks
+in Convention~B as $H(n_x,n_y,n_z)$, the transport-direction blocks are
+\begin{align}
+  H_{00}(\vc{k}_\perp)
+    &= \frac{C}{N_{q_z}}
+       \sum_{k=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(k_x, k_y, \frac{k}{N_{q_z}}\right),
+  \label{eq:H00} \\
+  H_{01}(\vc{k}_\perp)
+    &= \frac{C}{N_{q_z}}
+       \sum_{k=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(k_x, k_y, \frac{k}{N_{q_z}}\right)
+       e^{-2\pi i k / N_{q_z}}.
+  \label{eq:H01}
+\end{align}
+At non-zero transverse wavevector, these quantities are generally
+complex because they arise from a two-dimensional Fourier sum over the
+real-space transverse shifts,
+\begin{equation}
+  H_{0n_z}(\vc{k}_\perp)
+  = \sum_{n_x,n_y}
+    H(n_x,n_y,n_z)\,e^{2\pi i(k_x n_x + k_y n_y)}.
+\end{equation}
+Hermiticity implies
+\begin{equation}
+  H_{10}(\vc{k}_\perp) = H_{01}^\dagger(\vc{k}_\perp).
+\end{equation}
+
+These blocks define the effective one-dimensional transport problem for
+each transverse wavevector and form the input to the contact and device
+Green's-function calculation.
+
+\subsubsection{Sancho--Rubio decimation}
+
+The surface Green's function of a semi-infinite harmonic lead is
+computed iteratively using the Sancho--Rubio decimation method.  Given
+the bulk on-site and coupling blocks $H_{00}$ and $H_{01}$, the
+algorithm is initialized as
+\begin{equation}
+  \epsilon = \epsilon_s = (\omega^2 + i\eta)I - H_{00},
+  \qquad
+  \alpha = -H_{10},
+  \qquad
+  \beta = -H_{01},
+\end{equation}
+and then iterates
+\begin{align}
+  \epsilon_s &\leftarrow \epsilon_s - \alpha\,\epsilon^{-1}\beta, \\
+  \epsilon   &\leftarrow \epsilon - \alpha\,\epsilon^{-1}\beta
+              - \beta\,\epsilon^{-1}\alpha, \\
+  \alpha     &\leftarrow \alpha\,\epsilon^{-1}\alpha, \\
+  \beta      &\leftarrow \beta\,\epsilon^{-1}\beta.
+\end{align}
+The iteration is terminated when
+\begin{equation}
+  \|\alpha\| + \|\beta\| < \mathrm{tol},
+\end{equation}
+at which point the surface Green's function is
+\begin{equation}
+  g_s = \epsilon_s^{-1}.
+\end{equation}
+
+For the left lead, the surface Green's function is computed as
+\begin{equation}
+  g_L = g_s(H_{00},H_{01}),
+\end{equation}
+whereas for the right lead the coupling direction is reversed,
+\begin{equation}
+  g_R = g_s(H_{00},H_{01}^\dagger).
+\end{equation}
+
+\subsubsection{Caroli formula}
+
+Once the lead surface Green's functions have been computed, the retarded
+contact self-energies are
+\begin{align}
+  \Sigma_L &= H_{10}\,g_L\,H_{01}, &
+  \Sigma_R &= H_{01}\,g_R\,H_{10},
+\end{align}
+and the corresponding broadening matrices are
+\begin{equation}
+  \Gamma_{L/R} = i(\Sigma_{L/R} - \Sigma_{L/R}^\dagger).
+\end{equation}
+The retarded device Green's function is then
+\begin{equation}
+  G^R
+  = \bigl[(\omega^2+i\eta)I - H_D - \Sigma_L - \Sigma_R\bigr]^{-1},
+\end{equation}
+with advanced Green's function
+\begin{equation}
+  G^A = (G^R)^\dagger.
+\end{equation}
+
+The ballistic transmission at fixed transverse wavevector is given by
+the Caroli formula,
+\begin{equation}\label{eq:caroli}
+  \mathcal{T}(\omega^2,\vc{k}_\perp)
+  = \mathrm{Tr}\bigl[\Gamma_L\,G^R\,\Gamma_R\,G^A\bigr].
+\end{equation}
+The transverse-wavevector-averaged transmission is then
+\begin{equation}
+  \bar{\mathcal{T}}(\omega^2)
+  = \frac{1}{N_{k_\perp}}
+    \sum_{\vc{k}_\perp}
+    \mathcal{T}(\omega^2,\vc{k}_\perp).
+\end{equation}
+
+\subsubsection{QuaTrEx implementation}
+\label{sec:phonon_solver}
+
+In QuaTrEx, the harmonic problem is solved by the
+\texttt{PhononSolver}.  The solver assembles the inverse retarded
+Green's-function matrix in the form
+\begin{equation}\label{eq:system}
+  \bigl[G^R(\omega^2,\vc{k}_\perp)\bigr]^{-1}
+  = (\omega^2+i\eta)\,\mathbb{I}
+    - D(\vc{k}_\perp)
+    - \Sigma^R(\omega^2,\vc{k}_\perp),
+\end{equation}
+where $D(\vc{k}_\perp)$ is the BTD harmonic dynamical matrix assembled
+from the \texttt{dynamical\_matrix.mat} input, and
+$\Sigma^R = \Sigma_L + \Sigma_R$ in the ballistic case.
+
+The contact lesser and greater self-energies encode the Bose--Einstein
+occupation of the leads,
+\begin{align}
+  \Sigma_L^< &= i\,\Gamma_L\,n_\mathrm{BE}(\omega,T_L), &
+  \Sigma_L^> &= i\,\Gamma_L\,\bigl[n_\mathrm{BE}(\omega,T_L)+1\bigr],
+\end{align}
+and analogously for the right contact.  The Keldysh Green's functions
+are then obtained from
+\begin{align}
+  G^< &= G^R\,\Sigma_\mathrm{total}^<\,(G^R)^\dagger, \\
+  G^> &= G^R\,\Sigma_\mathrm{total}^>\,(G^R)^\dagger.
+\end{align}
+
+This harmonic implementation is the baseline solver used directly in the
+ballistic calculations and also the zeroth-order problem in the later
+SCBA treatment of anharmonic transport.
+
+\subsubsection{Thermal conductance}
+
+The ballistic thermal conductance per unit area is obtained from the
+transmission through
+\begin{equation}\label{eq:G_thermal}
+  G(T)
+  = \frac{1}{A_c}
+    \int_0^\infty \frac{d\omega}{2\pi}\;
+    \bar{\mathcal{T}}(\omega)\;
+    \hbar\omega\;
+    \frac{\partial n_\mathrm{BE}}{\partial T},
+\end{equation}
+where $A_c$ is the cross-sectional area perpendicular to transport and
+$n_\mathrm{BE}(\omega,T)$ is the Bose--Einstein distribution.  Its
+temperature derivative is
+\begin{equation}
+  \frac{\partial n_\mathrm{BE}}{\partial T}
+  = \frac{\hbar\omega}{k_B T^2}\,
+    \frac{e^{\hbar\omega/k_B T}}
+         {(e^{\hbar\omega/k_B T}-1)^2}.
+\end{equation}
+In practice, the integral is evaluated numerically on the sampled
+frequency grid using the trapezoidal rule.
+
+% ----------------------------------------------------------------------
+\subsection{Validation of the extracted harmonic model}
+\label{sec:extraction_validation}
+% ----------------------------------------------------------------------
+
+Before using the extracted harmonic blocks in transport calculations, it
+is important to verify that the block representation is internally
+consistent and reproduces the original phonopy dynamical matrix.  The
+present validation procedures are implemented in
+\texttt{validation.py}.
+
+\paragraph{Acoustic sum rule.}
+
+At the $\Gamma$ point, the lattice Fourier series reduces to
+\begin{equation}
+  D^{(\mathrm{B})}(\vc{0}) = \sum_{\vc{R}} H(\vc{R}).
+\end{equation}
+Translational invariance requires that the three acoustic modes vanish
+at $\Gamma$.  The validation therefore forms
+\begin{equation}
+  D_\Gamma = \sum_{\vc{R}} H(\vc{R}),
+\end{equation}
+computes its eigenvalues $\lambda_n$, and reports the corresponding
+frequencies
+\begin{equation}
+  \omega_n = \mathrm{sign}(\lambda_n)\sqrt{|\lambda_n|}.
+\end{equation}
+The three smallest $|\omega_n|$ should be close to zero.  In addition,
+the matrix should be symmetric to numerical precision, so that
+\begin{equation}
+  \max |D_\Gamma - D_\Gamma^T|
+\end{equation}
+is approximately zero.
+
+\paragraph{Block symmetry.}
+
+The real-space harmonic blocks must satisfy the Hermiticity relation
+\begin{equation}\label{eq:block_sym}
+  H(\vc{R})^T = H(-\vc{R})
+  \qquad \forall\;\vc{R}.
+\end{equation}
+The validation iterates over all block pairs
+$(\vc{R},-\vc{R})$ and reports the maximum deviation
+\begin{equation}
+  \max_{\vc{R}}
+  \|H(\vc{R})^T - H(-\vc{R})\|_\infty.
+\end{equation}
+
+\paragraph{Band-structure comparison.}
+
+A more stringent validation compares phonon frequencies reconstructed
+from the extracted blocks with those obtained directly from phonopy.
+Along a chosen $\vc{q}$-path, two spectra are computed:
+\begin{enumerate}
+  \item the phonopy reference spectrum, obtained from
+        \begin{equation}
+          D_\mathrm{ph}(\vc{q})
+          = P(\vc{q})\,D^{(\mathrm{A})}(\vc{q})\,P^\dagger(\vc{q}),
+        \end{equation}
+        converted to $(\mathrm{rad/s})^2$ and diagonalized;
+
+  \item the reconstructed spectrum, obtained from
+        \begin{equation}
+          D_\mathrm{rec}(\vc{q})
+          = \sum_{\vc{R}} H(\vc{R})\,
+            e^{2\pi i\,\vc{q}\cdot\vc{R}},
+        \end{equation}
+        and then diagonalized.
+\end{enumerate}
+The maximum eigenfrequency deviation
+\begin{equation}
+  \max_{n,\vc{q}}
+  |\omega_n^\mathrm{ph} - \omega_n^\mathrm{rec}|
+\end{equation}
+serves as a direct measure of the quality of the extraction.  In
+addition, overlay plots of the two band structures provide a visual
+consistency check.
+
+% ----------------------------------------------------------------------
+\subsection{Heterogeneous-device extension}
+\label{sec:heterogeneous}
+% ----------------------------------------------------------------------
+
+The original harmonic unit-cell input mode in QuaTrEx constructs a
+homogeneous device by repeating the same block set across all transport
+cells.  To model interfaces such as Si/Ge, the harmonic assembly was
+extended to support piecewise-defined left, device, and right regions
+with distinct block dictionaries.
+
+\subsubsection{L|D|R device model}
+
+The transport region is partitioned into three sections,
+\begin{equation}\label{eq:ldr}
+  \underbrace{L\;\cdots\;L}_{n_L\;\text{cells}}
+  \;\underbrace{D\;\cdots\;D}_{n_D\;\text{cells}}
+  \;\underbrace{R\;\cdots\;R}_{n_R\;\text{cells}},
+  \qquad
+  n_L + n_D + n_R = n_\mathrm{transport},
+\end{equation}
+where the left and right parts serve as lead-like material regions and
+the central part represents the interface or device region.
+
+\subsubsection{Configuration changes}
+
+To support this heterogeneous harmonic setup, four new configuration
+fields were added to \texttt{DeviceConfig}:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Field & Type & Purpose \\
+  \midrule
+  \texttt{num\_left\_cells}  & \texttt{PositiveInt | None} & number of left cells $n_L$ \\
+  \texttt{num\_right\_cells} & \texttt{PositiveInt | None} & number of right cells $n_R$ \\
+  \texttt{left\_matrix}      & \texttt{str | None}         & left-lead \texttt{.mat} file \\
+  \texttt{right\_matrix}     & \texttt{str | None}         & right-lead \texttt{.mat} file \\
+  \bottomrule
+\end{tabular}
+\end{center}
+This mode requires
+\texttt{construct\_from\_unit\_cell = true} and must satisfy
+\begin{equation}
+  n_L + n_R < n_\mathrm{transport},
+\end{equation}
+so that at least one transport cell remains in the device region.
+
+\subsubsection{Matrix assembly}
+
+The heterogeneous assembly is implemented by extending the harmonic
+unit-cell expansion to allow different block dictionaries in different
+transport cells.  Two new functions were added to
+\texttt{quatrex/device/inputs.py}.
+
+\texttt{\_expand\_heterogeneous\_matrix} builds a BTD sparse matrix for
+a single transverse periodic shift $(n_x,n_y)$.  Each cell is assigned
+to one of the three regions according to its index.  The diagonal block
+of cell $i$ is selected according to
+\begin{equation}
+  D_{ii} =
+  \begin{cases}
+    D_L, & i < n_L, \\
+    D_D, & n_L \le i < n_L+n_D, \\
+    D_R, & i \ge n_L+n_D.
+  \end{cases}
+\end{equation}
+
+\texttt{\_create\_heterogeneous\_matrix} loops over all transverse
+periodic shifts, calls \texttt{\_expand\_heterogeneous\_matrix} for
+each, and combines them into the final transport object.  At $\Gamma$,
+the transverse contributions are also summed to determine the sparsity
+pattern.
+
+\subsubsection{Boundary coupling}
+
+At the interfaces between the $L$, $D$, and $R$ regions, the
+off-diagonal couplings must be chosen consistently with Hermiticity.
+For harmonic real-space blocks, the relevant relation is
+\begin{equation}\label{eq:hermiticity_perp}
+  H(\vc{R}_\perp,n_z)^\dagger
+  = H(-\vc{R}_\perp,-n_z).
+\end{equation}
+At the left/device boundary, the super-diagonal coupling is taken from
+the left-lead block $H_{01}^L$, while the corresponding sub-diagonal is
+$H_{10}^L$.  At the device/right boundary, the couplings are taken from
+the right-lead blocks $H_{01}^R$ and $H_{10}^R$.  This ensures that the
+assembled heterogeneous matrix remains consistent with the physical lead
+couplings on either side of the interface.
+
+% ----------------------------------------------------------------------
+\subsection{Reference calculations}
+\label{sec:validation}
+% ----------------------------------------------------------------------
+
+To validate the harmonic transport implementation, the QuaTrEx results
+are compared against simpler reference calculations based on direct
+Sancho--Rubio decimation and the Caroli formula.  A naive
+Sancho--Rubio + Caroli Python code is used as reference.  These
+reference cases serve both as correctness checks for the harmonic
+backbone and as a baseline for interpreting later anharmonic
+corrections.
+
+\subsubsection{Bulk validation}
+\label{sec:bulk_validation}
+
+The simplest test is a homogeneous bulk silicon system.  In this case,
+the extracted harmonic blocks are used both in QuaTrEx and in a
+standalone reference implementation of Sancho--Rubio plus Caroli.  Both
+calculations are run with identical harmonic inputs, the same
+transverse-wavevector mesh, and the same frequency grid.
+
+Agreement between the two transmission curves confirms that:
+\begin{itemize}
+  \item the block extraction from phonopy is correct,
+  \item the BTD assembly from unit-cell blocks is consistent,
+  \item the open-boundary-condition treatment in QuaTrEx matches the
+        reference implementation.
+\end{itemize}
+
+\subsubsection{Si/Ge interface}
+\label{sec:sige}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=\textwidth]{fig/reference/si_ge_quatrex_comparison.png}
+  \caption{Ballistic phonon transmission on a $20\times20$ transverse
+    $k$-mesh with 101 frequency points.
+    \textbf{Left:} Homogeneous bulk Si.
+    \textbf{Right:} Si/Ge interface in the mass-mismatch approximation.}
+  \label{fig:quatrex_comparison}
+\end{figure}
+
+As a more realistic reference problem, a ballistic Si/Ge interface is
+constructed using a mass-mismatch model.  In this approximation, the
+harmonic force constants are taken from bulk Si throughout, and the
+distinction between Si and Ge enters only through the atomic masses,
+\begin{equation}
+  m_\mathrm{Si} = 28.09\;\mathrm{amu},
+  \qquad
+  m_\mathrm{Ge} = 72.64\;\mathrm{amu}.
+\end{equation}
+This is justified by the similarity of the Si and Ge interatomic force
+constants together with their substantial mass difference.
+
+The heterogeneous system is partitioned into three regions:
+\begin{itemize}
+  \item \textbf{Left lead:} Si force constants with Si masses,
+  \item \textbf{Device:} Si force constants with mixed Si/Ge masses,
+  \item \textbf{Right lead:} Si force constants with Ge masses.
+\end{itemize}
+In the present setup, atoms with fractional coordinate $z<0.5$ are
+assigned Si mass in the device cell and the remainder Ge mass.  The
+coupling between left lead and device is taken from the Si lead, while
+the coupling between device and right lead is taken from the Ge lead.
+
+For the harmonic inputs, the Si force constants are obtained from a DFT
+calculation at equilibrium lattice constant
+\begin{equation}
+  a = 5.466\;\mathrm{\AA},
+\end{equation}
+using the conventional 8-atom diamond cell and a
+$2\times2\times2$ supercell.  The DFT parameters are:
+plane-wave cutoff 60\,Ry, charge-density cutoff 480\,Ry,
+$4\times4\times4$ supercell $k$-mesh, SCF threshold
+$10^{-10}$\,Ry, Gaussian smearing 0.01\,Ry, PBE exchange-correlation,
+and the pseudopotential
+\texttt{Si.pbe-n-rrkjus\_psl.1.0.0.UPF}.  Because of diamond symmetry,
+this setup reduces to a single displaced calculation in the harmonic
+finite-displacement workflow.
+
+The corresponding phonopy calculation is performed with the native QE
+interface, so the lattice and force constants are converted from bohr
+and Ry/bohr$^2$ to \AA\ and eV/\AA$^2$ on loading, as described in
+\cref{sec:phonopy_units}.  The Ge and interface models are obtained by
+cloning the Si harmonic model and substituting the atomic masses.
+
+The transport parameters used for the Si/Ge interface calculation are
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  Parameter & Value \\
+  \midrule
+  Transverse $k$-mesh & $20\times20$ \\
+  Frequency range & $0.01$--$16.0$\,THz, 101 points \\
+  Transport direction & $z$ (001) \\
+  Total transport cells / $n_L$ / $n_D$ / $n_R$ & 5 / 2 / 1 / 2 \\
+  Broadening $\eta$ & $\tfrac12 \Delta\omega^2 \approx 5.05\times10^{23}\,(\mathrm{rad/s})^2$ \\
+  $T_L$, $T_R$ & 301\,K, 299\,K \\
+  OBC algorithm & Sancho--Rubio \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+At the $\Gamma$ point, the maximum optical frequency of the Si model is
+15.55\,THz, consistent with reference values.  The Ge mass-mismatch
+clone gives 9.67\,THz, in agreement with the simple mass-scaling
+relation
+\begin{equation}
+  f_\mathrm{Ge}
+  = f_\mathrm{Si}\sqrt{\frac{m_\mathrm{Si}}{m_\mathrm{Ge}}}.
+\end{equation}
+
+The resulting interfacial thermal conductance at 300\,K is
+\begin{equation}
+  G = 196\;\mathrm{MW/(m^2\,K)}.
+\end{equation}
+This may be compared with the literature values
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  Reference & $G$ [MW/(m$^2$\,K)] \\
+  \midrule
+  Latour et al.\ (2017) & 210 \\
+  Tian et al.\ (2012) & 209 \\
+  Present calculation & 196 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The remaining $\sim 7\%$ deviation is likely attributable to the coarser
+transverse-wavevector mesh and the specific DFT setup used here.
+
+% ======================================================================
+\section{Anharmonic Extension: FC3 and Self-Consistent Transport}
+\label{sec:anharmonic_transport}
+% ======================================================================
+
+The harmonic transport problem described in the previous section treats
+phonons as non-interacting quasiparticles propagating through the device
+under the action of the quadratic force-constant matrix alone.  The
+anharmonic extension adds phonon--phonon scattering through the cubic
+interatomic force constants (FC3), represented here by the mass-weighted
+tensor $\Psi$.  In practice, this turns the ballistic transport problem
+into a self-consistent many-body problem: the Green's functions depend
+on the phonon self-energy, while the phonon self-energy itself is
+constructed from the Green's functions.
+
+The present implementation proceeds in three layers.  First, the full
+FC3 dataset is reduced to a transport-compatible local tensor.  Second,
+this tensor is used to construct the phonon--phonon self-energy at
+lowest nontrivial order in the cubic interaction.  Third, the resulting
+retarded, lesser, and greater self-energies are incorporated into a
+self-consistent Born approximation (SCBA) loop.  The remainder of this
+section summarizes the reduced FC3 models currently used, the basic
+self-energy formulas, the SCBA procedure, and more advanced
+formulations and scaling analyses relevant for large-scale distributed
+calculations.
+
+% ----------------------------------------------------------------------
+\subsection{Reduced FC3 models for transport}
+\label{sec:assembly_fc3}
+% ----------------------------------------------------------------------
+
+In the present transport implementation, the harmonic device region is
+one transport cell thick in the transport direction, with harmonic
+dimension
+\begin{equation}
+  n_\mathrm{dof} = 3N_b,
+\end{equation}
+where $N_b$ is the number of basis atoms in the transport cell.  For
+the conventional 8-atom silicon cell used here, $n_\mathrm{dof}=24$.
+The full real-space FC3 dataset, however, couples triplets of atoms
+across different unit cells, and therefore exceeds the locality of the
+harmonic transport slab representation.
+
+To obtain a tractable transport model, the full FC3 dataset is reduced
+to an effective local tensor $\Psi_{abc}$ for the transport slab.  Two
+approximations are considered below.
+
+\subsubsection{Onsite approximation}
+
+The simplest reduction retains only the fully local FC3 block, i.e. the
+contribution for which both relative cell vectors are zero:
+\begin{equation}
+  \Psi_{abc}^{\mathrm{onsite}}
+  =
+  \frac{\Phi^{(3)}_{abc}(\vc{0},\vc{0},\vc{0})}
+       {\sqrt{M_a M_b M_c}}.
+\end{equation}
+Here $a,b,c$ denote the combined Cartesian and basis indices of the
+transport slab.  This approximation ignores all cubic couplings to
+neighbouring transport slabs and retains only scattering processes that
+are fully local within the reference slab.
+
+\subsubsection{Full \texorpdfstring{$\delta l = 0$}{delta l = 0} approximation}
+
+A less restrictive approximation retains all FC3 blocks whose two
+relative cell vectors remain within the same transport slab as the
+reference atom.  This corresponds to the condition
+\begin{equation}
+  \delta l' = \delta l'' = 0,
+\end{equation}
+where the slab displacement along the transport direction is extracted
+from the real-space cell vectors through
+\begin{equation}
+  \delta l'
+  = \mathrm{round}\!\bigl([\vc{A}^{-\top}\vc{R}']_z\bigr),
+\end{equation}
+and similarly for $\delta l''$.  The reduced slab tensor is then
+\begin{equation}\label{eq:fc3_full}
+  \Psi_{abc}^{\mathrm{full}}
+  =
+  \sum_{\substack{\vc{R}',\vc{R}'' \\
+                  \delta l' = 0,\;\delta l'' = 0}}
+  \frac{\Phi^{(3)}_{abc}(\vc{0},\vc{R}',\vc{R}'')}
+       {\sqrt{M_a M_b M_c}}.
+\end{equation}
+This is the transport-slab analogue of Approximation~III in the
+literature on anharmonic phonon transport.  It retains all cubic
+interactions whose two partner atoms remain in the same transport slab,
+while still discarding couplings to neighbouring slabs.
+
+For the silicon FC3 dataset used here, 193 of the 422 remapped FC3
+blocks satisfy the condition $\delta l'=\delta l''=0$, corresponding to
+2126 nonzero tensor elements out of the total
+$24^3 = 13\,824$ possible entries.  This provides a significantly richer
+local anharmonic model than the onsite approximation while remaining
+compatible with the current single-slab transport treatment.
+
+% ----------------------------------------------------------------------
+\subsection{Phonon--phonon self-energy}
+\label{sec:self_energy}
+% ----------------------------------------------------------------------
+
+Given the reduced cubic interaction tensor $\Psi$, the lowest-order
+phonon--phonon scattering self-energy is constructed from a pair of
+Green's functions connected by two FC3 vertices.  This is the phonon
+analogue of a second-order Born self-energy.  In the present context,
+the lesser and greater components are the primary quantities, and the
+retarded self-energy is approximated from them.
+
+\subsubsection{Local self-energy formula}
+
+For a local transport slab, the phonon--phonon self-energy at second
+order in the cubic interaction is
+\begin{equation}\label{eq:sigma_guo}
+  \Sigma^{<}_{ab}(\omega)
+  = \frac{i\hbar}{2}
+    \sum_{c,d,e,f}
+    \Psi_{acd}
+    \left[
+      \int \frac{d\omega'}{2\pi}\;
+      G^<_{ce}(\omega')\,
+      G^<_{df}(\omega-\omega')
+    \right]
+    \Psi_{bef},
+\end{equation}
+where $G^<(\omega)$ is the slab lesser Green's function and
+$\Psi$ is the mass-weighted FC3 tensor in SI units.  The same structure
+applies to the greater self-energy,
+\begin{equation}
+  \Sigma^{>}_{ab}(\omega)
+  = \frac{i\hbar}{2}
+    \sum_{c,d,e,f}
+    \Psi_{acd}
+    \left[
+      \int \frac{d\omega'}{2\pi}\;
+      G^>_{ce}(\omega')\,
+      G^>_{df}(\omega-\omega')
+    \right]
+    \Psi_{bef}.
+\end{equation}
+
+In the current implementation, the retarded phonon self-energy is
+approximated by neglecting the Hilbert-transform contribution and using
+\begin{equation}\label{eq:sigma_r}
+  \Sigma^R(\omega)
+  \approx \frac{1}{2}
+  \bigl[\Sigma^>(\omega) - \Sigma^<(\omega)\bigr].
+\end{equation}
+This approximation captures the imaginary, scattering-related part of
+the retarded self-energy, but it does not yet include the full
+dispersive real-part correction.
+
+\subsubsection{Full Fourier-space self-energy}
+
+For a genuinely three-dimensional system with periodicity transverse to
+the transport direction, the phonon--phonon self-energy depends on the
+transverse wavevector and includes an internal sum over all transverse
+momenta.  The full lesser/greater self-energy takes the form
+\begin{align}\label{eq:sigma_phph}
+  \Sigma^{\gtrless}_{s,\,ll'_s}(&\omega;\,\vc{q}_\perp)
+  = \frac{i\hbar}{2}
+    \sum_{\substack{l_1 l_2 l_3 l_4\\ j_1 j_2 j_3 j_4}}
+    \frac{1}{N}\sum_{\vc{q}'_\perp}
+    \tilde{\Phi}^{ij_1j_2}_{l,\,l_1 l_2}
+      \!\left(\vc{q}'_\perp,\vc{q}_\perp-\vc{q}'_\perp\right)
+    \notag\\
+  &\qquad\times
+    \tilde{\Phi}^{j_3j_4j}_{l',\,l_3 l_4}
+      \!\left(\vc{q}'_\perp-\vc{q}_\perp,-\vc{q}'_\perp\right)
+    \int\!\frac{d\omega'}{2\pi}\;
+    G^{\gtrless,j_1j_4}_{l_1l_4}(\omega';\vc{q}'_\perp)\,
+    G^{\gtrless,j_2j_3}_{l_2l_3}
+      (\omega-\omega';\vc{q}_\perp-\vc{q}'_\perp).
+\end{align}
+Here $l,l'$ index transport slabs, $s$ indicates local basis indices
+within a slab, and the sum over $\vc{q}'_\perp$ enforces transverse
+momentum conservation.
+
+The Fourier-transformed FC3 tensor entering this expression is
+\begin{equation}\label{eq:fc3_fourier}
+  \tilde{\Phi}^{ij_1j_2}_{l,\,l_1 l_2}
+  (\vc{q}_\perp,\vc{q}'_\perp)
+  = \sum_{\Delta\vc{R}_\perp}\sum_{\Delta\vc{R}'_\perp}
+    \Phi^{ij_1j_2}_{l l_1 l_2}\;
+    e^{-i\vc{q}_\perp\cdot\Delta\vc{R}_\perp}\;
+    e^{-i\vc{q}'_\perp\cdot\Delta\vc{R}'_\perp}.
+\end{equation}
+Unlike the harmonic FC2 object, which depends on one transverse
+wavevector, the cubic tensor depends on two.  This is the origin of the
+substantially greater computational complexity of the anharmonic
+problem.
+
+In the ballistic harmonic case, each $\vc{q}_\perp$ is independent and
+the transport problem is embarrassingly parallel over wavevectors.  By
+contrast, the internal $\vc{q}'_\perp$ sum in
+\cref{eq:sigma_phph} couples all transverse wavevectors, so that
+evaluating the self-energy at one $\vc{q}_\perp$ requires access to
+Green's functions at every other transverse wavevector.
+
+\subsubsection{Frequency discretisation and FFT convolution}
+\label{sec:fft}
+
+In practice, the self-energy is evaluated on a discrete real-frequency
+grid
+\begin{equation}
+  \omega_n = \omega_\mathrm{min} + n\,\Delta\omega,
+  \qquad
+  n = 0,\ldots,N_\omega-1.
+\end{equation}
+The broadening parameter is chosen as
+\begin{equation}
+  \eta = \eta_\mathrm{factor}\,(\Delta\omega)^2,
+\end{equation}
+with $\eta_\mathrm{factor}=0.5$ in the current implementation.
+
+The frequency integral appearing in \cref{eq:sigma_guo} is a
+convolution.  On the discrete frequency grid, it is approximated by
+\begin{equation}
+  C_{ce,df}[\omega_n]
+  = \frac{\Delta\omega}{2\pi}
+    \sum_m
+    G^<_{ce}[\omega_m]\;
+    G^<_{df}[\omega_n-\omega_m].
+\end{equation}
+This convolution is evaluated efficiently by FFT:
+\begin{equation}
+  C
+  = \mathrm{IFFT}\!\bigl[
+      \mathrm{FFT}(G_{ce})\cdot \mathrm{FFT}(G_{df})
+    \bigr].
+\end{equation}
+The same procedure is applied to the greater component.
+
+The resulting discrete lesser self-energy is
+\begin{equation}\label{eq:full-energy}
+  \Sigma^<_{ab}[\omega_n]
+  = \frac{i\hbar\,\Delta\omega}{4\pi}
+    \sum_{c,d,e,f}
+    \Psi_{acd}\;C_{ce,df}[\omega_n]\;\Psi_{bef},
+\end{equation}
+and analogously for $\Sigma^>$.  In the current code this is
+implemented as a loop over active $(c,d)$ and $(e,f)$ index pairs with
+sparsity checks on the FC3 tensor.  For the silicon test case, the
+number of active pairs is of order $10^4$, leading to an overall
+self-energy cost scaling approximately as
+\begin{equation}
+  \mathcal{O}(n_\mathrm{dof}^4 N_\omega \log N_\omega).
+\end{equation}
+
+% ----------------------------------------------------------------------
+\subsection{SCBA algorithm}
+\label{sec:scba}
+% ----------------------------------------------------------------------
+
+The phonon self-energy modifies the retarded and Keldysh Green's
+functions, which in turn modify the self-energy itself.  The resulting
+nonlinear problem is solved iteratively within the self-consistent Born
+approximation (SCBA).  Starting from the harmonic ballistic solution,
+the phonon self-energy is updated repeatedly until convergence.
+
+\subsubsection{SCBA loop}
+
+The current SCBA procedure is:
+\begin{enumerate}
+  \item \textbf{Initialization.}
+        Set the phonon self-energy to zero,
+        \begin{equation}
+          \Sigma^\mathrm{ph} = 0,
+        \end{equation}
+        and solve the harmonic transport problem.
+
+  \item \textbf{Green's functions.}
+        For each transverse wavevector $\vc{q}_\perp$ and frequency
+        $\omega_n$, compute the contact self-energies using
+        Sancho--Rubio decimation and solve
+        \begin{align}
+          G^R
+          &= \Bigl[
+               (\omega^2+i\eta)\,\mathbb{I}
+               - H_{00}
+               - \Sigma_L^R
+               - \Sigma_R^R
+               - \Sigma_\mathrm{ph}^R
+             \Bigr]^{-1}, \\
+          G^{<,>}
+          &= G^R\,
+             \Sigma^{<,>}_\mathrm{total}\,
+             (G^R)^\dagger.
+        \end{align}
+
+  \item \textbf{Self-energy update.}
+        Construct the new
+        $\Sigma_\mathrm{ph}^{<,>,R}$ from the Green's functions using
+        the discretized self-energy formulas of
+        \cref{eq:full-energy,eq:sigma_r}.
+
+  \item \textbf{Mixing.}
+        Stabilize the iteration by linear mixing,
+        \begin{equation}
+          \Sigma^{(n+1)}
+          = (1-\alpha)\Sigma^{(n)}
+            + \alpha\,\Sigma^\mathrm{new},
+        \end{equation}
+        with default mixing parameter $\alpha=0.3$.
+
+  \item \textbf{Convergence check.}
+        Evaluate a convergence criterion based on the change in the
+        transport observable between two iterations.  In the current
+        implementation this is written as
+        \begin{equation}
+          \frac{\sum_n
+            |\mathcal{T}^{(k)}_n-\mathcal{T}^{(k-1)}_n|}
+               {\sum_n |\mathcal{T}^{(k-1)}_n|}
+          < \mathrm{tol},
+        \end{equation}
+        although the precise transport quantity used here is still under
+        review.
+
+  \item \textbf{Iteration.}
+        Repeat until the solution converges or the maximum number of
+        iterations is reached.
+\end{enumerate}
+
+Per SCBA iteration, the dominant costs are:
+\begin{itemize}
+  \item the solution of $N_\perp\times N_\omega$ Green's-function
+        problems, including Sancho--Rubio evaluations for the contacts,
+  \item the FFT-based self-energy update,
+        \begin{equation}
+          \mathcal{O}(n_\mathrm{dof}^4 N_\omega\log N_\omega),
+        \end{equation}
+  \item the evaluation of the transport observable used in the
+        convergence criterion.
+\end{itemize}
+For sufficiently large transport slabs, the self-energy update is
+expected to dominate the iteration cost.
+
+\subsubsection{Implementation status and current limitations}
+
+The present SCBA implementation should be regarded as a working
+prototype rather than a final production method.  Several aspects are
+already operational, while others remain approximate or still require
+revision.
+
+The following components are implemented:
+\begin{itemize}
+  \item FC3 remapping to the conventional harmonic basis,
+  \item local reduced FC3 models for the transport slab,
+  \item FFT-based evaluation of the lesser and greater self-energy,
+  \item inclusion of the phonon self-energy into the retarded and
+        Keldysh Green's-function equations,
+  \item iterative SCBA updates with linear mixing.
+\end{itemize}
+
+The following limitations remain:
+\begin{itemize}
+  \item The retarded phonon self-energy currently uses the approximate
+        relation \cref{eq:sigma_r} and does not yet include the full
+        Hilbert-transform contribution.
+  \item The transport quantity used inside the SCBA convergence loop is
+        not yet finalized, and the corresponding transmission update
+        logic still needs revision.
+  \item The current transport implementation retains only slab-local FC3
+        contributions, i.e. onsite or $\delta l=0$ approximations.
+        Fully nonlocal anharmonic couplings along the transport
+        direction are not yet included.
+  \item The current implementation is mainly validated on bulk-like
+        silicon test systems and has not yet been benchmarked as
+        extensively as the harmonic solver.
+\end{itemize}
+
+Accordingly, the present anharmonic results should be interpreted as
+preliminary and mainly as evidence that the overall SCBA machinery is
+working and producing physically plausible trends.
+
+\subsubsection{Preliminary anharmonic results}
+\label{sec:anharmonic_results}
+
+The current test system is bulk silicon in the conventional 8-atom
+cell, with lattice constant
+\begin{equation}
+  a = 5.4662\;\mathrm{\AA}.
+\end{equation}
+The harmonic FC2 are obtained from a phonopy/QE
+$2\times2\times2$ supercell calculation, while FC3 are taken from
+\texttt{thirdorder.py} in the 2-atom FCC cell and remapped to the
+conventional basis.  Transport is along the $z$ direction at 300\,K,
+using 51 frequency points in the range 0.5--15.0\,THz, a mixing
+parameter $\alpha=0.3$, and the slab-local FC3 approximation described
+above.
+
+The current results for two transverse $q$-meshes are summarized in
+\cref{tab:scaling_anh}.
+\begin{table}[h]
+\centering
+\caption{Self-energy magnitude and thermal conductance as a function of
+the transverse $q$-mesh for the current silicon SCBA test.}
+\label{tab:scaling_anh}
+\begin{tabular}{cccccc}
+  \toprule
+  $q$-mesh & $N_\perp$ &
+  $|\Sigma^R|_\mathrm{max}/|H_{00}|_\mathrm{max}$ &
+  SCBA iter &
+  $G_\mathrm{ball}$ &
+  $G_\mathrm{anh}$ \\
+  & & & & [MW/(m$^2$K)] & [MW/(m$^2$K)] \\
+  \midrule
+  $2\times2$ & 4  & 0.49 & 11 & 1096 & 913 \\
+  $4\times4$ & 16 & 0.20 & 8  & 1162 & 1005 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+These results show the expected suppression of thermal conductance in
+the anharmonic calculation relative to the ballistic one.  The ratio
+\begin{equation}
+  \frac{|\Sigma^R|_\mathrm{max}}{|H_{00}|_\mathrm{max}}
+\end{equation}
+decreases as the transverse mesh is refined, indicating that the
+effective self-energy per sampled point becomes less dominant once the
+transverse phase space is better resolved.
+
+The current transmission curves indicate that acoustic modes below
+roughly 6\,THz are comparatively weakly affected, with transmission
+ratio close to unity, whereas optical modes in the 10--15\,THz range
+show a stronger reduction.  This trend is physically plausible: the
+optical sector has larger phase space for three-phonon processes, while
+the acoustic modes remain more constrained by energy conservation.
+However, since the transmission post-processing is still under revision,
+these frequency-resolved results should at present be interpreted only
+qualitatively.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{fig/reference/anharmonic_test.png}
+  \caption{Left: ballistic (blue) and anharmonic SCBA (red dashed)
+    phonon transmission for bulk Si at 300\,K ($4\times4$ $q$-mesh,
+    51 frequency points).
+    Right: current transmission ratio
+    $\mathcal{T}_\mathrm{anh}/\mathcal{T}_\mathrm{ball}$.}
+  \label{fig:transmission}
+\end{figure}
+
+% ----------------------------------------------------------------------
+\subsection{Advanced formulations of the phonon--phonon self-energy}
+\label{sec:phph-energy}
+% ----------------------------------------------------------------------
+
+% ============================================================
+\subsection{Notation and conventions}
+\label{sub:notation}
+% ============================================================
+
+Throughout this section we use the following indices.
+\begin{center}
+\begin{tabular}{llr}
+  \toprule
+  Symbol & Meaning & Range \\
+  \midrule
+  $l,l'$               & Transport-direction slab index              & $N_\mathrm{sl}$ \\
+  $s,s'$               & Basis-atom within a slab cross-section      & $N_s$~per~slab \\
+  $i,j,j_1,\ldots,j_4$ & Cartesian component ($x,y,z$)               & $C=3$ \\
+  $\vq_\perp$          & Transverse wavevector (2D BZ)                & $N_q$ points \\
+  $\vR_\perp$          & Transverse lattice vector                    & $N_q$ points (dual) \\
+  $\omega,\omega'$     & Real frequency                               & $N_\omega$ points \\
+  $\tau$               & Conjugate time variable                      & $N_\tau = N_\omega$ \\
+  $N$                  & Total number of $\vq$-points, $N_q$         & \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+We define the combined Cartesian--basis index $\mu \equiv (j,s)$
+with dimension $M \equiv CN_s = 3N_s$ per slab, and denote by $N_B$
+the slab-pair bandwidth of the Green's function
+($G^{\mu\mu'}_{ll'} = 0$ for $|l-l'|>N_B$).  The FC3 range in the
+transport direction is $\hat{N}_c \equiv 2N_c+1$ slabs.
+
+For each slab $l$, the transverse lattice vector is
+$\vR_\perp(l) \equiv l_y\,\va_2 + l_z\,\va_3$,
+where $(l_y, l_z)\in\mathbb{Z}^2$ and $\va_2, \va_3$ are the
+transverse primitive vectors.  We define the transverse displacement
+vectors
+\begin{align}
+  \vrho_1 &\equiv \vR_\perp(l)  - \vR_\perp(l_1), \label{eq:rho1}\\
+  \vrho_2 &\equiv \vR_\perp(l)  - \vR_\perp(l_2), \label{eq:rho2}\\
+  \vrho_3 &\equiv \vR_\perp(l') - \vR_\perp(l_3), \label{eq:rho3}\\
+  \vrho_4 &\equiv \vR_\perp(l') - \vR_\perp(l_4). \label{eq:rho4}
+\end{align}
+With an FC3 cutoff of $N_\mathrm{cut}$ unit cells, each
+displacement satisfies $|\vrho_k|\le N_\mathrm{cut}|\va|$, giving
+at most $N_\perp \equiv (2N_\mathrm{cut}+1)^2$ nonzero values per
+pair.
+
+We define discrete Fourier transforms on the
+$N_q = N_{q_2}\times N_{q_3}$ transverse periodic supercell:
+\begin{align}
+  G(\omega;\vq) &= \sum_{\vR} g(\omega;\vR)\,e^{-i\vq\cdot\vR},
+  \label{eq:dft_fwd}\\
+  g(\omega;\vR) &= \frac{1}{N}\sum_{\vq} G(\omega;\vq)\,
+                    e^{+i\vq\cdot\vR}.
+  \label{eq:dft_inv}
+\end{align}
+The discrete convolution theorem states
+\begin{equation}
+  \frac{1}{N}\sum_{\vq'} A(\vq')\,B(\vq-\vq')
+  = \sum_{\vR} a(\vR)\,b(\vR)\,e^{-i\vq\cdot\vR},
+  \label{eq:conv_theorem}
+\end{equation}
+where $a, b$ are the inverse DFTs of $A, B$.
+
+The third-order force-constant (FC3)
+$\Phi^{ij_1j_2}_{l,l_1,l_2}$ couples three atoms: one at slab $l$
+with Cartesian index $i$, one at $(l_1, j_1)$, and one at
+$(l_2, j_2)$.  Its transverse Fourier transform depends on two
+wavevectors:
+\begin{equation}
+  \PhiT^{ij_1j_2}_{l,l_{1}l_{2}}(\vq,\vq')
+  \;\equiv\;
+  \sum_{\vrho_1}\sum_{\vrho_2}
+  \Phi^{ij_1j_2}_{l,l_1,l_2}\;
+  e^{-i\vq\cdot\vrho_1}\;e^{-i\vq'\cdot\vrho_2},
+  \label{eq:fc3_fourier}
+\end{equation}
+where the sums run over all transverse displacements within the
+cutoff and $\Phi^{ij_1j_2}_{l,l_1,l_2}$ is evaluated at the atom
+positions selected by $\vrho_1$ and $\vrho_2$.
+
+
+% ============================================================
+\subsection{Self-Energy Transformations}
+\label{sub:preliminary}
+% ============================================================
+
+The phonon--phonon self-energy is given by \cref{eq:sigma_phph},
+\begin{align}
+  \Sig^{\gtrless}_{s,ll'}(\omega;\vq)
+  &= \frac{i\hbar}{2}
+    \sum_{\substack{l_1 l_2 l_3 l_4\\j_1 j_2 j_3 j_4}}
+    \frac{1}{N}\sum_{\vq'}
+    \PhiT^{ij_1 j_2}_{l,\,l_1 l_2}\!\left(\vq',\vq{-}\vq'\right)
+    \PhiT^{j_3 j_4 j}_{l',\,l_3 l_4}\!\left(\vq'{-}\vq,-\vq'\right)
+    \notag\\
+  &\qquad\times
+    \int\!\dw\;
+    G^{\gtrless,j_1j_4}_{l_1 l_4}(\omega';\vq')\,
+    G^{\gtrless,j_2j_3}_{l_2 l_3}(\omega{-}\omega';\vq{-}\vq').
+\end{align}
+We suppress the $\gtrless$ superscript throughout.
+
+% -------------------------------------------------------
+\subsubsection{Time-domain representation of the frequency
+  convolution}
+\label{ssub:time_domain}
+% -------------------------------------------------------
+
+The $\omega'$-integral in \cref{eq:sigma_phph} is a convolution.
+Define the fourier transforms
+\begin{align}
+  g(\tau;\vR) &= \frac{1}{N}\sum_{\vq}\int\!\frac{d\omega}{2\pi}\;
+                  G(\omega;\vq)\,e^{-i\omega\tau}\,e^{+i\vq\cdot\vR},
+  \label{eq:g_2d}\\
+  G(\omega;\vq) &= \sum_{\vR}\int\!d\tau\;
+                  g(\tau;\vR)\,e^{+i\omega\tau}\,e^{-i\vq\cdot\vR}.
+  \label{eq:G_2d}
+\end{align}
+At fixed transverse argument the 1D convolution theorem gives
+\begin{equation}
+  \int\!\dw\; G_1(\omega';\cdot)\,G_2(\omega{-}\omega';\cdot)
+  = \int\!d\tau\; g_1(\tau;\cdot)\,g_2(\tau;\cdot)\,
+    e^{+i\omega\tau},
+  \label{eq:omega_conv}
+\end{equation}
+replacing the $\omega'$-integration by a pointwise $\tau$-product
+at cost $\cO(N_\omega\log N_\omega)$ per transverse point.
+
+% -------------------------------------------------------
+\subsubsection{Inner contraction}
+\label{ssub:contraction}
+% -------------------------------------------------------
+
+At each working point, the self-energy accumulates a contribution
+\begin{equation}
+  \mathcal{B}^{ij}_{ll'}
+  \;\mathrel{+}=\;
+  \sum_{\substack{\mu_1 \mu_2 \mu_3 \mu_4\\l_1 l_2 l_3 l_4}}
+  \Phi^{i\mu_1\mu_2}_{l,l_1,l_2}\;
+  g^{\mu_1\mu_4}_{l_1,l_4}\;
+  g^{\mu_2\mu_3}_{l_2,l_3}\;
+  \Phi^{\mu_3\mu_4 j}_{l',l_3,l_4},
+  \label{eq:inner_contraction}
+\end{equation}
+where $\Phi$ stands for either $\PhiT$ or the real-space FC3.
+The four tensors form a ring: $\Phi_1$ shares $(\mu_1,l_1)$ with
+$g_1$, which shares $(\mu_4,l_4)$ with $\Phi_2$, which shares
+$(\mu_3,l_3)$ with $g_2$, which shares $(\mu_2,l_2)$ with
+$\Phi_1$.  The optimal evaluation splits the ring into two halves:
+\begin{align}
+  {T_1}^{i\mu_2\mu_4}_{l,l_2,l_4}
+  &= \sum_{\mu_1,l_1}
+     \Phi^{i\mu_1\mu_2}_{l,l_1,l_2}\;g^{\mu_1\mu_4}_{l_1,l_4},
+  \qquad
+  {T_2}^{j\mu_2\mu_4}_{l',l_2,l_4}
+  = \sum_{\mu_3,l_3}
+     g^{\mu_2\mu_3}_{l_2,l_3}\;
+     \Phi^{\mu_3\mu_4 j}_{l',l_3,l_4},
+  \notag\\[4pt]
+  \mathcal{B}^{ij}_{l,l'}
+  &= \sum_{\mu_2,\mu_4,l_2,l_4} T_1\,T_2.
+  \label{eq:balanced_tree}
+\end{align}
+Each half-transform contracts over $(\mu_1,l_1)$ of dimension
+$M\hat{N}_c$, producing a result of dimension
+$M\hat{N}_c \times MN_B$.  The cost is
+\begin{equation}
+  \cC_\mathrm{ic}
+  = \cO\!\left(M^3\,\hat{N}_c^2\,N_B\right).
+  \label{eq:cost_ic}
+\end{equation}
+
+
+% ============================================================
+\subsection{\texorpdfstring{$\vq$}{q}-space formulation}
+\label{sub:q_space}
+% ============================================================
+
+The $\vq$-space formulation retains the explicit $\vq'$-loop in
+\cref{eq:sigma_phph} and converts the frequency convolution to a
+$\tau$-product via \cref{eq:omega_conv}.
+
+The Fourier-transformed FC3 is not stored but computed
+on-the-fly at each $(\vq',\vq)$: one streams through the
+$N_\perp^2$ nonzero real-space FC3 elements, multiplying each by
+$e^{-i\vq'\cdot\vrho_1}\,e^{-i(\vq-\vq')\cdot\vrho_2}$ and
+accumulating.  The phase computation costs
+$\cO(N_\perp^2\,M^2\hat{N}_c^2)$ per $(\vq',\vq)$, which is
+negligible compared to the ring contraction since
+$N_\perp^2 \ll MN_B$.
+
+Defining the $\tau$-dependent bubble at fixed $\vq$,
+\begin{equation}
+  \mathcal{B}(\tau;\vq)
+  \;\equiv\;
+  \frac{1}{N}\sum_{\vq'}
+  \PhiT_1(\vq',\vq{-}\vq')\;
+  g_1(\tau;\vq')\;
+  g_2(\tau;\vq{-}\vq')\;
+  \PhiT_2(\vq'{-}\vq,-\vq'),
+  \label{eq:bubble_q}
+\end{equation}
+the self-energy is
+\begin{equation}
+  \Sig(\omega;\vq)
+  = \frac{i\hbar}{2}
+    \int\!d\tau\;
+    \mathcal{B}(\tau;\vq)\,e^{+i\omega\tau}.
+  \label{eq:sigma_q}
+\end{equation}
+At each $(\tau,\vq)$, the bubble is accumulated over $N_q$ values
+of $\vq'$, each requiring one inner contraction
+\cref{eq:balanced_tree}.  The total cost is
+\begin{equation}
+  \cW_q = N_\tau\,N_q^2\;\cC_\mathrm{ic}.
+  \label{eq:cost_q}
+\end{equation}
+
+
+% ============================================================
+\subsection{Real-space formulation}
+\label{sub:real_space}
+% ============================================================
+
+We show that eliminating the $N_q^2$ loop by applying the
+convolution theorem to the $\vq'$-sum is not competitive at the transverse
+grids $N_q \approx 400$.
+
+Expanding both Fourier-transformed FC3 factors in
+\cref{eq:sigma_phph} using \cref{eq:fc3_fourier}:
+\begin{align}
+  \PhiT^{ij_1j_2}_{l,l_1l_2}\!\left(\vq',\vq-\vq'\right)
+  &= \sum_{\vrho_1,\vrho_2}
+     \Phi^{ij_1j_2}_{l,l_1,l_2}\;
+     e^{-i\vq'\cdot\vrho_1}\;
+     e^{-i(\vq-\vq')\cdot\vrho_2},
+  \label{eq:v1_expand}\\[2pt]
+  \PhiT^{j_3j_4j}_{l',l_3l_4}\!\left(\vq'-\vq,-\vq'\right)
+  &= \sum_{\vrho_3,\vrho_4}
+     \Phi^{j_3j_4j}_{l',l_3,l_4}\;
+     e^{-i(\vq'-\vq)\cdot\vrho_3}\;
+     e^{+i\vq'\cdot\vrho_4}.
+  \label{eq:v2_expand}
+\end{align}
+The four exponentials factorize:
+\begin{align}
+  e^{-i\vq'\cdot\vrho_1}\, e^{-i(\vq-\vq')\cdot\vrho_2}
+  &= e^{-i\vq\cdot\vrho_2}\cdot
+     e^{-i\vq'\cdot(\vrho_1-\vrho_2)},
+  \label{eq:v1_phases}\\[2pt]
+  e^{-i(\vq'-\vq)\cdot\vrho_3}\, e^{+i\vq'\cdot\vrho_4}
+  &= e^{+i\vq\cdot\vrho_3}\cdot
+     e^{-i\vq'\cdot(\vrho_3-\vrho_4)}.
+  \label{eq:v2_phases}
+\end{align}
+Multiplying and grouping:
+\begin{equation}
+  \text{(product of four)}
+  = \underbrace{e^{+i\vq\cdot(\vrho_3-\vrho_2)}}_{F(\vq)}
+    \;\cdot\;
+    \underbrace{e^{-i\vq'\cdot\sS}}_{\text{$\vq'$-dep.}},
+  \qquad
+  \sS \equiv \vrho_1 - \vrho_2 + \vrho_3 - \vrho_4.
+  \label{eq:phases_combined}
+\end{equation}
+Substituting into \cref{eq:sigma_phph} and pulling $F(\vq)$
+outside the $\vq'$-sum:
+\begin{align}
+  \Sig(\omega;\vq)
+  &= \frac{i\hbar}{2}
+    \sum_{\substack{l_{1..4},\vrho_{1..4}\\j_{1..4}}}
+    \Phi_1\,\Phi_2\;
+    e^{+i\vq\cdot(\vrho_3-\vrho_2)}
+    \int\!\dw
+    \underbrace{\left[
+      \frac{1}{N}\sum_{\vq'} e^{-i\vq'\cdot\sS}\;
+      G_1(\omega';\vq')\;G_2(\omega{-}\omega';\vq{-}\vq')
+    \right]}_{\displaystyle\text{convolution}},
+  \label{eq:sigma_intermediate}
+\end{align}
+where $\Phi_1 \equiv \Phi^{ij_1j_2}_{l,l_1,l_2}$, etc.
+The phase $e^{-i\vq'\cdot\sS}$ shifts the inverse DFT of $G_1$:
+$g_1(\omega';\vR) \to g_1(\omega';\vR - \sS)$.
+Applying the convolution theorem \cref{eq:conv_theorem}:
+\begin{equation}
+  \frac{1}{N}\sum_{\vq'} e^{-i\vq'\cdot\sS}\,
+  G_1(\omega';\vq')\,G_2(\omega{-}\omega';\vq{-}\vq')
+  = \sum_{\vR} g_1(\omega';\vR{-}\sS)\;
+    g_2(\omega{-}\omega';\vR)\;e^{-i\vq\cdot\vR}.
+  \label{eq:conv_result}
+\end{equation}
+Combining exponentials and substituting
+$\vR' = \vR - (\vrho_3 - \vrho_2)$, the first Green's function
+argument simplifies via
+$\vrho_3 - \vrho_2 - \sS = \vrho_4 - \vrho_1$.
+Incorporating \cref{eq:omega_conv}:
+\begin{equation}
+  \Sig(\omega;\vq)
+  = \frac{i\hbar}{2}
+    \sum_{\vR}
+    \int\!d\tau\;
+    \mathcal{B}(\tau;\vR)\,e^{+i\omega\tau}\,e^{-i\vq\cdot\vR},
+  \label{eq:sigma_realspace}
+\end{equation}
+where
+\begin{equation}
+  \mathcal{B}^{ij}_{ll'}(\tau;\vR)
+  \;\equiv\;
+  \sum_{\substack{l_{1..4},\vrho_{1..4}\\j_{1..4}}}
+  \Phi^{ij_1j_2}_{l,l_1,l_2}\;
+  \Phi^{j_3j_4j}_{l',l_3,l_4}\;
+  g^{j_1j_4}_{l_1 l_4}\!\bigl(\tau;\,\vR+\vrho_4{-}\vrho_1\bigr)\;
+  g^{j_2j_3}_{l_2 l_3}\!\bigl(\tau;\,\vR+\vrho_3{-}\vrho_2\bigr).
+  \label{eq:bubble_realspace}
+\end{equation}
+The $\vq'$-sum has been replaced by a loop over $N_D$ displacement
+quadruples $(\vrho_1,\vrho_2,\vrho_3,\vrho_4)$.  At each
+quadruple and each $\vR\in\mathcal{R}_\mathrm{eff}$, one inner
+contraction \cref{eq:balanced_tree} is evaluated.  The total cost
+is
+\begin{equation}
+  \cW_R
+  = N_\tau\,N_D\,N_T^\mathrm{eff}\;\cC_\mathrm{ic},
+  \qquad
+  N_D \le N_\perp^4,\quad
+  N_T^\mathrm{eff} = (4N_\mathrm{cut}+1)^2.
+  \label{eq:cost_real}
+\end{equation}
+
+Although the contraction loop in \cref{eq:cost_real} is independent
+of $N_q$, the displacement count $N_D \le N_\perp^4 =
+(2N_\mathrm{cut}+1)^8$ grows as the eighth power of the FC3
+cutoff.  The inner contraction $\cC_\mathrm{ic}$ is identical in
+both formulations, so the real-space method is faster only when
+$N_D\,N_T^\mathrm{eff} < N_q^2$.
+For $N_q = 20\times 20 = 400$:
+\begin{center}
+\begin{tabular}{crr}
+  \toprule
+  $N_\mathrm{cut}$
+    & $N_\perp^4 N_T^\mathrm{eff}$
+    & ratio to $N_q^2$\\
+  \midrule
+  1 & $1.6\times 10^5$ & $1.0$  \\
+  2 & $3.2\times 10^7$ & $198$ \\
+  3 & $9.7\times 10^8$ & $6\,088$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The crossover $N_q^2 = N_\perp^4 N_T^\mathrm{eff}$ occurs at
+$N_q \approx 5{,}600$ for $N_\mathrm{cut}=2$, significantly larger than the
+$N_q\approx 400$ required for phonons.
+
+% ============================================================
+\subsection{Separable FC3 approximation}
+\label{sub:separable}
+% ============================================================
+
+Consider $\Phi^{i\mu_1\mu_2}_{l,l_1,l_2}$ as a function of the
+transverse displacement pair $(\vrho_1,\vrho_2)$ at fixed slab and
+combined Cartesian--basis indices.  Arranging these values into a
+matrix with row index $(\vrho_1, \mu_1, l_1)$ and column index
+$(\vrho_2, \mu_2, l_2)$, assume we can perform a separable
+approximation
+\begin{equation}
+  \Phi^{i\mu_1\mu_2}_{l,l_1,l_2}
+  \;\approx\;
+  \sum_{r=1}^{R}
+  f^{i\mu_1}_{l,l_1,r}(\vrho_1)\;h^{\mu_2}_{l_2,r}(\vrho_2),
+  \label{eq:fc3_lowrank}
+\end{equation}
+with rank $R \ll N_\perp$, and similiarly
+$\Phi^{\mu_3\mu_4 j}_{l',l_3,l_4} \approx \sum_s
+  f'^{\mu_3 j}_{l',l_3,s}(\vrho_3)\;h'^{\mu_4}_{l_4,s}(\vrho_4)$
+holds for the second FC3 factor.
+
+Substituting \cref{eq:fc3_lowrank} for both FC3 factors in
+\cref{eq:inner_contraction}:
+\begin{align}
+  \mathcal{B}^{ij}_{ll'}
+  &\;\mathrel{+}=\;
+  \sum_{r,s}
+  \underbrace{
+    \sum_{\mu_1,l_1,\mu_4,l_4}
+    f^{i\mu_1}_{l,l_1,r}\;g^{\mu_1\mu_4}_{l_1,l_4}\;
+    h'^{\mu_4}_{l_4,s}
+  }_{P^i_{l,rs}}
+  \;\cdot\;
+  \underbrace{
+    \sum_{\mu_2,l_2,\mu_3,l_3}
+    h^{\mu_2}_{l_2,r}\;g^{\mu_2\mu_3}_{l_2,l_3}\;
+    f'^{\mu_3 j}_{l',l_3,s}
+  }_{Q^j_{l',rs}}.
+  \label{eq:sep_split}
+\end{align}
+The four-tensor ring contraction has factorised into a product of
+two independent bilinear forms $P$ and $Q$.  Each has the
+structure $P_{rs} = f_r^{\,T}\,g_1\,h'_s$,  where
+$f_r$ and $h'_s$ are vectors of dimension $M\hat{N}_c$ and $MN_B$
+respectively and $g_1$ is the banded Green's function matrix.
+
+The Green's function $g$ is shared across all $(r,s)$ pairs.
+Rather than evaluating one bilinear form per $(r,s)$ pair at cost
+$\cO(M^2\hat{N}_c N_B)$ each (totalling $R^2$ evaluations), we
+can contract in two stages:
+\begin{enumerate}
+  \item\textbf{Matrix--vector products} (once per $s$):
+    compute
+    $\vv_s^{\mu_1}{}_{l_1}
+      \equiv \sum_{\mu_4,l_4}
+      g^{\mu_1\mu_4}_{l_1,l_4}\,h'^{\mu_4}_{l_4,s}$
+    for $s = 1,\ldots,R$.
+    Each product costs
+    $\cO(M^2\hat{N}_c N_B)$, total $R\cdot M^2\hat{N}_c N_B$.
+  \item\textbf{Inner products} (once per $(r,s)$):
+    compute $P^i_{l,rs} = \sum_{\mu_1,l_1}
+      f^{i\mu_1}_{l,l_1,r}\;\vv_s^{\mu_1}{}_{l_1}$,
+    total $R^2\cdot M\hat{N}_c$.
+\end{enumerate}
+The combined cost per working point is
+\begin{equation}
+  2\bigl(R\cdot M^2\hat{N}_c N_B
+        + R^2\cdot M\hat{N}_c\bigr).
+  \label{eq:cost_opt}
+\end{equation}
+With $R \ll MN_B$, the first term dominates and the
+effective cost is $\cO(R\,M^2\hat{N}_c N_B)$.
+
+Fourier-transforming each factor of \cref{eq:fc3_lowrank},
+\begin{equation}
+  \hat{f}^{i\mu_1}_{l,l_1,r}(\vq)
+  = \sum_{\vrho_1} f^{i\mu_1}_{l,l_1,r}(\vrho_1)\,
+    e^{-i\vq\cdot\vrho_1},
+  \qquad
+  \hat{h}^{\mu_2}_{l_2,r}(\vq)
+  = \sum_{\vrho_2} h^{\mu_2}_{l_2,r}(\vrho_2)\,
+    e^{-i\vq\cdot\vrho_2},
+  \label{eq:fh_fourier}
+\end{equation}
+the Fourier-transformed FC3 factorises as
+$\PhiT(\vq_1,\vq_2) = \sum_r \hat{f}_r(\vq_1)\,\hat{h}_r(\vq_2)$.
+Substituting into \cref{eq:sigma_phph} and using
+\cref{eq:omega_conv}, the $\vq'$-sum for each $(r,s)$ pair
+becomes
+\begin{equation}
+  \frac{1}{N}\sum_{\vq'}
+  \underbrace{
+    \hat{f}_r(\vq')\,\hat{h}'_s({-}\vq')\,g_1(\tau;\vq')
+  }_{A_{rs}(\tau;\vq')}
+  \;\underbrace{
+    \hat{h}_r(\vq{-}\vq')\,\hat{f}'_s(\vq'{-}\vq)\,
+    g_2(\tau;\vq{-}\vq')
+  }_{B_{rs}(\tau;\vq{-}\vq')},
+  \label{eq:lr_AB}
+\end{equation}
+a convolution evaluated via FFT.  Forming
+$A_{rs}(\tau;\vq')$ is precisely the bilinear form
+$\hat{f}_r^{\,T} G_1(\tau;\vq')\,\hat{h}'_s$, so the
+optimal two-stage evaluation \cref{eq:cost_opt} applies:
+first compute
+$\vv_s(\tau;\vq') = G_1(\tau;\vq')\,\hat{h}'_s(\vq')$
+for all $s$, then form
+$A_{rs}(\tau;\vq') = \hat{f}_r(\vq')^T\,\vv_s(\tau;\vq')$
+for all $(r,s)$.
+
+The self-energy is
+\begin{equation}
+  \Sig(\omega;\vq)
+  = \frac{i\hbar}{2}
+    \int\!d\tau\;
+    \sum_{r,s}
+    \mathrm{FFT}_{\vR\to\vq}\!\bigl[
+      a_{rs}(\tau;\vR)\;b_{rs}(\tau;\vR)
+    \bigr]\;e^{+i\omega\tau},
+  \label{eq:sigma_sep}
+\end{equation}
+where $a_{rs}, b_{rs}$ are the inverse DFTs of $A_{rs}, B_{rs}$.
+
+
+
+% ======================================================================
+\subsection{PCP decomposition of the FC3 tensor}
+\label{sub:pcp}
+% ======================================================================
+
+The Permanent CP (PCP) decomposition, introduced in~\cite{luo_tensor_2025},
+provides an alternative compressed
+representation of the third-order force constants.  Unlike the SVD-based
+separable approximation of \cref{sub:separable}, which decomposes the
+FC3 viewed as a matrix (with rows and columns corresponding to the two
+transverse partner atoms), the PCP decomposition works directly on the
+three-index tensor and enforces full permutation symmetry of
+the cubic interaction.
+
+% -------------------------------------------------------
+\subsubsection{PCP ansatz}
+\label{sssub:pcp_ansatz}
+% -------------------------------------------------------
+
+The PCP ansatz approximates the mass-weighted FC3 tensor as
+\begin{equation}\label{eq:pcp_ansatz}
+  \tilde{\Psi}_{\alpha\beta\gamma}
+    (0\kappa,\, l'\kappa',\, l''\kappa'')
+  = \sum_{\xi=1}^{N_c}
+    \frac{\lambda_\xi}{3!}
+    \sum_{\sigma\in S_3}
+    \sum_{\vc{R}}
+    \prod_{i=1}^{3}
+    A_{\sigma_i}^{\xi}\!\bigl(l_i - \vc{R},\, \kappa_i,\, \alpha_i\bigr),
+\end{equation}
+where:
+\begin{itemize}
+  \item $N_c$ is the PCP rank (number of components),
+  \item $\lambda_\xi \in \mathbb{R}$ are the PCP singular values,
+  \item $A_i^{\xi}(l, \kappa, \alpha) \in \mathbb{R}$ are the PCP mode
+        functions, with $i \in \{1,2,3\}$ indexing three independent
+        ``legs'' and $\xi$ indexing the rank component,
+  \item the sum over $\sigma \in S_3$ (all 6 permutations of
+        $\{1,2,3\}$) enforces full permutation symmetry,
+  \item $\vc{R}$ runs over the $N_\mathrm{cell}$ unit cells in the
+        supercell.
+\end{itemize}
+
+The PCP decomposition is structurally analogous to a canonical
+polyadic (CP) decomposition of a third-order tensor, but with the
+additional permanent (symmetrization) sum over $S_3$.  Each rank-$\xi$
+component contributes a symmetrized outer product of three mode
+vectors, weighted by $\lambda_\xi / 3!$.
+
+The total number of parameters in the PCP ansatz is
+\begin{equation}
+  N_\mathrm{params}
+  = 3 \, N_c \, N_\mathrm{cell} \, N_b \cdot 3 + N_c
+  = N_c \,(9\, N_\mathrm{cell}\, N_b + 1),
+\end{equation}
+where the first term counts the mode entries (3 legs $\times$ $N_c$
+ranks $\times$ $N_\mathrm{cell}$ cells $\times$ $N_b$ basis atoms
+$\times$ 3 Cartesian directions) and the second term the singular
+values.  For the Si $2\times 2\times 2$ supercell with
+$N_b = 2$, $N_\mathrm{cell} = 8$, and $N_c = 8$:
+$N_\mathrm{params} = 1{,}160$, compared to
+$N_b \times N_\mathrm{super}^2 \times 27 = 13{,}824$ FC3 entries.
+The compression ratio is $13{,}824 / 8 = 1{,}728\times$.
+
+% -------------------------------------------------------
+\subsubsection{Acoustic sum rule enforcement}
+\label{sssub:pcp_asr}
+% -------------------------------------------------------
+
+A key advantage of the PCP representation is that the acoustic sum rule
+(ASR) can be enforced directly on the mode functions.  Translational
+invariance of the FC3 requires
+\begin{equation}
+  \sum_{\kappa} \Psi_{\alpha\beta\gamma}(\kappa, \kappa', \kappa'') = 0
+  \qquad \forall\;(\kappa',\kappa'',\beta,\gamma).
+\end{equation}
+In the PCP parametrization, this reduces to the simpler condition
+\begin{equation}\label{eq:pcp_asr}
+  \sum_{l,\kappa} A_i^{\xi}(l, \kappa, \alpha) = 0
+  \qquad \forall\;(\xi, i, \alpha),
+\end{equation}
+i.e., each mode function must have zero sum over all cell--atom pairs.
+This is enforced during fitting via a penalty term
+\begin{equation}
+  \mathcal{L}_\mathrm{ASR}
+  = \lambda_\mathrm{ASR}
+    \sum_{\xi,i,\alpha}
+    \left(
+      \sum_{l,\kappa} A_i^{\xi}(l, \kappa, \alpha)
+    \right)^{\!2},
+\end{equation}
+which is added to the reconstruction loss.  With a penalty weight
+$\lambda_\mathrm{ASR} = 10$, the ASR violation
+$\max|\sum_{l,\kappa} A|$ is driven below $10^{-4}$ during fitting.
+
+This is in contrast to the separable SVD decomposition, where ASR
+enforcement is more difficult.  The SVD factors $F_r$ and $H$ are
+obtained from the stacked FC3 matrix restricted to same-slab atoms
+($\delta l = 0$), and the partial sums over this restricted set of
+atoms do not vanish even when the full ASR holds exactly.
+
+The PCP mode functions and singular values are obtained by minimizing
+the loss function
+\begin{equation}\label{eq:pcp_loss}
+  \mathcal{L}
+  = \bigl\|\tilde{\Psi} - \Psi_\mathrm{target}\bigr\|_F^2
+    + \mathcal{L}_\mathrm{ASR},
+\end{equation}
+where $\Psi_\mathrm{target}$ is the mass-weighted FC3 tensor (converted
+to THz$^{5/2}$ units via \texttt{CONVERSION\_FC3\_THZ}) and
+$\|\cdot\|_F$ is the Frobenius norm.
+
+The optimization is implemented in PyTorch and uses a two-phase
+strategy:
+\begin{enumerate}
+  \item \textbf{Adam warm-up} 500 iterations, learning
+        rate 0.05 with cosine annealing to $10^{-3}$
+
+  \item \textbf{L-BFGS refinement} remaining iterations,
+        Hessian history size 50, strong Wolfe line search
+\end{enumerate}
+
+The forward model evaluation uses fully vectorized PyTorch operations.
+The expensive computation is the triple outer product summed over cell shifts
+and permutations:
+\begin{equation}
+  \tilde{\Psi}[\kappa_1, j, k, \alpha, \beta, \gamma]
+  = \sum_{\xi}
+    \frac{\lambda_\xi}{6}
+    \sum_{\sigma \in S_3}
+    \sum_l
+    m_{\sigma_1}[\xi, \kappa_1, l, \alpha]\;
+    m_{\sigma_2}[\xi, j, l, \beta]\;
+    m_{\sigma_3}[\xi, k, l, \gamma],
+\end{equation}
+where the mode tables $m_i[\xi, j, l, \alpha]$ are precomputed via
+advanced indexing from the cell-difference table.  This can be written as einsum
+\begin{equation*}
+  \texttt{fc3 += torch.einsum('xila, xjlb, xklc -> ijkabc', wm1, m2, m3)}
+\end{equation*}
+with $l$ (cell shift) and $x$ ($\xi$, rank) as contraction indices.
+
+The gradient is computed by PyTorch automatic differentiation.  For the
+Si test case ($N_c = 8$, 2000 iterations), fitting takes approximately
+13\,s and achieves a relative Frobenius error of $4.4 \times 10^{-2}$.
+
+\paragraph{Fitting results for Si $2\times2\times2$.}
+\Cref{tab:pcp_fit} summarises the PCP fitting results for different
+ranks.
+
+\begin{table}[h]
+\centering
+\caption{PCP fitting results for Si $2\times2\times2$ FC3.}
+\label{tab:pcp_fit}
+\begin{tabular}{ccccc}
+  \toprule
+  $N_c$ & Parameters & Compression & Rel.\ error & ASR violation \\
+  \midrule
+  8  & 1{,}160  & 1{,}728$\times$ & $4.39\times10^{-2}$ & $5.3\times10^{-5}$ \\
+  24 & 3{,}480  & 576$\times$     & $5.8\times10^{-3}$  & $2.7\times10^{-4}$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+To use the PCP decomposition in the $\vq$-space self-energy formulation,
+the real-space mode functions are Fourier-transformed to each transverse
+wavevector.  Define
+\begin{equation}\label{eq:pcp_ft}
+  f_i^{\xi}(\vq)_{\kappa\alpha}
+  = \sum_l
+    e^{-2\pi i\, \vq \cdot \vR_l}\;
+    A_i^{\xi}(l, \kappa, \alpha),
+\end{equation}
+where $\vR_l$ is the lattice vector of cell $l$ in fractional
+coordinates and $\vq$ is the transverse wavevector.  The result is a
+complex vector of dimension $n_\mathrm{dof} = 3N_b$ for each
+combination of leg index $i \in \{1,2,3\}$ and rank $\xi$.  No
+additional mass weighting is applied since the mode functions were
+fitted against the already mass-weighted target.
+
+In matrix form, the Fourier-transformed modes at wavevector $\vq$ are
+stored as
+\begin{equation}
+  f_\mathrm{all}(\vq) \in \mathbb{C}^{3 \times N_c \times n_\mathrm{dof}},
+\end{equation}
+with the three axes corresponding to leg index, rank, and combined
+$(\kappa, \alpha)$ degree of freedom.
+
+The ASR condition \cref{eq:pcp_asr} implies that at $\vq = \vc{0}$
+(the $\Gamma$ point), the mode vectors satisfy
+$\sum_{\kappa,\alpha} f_i^{\xi}(\vc{0})_{\kappa\alpha} \approx 0$,
+suppressing the coupling to acoustic modes at long wavelengths.
+
+
+% ======================================================================
+\subsection{PCP self-energy kernel}
+\label{sub:pcp_self_energy}
+% ======================================================================
+
+The PCP decomposition leads to a self-energy kernel with a qualitatively
+different computational structure from both the dense and separable
+formulations.  The FC3 is represented as a sum of symmetrized outer products,
+and the bilinear contraction of two FC3 vertices with two Green's functions
+can be reduced to scalar projections.
+
+% -------------------------------------------------------
+\subsubsection{Scalar projection}
+\label{sssub:pcp_scalar_projection}
+% -------------------------------------------------------
+
+Substituting the PCP ansatz into the self-energy formula
+\cref{eq:sigma_phph} and using the Fourier-transformed modes
+\cref{eq:pcp_ft}, the self-energy becomes
+\begin{align}\label{eq:sigma_pcp}
+  \Sigma^{\gtrless}_{ab}(\omega; \vq)
+  &= \frac{i\hbar}{2}
+    \sum_{\xi,\xi'} \frac{\lambda_\xi \lambda_{\xi'}}{36}
+    \sum_{\sigma,\sigma' \in S_3}
+    \frac{1}{N} \sum_{\vq'}
+    \int \frac{d\omega'}{2\pi}\;
+    g_{\sigma_2 \sigma_2'}^{\xi \xi'}(\omega'; \vq')\;
+    g_{\sigma_3 \sigma_3'}^{\xi \xi'}(\omega - \omega'; \vq - \vq')
+    \notag\\
+  &\qquad \times
+    f_{\sigma_1}^{\xi}(\vq)_a \;
+    \overline{f_{\sigma_1'}^{\xi'}(\vq)_b},
+\end{align}
+where the scalar projections of the Green's function are defined
+as
+\begin{equation}\label{eq:scalar_proj}
+  g_{ij}^{\xi\xi'}(\omega; \vq)
+  = \sum_{c,d}
+    \overline{f_i^{\xi}(\vq)_c}\;
+    G^{\gtrless}_{cd}(\omega; \vq)\;
+    f_j^{\xi'}(\vq)_d
+  = \vc{f}_i^{\xi}(\vq)^\dagger\;
+    G^{\gtrless}(\omega; \vq)\;
+    \vc{f}_j^{\xi'}(\vq).
+\end{equation}
+
+These are scalar-valued quantities: the $n_\mathrm{dof} \times
+n_\mathrm{dof}$ matrix Green's function is projected onto the PCP mode
+vectors.  The scalar
+projections $g_{ij}^{\xi\xi'}$ carry indices
+$(\xi, \xi', i, j)$ with $\xi, \xi' \in \{1, \ldots, N_c\}$ and
+$i, j \in \{1, 2, 3\}$, giving $9 N_c^2$ scalar projections per
+$(\omega, \vq)$ pair.
+
+The frequency integral in \cref{eq:sigma_pcp} is a convolution of two
+scalar functions, evaluated by FFT:
+\begin{equation}
+  c_{ij,kl}^{\xi\xi'}(\omega; \vq, \vq')
+  = \mathrm{IFFT}\!\bigl[
+    \hat{g}_{ij}^{\xi\xi'}(\vq') \cdot
+    \hat{g}_{kl}^{\xi\xi'}(\vq - \vq')
+  \bigr],
+\end{equation}
+where $\hat{g}$ denotes the FFT along the frequency axis.
+
+% -------------------------------------------------------
+\subsubsection{Accumulation and permutation batching}
+\label{sssub:pcp_accumulation}
+% -------------------------------------------------------
+
+The self-energy is accumulated by iterating over external wavevector
+pairs $(\vq, \vq')$ and permutation pairs $(\sigma, \sigma')$.  The
+outer product structure of \cref{eq:sigma_pcp} allows the rank sum to
+be vectorized.
+
+For fixed $(\vq, \vq', \sigma, \sigma')$, the contribution to the
+self-energy is
+\begin{equation}\label{eq:pcp_accum}
+  \Sigma^{\gtrless}_{ab}(\omega; \vq)
+  \mathrel{+}=
+  \frac{i\hbar \,\Delta\omega}{4\pi N}
+  \sum_{\xi,\xi'}
+  \frac{\lambda_\xi \lambda_{\xi'}}{36}\;
+  c_{\sigma_2\sigma_2', \sigma_3\sigma_3'}^{\xi\xi'}(\omega)\;
+  f_{\sigma_1}^{\xi}(\vq)_a\;
+  \overline{f_{\sigma_1'}^{\xi'}(\vq)_b},
+\end{equation}
+which is computed as a single \texttt{einsum} operation:
+\begin{equation*}
+  \Sigma[\omega, a, b]
+  \mathrel{+}=
+  \mathrm{prefactor} \cdot
+  \texttt{einsum}(\texttt{'xyw,xa,yb->wab'},\;
+  W_{\xi\xi'} c^{\xi\xi'},\;
+  f_{\sigma_1}^\xi,\;
+  \overline{f_{\sigma_1'}^{\xi'}}),
+\end{equation*}
+where $W_{\xi\xi'} = \lambda_\xi \lambda_{\xi'} / 36$ is the weight
+matrix.
+
+
+% -------------------------------------------------------
+\subsubsection{Computational cost}
+\label{sssub:pcp_cost}
+% -------------------------------------------------------
+
+The PCP self-energy kernel has three phases per SCBA iteration:
+
+\paragraph{Scalar projection (g-precomputation).}
+For each wavevector $\vq$, compute $9N_c^2$ scalar projections from the
+$n_\mathrm{dof} \times n_\mathrm{dof}$ Green's function matrices.
+This is done as a batched matrix multiplication:
+\begin{equation}
+  G^{\gtrless}(\vq) \cdot \vc{f}^T
+  \in \mathbb{C}^{n_\mathrm{fft} \times n_\mathrm{dof} \times 3N_c},
+\end{equation}
+followed by a contraction with $\overline{\vc{f}}$:
+\begin{equation}
+  g^{\xi\xi'}_{ij}[\vq, \omega]
+  = \texttt{einsum}(\texttt{'ia,waj->ijw'},\;
+    \overline{f}_\mathrm{flat},\; G\!\cdot\!f_\mathrm{flat}^T).
+\end{equation}
+Cost: $\mathcal{O}(N_q \cdot n_\mathrm{dof}^2 \cdot 3N_c \cdot
+n_\mathrm{fft})$ for the matmul, plus
+$\mathcal{O}(N_q \cdot n_\mathrm{dof} \cdot 9N_c^2 \cdot n_\mathrm{fft})$
+for the contraction.
+
+\paragraph{FFT of scalar projections.}
+Batch FFT of the $g$ arrays along the frequency axis: cost
+$\mathcal{O}(9N_c^2 \cdot N_q \cdot n_\mathrm{fft} \log n_\mathrm{fft})$.
+
+\paragraph{Convolution and accumulation.}
+For each $(\vq, \vq')$ pair: 36 element-wise products of
+$(N_c, N_c, n_\mathrm{fft})$ arrays, grouped into a
+$(N_c, N_c, 3, 3, n_\mathrm{fft})$ sum, one batch IFFT, and 9
+rank-weighted einsums.  Cost per pair:
+$\mathcal{O}(9N_c^2 n_\mathrm{fft} + N_c^2 \cdot 9 \cdot
+n_\mathrm{fft} \log n_\mathrm{fft} + 9 N_c^2 n_\mathrm{freq}
+n_\mathrm{dof})$.  Total over $N_q^2$ pairs:
+\begin{equation}
+  \mathcal{O}\!\left(
+    N_q^2 \left[
+      N_c^2 \cdot n_\mathrm{fft} \log n_\mathrm{fft}
+      + N_c^2 \cdot n_\mathrm{freq} \cdot n_\mathrm{dof}
+    \right]
+  \right).
+\end{equation}
+
+The PCP kernel trades the $n_\mathrm{dof}^4$ scaling of the dense
+formulation for a $N_c^2 n_\mathrm{dof}$ scaling in the accumulation
+step, at the cost of introducing the fitting approximation error.
+
+
+% ======================================================================
+\subsection{Optimized separable self-energy}
+\label{sub:separable_optimized}
+% ======================================================================
+
+The original separable self-energy kernel of \cref{sub:separable}
+evaluates the $(\vq, \vq')$ convolution with an explicit loop over all
+$R^2$ rank pairs $(r, s)$, performing 4 FFTs and 1 IFFT per pair.  For
+the Si test case with $R = 24$ and $N_q = 16$ wavevectors, this results
+in $R^2 \times 4 \times N_q^2 = 576 \times 4 \times 256 \approx
+590{,}000$ individual FFT calls per SCBA iteration on a small
+array of size $(n_\mathrm{fft}, n_\mathrm{dof})$.  The FFTs of the
+intermediate arrays $V$ and $U$ can be precomputed once, and the
+rank-pair sum can be factored analytically.  From \cref{sub:separable}:
+\begin{equation}
+  P_{rs}(\omega; \vq')
+  = V_s(\omega; \vq') \cdot \hat{F}_r(\vq')^T,
+  \qquad
+  Q_{rs}(\omega; \vq - \vq')
+  = U_r(\omega; \vq - \vq') \cdot \overline{\hat{F}_s(\vq - \vq')}^T,
+\end{equation}
+where $V_s = G \cdot \overline{\hat{h}_s}$ and $U_r = G^T \cdot
+\hat{h}_r$ are the stage-1 products.
+
+The self-energy contribution from a single $(\vq, \vq')$ pair is
+\begin{equation}
+  \Sigma_{ab}(\omega; \vq)
+  \mathrel{+}=
+  \mathrm{prefactor} \cdot
+  \sum_{r,s}
+  \mathrm{IFFT}\!\bigl[
+    \hat{P}_{rs}(\cdot; \vq')_a \cdot
+    \hat{Q}_{rs}(\cdot; \vq - \vq')_b
+  \bigr](\omega).
+\end{equation}
+
+Since IFFT and summation commute, we can sum over $(r,s)$ in the
+frequency domain before the inverse transform:
+\begin{equation}
+  \sum_{r,s} \hat{P}_{rs}[\omega, a] \cdot \hat{Q}_{rs}[\omega, b]
+  = \sum_{c,d}
+    \underbrace{
+      \sum_r \hat{F}_r(\vq')_{ac} \cdot \hat{U}_r(\vq-\vq')_{\omega,d}
+    }_{M_1[\omega,a,c,d]}
+    \cdot
+    \underbrace{
+      \sum_s \hat{V}_s(\vq')_{\omega,c} \cdot
+      \overline{\hat{F}_s(\vq-\vq')}_{bd}
+    }_{M_2[\omega,c,b,d]},
+\end{equation}
+where $\hat{V}, \hat{U}$ are the FFTs of $V, U$ along the frequency
+axis.  This gives three einsum:
+\begin{align}
+  M_1[\omega,a,c,d]
+  &= \texttt{einsum}(\texttt{'rac,wdr->wacd'},\;
+     \hat{F}(\vq'),\; \hat{U}(\vq{-}\vq')),
+  \label{eq:M1} \\
+  M_2[\omega,c,b,d]
+  &= \texttt{einsum}(\texttt{'wcs,sbd->wcbd'},\;
+     \hat{V}(\vq'),\; \overline{\hat{F}(\vq{-}\vq')}),
+  \label{eq:M2} \\
+  S[\omega,a,b]
+  &= \texttt{einsum}(\texttt{'wacd,wcbd->wab'},\; M_1,\; M_2),
+  \label{eq:S_contract}
+\end{align}
+followed by a single IFFT:
+\begin{equation}
+  \Sigma(\omega; \vq) \mathrel{+}=
+  \mathrm{prefactor} \cdot \mathrm{IFFT}(S)[\mathrm{freq\_sl}].
+\end{equation}
+
+% ======================================================================
+\subsection{Numerical validation}
+\label{sub:validation_anharmonic}
+% ======================================================================
+
+The correctness of the self-energy kernels is validated with:
+a synthetic toy model, a physical Si benchmark, and a comparison of all
+three methods (dense, separable, PCP) on the same transport problem.
+
+% -------------------------------------------------------
+\subsubsection{Toy model validation}
+\label{sssub:toy_model}
+% -------------------------------------------------------
+
+A synthetic test constructs random FC3 matrices $M_\mathrm{stacked}$
+and gathering matrices $T(\vq)$ without any DFT data.  The separable
+decomposition is obtained by SVD of $M_\mathrm{stacked}$, and the
+Fourier-transformed factors $\hat{F}_r(\vq) = F_r \cdot T(\vq)^T$,
+$\hat{H}(\vq) = T(\vq) \cdot H$ are constructed analytically.  Random
+Hermitian Green's functions are generated at all $(\omega, \vq)$ points.
+
+The following properties are verified:
+\begin{enumerate}
+  \item \textbf{Dense = Separable (full rank):}
+    The self-energies $\Sigma^{<,>,R}$ computed by the dense kernel and
+    the full-rank separable kernel agree to machine precision
+    (relative difference $< 2 \times 10^{-15}$).
+
+  \item \textbf{Rank truncation error:}
+    Truncating the SVD to rank $R < R_\mathrm{max}$ introduces a
+    self-energy error that decreases monotonically with increasing $R$
+    and vanishes at full rank.
+
+  \item \textbf{Self-energy relations:}
+    The identity $\Sigma^R = \tfrac{1}{2}(\Sigma^> - \Sigma^<)$ holds
+    to machine precision for all kernels.
+\end{enumerate}
+
+
+% -------------------------------------------------------
+\subsubsection{Si benchmark results}
+\label{sssub:si_benchmark}
+% -------------------------------------------------------
+
+The full comparison uses the Si $2\times2\times2$ supercell with FC3
+from finite displacements.  All methods use a $4\times4$ transverse
+$q$-mesh (16 points), a frequency grid of 101 points from 1.0 to
+14.0\,THz, mixing parameter $\alpha = 0.3$, and 10 SCBA iterations.
+The frequency range lower bound of 1.0\,THz avoids the acoustic mode
+divergence at $\Gamma$, where
+$G^<(\vq = \vc{0}, \omega \to 0) \propto n_\mathrm{BE}(\omega)/\omega^2$
+diverges as $1/\omega^3$ for $\omega \to 0$.
+
+\begin{table}[h]
+\centering
+\caption{Anharmonic thermal conductance for Si at 300\,K.  All methods
+use identical harmonic inputs, frequency grid, and SCBA parameters.}
+\label{tab:method_comparison}
+\begin{tabular}{lccccc}
+  \toprule
+  Method & $G_\mathrm{ball}$ & $G_\mathrm{anh}$
+    & $G_\mathrm{anh}/G_\mathrm{ball}$ & Conservation & Time \\
+  & \multicolumn{2}{c}{[MW/(m$^2$\,K)]} & & & [s] \\
+  \midrule
+  Dense (exact)           & 1103 & 827 & 0.750 & $2.8\times10^{-2}$ & 53 \\
+  Separable (full rank)   & 1103 & 827 & 0.750 & $2.8\times10^{-2}$ & 47 \\
+  Separable ($R=6$)       & 1103 & 848 & 0.769 & $2.5\times10^{-2}$ & 22 \\
+  PCP ($N_c = 8$)         & 1103 & 881 & 0.799 & $1.4\times10^{-2}$ & 91 \\
+  PCP ($N_c = 24$)        & 1103 & 909 & 0.825 & $1.4\times10^{-2}$ & 791 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{itemize}
+  \item Dense and separable (full rank) agree to machine precision
+    ($\Delta G / G < 10^{-15}$), confirming the mathematical
+    equivalence demonstrated by the toy model.
+
+  \item The truncated separable ($R = 6$) retains 81.5\% of the FC3
+    Frobenius norm and overestimates $G_\mathrm{anh}$ by 2.5\%
+    relative to the exact result, consistent with the reduced
+    scattering strength from truncation.
+
+  \item PCP overestimates $G_\mathrm{anh}$ by 6.5\% ($N_c = 8$) and
+    9.9\% ($N_c = 24$).  The larger deviation at higher rank may
+    indicate that PCP captures the dominant scattering channels
+    differently from the slab-local SVD decomposition, though the
+    fitting error of 4.4\% ($N_c = 8$) and 0.6\% ($N_c = 24$) in the
+    FC3 reconstruction does not directly translate to a proportional
+    transport error.
+
+  \item PCP consistently achieves better heat flow conservation
+    ($\sim 1.4\%$ vs.\ $\sim 2.5$--$2.8\%$ for dense/separable)
+
+  \item The frequency lower bound of 1.0\,THz is essential for
+    convergence of the dense and separable methods.  With
+    $\omega_\mathrm{min} = 0.01$\,THz, the SCBA with full FC3 diverges due to
+    the acoustic-mode singularity at $\Gamma$.  PCP converges even at
+    $\omega_\mathrm{min} = 0.01$\,THz
+\end{itemize}
+
+
+% ======================================================================
+\subsection{I/O, Checkpoints}
+\label{sub:io}
+% ======================================================================
+
+To enable reproducible comparisons and avoid redundant recomputation,
+the transport results and FC3 decompositions are saved to disk using
+a standardised format implemented in \texttt{phonon\_inputs/io.py}.
+
+Transport results are stored as a pair of files:
+\begin{itemize}
+  \item \texttt{transport.npz}: compressed NumPy archive containing
+    array data (spectral heat currents, self-energies, transmission,
+    frequency grid),
+  \item \texttt{transport.json}: JSON sidecar with scalar quantities
+    (thermal conductances, conservation errors, iteration counts) and
+    optional metadata (method name, parameters, timing).
+\end{itemize}
+
+The functions \texttt{save\_transport\_results} and
+\texttt{load\_transport\_results} handle serialisation and
+deserialisation, including automatic type dispatch (arrays to NPZ,
+scalars to JSON).  An analogous pair
+\texttt{save\_decomposition}/\texttt{load\_decomposition} stores SVD or
+PCP decompositions for reuse across SCBA runs.
+
+The comparison script \texttt{compare\_methods.py} runs all five method
+variants (dense, separable full rank, separable $R=6$, PCP $N_c=8$, PCP
+$N_c=24$), saves each result to a subdirectory of
+\texttt{anharmonic/results/}, and generates a multi-panel diagnostic
+plot.  Subsequent runs with the \texttt{-{}-load} flag skip the
+computation and regenerate plots from the saved data, enabling rapid
+iteration on visualisation without rerunning the SCBA.
+
+% ======================================================================
+\subsection{Decomposition Results}
+\label{sub:decomp_results}
+% ======================================================================
+
+We first present the SVD approximation quality
+(\cref{sssub:pcp_quality}), cost analysis (\cref{sssub:cost_analysis}),
+and thickness-dependent validation (\cref{sssub:thickness_validation}).
+\Cref{sssub:scba_investigation} investigates SCBA convergence limits
+using a toy model and FC3/FC2 strength analysis.
+\Cref{sssub:svd_asr} evaluates ASR enforcement.
+
+
+% -------------------------------------------------------
+\subsubsection{Approximation quality}
+\label{sssub:pcp_quality}
+% -------------------------------------------------------
+
+All results in this section use the Si $2\times 2\times 2$ test case
+with a $4\times 4$ $q$-mesh, 101 frequency points from
+1.0--14.0\,THz, up to 10 SCBA iterations (tol.\ 0.5\%), and mixing
+0.3.  The dense reference gives
+$G_\mathrm{anh} = 827\,\mathrm{MW/(m^2\,K)}$.
+
+\paragraph{FC3 reconstruction error.}
+\Cref{fig:fc3_error} shows the singular value spectrum of the
+stacked FC3 matrix (left) and the reconstruction error vs.\ SVD
+rank (right).  The error decreases monotonically by construction,
+reaching $< 3\%$ at $R = 12$ and machine precision at $R = 24$
+(the full rank).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/fc3_error_vs_rank.pdf}
+  \caption{(a) Singular value spectrum of the stacked FC3 matrix.
+    (b) FC3 reconstruction error vs.\ SVD rank.}
+  \label{fig:fc3_error}
+\end{figure}
+
+\paragraph{Transport accuracy vs.\ rank.}
+\Cref{fig:transport_rank} shows $G_\mathrm{anh}$ and the relative
+transport error as a function of SVD rank.  The separable
+approximation converges monotonically to the dense result, reaching
+$< 1\%$ error at $R = 12$ and matching dense exactly at $R = 24$.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/transport_vs_rank.pdf}
+  \caption{(a) Thermal conductance $G_\mathrm{anh}$ vs.\ SVD rank.
+    The separable result (green) converges to the dense reference
+    (red line).
+    (b) Relative transport error.  The green band marks the $\pm 5\%$
+    region; SVD enters this band at $R \geq 6$.}
+  \label{fig:transport_rank}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Transport results for Si 300\,K.  Dense reference:
+$G_\mathrm{anh} = 827\,\mathrm{MW/(m^2\,K)}$.}
+\label{tab:accuracy}
+\begin{tabular}{lccccc}
+  \toprule
+  Method & FC3 err. & $G_\mathrm{anh}$ [MW] & Transp.\ err.
+         & Conserv. & Time [s] \\
+  \midrule
+  Dense           & ---     & 827  & ---       & 2.8\% & 53 \\
+  SVD $R=2$       & 43.3\%  & 1054 & $+27.5\%$ & 0.4\% & 4 \\
+  SVD $R=4$       & 22.2\%  & 957  & $+15.7\%$ & 1.2\% & 20 \\
+  SVD $R=6$       & 12.3\%  & 848  & $+2.5\%$  & 2.5\% & 22 \\
+  SVD $R=12$      & 2.8\%   & 831  & $+0.4\%$  & 2.8\% & 31 \\
+  SVD $R=24$      & 0.1\%   & 827  & $-0.0\%$  & 2.8\% & 47 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Spectral heat current.}
+\Cref{fig:spectral_current} shows the frequency-resolved heat
+current (left) and its deviation from the dense reference (right).
+SVD $R = 24$ is indistinguishable from dense.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/spectral_current.pdf}
+  \caption{(a) Spectral heat current for selected methods.
+    (b) Difference from dense: SVD $R = 24$ is indistinguishable from
+    dense; SVD $R = 6$ shows small deviations.}
+  \label{fig:spectral_current}
+\end{figure}
+
+\paragraph{Self-energy comparison.}
+\Cref{fig:sigma_compare} shows the phonon broadening
+$-\mathrm{Tr}[\mathrm{Im}\,\Sigma^R]/M$ (left) and the relative
+Frobenius error of the self-energy vs.\ frequency (right).
+SVD $R = 24$ reproduces the dense self-energy to $< 1\%$ at all
+frequencies.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/self_energy_comparison.pdf}
+  \caption{(a) Phonon broadening (q-averaged).
+    (b) Relative Frobenius error of the self-energy vs.\ frequency.
+    SVD converges systematically with increasing rank.}
+  \label{fig:sigma_compare}
+\end{figure}
+
+\paragraph{FC3 error vs.\ transport error.}
+\Cref{fig:error_decomp} plots the FC3 reconstruction error against
+the transport error.  SVD points follow the
+$\epsilon_G \approx C \delta_\Phi$ line: transport error is directly
+proportional to the FC3 truncation error.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.7\textwidth]{fig/decomp/error_decomposition.pdf}
+  \caption{FC3 reconstruction error vs.\ transport error.
+    SVD (green squares) follows $\epsilon_G \propto \delta_\Phi$:
+    better FC3 $\Rightarrow$ better transport.}
+  \label{fig:error_decomp}
+\end{figure}
+
+\paragraph{Conservation and cost trade-off.}
+\Cref{fig:conserv_pareto} shows conservation error (left) and the
+accuracy--cost Pareto front (right).  SVD $R = 6$ (22\,s, 2.5\%
+error) and SVD $R = 12$ (31\,s, 0.4\% error) provide excellent
+accuracy--cost trade-offs.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/conservation_and_timing.pdf}
+  \caption{(a) Heat flow conservation error.
+    (b) Pareto front: $G_\mathrm{anh}$ accuracy vs.\ wall time.
+    The green band marks $\pm 5\%$ of the dense reference.}
+  \label{fig:conserv_pareto}
+\end{figure}
+
+\paragraph{SCBA convergence.}
+\Cref{fig:scba_conv} shows the SCBA convergence behaviour.  All
+SVD ranks converge at similar rates, requiring $\sim$10 iterations.
+Low-rank cases ($R = 2$) converge faster.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/scba_convergence.pdf}
+  \caption{(a) SCBA convergence: relative change in total heat
+    current vs.\ iteration.
+    (b) Total iterations to convergence.}
+  \label{fig:scba_conv}
+\end{figure}
+
+
+% -------------------------------------------------------
+\subsubsection{Cost analysis}
+\label{sssub:cost_analysis}
+% -------------------------------------------------------
+
+The separable kernel replaces the dense per-pair cost with a sum
+over $R^2$ rank pairs.  For each $(\vq,\vq')$ pair:
+\begin{equation}\label{eq:sep_cost}
+  \cW_\mathrm{sep}^{\mathrm{pair}}
+  = \underbrace{R^2\,N_\tau \log N_\tau}_{\text{batch IFFT}}
+  + \underbrace{R^2\,N_\omega\,M^2}_{\text{accumulation}},
+\end{equation}
+where $M = n_\mathrm{dof} = 6$ for Si.  The dense kernel has cost
+\begin{equation}
+  \cW_\mathrm{dense}^{\mathrm{pair}}
+  = M^4\,N_\tau \log N_\tau + N_\omega\,(M^5 + M^4).
+\end{equation}
+The separable kernel is faster when $R^2 < M^4$, i.e., $R < M^2$.
+For Si ($M = 6$): at $R = 6$, $R^2 = 36 \ll M^4 = 1296$, giving
+$\sim 36\times$ fewer IFFT operations.
+
+
+% -------------------------------------------------------
+\subsubsection{Thickness-dependent thermal conductivity}
+\label{sssub:thickness_validation}
+% -------------------------------------------------------
+
+To validate the separable kernel,
+we reproduce the thickness-dependent cross-plane thermal conductivity
+of a silicon thin film at 300\,K, following \cite{guo_quantum_2020}.  The setup models a thin film of thickness~$d$
+between two semi-infinite Si contacts, with a temperature difference
+$\Delta T = 10$\,K.  The thermal conductivity is computed as
+$\kappa_\mathrm{eff} = G \cdot d$, where $G = J / (A_c \Delta T)$ is
+the thermal conductance and $d = n_\mathrm{slabs} \times a/2$ is the
+film thickness (one FCC primitive cell per slab, $a/2 = 2.73$\,\AA{}
+along~$[100]$).
+
+\Cref{fig:thickness_kappa} shows the thickness-dependent thermal
+conductivity computed with the separable kernel ($R = 12$, $4 \times 4$
+$q$-mesh, 101 frequency points, 0.5--15.5\,THz).  Both the ballistic
+and anharmonic results are compared with the data of
+Guo et~al.\ (first nearest-neighbor FC3, DFT input).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decomp/thickness_conductivity.pdf}
+  \caption{(a) Cross-plane thermal conductivity of a Si thin film at
+    300\,K vs.\ thickness, computed with the separable kernel
+    ($R = 12$) and compared with Guo et~al.\ \cite{guo_quantum_2020}.
+    Open symbols: reference data; filled symbols: present work.
+    (b) Thermal conductance vs.\ thickness, showing the ballistic
+    (circles) and anharmonic (triangles) results.}
+  \label{fig:thickness_kappa}
+\end{figure}
+
+The anharmonic reduction of thermal conductivity should increase with film
+thickness: thicker films allow more phonon-phonon
+scattering.  The SCBA converges reliably up to $n_\mathrm{slabs} = 6$
+($d \approx 1.6$\,nm).  At $n_\mathrm{slabs} = 10$, the solver yields 47.8\% conservation error.
+For the converged data points ($n_\mathrm{slabs} \leq 6$), the
+anharmonic reduction is 30--50\%, qualitatively consistent with
+Guo et~al.\ but quantitatively larger.
+
+\Cref{fig:thickness_spectral} shows the spectral heat current at
+different thicknesses, there are still problems..
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{/decomp/thickness_spectral.pdf}
+  \caption{(a) Spectral heat current vs.\ frequency for different
+    film thicknesses (solid: anharmonic, dashed: ballistic).
+    (b) Anharmonic conductance reduction vs.\ thickness.}
+  \label{fig:thickness_spectral}
+\end{figure}
+
+
+% -------------------------------------------------------
+\subsubsection{SCBA convergence investigation}
+\label{sssub:scba_investigation}
+% -------------------------------------------------------
+
+The thickness sweep of \cref{sssub:thickness_validation} reveals that
+the SCBA diverges for thicknesses above $\sim$6 primitive slabs
+($\gtrsim 1.6$\,nm), even with reduced mixing parameters.  This
+section investigates the root cause by (a) validating the solver
+equations with a toy model, (b) quantifying the anharmonic coupling
+strength ratio FC3/FC2, and (c) identifying the physical regime in
+which the perturbative SCBA is valid.
+
+To distinguish solver bugs from physical convergence limits, we
+construct a synthetic simple-cubic crystal with one atom per cell
+($a = 3$\,\AA, $m = 28$\,amu), nearest-neighbor harmonic springs
+($k = 5$\,eV/\AA$^2$), and nearest-neighbor cubic anharmonicity
+($\Phi_3$, isotropic, fully $S_3$-symmetrized).  This model is fed
+through the \emph{existing} separable SCBA code.  \Cref{tab:toy_weak} shows that for weak anharmonicity
+($\Phi_3 = 0.5$\,eV/\AA$^3$), the SCBA converges at all tested device
+thicknesses ($n_\mathrm{slabs} = 1$--$10$) with heat-flow conservation
+$<$3.8\% and physical conductance reduction with increasing thickness.
+
+\begin{table}[h]
+  \centering
+  \caption{SCBA convergence for the toy model with weak anharmonicity
+    ($\Phi_3 = 0.5$\,eV/\AA$^3$, $\alpha = 0.001$).
+    All runs use $2\times 2$ $q$-mesh and mixing~0.3.}
+  \label{tab:toy_weak}
+  \begin{tabular}{rrrrrl}
+    \toprule
+    $n_\mathrm{slabs}$ & $G_\mathrm{ball}$ & $G_\mathrm{anh}$
+      & Conserv.\ & Iters & Converged \\
+    & (MW/m$^2$K) & (MW/m$^2$K) & & & \\
+    \midrule
+    1  & 1302 & 1297 & 0.56\% & 40 & yes \\
+    2  & 1294 & 1286 & 1.05\% & 40 & yes \\
+    4  & 1279 & 1264 & 1.87\% & 40 & yes \\
+    6  & 1264 & 1244 & 2.57\% & 40 & yes \\
+    8  & 1250 & 1224 & 3.19\% & 40 & yes \\
+    10 & 1236 & 1206 & 3.73\% & 40 & yes \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Increasing the coupling to $\Phi_3 = 5.0$\,eV/\AA$^3$ causes the
+SCBA to diverge even at $n_\mathrm{slabs} = 1$, regardless of mixing
+parameter (0.3, 0.1, or 0.05) or $q$-mesh ($2\times 2$ or
+$4\times 4$).  \Cref{tab:toy_strong} shows results:
+conductance exceeds the ballistic limit and/or conservation errors
+exceed 5\%. One configuration appear marginally stable
+($n_\mathrm{slabs} = 2$, $q$-mesh $2\times 2$, mixing 0.1).  At $n_\mathrm{slabs} = 10$--$20$, the
+self-energy blows up to $\sim$$10^4\times$ the ballistic conductance.
+
+\begin{table}[h]
+  \centering
+  \caption{SCBA results for strong anharmonicity
+    ($\Phi_3 = 5.0$\,eV/\AA$^3$, $\alpha = 0.011$)}
+  \label{tab:toy_strong}
+  \begin{tabular}{rrrlrrrl}
+    \toprule
+    $n_\mathrm{sl}$ & $q$-mesh & mix & $G_\mathrm{ball}$
+      & $G_\mathrm{anh}$ & Conserv. & Iters & OK \\
+    \midrule
+    1 & $4\times 4$ & 0.30 & 1302 & 1105 & 18.8\% & 40 & no \\
+    1 & $2\times 2$ & 0.05 & 1302 & 1164 & 10.2\% & 40 & no \\
+    \textbf{2} & \textbf{2$\times$2} & \textbf{0.10}
+      & \textbf{1294} & \textbf{1117} & \textbf{1.5\%}
+      & \textbf{40} & \textbf{yes} \\
+    4 & $4\times 4$ & 0.10 & 1279 &  884 & 9.7\%  & 40 & no \\
+    10 & $2\times 2$ & 0.30 & 1236 & 15585 & 100\% & 40 & no \\
+    20 & $4\times 4$ & 0.10 & 1169 & 26313 & 100\% & 40 & no \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+A larger $q$-mesh makes convergence harder.  At $n_\mathrm{slabs} = 1$ with $\Phi_3 = 5.0$, the
+conservation error is 7\% for $2\times 2$ vs.\ 19\% for
+$4\times 4$ at the same mixing.  More $q$-points introduce more
+coupled self-energy channels, each contributing to the feedback loop.
+
+\paragraph{FC3/FC2 analysis: Si vs.\ toy model.}
+\Cref{tab:alpha} compares the anharmonic parameter for the real Si
+$2\times 2\times 2$ FC3 and the toy model at different $\Phi_3$
+strengths.
+
+We define a dimensionless anharmonic parameter
+\begin{equation}\label{eq:alpha}
+  \alpha = \frac{\Phi_{3,\max}\,u_\mathrm{rms}}{\Phi_{2,\mathrm{diag}}},
+\end{equation}
+where $\Phi_{3,\max}$ is the maximum Frobenius norm of any FC3 triplet
+block, $\Phi_{2,\mathrm{diag}}$ is the mean on-site FC2 norm, and
+$u_\mathrm{rms} = \sqrt{k_B T / \Phi_{2,\mathrm{diag}}}$ is the
+thermal displacement amplitude.  The parameter $\alpha$ represents the
+ratio of anharmonic to harmonic force at the thermal displacement
+scale.
+
+\begin{table}[h]
+  \centering
+  \caption{Anharmonic parameter $\alpha$ for Si and the toy model at
+    300\,K.}
+  \label{tab:alpha}
+  \begin{tabular}{lrrrrl}
+    \toprule
+    System & $\Phi_{2,\mathrm{diag}}$ & $\Phi_{3,\max}$
+      & $u_\mathrm{rms}$ (\AA) & $\alpha$ & SCBA \\
+    & (eV/\AA$^2$) & (eV/\AA$^3$) & & & \\
+    \midrule
+    Si (phono3py) & 23.1 & 74.8 & 0.033 & 0.108 & marginal \\
+    Toy, $\Phi_3 = 0.5$ & 8.66 & 0.17 & 0.055 & 0.001 & converges \\
+    Toy, $\Phi_3 = 2.0$ & 8.66 & 0.67 & 0.055 & 0.004 & fails \\
+    Toy, $\Phi_3 = 5.0$ & 8.66 & 1.67 & 0.055 & 0.011 & fails \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Comparison.}
+\cite{guo_quantum_2020} successfully computes
+$\kappa$ up to $d = 13$\,nm (24 conventional unit cells = 48 primitive
+slabs). Two differences:
+\begin{enumerate}
+  \item \textbf{Larger FC3 supercell}: $3\times 3\times 3$ (216~atoms)
+    vs.\ our $2\times 2\times 2$ (16~atoms).
+  \item \textbf{First-NN-only FC3}: Their Table~IV analysis uses only
+    first-nearest-neighbor FC3, which filters out the
+    longer-range contributions that increase $\Phi_{3,\max}$.
+\end{enumerate}
+I should try
+\begin{enumerate}
+  \item \textbf{Better FC3 input}: FC3 from a $3\times 3\times 3$
+    supercell with controlled neighbor-shell truncation to ensure
+    $\alpha \lesssim 0.01$.
+  \item \textbf{Different mixing}: Replace simple linear mixing
+    $\Sigma_\mathrm{new} = (1-\alpha_\mathrm{mix})\Sigma_\mathrm{old}
+    + \alpha_\mathrm{mix}\Sigma_\mathrm{computed}$ with Anderson or
+    DIIS acceleration, dynamically reduce
+    $\alpha_\mathrm{mix}$ when $|\Sigma|$ grows.
+\end{enumerate}
+
+% ============================================================
+\subsection{Computational scaling}
+\label{sub:scaling}
+% ============================================================
+
+\subsubsection{Cost summary}
+
+The dominant cost of each formulation is:
+\begin{align}
+  \cW_q &= N_\tau\,N_q^2\;\cC_\mathrm{ic},
+  &\cC_\mathrm{ic} &= \cO(M^3\hat{N}_c^2 N_B),
+  \tag{$\vq$-space}
+  \label{eq:scaling_q}\\[3pt]
+  \cW_R &= N_\tau\,N_D\,N_T^\mathrm{eff}\;\cC_\mathrm{ic},
+  &N_D &\le N_\perp^4,
+  \tag{real space}
+  \label{eq:scaling_R}\\[3pt]
+  \cW_S &= N_\tau\,N_q\bigl[
+      R\,M^2\hat{N}_c N_B + R^2 M\hat{N}_c
+    \bigr],
+  && \tag{separable}
+  \label{eq:scaling_S}
+\end{align}
+plus $\cO(R^2 N_\tau N_q\log N_q\,M)$ for the FFT
+convolutions.  The $\vq$-space and real-space formulations share
+the same inner contraction $\cC_\mathrm{ic}$ and differ only in
+their outer loop count ($N_q^2$ vs.\ $N_D N_T^\mathrm{eff}$).
+The separable formulation differs in both respects: the outer loop
+is $R^2 N_q$ convolutions (each via FFT at $N_q\log N_q$) and the
+inner operation is a bilinear form rather than a ring contraction.
+
+In the regime $R \ll MN_B$ where the matrix--vector products
+dominate, the speedup relative to $\vq$-space is
+\begin{equation}
+  \frac{\cW_q}{\cW_S}
+  \;\approx\;
+  \frac{N_q\,M\,\hat{N}_c}{R}.
+  \label{eq:speedup}
+\end{equation}
+This ratio grows linearly in both $N_q$ and the cross-section size
+$M = CN_s$, and inversely in $R$.
+
+\subsubsection{Memory requirements}
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Formulation & Dominant array & Size \\
+  \midrule
+  $\vq$-space
+    & $g(\tau;\vq)$ for all $(\tau,\vq)$
+    & $N_\tau\,N_q\,M^2 N_B$ \\
+    & FC3 (real space, on-the-fly)
+    & $N_D\,M^2\hat{N}_c^2$ \\[4pt]
+  Real space
+    & $g(\tau;\vR)$ for $\vR\in\mathcal{R}_\mathrm{eff}$
+    & $N_\tau\,N_T^\mathrm{eff}\,M^2 N_B$ \\
+    & FC3 (real space)
+    & $N_D\,M^2\hat{N}_c^2$ \\[4pt]
+  Separable
+    & $\mathcal{B}(\tau;\vq)$ (accumulated bubble)
+    & $N_\tau\,N_q\,M^2 N_B$ \\
+    & $G(\tau;\vq)$ for current $\tau$
+    & $N_q\,M^2 N_B$ \\
+    & Rank factors $\hat{f}_r(\vq), \hat{h}_r(\vq)$
+    & $R\,N_q\,M\hat{N}_c$ \\
+    & $\vv_s(\vq)$, $A_{rs}(\vq)$, $B_{rs}(\vq)$
+    & $R\,N_q\,M\hat{N}_c + 2R^2\,N_q$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================
+\subsection{Distributed computation of the separable
+  phonon--phonon self-energy}
+\label{sub:distributed}
+% ============================================================
+
+We describe the distributed algorithm for computing the
+separable phonon--phonon self-energy
+\cref{eq:sigma_sep} within a large-scale NEGF solver.
+The algorithm builds on the existing parallelisation
+infrastructure of QuaTrEx~\cite{vetsch_ab-initio_2025}, which
+distributes data over energy points and spatial partitions,
+and extends it with a transverse-wavevector ($\vq$) dimension
+required for the phonon--phonon interaction.
+
+% -------------------------------------------------------
+\subsubsection{Rank layout}
+\label{sssub:rank_layout}
+% -------------------------------------------------------
+
+The total number of MPI ranks $P$ is factored as
+\begin{equation}
+  P = P_\omega \times P_q \times P_S,
+  \label{eq:rank_layout}
+\end{equation}
+where $P_\omega$ ranks share the $N_\omega$ frequency points,
+$P_q$ ranks share the $N_q$ transverse wavevectors, and $P_S$
+ranks participate in the spatial domain decomposition of the
+RGF solver along the transport direction.  Each rank is
+identified by a triple $(p_\omega, p_q, p_S)$.  The
+$P_\omega$-ranks at fixed $(p_q, p_S)$ form an
+$\omega$-communicator, the $P_q$-ranks at fixed
+$(p_\omega, p_S)$ form a $\vq$-communicator, and the
+$P_S$-ranks at fixed $(p_\omega, p_q)$ form a
+spatial communicator used for the distributed RGF.
+
+In the RGF phase (solving for $G$), each rank stores the
+diagonal and first off-diagonal blocks of
+$G^{\gtrless}(\omega_k;\vq_n)$ for its assigned
+$(\omega_k,\vq_n)$-points, with block size $N_{BS}\times N_{BS}$.
+The number of frequency points per $\omega$-rank is
+$N_\omega^{\mathrm{loc}} = N_\omega / P_\omega$, and the number
+of $\vq$-points per $\vq$-rank is
+$N_q^{\mathrm{loc}} = N_q / P_q$.  For the spatial
+decomposition with $P_S$ partitions, each spatial rank holds
+$\sim N_B/P_S$ transport cells of the block-tridiagonal system.
+
+% -------------------------------------------------------
+\subsubsection{Precomputation of rank factors}
+\label{sssub:precompute}
+% -------------------------------------------------------
+
+The separable FC3 approximation \cref{eq:fc3_lowrank} is
+computed once before the SCBA loop.  The real-space rank
+factors $f^{i\mu_1}_{l,l_1,r}(\vrho_1)$ and
+$h^{\mu_2}_{l_2,r}(\vrho_2)$ are obtained by truncated SVD
+of the FC3 matrix (viewed as a matrix in $(\vrho_1,\mu_1,l_1)
+\times (\vrho_2,\mu_2,l_2)$) to rank $R$.
+Their Fourier transforms $\hat{f}_r(\vq)$, $\hat{h}_r(\vq)$ are
+computed by applying 2D DFTs over the $N_\perp$ displacement
+vectors for each $(r, \mu, l)$-combination.  Since the rank
+factors have dimension $M\hat{N}_c$ per slab group and there
+are $R$ of them, the total storage is
+$\cO(R\,N_q\,M\hat{N}_c)$ per FC3 factor.  This is small
+compared to the Green's function storage and is replicated on
+all $\vq$-ranks.
+
+% -------------------------------------------------------
+\subsubsection{Algorithm overview}
+\label{sssub:algorithm}
+% -------------------------------------------------------
+
+Each SCBA iteration for the phonon--phonon self-energy
+proceeds through five phases, detailed below.  We write $G_k^n \equiv
+G^{\gtrless}(\omega_k;\vq_n)$ for the Green's function at
+frequency $\omega_k$ and wavevector $\vq_n$.
+
+\paragraph{Phase~1: $\omega\to\tau$ transform
+  (all-to-all within $\omega$-communicators).}
+%
+The RGF solver produces $G_k^n$ distributed over
+$(\omega,\vq)$-pairs: each rank $(p_\omega,p_q,p_S)$ holds
+$N_\omega^{\mathrm{loc}} \times N_q^{\mathrm{loc}}$ points.
+To apply the inverse FFT $\omega\to\tau$, all $N_\omega$
+frequencies at a given $(\vq_n, \text{entry})$ must be
+gathered on a single rank.
+
+This is done by the Stacked$\,\to\,$NNZ transpose:
+an all-to-all exchange within each $\omega$-communicator
+redistributes the data so that each rank holds all $N_\omega$
+frequencies for a subset of $(\text{entry},\vq)$-pairs.
+After the transpose, each rank applies the $\omega\to\tau$
+IFFT independently.  The result is
+$g^{\mu_1\mu_4}_{l_1,l_4}(\tau_m;\vq_n)$ for all $N_\tau$
+time points, at the rank's assigned $(\text{entry},\vq)$-pairs.
+
+The communication volume per rank is
+$N_\omega^{\mathrm{loc}}\times N_q^{\mathrm{loc}} \times
+  N_{\mathrm{nnz}}^{\mathrm{loc}}$ complex numbers, where
+$N_{\mathrm{nnz}}^{\mathrm{loc}}$ is the number of nonzero
+Green's function entries per $(\omega,\vq)$-point assigned to
+this rank (diagonal and first off-diagonal blocks of the
+block-tridiagonal structure, divided over $P_S$ spatial
+partitions).
+
+\paragraph{Phase~2: bilinear contraction (local).}
+%
+This is computationally dominant.
+At each $(\tau_m, \vq_n)$ assigned to the current rank, the
+two-stage contraction is executed:
+
+\begin{enumerate}
+\item For $s = 1,\ldots,R$: compute the matrix--vector product
+  \begin{equation}
+    \vv_s^{\mu_1}{}_{l_1}(\tau_m;\vq_n)
+    = \sum_{\mu_4,l_4}
+      g^{\mu_1\mu_4}_{l_1,l_4}(\tau_m;\vq_n)\;
+      \hat{h}'^{\mu_4}_{l_4,s}(\vq_n).
+    \label{eq:matvec}
+  \end{equation}
+  The Green's function $g(\tau_m;\vq_n)$ is block-tridiagonal
+  with $N_B/P_S$ blocks of size $N_{BS}\times N_{BS}$ on the
+  current spatial partition.  The vector
+  $\hat{h}'_s(\vq_n)$ is nonzero only within $\hat{N}_c$ slabs
+  of the output slab $l'$, so the product involves at most
+  $\hat{N}_c$ block-rows of $g$, each with 3 contributing
+  blocks (block-tridiagonal structure).  The cost per
+  $(s,\tau_m,\vq_n)$ is $\cO(\hat{N}_c\,N_{BS}^2)$.
+
+  The result $\vv_s$ is a vector of dimension $M\hat{N}_c$ per
+  output slab, and is reused across all $R$ values of $r$ in
+  the next step.
+
+\item For $r = 1,\ldots,R$ and $s = 1,\ldots,R$: compute the
+  inner product
+  \begin{equation}
+    A^{i}_{l,rs}(\tau_m;\vq_n)
+    = \sum_{\mu_1,l_1}
+      \hat{f}^{i\mu_1}_{l,l_1,r}(\vq_n)\;
+      \vv_s^{\mu_1}{}_{l_1}(\tau_m;\vq_n).
+    \label{eq:innerprod}
+  \end{equation}
+  Each inner product has length $M\hat{N}_c$.  For each
+  output slab $l$ and Cartesian index $i$, this produces a
+  scalar.  The total number of scalars per
+  $(\tau_m,\vq_n)$-point is $R^2 \times C \times N_\Sigma$,
+  where $N_\Sigma$ is the number of output slab pairs within
+  the self-energy bandwidth.
+\end{enumerate}
+
+An identical two-stage procedure produces $B^{j}_{l',rs}$
+from $g_2(\tau_m;\vq_n)$, $\hat{h}_r(\vq_n)$, and
+$\hat{f}'_s(\vq_n)$. No communication is required in this phase, each rank
+operates only on its local $(\tau,\vq)$-points.
+
+\paragraph{Phase~3: $\vq$-transpose
+  (all-to-all within $\vq$-communicators).}
+%
+The FFT convolution in \cref{eq:sigma_sep} requires, for each
+$(r,s,\tau_m)$, the values $A_{rs}(\tau_m;\vq_n)$ and
+$B_{rs}(\tau_m;\vq_n)$ at \emph{all} $N_q$ wavevectors.
+After Phase~2, these are distributed across $P_q$ ranks (each
+holding $N_q^{\mathrm{loc}}$ wavevectors).  A
+$\vq$-transpose---an all-to-all exchange within each
+$\vq$-communicator---redistributes the data so that each rank
+holds all $N_q$ wavevectors for a subset of
+$(\tau,r,s,i,l)$-combinations.
+
+The Communication volume per rank is
+$N_\tau^{\mathrm{loc}} \times R^2 \times C \times N_\Sigma
+  \times N_q^{\mathrm{loc}}$ complex numbers for $A$, and the
+same for $B$.  Because of the compression in Phase~2, this is
+a factor $M^2 N_B / (R^2 C N_\Sigma)$ smaller than the
+hypothetical cost of transposing the full Green's function
+matrices.
+
+Without the separable approximation, $\vq$-distribution of the
+$\vq$-space formulation \cref{eq:bubble_q} would require an
+all-gather of $g(\tau;\vq')$ for all $\vq'$ at each $(\tau,\vq)$
+working point, with communication volume
+$N_\tau \times N_q \times M^2 N_B$ per rank---effectively
+negating the memory saving from $\vq$-distribution.
+
+\paragraph{Phase~4: $\vq$-FFT convolution
+  (local after transpose).}
+%
+After the $\vq$-transpose, each rank holds $A^i_{l,rs}$ and
+$B^j_{l',rs}$ at all $N_q$ wavevectors for its assigned subset
+of $(r,s,\tau,i,l)$ and $(r,s,\tau,j,l')$ indices.  For each
+such index combination:
+
+\begin{enumerate}
+\item Apply the inverse 2D FFT $\vq\to\vR$ to obtain
+  $a^i_{l,rs}(\tau_m;\vR)$ and $b^j_{l',rs}(\tau_m;\vR)$ at all
+  $N_q$ transverse lattice points $\vR$.
+\item For each $\vR$: compute the outer product
+  $c^{ij}_{ll',rs}(\tau_m;\vR) =
+    a^i_{l,rs}(\tau_m;\vR) \cdot b^j_{l',rs}(\tau_m;\vR)$.
+\item Accumulate over $(r,s)$ into the bubble:
+  $\mathcal{B}^{ij}_{ll'}(\tau_m;\vR)
+    \mathrel{+}= c^{ij}_{ll',rs}(\tau_m;\vR)$.
+\item After all $(r,s)$ pairs: apply the forward 2D FFT
+  $\vR\to\vq$ to recover
+  $\mathcal{B}^{ij}_{ll'}(\tau_m;\vq)$.
+\end{enumerate}
+
+Alternatively, if one processes all $(r,s)$ pairs before the
+final FFT, the accumulation is done in $\vR$-space (step~3)
+and only one forward FFT per $(\tau,i,l,j,l')$ is needed
+(step~4).  This reduces the number of forward FFTs from
+$R^2$ to $1$ per index combination.
+
+Cost per $\tau$-point is
+$2 R^2 C N_\Sigma$ inverse FFTs (for $A$ and $B$) plus
+$C^2 N_\Sigma^2$ forward FFTs (for $\mathcal{B}$), each of
+length $N_q$.  With $N_q = 400$, $R = 10$, $C = 3$,
+$N_\Sigma = 5$: approximately $3{,}000$ IFFTs and $225$ FFTs
+per $\tau$-point.
+
+\paragraph{Phase~5: reverse transposes and $\tau\to\omega$
+  transform.}
+%
+The bubble $\mathcal{B}^{ij}_{ll'}(\tau_m;\vq_n)$ must be
+transformed back to the $(\omega,\vq)$-distributed format for
+injection into the next RGF solve.  This requires two steps:
+
+\begin{enumerate}
+\item \emph{Reverse $\vq$-transpose}: redistribute
+  $\mathcal{B}(\tau;\vq)$ so that each rank holds all $\tau$
+  at its local $\vq$-points, using an all-to-all within
+  $\vq$-communicators.  The communicated data is the full
+  self-energy matrix (not the compressed $A_{rs}$ scalars),
+  so the volume is
+  $N_\tau^{\mathrm{loc}} \times N_q^{\mathrm{loc}} \times
+    C^2 N_\Sigma^2$.
+\item \emph{$\tau\to\omega$ FFT}: at each $\vq_n$, apply the
+  forward FFT $\tau\to\omega$ to obtain
+  $\Sig^{ij}_{ll'}(\omega_k;\vq_n)$.
+\item \emph{Reverse $\omega$-transpose}: redistribute from the
+  NNZ layout (all $\omega$ at local entries) back to the
+  Stacked layout (local $\omega$ at all entries) for the RGF
+  solver.
+\end{enumerate}
+
+% -------------------------------------------------------
+\subsubsection{Comparison to the non-separable parallelisation}
+\label{sssub:compare_dist}
+% -------------------------------------------------------
+
+In the non-separable $\vq$-space formulation, the inner
+$\vq'$-loop at each $(\tau,\vq)$-point accesses $G(\tau;\vq')$
+for all $N_q$ values of $\vq'$.  If $G$ is distributed over
+$P_q$ ranks, this requires either:
+\begin{itemize}
+\item an all-gather of $G(\tau;\cdot)$ at every $\tau$-step,
+  with volume $N_q \times M^2 N_B$ per step, or
+\item replication of $G(\tau;\vq)$ across all $\vq$-ranks,
+  eliminating the memory benefit of $\vq$-distribution.
+\end{itemize}
+Neither option is viable for large $N_q$ and $M$.
+
+The Guo et al.\ approach~\cite{guo2020} avoids this issue by
+assigning one $\vq$-point per rank (full parallelisation of
+$\vq$) and exchanging Green's function data between all pairs
+of ranks at each SCBA iteration.  This works for small systems
+($N_{BS} = 24$ in their silicon thin film, $N_q = 36$) but does
+not scale to the nanoribbon regime ($N_{BS} = 3{,}408$,
+$N_q = 400$) because the all-to-all volume grows as
+$N_q^2 \times N_{BS}^2$.
+
+The separable formulation resolves this by compressing
+$M^2 N_B$ matrix elements to $R^2 C N_\Sigma$ scalars
+\emph{before} the $\vq$-transpose.  The all-to-all volume in
+Phase~3 is independent of $M$ and $N_B$, scaling only as
+$R^2 C N_\Sigma \times N_\tau \times N_q$---a reduction by
+the compression factor $M^2 N_B / (R^2 C N_\Sigma)$.
+
+% -------------------------------------------------------
+\subsubsection{Memory layout per rank}
+\label{sssub:memory}
+% -------------------------------------------------------
+
+The peak memory per rank occurs during Phase~2 (bilinear
+contraction), when the rank simultaneously holds:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Array & Description & Size (complex numbers) \\
+  \midrule
+  $g(\tau;\vq)$
+    & Green's function at current $\tau$,
+    & $N_q^{\mathrm{loc}} \times N_{\mathrm{nnz}}^{\mathrm{loc}}$ \\
+    & local $\vq$-points & \\[4pt]
+  $\hat{f}_r(\vq), \hat{h}_r(\vq)$
+    & Rank factors (replicated)
+    & $2R \times N_q^{\mathrm{loc}} \times M\hat{N}_c$ \\[4pt]
+  $\vv_s(\tau;\vq)$
+    & Intermediate vectors
+    & $R \times N_q^{\mathrm{loc}} \times M\hat{N}_c$ \\[4pt]
+  $A_{rs}(\tau;\vq)$, $B_{rs}(\tau;\vq)$
+    & Compressed scalars
+    & $2R^2 \times N_q^{\mathrm{loc}} \times C N_\Sigma$ \\[4pt]
+  $\mathcal{B}(\tau;\vq)$
+    & Accumulated bubble (all $\tau$)
+    & $N_\tau \times N_q^{\mathrm{loc}} \times C^2 N_\Sigma^2$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The bubble $\mathcal{B}$ must persist across all $\tau$-steps
+(to perform the final $\tau\to\omega$ FFT), while $g$,
+$\vv_s$, $A_{rs}$, and $B_{rs}$ are overwritten at each
+$\tau$-step.  In the separable formulation, $g$ needs to be
+held only for the current $\tau$-step, not for all $\tau$
+simultaneously---in contrast to the non-separable $\vq$-space
+method, which requires random access to $g(\tau;\vq')$ and
+$g(\tau;\vq-\vq')$ across the full $\tau$-range.
+
+% -------------------------------------------------------
+\subsubsection{Communication summary}
+\label{sssub:comm_summary}
+% -------------------------------------------------------
+
+\Cref{tab:comm} summarises the four all-to-all exchanges per
+SCBA iteration.  The $\omega$-transposes (Phases~1 and~5c) are
+identical to those in the existing QuaTrEx electron--electron
+self-energy computation.  The $\vq$-transposes (Phases~3
+and~5a) are new and operate on the compressed $A_{rs}$,
+$B_{rs}$ scalars or the self-energy matrix $\mathcal{B}$
+respectively.
+
+\begin{center}
+\begin{tabular}{llll}
+  \toprule
+  Phase & Communicator & Direction & Volume per rank \\
+  \midrule
+  1 ($\omega\to\tau$)
+    & $\omega$-comm
+    & Stacked$\to$NNZ
+    & $N_\omega^{\mathrm{loc}} N_q^{\mathrm{loc}}
+      N_{\mathrm{nnz}}^{\mathrm{loc}}$ \\[3pt]
+  3 ($\vq$-transpose)
+    & $\vq$-comm
+    & local-$\vq\to$all-$\vq$
+    & $N_\tau N_q^{\mathrm{loc}} R^2 C N_\Sigma$ \\[3pt]
+  5a (reverse $\vq$)
+    & $\vq$-comm
+    & all-$\vq\to$local-$\vq$
+    & $N_\tau N_q^{\mathrm{loc}} C^2 N_\Sigma^2$ \\[3pt]
+  5c ($\tau\to\omega$)
+    & $\omega$-comm
+    & NNZ$\to$Stacked
+    & $N_\omega^{\mathrm{loc}} N_q^{\mathrm{loc}}
+      N_{\mathrm{nnz}}^{\mathrm{loc}}$ \\
+  \bottomrule
+\end{tabular}
+\label{tab:comm}
+\end{center}
+
+The $\vq$-transpose in Phase~3 is the communication
+bottleneck specific to the phonon--phonon self-energy.  Its
+volume scales as $R^2 C N_\Sigma$ per $(\tau,\vq)$-point,
+which is independent of the cross-section size $M$.  For
+$R = 10$, $C = 3$, $N_\Sigma = 5$: $1{,}500$ complex numbers
+per $(\tau,\vq)$-point, compared to
+$M^2 N_B \approx 2.2\times 10^6$ for the full Green's
+function---a reduction by three orders of magnitude.
+
+% -------------------------------------------------------
+\subsubsection{Computational cost per rank per SCBA iteration}
+\label{sssub:cost_per_rank}
+% -------------------------------------------------------
+
+The dominant cost is Phase~2 (bilinear contraction).  Per
+rank, the number of $(\tau,\vq)$-points processed is
+$N_\tau \times N_q^{\mathrm{loc}}$.  At each point:
+
+\begin{itemize}
+\item Step~1 (matrix--vector products): $R$ products, each
+  involving $\hat{N}_c$ block-rows of the block-tridiagonal $g$
+  at cost $\cO(\hat{N}_c N_{BS}^2)$.
+  Total: $R\,\hat{N}_c\,N_{BS}^2$ per $(\tau,\vq)$.
+\item Step~2 (inner products): $R^2$ inner products of length
+  $M\hat{N}_c$, for each of $C \times N_\Sigma$ output pairs.
+  Total: $R^2\,M\hat{N}_c\,C\,N_\Sigma$ per $(\tau,\vq)$.
+\end{itemize}
+
+For $P$ and $Q$ together, the per-rank cost is
+\begin{equation}
+  \cW_{\mathrm{rank}} =
+  N_\tau \frac{N_q}{P_q}
+  \bigl[
+    2R\,\hat{N}_c\,N_{BS}^2
+  + 2R^2\,M\hat{N}_c\,C\,N_\Sigma
+  \bigr]
+  / P_S.
+  \label{eq:cost_per_rank}
+\end{equation}
+The first term dominates for the nanoribbon parameters of
+\cref{tab:nanoribbon}: with $N_{BS} = 3{,}408$,
+$\hat{N}_c = 4$, $R = 10$, $N_\tau = 500$,
+$N_q^{\mathrm{loc}} = N_q/P_q$, each rank performs
+$\cO(10^{14}/P_q P_S)$ floating-point operations per SCBA
+iteration.
+
+
+% ============================================================
+\subsection{No Tranverse Periodicity}
+\label{sub:nq1}
+% ============================================================
+
+The analysis above assumed a nonzero transverse wavevector
+grid ($N_q > 1$), which arises when the device cross-section
+has periodic boundary conditions in one or both transverse
+directions.  For narrow nanoribbons, FinFETs, or gate-all-around
+nanowire transistors whose cross-section is fully confined
+(no transverse periodicity), $N_q = 1$ and the self-energy
+\cref{eq:sigma_phph} reduces to the purely 1D form of
+Guo et~al.~\cite[Eq. 8]{guo_quantum_2020}:
+\begin{equation}
+  \Sig^{\gtrless,ij}_{ll'}(\omega)
+  = \frac{i\hbar}{2}
+    \sum_{\substack{l_{1..4}\\j_{1..4}}}
+    \int\!\frac{d\omega'}{2\pi}\;
+    \Phi^{ij_1j_2}_{ll_1l_2}\;
+    \Phi^{j_3j_4 j}_{l'l_3l_4}\;
+    G^{\gtrless,j_1j_4}_{l_1 l_4}(\omega')\;
+    G^{\gtrless,j_2j_3}_{l_2 l_3}(\omega{-}\omega').
+  \label{eq:sigma_1d}
+\end{equation}
+The total cost per SCBA iteration is then
+\begin{align}
+  \cW_q\big|_{N_q=1}
+  &= N_\tau\;\cC_\mathrm{ic}
+  = N_\tau\,M^3\,\hat{N}_c^2\,N_B,
+  \tag{non-separable, $N_q{=}1$}
+  \label{eq:cost_nq1_nonsep}
+  \\[4pt]
+  \cW_S\big|_{N_q=1}
+  &= N_\tau\bigl[
+    R\,M^2\hat{N}_c N_B + R^2 M\hat{N}_c
+  \bigr].
+  \tag{separable, $N_q{=}1$}
+  \label{eq:cost_nq1_sep}
+\end{align}
+The separable formulation still provides a speedup of
+\begin{equation}
+  \frac{\cW_q}{\cW_S}\bigg|_{N_q=1}
+  \approx
+  \frac{M\,\hat{N}_c}{R},
+  \label{eq:speedup_nq1}
+\end{equation}
+from the bilinear-form reduction ($M^3 \to M^2$) and shared-$G$
+reuse (factor~$R$).
+
+The distributed algorithm simplifies accordingly: only
+the $\omega$-distribution and spatial decomposition from
+QuaTrEx are needed.  Phase~1 (the existing
+Stacked$\,\to\,$NNZ transpose for $\omega\to\tau$) and the
+bilinear contraction (Phase~2 at a single $\vq$-point) proceed
+as before.  Phases~3--4 (the $\vq$-transpose and FFT
+convolution) are absent.  Phase~5 reduces to the
+$\tau\to\omega$ FFT and the reverse $\omega$-transpose.
+

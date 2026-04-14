@@ -40,7 +40,7 @@ def _run_case(label, phonon, fc3_data):
         phonon,
         fc3_data,
         q_mesh_transverse=(10, 10),
-        freq_range_thz=(0.5, 15.0, 51),
+        freq_range_thz=(0.0, 15.0, 51),
         transport_direction="x",
         eta_factor=0.5,
         temperature=300.0,
