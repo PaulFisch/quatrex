@@ -248,7 +248,7 @@ def _sancho_rubio(z2, H_00, H_01, max_iter=300, tol=1e-8):
     Parameters
     ----------
     z2 : complex
-        Causal frequency squared: z² = (ω + iη_w)².
+        Causal frequency squared: z² = ω² + 2iωη_w.
     """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
@@ -332,7 +332,7 @@ def reference_transmission(
     freqs_thz = np.linspace(fmin, fmax, int(nfreq))
     dw = freqs_thz[1] - freqs_thz[0]  # THz
     eta_w = dw * eta_factor  # THz
-    z2_arr = (freqs_thz + 1j * eta_w) ** 2
+    z2_arr = freqs_thz**2 + 2j * freqs_thz * eta_w
 
     nkx, nky = q_mesh_transverse
     q_1d = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
@@ -388,7 +388,7 @@ def interface_transmission(
     freqs_thz = np.linspace(fmin, fmax, nfreq)
     dw = freqs_thz[1] - freqs_thz[0]
     eta_w = dw * eta_factor
-    z2_arr = (freqs_thz + 1j * eta_w) ** 2
+    z2_arr = freqs_thz**2 + 2j * freqs_thz * eta_w
 
     nkx, nky = q_mesh_transverse
     q_1d_x = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
