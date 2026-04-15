@@ -159,29 +159,32 @@ def _boson_contact_self_energies_from_gamma(Gamma, freqs_thz, T):
 
 
 def _check_antihermitian_sign(Sigma_R, freqs_thz, name, tol=1e-8):
-    """Check that i(Σ^R - Σ^{R†}) is negative semidefinite for ω > 0.
+    """Check that Γ = i(Σ^R - Σ^{R†}) is positive semidefinite for ω > 0.
+
+    In NEGF, Γ represents dissipation/broadening and must be PSD.
+    For ω < 0, Γ should be negative semidefinite (by time-reversal).
 
     Parameters
     ----------
     Sigma_R : (nfreq, nd, nd)
     freqs_thz : (nfreq,)
     """
-    # Only check positive frequencies away from zero
     for iw in range(len(freqs_thz)):
         if abs(freqs_thz[iw]) < 0.5:
             continue
         sr = Sigma_R[iw]
         anti_herm = 1j * (sr - sr.conj().T)
         anti_herm = 0.5 * (anti_herm + anti_herm.conj().T)
-        worst = np.linalg.eigvalsh(anti_herm).max()
-        if freqs_thz[iw] > 0 and worst > tol:
+        eigs = np.linalg.eigvalsh(anti_herm)
+        if freqs_thz[iw] > 0 and eigs.min() < -tol:
             warnings.warn(
-                f"{name}: i(Σ^R-Σ^A) not NSD at ω={freqs_thz[iw]:.2f} THz, "
-                f"max eig={worst:.3e}")
+                f"{name}: Γ=i(Σ^R-Σ^A) not PSD at ω={freqs_thz[iw]:.2f} THz, "
+                f"min eig={eigs.min():.3e}")
             return
-        if freqs_thz[iw] < 0 and np.linalg.eigvalsh(anti_herm).min() < -tol:
+        if freqs_thz[iw] < 0 and eigs.max() > tol:
             warnings.warn(
-                f"{name}: i(Σ^R-Σ^A) wrong sign at ω={freqs_thz[iw]:.2f} THz")
+                f"{name}: Γ=i(Σ^R-Σ^A) wrong sign at ω={freqs_thz[iw]:.2f} THz, "
+                f"max eig={eigs.max():.3e}")
             return
 
 
@@ -490,14 +493,16 @@ def _hilbert_transform_axis(f, axis=1):
 
 
 def _retarded_from_lesser_greater(delta, omega_grid_thz):
-    """Build Σ^R from Δ = Σ^> - Σ^< via discrete principal-value integral.
+    """Build Σ^R from Δ = Σ^> - Σ^< via Kramers-Kronig.
 
-    Uses Guo Eq. (14) on the working frequency grid. Avoids the wraparound
-    artifacts of the FFT Hilbert transform.
+    Σ^R(ω) = ½Δ(ω) + (i/2π) PV∫ Δ(ω')/(ω-ω') dω'
+
+    This follows from Σ^R(t) = θ(t)[Σ^>(t) - Σ^<(t)] and the standard
+    Fourier transform of θ(t)·f(t).
 
     Parameters
     ----------
-    delta : (n_freq, nd, nd)
+    delta : (n_freq, nd, nd) — Σ^> - Σ^<
     omega_grid_thz : (n_freq,)
     """
     n_freq = len(omega_grid_thz)
