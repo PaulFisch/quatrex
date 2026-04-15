@@ -23,12 +23,11 @@ Retarded reconstruction
 -----------------------
 The ``retarded`` parameter controls how Σ^R is built from Σ^{<,>}:
   - ``"half"``— Σ^R = ½(Σ^> - Σ^<), no Kramers-Kronig correction
-  - ``"pv"``  — direct discrete principal-value integral (O(nfreq²))
+  - ``"pv"``  — singularity-subtracted principal-value integral (O(nfreq²))
   - ``"fft"`` — FFT-based Hilbert transform (O(nfreq log nfreq))
-The finite (Gamma-only) entry point defaults to ``"pv"``.
-The q-path entry point defaults to ``"half"`` because the truncated PV
-integral amplifies sign violations inherent in the cross-q bubble diagram,
-causing SCBA divergence at general q-points.
+Both entry points default to ``"half"`` so that q=(1,1) reproduces the
+finite solver exactly.  Σ^R is rebuilt from the mixed Σ^{<,>} pair
+after each SCBA iteration, not mixed independently.
 """
 
 import warnings
@@ -219,6 +218,42 @@ def _check_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
     retarded_err = float(np.max(np.abs(G_R_pos - G_R_neg.conj())))
 
     return lesser_err, retarded_err
+
+
+def _symmetrize_lesser_greater(sig_l, sig_g):
+    """Project Σ^< and Σ^> onto the bosonic full-axis symmetry manifold.
+
+    Enforces Σ^<(ω) = −[Σ^>(−ω)]^T  in-place on the last three axes
+    (nfreq, nd, nd).  Leading dimensions (slabs, q-points) are preserved.
+
+    The grid is assumed symmetric about ω=0 with mid = nfreq // 2.
+    The ω=0 sample is left untouched (it is excluded from physics).
+    """
+    nfreq = sig_l.shape[-3]
+    mid = nfreq // 2
+
+    # Work on copies so the negative-side update doesn't interfere
+    sl_pos = sig_l[..., mid + 1:, :, :].copy()
+    sg_pos = sig_g[..., mid + 1:, :, :].copy()
+    # Σ(−ω): take negative-freq slice and reverse along freq axis
+    sg_neg_rev = sig_g[..., :mid, :, :][..., ::-1, :, :].copy()
+    sl_neg_rev = sig_l[..., :mid, :, :][..., ::-1, :, :].copy()
+
+    # Symmetrize positive side:
+    # Σ^<_sym(ω) = ½ [Σ^<(ω) − Σ^>(−ω)^T]
+    # Σ^>_sym(ω) = ½ [Σ^>(ω) − Σ^<(−ω)^T]
+    sl_pos_sym = 0.5 * (sl_pos - sg_neg_rev.swapaxes(-2, -1))
+    sg_pos_sym = 0.5 * (sg_pos - sl_neg_rev.swapaxes(-2, -1))
+
+    sig_l[..., mid + 1:, :, :] = sl_pos_sym
+    sig_g[..., mid + 1:, :, :] = sg_pos_sym
+
+    # Negative side follows from the symmetry:
+    # Σ^<(−ω) = −[Σ^>(ω)]^T,  Σ^>(−ω) = −[Σ^<(ω)]^T
+    sig_l[..., :mid, :, :] = -(
+        sig_g[..., mid + 1:, :, :][..., ::-1, :, :].swapaxes(-2, -1))
+    sig_g[..., :mid, :, :] = -(
+        sig_l[..., mid + 1:, :, :][..., ::-1, :, :].swapaxes(-2, -1))
 
 
 # ---------------------------------------------------------------------------
@@ -500,10 +535,20 @@ def _retarded_from_lesser_greater(delta, omega_grid_thz):
 
     Σ^R(ω) = ½Δ(ω) + (i/2π) PV∫ Δ(ω')/(ω−ω') dω'
 
-    This follows from Σ^R(t) = θ(t)[Σ^>(t) − Σ^<(t)].
+    Uses singularity subtraction for the PV integral:
 
-    No tail correction is applied; the result depends on the finite
-    frequency window and grid resolution.
+        PV∫ Δ(ω')/(ω−ω') dω'
+          = ∫ [Δ(ω') − Δ(ω)]/(ω−ω') dω'  +  Δ(ω) · PV∫ 1/(ω−ω') dω'
+
+    The first integral is regular (the 1/(ω−ω') singularity cancels) and
+    is evaluated with standard trapezoid quadrature, filling the diagonal
+    sample with the finite-difference derivative −Δ'(ω).  The second term
+    uses the analytic PV integral of 1/(ω−ω') over [ω_min, ω_max]:
+
+        PV∫_{ω_min}^{ω_max} dω'/(ω−ω') = ln|(ω − ω_min)/(ω − ω_max)|
+
+    For the endpoints ω = ω_min or ω_max the analytic PV diverges
+    logarithmically; we fall back to the discrete sum there.
 
     Parameters
     ----------
@@ -511,18 +556,43 @@ def _retarded_from_lesser_greater(delta, omega_grid_thz):
     omega_grid_thz : (n_freq,)
     """
     n_freq = len(omega_grid_thz)
-    sig_r = 0.5 * delta.copy()
+    nd = delta.shape[-1]
+    sig_r = 0.5 * delta.astype(complex)
+    dw = omega_grid_thz[1] - omega_grid_thz[0] if n_freq > 1 else 1.0
+    w_min = omega_grid_thz[0]
+    w_max = omega_grid_thz[-1]
 
     for i in range(n_freq):
-        diff = omega_grid_thz[i] - omega_grid_thz
-        mask = np.ones(n_freq, dtype=bool)
-        mask[i] = False
-        pv = np.trapezoid(
-            delta[mask] / diff[mask, None, None],
-            omega_grid_thz[mask],
-            axis=0,
-        )
-        sig_r[i] += 0.5j / np.pi * pv
+        wi = omega_grid_thz[i]
+
+        # Regular part: [Δ(ω') − Δ(ω_i)] / (ω_i − ω')
+        diff = wi - omega_grid_thz  # (n_freq,)
+        reg = np.empty_like(delta)
+        nz = diff != 0
+        reg[nz] = (delta[nz] - delta[i][None]) / diff[nz, None, None]
+
+        # At ω' = ω_i: L'Hôpital → −dΔ/dω evaluated by central difference
+        if i == 0:
+            deriv = (delta[1] - delta[0]) / dw
+        elif i == n_freq - 1:
+            deriv = (delta[-1] - delta[-2]) / dw
+        else:
+            deriv = (delta[i + 1] - delta[i - 1]) / (2 * dw)
+        reg[i] = -deriv
+
+        regular_integral = np.trapezoid(reg, omega_grid_thz, axis=0)
+
+        # Analytic PV∫ 1/(ω_i − ω') dω' over [w_min, w_max]
+        eps_edge = 1e-12 * (w_max - w_min)
+        if abs(wi - w_min) < eps_edge or abs(wi - w_max) < eps_edge:
+            # Endpoint: analytic form diverges, use discrete sum
+            mask = nz
+            pv_scalar = np.sum(1.0 / diff[mask]) * dw
+        else:
+            pv_scalar = np.log(abs((wi - w_min) / (wi - w_max)))
+
+        pv_integral = regular_integral + delta[i] * pv_scalar
+        sig_r[i] += 0.5j / np.pi * pv_integral
 
     return sig_r
 
@@ -563,13 +633,11 @@ def _build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
 
 def _compute_phph_self_energy_finite(
     G_lesser, G_greater, Phi, omega_grid_thz, dw_thz,
-    retarded="pv",
 ):
     """Phonon-phonon self-energy for a finite device (no transverse q).
 
-    Parameters
-    ----------
-    retarded : {"pv", "fft", "half"}
+    Returns (Σ^<, Σ^>) only; Σ^R is rebuilt from the mixed pair in the
+    SCBA loop via ``_build_retarded``.
     """
     n_freq = len(omega_grid_thz)
     nd = Phi.shape[0]
@@ -611,8 +679,7 @@ def _compute_phph_self_energy_finite(
         sig_out[:] = prefactor * np.fft.ifft(
             S.reshape(n_fft, nd, nd), axis=0)[freq_sl]
 
-    sig_r = _build_retarded(sig_l, sig_g, omega_grid_thz, method=retarded)
-    return sig_l, sig_g, sig_r
+    return sig_l, sig_g
 
 
 # ---------------------------------------------------------------------------
@@ -672,17 +739,15 @@ def _se_worker_iq(args):
 def _compute_phph_self_energy_q_dense(
     G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
     nat_prim, n_kpts, omega_grid_thz, dw_thz, n_workers=None,
-    retarded="pv",
 ):
     """Compute q-dependent phonon-phonon self-energy.
 
-    Parameters
-    ----------
-    retarded : {"pv", "fft", "half"}
+    Returns (Σ^<, Σ^>) only; Σ^R is rebuilt from the mixed pair in the
+    SCBA loop via ``_build_retarded``.
 
     Returns
     -------
-    Sigma_lesser, Sigma_greater, Sigma_retarded : (n_kpts, n_freq, n_dof, n_dof)
+    Sigma_lesser, Sigma_greater : (n_kpts, n_freq, n_dof, n_dof)
     """
     import os
 
@@ -761,8 +826,7 @@ def _compute_phph_self_energy_q_dense(
                         sig_l[iq] = sl[i]
                         sig_g[iq] = sg[i]
 
-    sig_r = _build_retarded(sig_l, sig_g, omega_grid_thz, method=retarded)
-    return sig_l, sig_g, sig_r
+    return sig_l, sig_g
 
 
 # ---------------------------------------------------------------------------
@@ -781,6 +845,7 @@ def _scba_loop(
     max_scba_iter, scba_tol, conservation_tol,
     mixing, anderson_mixing, anderson_depth,
     scattering_contacts,
+    retarded,
     verbose,
 ):
     """Shared SCBA loop for both q-dense and finite paths.
@@ -791,8 +856,10 @@ def _scba_loop(
     Parameters
     ----------
     se_kernel : callable(G_lesser_slab, G_greater_slab)
-        Must return (Σ_l, Σ_g, Σ_R), each of shape
+        Must return (Σ_l, Σ_g), each of shape
         (n_slabs, n_kpts, nfreq, n_dof, n_dof).
+    retarded : {"pv", "fft", "half"}
+        Method for rebuilding Σ^R from the mixed Σ^{<,>}.
     """
     nfreq = len(freqs_thz)
 
@@ -806,9 +873,6 @@ def _scba_loop(
     rel_change = float('inf')
     sig_change = float('inf')
     conservation_err = 1.0
-    best_conservation = 1.0
-    best_state = None
-
     _anderson_x_hist = []
     _anderson_f_hist = []
 
@@ -890,19 +954,6 @@ def _scba_loop(
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
                             if J_denom > 0 else 0.0)
 
-        # Track best-conservation state
-        if scba_iter >= 3 and conservation_err < best_conservation:
-            best_conservation = conservation_err
-            best_state = {
-                "spectral_J_L": spectral_J_L.copy(),
-                "spectral_J_R": spectral_J_R.copy(),
-                "Sigma_R": Sigma_R.copy(),
-                "Sigma_l": Sigma_l.copy(),
-                "Sigma_g": Sigma_g.copy(),
-                "conservation_err": conservation_err,
-                "iter": scba_iter + 1,
-            }
-
         # Full-axis symmetry check — all slabs and q-points
         if verbose and scba_iter <= 2:
             max_l_err = 0.0
@@ -918,11 +969,14 @@ def _scba_loop(
                 print(f"    Symmetry: |G^<+G^>(-)|={max_l_err:.2e}, "
                       f"|G^R-G^R(-)*|={max_r_err:.2e}")
 
-        # Compute new self-energy
-        Sigma_l_new, Sigma_g_new, Sigma_r_new = se_kernel(
+        # Compute new self-energy (lesser and greater only)
+        Sigma_l_new, Sigma_g_new = se_kernel(
             G_lesser_slab, G_greater_slab)
 
-        sig_r_norm = np.max(np.abs(Sigma_r_new))
+        # Enforce bosonic full-axis symmetry: Σ^<(ω) = −[Σ^>(−ω)]^T
+        _symmetrize_lesser_greater(Sigma_l_new, Sigma_g_new)
+
+        sig_r_norm = np.max(np.abs(Sigma_l_new)) + np.max(np.abs(Sigma_g_new))
 
         if verbose and scba_iter == 0:
             gl_max = np.max(np.abs(G_lesser_slab))
@@ -931,18 +985,17 @@ def _scba_loop(
 
         # Save previous for convergence check
         _Sigma_prev = np.concatenate([
-            Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
+            Sigma_l.ravel(), Sigma_g.ravel()])
 
-        # Mix
+        # Mix only Σ^< and Σ^>, then rebuild Σ^R from the mixed pair
         if scba_iter == 0:
             Sigma_l = Sigma_l_new.copy()
             Sigma_g = Sigma_g_new.copy()
-            Sigma_R = Sigma_r_new.copy()
         elif anderson_mixing:
             x_in = np.concatenate([
-                Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
+                Sigma_l.ravel(), Sigma_g.ravel()])
             x_out = np.concatenate([
-                Sigma_l_new.ravel(), Sigma_g_new.ravel(), Sigma_r_new.ravel()])
+                Sigma_l_new.ravel(), Sigma_g_new.ravel()])
             f_k = x_out - x_in
             _anderson_x_hist.append(x_in)
             _anderson_f_hist.append(f_k)
@@ -967,8 +1020,7 @@ def _scba_loop(
 
             sz = Sigma_l.size
             Sigma_l = x_mixed[:sz].reshape(Sigma_l.shape)
-            Sigma_g = x_mixed[sz:2*sz].reshape(Sigma_g.shape)
-            Sigma_R = x_mixed[2*sz:].reshape(Sigma_R.shape)
+            Sigma_g = x_mixed[sz:].reshape(Sigma_g.shape)
 
             if len(_anderson_x_hist) > anderson_depth + 2:
                 _anderson_x_hist.pop(0)
@@ -977,7 +1029,10 @@ def _scba_loop(
             alpha = mixing
             Sigma_l = (1 - alpha) * Sigma_l + alpha * Sigma_l_new
             Sigma_g = (1 - alpha) * Sigma_g + alpha * Sigma_g_new
-            Sigma_R = (1 - alpha) * Sigma_R + alpha * Sigma_r_new
+
+        # Rebuild Σ^R from the mixed Σ^< and Σ^>
+        Sigma_R = _build_retarded(
+            Sigma_l, Sigma_g, freqs_thz, method=retarded)
 
         # Broadening sign check — all slabs and q-points
         total_viol = 0
@@ -996,20 +1051,18 @@ def _scba_loop(
         if scba_iter > 0:
             rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
             _Sigma_now = np.concatenate([
-                Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
+                Sigma_l.ravel(), Sigma_g.ravel()])
             sig_norm = np.linalg.norm(_Sigma_now)
             sig_change = (np.linalg.norm(_Sigma_now - _Sigma_prev)
                           / (sig_norm + 1e-30) if sig_norm > 0 else 0.0)
             convergence_history.append(rel_change)
             if verbose:
-                best_mark = " *" if conservation_err <= best_conservation else ""
                 print(f"    SCBA iter {scba_iter + 1}: "
                       f"J = {J_total:.4e} W, "
                       f"conservation = {conservation_err:.4e}, "
                       f"dJ/J = {rel_change:.4e}, "
                       f"dΣ/Σ = {sig_change:.4e}, "
-                      f"max|Σ^R| = {np.max(np.abs(Sigma_R)):.2e} THz²"
-                      f"{best_mark}")
+                      f"max|Σ^R| = {np.max(np.abs(Sigma_R)):.2e} THz²")
             numerically_converged = (sig_change < scba_tol
                                       and rel_change < scba_tol)
             conserving = conservation_err < conservation_tol
@@ -1038,20 +1091,6 @@ def _scba_loop(
             print(f"  WARNING: SCBA did not converge after {max_scba_iter} "
                   f"iterations (dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
                   f"conservation={conservation_err:.2e})")
-
-    # Restore best-conservation state if final state is poor
-    if (best_state is not None
-            and best_state["conservation_err"] < 0.5 * conservation_err):
-        spectral_J_L = best_state["spectral_J_L"]
-        spectral_J_R = best_state["spectral_J_R"]
-        Sigma_R = best_state["Sigma_R"]
-        Sigma_l = best_state["Sigma_l"]
-        Sigma_g = best_state["Sigma_g"]
-        conservation_err = best_state["conservation_err"]
-        if verbose:
-            print(f"  Using best-conservation state from iter "
-                  f"{best_state['iter']} "
-                  f"(conservation={conservation_err:.4e})")
 
     return {
         "spectral_J_L": spectral_J_L,
@@ -1086,7 +1125,7 @@ def anharmonic_transmission_finite(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    retarded: str = "pv",
+    retarded: str = "half",
     scattering_contacts: bool = False,
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
@@ -1096,8 +1135,9 @@ def anharmonic_transmission_finite(
 
     Parameters
     ----------
-    retarded : {"pv", "fft", "half"}
-        Method for reconstructing Σ^R from Σ^{<,>}.
+    retarded : {"half", "pv", "fft"}
+        Method for reconstructing Σ^R from Σ^{<,>}.  Default ``"half"``
+        matches the q-path entry point so q=(1,1) reproduces finite.
     """
     from .convention import get_btd_blocks
     from .separable import (
@@ -1207,16 +1247,13 @@ def anharmonic_transmission_finite(
         # Input: (n_slabs, 1, nfreq, n_dof, n_dof)
         Sigma_l_new = np.zeros((n_slabs, 1, nfreq, n_dof, n_dof), dtype=complex)
         Sigma_g_new = np.zeros_like(Sigma_l_new)
-        Sigma_r_new = np.zeros_like(Sigma_l_new)
         for l in range(n_slabs):
-            sl_n, sg_n, sr_n = _compute_phph_self_energy_finite(
+            sl_n, sg_n = _compute_phph_self_energy_finite(
                 G_lesser_slab[l, 0], G_greater_slab[l, 0],
-                Phi, freqs_thz, dw_thz,
-                retarded=retarded)
+                Phi, freqs_thz, dw_thz)
             Sigma_l_new[l, 0] = sl_n
             Sigma_g_new[l, 0] = sg_n
-            Sigma_r_new[l, 0] = sr_n
-        return Sigma_l_new, Sigma_g_new, Sigma_r_new
+        return Sigma_l_new, Sigma_g_new
 
     # SCBA
     scba_result = _scba_loop(
@@ -1232,6 +1269,7 @@ def anharmonic_transmission_finite(
         mixing=mixing, anderson_mixing=anderson_mixing,
         anderson_depth=anderson_depth,
         scattering_contacts=scattering_contacts,
+        retarded=retarded,
         verbose=verbose,
     )
 
@@ -1438,17 +1476,14 @@ def anharmonic_transmission_q(
         Sigma_l_new = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
         Sigma_g_new = np.zeros_like(Sigma_l_new)
-        Sigma_r_new = np.zeros_like(Sigma_l_new)
         for l in range(n_slabs):
-            sl_n, sg_n, sr_n = _compute_phph_self_energy_q_dense(
+            sl_n, sg_n = _compute_phph_self_energy_q_dense(
                 G_lesser_slab[l], G_greater_slab[l],
                 M_stacked, T_all_q, q_diff_map,
-                n_atoms, n_kpts, freqs_thz, dw_thz,
-                retarded=retarded)
+                n_atoms, n_kpts, freqs_thz, dw_thz)
             Sigma_l_new[l] = sl_n
             Sigma_g_new[l] = sg_n
-            Sigma_r_new[l] = sr_n
-        return Sigma_l_new, Sigma_g_new, Sigma_r_new
+        return Sigma_l_new, Sigma_g_new
 
     # SCBA
     scba_result = _scba_loop(
@@ -1464,6 +1499,7 @@ def anharmonic_transmission_q(
         mixing=mixing, anderson_mixing=anderson_mixing,
         anderson_depth=anderson_depth,
         scattering_contacts=scattering_contacts,
+        retarded=retarded,
         verbose=verbose,
     )
 
