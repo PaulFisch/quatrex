@@ -207,7 +207,7 @@ def compute_transport(
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = abs(J_L_total - J_R_total) / J_denom if J_denom > 0 else 0.0
 
-        # Self-energy update
+        # Self-energy update.
         Sigma_l_new = np.zeros_like(Sigma_l_q)
         Sigma_g_new = np.zeros_like(Sigma_g_q)
         Sigma_r_new = np.zeros_like(Sigma_R_q)

@@ -26,7 +26,7 @@ import itertools
 import numpy as np
 import torch
 
-from .constants import CONVERSION_FC3_THZ, CONVERSION_THZ2, HBAR_SI, HBAR_EV, KB_EV, THZ_TO_RAD
+from .constants import CONVERSION_FC3_THZ, CONVERSION_THZ2, HBAR_SI, KB_SI, THZ_TO_RAD
 from .anharmonic import (
     _build_device_hamiltonian,
     _compute_obc_self_energies,
@@ -909,16 +909,16 @@ def _compute_phph_self_energy_pcp(
     n_freq = len(omega_grid_thz)
     N_c = len(lambdas)
 
-    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
-    n_ext = n_low + n_freq
-    n_fft = 2 * n_ext
-    freq_sl = slice(n_low, n_low + n_freq)
+    # Linear convolution via zero-padded FFT (symmetric grid).
+    n_fft = 2 * n_freq - 1
+    mid = (n_freq - 1) // 2
+    freq_sl = slice(mid, mid + n_freq)
 
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
 
     def _pad(G_q):
         out = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-        out[:, n_low:n_low + n_freq] = G_q
+        out[:, :n_freq] = G_q
         return out
 
     GL = _pad(G_lesser_q)
@@ -1026,16 +1026,16 @@ def _compute_phph_self_energy_pcp_shifted(
     N_c = len(lambdas)
     n_cells = f_shifted.shape[0]
 
-    n_low = max(0, int(np.round(omega_grid_thz[0] / dw_thz)))
-    n_ext = n_low + n_freq
-    n_fft = 2 * n_ext
-    freq_sl = slice(n_low, n_low + n_freq)
+    # Linear convolution via zero-padded FFT (symmetric grid).
+    n_fft = 2 * n_freq - 1
+    mid = (n_freq - 1) // 2
+    freq_sl = slice(mid, mid + n_freq)
 
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
 
     def _pad(G_q):
         out = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-        out[:, n_low:n_low + n_freq] = G_q
+        out[:, :n_freq] = G_q
         return out
 
     GL = _pad(G_lesser_q)
@@ -1271,13 +1271,16 @@ def pcp_anharmonic_transmission(
     from .validation import _ballistic_transmission
     from .separable import build_q_diff_map
 
-    # --- Setup ---
-    fmin, fmax, nfreq = freq_range_thz
-    nfreq = int(nfreq)
-    freqs_thz = np.linspace(fmin, fmax, nfreq)
+    # --- Setup: symmetric frequency grid [-fmax, ..., 0, ..., fmax] ---
+    _fmin, fmax, nfreq_pos = freq_range_thz
+    nfreq_pos = int(nfreq_pos)
+    freqs_pos = np.linspace(0.0, fmax, nfreq_pos)
+    freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
+    nfreq = len(freqs_thz)
+    dw_thz = freqs_pos[1] - freqs_pos[0]
     omega_sq_thz2 = freqs_thz ** 2
-    dw_thz = freqs_thz[1] - freqs_thz[0]
     eta = dw_thz ** 2 * eta_factor
+    pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
@@ -1327,13 +1330,13 @@ def pcp_anharmonic_transmission(
 
     q_diff_map = build_q_diff_map(nkx, nky)
 
-    # --- Bose-Einstein ---
+    # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
     def bose_einstein(freq_thz_arr, T):
-        hw = HBAR_EV * np.abs(freq_thz_arr) * THZ_TO_RAD
-        x = hw / (KB_EV * T)
+        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
+        x = HBAR_SI * omega_rad_s / (KB_SI * T)
         n = np.zeros_like(x)
-        valid = x > 1e-10
-        n[valid] = 1.0 / (np.exp(x[valid]) - 1.0)
+        valid = x > 1e-12
+        n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
     T_L = temperature + delta_T / 2.0
@@ -1384,7 +1387,7 @@ def pcp_anharmonic_transmission(
 
     omega_rad = freqs_thz * THZ_TO_RAD
     spectral_J_ball = HBAR_SI * omega_rad * (n_bose_L - n_bose_R) * trans_ballistic
-    J_ball_total = np.sum(spectral_J_ball) * dw_thz * 1e12
+    J_ball_total = np.sum(spectral_J_ball[pos_mask]) * dw_thz * 1e12
     G_ball = J_ball_total / (A_c * delta_T)
 
     if verbose:
@@ -1445,13 +1448,13 @@ def pcp_anharmonic_transmission(
 
         spectral_J_L /= n_kpts
         spectral_J_R /= n_kpts
-        J_L_total = np.sum(spectral_J_L) * dw_thz * 1e12
-        J_R_total = np.sum(spectral_J_R) * dw_thz * 1e12
+        J_L_total = np.sum(spectral_J_L[pos_mask]) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R[pos_mask]) * dw_thz * 1e12
         J_total = 0.5 * (J_L_total + J_R_total)
         J_denom = abs(J_L_total) + abs(J_R_total)
         conservation_err = abs(J_L_total - J_R_total) / J_denom if J_denom > 0 else 0.0
 
-        # Self-energy: shifted-FT PCP kernel (universal)
+        # Self-energy: shifted-FT PCP kernel (universal).
         Sigma_l_new = np.zeros_like(Sigma_l_q)
         Sigma_g_new = np.zeros_like(Sigma_g_q)
         Sigma_r_new = np.zeros_like(Sigma_R_q)
@@ -1503,12 +1506,13 @@ def pcp_anharmonic_transmission(
         print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
         print(f"  Heat flow conservation: {conservation_err:.4e}")
 
+    # Return positive-frequency side only
     return {
-        "freqs_thz": freqs_thz,
-        "omega_rad": freqs_thz * THZ_TO_RAD,
-        "transmission_ballistic": trans_ballistic,
-        "spectral_heat_current_ballistic": spectral_J_ball,
-        "spectral_heat_current": spectral_J,
+        "freqs_thz": freqs_thz[pos_mask],
+        "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
+        "transmission_ballistic": trans_ballistic[pos_mask],
+        "spectral_heat_current_ballistic": spectral_J_ball[pos_mask],
+        "spectral_heat_current": spectral_J[pos_mask],
         "heat_current_ballistic": J_ball_total,
         "heat_current": J_total,
         "thermal_conductance_ballistic": G_ball,
@@ -1517,9 +1521,9 @@ def pcp_anharmonic_transmission(
         "delta_T": delta_T,
         "n_scba_iterations": scba_iter + 1,
         "convergence_history": convergence_history,
-        "self_energy_retarded": Sigma_R_q,
-        "self_energy_lesser": Sigma_l_q,
-        "self_energy_greater": Sigma_g_q,
+        "self_energy_retarded": Sigma_R_q[:, :, pos_mask],
+        "self_energy_lesser": Sigma_l_q[:, :, pos_mask],
+        "self_energy_greater": Sigma_g_q[:, :, pos_mask],
         "pcp_info": pcp_info,
     }
 

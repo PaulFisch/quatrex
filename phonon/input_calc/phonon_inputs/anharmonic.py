@@ -519,7 +519,7 @@ def _se_worker_iq(args):
 def _compute_phph_self_energy_q_dense(
     G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
     nat_prim, n_kpts, omega_grid_thz, dw_thz, n_workers=None,
-    hilbert_retarded=False,
+    hilbert_retarded=True,
 ):
     """Compute q-dependent phonon-phonon self-energy.
 
@@ -675,7 +675,7 @@ def anharmonic_transmission_q(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    hilbert_retarded: bool = False,
+    hilbert_retarded: bool = True,
     scattering_contacts: bool = False,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
@@ -973,7 +973,7 @@ def anharmonic_transmission_q(
         # Track best-conservation state (SCBA fixed point may overshoot)
         # Skip first 3 iterations — conservation is trivially good before
         # self-energy has been mixed in properly
-        if scba_iter >= 200 and conservation_err < best_conservation:
+        if scba_iter >= 3 and conservation_err < best_conservation:
             best_conservation = conservation_err
             best_state = {
                 "spectral_J_L": spectral_J_L.copy(),
@@ -982,7 +982,7 @@ def anharmonic_transmission_q(
                 "iter": scba_iter + 1,
             }
 
-        # Compute per-slab self-energy via dense q-dependent kernel
+        # Compute per-slab self-energy via dense q-dependent kernel.
         Sigma_l_new = np.zeros_like(Sigma_l_q)
         Sigma_g_new = np.zeros_like(Sigma_g_q)
         Sigma_r_new = np.zeros_like(Sigma_R_q)
@@ -1036,7 +1036,7 @@ def anharmonic_transmission_q(
                 Ftf = dF.conj().T @ f_k
                 reg = 1e-8 * np.trace(FtF).real / max(FtF.shape[0], 1)
                 gamma = np.linalg.solve(
-                    FtF + reg * np.eye(FtF.shape[0]), Ftf).real
+                    FtF + reg * np.eye(FtF.shape[0]), Ftf)
                 x_mixed = (x_in + mixing * f_k) - (dX + mixing * dF) @ gamma
             else:
                 # First iteration: plain linear mixing
@@ -1143,7 +1143,7 @@ def anharmonic_transmission_q(
 
 def _compute_phph_self_energy_finite(
     G_lesser, G_greater, Phi, omega_grid_thz, dw_thz,
-    hilbert_retarded=False,
+    hilbert_retarded=True,
 ):
     """Phonon-phonon self-energy for a finite device (no transverse q).
 
@@ -1229,7 +1229,7 @@ def anharmonic_transmission_finite(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    hilbert_retarded: bool = False,
+    hilbert_retarded: bool = True,
     scattering_contacts: bool = False,
 ) -> dict:
     """Anharmonic phonon transport for a finite device (no transverse q).
@@ -1479,7 +1479,7 @@ def anharmonic_transmission_finite(
                 "iter": scba_iter + 1,
             }
 
-        # Compute per-slab self-energy (finite device, no q)
+        # Compute per-slab self-energy (finite device, no q).
         Sigma_l_new = np.zeros_like(Sigma_l)
         Sigma_g_new = np.zeros_like(Sigma_g)
         Sigma_r_new = np.zeros_like(Sigma_R)
@@ -1530,7 +1530,7 @@ def anharmonic_transmission_finite(
                 Ftf = dF.conj().T @ f_k
                 reg = 1e-8 * np.trace(FtF).real / max(FtF.shape[0], 1)
                 gamma = np.linalg.solve(
-                    FtF + reg * np.eye(FtF.shape[0]), Ftf).real
+                    FtF + reg * np.eye(FtF.shape[0]), Ftf)
                 x_mixed = (x_in + mixing * f_k) - (dX + mixing * dF) @ gamma
             else:
                 x_mixed = x_in + mixing * f_k
