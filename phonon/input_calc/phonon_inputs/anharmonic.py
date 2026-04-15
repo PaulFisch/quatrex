@@ -22,13 +22,13 @@ the q-path at q_mesh=(1,1) and the finite path.
 Retarded reconstruction
 -----------------------
 The ``retarded`` parameter controls how Σ^R is built from Σ^{<,>}:
-  - ``"pv"``  — direct discrete principal-value integral (default, no
-    wraparound artifacts, O(nfreq²))
-  - ``"fft"`` — FFT-based Hilbert transform (fast, O(nfreq log nfreq),
-    but suffers from finite-window wrap)
   - ``"half"``— Σ^R = ½(Σ^> - Σ^<), no Kramers-Kronig correction
-Both entry points default to ``"pv"`` so the two canonical routes are
-numerically identical for n_slabs=1.
+  - ``"pv"``  — direct discrete principal-value integral (O(nfreq²))
+  - ``"fft"`` — FFT-based Hilbert transform (O(nfreq log nfreq))
+The finite (Gamma-only) entry point defaults to ``"pv"``.
+The q-path entry point defaults to ``"half"`` because the truncated PV
+integral amplifies sign violations inherent in the cross-q bubble diagram,
+causing SCBA divergence at general q-points.
 """
 
 import warnings
@@ -86,27 +86,41 @@ def _load_fc3_raw(fc3_source):
 
 
 def _build_frequency_grid(freq_range_thz, eta_w_thz=None, eta_factor=0.05):
-    """Build a symmetric frequency grid for FFT convolution.
+    """Build a uniform symmetric frequency grid for FFT convolution.
+
+    The grid spacing is Δω = fmax / nfreq_pos, giving positive bins at
+    Δω, 2Δω, ..., fmax (no exact-zero sample on the positive side).
+    The full axis is [-fmax, ..., -Δω, 0, Δω, ..., fmax].
+
+    The ω = 0 sample is included for FFT index arithmetic but is
+    excluded from physical integrals via ``pos_mask`` and from the
+    scattering kernel via ``scatt_mask``.
+
+    Parameters
+    ----------
+    freq_range_thz : (fmin, fmax, nfreq_pos)
+        fmin is advisory (Δω is set to fmax/nfreq_pos).
+        fmax is the upper edge.
+        nfreq_pos is the number of positive-frequency bins (excluding 0).
 
     Returns
     -------
-    freqs_thz : (nfreq,)
+    freqs_thz : (2*nfreq_pos + 1,) — uniform, symmetric, includes 0
     dw_thz : float
     eta_w_thz : float
-    z2_arr : (nfreq,) complex — (ω + iη_w)²
-    pos_mask : (nfreq,) bool — True for ω > 0 (excludes exact zero)
-    mid : int — index of the ω=0 sample
+    z2_arr : complex array — (ω + iη_w)²
+    pos_mask : bool array — True for ω > 0 (excludes 0)
+    mid : int — index of the ω = 0 sample
     """
     _fmin, fmax, nfreq_pos = freq_range_thz
     nfreq_pos = int(nfreq_pos)
     if nfreq_pos < 2:
         raise ValueError("nfreq_pos must be >= 2")
 
-    freqs_pos = np.linspace(0.0, fmax, nfreq_pos)
-    dw_thz = freqs_pos[1] - freqs_pos[0]
-
-    freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
-    mid = len(freqs_thz) // 2
+    dw_thz = fmax / nfreq_pos
+    freqs_pos = np.arange(1, nfreq_pos + 1) * dw_thz   # Δω, 2Δω, ..., fmax
+    freqs_thz = np.concatenate((-freqs_pos[::-1], [0.0], freqs_pos))
+    mid = nfreq_pos   # index of the ω = 0 sample
 
     if eta_w_thz is None:
         eta_w_thz = eta_factor * dw_thz
@@ -121,23 +135,22 @@ def _build_frequency_grid(freq_range_thz, eta_w_thz=None, eta_factor=0.05):
 def _bose_full_axis(freqs_thz, T):
     """Bose-Einstein on the full symmetric axis.
 
-    At ω = 0 the true occupation diverges.  We assign n_B(0) = −½
-    which is the finite part of the Laurent expansion around x = 0
-    and preserves n_B(−ω) = −(1 + n_B(ω)).  This is a regularization
-    device for the symmetric grid, **not** the physical occupation.
-    The ω = 0 sample is excluded from all physical integrals via
-    ``pos_mask = freqs > 0``.
+    At ω = 0 the true occupation diverges.  We assign n_B(0) = 0
+    as a placeholder; the ω = 0 sample must never participate in
+    physical integrals or the scattering kernel (the caller zeros
+    out the Green's function at mid before entering the convolution).
     """
     x = HBAR_SI * freqs_thz * THZ_TO_RAD / (KB_SI * T)
     n = np.empty_like(x, dtype=float)
 
-    zero = np.isclose(freqs_thz, 0.0)
+    zero = np.abs(freqs_thz) < 1e-30
     small = (~zero) & (np.abs(x) < 1e-6)
     regular = (~zero) & (~small)
 
     n[regular] = 1.0 / np.expm1(x[regular])
+    # Taylor: 1/(e^x - 1) ≈ 1/x - 1/2 + x/12
     n[small] = 1.0 / x[small] - 0.5 + x[small] / 12.0
-    n[zero] = -0.5
+    n[zero] = 0.0  # placeholder — excluded from all physical integrals
 
     return n
 
@@ -563,18 +576,25 @@ def _compute_phph_self_energy_finite(
     nd2 = nd * nd
 
     n_fft = 2 * n_freq - 1
-    mid = (n_freq - 1) // 2
+    mid = n_freq // 2    # index of ω = 0 in the input grid
     freq_sl = slice(mid, mid + n_freq)
 
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
 
+    # Zero out ω=0 sample before convolution to prevent the singular
+    # Bose occupation at zero frequency from leaking into the self-energy.
+    G_l_clean = G_lesser.copy()
+    G_l_clean[mid] = 0.0
+    G_g_clean = G_greater.copy()
+    G_g_clean[mid] = 0.0
+
     G_pad = np.zeros((n_fft, nd, nd), dtype=complex)
-    G_pad[:n_freq] = G_lesser
+    G_pad[:n_freq] = G_l_clean
     GL_fft = np.fft.fft(G_pad, axis=0)
     G_pad[:] = 0
-    G_pad[:n_freq] = G_greater
+    G_pad[:n_freq] = G_g_clean
     GG_fft = np.fft.fft(G_pad, axis=0)
-    del G_pad
+    del G_pad, G_l_clean, G_g_clean
 
     PL_flat = Phi.reshape(nd2, nd)
     PR_flat = Phi.conj().reshape(nd, nd2)
@@ -671,18 +691,24 @@ def _compute_phph_self_energy_q_dense(
     dim_t = M_stacked.shape[1]
 
     n_fft = 2 * n_freq - 1
-    mid = (n_freq - 1) // 2
+    mid = n_freq // 2    # index of ω = 0
     freq_sl = slice(mid, mid + n_freq)
 
     prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
 
+    # Zero out ω=0 before convolution
+    G_l_clean = G_lesser_q.copy()
+    G_l_clean[:, mid] = 0.0
+    G_g_clean = G_greater_q.copy()
+    G_g_clean[:, mid] = 0.0
+
     G_padded = np.zeros((n_kpts, n_fft, n_dof, n_dof), dtype=complex)
-    G_padded[:, :n_freq] = G_lesser_q
+    G_padded[:, :n_freq] = G_l_clean
     GL_fft = np.fft.fft(G_padded, axis=1)
     G_padded[:, :] = 0
-    G_padded[:, :n_freq] = G_greater_q
+    G_padded[:, :n_freq] = G_g_clean
     GG_fft = np.fft.fft(G_padded, axis=1)
-    del G_padded
+    del G_padded, G_l_clean, G_g_clean
 
     M_blocks = M_stacked.reshape(n_dof, dim_t, dim_t)
     T_arr = np.array(T_all_q)
@@ -1266,7 +1292,7 @@ def anharmonic_transmission_q(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    retarded: str = "pv",
+    retarded: str = "half",
     scattering_contacts: bool = False,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
@@ -1279,8 +1305,10 @@ def anharmonic_transmission_q(
 
     Parameters
     ----------
-    retarded : {"pv", "fft", "half"}
-        Method for reconstructing Σ^R from Σ^{<,>}.
+    retarded : {"half", "pv", "fft"}
+        Method for reconstructing Σ^R from Σ^{<,>}.  Defaults to "half"
+        for the q-path because the truncated PV integral amplifies sign
+        violations inherent in the cross-q bubble diagram.
     """
     from .convention import get_btd_blocks
     from .separable import (
