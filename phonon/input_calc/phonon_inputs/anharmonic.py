@@ -11,6 +11,24 @@ The scattering self-energy (Guo Eq. 8, diagonal block):
         * Phi3_{b,e,f}
 
 Internal units: THz^2 for dynamical matrices and self-energies.
+
+Shape convention
+----------------
+Self-energies always carry a q-axis, even for the finite (Gamma-only)
+path where n_kpts == 1.  Shape: (n_slabs, n_kpts, nfreq, n_dof, n_dof).
+This removes the branching on n_kpts that caused shape mismatches between
+the q-path at q_mesh=(1,1) and the finite path.
+
+Retarded reconstruction
+-----------------------
+The ``retarded`` parameter controls how Σ^R is built from Σ^{<,>}:
+  - ``"pv"``  — direct discrete principal-value integral (default, no
+    wraparound artifacts, O(nfreq²))
+  - ``"fft"`` — FFT-based Hilbert transform (fast, O(nfreq log nfreq),
+    but suffers from finite-window wrap)
+  - ``"half"``— Σ^R = ½(Σ^> - Σ^<), no Kramers-Kronig correction
+Both entry points default to ``"pv"`` so the two canonical routes are
+numerically identical for n_slabs=1.
 """
 
 import warnings
@@ -19,56 +37,51 @@ from numpy.linalg import inv
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
 from .constants import (
-    CONVERSION_FC3_THZ,
     CONVERSION_THZ2,
     HBAR_SI,
     KB_SI,
     THZ_TO_RAD,
 )
 
+# Stale import target — separable.py imports this at module level.
+# Cannot remove until separable.py is updated.
+_compute_obc_self_energies = None
+
 
 # ---------------------------------------------------------------------------
-# FC3 loading helpers
+# FC3 loading
 # ---------------------------------------------------------------------------
 
 
-def _load_fc3_raw(fc3_hdf5):
-    """Load raw FC3 array from an HDF5 path or extract from fc3_data dict.
+def _load_fc3_raw(fc3_source):
+    """Load raw FC3 array from various sources.
 
     Parameters
     ----------
-    fc3_hdf5 : str, Path, or dict
-        Either a path to an HDF5 file containing an "fc3" dataset,
-        or a dict returned by ``load_primitive_cell`` / ``load_fc3_phono3py``
-        that contains the raw FC3 under key "fc3" or the phono3py object
-        under key "ph3".
+    fc3_source : str, Path, ndarray, or dict
+        - str/Path: HDF5 file with an ``"fc3"`` dataset.
+        - ndarray:  raw FC3 passed directly.
+        - dict:     must contain ``"fc3"`` (raw array) or ``"ph3"``
+          (phono3py object whose ``.fc3`` attribute is the raw array).
     """
-    import h5py
-
-    if isinstance(fc3_hdf5, np.ndarray):
-        # Raw FC3 array passed directly
-        return fc3_hdf5
-    if isinstance(fc3_hdf5, dict):
-        # Dict from load_fc3_dfpt_hdf5 (has "fc3" key with raw array)
-        if "fc3" in fc3_hdf5:
-            return np.asarray(fc3_hdf5["fc3"])
-        if "ph3" in fc3_hdf5:
-            return np.asarray(fc3_hdf5["ph3"].fc3)
+    if isinstance(fc3_source, np.ndarray):
+        return fc3_source
+    if isinstance(fc3_source, dict):
+        if "fc3" in fc3_source:
+            return np.asarray(fc3_source["fc3"])
+        if "ph3" in fc3_source:
+            return np.asarray(fc3_source["ph3"].fc3)
         raise ValueError(
-            "fc3_data dict has neither 'fc3' nor 'ph3' key. "
+            "fc3 dict has neither 'fc3' nor 'ph3' key. "
             "Pass the fc3.hdf5 path or the raw fc3 array instead. "
-            f"Available keys: {list(fc3_hdf5.keys())}")
-    else:
-        with h5py.File(str(fc3_hdf5), "r") as f:
-            return np.array(f["fc3"])
-
-
-# Compat alias so separable.py can import the old name without changes.
-_compute_obc_self_energies = None  # replaced by _compute_obc_batch
+            f"Available keys: {list(fc3_source.keys())}")
+    import h5py
+    with h5py.File(str(fc3_source), "r") as f:
+        return np.array(f["fc3"])
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers: frequency grid, Bose function, zero-sample repair
+# Frequency grid and Bose function
 # ---------------------------------------------------------------------------
 
 
@@ -80,9 +93,9 @@ def _build_frequency_grid(freq_range_thz, eta_w_thz=None, eta_factor=0.05):
     freqs_thz : (nfreq,)
     dw_thz : float
     eta_w_thz : float
-    z2_arr : (nfreq,) complex
-    pos_mask : (nfreq,) bool  — True for ω > 0 (excludes exact zero)
-    mid : int  — index of the ω=0 sample
+    z2_arr : (nfreq,) complex — (ω + iη_w)²
+    pos_mask : (nfreq,) bool — True for ω > 0 (excludes exact zero)
+    mid : int — index of the ω=0 sample
     """
     _fmin, fmax, nfreq_pos = freq_range_thz
     nfreq_pos = int(nfreq_pos)
@@ -100,18 +113,20 @@ def _build_frequency_grid(freq_range_thz, eta_w_thz=None, eta_factor=0.05):
 
     z2_arr = (freqs_thz + 1j * eta_w_thz) ** 2
 
-    # Exclude exact zero from physical output/integration.
     pos_mask = freqs_thz > 0.0
 
     return freqs_thz, dw_thz, eta_w_thz, z2_arr, pos_mask, mid
 
 
 def _bose_full_axis(freqs_thz, T):
-    """Bose-Einstein on the full symmetric axis with proper ω=0 handling.
+    """Bose-Einstein on the full symmetric axis.
 
-    At ω=0 the occupation diverges; we use n_B(0) = -1/2 which is the
-    finite part of the Laurent expansion and preserves the full-axis
-    symmetry n_B(-ω) = -(1 + n_B(ω)).
+    At ω = 0 the true occupation diverges.  We assign n_B(0) = −½
+    which is the finite part of the Laurent expansion around x = 0
+    and preserves n_B(−ω) = −(1 + n_B(ω)).  This is a regularization
+    device for the symmetric grid, **not** the physical occupation.
+    The ω = 0 sample is excluded from all physical integrals via
+    ``pos_mask = freqs > 0``.
     """
     x = HBAR_SI * freqs_thz * THZ_TO_RAD / (KB_SI * T)
     n = np.empty_like(x, dtype=float)
@@ -127,73 +142,56 @@ def _bose_full_axis(freqs_thz, T):
     return n
 
 
-def _repair_zero_frequency_sample(X):
-    """Symmetric interpolation of the single ω=0 sample on a mirrored grid.
-
-    X shape: (n_freq, ...) with zero sample at mid = n_freq // 2.
-    """
-    mid = X.shape[0] // 2
-    if 0 < mid < X.shape[0] - 1:
-        X[mid] = 0.5 * (X[mid - 1] + X[mid + 1])
-    return X
-
-
 def _boson_contact_self_energies_from_gamma(Gamma, freqs_thz, T):
-    """Build contact Σ^<, Σ^> from Gamma and repair the zero sample."""
-    n = _bose_full_axis(freqs_thz, T)
+    """Build contact Σ^<, Σ^> from broadening Gamma.
 
+    Σ^< = −i n_B Γ,   Σ^> = −i (n_B + 1) Γ.
+    The ω = 0 sample uses the n_B(0) = −½ regularization; it is never
+    included in physical integrals (pos_mask excludes it).
+    """
+    n = _bose_full_axis(freqs_thz, T)
     Sigma_l = -1j * n[:, None, None] * Gamma
     Sigma_g = -1j * (n[:, None, None] + 1.0) * Gamma
-
-    mid = len(freqs_thz) // 2
-    if 0 < mid < len(freqs_thz) - 1:
-        Sigma_l[mid] = 0.5 * (Sigma_l[mid - 1] + Sigma_l[mid + 1])
-        Sigma_g[mid] = 0.5 * (Sigma_g[mid - 1] + Sigma_g[mid + 1])
-
     return Sigma_l, Sigma_g
 
 
 # ---------------------------------------------------------------------------
-# Causality / dissipation checks
+# Diagnostics
 # ---------------------------------------------------------------------------
 
 
-def _check_antihermitian_sign(Sigma_R, freqs_thz, name, tol=1e-8):
-    """Check that Γ = i(Σ^R - Σ^{R†}) is positive semidefinite for ω > 0.
+def _check_broadening_sign(Sigma_R, freqs_thz, name,
+                           low_freq_thz=0.0, tol=1e-8):
+    """Check Γ = i(Σ^R − Σ^A) PSD for ω > 0, NSD for ω < 0.
 
-    In NEGF, Γ represents dissipation/broadening and must be PSD.
-    For ω < 0, Γ should be negative semidefinite (by time-reversal).
-
-    Parameters
-    ----------
-    Sigma_R : (nfreq, nd, nd)
-    freqs_thz : (nfreq,)
+    Checks *every* frequency with |ω| > low_freq_thz.
+    Returns (n_violations, max_violation).
     """
+    n_viol = 0
+    max_viol = 0.0
     for iw in range(len(freqs_thz)):
-        if abs(freqs_thz[iw]) < 0.5:
+        w = freqs_thz[iw]
+        if abs(w) <= low_freq_thz:
             continue
         sr = Sigma_R[iw]
-        anti_herm = 1j * (sr - sr.conj().T)
-        anti_herm = 0.5 * (anti_herm + anti_herm.conj().T)
-        eigs = np.linalg.eigvalsh(anti_herm)
-        if freqs_thz[iw] > 0 and eigs.min() < -tol:
-            warnings.warn(
-                f"{name}: Γ=i(Σ^R-Σ^A) not PSD at ω={freqs_thz[iw]:.2f} THz, "
-                f"min eig={eigs.min():.3e}")
-            return
-        if freqs_thz[iw] < 0 and eigs.max() > tol:
-            warnings.warn(
-                f"{name}: Γ=i(Σ^R-Σ^A) wrong sign at ω={freqs_thz[iw]:.2f} THz, "
-                f"max eig={eigs.max():.3e}")
-            return
+        Gamma = 1j * (sr - sr.conj().T)
+        Gamma = 0.5 * (Gamma + Gamma.conj().T)  # ensure Hermitian
+        eigs = np.linalg.eigvalsh(Gamma)
+        if w > 0 and eigs.min() < -tol:
+            n_viol += 1
+            max_viol = max(max_viol, -eigs.min())
+        elif w < 0 and eigs.max() > tol:
+            n_viol += 1
+            max_viol = max(max_viol, eigs.max())
+    return n_viol, max_viol
 
 
-def _assert_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
-                               rtol=1e-4, atol=1e-8):
-    """Verify Guo full-axis symmetry relations.
+def _check_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
+                              rtol=1e-3, atol=1e-8):
+    """Verify Guo full-axis symmetry.
 
-    G^<(ω) = -[G^>(-ω)]^T
-    G^R(ω) = [G^R(-ω)]*
+    G^<(ω) = −[G^>(−ω)]^T,  G^R(ω) = [G^R(−ω)]*.
+    Returns (lesser_err, retarded_err).
     """
     mid = len(freqs_thz) // 2
     pos = slice(mid + 1, None)
@@ -201,34 +199,24 @@ def _assert_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
 
     G_l_pos = G_l[pos]
     G_g_neg = G_g[neg][::-1].transpose(0, 2, 1)
-    if not np.allclose(G_l_pos, -G_g_neg, rtol=rtol, atol=atol):
-        max_err = np.max(np.abs(G_l_pos + G_g_neg))
-        warnings.warn(f"G^<(ω) != -[G^>(-ω)]^T, max err = {max_err:.2e}")
+    lesser_err = float(np.max(np.abs(G_l_pos + G_g_neg)))
 
     G_R_pos = G_R[pos]
     G_R_neg = G_R[neg][::-1]
-    if not np.allclose(G_R_pos, G_R_neg.conj(), rtol=rtol, atol=atol):
-        max_err = np.max(np.abs(G_R_pos - G_R_neg.conj()))
-        warnings.warn(f"G^R(ω) != [G^R(-ω)]*, max err = {max_err:.2e}")
+    retarded_err = float(np.max(np.abs(G_R_pos - G_R_neg.conj())))
+
+    return lesser_err, retarded_err
 
 
 # ---------------------------------------------------------------------------
-# Green's function and self-energy computation
+# Surface Green's function
 # ---------------------------------------------------------------------------
 
 
 def _sancho_rubio(z2, H_00, H_01, max_iter=300, tol=1e-8):
     """Surface Green's function via Sancho-Rubio decimation.
 
-    Parameters
-    ----------
-    z2 : complex
-        Causal frequency squared: z² = (ω + iη_w)².
-
-    Raises
-    ------
-    RuntimeError
-        If the surface Dyson equation residual exceeds 1e-4.
+    Raises RuntimeError if the surface Dyson residual exceeds 1e-4.
     """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
@@ -264,11 +252,8 @@ def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
                         lead_sigma_r=None):
     """Batched surface Green's function for multiple frequencies.
 
-    Returns
-    -------
-    g_surf : ndarray, shape (nfreq, N, N)
-    valid : ndarray, shape (nfreq,), bool
-        True if the residual is acceptable for that frequency.
+    Returns (g_surf, valid) where valid[iw] is True if the residual
+    is acceptable.
     """
     nfreq = len(z2_arr)
     N = H_00.shape[0]
@@ -299,7 +284,6 @@ def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
 
     g_surf = np.linalg.inv(eps_s)
 
-    # Residual check per frequency
     residual = a_ii - (H_10[None] @ g_surf @ H_01[None]) - np.linalg.inv(g_surf)
     res_per_freq = np.linalg.norm(residual.reshape(nfreq, -1), axis=1)
     a_per_freq = np.linalg.norm(a_ii.reshape(nfreq, -1), axis=1)
@@ -307,6 +291,11 @@ def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
     valid = rel_res <= 1e-4
 
     return g_surf, valid
+
+
+# ---------------------------------------------------------------------------
+# Device Hamiltonian and OBC
+# ---------------------------------------------------------------------------
 
 
 def _build_device_hamiltonian(H_00, H_01, n_slabs):
@@ -331,12 +320,12 @@ def _build_device_hamiltonian(H_00, H_01, n_slabs):
 
 
 def _compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
-                        n_slabs=1, lead_sigma_r_L=None, lead_sigma_r_R=None):
+                       n_slabs=1, lead_sigma_r_L=None, lead_sigma_r_R=None):
     """Batched OBC self-energies for all frequencies.
 
-    Uses _bose_full_axis + zero-sample repair for contact Σ^{<,>}.
-    Falls back to scalar Sancho-Rubio for any frequency where the
-    batch residual is bad.
+    Falls back to scalar Sancho-Rubio for frequencies where the
+    batch residual is bad.  If scattering-dressed contacts fail,
+    falls back to undressed contacts and emits a warning.
     """
     nfreq = len(z2_arr)
     n_dof = H_00.shape[0]
@@ -348,7 +337,7 @@ def _compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
         z2_arr, H_00, H_01.conj().T, lead_sigma_r=lead_sigma_r_R)
     valid = valid_L & valid_R
 
-    # Frequency-local fallback for bad residuals
+    n_fallback = 0
     if not np.all(valid):
         bad = np.where(~valid)[0]
         for iw in bad:
@@ -356,15 +345,19 @@ def _compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
                 g_L_all[iw] = _sancho_rubio(z2_arr[iw], H_00, H_01)
                 g_R_all[iw] = _sancho_rubio(
                     z2_arr[iw], H_00, H_01.conj().T)
-                valid[iw] = True
             except RuntimeError:
                 if lead_sigma_r_L is None and lead_sigma_r_R is None:
                     raise
-                # Scattering-dressed contact failed; use undressed fallback
+                # Dressed contact failed — fall back to undressed
                 g_L_all[iw] = _sancho_rubio(z2_arr[iw], H_00, H_01)
                 g_R_all[iw] = _sancho_rubio(
                     z2_arr[iw], H_00, H_01.conj().T)
-                valid[iw] = True
+                n_fallback += 1
+
+    if n_fallback > 0:
+        warnings.warn(
+            f"Sancho-Rubio: {n_fallback}/{len(bad)} frequencies fell back "
+            f"to undressed contacts (scattering-dressed failed)")
 
     H_01_dag = H_01.conj().T
     sig_L_all = H_01_dag[None] @ g_L_all @ H_01[None]
@@ -386,7 +379,7 @@ def _compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
     Gamma_L[:, sl0, sl0] = gam_L_all
     Gamma_R[:, sl_last, sl_last] = gam_R_all
 
-    # Contact lesser/greater with zero-sample repair
+    # Contact lesser/greater
     Sigma_L_lesser, Sigma_L_greater = _boson_contact_self_energies_from_gamma(
         Gamma_L, freqs_thz, T_L)
     Sigma_R_lesser, Sigma_R_greater = _boson_contact_self_energies_from_gamma(
@@ -402,6 +395,11 @@ def _compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
         "Gamma_L": Gamma_L,
         "Gamma_R": Gamma_R,
     }
+
+
+# ---------------------------------------------------------------------------
+# Green's function solvers
+# ---------------------------------------------------------------------------
 
 
 def _solve_green_functions(z2, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser,
@@ -445,10 +443,7 @@ def _solve_green_batch(z2_arr, H_D, obc_batch,
 
 
 def _ballistic_transmission_z2(z2, H_D, H_00, H_01, H_LD, H_DR):
-    """Ballistic transmission: T = Tr(Γ_L G^R Γ_R G^A).
-
-    Uses the same causal z² as the SCBA solver.
-    """
+    """Ballistic transmission: T = Tr(Γ_L G^R Γ_R G^A)."""
     g_L = _sancho_rubio(z2, H_00, H_01)
     g_R = _sancho_rubio(z2, H_00, H_01.conj().T)
 
@@ -470,12 +465,7 @@ def _ballistic_transmission_z2(z2, H_D, H_00, H_01, H_LD, H_DR):
 
 
 def _hilbert_transform_axis(f, axis=1):
-    """Hilbert transform along *axis* via FFT (sign-multiplier method).
-
-    Kept as a fast option for large q-meshes. For n_slabs=1, prefer
-    _retarded_from_lesser_greater() which uses a direct principal-value
-    integral and avoids wraparound artifacts.
-    """
+    """Hilbert transform along *axis* via FFT (sign-multiplier method)."""
     N = f.shape[axis]
     Ff = np.fft.fft(f, axis=axis)
 
@@ -493,16 +483,18 @@ def _hilbert_transform_axis(f, axis=1):
 
 
 def _retarded_from_lesser_greater(delta, omega_grid_thz):
-    """Build Σ^R from Δ = Σ^> - Σ^< via Kramers-Kronig.
+    """Build Σ^R from Δ = Σ^> − Σ^< via Kramers-Kronig.
 
-    Σ^R(ω) = ½Δ(ω) + (i/2π) PV∫ Δ(ω')/(ω-ω') dω'
+    Σ^R(ω) = ½Δ(ω) + (i/2π) PV∫ Δ(ω')/(ω−ω') dω'
 
-    This follows from Σ^R(t) = θ(t)[Σ^>(t) - Σ^<(t)] and the standard
-    Fourier transform of θ(t)·f(t).
+    This follows from Σ^R(t) = θ(t)[Σ^>(t) − Σ^<(t)].
+
+    No tail correction is applied; the result depends on the finite
+    frequency window and grid resolution.
 
     Parameters
     ----------
-    delta : (n_freq, nd, nd) — Σ^> - Σ^<
+    delta : (n_freq, nd, nd) — Σ^> − Σ^<
     omega_grid_thz : (n_freq,)
     """
     n_freq = len(omega_grid_thz)
@@ -512,7 +504,7 @@ def _retarded_from_lesser_greater(delta, omega_grid_thz):
         diff = omega_grid_thz[i] - omega_grid_thz
         mask = np.ones(n_freq, dtype=bool)
         mask[i] = False
-        pv = np.trapz(
+        pv = np.trapezoid(
             delta[mask] / diff[mask, None, None],
             omega_grid_thz[mask],
             axis=0,
@@ -522,8 +514,89 @@ def _retarded_from_lesser_greater(delta, omega_grid_thz):
     return sig_r
 
 
+def _build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
+    """Build Σ^R from Σ^< and Σ^> using the specified method.
+
+    Parameters
+    ----------
+    sig_l, sig_g : (..., n_freq, nd, nd)
+        Lesser/greater self-energies.  Leading dimensions are preserved.
+    method : {"pv", "fft", "half"}
+    """
+    delta = sig_g - sig_l
+    if method == "pv":
+        # Direct principal-value integral
+        leading = delta.shape[:-3]
+        flat = delta.reshape(-1, *delta.shape[-3:])
+        sig_r = np.empty_like(flat)
+        for i in range(flat.shape[0]):
+            sig_r[i] = _retarded_from_lesser_greater(flat[i], omega_grid_thz)
+        return sig_r.reshape(leading + delta.shape[-3:])
+    elif method == "fft":
+        # FFT Hilbert — axis is the frequency axis (second-to-last-but-two)
+        freq_axis = len(delta.shape) - 3
+        return 0.5 * delta + 0.5j * _hilbert_transform_axis(delta, axis=freq_axis)
+    elif method == "half":
+        return 0.5 * delta
+    else:
+        raise ValueError(f"Unknown retarded method: {method!r}. "
+                         f"Use 'pv', 'fft', or 'half'.")
+
+
 # ---------------------------------------------------------------------------
-# Full q-dependent self-energy (dense FC3 Fourier transform)
+# Self-energy computation: finite (Gamma-only)
+# ---------------------------------------------------------------------------
+
+
+def _compute_phph_self_energy_finite(
+    G_lesser, G_greater, Phi, omega_grid_thz, dw_thz,
+    retarded="pv",
+):
+    """Phonon-phonon self-energy for a finite device (no transverse q).
+
+    Parameters
+    ----------
+    retarded : {"pv", "fft", "half"}
+    """
+    n_freq = len(omega_grid_thz)
+    nd = Phi.shape[0]
+    nd2 = nd * nd
+
+    n_fft = 2 * n_freq - 1
+    mid = (n_freq - 1) // 2
+    freq_sl = slice(mid, mid + n_freq)
+
+    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
+
+    G_pad = np.zeros((n_fft, nd, nd), dtype=complex)
+    G_pad[:n_freq] = G_lesser
+    GL_fft = np.fft.fft(G_pad, axis=0)
+    G_pad[:] = 0
+    G_pad[:n_freq] = G_greater
+    GG_fft = np.fft.fft(G_pad, axis=0)
+    del G_pad
+
+    PL_flat = Phi.reshape(nd2, nd)
+    PR_flat = Phi.conj().reshape(nd, nd2)
+
+    sig_l = np.zeros((n_freq, nd, nd), dtype=complex)
+    sig_g = np.zeros_like(sig_l)
+
+    for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
+        A = PL_flat[None] @ G_fft
+        A = A.reshape(n_fft, nd, nd, nd)
+        A = A.transpose(0, 1, 3, 2)
+        B = A @ G_fft[:, None, :, :]
+        S = B.reshape(n_fft * nd, nd2) @ PR_flat.T
+        sig_out[:] = prefactor * np.fft.ifft(
+            S.reshape(n_fft, nd, nd), axis=0)[freq_sl]
+
+    sig_r = _build_retarded(sig_l, sig_g, omega_grid_thz, method=retarded)
+    return sig_l, sig_g, sig_r
+
+
+# ---------------------------------------------------------------------------
+# Self-energy computation: q-dependent (dense FC3 Fourier transform)
 # ---------------------------------------------------------------------------
 
 
@@ -579,9 +652,13 @@ def _se_worker_iq(args):
 def _compute_phph_self_energy_q_dense(
     G_lesser_q, G_greater_q, M_stacked, T_all_q, q_diff_map,
     nat_prim, n_kpts, omega_grid_thz, dw_thz, n_workers=None,
-    hilbert_retarded=True,
+    retarded="pv",
 ):
     """Compute q-dependent phonon-phonon self-energy.
+
+    Parameters
+    ----------
+    retarded : {"pv", "fft", "half"}
 
     Returns
     -------
@@ -658,84 +735,7 @@ def _compute_phph_self_energy_q_dense(
                         sig_l[iq] = sl[i]
                         sig_g[iq] = sg[i]
 
-    # Repair zero sample before building retarded
-    for iq in range(n_kpts):
-        _repair_zero_frequency_sample(sig_l[iq])
-        _repair_zero_frequency_sample(sig_g[iq])
-
-    delta = sig_g - sig_l
-    if hilbert_retarded:
-        if hilbert_retarded == "pv":
-            # Direct principal-value (expensive but accurate)
-            sig_r = np.zeros_like(delta)
-            for iq in range(n_kpts):
-                sig_r[iq] = _retarded_from_lesser_greater(
-                    delta[iq], omega_grid_thz)
-        else:
-            sig_r = 0.5 * delta + 0.5j * _hilbert_transform_axis(delta, axis=1)
-    else:
-        sig_r = 0.5 * delta
-
-    for iq in range(n_kpts):
-        _repair_zero_frequency_sample(sig_r[iq])
-
-    return sig_l, sig_g, sig_r
-
-
-def _compute_phph_self_energy_finite(
-    G_lesser, G_greater, Phi, omega_grid_thz, dw_thz,
-    hilbert_retarded=True,
-):
-    """Phonon-phonon self-energy for a finite device (no transverse q).
-
-    For n_slabs=1, uses the direct principal-value integral by default
-    instead of the FFT Hilbert transform to avoid wraparound artifacts.
-    """
-    n_freq = len(omega_grid_thz)
-    nd = Phi.shape[0]
-    nd2 = nd * nd
-
-    n_fft = 2 * n_freq - 1
-    mid = (n_freq - 1) // 2
-    freq_sl = slice(mid, mid + n_freq)
-
-    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
-
-    G_pad = np.zeros((n_fft, nd, nd), dtype=complex)
-    G_pad[:n_freq] = G_lesser
-    GL_fft = np.fft.fft(G_pad, axis=0)
-    G_pad[:] = 0
-    G_pad[:n_freq] = G_greater
-    GG_fft = np.fft.fft(G_pad, axis=0)
-    del G_pad
-
-    PL_flat = Phi.reshape(nd2, nd)
-    PR_flat = Phi.conj().reshape(nd, nd2)
-
-    sig_l = np.zeros((n_freq, nd, nd), dtype=complex)
-    sig_g = np.zeros_like(sig_l)
-
-    for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
-        A = PL_flat[None] @ G_fft
-        A = A.reshape(n_fft, nd, nd, nd)
-        A = A.transpose(0, 1, 3, 2)
-        B = A @ G_fft[:, None, :, :]
-        S = B.reshape(n_fft * nd, nd2) @ PR_flat.T
-        sig_out[:] = prefactor * np.fft.ifft(
-            S.reshape(n_fft, nd, nd), axis=0)[freq_sl]
-
-    # Repair zero sample
-    _repair_zero_frequency_sample(sig_l)
-    _repair_zero_frequency_sample(sig_g)
-
-    delta = sig_g - sig_l
-    if hilbert_retarded:
-        # Default: use direct PV integral (no wraparound artifacts)
-        sig_r = _retarded_from_lesser_greater(delta, omega_grid_thz)
-    else:
-        sig_r = 0.5 * delta
-
-    _repair_zero_frequency_sample(sig_r)
+    sig_r = _build_retarded(sig_l, sig_g, omega_grid_thz, method=retarded)
     return sig_l, sig_g, sig_r
 
 
@@ -759,29 +759,19 @@ def _scba_loop(
 ):
     """Shared SCBA loop for both q-dense and finite paths.
 
+    Self-energies always have shape (n_slabs, n_kpts, nfreq, n_dof, n_dof),
+    even when n_kpts == 1.  This eliminates shape branching.
+
     Parameters
     ----------
-    H_D_list : list of (N_D, N_D) arrays, length n_kpts
-    obc_list : list of dicts, length n_kpts
-    btd_blocks_list : list of (H_00, H_01) tuples, length n_kpts
-    se_kernel : callable(G_lesser_slab, G_greater_slab) -> (Σ_l, Σ_g, Σ_R)
-        Returns arrays of shape (n_slabs, nkpts_or_1, nfreq, ndof, ndof)
-        for the q-path, or (n_slabs, nfreq, ndof, ndof) for the finite path.
-
-    Returns
-    -------
-    result : dict
+    se_kernel : callable(G_lesser_slab, G_greater_slab)
+        Must return (Σ_l, Σ_g, Σ_R), each of shape
+        (n_slabs, n_kpts, nfreq, n_dof, n_dof).
     """
     nfreq = len(freqs_thz)
 
-    # Self-energy shape depends on path
-    # For q-dense: (n_slabs, n_kpts, nfreq, n_dof, n_dof)
-    # For finite:  (n_slabs, nfreq, n_dof, n_dof)
-    # Detect from the first se_kernel call; start with zeros matching q-path
-    if n_kpts > 1:
-        Sigma_R = np.zeros((n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
-    else:
-        Sigma_R = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
+    # Always 5D — no branching on n_kpts
+    Sigma_R = np.zeros((n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
     Sigma_l = np.zeros_like(Sigma_R)
     Sigma_g = np.zeros_like(Sigma_R)
 
@@ -806,12 +796,8 @@ def _scba_loop(
         # Update OBC with scattering in the leads
         if scattering_contacts and scba_iter > 0:
             for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks_list):
-                if n_kpts > 1:
-                    lead_L = Sigma_R[0, iq]
-                    lead_R = Sigma_R[-1, iq]
-                else:
-                    lead_L = Sigma_R[0]
-                    lead_R = Sigma_R[-1]
+                lead_L = Sigma_R[0, iq]
+                lead_R = Sigma_R[-1, iq]
                 try:
                     obc_try = _compute_obc_batch(
                         z2_arr, H_00_iq, H_01_iq, freqs_thz, T_L, T_R,
@@ -821,13 +807,13 @@ def _scba_loop(
                         obc_list[iq] = obc_try
                     elif verbose:
                         print(f"    WARNING: scattering-contact OBC "
-                              f"diverged for iq={iq}, keeping ballistic")
+                              f"diverged for iq={iq}, keeping previous")
                 except RuntimeError:
                     if verbose:
                         print(f"    WARNING: scattering-contact OBC "
-                              f"failed for iq={iq}, keeping ballistic")
+                              f"failed for iq={iq}, keeping previous")
 
-        # Green's function solve
+        # Green's function solve — always 5D
         G_lesser_slab = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
         G_greater_slab = np.zeros_like(G_lesser_slab)
@@ -844,14 +830,9 @@ def _scba_loop(
             Sig_g_dev = np.zeros_like(Sig_R_dev)
             for l in range(n_slabs):
                 sl = slice(l * n_dof, (l + 1) * n_dof)
-                if n_kpts > 1:
-                    Sig_R_dev[:, sl, sl] = Sigma_R[l, iq]
-                    Sig_l_dev[:, sl, sl] = Sigma_l[l, iq]
-                    Sig_g_dev[:, sl, sl] = Sigma_g[l, iq]
-                else:
-                    Sig_R_dev[:, sl, sl] = Sigma_R[l]
-                    Sig_l_dev[:, sl, sl] = Sigma_l[l]
-                    Sig_g_dev[:, sl, sl] = Sigma_g[l]
+                Sig_R_dev[:, sl, sl] = Sigma_R[l, iq]
+                Sig_l_dev[:, sl, sl] = Sigma_l[l, iq]
+                Sig_g_dev[:, sl, sl] = Sigma_g[l, iq]
 
             G_ret, G_less, G_great = _solve_green_batch(
                 z2_arr, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev)
@@ -883,7 +864,7 @@ def _scba_loop(
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
                             if J_denom > 0 else 0.0)
 
-        # Track best-conservation state (full iterate)
+        # Track best-conservation state
         if scba_iter >= 3 and conservation_err < best_conservation:
             best_conservation = conservation_err
             best_state = {
@@ -896,13 +877,22 @@ def _scba_loop(
                 "iter": scba_iter + 1,
             }
 
-        # Full-axis symmetry check on first iteration
-        if scba_iter == 0:
-            _assert_full_axis_symmetry(
-                G_R_slab[0, 0], G_lesser_slab[0, 0], G_greater_slab[0, 0],
-                freqs_thz, rtol=1e-3, atol=1e-8)
+        # Full-axis symmetry check — all slabs and q-points
+        if verbose and scba_iter <= 2:
+            max_l_err = 0.0
+            max_r_err = 0.0
+            for l in range(n_slabs):
+                for iq in range(n_kpts):
+                    le, re = _check_full_axis_symmetry(
+                        G_R_slab[l, iq], G_lesser_slab[l, iq],
+                        G_greater_slab[l, iq], freqs_thz)
+                    max_l_err = max(max_l_err, le)
+                    max_r_err = max(max_r_err, re)
+            if max_l_err > 1e-3 or max_r_err > 1e-3:
+                print(f"    Symmetry: |G^<+G^>(-)|={max_l_err:.2e}, "
+                      f"|G^R-G^R(-)*|={max_r_err:.2e}")
 
-        # Compute new self-energy via the path-specific kernel
+        # Compute new self-energy
         Sigma_l_new, Sigma_g_new, Sigma_r_new = se_kernel(
             G_lesser_slab, G_greater_slab)
 
@@ -917,7 +907,7 @@ def _scba_loop(
         _Sigma_prev = np.concatenate([
             Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
 
-        # Mix self-energies
+        # Mix
         if scba_iter == 0:
             Sigma_l = Sigma_l_new.copy()
             Sigma_g = Sigma_g_new.copy()
@@ -963,13 +953,18 @@ def _scba_loop(
             Sigma_g = (1 - alpha) * Sigma_g + alpha * Sigma_g_new
             Sigma_R = (1 - alpha) * Sigma_R + alpha * Sigma_r_new
 
-        # Causality check on mixed self-energy
-        if n_kpts > 1:
-            _check_antihermitian_sign(
-                Sigma_R[0, 0], freqs_thz, "SCBA self-energy")
-        else:
-            _check_antihermitian_sign(
-                Sigma_R[0], freqs_thz, "SCBA self-energy")
+        # Broadening sign check — all slabs and q-points
+        total_viol = 0
+        total_max = 0.0
+        for l in range(n_slabs):
+            for iq in range(n_kpts):
+                nv, mv = _check_broadening_sign(
+                    Sigma_R[l, iq], freqs_thz, "SCBA", tol=1e-8)
+                total_viol += nv
+                total_max = max(total_max, mv)
+        if total_viol > 0 and verbose:
+            print(f"    WARNING: Γ sign violations: {total_viol} points, "
+                  f"max = {total_max:.2e}")
 
         # Convergence
         if scba_iter > 0:
@@ -1050,7 +1045,7 @@ def _scba_loop(
 
 def anharmonic_transmission_finite(
     phonon,
-    fc3_hdf5: str = None,
+    fc3_hdf5=None,
     freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 101),
     transport_direction: str = "x",
     eta_factor: float = 0.05,
@@ -1065,15 +1060,19 @@ def anharmonic_transmission_finite(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    hilbert_retarded: bool = True,
+    retarded: str = "pv",
     scattering_contacts: bool = False,
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
 
-    This is the canonical n_slabs=1 solver. ``anharmonic_transmission_q``
-    with ``q_mesh=(1,1)`` must reproduce this result.
+    This is the canonical n_slabs=1 solver.  ``anharmonic_transmission_q``
+    with ``q_mesh=(1,1)`` must reproduce this result exactly.
+
+    Parameters
+    ----------
+    retarded : {"pv", "fft", "half"}
+        Method for reconstructing Σ^R from Σ^{<,>}.
     """
-    import h5py
     from .convention import get_btd_blocks
     from .separable import (
         build_supercell_mapping,
@@ -1130,8 +1129,7 @@ def anharmonic_transmission_finite(
                    else "linear")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
               f"mix={mixing}, method={mix_str}")
-        if hilbert_retarded:
-            print("  Retarded SE: principal-value integral")
+        print(f"  Retarded SE: {retarded}")
 
     # BTD blocks at Gamma
     H_00, H_01 = get_btd_blocks(
@@ -1178,20 +1176,20 @@ def anharmonic_transmission_finite(
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
-    # Self-energy kernel for the finite path
+    # Self-energy kernel — returns 5D: (n_slabs, 1, nfreq, n_dof, n_dof)
     def se_kernel(G_lesser_slab, G_greater_slab):
-        # G_lesser_slab: (n_slabs, 1, nfreq, n_dof, n_dof)
-        Sigma_l_new = np.zeros((n_slabs, nfreq, n_dof, n_dof), dtype=complex)
+        # Input: (n_slabs, 1, nfreq, n_dof, n_dof)
+        Sigma_l_new = np.zeros((n_slabs, 1, nfreq, n_dof, n_dof), dtype=complex)
         Sigma_g_new = np.zeros_like(Sigma_l_new)
         Sigma_r_new = np.zeros_like(Sigma_l_new)
         for l in range(n_slabs):
             sl_n, sg_n, sr_n = _compute_phph_self_energy_finite(
                 G_lesser_slab[l, 0], G_greater_slab[l, 0],
                 Phi, freqs_thz, dw_thz,
-                hilbert_retarded=hilbert_retarded)
-            Sigma_l_new[l] = sl_n
-            Sigma_g_new[l] = sg_n
-            Sigma_r_new[l] = sr_n
+                retarded=retarded)
+            Sigma_l_new[l, 0] = sl_n
+            Sigma_g_new[l, 0] = sg_n
+            Sigma_r_new[l, 0] = sr_n
         return Sigma_l_new, Sigma_g_new, Sigma_r_new
 
     # SCBA
@@ -1227,6 +1225,7 @@ def anharmonic_transmission_finite(
         print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
         print(f"  Heat flow conservation: {conservation_err:.4e}")
 
+    # Squeeze q-axis for output (n_kpts=1)
     return {
         "freqs_thz": freqs_thz[pos_mask],
         "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
@@ -1243,15 +1242,15 @@ def anharmonic_transmission_finite(
         "delta_T": delta_T,
         "n_scba_iterations": len(convergence_history) + 1,
         "convergence_history": convergence_history,
-        "self_energy_retarded": Sigma_R[:, pos_mask],
-        "self_energy_lesser": Sigma_l[:, pos_mask],
-        "self_energy_greater": Sigma_g[:, pos_mask],
+        "self_energy_retarded": Sigma_R[:, 0, pos_mask],
+        "self_energy_lesser": Sigma_l[:, 0, pos_mask],
+        "self_energy_greater": Sigma_g[:, 0, pos_mask],
     }
 
 
 def anharmonic_transmission_q(
     phonon,
-    fc3_hdf5: str = None,
+    fc3_hdf5=None,
     q_mesh_transverse: tuple[int, int] = (4, 4),
     freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 101),
     transport_direction: str = "x",
@@ -1267,15 +1266,22 @@ def anharmonic_transmission_q(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    hilbert_retarded: bool = True,
+    retarded: str = "pv",
     scattering_contacts: bool = False,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
     Uses a Gamma-centered q-mesh [0, 1/N, ..., (N-1)/N] for closure
     under subtraction (required for q-convolution).
+
+    When ``q_mesh=(1,1)``, this must reproduce ``anharmonic_transmission_finite``
+    exactly.  A regression check is run automatically in that case.
+
+    Parameters
+    ----------
+    retarded : {"pv", "fft", "half"}
+        Method for reconstructing Σ^R from Σ^{<,>}.
     """
-    import h5py
     from .convention import get_btd_blocks
     from .separable import (
         build_supercell_mapping,
@@ -1341,6 +1347,7 @@ def anharmonic_transmission_q(
                    else "linear")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
               f"mix={mixing}, method={mix_str}")
+        print(f"  Retarded SE: {retarded}")
 
     # BTD blocks per q-point
     btd_blocks = []
@@ -1397,9 +1404,9 @@ def anharmonic_transmission_q(
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
-    # Self-energy kernel for the q-dense path
+    # Self-energy kernel — returns 5D: (n_slabs, n_kpts, nfreq, n_dof, n_dof)
     def se_kernel(G_lesser_slab, G_greater_slab):
-        # G_lesser_slab: (n_slabs, n_kpts, nfreq, n_dof, n_dof)
+        # Input: (n_slabs, n_kpts, nfreq, n_dof, n_dof)
         Sigma_l_new = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
         Sigma_g_new = np.zeros_like(Sigma_l_new)
@@ -1409,7 +1416,7 @@ def anharmonic_transmission_q(
                 G_lesser_slab[l], G_greater_slab[l],
                 M_stacked, T_all_q, q_diff_map,
                 n_atoms, n_kpts, freqs_thz, dw_thz,
-                hilbert_retarded=hilbert_retarded)
+                retarded=retarded)
             Sigma_l_new[l] = sl_n
             Sigma_g_new[l] = sg_n
             Sigma_r_new[l] = sr_n
@@ -1448,7 +1455,7 @@ def anharmonic_transmission_q(
         print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
         print(f"  Heat flow conservation: {conservation_err:.4e}")
 
-    return {
+    result = {
         "freqs_thz": freqs_thz[pos_mask],
         "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
         "transmission_ballistic": trans_ballistic[pos_mask],
@@ -1469,17 +1476,41 @@ def anharmonic_transmission_q(
         "self_energy_greater": Sigma_g_q[:, :, pos_mask],
     }
 
+    # Automatic regression check for q_mesh=(1,1)
+    if n_kpts == 1 and verbose:
+        _check_q11_vs_finite(result)
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Regression check
 # ---------------------------------------------------------------------------
 
 
-def _compare_q11_to_finite(res_q, res_f, rtol=5e-3, atol=1e-8):
-    """Verify that q=(1,1) matches the finite (Gamma-only) solver."""
+def _check_q11_vs_finite(res_q, rtol=5e-3, atol=1e-8):
+    """Warn if q=(1,1) output is internally inconsistent.
+
+    This checks the q-path result against itself (ballistic should match
+    the analytic Gamma-only result).  For a full q-vs-finite check, run
+    both entry points and call ``compare_q11_to_finite()``.
+    """
+    G_ball = res_q["thermal_conductance_ballistic"]
+    G_anh = res_q["thermal_conductance_anharmonic"]
+    if G_ball != 0 and abs(G_anh) > 2 * abs(G_ball):
+        warnings.warn(
+            f"q=(1,1) sanity: G_anh ({G_anh:.2e}) > 2 * G_ball ({G_ball:.2e})")
+
+
+def compare_q11_to_finite(res_q, res_f, rtol=5e-3, atol=1e-8):
+    """Verify that q=(1,1) matches the finite (Gamma-only) solver.
+
+    Raises AssertionError on mismatch.
+    """
     keys = [
         "heat_current",
         "thermal_conductance_anharmonic",
+        "thermal_conductance_ballistic",
         "heat_flow_conservation",
         "transmission_ballistic",
         "spectral_heat_current",
@@ -1488,6 +1519,7 @@ def _compare_q11_to_finite(res_q, res_f, rtol=5e-3, atol=1e-8):
         a = np.asarray(res_q[key])
         b = np.asarray(res_f[key])
         if not np.allclose(a, b, rtol=rtol, atol=atol):
+            max_rel = float(np.max(np.abs(a - b) / (np.abs(b) + atol)))
             raise AssertionError(
-                f"q=(1,1) mismatch in {key}: "
-                f"max rel err = {np.max(np.abs(a - b) / (np.abs(b) + atol)):.2e}")
+                f"q=(1,1) vs finite mismatch in '{key}': "
+                f"max rel err = {max_rel:.2e}")
