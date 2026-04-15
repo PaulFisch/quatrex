@@ -95,15 +95,20 @@ def build_fc3_matrix(
 # ---------------------------------------------------------------------------
 
 
-def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
+def _sancho_rubio(z2, H_00, H_01, max_iter=300, tol=1e-8):
     """Surface Green's function via Sancho-Rubio decimation.
 
-    All quantities in THz^2.
+    Parameters
+    ----------
+    z2 : complex
+        Causal frequency squared: z² = (ω + iη_w)².
+    H_00, H_01 : ndarray
+        On-site and coupling blocks (THz²).
     """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
 
-    a_ii = (omega_sq + 1j * eta) * np.eye(N) - H_00
+    a_ii = z2 * np.eye(N) - H_00
     eps = a_ii.copy()
     eps_s = a_ii.copy()
     alpha = (-H_10).copy()
@@ -122,13 +127,14 @@ def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
     return inv(eps_s)
 
 
-def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8,
+def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
                         lead_sigma_r=None):
     """Batched surface Green's function for multiple frequencies at once.
 
     Parameters
     ----------
-    omega_sq_arr : ndarray, shape (nfreq,)
+    z2_arr : ndarray, shape (nfreq,), complex
+        Causal frequency squared: z² = (ω + iη_w)² for each frequency.
     H_00, H_01 : ndarray, shape (N, N)
     lead_sigma_r : ndarray, shape (nfreq, N, N), optional
         Retarded scattering self-energy in the lead bulk.  Included in
@@ -139,14 +145,14 @@ def _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta=1e-4, max_iter=300, tol=1e
     -------
     g_surf : ndarray, shape (nfreq, N, N), complex
     """
-    nfreq = len(omega_sq_arr)
+    nfreq = len(z2_arr)
     N = H_00.shape[0]
     H_10 = H_01.conj().T
     eye = np.eye(N)
 
     # (nfreq, N, N) broadcast — system-matrix diagonal block:
-    # a_ii = (w^2 + i*eta)*I - H_00 - Sigma_scatt^R
-    a_ii = (omega_sq_arr[:, None, None] + 1j * eta) * eye[None] - H_00[None]
+    # a_ii = z^2 * I - H_00 - Sigma_scatt^R
+    a_ii = z2_arr[:, None, None] * eye[None] - H_00[None]
     if lead_sigma_r is not None:
         a_ii = a_ii - lead_sigma_r
     eps = a_ii.copy()
@@ -212,7 +218,7 @@ def _build_device_hamiltonian(H_00, H_01, n_slabs):
     return H_D
 
 
-def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
+def _compute_obc_self_energies(z2, H_00, H_01, n_bose_L, n_bose_R,
                                 n_slabs=1):
     """Compute contact self-energies embedded in the N-slab device space.
 
@@ -220,12 +226,10 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
 
     Parameters
     ----------
-    omega_sq : float
-        w^2 in THz^2.
+    z2 : complex
+        Causal frequency squared: z² = (ω + iη_w)².
     H_00, H_01 : ndarray
         On-site and coupling blocks for the lead (THz^2).
-    eta : float
-        Broadening in THz^2.
     n_bose_L, n_bose_R : float
         Bose-Einstein occupation at the left/right contacts.
     n_slabs : int
@@ -240,8 +244,8 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
     N_D = n_slabs * n_dof
 
     # Compute lead surface Green's functions (n_dof x n_dof)
-    g_L = _sancho_rubio(omega_sq, H_00, H_01, eta)
-    g_R = _sancho_rubio(omega_sq, H_00, H_01.conj().T, eta)
+    g_L = _sancho_rubio(z2, H_00, H_01)
+    g_R = _sancho_rubio(z2, H_00, H_01.conj().T)
 
     # Lead self-energies (n_dof x n_dof blocks)
     sig_L = H_01.conj().T @ g_L @ H_01
@@ -262,10 +266,10 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
     Gamma_L = _embed(gam_L, 0)
     Gamma_R = _embed(gam_R, n_slabs - 1)
 
-    Sigma_L_lesser = 1j * n_bose_L * Gamma_L
-    Sigma_L_greater = 1j * (n_bose_L + 1) * Gamma_L
-    Sigma_R_lesser = 1j * n_bose_R * Gamma_R
-    Sigma_R_greater = 1j * (n_bose_R + 1) * Gamma_R
+    Sigma_L_lesser = -1j * n_bose_L * Gamma_L
+    Sigma_L_greater = -1j * (n_bose_L + 1) * Gamma_L
+    Sigma_R_lesser = -1j * n_bose_R * Gamma_R
+    Sigma_R_greater = -1j * (n_bose_R + 1) * Gamma_R
 
     return {
         "Sigma_L_R": Sigma_L_R,
@@ -279,12 +283,14 @@ def _compute_obc_self_energies(omega_sq, H_00, H_01, eta, n_bose_L, n_bose_R,
     }
 
 
-def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
+def _compute_obc_batch(z2_arr, H_00, H_01, n_bose_L, n_bose_R,
                         n_slabs=1, lead_sigma_r_L=None, lead_sigma_r_R=None):
     """Batched OBC self-energies for all frequencies at once.
 
     Parameters
     ----------
+    z2_arr : ndarray, shape (nfreq,), complex
+        Causal frequency squared: z² = (ω + iη_w)².
     lead_sigma_r_L, lead_sigma_r_R : ndarray (nfreq, n_dof, n_dof), optional
         Retarded scattering self-energy for the left / right lead.
         Included in the Sancho-Rubio on-site block so that the
@@ -293,14 +299,14 @@ def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
     Returns arrays of shape (nfreq,) for scalar quantities and
     (nfreq, N_D, N_D) for matrices.
     """
-    nfreq = len(omega_sq_arr)
+    nfreq = len(z2_arr)
     n_dof = H_00.shape[0]
     N_D = n_slabs * n_dof
 
     # Batched Sancho-Rubio: (nfreq, n_dof, n_dof)
-    g_L_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01, eta,
+    g_L_all = _sancho_rubio_batch(z2_arr, H_00, H_01,
                                   lead_sigma_r=lead_sigma_r_L)
-    g_R_all = _sancho_rubio_batch(omega_sq_arr, H_00, H_01.conj().T, eta,
+    g_R_all = _sancho_rubio_batch(z2_arr, H_00, H_01.conj().T,
                                   lead_sigma_r=lead_sigma_r_R)
 
     H_01_dag = H_01.conj().T
@@ -325,10 +331,10 @@ def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
     Gamma_R[:, sl_last, sl_last] = gam_R_all
 
     # lesser/greater: (nfreq, N_D, N_D)
-    Sigma_L_lesser = 1j * n_bose_L[:, None, None] * Gamma_L
-    Sigma_L_greater = 1j * (n_bose_L[:, None, None] + 1) * Gamma_L
-    Sigma_R_lesser = 1j * n_bose_R[:, None, None] * Gamma_R
-    Sigma_R_greater = 1j * (n_bose_R[:, None, None] + 1) * Gamma_R
+    Sigma_L_lesser = -1j * n_bose_L[:, None, None] * Gamma_L
+    Sigma_L_greater = -1j * (n_bose_L[:, None, None] + 1) * Gamma_L
+    Sigma_R_lesser = -1j * n_bose_R[:, None, None] * Gamma_R
+    Sigma_R_greater = -1j * (n_bose_R[:, None, None] + 1) * Gamma_R
 
     return {
         "Sigma_L_R": Sigma_L_R,
@@ -342,11 +348,11 @@ def _compute_obc_batch(omega_sq_arr, H_00, H_01, eta, n_bose_L, n_bose_R,
     }
 
 
-def _solve_green_functions(omega_sq, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser,
-                           Sigma_scatt_greater, eta):
+def _solve_green_functions(z2, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser,
+                           Sigma_scatt_greater):
     """Solve for retarded, lesser, and greater Green's functions.
 
-    G^R = [(w^2 + i*eta)*I - H_D - Sigma_L^R - Sigma_R^R - Sigma_scatt^R]^{-1}
+    G^R = [z^2*I - H_D - Sigma_L^R - Sigma_R^R - Sigma_scatt^R]^{-1}
     G^{<,>} = G^R * Sigma^{<,>}_total * G^A
 
     All in THz^2 units.
@@ -354,7 +360,7 @@ def _solve_green_functions(omega_sq, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser
     N = H_D.shape[0]
 
     Sigma_R_total = obc["Sigma_L_R"] + obc["Sigma_R_R"] + Sigma_scatt_R
-    G_R = inv((omega_sq + 1j * eta) * np.eye(N) - H_D - Sigma_R_total)
+    G_R = inv(z2 * np.eye(N) - H_D - Sigma_R_total)
     G_A = G_R.conj().T
 
     Sigma_lesser_total = (obc["Sigma_L_lesser"] + obc["Sigma_R_lesser"]
@@ -368,14 +374,14 @@ def _solve_green_functions(omega_sq, H_D, obc, Sigma_scatt_R, Sigma_scatt_lesser
     return G_R, G_lesser, G_greater
 
 
-def _solve_green_batch(omega_sq_arr, H_D, obc_batch,
-                       Sigma_scatt_R, Sigma_scatt_lesser, Sigma_scatt_greater,
-                       eta):
+def _solve_green_batch(z2_arr, H_D, obc_batch,
+                       Sigma_scatt_R, Sigma_scatt_lesser, Sigma_scatt_greater):
     """Batched Green's function solve for all frequencies.
 
     Parameters
     ----------
-    omega_sq_arr : (nfreq,)
+    z2_arr : (nfreq,), complex
+        Causal frequency squared: z² = (ω + iη_w)².
     H_D : (N_D, N_D)
     obc_batch : dict with (nfreq, N_D, N_D) arrays
     Sigma_scatt_R/lesser/greater : (nfreq, N_D, N_D)
@@ -384,13 +390,13 @@ def _solve_green_batch(omega_sq_arr, H_D, obc_batch,
     -------
     G_R, G_lesser, G_greater : (nfreq, N_D, N_D)
     """
-    nfreq = len(omega_sq_arr)
+    nfreq = len(z2_arr)
     N = H_D.shape[0]
     eye = np.eye(N)
 
     Sigma_R_total = obc_batch["Sigma_L_R"] + obc_batch["Sigma_R_R"] + Sigma_scatt_R
-    # A[w] = (w^2 + i*eta)*I - H_D - Sigma_R_total[w]
-    A = (omega_sq_arr[:, None, None] + 1j * eta) * eye[None] - H_D[None] - Sigma_R_total
+    # A[w] = z^2 * I - H_D - Sigma_R_total[w]
+    A = z2_arr[:, None, None] * eye[None] - H_D[None] - Sigma_R_total
     G_R = np.linalg.inv(A)  # (nfreq, N, N)
     G_A = G_R.conj().transpose(0, 2, 1)
 
@@ -745,8 +751,11 @@ def anharmonic_transmission_q(
     freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
     nfreq = len(freqs_thz)
     dw_thz = freqs_pos[1] - freqs_pos[0]
-    omega_sq_thz2 = freqs_thz ** 2
-    eta = dw_thz ** 2 * eta_factor
+    # Causal frequency squared: z² = (ω + iη_w)² gives the correct
+    # retarded prescription on both sides of the frequency axis.
+    # Im(z²) = 2ωη_w flips sign with ω, as required by causality.
+    eta_w = dw_thz * eta_factor  # frequency broadening in THz
+    z2_arr = (freqs_thz + 1j * eta_w) ** 2  # (nfreq,) complex
     pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
@@ -796,11 +805,13 @@ def anharmonic_transmission_q(
         T_all_q.append(T)
 
     # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
+    # On the full two-sided axis: n_B(-ω) = -(1 + n_B(ω)).
+    # This is obtained naturally by using the signed frequency.
     def bose_einstein(freq_thz_arr, T):
-        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
-        x = HBAR_SI * omega_rad_s / (KB_SI * T)
+        omega_rad_s = freq_thz_arr * THZ_TO_RAD  # signed
+        x = HBAR_SI * omega_rad_s / (KB_SI * T)  # signed
         n = np.zeros_like(x)
-        valid = x > 1e-12
+        valid = np.abs(x) > 1e-12
         n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
@@ -814,7 +825,7 @@ def anharmonic_transmission_q(
         print(f"  Frequency grid: {nfreq} points ({nfreq_pos} positive), "
               f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
-        print(f"  eta = {eta:.4e} THz^2")
+        print(f"  eta_w = {eta_w:.4e} THz")
         mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
                    else "linear")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
@@ -839,7 +850,7 @@ def anharmonic_transmission_q(
     for iq, (H_00, H_01) in enumerate(btd_blocks):
         H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
         H_D_all.append(H_D)
-        obc = _compute_obc_batch(omega_sq_thz2, H_00, H_01, eta,
+        obc = _compute_obc_batch(z2_arr, H_00, H_01,
                                  n_bose_L, n_bose_R, n_slabs=n_slabs)
         obc_all.append(obc)
 
@@ -851,9 +862,9 @@ def anharmonic_transmission_q(
         H_LD[:, :n_dof] = H_01
         H_DR = np.zeros((N_D, n_dof), dtype=complex)
         H_DR[-n_dof:, :] = H_01
-        for iw, w2 in enumerate(omega_sq_thz2):
+        for iw, z2 in enumerate(z2_arr):
             trans_ballistic[iw] += _ballistic_transmission(
-                w2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR, eta=eta
+                z2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR
             )
     trans_ballistic /= n_kpts
 
@@ -904,7 +915,7 @@ def anharmonic_transmission_q(
         if scattering_contacts and scba_iter > 0:
             for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks):
                 obc_try = _compute_obc_batch(
-                    omega_sq_thz2, H_00_iq, H_01_iq, eta,
+                    z2_arr, H_00_iq, H_01_iq,
                     n_bose_L, n_bose_R, n_slabs=n_slabs,
                     lead_sigma_r_L=Sigma_R_q[0, iq],
                     lead_sigma_r_R=Sigma_R_q[-1, iq])
@@ -939,7 +950,7 @@ def anharmonic_transmission_q(
 
             # Batched solve: all frequencies at once
             _, G_less, G_great = _solve_green_batch(
-                omega_sq_thz2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev, eta)
+                z2_arr, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev)
 
             # Extract slab-diagonal blocks
             for l in range(n_slabs):
@@ -1007,7 +1018,8 @@ def anharmonic_transmission_q(
             print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
 
-        # Mix self-energies
+        # Mix self-energies (save previous for convergence check)
+        _Sigma_R_prev = Sigma_R_q.copy()
         if scba_iter == 0:
             Sigma_l_q = Sigma_l_new.copy()
             Sigma_g_q = Sigma_g_new.copy()
@@ -1058,21 +1070,22 @@ def anharmonic_transmission_q(
             Sigma_g_q = (1 - alpha) * Sigma_g_q + alpha * Sigma_g_new
             Sigma_R_q = (1 - alpha) * Sigma_R_q + alpha * Sigma_r_new
 
-        # Convergence: stop when conservation passes through minimum
-        # and starts rising, or when rel_change is small enough
+        # Convergence: monitor both current change and self-energy norm
         if scba_iter > 0:
             rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
+            sig_norm = np.linalg.norm(Sigma_R_q)
+            sig_change = (np.linalg.norm(Sigma_R_q - _Sigma_R_prev) / (sig_norm + 1e-30)
+                          if sig_norm > 0 else 0.0)
             convergence_history.append(rel_change)
             if verbose:
                 best_mark = " *" if conservation_err <= best_conservation else ""
                 print(f"    SCBA iter {scba_iter + 1}: "
                       f"J = {J_total:.4e} W, "
                       f"conservation = {conservation_err:.4e}, "
-                      f"rel. change = {rel_change:.4e}, "
-                      f"max|Sigma^R| = {np.max(np.abs(Sigma_R_q)):.2e} THz^2"
+                      f"dJ/J = {rel_change:.4e}, "
+                      f"dΣ/Σ = {sig_change:.4e}, "
+                      f"max|Σ^R| = {np.max(np.abs(Sigma_R_q)):.2e} THz²"
                       f"{best_mark}")
-            # Stop when conservation starts rising above 2x its minimum
-            # (the minimum has been passed, further iterations make it worse)
             if (best_conservation < 0.5
                     and conservation_err > 2 * best_conservation
                     and scba_iter >= 200):
@@ -1081,10 +1094,10 @@ def anharmonic_transmission_q(
                           f"({conservation_err:.2e} > 2 * best {best_conservation:.2e}). "
                           f"Using best state from iter {best_state['iter']}.")
                 break
-            if rel_change < scba_tol:
+            if sig_change < scba_tol and rel_change < scba_tol:
                 if verbose:
                     print(f"    Converged after {scba_iter + 1} iterations "
-                          f"(rel_change={rel_change:.2e}, "
+                          f"(dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
                           f"conservation={conservation_err:.2e})")
                 break
         else:
@@ -1279,8 +1292,8 @@ def anharmonic_transmission_finite(
     freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
     nfreq = len(freqs_thz)
     dw_thz = freqs_pos[1] - freqs_pos[0]
-    omega_sq_thz2 = freqs_thz ** 2
-    eta = dw_thz ** 2 * eta_factor
+    eta_w = dw_thz * eta_factor  # frequency broadening in THz
+    z2_arr = (freqs_thz + 1j * eta_w) ** 2  # (nfreq,) complex
     pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
@@ -1322,11 +1335,12 @@ def anharmonic_transmission_finite(
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs (finite, Gamma only)")
 
     # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
+    # On the full two-sided axis: n_B(-ω) = -(1 + n_B(ω)).
     def bose_einstein(freq_thz_arr, T):
-        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
-        x = HBAR_SI * omega_rad_s / (KB_SI * T)
+        omega_rad_s = freq_thz_arr * THZ_TO_RAD  # signed
+        x = HBAR_SI * omega_rad_s / (KB_SI * T)  # signed
         n = np.zeros_like(x)
-        valid = x > 1e-12
+        valid = np.abs(x) > 1e-12
         n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
@@ -1339,7 +1353,7 @@ def anharmonic_transmission_finite(
         print(f"  Frequency grid: {nfreq} points ({nfreq_pos} positive), "
               f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
-        print(f"  eta = {eta:.4e} THz^2")
+        print(f"  eta_w = {eta_w:.4e} THz")
         mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
                    else "linear")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
@@ -1358,7 +1372,7 @@ def anharmonic_transmission_finite(
     if verbose:
         suffix = " (will update each SCBA iter)" if scattering_contacts else ""
         print(f"  Precomputing OBC self-energies (batched)...{suffix}")
-    obc = _compute_obc_batch(omega_sq_thz2, H_00, H_01, eta,
+    obc = _compute_obc_batch(z2_arr, H_00, H_01,
                              n_bose_L, n_bose_R, n_slabs=n_slabs)
 
     # --- Ballistic transmission ---
@@ -1367,9 +1381,9 @@ def anharmonic_transmission_finite(
     H_DR = np.zeros((N_D, n_dof), dtype=complex)
     H_DR[-n_dof:, :] = H_01
     trans_ballistic = np.zeros(nfreq)
-    for iw, w2 in enumerate(omega_sq_thz2):
+    for iw, z2 in enumerate(z2_arr):
         trans_ballistic[iw] = _ballistic_transmission(
-            w2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR, eta=eta
+            z2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR
         )
 
     if verbose:
@@ -1417,7 +1431,7 @@ def anharmonic_transmission_finite(
         # Update OBC with scattering in the leads
         if scattering_contacts and scba_iter > 0:
             obc_try = _compute_obc_batch(
-                omega_sq_thz2, H_00, H_01, eta,
+                z2_arr, H_00, H_01,
                 n_bose_L, n_bose_R, n_slabs=n_slabs,
                 lead_sigma_r_L=Sigma_R[0],
                 lead_sigma_r_R=Sigma_R[-1])
@@ -1444,7 +1458,7 @@ def anharmonic_transmission_finite(
             Sig_g_dev[:, sl, sl] = Sigma_g[l]
 
         _, G_less, G_great = _solve_green_batch(
-            omega_sq_thz2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev, eta)
+            z2_arr, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev)
 
         for l in range(n_slabs):
             sl = slice(l * n_dof, (l + 1) * n_dof)
@@ -1503,7 +1517,8 @@ def anharmonic_transmission_finite(
             print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
 
-        # Mix self-energies
+        # Mix self-energies (save previous for convergence check)
+        _Sigma_R_prev = Sigma_R.copy()
         if scba_iter == 0:
             Sigma_l = Sigma_l_new.copy()
             Sigma_g = Sigma_g_new.copy()
@@ -1551,14 +1566,18 @@ def anharmonic_transmission_finite(
 
         if scba_iter > 0:
             rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
+            sig_norm = np.linalg.norm(Sigma_R)
+            sig_change = (np.linalg.norm(Sigma_R - _Sigma_R_prev) / (sig_norm + 1e-30)
+                          if sig_norm > 0 else 0.0)
             convergence_history.append(rel_change)
             if verbose:
                 best_mark = " *" if conservation_err <= best_conservation else ""
                 print(f"    SCBA iter {scba_iter + 1}: "
                       f"J = {J_total:.4e} W, "
                       f"conservation = {conservation_err:.4e}, "
-                      f"rel. change = {rel_change:.4e}, "
-                      f"max|Sigma^R| = {np.max(np.abs(Sigma_R)):.2e} THz^2"
+                      f"dJ/J = {rel_change:.4e}, "
+                      f"dΣ/Σ = {sig_change:.4e}, "
+                      f"max|Σ^R| = {np.max(np.abs(Sigma_R)):.2e} THz²"
                       f"{best_mark}")
             if (best_conservation < 0.5
                     and conservation_err > 2 * best_conservation
@@ -1569,10 +1588,10 @@ def anharmonic_transmission_finite(
                           f"{best_conservation:.2e}). "
                           f"Using best state from iter {best_state['iter']}.")
                 break
-            if rel_change < scba_tol:
+            if sig_change < scba_tol and rel_change < scba_tol:
                 if verbose:
                     print(f"    Converged after {scba_iter + 1} iterations "
-                          f"(rel_change={rel_change:.2e}, "
+                          f"(dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
                           f"conservation={conservation_err:.2e})")
                 break
         else:
