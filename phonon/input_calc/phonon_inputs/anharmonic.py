@@ -606,12 +606,12 @@ def _build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
         Lesser/greater self-energies.  Leading dimensions are preserved.
     method : {"pv", "fft", "half"}
     """
-    delta = sig_g - sig_l
+    delta = (sig_g - sig_l).astype(complex)
     if method == "pv":
-        # Direct principal-value integral
+        # Singularity-subtracted principal-value integral
         leading = delta.shape[:-3]
         flat = delta.reshape(-1, *delta.shape[-3:])
-        sig_r = np.empty_like(flat)
+        sig_r = np.empty(flat.shape, dtype=complex)
         for i in range(flat.shape[0]):
             sig_r[i] = _retarded_from_lesser_greater(flat[i], omega_grid_thz)
         return sig_r.reshape(leading + delta.shape[-3:])
@@ -1127,6 +1127,7 @@ def anharmonic_transmission_finite(
     M_stacked_override: np.ndarray = None,
     retarded: str = "half",
     scattering_contacts: bool = False,
+    hilbert_retarded: bool = False,
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
 
@@ -1138,7 +1139,11 @@ def anharmonic_transmission_finite(
     retarded : {"half", "pv", "fft"}
         Method for reconstructing Σ^R from Σ^{<,>}.  Default ``"half"``
         matches the q-path entry point so q=(1,1) reproduces finite.
+    hilbert_retarded : bool
+        Legacy flag.  If True, overrides ``retarded`` to ``"fft"``.
     """
+    if hilbert_retarded:
+        retarded = "fft"
     from .convention import get_btd_blocks
     from .separable import (
         build_supercell_mapping,
@@ -1332,6 +1337,7 @@ def anharmonic_transmission_q(
     M_stacked_override: np.ndarray = None,
     retarded: str = "half",
     scattering_contacts: bool = False,
+    hilbert_retarded: bool = False,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -1347,7 +1353,12 @@ def anharmonic_transmission_q(
         Method for reconstructing Σ^R from Σ^{<,>}.  Defaults to "half"
         for the q-path because the truncated PV integral amplifies sign
         violations inherent in the cross-q bubble diagram.
+    hilbert_retarded : bool
+        Legacy flag.  If True, overrides ``retarded`` to ``"pv"``.
     """
+    if hilbert_retarded:
+        retarded = "pv"
+
     from .convention import get_btd_blocks
     from .separable import (
         build_supercell_mapping,
