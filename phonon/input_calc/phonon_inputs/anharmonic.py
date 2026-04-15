@@ -101,9 +101,19 @@ def _sancho_rubio(z2, H_00, H_01, max_iter=300, tol=1e-8):
     Parameters
     ----------
     z2 : complex
-        Causal frequency squared: z² = (ω + iη_w)².
+        Causal frequency squared: z² = ω² + 2iωη_w.
     H_00, H_01 : ndarray
         On-site and coupling blocks (THz²).
+
+    Returns
+    -------
+    g_surf : ndarray, shape (N, N)
+        Surface Green's function.
+
+    Raises
+    ------
+    RuntimeError
+        If the surface Dyson equation residual exceeds 1e-4.
     """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
@@ -124,7 +134,17 @@ def _sancho_rubio(z2, H_00, H_01, max_iter=300, tol=1e-8):
         if np.linalg.norm(alpha) + np.linalg.norm(beta) < tol:
             break
 
-    return inv(eps_s)
+    g_surf = inv(eps_s)
+
+    # Residual check: g_surf should satisfy the surface Dyson equation
+    # g^{-1} = (z²I - H_00) - H_10 @ g @ H_01
+    residual = a_ii - H_10 @ g_surf @ H_01 - inv(g_surf)
+    res_norm = np.linalg.norm(residual) / max(np.linalg.norm(a_ii), 1e-30)
+    if res_norm > 1e-4:
+        raise RuntimeError(
+            f"Sancho-Rubio did not converge: relative residual {res_norm:.2e}")
+
+    return g_surf
 
 
 def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
@@ -134,7 +154,7 @@ def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
     Parameters
     ----------
     z2_arr : ndarray, shape (nfreq,), complex
-        Causal frequency squared: z² = (ω + iη_w)² for each frequency.
+        Causal frequency squared: z² = ω² + 2iωη_w for each frequency.
     H_00, H_01 : ndarray, shape (N, N)
     lead_sigma_r : ndarray, shape (nfreq, N, N), optional
         Retarded scattering self-energy in the lead bulk.  Included in
@@ -144,7 +164,13 @@ def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
     Returns
     -------
     g_surf : ndarray, shape (nfreq, N, N), complex
+
+    Warns
+    -----
+    If the surface Dyson equation residual exceeds 1e-4 for any frequency.
     """
+    import warnings
+
     nfreq = len(z2_arr)
     N = H_00.shape[0]
     H_10 = H_01.conj().T
@@ -175,7 +201,24 @@ def _sancho_rubio_batch(z2_arr, H_00, H_01, max_iter=300, tol=1e-8,
         if norm_max < tol:
             break
 
-    return np.linalg.inv(eps_s)
+    g_surf = np.linalg.inv(eps_s)
+
+    # Residual check: g^{-1} = a_ii - H_10 @ g @ H_01
+    # Check worst-case frequency point.
+    residual = a_ii - (H_10[None] @ g_surf @ H_01[None]) - np.linalg.inv(g_surf)
+    res_per_freq = np.linalg.norm(
+        residual.reshape(nfreq, -1), axis=1)
+    a_per_freq = np.linalg.norm(
+        a_ii.reshape(nfreq, -1), axis=1)
+    rel_res = res_per_freq / np.maximum(a_per_freq, 1e-30)
+    worst = rel_res.max()
+    if worst > 1e-4:
+        iw = rel_res.argmax()
+        warnings.warn(
+            f"Sancho-Rubio batch: max relative residual {worst:.2e} "
+            f"at freq index {iw}")
+
+    return g_surf
 
 
 def _build_device_hamiltonian(H_00, H_01, n_slabs):
@@ -675,6 +718,7 @@ def anharmonic_transmission_q(
     delta_T: float = 10.0,
     max_scba_iter: int = 10,
     scba_tol: float = 0.01,
+    conservation_tol: float = 0.01,
     mixing: float = 0.5,
     anderson_mixing: bool = False,
     anderson_depth: int = 5,
@@ -703,6 +747,10 @@ def anharmonic_transmission_q(
         Only the positive-frequency side is returned.
     transport_direction : str
     eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
+    conservation_tol : float
+        Maximum allowed |J_L - J_R| / (|J_L| + |J_R|) for convergence.
+        The SCBA loop will not declare convergence until conservation
+        is satisfied alongside the self-energy and current tolerances.
     anderson_mixing : bool
         Use Anderson acceleration instead of plain linear mixing.
         Works well when q-mesh matches supercell resolution (e.g. 4x4
@@ -751,11 +799,12 @@ def anharmonic_transmission_q(
     freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
     nfreq = len(freqs_thz)
     dw_thz = freqs_pos[1] - freqs_pos[0]
-    # Causal frequency squared: z² = (ω + iη_w)² gives the correct
-    # retarded prescription on both sides of the frequency axis.
-    # Im(z²) = 2ωη_w flips sign with ω, as required by causality.
+    # Causal frequency squared: z² = ω² + 2iωη_w.
+    # This gives the correct retarded sign structure (Im(z²) flips with ω)
+    # without introducing an artificial real shift -η_w² that (ω+iη_w)²
+    # would produce.
     eta_w = dw_thz * eta_factor  # frequency broadening in THz
-    z2_arr = (freqs_thz + 1j * eta_w) ** 2  # (nfreq,) complex
+    z2_arr = freqs_thz**2 + 2j * freqs_thz * eta_w  # (nfreq,) complex
     pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
@@ -807,10 +856,15 @@ def anharmonic_transmission_q(
     # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
     # On the full two-sided axis: n_B(-ω) = -(1 + n_B(ω)).
     # This is obtained naturally by using the signed frequency.
+    # At ω = 0: n_B → k_BT/(ℏω) - 1/2, use Taylor expansion.
     def bose_einstein(freq_thz_arr, T):
         omega_rad_s = freq_thz_arr * THZ_TO_RAD  # signed
         x = HBAR_SI * omega_rad_s / (KB_SI * T)  # signed
         n = np.zeros_like(x)
+        # At ω = 0: n_B diverges, but ω·n_B → k_BT/ℏ (finite).
+        # Set n_B(0) = 0 so that Σ^<(0) = 0 and the spectral current
+        # integrand ℏω·n_B·T(ω) = 0 at the single ω=0 grid point.
+        # The integral error is O(dω) — one grid point of zero measure.
         valid = np.abs(x) > 1e-12
         n[valid] = 1.0 / np.expm1(x[valid])
         return n
@@ -896,6 +950,8 @@ def anharmonic_transmission_q(
 
     convergence_history = []
     J_total_prev = 0.0
+    rel_change = float('inf')
+    sig_change = float('inf')
     conservation_err = 1.0
     best_conservation = 1.0
     best_state = None  # will hold spectral currents at min conservation
@@ -981,14 +1037,15 @@ def anharmonic_transmission_q(
         conservation_err = (abs(J_L_total - J_R_total) / J_denom
                             if J_denom > 0 else 0.0)
 
-        # Track best-conservation state (SCBA fixed point may overshoot)
-        # Skip first 3 iterations — conservation is trivially good before
-        # self-energy has been mixed in properly
+        # Track best-conservation state (full iterate for consistency)
         if scba_iter >= 3 and conservation_err < best_conservation:
             best_conservation = conservation_err
             best_state = {
                 "spectral_J_L": spectral_J_L.copy(),
                 "spectral_J_R": spectral_J_R.copy(),
+                "Sigma_R": Sigma_R_q.copy(),
+                "Sigma_l": Sigma_l_q.copy(),
+                "Sigma_g": Sigma_g_q.copy(),
                 "conservation_err": conservation_err,
                 "iter": scba_iter + 1,
             }
@@ -1018,8 +1075,11 @@ def anharmonic_transmission_q(
             print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
 
-        # Mix self-energies (save previous for convergence check)
-        _Sigma_R_prev = Sigma_R_q.copy()
+        # Save previous state for convergence check (all three components)
+        _Sigma_prev = np.concatenate([
+            Sigma_l_q.ravel(), Sigma_g_q.ravel(), Sigma_R_q.ravel()])
+
+        # Mix self-energies
         if scba_iter == 0:
             Sigma_l_q = Sigma_l_new.copy()
             Sigma_g_q = Sigma_g_new.copy()
@@ -1070,12 +1130,14 @@ def anharmonic_transmission_q(
             Sigma_g_q = (1 - alpha) * Sigma_g_q + alpha * Sigma_g_new
             Sigma_R_q = (1 - alpha) * Sigma_R_q + alpha * Sigma_r_new
 
-        # Convergence: monitor both current change and self-energy norm
+        # Convergence: monitor change in combined (Σ^<, Σ^>, Σ^R) vector
         if scba_iter > 0:
             rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
-            sig_norm = np.linalg.norm(Sigma_R_q)
-            sig_change = (np.linalg.norm(Sigma_R_q - _Sigma_R_prev) / (sig_norm + 1e-30)
-                          if sig_norm > 0 else 0.0)
+            _Sigma_now = np.concatenate([
+                Sigma_l_q.ravel(), Sigma_g_q.ravel(), Sigma_R_q.ravel()])
+            sig_norm = np.linalg.norm(_Sigma_now)
+            sig_change = (np.linalg.norm(_Sigma_now - _Sigma_prev)
+                          / (sig_norm + 1e-30) if sig_norm > 0 else 0.0)
             convergence_history.append(rel_change)
             if verbose:
                 best_mark = " *" if conservation_err <= best_conservation else ""
@@ -1086,20 +1148,22 @@ def anharmonic_transmission_q(
                       f"dΣ/Σ = {sig_change:.4e}, "
                       f"max|Σ^R| = {np.max(np.abs(Sigma_R_q)):.2e} THz²"
                       f"{best_mark}")
-            if (best_conservation < 0.5
-                    and conservation_err > 2 * best_conservation
-                    and scba_iter >= 200):
-                if verbose:
-                    print(f"    Stopping: conservation rising "
-                          f"({conservation_err:.2e} > 2 * best {best_conservation:.2e}). "
-                          f"Using best state from iter {best_state['iter']}.")
-                break
-            if sig_change < scba_tol and rel_change < scba_tol:
+            numerically_converged = (sig_change < scba_tol
+                                      and rel_change < scba_tol)
+            conserving = conservation_err < conservation_tol
+
+            if numerically_converged and conserving:
                 if verbose:
                     print(f"    Converged after {scba_iter + 1} iterations "
                           f"(dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
                           f"conservation={conservation_err:.2e})")
                 break
+
+            if numerically_converged and not conserving:
+                if verbose:
+                    print(f"    Numerically converged but conservation "
+                          f"NOT satisfied ({conservation_err:.2e} > "
+                          f"{conservation_tol:.2e}), continuing...")
         else:
             if verbose:
                 print(f"    SCBA iter 1: "
@@ -1107,11 +1171,22 @@ def anharmonic_transmission_q(
 
         J_total_prev = J_total
 
-    # Use best-conservation state if it's significantly better than final
+    else:
+        # for-else: loop exhausted without break → did not converge
+        if verbose:
+            print(f"  WARNING: SCBA did not converge after {max_scba_iter} "
+                  f"iterations (dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
+                  f"conservation={conservation_err:.2e})")
+
+    # Use best-conservation state if final state has poor conservation.
+    # Restores the full iterate (currents + self-energies) for consistency.
     if (best_state is not None
             and best_state["conservation_err"] < 0.5 * conservation_err):
         spectral_J_L = best_state["spectral_J_L"]
         spectral_J_R = best_state["spectral_J_R"]
+        Sigma_R_q = best_state["Sigma_R"]
+        Sigma_l_q = best_state["Sigma_l"]
+        Sigma_g_q = best_state["Sigma_g"]
         conservation_err = best_state["conservation_err"]
         if verbose:
             print(f"  Using best-conservation state from iter {best_state['iter']} "
@@ -1236,6 +1311,7 @@ def anharmonic_transmission_finite(
     delta_T: float = 10.0,
     max_scba_iter: int = 10,
     scba_tol: float = 0.01,
+    conservation_tol: float = 0.01,
     mixing: float = 0.5,
     anderson_mixing: bool = False,
     anderson_depth: int = 5,
@@ -1260,6 +1336,8 @@ def anharmonic_transmission_finite(
         See ``anharmonic_transmission_q`` for details.
     transport_direction : str
     eta_factor, temperature, delta_T, max_scba_iter, scba_tol, mixing : float
+    conservation_tol : float
+        Maximum allowed |J_L - J_R| / (|J_L| + |J_R|) for convergence.
     anderson_mixing : bool
     anderson_depth : int
     n_slabs : int
@@ -1293,7 +1371,7 @@ def anharmonic_transmission_finite(
     nfreq = len(freqs_thz)
     dw_thz = freqs_pos[1] - freqs_pos[0]
     eta_w = dw_thz * eta_factor  # frequency broadening in THz
-    z2_arr = (freqs_thz + 1j * eta_w) ** 2  # (nfreq,) complex
+    z2_arr = freqs_thz**2 + 2j * freqs_thz * eta_w  # (nfreq,) complex
     pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
@@ -1334,12 +1412,16 @@ def anharmonic_transmission_finite(
         print(f"  Phi norm: {np.linalg.norm(Phi):.4e}")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs (finite, Gamma only)")
 
-    # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
+    # --- Bose-Einstein (SI units, Taylor expansion near ω=0) ---
     # On the full two-sided axis: n_B(-ω) = -(1 + n_B(ω)).
     def bose_einstein(freq_thz_arr, T):
         omega_rad_s = freq_thz_arr * THZ_TO_RAD  # signed
         x = HBAR_SI * omega_rad_s / (KB_SI * T)  # signed
         n = np.zeros_like(x)
+        # At ω = 0: n_B diverges, but ω·n_B → k_BT/ℏ (finite).
+        # Set n_B(0) = 0 so that Σ^<(0) = 0 and the spectral current
+        # integrand ℏω·n_B·T(ω) = 0 at the single ω=0 grid point.
+        # The integral error is O(dω) — one grid point of zero measure.
         valid = np.abs(x) > 1e-12
         n[valid] = 1.0 / np.expm1(x[valid])
         return n
@@ -1414,6 +1496,8 @@ def anharmonic_transmission_finite(
 
     convergence_history = []
     J_total_prev = 0.0
+    rel_change = float('inf')
+    sig_change = float('inf')
     conservation_err = 1.0
     best_conservation = 1.0
     best_state = None
@@ -1489,6 +1573,9 @@ def anharmonic_transmission_finite(
             best_state = {
                 "spectral_J_L": spectral_J_L.copy(),
                 "spectral_J_R": spectral_J_R.copy(),
+                "Sigma_R": Sigma_R.copy(),
+                "Sigma_l": Sigma_l.copy(),
+                "Sigma_g": Sigma_g.copy(),
                 "conservation_err": conservation_err,
                 "iter": scba_iter + 1,
             }
@@ -1517,8 +1604,11 @@ def anharmonic_transmission_finite(
             print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2, "
                   f"|Sigma^R|/|H_00| = {sig_r_norm / h00_max:.4e}")
 
-        # Mix self-energies (save previous for convergence check)
-        _Sigma_R_prev = Sigma_R.copy()
+        # Save previous state for convergence check (all three components)
+        _Sigma_prev = np.concatenate([
+            Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
+
+        # Mix self-energies
         if scba_iter == 0:
             Sigma_l = Sigma_l_new.copy()
             Sigma_g = Sigma_g_new.copy()
@@ -1564,11 +1654,14 @@ def anharmonic_transmission_finite(
             Sigma_g = (1 - alpha) * Sigma_g + alpha * Sigma_g_new
             Sigma_R = (1 - alpha) * Sigma_R + alpha * Sigma_r_new
 
+        # Convergence: monitor change in combined (Σ^<, Σ^>, Σ^R) vector
         if scba_iter > 0:
             rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
-            sig_norm = np.linalg.norm(Sigma_R)
-            sig_change = (np.linalg.norm(Sigma_R - _Sigma_R_prev) / (sig_norm + 1e-30)
-                          if sig_norm > 0 else 0.0)
+            _Sigma_now = np.concatenate([
+                Sigma_l.ravel(), Sigma_g.ravel(), Sigma_R.ravel()])
+            sig_norm = np.linalg.norm(_Sigma_now)
+            sig_change = (np.linalg.norm(_Sigma_now - _Sigma_prev)
+                          / (sig_norm + 1e-30) if sig_norm > 0 else 0.0)
             convergence_history.append(rel_change)
             if verbose:
                 best_mark = " *" if conservation_err <= best_conservation else ""
@@ -1579,21 +1672,22 @@ def anharmonic_transmission_finite(
                       f"dΣ/Σ = {sig_change:.4e}, "
                       f"max|Σ^R| = {np.max(np.abs(Sigma_R)):.2e} THz²"
                       f"{best_mark}")
-            if (best_conservation < 0.5
-                    and conservation_err > 2 * best_conservation
-                    and scba_iter >= 5):
-                if verbose:
-                    print(f"    Stopping: conservation rising "
-                          f"({conservation_err:.2e} > 2 * best "
-                          f"{best_conservation:.2e}). "
-                          f"Using best state from iter {best_state['iter']}.")
-                break
-            if sig_change < scba_tol and rel_change < scba_tol:
+            numerically_converged = (sig_change < scba_tol
+                                      and rel_change < scba_tol)
+            conserving = conservation_err < conservation_tol
+
+            if numerically_converged and conserving:
                 if verbose:
                     print(f"    Converged after {scba_iter + 1} iterations "
                           f"(dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
                           f"conservation={conservation_err:.2e})")
                 break
+
+            if numerically_converged and not conserving:
+                if verbose:
+                    print(f"    Numerically converged but conservation "
+                          f"NOT satisfied ({conservation_err:.2e} > "
+                          f"{conservation_tol:.2e}), continuing...")
         else:
             if verbose:
                 print(f"    SCBA iter 1: "
@@ -1601,11 +1695,21 @@ def anharmonic_transmission_finite(
 
         J_total_prev = J_total
 
-    # Use best-conservation state if significantly better than final
+    else:
+        if verbose:
+            print(f"  WARNING: SCBA did not converge after {max_scba_iter} "
+                  f"iterations (dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
+                  f"conservation={conservation_err:.2e})")
+
+    # Use best-conservation state if final state has poor conservation.
+    # Restores the full iterate (currents + self-energies) for consistency.
     if (best_state is not None
             and best_state["conservation_err"] < 0.5 * conservation_err):
         spectral_J_L = best_state["spectral_J_L"]
         spectral_J_R = best_state["spectral_J_R"]
+        Sigma_R = best_state["Sigma_R"]
+        Sigma_l = best_state["Sigma_l"]
+        Sigma_g = best_state["Sigma_g"]
         conservation_err = best_state["conservation_err"]
         if verbose:
             print(f"  Using best-conservation state from iter "
