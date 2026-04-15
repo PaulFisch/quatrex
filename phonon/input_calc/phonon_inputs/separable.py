@@ -598,8 +598,8 @@ def separable_anharmonic_transmission(
     freqs_thz = np.concatenate((-freqs_pos[:0:-1], freqs_pos))
     nfreq = len(freqs_thz)
     dw_thz = freqs_pos[1] - freqs_pos[0]
-    omega_sq_thz2 = freqs_thz ** 2
-    eta = dw_thz ** 2 * eta_factor
+    eta_w = dw_thz * eta_factor
+    z2_arr = (freqs_thz + 1j * eta_w) ** 2
     pos_mask = freqs_thz >= 0.0
 
     n_atoms = len(phonon.primitive.masses)
@@ -659,10 +659,10 @@ def separable_anharmonic_transmission(
 
     # --- Bose-Einstein (SI units, expm1 for numerical stability) ---
     def bose_einstein(freq_thz_arr, T):
-        omega_rad_s = np.abs(freq_thz_arr) * THZ_TO_RAD
+        omega_rad_s = freq_thz_arr * THZ_TO_RAD  # signed
         x = HBAR_SI * omega_rad_s / (KB_SI * T)
         n = np.zeros_like(x)
-        valid = x > 1e-12
+        valid = np.abs(x) > 1e-12
         n[valid] = 1.0 / np.expm1(x[valid])
         return n
 
@@ -676,7 +676,7 @@ def separable_anharmonic_transmission(
         print(f"  Frequency grid: {nfreq} points ({nfreq_pos} positive), "
               f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
         print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
-        print(f"  eta = {eta:.4e} THz^2")
+        print(f"  eta_w = {eta_w:.4e} THz")
         print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, mix={mixing}")
 
     # --- BTD blocks per q-point ---
@@ -696,9 +696,9 @@ def separable_anharmonic_transmission(
         H_LD[:, :n_dof] = H_01
         H_DR = np.zeros((N_D, n_dof), dtype=complex)
         H_DR[-n_dof:, :] = H_01
-        for iw, w2 in enumerate(omega_sq_thz2):
+        for iw, z2 in enumerate(z2_arr):
             trans_ballistic[iw] += _ballistic_transmission(
-                w2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR, eta=eta
+                z2, H_D, H_00, H_01, H_00, H_01, H_LD, H_DR
             )
     trans_ballistic /= n_kpts
 
@@ -746,7 +746,7 @@ def separable_anharmonic_transmission(
         for iq, (H_00, H_01) in enumerate(btd_blocks):
             H_D = _build_device_hamiltonian(H_00, H_01, n_slabs)
 
-            for iw, w2 in enumerate(omega_sq_thz2):
+            for iw, z2 in enumerate(z2_arr):
                 # Embed per-slab, per-q self-energy
                 Sig_R_dev = np.zeros((N_D, N_D), dtype=complex)
                 Sig_l_dev = np.zeros((N_D, N_D), dtype=complex)
@@ -758,11 +758,11 @@ def separable_anharmonic_transmission(
                     Sig_g_dev[sl, sl] = Sigma_g_q[l, iq, iw]
 
                 obc = _compute_obc_self_energies(
-                    w2, H_00, H_01, eta, n_bose_L[iw], n_bose_R[iw],
+                    z2, H_00, H_01, n_bose_L[iw], n_bose_R[iw],
                     n_slabs=n_slabs,
                 )
                 _, G_less, G_great = _solve_green_functions(
-                    w2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev, eta,
+                    z2, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev,
                 )
 
                 for l in range(n_slabs):

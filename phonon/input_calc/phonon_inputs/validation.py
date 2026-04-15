@@ -242,15 +242,18 @@ def compare_band_structure(
 # ---- Reference transmission calculation ----
 
 
-def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
+def _sancho_rubio(z2, H_00, H_01, max_iter=300, tol=1e-8):
     """Surface Green's function via Sancho-Rubio decimation.
 
-    All quantities in THz^2 (or any consistent unit system).
+    Parameters
+    ----------
+    z2 : complex
+        Causal frequency squared: z² = (ω + iη_w)².
     """
     N = H_00.shape[0]
     H_10 = H_01.conj().T
 
-    a_ii = (omega_sq + 1j * eta) * np.eye(N) - H_00
+    a_ii = z2 * np.eye(N) - H_00
     eps = a_ii.copy()
     eps_s = a_ii.copy()
     alpha = (-H_10).copy()
@@ -269,13 +272,19 @@ def _sancho_rubio(omega_sq, H_00, H_01, eta=1e-4, max_iter=300, tol=1e-8):
     return inv(eps_s)
 
 
-def _ballistic_transmission(omega_sq, H_D, H_L00, H_L01, H_R00, H_R01,
-                            H_LD, H_DR, eta=1e-4):
-    """Ballistic transmission via Caroli: T = Tr(Gamma_L G^R Gamma_R G^A)."""
+def _ballistic_transmission(z2, H_D, H_L00, H_L01, H_R00, H_R01,
+                            H_LD, H_DR):
+    """Ballistic transmission via Caroli: T = Tr(Gamma_L G^R Gamma_R G^A).
+
+    Parameters
+    ----------
+    z2 : complex
+        Causal frequency squared: z² = (ω + iη_w)².
+    """
     N_D = H_D.shape[0]
 
-    g_L = _sancho_rubio(omega_sq, H_L00, H_L01, eta)
-    g_R = _sancho_rubio(omega_sq, H_R00, H_R01.conj().T, eta)
+    g_L = _sancho_rubio(z2, H_L00, H_L01)
+    g_R = _sancho_rubio(z2, H_R00, H_R01.conj().T)
 
     Sigma_L = H_LD.conj().T @ g_L @ H_LD
     Sigma_R = H_DR @ g_R @ H_DR.conj().T
@@ -283,7 +292,7 @@ def _ballistic_transmission(omega_sq, H_D, H_L00, H_L01, H_R00, H_R01,
     Gamma_L = 1j * (Sigma_L - Sigma_L.conj().T)
     Gamma_R = 1j * (Sigma_R - Sigma_R.conj().T)
 
-    G_R = inv((omega_sq + 1j * eta) * np.eye(N_D) - H_D - Sigma_L - Sigma_R)
+    G_R = inv(z2 * np.eye(N_D) - H_D - Sigma_L - Sigma_R)
     G_A = G_R.conj().T
 
     T = np.real(np.trace(Gamma_L @ G_R @ Gamma_R @ G_A))
@@ -321,9 +330,9 @@ def reference_transmission(
     """
     fmin, fmax, nfreq = freq_range_thz
     freqs_thz = np.linspace(fmin, fmax, int(nfreq))
-    omega_sq = freqs_thz ** 2  # THz^2
     dw = freqs_thz[1] - freqs_thz[0]  # THz
-    eta = dw ** 2 * eta_factor  # THz^2
+    eta_w = dw * eta_factor  # THz
+    z2_arr = (freqs_thz + 1j * eta_w) ** 2
 
     nkx, nky = q_mesh_transverse
     q_1d = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
@@ -337,9 +346,9 @@ def reference_transmission(
             phonon, (qx, qy), transport_direction=transport_direction,
             conversion_factor=CONVERSION_THZ2,
         )
-        for iw, w2 in enumerate(omega_sq):
+        for iw, z2 in enumerate(z2_arr):
             trans[iw] += _ballistic_transmission(
-                w2, H_00, H_00, H_01, H_00, H_01, H_01, H_01, eta=eta
+                z2, H_00, H_00, H_01, H_00, H_01, H_01, H_01
             )
 
     trans /= len(q_points)
@@ -377,9 +386,9 @@ def interface_transmission(
     fmin, fmax, nfreq = freq_range_thz
     nfreq = int(nfreq)
     freqs_thz = np.linspace(fmin, fmax, nfreq)
-    omega_sq = freqs_thz ** 2  # THz^2
     dw = freqs_thz[1] - freqs_thz[0]
-    eta = dw ** 2 * eta_factor
+    eta_w = dw * eta_factor
+    z2_arr = (freqs_thz + 1j * eta_w) ** 2
 
     nkx, nky = q_mesh_transverse
     q_1d_x = [(2 * n - nkx - 1) / (2 * nkx) for n in range(1, nkx + 1)]
@@ -406,9 +415,9 @@ def interface_transmission(
             conversion_factor=CONVERSION_THZ2,
         )
 
-        for iw, w2 in enumerate(omega_sq):
+        for iw, z2 in enumerate(z2_arr):
             trans[iw] += _ballistic_transmission(
-                w2,
+                z2,
                 H_D=H_00_D,
                 H_L00=H_00_L,
                 H_L01=H_01_L,
@@ -416,7 +425,6 @@ def interface_transmission(
                 H_R01=H_01_R,
                 H_LD=H_01_L,
                 H_DR=H_01_R,
-                eta=eta,
             )
 
     trans /= len(q_points)
