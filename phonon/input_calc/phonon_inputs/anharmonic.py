@@ -200,9 +200,14 @@ def _check_broadening_sign(Sigma_R, freqs_thz, name,
 
 def _check_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
                               rtol=1e-3, atol=1e-8):
-    """Verify Guo full-axis symmetry.
+    """Verify bosonic full-axis symmetry.
 
-    G^<(ω) = −[G^>(−ω)]^T,  G^R(ω) = [G^R(−ω)]*.
+    G^<(ω) = [G^>(−ω)]^T,  G^R(ω) = [G^R(−ω)]*.
+
+    Derivation: Σ^< = −i n_B Γ, Σ^> = −i(n_B+1)Γ, and for bosons
+    n_B(−ω) = −(n_B(ω)+1), Γ(−ω) = −Γ(ω)^T, giving
+    Σ^<(ω) = [Σ^>(−ω)]^T  (no minus sign).
+
     Returns (lesser_err, retarded_err).
     """
     mid = len(freqs_thz) // 2
@@ -211,7 +216,7 @@ def _check_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
 
     G_l_pos = G_l[pos]
     G_g_neg = G_g[neg][::-1].transpose(0, 2, 1)
-    lesser_err = float(np.max(np.abs(G_l_pos + G_g_neg)))
+    lesser_err = float(np.max(np.abs(G_l_pos - G_g_neg)))
 
     G_R_pos = G_R[pos]
     G_R_neg = G_R[neg][::-1]
@@ -223,8 +228,12 @@ def _check_full_axis_symmetry(G_R, G_l, G_g, freqs_thz,
 def _symmetrize_lesser_greater(sig_l, sig_g):
     """Project Σ^< and Σ^> onto the bosonic full-axis symmetry manifold.
 
-    Enforces Σ^<(ω) = −[Σ^>(−ω)]^T  in-place on the last three axes
+    Enforces Σ^<(ω) = [Σ^>(−ω)]^T  in-place on the last three axes
     (nfreq, nd, nd).  Leading dimensions (slabs, q-points) are preserved.
+
+    Derivation: Σ^< = −i n_B Γ, Σ^> = −i(n_B+1)Γ, and for bosons
+    n_B(−ω) = −(n_B(ω)+1), Γ(−ω) = −Γ(ω)^T, giving
+    Σ^<(ω) = [Σ^>(−ω)]^T  (no minus sign).
 
     The grid is assumed symmetric about ω=0 with mid = nfreq // 2.
     The ω=0 sample is left untouched (it is excluded from physics).
@@ -240,20 +249,20 @@ def _symmetrize_lesser_greater(sig_l, sig_g):
     sl_neg_rev = sig_l[..., :mid, :, :][..., ::-1, :, :].copy()
 
     # Symmetrize positive side:
-    # Σ^<_sym(ω) = ½ [Σ^<(ω) − Σ^>(−ω)^T]
-    # Σ^>_sym(ω) = ½ [Σ^>(ω) − Σ^<(−ω)^T]
-    sl_pos_sym = 0.5 * (sl_pos - sg_neg_rev.swapaxes(-2, -1))
-    sg_pos_sym = 0.5 * (sg_pos - sl_neg_rev.swapaxes(-2, -1))
+    # Σ^<_sym(ω) = ½ [Σ^<(ω) + Σ^>(−ω)^T]
+    # Σ^>_sym(ω) = ½ [Σ^>(ω) + Σ^<(−ω)^T]
+    sl_pos_sym = 0.5 * (sl_pos + sg_neg_rev.swapaxes(-2, -1))
+    sg_pos_sym = 0.5 * (sg_pos + sl_neg_rev.swapaxes(-2, -1))
 
     sig_l[..., mid + 1:, :, :] = sl_pos_sym
     sig_g[..., mid + 1:, :, :] = sg_pos_sym
 
     # Negative side follows from the symmetry:
-    # Σ^<(−ω) = −[Σ^>(ω)]^T,  Σ^>(−ω) = −[Σ^<(ω)]^T
-    sig_l[..., :mid, :, :] = -(
-        sig_g[..., mid + 1:, :, :][..., ::-1, :, :].swapaxes(-2, -1))
-    sig_g[..., :mid, :, :] = -(
-        sig_l[..., mid + 1:, :, :][..., ::-1, :, :].swapaxes(-2, -1))
+    # Σ^<(−ω) = [Σ^>(ω)]^T,  Σ^>(−ω) = [Σ^<(ω)]^T
+    sig_l[..., :mid, :, :] = (
+        sg_pos_sym[..., ::-1, :, :].swapaxes(-2, -1))
+    sig_g[..., :mid, :, :] = (
+        sl_pos_sym[..., ::-1, :, :].swapaxes(-2, -1))
 
 
 # ---------------------------------------------------------------------------
