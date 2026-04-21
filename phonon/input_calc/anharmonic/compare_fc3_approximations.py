@@ -1,30 +1,39 @@
-"""Compare FC3 tensor approximation methods.
+"""Compare FC3 compression ansatze and report error vs parameter count.
 
-For each method and rank, computes:
-  1. Number of parameters
-  2. Relative Frobenius-norm error ||Phi - Phi_approx||_F / ||Phi||_F
+Thin driver around :mod:`phonon_inputs.fc3_compression`.  Fits every requested
+(method, rank) pair to the mass-weighted FC3 from ``fc3_prim/fc3.hdf5`` and
+produces diagnostic plots:
 
-Methods:
-  1. Truncated SVD (separable)
-  2. Partially Symmetric CP (PSCP) — algebraic, S2 on internal legs
-  3. Symmetric CP with 3 modes (SCP3) — optimization, S3
-  4. Fully Symmetric CP (FSCP) — optimization, S3, single mode per rank
+  1. error vs number of parameters
+  2. error vs rank
+  3. mSVD singular-value spectrum
+  4. HOSVD mode-1 and mode-(2,3) spectra
 
-Requires:
-  - fc3_prim/fc3.hdf5 (run fc3-reap first)
-  - fc3_prim/phono3py_disp.yaml
+Methods (naming follows the thesis text):
+  mSVD     — truncated matricization SVD
+  HOSVD    — S2-symmetric Tucker (HOSVD + HOOI refinement)
+  CP       — unconstrained canonical polyadic (tensorly ALS + L-BFGS)
+  INDSCAL  — CP with internal-leg symmetry
+  Waring   — symmetric CP on the S3-lifted tensor
+  PCP      — permanent CP of Luo et al. 2025
+
+Each fit is cached to ``anharmonic/quality_cache/fc3_compression_*.npz``.
 """
 
+from __future__ import annotations
+
+import argparse
+import json
 import sys
 import time
-import itertools
+from dataclasses import asdict
 from pathlib import Path
 
 import h5py
 import numpy as np
-import torch
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -33,486 +42,382 @@ work_dir = script_dir.parent  # input_calc/
 sys.path.insert(0, str(work_dir))
 
 from run_anharmonic import load_primitive_cell
-from phonon_inputs.constants import CONVERSION_FC3_THZ
-from phonon_inputs.separable import (
-    build_supercell_mapping,
-    build_realspace_fc3_matrices,
-    decompose_fc3_supercell,
-)
-from phonon_inputs.pcp import (
-    _build_target,
-    _supercell_cp_forward_torch,
-    _project_asr_supercell,
-    _project_asr_grad_supercell,
-    fit_supercell_cp,
-)
-
-S3_PERMS = list(itertools.permutations(range(3)))
+from phonon_inputs import fc3_compression as fc3c
 
 
-# =====================================================================
-# Method 1: Truncated SVD
-# =====================================================================
-
-def svd_approximation(M_stacked, rank):
-    """Truncated SVD at given rank. Returns reconstructed M_stacked."""
-    U, S, Vt = np.linalg.svd(M_stacked, full_matrices=False)
-    R = min(rank, len(S))
-    return U[:, :R] @ np.diag(S[:R]) @ Vt[:R, :]
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
 
 
-def svd_n_params(rank, n_dof, dim_sc):
-    """Parameter count: R left vectors of length n_dof*dim_sc + R right vectors of length dim_sc."""
-    return rank * (n_dof * dim_sc + dim_sc)
+DEFAULT_RANKS = {
+    "mSVD":    [1, 2, 4, 8, 12, 16, 24, 36, 48],
+    "HOSVD":   [(3, 4), (3, 8), (6, 8), (6, 16), (6, 24), (6, 36)],
+    "CP":      [2, 4, 8, 16, 24, 36, 48],
+    "INDSCAL": [2, 4, 8, 16, 24, 36, 48],
+    "Waring":  [4, 8, 16, 24, 36, 48, 64, 96],
+    "PCP":     [2, 4, 8, 16, 24],
+}
 
 
-# =====================================================================
-# Method 2: Partially Symmetric CP (PSCP)
-# =====================================================================
-
-def pscp_decomposition(M_stacked, n_dof, dim_sc, R_max=None, threshold=1e-10):
-    """Algebraic PSCP: SVD of (n_dof, dim_sc^2) + eigendecomposition.
-
-    Returns
-    -------
-    d_ext : (R_total, n_dof)
-    v_int : (R_total, dim_sc)
-    norms : (R_total,) — |d_r| * |v_r|, for sorting/truncation
-    """
-    Phi = M_stacked.reshape(n_dof, dim_sc, dim_sc)
-
-    Phi_flat = Phi.reshape(n_dof, dim_sc * dim_sc)
-    U_ext, sigma, Vt = np.linalg.svd(Phi_flat, full_matrices=False)
-    R_svd = len(sigma)
-
-    all_d = []
-    all_v = []
-    all_norms = []
-
-    for r in range(R_svd):
-        if sigma[r] < threshold * sigma[0]:
-            break
-        W_r = (sigma[r] * Vt[r]).reshape(dim_sc, dim_sc)
-        W_r = 0.5 * (W_r + W_r.T)
-
-        eigenvalues, eigenvectors = np.linalg.eigh(W_r)
-        order = np.argsort(-np.abs(eigenvalues))
-        eigenvalues = eigenvalues[order]
-        eigenvectors = eigenvectors[:, order]
-
-        for p in range(len(eigenvalues)):
-            if np.abs(eigenvalues[p]) < threshold * np.abs(eigenvalues[0]):
-                break
-            d_rp = U_ext[:, r] * eigenvalues[p]
-            v_rp = eigenvectors[:, p]
-            all_d.append(d_rp)
-            all_v.append(v_rp)
-            all_norms.append(np.abs(eigenvalues[p]) * np.linalg.norm(U_ext[:, r]))
-
-    d_ext = np.array(all_d)
-    v_int = np.array(all_v)
-    norms = np.array(all_norms)
-
-    # Sort by contribution magnitude
-    order = np.argsort(-norms)
-    d_ext = d_ext[order]
-    v_int = v_int[order]
-    norms = norms[order]
-
-    if R_max is not None and R_max < len(d_ext):
-        d_ext = d_ext[:R_max]
-        v_int = v_int[:R_max]
-        norms = norms[:R_max]
-
-    return d_ext, v_int, norms
+METHOD_STYLE = {
+    "mSVD":    {"color": "C0", "marker": "o"},
+    "HOSVD":   {"color": "C4", "marker": "v"},
+    "CP":      {"color": "C2", "marker": "^"},
+    "INDSCAL": {"color": "C1", "marker": "s"},
+    "Waring":  {"color": "C3", "marker": "D"},
+    "PCP":     {"color": "C5", "marker": "X"},
+}
 
 
-def pscp_reconstruct(d_ext, v_int, n_dof, dim_sc):
-    """Reconstruct M_stacked from PSCP decomposition."""
-    M_approx = np.zeros((n_dof * dim_sc, dim_sc))
-    for a in range(n_dof):
-        weighted_v = d_ext[:, a:a+1] * v_int  # (R, dim_sc)
-        M_a = weighted_v.T @ v_int  # (dim_sc, dim_sc)
-        M_approx[a * dim_sc:(a + 1) * dim_sc, :] = M_a
-    return M_approx
+def _rank_to_scalar(rank) -> int:
+    """Collapse a (R1, R2) HOSVD rank to a scalar for plotting on the rank axis."""
+    if isinstance(rank, tuple):
+        return int(max(rank))
+    return int(rank)
 
 
-def pscp_n_params(rank, n_dof, dim_sc):
-    return rank * (n_dof + dim_sc)
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
 
 
-# =====================================================================
-# Method 3: Symmetric CP with 3 modes (SCP3) — uses fit_supercell_cp
-# =====================================================================
-
-def scp3_reconstruct_M_stacked(u_modes, lambdas, phonon, target_norm, n_dof, dim_sc):
-    """Reconstruct M_stacked from supercell CP modes."""
-    nat_prim = len(phonon.primitive.masses)
-    n_super = len(phonon.supercell.masses)
-    p2s = torch.tensor(phonon.primitive.p2s_map.astype(np.int64), dtype=torch.long)
-    N_c = len(lambdas)
-
-    with torch.no_grad():
-        u_t = torch.tensor(u_modes, dtype=torch.float64)
-        lam_t = torch.tensor(lambdas / target_norm, dtype=torch.float64)
-        fc3_mw = _supercell_cp_forward_torch(
-            u_t, lam_t, p2s, nat_prim, n_super, N_c,
-        ).numpy() * target_norm
-
-    # Reshape (nat_prim, n_super, n_super, 3, 3, 3) -> M_stacked
-    M = np.zeros((n_dof * dim_sc, dim_sc))
-    for i_prim in range(nat_prim):
-        for alpha in range(3):
-            a = 3 * i_prim + alpha
-            block = fc3_mw[i_prim, :, :, alpha, :, :]
-            M[a * dim_sc:(a + 1) * dim_sc, :] = block.transpose(0, 2, 1, 3).reshape(dim_sc, dim_sc)
-    return M
+def _cache_key(method: str, rank) -> str:
+    if isinstance(rank, tuple):
+        return f"{method}_R{'_'.join(str(r) for r in rank)}"
+    return f"{method}_R{rank}"
 
 
-def scp3_n_params(N_c, dim_sc):
-    return N_c * (3 * dim_sc + 1)
+def _save_cache(cache_dir: Path, method: str, res: fc3c.CompressionResult) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        cache_dir / f"fc3_compression_{_cache_key(method, res.rank)}.npz",
+        name=res.name,
+        rank=np.array(res.rank, dtype=object),
+        n_params=res.n_params,
+        rel_err=res.rel_err,
+        fit_time_s=res.fit_time_s,
+        **{f"factor_{k}": v for k, v in res.factors.items()},
+    )
 
 
-# =====================================================================
-# Method 4: Fully Symmetric CP (FSCP)
-# =====================================================================
-
-def _fscp_forward_torch(v, lambdas, p2s_map, nat_prim, n_super, R):
-    """Forward: Phi[i,j,k,a,b,c] = sum_r lam_r v_r[p2s[i],a] v_r[j,b] v_r[k,c]."""
-    ext = v[:, p2s_map, :]  # (R, nat_prim, 3)
-    wv = lambdas[:, None, None] * v  # (R, n_super, 3)
-    return torch.einsum('ria, rjb, rkc -> ijkabc', ext, wv, v)
-
-
-def fit_fscp(fc3_raw, phonon, R=24, max_iter=2000, verbose=True):
-    """Fit fully symmetric CP: Phi = sum_r lam_r v_r^{otimes 3}."""
-    nat_prim = len(phonon.primitive.masses)
-    n_super = len(phonon.supercell.masses)
-    p2s = torch.tensor(phonon.primitive.p2s_map.astype(np.int64), dtype=torch.long)
-
-    target_np = _build_target(fc3_raw, phonon)
-    target_norm = np.linalg.norm(target_np)
-    target_t = torch.tensor(target_np / target_norm, dtype=torch.float64)
-
-    rng = np.random.default_rng(42)
-    scale = (1.0 / (R * n_super)) ** (1.0 / 3.0)
-    v_init = rng.normal(0, scale, (R, n_super, 3))
-    v_init -= v_init.mean(axis=1, keepdims=True)
-
-    v_param = torch.tensor(v_init, dtype=torch.float64, requires_grad=True)
-    lam_param = torch.tensor(np.ones(R, dtype=np.float64), requires_grad=True)
-
-    best_err = float('inf')
-    best_v = v_param.detach().clone()
-    best_lam = lam_param.detach().clone()
-
-    def forward():
-        fc3 = _fscp_forward_torch(v_param, lam_param, p2s, nat_prim, n_super, R)
-        return torch.sum((fc3 - target_t) ** 2), fc3
-
-    def update_best(err_val):
-        nonlocal best_err, best_v, best_lam
-        if err_val < best_err:
-            best_err = err_val
-            best_v = v_param.detach().clone()
-            best_lam = lam_param.detach().clone()
-
-    # Phase 1: Adam
-    adam_iters = min(max_iter * 3 // 4, 1500)
-    optimizer = torch.optim.Adam([v_param, lam_param], lr=0.02)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=200, T_mult=2, eta_min=1e-4)
-
-    if verbose:
-        print(f"  FSCP fitting: R={R}, max_iter={max_iter}")
-
-    for it in range(1, adam_iters + 1):
-        optimizer.zero_grad()
-        loss, fc3_approx = forward()
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-
-        with torch.no_grad():
-            v_param.data -= v_param.data.mean(dim=1, keepdim=True)
-
-        if it % 200 == 0 or it == 1:
-            with torch.no_grad():
-                err = torch.sqrt(torch.sum((fc3_approx - target_t) ** 2)).item()
-            update_best(err)
-            if verbose:
-                print(f"    iter {it:5d}: rel_err={err:.6e}")
-
-    # Phase 2: L-BFGS
-    lbfgs_iters = max_iter - adam_iters
-    v_param.data.copy_(best_v)
-    lam_param.data.copy_(best_lam)
-
-    if verbose:
-        print(f"  Phase 2: L-BFGS ({lbfgs_iters} iters)...")
-
-    lbfgs = torch.optim.LBFGS(
-        [v_param, lam_param], lr=1.0, max_iter=20,
-        history_size=50, line_search_fn='strong_wolfe')
-
-    for outer in range(max(1, lbfgs_iters // 20)):
-        def closure():
-            lbfgs.zero_grad()
-            loss, _ = forward()
-            loss.backward()
-            if v_param.grad is not None:
-                v_param.grad.data = (
-                    v_param.grad.data - v_param.grad.data.mean(dim=1, keepdim=True)
-                ).contiguous()
-            return loss
-        lbfgs.step(closure)
-
-        if (outer + 1) % 5 == 0 or outer == 0:
-            with torch.no_grad():
-                _, fc3_approx = forward()
-                err = torch.sqrt(torch.sum((fc3_approx - target_t) ** 2)).item()
-            update_best(err)
-            if verbose:
-                print(f"    L-BFGS step {outer+1:4d}: rel_err={err:.6e}")
-
-    v_modes = best_v.numpy()
-    lambdas = best_lam.numpy() * target_norm
-
-    order = np.argsort(-np.abs(lambdas))
-    v_modes = v_modes[order]
-    lambdas = lambdas[order]
-
-    return v_modes, lambdas, {'rel_err': best_err, 'target_norm': target_norm}
+def _load_cache(cache_dir: Path, method: str, rank):
+    path = cache_dir / f"fc3_compression_{_cache_key(method, rank)}.npz"
+    if not path.exists():
+        return None
+    data = np.load(path, allow_pickle=True)
+    factors = {
+        k[len("factor_"):]: data[k] for k in data.files if k.startswith("factor_")
+    }
+    rk = data["rank"].item()
+    return fc3c.CompressionResult(
+        name=str(data["name"]),
+        rank=rk,
+        n_params=int(data["n_params"]),
+        rel_err=float(data["rel_err"]),
+        fit_time_s=float(data["fit_time_s"]),
+        factors=factors,
+        info={},
+    )
 
 
-def fscp_reconstruct_M_stacked(v_modes, lambdas, phonon, target_norm, n_dof, dim_sc):
-    """Reconstruct M_stacked from FSCP modes."""
-    nat_prim = len(phonon.primitive.masses)
-    n_super = len(phonon.supercell.masses)
-    p2s = torch.tensor(phonon.primitive.p2s_map.astype(np.int64), dtype=torch.long)
-    R = len(lambdas)
-
-    with torch.no_grad():
-        v_t = torch.tensor(v_modes, dtype=torch.float64)
-        lam_t = torch.tensor(lambdas / target_norm, dtype=torch.float64)
-        fc3_mw = _fscp_forward_torch(v_t, lam_t, p2s, nat_prim, n_super, R).numpy() * target_norm
-
-    M = np.zeros((n_dof * dim_sc, dim_sc))
-    for i_prim in range(nat_prim):
-        for alpha in range(3):
-            a = 3 * i_prim + alpha
-            block = fc3_mw[i_prim, :, :, alpha, :, :]
-            M[a * dim_sc:(a + 1) * dim_sc, :] = block.transpose(0, 2, 1, 3).reshape(dim_sc, dim_sc)
-    return M
+# ---------------------------------------------------------------------------
+# Plots
+# ---------------------------------------------------------------------------
 
 
-def fscp_n_params(R, dim_sc):
-    return R * (dim_sc + 1)
+# Errors below this floor are treated as machine-precision noise and hidden
+# from the convergence plots so the y-axis stays informative.
+_ERR_FLOOR = 1e-6
 
 
-# =====================================================================
-# Main comparison
-# =====================================================================
+def _plot_points(results):
+    """Return (x_params, x_rank, y_err) with machine-precision points removed."""
+    out = []
+    for r in sorted(results, key=lambda x: x.n_params):
+        if r.rel_err < _ERR_FLOOR:
+            continue
+        out.append((r.n_params, _rank_to_scalar(r.rank), r.rel_err))
+    return out
 
-def main():
+
+def plot_error_vs_params(results_by_method, out_path: Path) -> None:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    all_errs: list[float] = []
+    for method, results in results_by_method.items():
+        if not results:
+            continue
+        pts = _plot_points(results)
+        if not pts:
+            continue
+        xs = [p[0] for p in pts]
+        ys = [p[2] for p in pts]
+        all_errs.extend(ys)
+        ax.loglog(
+            xs, ys,
+            f"-{METHOD_STYLE[method]['marker']}",
+            color=METHOD_STYLE[method]["color"],
+            label=method,
+            markersize=6,
+        )
+    if all_errs:
+        lo = 10 ** np.floor(np.log10(min(all_errs)) - 0.3)
+        ax.set_ylim(bottom=max(lo, _ERR_FLOOR), top=1.2)
+    ax.set_xlabel("Number of parameters")
+    ax.set_ylabel(r"Relative Frobenius error")
+    ax.set_title("FC3 compression: error vs parameter count")
+    ax.grid(True, which="both", alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_path)
+    fig.savefig(out_path.with_suffix(".png"), dpi=150)
+    plt.close(fig)
+
+
+def plot_error_vs_rank(results_by_method, out_path: Path) -> None:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    all_errs: list[float] = []
+    for method, results in results_by_method.items():
+        if not results:
+            continue
+        pts = sorted(_plot_points(results), key=lambda p: p[1])
+        if not pts:
+            continue
+        xs = [p[1] for p in pts]
+        ys = [p[2] for p in pts]
+        all_errs.extend(ys)
+        ax.semilogy(
+            xs, ys,
+            f"-{METHOD_STYLE[method]['marker']}",
+            color=METHOD_STYLE[method]["color"],
+            label=method,
+            markersize=6,
+        )
+    if all_errs:
+        lo = 10 ** np.floor(np.log10(min(all_errs)) - 0.3)
+        ax.set_ylim(bottom=max(lo, _ERR_FLOOR), top=1.2)
+    ax.set_xlabel("Rank R")
+    ax.set_ylabel(r"Relative Frobenius error")
+    ax.set_title("FC3 compression: error vs rank")
+    ax.grid(True, which="both", alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_path)
+    fig.savefig(out_path.with_suffix(".png"), dpi=150)
+    plt.close(fig)
+
+
+def plot_msvd_spectrum(target, out_path: Path) -> None:
+    M = target.T.reshape(target.n_dof * target.dim_sc, target.dim_sc)
+    S = np.linalg.svd(M, compute_uv=False)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.semilogy(np.arange(1, len(S) + 1), S / S[0], "o-", markersize=4)
+    ax.set_xlabel("Singular value index")
+    ax.set_ylabel(r"$\sigma_r / \sigma_1$")
+    ax.set_title("mSVD spectrum of FC3 $(\\mu, j)|k$ matricization")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_path)
+    fig.savefig(out_path.with_suffix(".png"), dpi=150)
+    plt.close(fig)
+
+
+def plot_hosvd_spectra(target, out_path: Path) -> None:
+    T = target.T
+    n_dof, dim_sc, _ = T.shape
+    S1 = np.linalg.svd(T.reshape(n_dof, -1), compute_uv=False)
+    M23 = np.concatenate(
+        [T.transpose(1, 0, 2).reshape(dim_sc, -1),
+         T.transpose(2, 0, 1).reshape(dim_sc, -1)],
+        axis=1,
+    )
+    S2 = np.linalg.svd(M23, compute_uv=False)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    ax1.semilogy(np.arange(1, len(S1) + 1), S1 / S1[0], "o-", markersize=4)
+    ax1.set_xlabel("Index"); ax1.set_ylabel(r"$\sigma_r / \sigma_1$")
+    ax1.set_title("HOSVD mode-1 spectrum (external leg)")
+    ax1.grid(True, alpha=0.3)
+    ax2.semilogy(np.arange(1, len(S2) + 1), S2 / S2[0], "o-", markersize=4, color="C4")
+    ax2.set_xlabel("Index"); ax2.set_ylabel(r"$\sigma_r / \sigma_1$")
+    ax2.set_title("HOSVD mode-(2,3) spectrum (internal legs, S2-symmetrised)")
+    ax2.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_path)
+    fig.savefig(out_path.with_suffix(".png"), dpi=150)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Summary table
+# ---------------------------------------------------------------------------
+
+
+def _print_summary(results_by_method) -> None:
+    print()
+    print("=" * 64)
+    print("SUMMARY")
+    print("=" * 64)
+    print(f"{'Method':<10} {'Rank':>10} {'Params':>10} {'Rel Error':>14} {'Time':>8}")
+    print("-" * 64)
+    for method, results in results_by_method.items():
+        for r in sorted(results, key=lambda x: x.n_params):
+            rank_str = (
+                f"({r.rank[0]},{r.rank[1]})" if isinstance(r.rank, tuple) else str(r.rank)
+            )
+            print(
+                f"{method:<10} {rank_str:>10} {r.n_params:>10} "
+                f"{r.rel_err:>14.4e} {r.fit_time_s:>7.1f}s"
+            )
+        print("-" * 64)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--methods",
+        nargs="+",
+        default=list(DEFAULT_RANKS),
+        help="Subset of methods to run (default: all)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=script_dir / "figures",
+        help="Where to save plots (default: anharmonic/figures)",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=script_dir / "quality_cache",
+        help="Fit cache directory (default: anharmonic/quality_cache)",
+    )
+    parser.add_argument(
+        "--no-cache", action="store_true", help="Disable cache lookup and write"
+    )
+    parser.add_argument(
+        "--cp-restarts", type=int, default=10,
+        help="Number of CP random restarts (default: 10)",
+    )
+    parser.add_argument(
+        "--indscal-restarts", type=int, default=8,
+        help="Number of INDSCAL random restarts (default: 8)",
+    )
+    parser.add_argument(
+        "--waring-restarts", type=int, default=10,
+        help="Number of Waring random restarts (default: 10)",
+    )
+    parser.add_argument(
+        "--pcp-max-iter", type=int, default=2000,
+        help="PCP total optimisation iterations per rank (default: 2000)",
+    )
+    parser.add_argument(
+        "--fc3-hdf5",
+        type=Path,
+        default=work_dir / "fc3_prim" / "fc3.hdf5",
+        help="Path to FC3 HDF5 (default: input_calc/fc3_prim/fc3.hdf5)",
+    )
+    args = parser.parse_args(argv)
+
     phonon, _ = load_primitive_cell(work_dir)
-    fc3_path = work_dir / "fc3_prim" / "fc3.hdf5"
-
-    with h5py.File(fc3_path, "r") as f:
+    with h5py.File(args.fc3_hdf5, "r") as f:
         fc3_raw = np.array(f["fc3"])
 
-    nat_prim = len(phonon.primitive.masses)
-    n_super = len(phonon.supercell.masses)
-    n_dof = 3 * nat_prim
-    dim_sc = 3 * n_super
-    masses_super = phonon.supercell.masses
+    target = fc3c.build_fc3_target(fc3_raw, phonon)
+    print(
+        f"FC3 target: n_dof={target.n_dof}, dim_sc={target.dim_sc}, "
+        f"||T||_F={target.target_norm:.4e}"
+    )
+    print(f"  Full tensor entries: {target.n_dof * target.dim_sc**2}")
 
-    prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(phonon)
+    # --- Pre-compute spectra plots (independent of fits) ---
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    plot_msvd_spectrum(target, args.output_dir / "fc3_msvd_spectrum.pdf")
+    plot_hosvd_spectra(target, args.output_dir / "fc3_hosvd_spectra.pdf")
+    print(f"Saved spectra to {args.output_dir}")
 
-    print(f"System: nat_prim={nat_prim}, n_super={n_super}")
-    print(f"  n_dof={n_dof}, dim_sc={dim_sc}")
-    print(f"  Full tensor entries: {n_dof * dim_sc**2}")
-    print()
-
-    # Build reference M_stacked
-    M_stacked = build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super, ref_sc_atoms)
-    M_norm = np.linalg.norm(M_stacked, 'fro')
-    print(f"M_stacked shape: {M_stacked.shape}, Frobenius norm: {M_norm:.4e}")
-
-    # Full SVD for rank analysis
-    _, S_full, _ = np.linalg.svd(M_stacked, full_matrices=False)
-    R_full = len(S_full)
-    print(f"Full SVD rank: {R_full}")
-    print(f"Singular values: {S_full}")
-    print()
-
-    # Full PSCP for rank analysis
-    d_full, v_full, norms_full = pscp_decomposition(M_stacked, n_dof, dim_sc)
-    R_pscp_full = len(d_full)
-    print(f"Full PSCP rank: {R_pscp_full}")
-    print()
-
-    # ---- Collect results ----
-    results = {
-        'SVD': {'ranks': [], 'n_params': [], 'errors': []},
-        'PSCP': {'ranks': [], 'n_params': [], 'errors': []},
-        'SCP3': {'ranks': [], 'n_params': [], 'errors': []},
-        'FSCP': {'ranks': [], 'n_params': [], 'errors': []},
+    # --- Per-method fits ---
+    extra_kwargs = {
+        "CP":      {"n_restarts": args.cp_restarts, "max_iter": 800, "lbfgs_iters": 500},
+        "INDSCAL": {"n_restarts": args.indscal_restarts, "max_iter": 800, "lbfgs_iters": 600},
+        "Waring":  {"n_restarts": args.waring_restarts, "n_power_repeats": 30,
+                    "n_power_iters": 300, "lbfgs_iters": 600},
+        "HOSVD":   {"refine": True, "hooi_iters": 12},
+        "PCP":     {"phonon": phonon, "fc3_raw": fc3_raw, "max_iter": args.pcp_max_iter, "verbose": False},
     }
 
-    # -- SVD at various ranks --
-    print("=" * 60)
-    print("Method 1: Truncated SVD")
-    print("=" * 60)
-    svd_ranks = sorted(set([1, 2, 3, 4, 6, 8, 12, 16, 24, R_full]))
-    svd_ranks = [r for r in svd_ranks if r <= R_full]
+    results_by_method: dict[str, list[fc3c.CompressionResult]] = {}
+    for method in args.methods:
+        if method not in DEFAULT_RANKS:
+            print(f"Unknown method {method}, skipping.")
+            continue
+        ranks = DEFAULT_RANKS[method]
+        results_by_method[method] = []
+        for rank in ranks:
+            # Cache lookup
+            cached = None
+            if not args.no_cache:
+                cached = _load_cache(args.cache_dir, method, rank)
+            if cached is not None:
+                print(f"[{method}] rank={rank}: loaded from cache "
+                      f"(params={cached.n_params}, err={cached.rel_err:.4e})")
+                results_by_method[method].append(cached)
+                continue
 
-    for R in svd_ranks:
-        M_approx = svd_approximation(M_stacked, R)
-        err = np.linalg.norm(M_stacked - M_approx, 'fro') / M_norm
-        n_p = svd_n_params(R, n_dof, dim_sc)
-        results['SVD']['ranks'].append(R)
-        results['SVD']['n_params'].append(n_p)
-        results['SVD']['errors'].append(err)
-        print(f"  R={R:3d}: params={n_p:8d}, rel_err={err:.6e}")
+            print(f"[{method}] rank={rank} ...", flush=True)
+            try:
+                fitter = fc3c.FITTERS[method]
+                kw = extra_kwargs.get(method, {})
+                if method == "HOSVD":
+                    res = fitter(target, R1=rank[0], R2=rank[1], **kw)
+                else:
+                    res = fitter(target, rank=rank, **kw)
+            except Exception as exc:
+                print(f"  FAILED: {exc}")
+                continue
 
-    # -- PSCP at various ranks --
-    print()
-    print("=" * 60)
-    print("Method 2: Partially Symmetric CP (PSCP)")
-    print("=" * 60)
-    pscp_ranks = sorted(set([1, 2, 4, 6, 8, 12, 18, 24, 36, 48, R_pscp_full]))
-    pscp_ranks = [r for r in pscp_ranks if r <= R_pscp_full]
+            print(
+                f"    params={res.n_params}, rel_err={res.rel_err:.4e}, "
+                f"t={res.fit_time_s:.1f}s"
+            )
+            results_by_method[method].append(res)
+            if not args.no_cache:
+                _save_cache(args.cache_dir, method, res)
 
-    for R in pscp_ranks:
-        d_trunc = d_full[:R]
-        v_trunc = v_full[:R]
-        M_approx = pscp_reconstruct(d_trunc, v_trunc, n_dof, dim_sc)
-        err = np.linalg.norm(M_stacked - M_approx, 'fro') / M_norm
-        n_p = pscp_n_params(R, n_dof, dim_sc)
-        results['PSCP']['ranks'].append(R)
-        results['PSCP']['n_params'].append(n_p)
-        results['PSCP']['errors'].append(err)
-        print(f"  R={R:3d}: params={n_p:8d}, rel_err={err:.6e}")
+    _print_summary(results_by_method)
 
-    # -- SCP3 at various ranks --
-    print()
-    print("=" * 60)
-    print("Method 3: Symmetric CP (3 modes)")
-    print("=" * 60)
-    scp3_ranks = [2, 4, 8, 16, 24]
+    # --- Plots ---
+    plot_error_vs_params(results_by_method, args.output_dir / "fc3_error_vs_params.pdf")
+    plot_error_vs_rank(results_by_method, args.output_dir / "fc3_error_vs_rank.pdf")
+    print(f"\nSaved plots to {args.output_dir}")
 
-    for N_c in scp3_ranks:
-        print(f"\n  --- N_c={N_c} ---")
-        t0 = time.time()
-        u_modes, lambdas, info = fit_supercell_cp(
-            fc3_raw, phonon, N_c=N_c, max_iter=2000, verbose=False)
-        dt = time.time() - t0
-
-        M_approx = scp3_reconstruct_M_stacked(
-            u_modes, lambdas, phonon, info['target_norm'], n_dof, dim_sc)
-        err = np.linalg.norm(M_stacked - M_approx, 'fro') / M_norm
-        n_p = scp3_n_params(N_c, dim_sc)
-
-        results['SCP3']['ranks'].append(N_c)
-        results['SCP3']['n_params'].append(n_p)
-        results['SCP3']['errors'].append(err)
-        print(f"  N_c={N_c:3d}: params={n_p:8d}, rel_err={err:.6e} ({dt:.1f}s)")
-
-    # -- FSCP at various ranks --
-    print()
-    print("=" * 60)
-    print("Method 4: Fully Symmetric CP (1 mode)")
-    print("=" * 60)
-    fscp_ranks = [4, 8, 16, 24, 48]
-
-    for R in fscp_ranks:
-        print(f"\n  --- R={R} ---")
-        t0 = time.time()
-        v_modes, lambdas, info = fit_fscp(
-            fc3_raw, phonon, R=R, max_iter=2000, verbose=False)
-        dt = time.time() - t0
-
-        M_approx = fscp_reconstruct_M_stacked(
-            v_modes, lambdas, phonon, info['target_norm'], n_dof, dim_sc)
-        err = np.linalg.norm(M_stacked - M_approx, 'fro') / M_norm
-        n_p = fscp_n_params(R, dim_sc)
-
-        results['FSCP']['ranks'].append(R)
-        results['FSCP']['n_params'].append(n_p)
-        results['FSCP']['errors'].append(err)
-        print(f"  R={R:3d}: params={n_p:8d}, rel_err={err:.6e} ({dt:.1f}s)")
-
-    # ---- Summary table ----
-    print()
-    print("=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
-    print(f"{'Method':<8} {'Rank':>6} {'Params':>10} {'Rel Error':>12}")
-    print("-" * 40)
-    for method in ['SVD', 'PSCP', 'SCP3', 'FSCP']:
-        for i in range(len(results[method]['ranks'])):
-            print(f"{method:<8} {results[method]['ranks'][i]:>6} "
-                  f"{results[method]['n_params'][i]:>10} "
-                  f"{results[method]['errors'][i]:>12.4e}")
-        print("-" * 40)
-
-    # ---- Plots ----
-    fig_dir = script_dir / "figures"
-    fig_dir.mkdir(exist_ok=True)
-
-    colors = {'SVD': 'C0', 'PSCP': 'C1', 'SCP3': 'C2', 'FSCP': 'C3'}
-    markers = {'SVD': 'o', 'PSCP': 's', 'SCP3': '^', 'FSCP': 'D'}
-
-    # Plot 1: Error vs number of parameters
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for method in ['SVD', 'PSCP', 'SCP3', 'FSCP']:
-        r = results[method]
-        if r['n_params']:
-            ax.semilogy(r['n_params'], r['errors'],
-                        f'-{markers[method]}', color=colors[method],
-                        label=method, markersize=6)
-    ax.set_xlabel('Number of parameters')
-    ax.set_ylabel('Relative Frobenius error')
-    ax.set_title('FC3 approximation: error vs parameters')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(fig_dir / "fc3_error_vs_params.pdf")
-    fig.savefig(fig_dir / "fc3_error_vs_params.png", dpi=150)
-    print(f"\nSaved: {fig_dir / 'fc3_error_vs_params.pdf'}")
-
-    # Plot 2: Error vs rank
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for method in ['SVD', 'PSCP', 'SCP3', 'FSCP']:
-        r = results[method]
-        if r['ranks']:
-            ax.semilogy(r['ranks'], r['errors'],
-                        f'-{markers[method]}', color=colors[method],
-                        label=method, markersize=6)
-    ax.set_xlabel('Rank R')
-    ax.set_ylabel('Relative Frobenius error')
-    ax.set_title('FC3 approximation: error vs rank')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(fig_dir / "fc3_error_vs_rank.pdf")
-    fig.savefig(fig_dir / "fc3_error_vs_rank.png", dpi=150)
-    print(f"Saved: {fig_dir / 'fc3_error_vs_rank.pdf'}")
-
-    # Plot 3: SVD singular value spectrum
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.semilogy(np.arange(1, len(S_full) + 1), S_full / S_full[0], 'o-', markersize=4)
-    ax.set_xlabel('Singular value index')
-    ax.set_ylabel(r'$\sigma_r / \sigma_1$')
-    ax.set_title('SVD singular value spectrum of M_stacked')
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(fig_dir / "svd_spectrum.pdf")
-    fig.savefig(fig_dir / "svd_spectrum.png", dpi=150)
-    print(f"Saved: {fig_dir / 'svd_spectrum.pdf'}")
-
-    plt.close('all')
+    # --- JSON dump of numeric results (no factor arrays) ---
+    summary = {
+        method: [
+            {
+                "rank": r.rank if not isinstance(r.rank, tuple) else list(r.rank),
+                "n_params": r.n_params,
+                "rel_err": r.rel_err,
+                "fit_time_s": r.fit_time_s,
+            }
+            for r in results_by_method[method]
+        ]
+        for method in results_by_method
+    }
+    summary["_meta"] = {
+        "n_dof": target.n_dof,
+        "dim_sc": target.dim_sc,
+        "target_norm": target.target_norm,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    with open(args.output_dir / "fc3_compression_summary.json", "w") as fh:
+        json.dump(summary, fh, indent=2)
+    print(f"Saved summary JSON to {args.output_dir / 'fc3_compression_summary.json'}")
 
 
 if __name__ == "__main__":
