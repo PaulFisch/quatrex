@@ -1,15 +1,20 @@
-"""FC3 approximation quality: all four methods (SVD, PSCP, SCP3, FSCP).
+"""FC3 approximation quality: transport error for the five canonical ansatze.
 
-Uses anharmonic_transmission_q from phonon_inputs with M_stacked_override
-to run the same SCBA code path for all methods.
+Drives the new :mod:`phonon_inputs.fc3_compression` module (mSVD, HOSVD, CP,
+INDSCAL, Waring) and feeds each reconstruction back into
+:func:`phonon_inputs.anharmonic.anharmonic_transmission_q` via
+``M_stacked_override``, so every rank is evaluated under the same SCBA code
+path as the dense reference.
 
 Usage:
     python plot_quality.py                    # run all computations
     python plot_quality.py --load             # only regenerate plots from cache
-    python plot_quality.py --hilbert          # use Hilbert-transform retarded SE
+    python plot_quality.py --hilbert          # Hilbert-transform retarded SE
     python plot_quality.py --hilbert --load   # plots from Hilbert cache
+    python plot_quality.py --fc3-subdir fc3_prim      # switch FC3 dataset
 """
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -26,30 +31,56 @@ work_dir = script_dir.parent  # input_calc/
 sys.path.insert(0, str(work_dir))
 
 from run_anharmonic import load_primitive_cell
-from phonon_inputs.separable import (
-    build_supercell_mapping,
-    build_realspace_fc3_matrices,
-)
 from phonon_inputs.anharmonic import anharmonic_transmission_q
-from phonon_inputs.pcp import fit_supercell_cp
+from phonon_inputs import fc3_compression as fc3c
 
-from compare_fc3_approximations import (
-    svd_approximation, svd_n_params,
-    pscp_decomposition, pscp_reconstruct, pscp_n_params,
-    scp3_reconstruct_M_stacked, scp3_n_params,
-    fit_fscp, fscp_reconstruct_M_stacked, fscp_n_params,
-)
 
-# Use 3x3x3 supercell data
-FC3_SUBDIR = "fc3_prim_vasp"
+# =========================================================================
+# Configuration
+# =========================================================================
 
-FIG_DIR = script_dir / "figures"
-CACHE_DIR_BASE = script_dir / "quality_cache_333"
-CACHE_DIR = CACHE_DIR_BASE  # overridden in main() when --hilbert
+# Methods and styles — naming follows the thesis (fc3_compression subsections).
+METHODS = ["mSVD", "HOSVD", "CP", "INDSCAL", "Waring"]
+COLORS = {
+    "mSVD":    "#2ca02c",
+    "HOSVD":   "#8c564b",
+    "CP":      "#ff7f0e",
+    "INDSCAL": "#1f77b4",
+    "Waring":  "#9467bd",
+}
+MARKERS = {
+    "mSVD":    "o",
+    "HOSVD":   "v",
+    "CP":      "s",
+    "INDSCAL": "^",
+    "Waring":  "D",
+}
+COLOR_DENSE = "#d62728"
+
+# Rank sweep per method. HOSVD ranks are (R1, R2) tuples.
+RANK_SWEEP = {
+    "mSVD":    [4, 8, 12, 16, 24, 36],
+    "HOSVD":   [(3, 4), (3, 8), (6, 8), (6, 16), (6, 24), (6, 36)],
+    "CP":      [8, 16, 24, 36, 48],
+    "INDSCAL": [8, 16, 24, 36, 48],
+    "Waring":  [8, 16, 24, 36, 48, 64],
+}
+
+# Fit-time hyperparameters. Mirrors the defaults in compare_fc3_approximations.py
+# so Frobenius errors reported here match the offline sweep.
+FIT_KWARGS = {
+    "mSVD":    {},
+    "HOSVD":   {"refine": True, "hooi_iters": 12},
+    "CP":      {"n_restarts": 10, "max_iter": 800, "lbfgs_iters": 500},
+    "INDSCAL": {"n_restarts": 8,  "max_iter": 800, "lbfgs_iters": 600},
+    "Waring":  {"n_restarts": 10, "n_power_repeats": 30,
+                "n_power_iters": 300, "lbfgs_iters": 600},
+}
+
 
 TRANSPORT_KW = dict(
     q_mesh_transverse=(4, 4),
-    freq_range_thz=(0.0, 18.0, 141),  # (_, fmax, nfreq_pos); symmetric grid 0..fmax
+    freq_range_thz=(0.0, 18.0, 141),
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,
@@ -63,23 +94,21 @@ TRANSPORT_KW = dict(
     verbose=True,
 )
 
-METHODS = ["SVD", "PSCP", "SCP3", "FSCP"]
-COLORS = {"SVD": "#2ca02c", "PSCP": "#ff7f0e", "SCP3": "#1f77b4", "FSCP": "#9467bd"}
-MARKERS = {"SVD": "o", "PSCP": "s", "SCP3": "^", "FSCP": "D"}
-COLOR_DENSE = "#d62728"
 
-# Ranks to sweep for each method
-RANK_SWEEP = {
-    "SVD": [4, 8, 12, 16, 24],
-    "PSCP": [6, 12, 24, 36, 48],
-    "SCP3": [4, 8, 16, 24],
-    "FSCP": [8, 16, 24, 48],
-}
+FIG_DIR = script_dir / "figures"
+CACHE_DIR_BASE = script_dir / "quality_cache_new"
+CACHE_DIR = CACHE_DIR_BASE  # overridden in main() when --hilbert
 
 
 # =========================================================================
 # Caching
 # =========================================================================
+
+def _rank_tag(rank) -> str:
+    if isinstance(rank, tuple):
+        return "_".join(str(r) for r in rank)
+    return str(rank)
+
 
 def save_result(result, name):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -110,59 +139,39 @@ def load_result(name):
 
 
 # =========================================================================
-# M_stacked construction per method
+# Fit + reconstruct per method
 # =========================================================================
 
-def build_M_approx(method, rank, M_ref, n_dof, dim_sc,
-                   d_pscp_full, v_pscp_full, fc3_raw, phonon):
-    if method == "SVD":
-        return svd_approximation(M_ref, rank)
-    elif method == "PSCP":
-        return pscp_reconstruct(d_pscp_full[:rank], v_pscp_full[:rank], n_dof, dim_sc)
-    elif method == "SCP3":
-        u_modes, lambdas, info = fit_supercell_cp(
-            fc3_raw, phonon, N_c=rank, max_iter=2000, verbose=False)
-        return scp3_reconstruct_M_stacked(
-            u_modes, lambdas, phonon, info["target_norm"], n_dof, dim_sc)
-    elif method == "FSCP":
-        v_modes, lambdas, info = fit_fscp(
-            fc3_raw, phonon, R=rank, max_iter=2000, verbose=False)
-        return fscp_reconstruct_M_stacked(
-            v_modes, lambdas, phonon, info["target_norm"], n_dof, dim_sc)
+def fit_and_reconstruct(method, rank, target):
+    """Run the fc3_compression fitter and return (M_stacked, rel_err, fit_time, n_params)."""
+    fitter = fc3c.FITTERS[method]
+    kw = dict(FIT_KWARGS.get(method, {}))
+    t0 = time.time()
+    if method == "HOSVD":
+        R1, R2 = rank
+        res = fitter(target, R1=R1, R2=R2, **kw)
+    else:
+        res = fitter(target, rank=rank, **kw)
+    fit_time = time.time() - t0
 
-
-def n_params_for(method, rank, n_dof, dim_sc):
-    if method == "SVD":
-        return svd_n_params(rank, n_dof, dim_sc)
-    elif method == "PSCP":
-        return pscp_n_params(rank, n_dof, dim_sc)
-    elif method == "SCP3":
-        return scp3_n_params(rank, dim_sc)
-    elif method == "FSCP":
-        return fscp_n_params(rank, dim_sc)
+    T_approx = fc3c.reconstruct(method, res, target)  # (n_dof, dim_sc, dim_sc)
+    M_stacked = T_approx.reshape(target.n_dof * target.dim_sc, target.dim_sc)
+    return M_stacked, float(res.rel_err), fit_time, int(res.n_params)
 
 
 # =========================================================================
 # Data collection
 # =========================================================================
 
-def collect_all(load_only=False):
-    phonon, _ = load_primitive_cell(work_dir, fc3_subdir=FC3_SUBDIR)
-    fc3_path = work_dir / FC3_SUBDIR / "fc3.hdf5"
+def collect_all(fc3_subdir: str, load_only: bool = False):
+    phonon, _ = load_primitive_cell(work_dir, fc3_subdir=fc3_subdir)
+    fc3_path = work_dir / fc3_subdir / "fc3.hdf5"
     with h5py.File(fc3_path, "r") as f:
         fc3_raw = np.array(f["fc3"])
 
-    nat_prim = len(phonon.primitive.masses)
-    n_super = len(phonon.supercell.masses)
-    n_dof = 3 * nat_prim
-    dim_sc = 3 * n_super
-    masses_super = phonon.supercell.masses
-
-    _, _, _, ref_sc_atoms = build_supercell_mapping(phonon)
-    M_ref = build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super, ref_sc_atoms)
-    M_norm = np.linalg.norm(M_ref, "fro")
-
-    d_pscp_full, v_pscp_full, _ = pscp_decomposition(M_ref, n_dof, dim_sc)
+    target = fc3c.build_fc3_target(fc3_raw, phonon)
+    print(f"FC3 target: n_dof={target.n_dof}, dim_sc={target.dim_sc}, "
+          f"||T||_F={target.target_norm:.4e}")
 
     results = {}
 
@@ -177,15 +186,16 @@ def collect_all(load_only=False):
         res = anharmonic_transmission_q(phonon, str(fc3_path), **TRANSPORT_KW)
         res["wall_time"] = time.time() - t0
         res["frob_err"] = 0.0
-        res["n_params"] = n_dof * dim_sc ** 2
+        res["n_params"] = target.n_dof * target.dim_sc ** 2
         save_result(res, "dense")
         results["dense"] = res
-        print(f"  G_anh = {res['thermal_conductance_anharmonic']/1e6:.2f} MW/(m^2 K)")
+        print(f"  G_anh = {res['thermal_conductance_anharmonic']/1e6:.2f} "
+              f"MW/(m^2 K)")
 
-    # --- Each method at various ranks ---
+    # --- Per-method rank sweeps ---
     for method in METHODS:
         for rank in RANK_SWEEP[method]:
-            key = f"{method}_R{rank}"
+            key = f"{method}_R{_rank_tag(rank)}"
             cached = load_result(key)
             if cached is not None:
                 print(f"[cached] {key}")
@@ -195,26 +205,23 @@ def collect_all(load_only=False):
                 continue
 
             print(f"\nRunning {method} R={rank}...")
-            t0_fit = time.time()
-            M_approx = build_M_approx(
-                method, rank, M_ref, n_dof, dim_sc,
-                d_pscp_full, v_pscp_full, fc3_raw, phonon)
-            frob_err = np.linalg.norm(M_ref - M_approx, "fro") / M_norm
-            t_fit = time.time() - t0_fit
+            M_approx, frob_err, fit_time, n_params = fit_and_reconstruct(
+                method, rank, target)
 
             t0 = time.time()
             res = anharmonic_transmission_q(
                 phonon, M_stacked_override=M_approx, **TRANSPORT_KW)
             res["wall_time"] = time.time() - t0
-            res["fit_time"] = t_fit
+            res["fit_time"] = fit_time
             res["frob_err"] = frob_err
-            res["n_params"] = n_params_for(method, rank, n_dof, dim_sc)
+            res["n_params"] = n_params
             save_result(res, key)
             results[key] = res
 
             G = res["thermal_conductance_anharmonic"]
-            print(f"  {key}: frob={frob_err:.4e}, "
-                  f"G_anh={G/1e6:.2f} MW/(m^2K) ({res['wall_time']:.0f}s)")
+            print(f"  {key}: frob={frob_err:.4e}, params={n_params}, "
+                  f"G_anh={G/1e6:.2f} MW/(m^2K) "
+                  f"({fit_time:.1f}s fit + {res['wall_time']:.0f}s transport)")
 
     return results
 
@@ -230,13 +237,28 @@ def _get(r, key, default=np.nan):
     return float(v) if np.isscalar(v) else v
 
 
+def _rank_to_scalar(rank):
+    if isinstance(rank, tuple):
+        return int(max(rank))
+    return int(rank)
+
+
+def _parse_rank(s: str):
+    """Inverse of _rank_tag: 'R8' or 'R3_8'."""
+    parts = s.split("_")
+    if len(parts) == 1:
+        return int(parts[0])
+    return tuple(int(p) for p in parts)
+
+
 def _method_data(results, method):
+    prefix = f"{method}_R"
     pairs = []
     for key, val in results.items():
-        if key.startswith(f"{method}_R"):
-            rank = int(key.split("R")[-1])
+        if key.startswith(prefix):
+            rank = _parse_rank(key[len(prefix):])
             pairs.append((rank, val))
-    pairs.sort(key=lambda x: x[0])
+    pairs.sort(key=lambda x: _rank_to_scalar(x[0]))
     return pairs
 
 
@@ -253,7 +275,6 @@ def _save(fig, name):
 # =========================================================================
 
 def fig_ganh_absolute(results):
-    """Absolute G_anh vs rank + relative transport error."""
     G_dense = _get(results["dense"], "thermal_conductance_anharmonic") / 1e6
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
@@ -266,7 +287,7 @@ def fig_ganh_absolute(results):
         data = _method_data(results, method)
         if not data:
             continue
-        ranks = [d[0] for d in data]
+        ranks = [_rank_to_scalar(d[0]) for d in data]
         G_vals = [_get(d[1], "thermal_conductance_anharmonic") / 1e6 for d in data]
         ax1.plot(ranks, G_vals, f"-{MARKERS[method]}", color=COLORS[method],
                  lw=1.5, ms=7, label=method)
@@ -281,7 +302,7 @@ def fig_ganh_absolute(results):
         data = _method_data(results, method)
         if not data:
             continue
-        ranks = [d[0] for d in data]
+        ranks = [_rank_to_scalar(d[0]) for d in data]
         errs = [abs(_get(d[1], "thermal_conductance_anharmonic") / 1e6 - G_dense)
                 / G_dense * 100 for d in data]
         ax2.semilogy(ranks, errs, f"-{MARKERS[method]}", color=COLORS[method],
@@ -298,7 +319,6 @@ def fig_ganh_absolute(results):
 
 
 def fig_error_vs_params(results):
-    """Frobenius error and transport error vs number of parameters."""
     G_dense = _get(results["dense"], "thermal_conductance_anharmonic")
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
@@ -311,10 +331,10 @@ def fig_error_vs_params(results):
         frob = [_get(d[1], "frob_err") for d in data]
         G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
                  / abs(G_dense) for d in data]
-        ax1.semilogy(n_params, frob, f"-{MARKERS[method]}", color=COLORS[method],
-                     lw=1.5, ms=7, label=method)
-        ax2.semilogy(n_params, G_err, f"-{MARKERS[method]}", color=COLORS[method],
-                     lw=1.5, ms=7, label=method)
+        ax1.loglog(n_params, frob, f"-{MARKERS[method]}", color=COLORS[method],
+                   lw=1.5, ms=7, label=method)
+        ax2.loglog(n_params, G_err, f"-{MARKERS[method]}", color=COLORS[method],
+                   lw=1.5, ms=7, label=method)
 
     ax1.set_xlabel("Number of parameters", fontsize=12)
     ax1.set_ylabel(r"$\|\Phi - \tilde\Phi\|_F / \|\Phi\|_F$", fontsize=12)
@@ -333,7 +353,6 @@ def fig_error_vs_params(results):
 
 
 def fig_frob_vs_transport(results):
-    """Frobenius error vs transport error correlation."""
     G_dense = _get(results["dense"], "thermal_conductance_anharmonic")
     fig, ax = plt.subplots(figsize=(7, 5.5))
 
@@ -344,16 +363,17 @@ def fig_frob_vs_transport(results):
         frob = [_get(d[1], "frob_err") for d in data]
         G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
                  / abs(G_dense) for d in data]
-        ranks = [d[0] for d in data]
         ax.loglog(frob, G_err, MARKERS[method], color=COLORS[method],
                   ms=9, label=method)
-        for i, R in enumerate(ranks):
+        for i, rank in enumerate(data):
+            R = _rank_to_scalar(rank[0])
             ax.annotate(f"$R={R}$", (frob[i], G_err[i]),
                         textcoords="offset points", xytext=(5, 4), fontsize=7,
                         color=COLORS[method])
 
     xx = np.logspace(-4, 0, 50)
     ax.plot(xx, xx, "k--", alpha=0.3, lw=1, label="1:1")
+    ax.plot(xx, xx ** 2, "k:", alpha=0.3, lw=1, label=r"$\varepsilon^2$")
     ax.set_xlabel(r"Frobenius error $\|\Phi - \tilde\Phi\|_F / \|\Phi\|_F$", fontsize=12)
     ax.set_ylabel(r"Transport error $|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$",
                   fontsize=12)
@@ -365,7 +385,6 @@ def fig_frob_vs_transport(results):
 
 
 def fig_conservation(results):
-    """Conservation error bar chart."""
     fig, ax = plt.subplots(figsize=(10, 5))
 
     labels, conserv, bar_colors = [], [], []
@@ -377,7 +396,7 @@ def fig_conservation(results):
 
     for method in METHODS:
         for rank, res in _method_data(results, method):
-            labels.append(f"{method} R={rank}")
+            labels.append(f"{method} R={_rank_tag(rank)}")
             conserv.append(_get(res, "heat_flow_conservation") * 100)
             bar_colors.append(COLORS[method])
 
@@ -396,7 +415,6 @@ def fig_conservation(results):
 
 
 def fig_scba_convergence(results):
-    """SCBA convergence history."""
     fig, ax = plt.subplots(figsize=(7, 5))
 
     if "dense" in results:
@@ -406,9 +424,15 @@ def fig_scba_convergence(results):
             ax.semilogy(np.arange(2, 2 + len(conv)), conv, "-", color=COLOR_DENSE,
                         lw=2, label="Dense", marker=".", ms=4)
 
-    repr_ranks = {"SVD": 8, "PSCP": 24, "SCP3": 8, "FSCP": 16}
+    repr_ranks = {
+        "mSVD":    16,
+        "HOSVD":   (6, 16),
+        "CP":      24,
+        "INDSCAL": 24,
+        "Waring":  24,
+    }
     for method in METHODS:
-        key = f"{method}_R{repr_ranks[method]}"
+        key = f"{method}_R{_rank_tag(repr_ranks[method])}"
         if key not in results:
             continue
         conv = results[key].get("convergence_history", None)
@@ -417,7 +441,7 @@ def fig_scba_convergence(results):
         conv = np.asarray(conv)
         ax.semilogy(np.arange(2, 2 + len(conv)), conv, f"-{MARKERS[method]}",
                     color=COLORS[method], lw=1.5, ms=5,
-                    label=f"{method} $R={repr_ranks[method]}$")
+                    label=f"{method} $R={_rank_tag(repr_ranks[method])}$")
 
     ax.axhline(TRANSPORT_KW["scba_tol"], color="gray", lw=0.8, ls="--", alpha=0.5)
     ax.set_xlabel("SCBA iteration", fontsize=12)
@@ -430,7 +454,6 @@ def fig_scba_convergence(results):
 
 
 def fig_spectral_current(results):
-    """Spectral heat current: absolute and difference from dense."""
     if "dense" not in results:
         return
 
@@ -445,19 +468,23 @@ def fig_spectral_current(results):
     ax1.plot(freqs, J_ref, "-", color=COLOR_DENSE, lw=2, label="Dense")
 
     repr_configs = [
-        ("SVD", 8, "-"), ("SVD", 24, "--"),
-        ("PSCP", 24, "-"),
-        ("SCP3", 8, "-"), ("SCP3", 24, "--"),
-        ("FSCP", 16, "-"), ("FSCP", 48, "--"),
+        ("mSVD",    16,      "-"),
+        ("mSVD",    24,      "--"),
+        ("HOSVD",   (6, 16), "-"),
+        ("CP",      24,      "-"),
+        ("INDSCAL", 24,      "-"),
+        ("INDSCAL", 48,      "--"),
+        ("Waring",  24,      "-"),
+        ("Waring",  48,      "--"),
     ]
     for method, rank, ls in repr_configs:
-        key = f"{method}_R{rank}"
+        key = f"{method}_R{_rank_tag(rank)}"
         if key not in results:
             continue
         r = results[key]
         ax1.plot(r["freqs_thz"], r["spectral_heat_current"],
                  ls, color=COLORS[method], lw=1.2,
-                 label=f"{method} $R={rank}$", alpha=0.85)
+                 label=f"{method} $R={_rank_tag(rank)}$", alpha=0.85)
 
     ax1.set_xlabel("Frequency (THz)", fontsize=12)
     ax1.set_ylabel("Spectral heat current (W/THz)", fontsize=12)
@@ -467,13 +494,13 @@ def fig_spectral_current(results):
     ax1.set_xlim(freqs[0], freqs[-1])
 
     for method, rank, ls in repr_configs:
-        key = f"{method}_R{rank}"
+        key = f"{method}_R{_rank_tag(rank)}"
         if key not in results:
             continue
         r = results[key]
         ax2.plot(r["freqs_thz"], r["spectral_heat_current"] - J_ref,
                  ls, color=COLORS[method], lw=1.2,
-                 label=f"{method} $R={rank}$", alpha=0.85)
+                 label=f"{method} $R={_rank_tag(rank)}$", alpha=0.85)
 
     ax2.axhline(0, color="gray", lw=0.5)
     ax2.set_xlabel("Frequency (THz)", fontsize=12)
@@ -488,7 +515,6 @@ def fig_spectral_current(results):
 
 
 def fig_spectral_current_lr(results):
-    """Left vs right contact spectral currents."""
     if "dense" not in results:
         return
 
@@ -504,8 +530,8 @@ def fig_spectral_current_lr(results):
     ax1.plot(freqs, J_L_dense, "-", color=COLOR_DENSE, lw=1.5, label="Dense $J_L$")
     ax1.plot(freqs, J_R_dense, "--", color=COLOR_DENSE, lw=1.5, label="Dense $J_R$")
 
-    for method, rank in [("SCP3", 8), ("SVD", 8)]:
-        key = f"{method}_R{rank}"
+    for method, rank in [("mSVD", 16), ("INDSCAL", 24), ("Waring", 24)]:
+        key = f"{method}_R{_rank_tag(rank)}"
         if key not in results:
             continue
         r = results[key]
@@ -513,9 +539,9 @@ def fig_spectral_current_lr(results):
         J_R = r.get("spectral_heat_current_R", None)
         if J_L is not None:
             ax1.plot(r["freqs_thz"], J_L, "-", color=COLORS[method], lw=1.2,
-                     label=f"{method} R={rank} $J_L$", alpha=0.8)
+                     label=f"{method} R={_rank_tag(rank)} $J_L$", alpha=0.8)
             ax1.plot(r["freqs_thz"], J_R, "--", color=COLORS[method], lw=1.2,
-                     label=f"{method} R={rank} $J_R$", alpha=0.8)
+                     label=f"{method} R={_rank_tag(rank)} $J_R$", alpha=0.8)
 
     ax1.set_xlabel("Frequency (THz)", fontsize=12)
     ax1.set_ylabel("Spectral heat current (W/THz)", fontsize=12)
@@ -524,9 +550,10 @@ def fig_spectral_current_lr(results):
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(freqs[0], freqs[-1])
 
-    ax2.plot(freqs, J_L_dense - J_R_dense, "-", color=COLOR_DENSE, lw=1.5, label="Dense")
-    for method, rank in [("SVD", 8), ("SCP3", 8), ("FSCP", 16)]:
-        key = f"{method}_R{rank}"
+    ax2.plot(freqs, J_L_dense - J_R_dense, "-", color=COLOR_DENSE, lw=1.5,
+             label="Dense")
+    for method, rank in [("mSVD", 16), ("INDSCAL", 24), ("Waring", 24)]:
+        key = f"{method}_R{_rank_tag(rank)}"
         if key not in results:
             continue
         r = results[key]
@@ -535,7 +562,7 @@ def fig_spectral_current_lr(results):
         if J_L is not None:
             ax2.plot(r["freqs_thz"], J_L - J_R, f"-{MARKERS[method]}",
                      color=COLORS[method], lw=1.2, ms=3,
-                     label=f"{method} $R={rank}$", alpha=0.8)
+                     label=f"{method} $R={_rank_tag(rank)}$", alpha=0.8)
 
     ax2.axhline(0, color="gray", lw=0.5)
     ax2.set_xlabel("Frequency (THz)", fontsize=12)
@@ -550,12 +577,7 @@ def fig_spectral_current_lr(results):
 
 
 def fig_hilbert_comparison():
-    """Compare instantaneous vs Hilbert-transform retarded self-energy.
-
-    Loads cached results from both cache directories (with and without
-    --hilbert) and plots the difference.  Skips silently if either is
-    missing.
-    """
+    """Compare instantaneous vs Hilbert-transform retarded self-energy."""
     cache_plain = CACHE_DIR_BASE
     cache_hilb = CACHE_DIR_BASE.parent / (CACHE_DIR_BASE.name + "_hilbert")
 
@@ -585,19 +607,18 @@ def fig_hilbert_comparison():
     ax1.plot(freqs, J_hilb, "--", color="#1f77b4", lw=2,
              label=r"Dense (Hilbert $\Sigma^R$)")
 
-    # Also compare representative approximations if available
-    for method, rank, ls in [("SCP3", 8, "-"), ("SVD", 8, "-")]:
-        key = f"{method}_R{rank}"
+    for method, rank, ls in [("INDSCAL", 24, "-"), ("mSVD", 16, "-")]:
+        key = f"{method}_R{_rank_tag(rank)}"
         rp = _load_from(cache_plain, key)
         rh = _load_from(cache_hilb, key)
         if rp is not None:
             ax1.plot(rp["freqs_thz"], rp["spectral_heat_current"],
                      ls, color=COLORS[method], lw=1, alpha=0.6,
-                     label=f"{method} R={rank} (inst.)")
+                     label=f"{method} R={_rank_tag(rank)} (inst.)")
         if rh is not None:
             ax1.plot(rh["freqs_thz"], rh["spectral_heat_current"],
                      "--", color=COLORS[method], lw=1, alpha=0.6,
-                     label=f"{method} R={rank} (Hilb.)")
+                     label=f"{method} R={_rank_tag(rank)} (Hilb.)")
 
     ax1.set_xlabel("Frequency (THz)", fontsize=12)
     ax1.set_ylabel("Spectral heat current (W/THz)", fontsize=12)
@@ -606,17 +627,16 @@ def fig_hilbert_comparison():
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(freqs[0], freqs[-1])
 
-    ax2.plot(freqs, J_hilb - J_plain, "-", color="#1f77b4", lw=2,
-             label="Dense")
-    for method, rank in [("SCP3", 8), ("SVD", 8)]:
-        key = f"{method}_R{rank}"
+    ax2.plot(freqs, J_hilb - J_plain, "-", color="#1f77b4", lw=2, label="Dense")
+    for method, rank in [("INDSCAL", 24), ("mSVD", 16)]:
+        key = f"{method}_R{_rank_tag(rank)}"
         rp = _load_from(cache_plain, key)
         rh = _load_from(cache_hilb, key)
         if rp is not None and rh is not None:
             ax2.plot(rp["freqs_thz"],
                      rh["spectral_heat_current"] - rp["spectral_heat_current"],
                      f"-{MARKERS[method]}", color=COLORS[method], lw=1, ms=3,
-                     label=f"{method} R={rank}")
+                     label=f"{method} R={_rank_tag(rank)}")
 
     ax2.axhline(0, color="gray", lw=0.5)
     ax2.set_xlabel("Frequency (THz)", fontsize=12)
@@ -638,15 +658,15 @@ def fig_hilbert_comparison():
 def print_summary(results):
     G_dense = _get(results["dense"], "thermal_conductance_anharmonic")
 
-    print(f"\n{'Method':<10} {'R':>4} {'Params':>8} {'Frob%':>8} "
+    print(f"\n{'Method':<10} {'R':>8} {'Params':>8} {'Frob%':>8} "
           f"{'G [MW/m2K]':>12} {'G_err%':>8} {'Conserv%':>9} {'Time':>6}")
-    print("-" * 72)
+    print("-" * 78)
 
     c = _get(results["dense"], "heat_flow_conservation") * 100
     t = _get(results["dense"], "wall_time")
-    print(f"{'Dense':<10} {'--':>4} {'--':>8} {'--':>8} "
+    print(f"{'Dense':<10} {'--':>8} {'--':>8} {'--':>8} "
           f"{G_dense/1e6:>12.2f} {'0.00':>8} {c:>9.2f} {t:>6.0f}")
-    print("-" * 72)
+    print("-" * 78)
 
     for method in METHODS:
         for rank, res in _method_data(results, method):
@@ -656,9 +676,9 @@ def print_summary(results):
             c = _get(res, "heat_flow_conservation") * 100
             t = _get(res, "wall_time")
             n_p = int(_get(res, "n_params"))
-            print(f"{method:<10} {rank:>4} {n_p:>8} {frob:>8.2f} "
+            print(f"{method:<10} {_rank_tag(rank):>8} {n_p:>8} {frob:>8.2f} "
                   f"{G/1e6:>12.2f} {G_err:>8.2f} {c:>9.2f} {t:>6.0f}")
-        print("-" * 72)
+        print("-" * 78)
 
 
 # =========================================================================
@@ -668,13 +688,25 @@ def print_summary(results):
 def main():
     global CACHE_DIR
 
-    use_hilbert = "--hilbert" in sys.argv
-    if use_hilbert:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--load", action="store_true",
+                        help="regenerate plots from cache only")
+    parser.add_argument("--hilbert", action="store_true",
+                        help="use Hilbert-transform retarded self-energy")
+    parser.add_argument("--fc3-subdir", default="fc3_prim_vasp",
+                        help="FC3 dataset subdirectory under input_calc/ "
+                             "(default: fc3_prim_vasp; use fc3_prim for 2x2x2)")
+    args = parser.parse_args()
+
+    if args.hilbert:
         CACHE_DIR = CACHE_DIR_BASE.parent / (CACHE_DIR_BASE.name + "_hilbert")
         TRANSPORT_KW["hilbert_retarded"] = True
         print("*** Hilbert-transform retarded self-energy enabled ***")
 
-    results = collect_all(load_only="--load" in sys.argv)
+    print(f"FC3 dataset: {args.fc3_subdir}")
+    print(f"Cache dir:   {CACHE_DIR}")
+
+    results = collect_all(fc3_subdir=args.fc3_subdir, load_only=args.load)
 
     if "dense" not in results:
         print("ERROR: no dense reference. Run without --load first.")
