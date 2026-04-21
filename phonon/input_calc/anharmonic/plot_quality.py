@@ -154,7 +154,7 @@ def fit_and_reconstruct(method, rank, target):
         res = fitter(target, rank=rank, **kw)
     fit_time = time.time() - t0
 
-    T_approx = fc3c.reconstruct(method, res, target)  # (n_dof, dim_sc, dim_sc)
+    T_approx = fc3c.reconstruct(res, target)  # (n_dof, dim_sc, dim_sc)
     M_stacked = T_approx.reshape(target.n_dof * target.dim_sc, target.dim_sc)
     return M_stacked, float(res.rel_err), fit_time, int(res.n_params)
 
