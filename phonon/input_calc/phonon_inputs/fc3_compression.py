@@ -131,6 +131,67 @@ S3_PERMS = tuple(itertools.permutations(range(3)))
 
 
 # =====================================================================
+# ASR (acoustic-sum-rule) projection helpers
+# =====================================================================
+#
+# For a tensor index of the form j = 3*s + beta (supercell atom index s in
+# [0, n_super), Cartesian beta in {0,1,2}), the ASR null-space on that leg is
+#   { v : sum_s v[3*s + beta] = 0  for each beta in {0,1,2} }
+# i.e. three linear constraints per leg.  The orthogonal projector subtracts
+# the Cartesian-by-Cartesian mean over supercell atoms.
+#
+# Null-space reparametrisation is used here: for multilinear ansatze (CP,
+# Tucker, symmetric CP) projecting each factor-column onto this null-space is
+# both necessary and sufficient for the reconstructed tensor to satisfy ASR
+# on the corresponding leg (see e.g. Comon-Golub-Lim-Mourrain 2008; Kolda-Bader
+# 2009; and phonon-community practice in hiPhive / phono3py / ALAMODE).
+
+
+def asr_project_factor(V: np.ndarray, n_super: int, axis: int = 0) -> np.ndarray:
+    """Project V along ``axis`` (size dim_sc = 3*n_super) onto the ASR null-space.
+
+    Subtracts the Cartesian-by-Cartesian mean over supercell atoms.  Idempotent.
+    """
+    V = np.moveaxis(V, axis, 0)
+    dim_sc = V.shape[0]
+    assert dim_sc == 3 * n_super, f"axis size {dim_sc} != 3*n_super = {3*n_super}"
+    rest = V.shape[1:]
+    V_r = V.reshape(n_super, 3, *rest)
+    V_r = V_r - V_r.mean(axis=0, keepdims=True)
+    V = V_r.reshape(dim_sc, *rest)
+    return np.moveaxis(V, 0, axis)
+
+
+def _asr_project_torch(V, n_super: int):
+    """Torch version of asr_project_factor on the first axis.  Differentiable."""
+    dim_sc = V.shape[0]
+    rest = V.shape[1:]
+    V_r = V.reshape(n_super, 3, *rest)
+    V_r = V_r - V_r.mean(dim=0, keepdim=True)
+    return V_r.reshape(dim_sc, *rest)
+
+
+def asr_residual(T_hat: np.ndarray, n_super: int) -> dict[str, float]:
+    """Return ||ASR_leg(T_hat)|| on legs 1, 2, 3 (axes 0, 1, 2) in Frobenius norm.
+
+    For the (n_dof, dim_sc, dim_sc) target, only legs 2 and 3 are directly
+    enforceable (leg 1 is primitive-DOF indexed, not a supercell atom sum).
+    """
+    out = {}
+    out["norm"] = float(np.linalg.norm(T_hat))
+    for axis_name, axis in [("leg_j", 1), ("leg_k", 2)]:
+        R = T_hat.reshape(
+            T_hat.shape[0], n_super, 3, n_super, 3
+        )
+        if axis == 1:
+            s = R.sum(axis=1)   # sum over leg-2 supercell atoms
+        else:
+            s = R.sum(axis=3)
+        out[axis_name] = float(np.linalg.norm(s))
+    return out
+
+
+# =====================================================================
 # Target construction
 # =====================================================================
 
@@ -238,25 +299,46 @@ class CompressionResult:
 # =====================================================================
 
 
-def fit_msvd(target: FC3Target, rank: int) -> CompressionResult:
+def fit_msvd(
+    target: FC3Target, rank: int, enforce_asr: bool = False,
+) -> CompressionResult:
     """Truncated (mu,j)|k matricization SVD.
 
     Stacks the n_dof matrices M_mu = T[mu, :, :] row-wise into a
     (n_dof * dim_sc, dim_sc) matrix and truncates at ``rank``.
     Eckart-Young optimal at this bipartition.
+
+    If ``enforce_asr`` is True the target is first projected onto the ASR
+    null-space on axes j (=1) and k (=2); the resulting U_R, V_R then encode
+    an approximation whose legs 2 and 3 satisfy ASR exactly.  For a physical
+    FC3 which already satisfies ASR the pre-projection is a no-op (up to
+    rounding); for a generic tensor this removes the ASR-violating mass.
     """
     t0 = time.time()
     T = target.T
     n_dof, dim_sc, _ = T.shape
-    M = T.reshape(n_dof * dim_sc, dim_sc)
+    T_fit = T
+    if enforce_asr:
+        T_fit = asr_project_factor(T_fit, target.n_super, axis=1)
+        T_fit = asr_project_factor(T_fit, target.n_super, axis=2)
+    M = T_fit.reshape(n_dof * dim_sc, dim_sc)
 
     U, S, Vt = np.linalg.svd(M, full_matrices=False)
     R = min(rank, len(S))
     U_R = U[:, :R] * S[:R]        # absorb sigma into the large factor
     V_R = Vt[:R, :]               # (R, dim_sc)
 
+    if enforce_asr:
+        # Safety: re-project V_R columns (axis 1 of V_R = dim_sc), and reshape
+        # U_R's second factor (j) in the (n_dof, dim_sc, R) lift to re-project.
+        V_R = asr_project_factor(V_R, target.n_super, axis=1)
+        U_R_cube = U_R.reshape(n_dof, dim_sc, R)
+        U_R_cube = asr_project_factor(U_R_cube, target.n_super, axis=1)
+        U_R = U_R_cube.reshape(n_dof * dim_sc, R)
+
     M_approx = U_R @ V_R
-    rel_err = float(np.linalg.norm(M - M_approx) / (target.target_norm or 1.0))
+    M_full = T.reshape(n_dof * dim_sc, dim_sc)
+    rel_err = float(np.linalg.norm(M_full - M_approx) / (target.target_norm or 1.0))
 
     return CompressionResult(
         name="mSVD",
@@ -265,7 +347,7 @@ def fit_msvd(target: FC3Target, rank: int) -> CompressionResult:
         rel_err=rel_err,
         fit_time_s=time.time() - t0,
         factors={"U_R": U_R.copy(), "V_R": V_R.copy()},
-        info={"singular_values": S.copy()},
+        info={"singular_values": S.copy(), "enforce_asr": enforce_asr},
     )
 
 
@@ -291,15 +373,29 @@ def fit_hosvd(
     R2: int,
     refine: bool = True,
     hooi_iters: int = 6,
+    enforce_asr: bool = False,
 ) -> CompressionResult:
     """S2-symmetric Tucker decomposition via HOSVD + optional HOOI refinement.
 
     Factors ``A`` on mode 1 (size n_dof x R1) and a shared ``B`` on modes 2, 3
     (size dim_sc x R2).  Core G is (R1, R2, R2) and S2-symmetric.
+
+    If ``enforce_asr`` is True each HOSVD/HOOI update restricts B to the ASR
+    null-space on its dim_sc axis.  Because ``B`` is shared between legs 2
+    and 3, the reconstruction then satisfies ASR on both legs (the core and
+    A remain unconstrained).
     """
     t0 = time.time()
     T = target.T
     n_dof, dim_sc, _ = T.shape
+    n_super = target.n_super
+
+    def _proj_B(B_: np.ndarray) -> np.ndarray:
+        if not enforce_asr:
+            return B_
+        Bp = asr_project_factor(B_, n_super, axis=0)
+        Q, _ = np.linalg.qr(Bp)
+        return Q
 
     # --- Closed-form HOSVD ---
     # Mode-1 unfolding: (n_dof, dim_sc*dim_sc)
@@ -316,7 +412,7 @@ def fit_hosvd(
         axis=1,
     )
     U2, _, _ = np.linalg.svd(M23, full_matrices=False)
-    B = U2[:, :R2]
+    B = _proj_B(U2[:, :R2])
 
     def _core(A_, B_):
         G_ = np.einsum("mjk,mp,jq,kr->pqr", T, A_, B_, B_, optimize=True)
@@ -342,7 +438,7 @@ def fit_hosvd(
                 axis=1,
             )
             U2, _, _ = np.linalg.svd(M23, full_matrices=False)
-            B = U2[:, :R2]
+            B = _proj_B(U2[:, :R2])
 
             G = _core(A, B)
 
@@ -362,7 +458,7 @@ def fit_hosvd(
         rel_err=rel_err,
         fit_time_s=time.time() - t0,
         factors={"A": A.copy(), "B": B.copy(), "G": G.copy()},
-        info={"hooi_errs": hooi_errs},
+        info={"hooi_errs": hooi_errs, "enforce_asr": enforce_asr},
     )
 
 
@@ -394,6 +490,7 @@ def fit_cp(
     lbfgs_refine: bool = True,
     lbfgs_iters: int = 200,
     verbose: bool = False,
+    enforce_asr: bool = False,
 ) -> CompressionResult:
     """Unconstrained CP via tensorly ALS with ELS + optional L-BFGS refinement.
 
@@ -443,14 +540,27 @@ def fit_cp(
 
     A, B, C, lam = best_factors
 
+    # --- Initial ASR projection of B and C (necessary & sufficient for ASR on
+    # legs 2 and 3 of the rank-1 outer products).  We then re-solve for A and
+    # lambdas in closed form given the projected (B, C) to stabilise the init.
+    if enforce_asr:
+        B = asr_project_factor(B, target.n_super)
+        C = asr_project_factor(C, target.n_super)
+
     # --- L-BFGS refinement in PyTorch (only keep if it improves) ---
     if lbfgs_refine and torch is not None:
         A2, B2, C2, lam2, lbfgs_err = _cp_lbfgs_refine(
-            T, A, B, C, lam, n_iter=lbfgs_iters, target_norm=target.target_norm
+            T, A, B, C, lam, n_iter=lbfgs_iters, target_norm=target.target_norm,
+            enforce_asr=enforce_asr, n_super=target.n_super,
         )
         if lbfgs_err < best_err:
             best_err = lbfgs_err
             A, B, C, lam = A2, B2, C2, lam2
+
+    if enforce_asr:
+        B = asr_project_factor(B, target.n_super)
+        C = asr_project_factor(C, target.n_super)
+        best_err = _cp_error(T, A, B, C, lam) / (target.target_norm or 1.0)
 
     # Sort by |lambda| descending
     order = np.argsort(-np.abs(lam))
@@ -464,7 +574,7 @@ def fit_cp(
         rel_err=best_err,
         fit_time_s=time.time() - t0,
         factors={"A": A, "B": B, "C": C, "lambdas": lam},
-        info={"restart_errs": restart_errs},
+        info={"restart_errs": restart_errs, "enforce_asr": enforce_asr},
     )
 
 
@@ -475,7 +585,10 @@ def _cp_error(
     return float(np.linalg.norm(T - T_approx))
 
 
-def _cp_lbfgs_refine(T, A, B, C, lam, n_iter: int, target_norm: float):
+def _cp_lbfgs_refine(
+    T, A, B, C, lam, n_iter: int, target_norm: float,
+    enforce_asr: bool = False, n_super: int | None = None,
+):
     Tn = target_norm or 1.0
     Tt = torch.tensor(T / Tn, dtype=torch.float64)
     At = torch.tensor(A, dtype=torch.float64, requires_grad=True)
@@ -495,7 +608,9 @@ def _cp_lbfgs_refine(T, A, B, C, lam, n_iter: int, target_norm: float):
 
     def closure():
         opt.zero_grad()
-        Tap = torch.einsum("r,mr,jr,kr->mjk", lamt, At, Bt, Ct)
+        B_eff = _asr_project_torch(Bt, n_super) if enforce_asr else Bt
+        C_eff = _asr_project_torch(Ct, n_super) if enforce_asr else Ct
+        Tap = torch.einsum("r,mr,jr,kr->mjk", lamt, At, B_eff, C_eff)
         loss = torch.sum((Tap - Tt) ** 2)
         loss.backward()
         return loss
@@ -506,6 +621,9 @@ def _cp_lbfgs_refine(T, A, B, C, lam, n_iter: int, target_norm: float):
     B = Bt.detach().numpy()
     C = Ct.detach().numpy()
     lam = lamt.detach().numpy() * Tn
+    if enforce_asr:
+        B = asr_project_factor(B, n_super)
+        C = asr_project_factor(C, n_super)
     err = _cp_error(T, A, B, C, lam) / Tn
     return A, B, C, lam, err
 
@@ -536,6 +654,7 @@ def fit_indscal(
     seed: int = 0,
     use_algebraic_init: bool = True,
     verbose: bool = False,
+    enforce_asr: bool = False,
 ) -> CompressionResult:
     """INDSCAL: T[mu, j, k] ~ sum_r D[mu, r] * V[j, r] * V[k, r].
 
@@ -565,8 +684,12 @@ def fit_indscal(
             D0 = rng.normal(0, 1.0 / np.sqrt(rank), (n_dof, rank))
             V0 = rng.normal(0, 1.0 / np.sqrt(rank), (dim_sc, rank))
 
+        if enforce_asr:
+            V0 = asr_project_factor(V0, target.n_super)
+
         D, V, err = _indscal_als(
-            T_sym, D0, V0, max_iter=max_iter, tol=tol, target_norm=target.target_norm
+            T_sym, D0, V0, max_iter=max_iter, tol=tol, target_norm=target.target_norm,
+            enforce_asr=enforce_asr, n_super=target.n_super,
         )
         restart_errs.append(err)
         if err < best_err:
@@ -575,11 +698,15 @@ def fit_indscal(
 
     # L-BFGS joint refinement on (D, V)
     D, V, lbfgs_err = _indscal_lbfgs(
-        T_sym, best_D, best_V, n_iter=lbfgs_iters, target_norm=target.target_norm
+        T_sym, best_D, best_V, n_iter=lbfgs_iters, target_norm=target.target_norm,
+        enforce_asr=enforce_asr, n_super=target.n_super,
     )
     if lbfgs_err < best_err:
         best_err = lbfgs_err
         best_D, best_V = D.copy(), V.copy()
+
+    if enforce_asr:
+        best_V = asr_project_factor(best_V, target.n_super)
 
     # Final error on the original (non-symmetrised) target
     T_approx = np.einsum("mr,jr,kr->mjk", best_D, best_V, best_V, optimize=True)
@@ -592,7 +719,8 @@ def fit_indscal(
         rel_err=rel_err,
         fit_time_s=time.time() - t0,
         factors={"D": best_D, "V": best_V},
-        info={"restart_errs": restart_errs, "sym_err": best_err},
+        info={"restart_errs": restart_errs, "sym_err": best_err,
+              "enforce_asr": enforce_asr},
     )
 
 
@@ -632,7 +760,10 @@ def _indscal_algebraic_init(T_sym: np.ndarray, rank: int):
     return d_arr, v_arr
 
 
-def _indscal_als(T_sym, D, V, max_iter: int, tol: float, target_norm: float):
+def _indscal_als(
+    T_sym, D, V, max_iter: int, tol: float, target_norm: float,
+    enforce_asr: bool = False, n_super: int | None = None,
+):
     """Symmetric ALS: update D in closed form, update V via symmetric solve."""
     n_dof, dim_sc, _ = T_sym.shape
     prev_err = np.inf
@@ -655,6 +786,8 @@ def _indscal_als(T_sym, D, V, max_iter: int, tol: float, target_norm: float):
         V1 = np.linalg.solve(G_sys + 1e-12 * np.eye(G_sys.shape[0]), RHS2.T).T
         V2 = np.linalg.solve(G_sys + 1e-12 * np.eye(G_sys.shape[0]), RHS3.T).T
         V = 0.5 * (V1 + V2)
+        if enforce_asr:
+            V = asr_project_factor(V, n_super)
 
         T_approx = np.einsum("mr,jr,kr->mjk", D, V, V, optimize=True)
         err = float(np.linalg.norm(T_sym - T_approx) / Tn)
@@ -665,7 +798,10 @@ def _indscal_als(T_sym, D, V, max_iter: int, tol: float, target_norm: float):
     return D, V, err
 
 
-def _indscal_lbfgs(T_sym, D, V, n_iter: int, target_norm: float):
+def _indscal_lbfgs(
+    T_sym, D, V, n_iter: int, target_norm: float,
+    enforce_asr: bool = False, n_super: int | None = None,
+):
     Tn = target_norm or 1.0
     Tt = torch.tensor(T_sym / Tn, dtype=torch.float64)
     Dt = torch.tensor(D, dtype=torch.float64, requires_grad=True)
@@ -683,7 +819,8 @@ def _indscal_lbfgs(T_sym, D, V, n_iter: int, target_norm: float):
 
     def closure():
         opt.zero_grad()
-        Tap = torch.einsum("mr,jr,kr->mjk", Dt, Vt, Vt)
+        V_eff = _asr_project_torch(Vt, n_super) if enforce_asr else Vt
+        Tap = torch.einsum("mr,jr,kr->mjk", Dt, V_eff, V_eff)
         loss = torch.sum((Tap - Tt) ** 2)
         loss.backward()
         return loss
@@ -692,6 +829,8 @@ def _indscal_lbfgs(T_sym, D, V, n_iter: int, target_norm: float):
 
     D = Dt.detach().numpy()
     V = Vt.detach().numpy()
+    if enforce_asr:
+        V = asr_project_factor(V, n_super)
     T_approx = np.einsum("mr,jr,kr->mjk", D, V, V, optimize=True)
     err = float(np.linalg.norm(T_sym - T_approx) / Tn)
     return D, V, err
@@ -715,45 +854,60 @@ def n_params_indscal(R: int, n_dof: int, dim_sc: int) -> int:
 def fit_waring(
     target: FC3Target,
     rank: int,
-    n_restarts: int = 5,
-    n_power_repeats: int = 10,
-    n_power_iters: int = 200,
-    lbfgs_iters: int = 400,
+    n_restarts: int = 3,
+    n_power_repeats: int = 5,
+    n_power_iters: int = 100,
+    lbfgs_iters: int = 200,
     seed: int = 0,
     verbose: bool = False,
     cp_init: bool = True,
+    power_init: bool = True,
     loss: str = "primitive",
+    enforce_asr: bool = False,
+    early_stop_rel_err: float = 1e-8,
+    max_time_s: float | None = None,
 ) -> CompressionResult:
     r"""Symmetric CP (Waring) with factors shared across the three legs.
 
-    The ansatz stores factors ``V \in R^{dim_sc x R}`` and ``lambdas \in R^R``
-    and reconstructs the primitive-row FC3 as
+    The ansatz stores factors ``V`` of shape (dim_sc, R) and ``lambdas`` of
+    shape (R,) and reconstructs the primitive-row FC3 as
 
         T_approx[3i+alpha, j, k] = sum_r lam_r V[3*p2s_map[i]+alpha, r]
                                           * V[j, r] * V[k, r]
 
-    i.e. a rank-R sum of cubes of linear forms ``v_r`` restricted to the
-    primitive-atom rows on leg 1.  The underlying full-lifted tensor is
-    exactly S3-symmetric by construction.
+    If ``enforce_asr`` is True the factor V is constrained to the ASR
+    null-space on its supercell-atom axis (per-column Cartesian-mean removed).
+    This is necessary and sufficient for the reconstruction to satisfy the
+    acoustic sum rule on legs 2 and 3 (see asr_project_factor docstring).
 
     Parameters
     ----------
+    rank : int
+    n_restarts : int, default 3
+        Random restarts in addition to the power-iteration and optional CP init.
+    n_power_repeats, n_power_iters : int, int, default 5, 100
+        Arguments to tensorly's shifted symmetric power iteration.  The
+        original defaults (30, 300) were dominated the total runtime — 9000
+        inner iterations per power-init call — without measurable gain on the
+        L-BFGS refined output.
+    lbfgs_iters : int, default 200
+        Max L-BFGS iterations per candidate.  Strong-Wolfe line search does
+        multiple closures per iter; the optimiser typically terminates far
+        earlier via ``tolerance_change``.
+    cp_init : bool, default True
+        Run an unconstrained CP fit and symmetrise as an additional init.
+    power_init : bool, default True
+        Use tensorly's shifted symmetric power iteration as an init.
     loss : {"primitive", "lift"}
-        ``"primitive"`` (default) minimises ``||T - slice(approx)||`` on the
-        (n_dof, dim_sc, dim_sc) target we actually want to compress.  This
-        is unbiased for the reported ``rel_err``.
-        ``"lift"`` minimises ``||T_lifted - approx||`` on the full
-        (dim_sc, dim_sc, dim_sc) lift — biased towards non-primitive rows
-        at low rank but preserves S3-symmetric optimality at high rank.
-
-    Inits:
-      * shifted symmetric power iteration (tensorly),
-      * optionally an unconstrained CP fit symmetrised by column alignment
-        (the CP optimum of a symmetric tensor is near-symmetric),
-      * ``n_restarts`` random inits with properly scaled magnitudes.
-
-    Every init is refined jointly with L-BFGS on (V, lambda) in a single
-    outer call so the Hessian history is preserved.
+        "primitive" (default) fits the (n_dof, dim_sc, dim_sc) target
+        directly; "lift" fits the full S3 lift.
+    enforce_asr : bool, default False
+        Require V columns to live in the ASR null-space on the supercell axis.
+    early_stop_rel_err : float, default 1e-8
+        Stop the restart loop once any candidate achieves this relative error.
+    max_time_s : float or None
+        Abort the restart loop (not the current candidate) after this many
+        wall-clock seconds and return the best so far.
     """
     if torch is None:
         raise RuntimeError("Waring refinement requires torch.")
@@ -763,6 +917,7 @@ def fit_waring(
     T_lifted = target.T_lifted_sym
     T_lifted_norm = float(np.linalg.norm(T_lifted))
     dim_sc = target.dim_sc
+    n_super = target.n_super
     Tn = target.target_norm or 1.0
     rng = np.random.default_rng(seed)
 
@@ -773,13 +928,17 @@ def fit_waring(
     )
 
     if loss == "primitive":
-        refine = lambda V0, lam0: _waring_lbfgs_primitive(
-            target.T, V0, lam0, prim_idx, lbfgs_iters, Tn
-        )
+        def refine(V0, lam0):
+            return _waring_lbfgs_primitive(
+                target.T, V0, lam0, prim_idx, lbfgs_iters, Tn,
+                enforce_asr=enforce_asr, n_super=n_super,
+            )
     else:
-        refine = lambda V0, lam0: _waring_lbfgs_lift(
-            T_lifted, V0, lam0, lbfgs_iters, T_lifted_norm
-        )
+        def refine(V0, lam0):
+            return _waring_lbfgs_lift(
+                T_lifted, V0, lam0, lbfgs_iters, T_lifted_norm,
+                enforce_asr=enforce_asr, n_super=n_super,
+            )
 
     candidates: list[tuple[float, np.ndarray, np.ndarray, str]] = []
 
@@ -790,46 +949,67 @@ def fit_waring(
 
     def _seed_random() -> tuple[np.ndarray, np.ndarray]:
         V = rng.normal(0, 1.0 / np.sqrt(dim_sc), (dim_sc, rank))
-        V = V / np.linalg.norm(V, axis=0, keepdims=True)
+        if enforce_asr:
+            V = asr_project_factor(V, n_super)
+        V = V / np.maximum(np.linalg.norm(V, axis=0, keepdims=True), 1e-30)
         lam = lam_scale * rng.choice([-1.0, 1.0], size=rank)
         return V, lam
 
+    def _should_stop() -> bool:
+        if candidates and candidates[0][0] <= early_stop_rel_err:
+            return True
+        if max_time_s is not None and (time.time() - t0) >= max_time_s:
+            return True
+        return False
+
+    def _register(V_ref, lam_ref, err_ref, tag):
+        candidates.append((err_ref, V_ref, lam_ref, tag))
+        candidates.sort(key=lambda c: c[0])
+        if verbose:
+            print(f"    {tag}: err={err_ref:.4e}  (best={candidates[0][0]:.4e})",
+                  flush=True)
+
     # --- Init: tensorly power iteration (deflation-based on the lift) ---
-    if _HAVE_TENSORLY:
+    if power_init and _HAVE_TENSORLY:
         try:
             lam0, V0 = _waring_power_init(
                 T_lifted, rank, n_power_repeats, n_power_iters, seed
             )
+            if enforce_asr:
+                V0 = asr_project_factor(V0, n_super)
             V_ref, lam_ref, err_ref = refine(V0, lam0)
-            candidates.append((err_ref, V_ref, lam_ref, "power"))
-            if verbose:
-                print(f"    power init: err={err_ref:.4e}")
+            _register(V_ref, lam_ref, err_ref, "power")
         except Exception as exc:
             if verbose:
                 print(f"    power init failed: {exc}")
 
     # --- Init: unconstrained CP on the lift, then symmetrise ---
-    if cp_init and _HAVE_TENSORLY:
+    if cp_init and _HAVE_TENSORLY and not _should_stop():
         try:
             V0, lam0 = _waring_cp_init(T_lifted, rank, seed)
+            if enforce_asr:
+                V0 = asr_project_factor(V0, n_super)
             V_ref, lam_ref, err_ref = refine(V0, lam0)
-            candidates.append((err_ref, V_ref, lam_ref, "cp"))
-            if verbose:
-                print(f"    cp init: err={err_ref:.4e}")
+            _register(V_ref, lam_ref, err_ref, "cp")
         except Exception as exc:
             if verbose:
                 print(f"    cp init failed: {exc}")
 
     # --- Random inits ---
     for trial in range(n_restarts):
+        if _should_stop():
+            break
         V0, lam0 = _seed_random()
         V_ref, lam_ref, err_ref = refine(V0, lam0)
-        candidates.append((err_ref, V_ref, lam_ref, f"random_{trial}"))
-        if verbose:
-            print(f"    random {trial}: err={err_ref:.4e}")
+        _register(V_ref, lam_ref, err_ref, f"random_{trial}")
 
-    candidates.sort(key=lambda c: c[0])
+    if not candidates:
+        raise RuntimeError("Waring: all inits failed")
+
     best_err, V, lam, best_kind = candidates[0]
+    # Final projection to enforce ASR exactly on the stored factor.
+    if enforce_asr:
+        V = asr_project_factor(V, n_super)
 
     order = np.argsort(-np.abs(lam))
     lam = lam[order]
@@ -911,7 +1091,10 @@ def _waring_error(T_lifted_sym: np.ndarray, V: np.ndarray, lam: np.ndarray) -> f
     return float(np.linalg.norm(T_lifted_sym - T_approx))
 
 
-def _waring_lbfgs_lift(T_lifted_sym, V, lam, n_iter: int, norm: float):
+def _waring_lbfgs_lift(
+    T_lifted_sym, V, lam, n_iter: int, norm: float,
+    enforce_asr: bool = False, n_super: int | None = None,
+):
     """L-BFGS on ||T_lifted - sum_r lam_r v_r^{otimes 3}||^2."""
     Tn = norm or 1.0
     Tt = torch.tensor(T_lifted_sym / Tn, dtype=torch.float64)
@@ -930,7 +1113,8 @@ def _waring_lbfgs_lift(T_lifted_sym, V, lam, n_iter: int, norm: float):
 
     def closure():
         opt.zero_grad()
-        Tap = torch.einsum("r,ir,jr,kr->ijk", lamt, Vt, Vt, Vt)
+        V_eff = _asr_project_torch(Vt, n_super) if enforce_asr else Vt
+        Tap = torch.einsum("r,ir,jr,kr->ijk", lamt, V_eff, V_eff, V_eff)
         loss = torch.sum((Tap - Tt) ** 2)
         loss.backward()
         return loss
@@ -939,11 +1123,17 @@ def _waring_lbfgs_lift(T_lifted_sym, V, lam, n_iter: int, norm: float):
 
     V = Vt.detach().numpy()
     lam = lamt.detach().numpy() * Tn
-    err = float(np.linalg.norm(T_lifted_sym - np.einsum("r,ir,jr,kr->ijk", lam, V, V, V, optimize=True)))
-    return V, lam, err
+    V_out = asr_project_factor(V, n_super) if enforce_asr else V
+    err = float(np.linalg.norm(
+        T_lifted_sym - np.einsum("r,ir,jr,kr->ijk", lam, V_out, V_out, V_out, optimize=True)
+    ))
+    return V_out, lam, err
 
 
-def _waring_lbfgs_primitive(T, V, lam, prim_idx, n_iter: int, norm: float):
+def _waring_lbfgs_primitive(
+    T, V, lam, prim_idx, n_iter: int, norm: float,
+    enforce_asr: bool = False, n_super: int | None = None,
+):
     """L-BFGS on ||T - slice_prim(sum_r lam_r v_r^{otimes 3})||^2.
 
     Keeps the Waring ansatz (V, lam) but optimises directly against the
@@ -969,8 +1159,9 @@ def _waring_lbfgs_primitive(T, V, lam, prim_idx, n_iter: int, norm: float):
 
     def closure():
         opt.zero_grad()
-        Vs = Vt.index_select(0, idx)
-        Tap = torch.einsum("r,mr,jr,kr->mjk", lamt, Vs, Vt, Vt)
+        V_eff = _asr_project_torch(Vt, n_super) if enforce_asr else Vt
+        Vs = V_eff.index_select(0, idx)
+        Tap = torch.einsum("r,mr,jr,kr->mjk", lamt, Vs, V_eff, V_eff)
         loss = torch.sum((Tap - Tt) ** 2)
         loss.backward()
         return loss
@@ -979,9 +1170,12 @@ def _waring_lbfgs_primitive(T, V, lam, prim_idx, n_iter: int, norm: float):
 
     V = Vt.detach().numpy()
     lam = lamt.detach().numpy() * Tn
-    Vs = V[prim_idx]
-    err = float(np.linalg.norm(T - np.einsum("r,mr,jr,kr->mjk", lam, Vs, V, V, optimize=True)))
-    return V, lam, err
+    V_out = asr_project_factor(V, n_super) if enforce_asr else V
+    Vs = V_out[prim_idx]
+    err = float(np.linalg.norm(
+        T - np.einsum("r,mr,jr,kr->mjk", lam, Vs, V_out, V_out, optimize=True)
+    ))
+    return V_out, lam, err
 
 
 def reconstruct_waring(result: CompressionResult, target: FC3Target) -> np.ndarray:

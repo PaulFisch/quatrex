@@ -674,7 +674,7 @@ def _compute_phph_self_energy_finite(
     del G_pad, G_l_clean, G_g_clean
 
     PL_flat = Phi.reshape(nd2, nd)
-    PR_flat = Phi.conj().reshape(nd, nd2)
+    PR_flat = Phi.reshape(nd, nd2)
 
     sig_l = np.zeros((n_freq, nd, nd), dtype=complex)
     sig_g = np.zeros_like(sig_l)
@@ -714,7 +714,7 @@ def _se_worker_iq(args):
     for idx, iq_ext in enumerate(iq_ext_list):
         iq_diff_arr = q_diff_map[iq_ext]
         PL_all = Phi_all[iq_prime_all, iq_diff_arr]
-        PR_all = np.conj(Phi_all[iq_diff_arr, iq_prime_all])
+        PR_all = Phi_all[iq_diff_arr, iq_prime_all]
 
         for G_fft, sig_out in [(GL_fft, sig_l), (GG_fft, sig_g)]:
             S_hat = np.zeros((n_fft, nd, nd), dtype=complex)

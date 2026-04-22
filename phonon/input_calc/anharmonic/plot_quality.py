@@ -57,6 +57,17 @@ MARKERS = {
 }
 COLOR_DENSE = "#d62728"
 
+# Variants: unconstrained ("plain") and ASR-enforced ("asr"). Plain variant
+# keeps the existing cache-key convention (no suffix) for backward compatibility;
+# ASR variant uses cache suffix "_ASR" and a dashed linestyle so both appear on
+# the same axes.
+VARIANTS = [
+    {"tag": "plain", "suffix": "",     "ls": "-",  "label": "",       "alpha": 1.0,
+     "fit_kw": {}},
+    {"tag": "asr",   "suffix": "_ASR", "ls": "--", "label": " (ASR)", "alpha": 0.75,
+     "fit_kw": {"enforce_asr": True}},
+]
+
 # Rank sweep per method. HOSVD ranks are (R1, R2) tuples.
 RANK_SWEEP = {
     "mSVD":    [4, 8, 12, 16, 24, 36],
@@ -73,8 +84,8 @@ FIT_KWARGS = {
     "HOSVD":   {"refine": True, "hooi_iters": 12},
     "CP":      {"n_restarts": 10, "max_iter": 800, "lbfgs_iters": 500},
     "INDSCAL": {"n_restarts": 8,  "max_iter": 800, "lbfgs_iters": 600},
-    "Waring":  {"n_restarts": 10, "n_power_repeats": 30,
-                "n_power_iters": 300, "lbfgs_iters": 600},
+    "Waring":  {"n_restarts": 5,  "n_power_repeats": 10,
+                "n_power_iters": 200, "lbfgs_iters": 400},
 }
 
 
@@ -142,10 +153,11 @@ def load_result(name):
 # Fit + reconstruct per method
 # =========================================================================
 
-def fit_and_reconstruct(method, rank, target):
+def fit_and_reconstruct(method, rank, target, variant):
     """Run the fc3_compression fitter and return (M_stacked, rel_err, fit_time, n_params)."""
     fitter = fc3c.FITTERS[method]
     kw = dict(FIT_KWARGS.get(method, {}))
+    kw.update(variant["fit_kw"])
     t0 = time.time()
     if method == "HOSVD":
         R1, R2 = rank
@@ -192,36 +204,37 @@ def collect_all(fc3_subdir: str, load_only: bool = False):
         print(f"  G_anh = {res['thermal_conductance_anharmonic']/1e6:.2f} "
               f"MW/(m^2 K)")
 
-    # --- Per-method rank sweeps ---
+    # --- Per-method rank sweeps (over unconstrained and ASR-enforced variants) ---
     for method in METHODS:
-        for rank in RANK_SWEEP[method]:
-            key = f"{method}_R{_rank_tag(rank)}"
-            cached = load_result(key)
-            if cached is not None:
-                print(f"[cached] {key}")
-                results[key] = cached
-                continue
-            if load_only:
-                continue
+        for variant in VARIANTS:
+            for rank in RANK_SWEEP[method]:
+                key = f"{method}{variant['suffix']}_R{_rank_tag(rank)}"
+                cached = load_result(key)
+                if cached is not None:
+                    print(f"[cached] {key}")
+                    results[key] = cached
+                    continue
+                if load_only:
+                    continue
 
-            print(f"\nRunning {method} R={rank}...")
-            M_approx, frob_err, fit_time, n_params = fit_and_reconstruct(
-                method, rank, target)
+                print(f"\nRunning {method}{variant['suffix']} R={rank}...")
+                M_approx, frob_err, fit_time, n_params = fit_and_reconstruct(
+                    method, rank, target, variant)
 
-            t0 = time.time()
-            res = anharmonic_transmission_q(
-                phonon, M_stacked_override=M_approx, **TRANSPORT_KW)
-            res["wall_time"] = time.time() - t0
-            res["fit_time"] = fit_time
-            res["frob_err"] = frob_err
-            res["n_params"] = n_params
-            save_result(res, key)
-            results[key] = res
+                t0 = time.time()
+                res = anharmonic_transmission_q(
+                    phonon, M_stacked_override=M_approx, **TRANSPORT_KW)
+                res["wall_time"] = time.time() - t0
+                res["fit_time"] = fit_time
+                res["frob_err"] = frob_err
+                res["n_params"] = n_params
+                save_result(res, key)
+                results[key] = res
 
-            G = res["thermal_conductance_anharmonic"]
-            print(f"  {key}: frob={frob_err:.4e}, params={n_params}, "
-                  f"G_anh={G/1e6:.2f} MW/(m^2K) "
-                  f"({fit_time:.1f}s fit + {res['wall_time']:.0f}s transport)")
+                G = res["thermal_conductance_anharmonic"]
+                print(f"  {key}: frob={frob_err:.4e}, params={n_params}, "
+                      f"G_anh={G/1e6:.2f} MW/(m^2K) "
+                      f"({fit_time:.1f}s fit + {res['wall_time']:.0f}s transport)")
 
     return results
 
@@ -251,8 +264,15 @@ def _parse_rank(s: str):
     return tuple(int(p) for p in parts)
 
 
-def _method_data(results, method):
-    prefix = f"{method}_R"
+def _method_data(results, method, variant=None):
+    """Collect (rank, result) pairs for ``method`` and the requested ``variant``.
+
+    If ``variant`` is None, returns the plain (unconstrained) variant —
+    preserves prior behaviour for callers that don't care about ASR.
+    """
+    if variant is None:
+        variant = VARIANTS[0]
+    prefix = f"{method}{variant['suffix']}_R"
     pairs = []
     for key, val in results.items():
         if key.startswith(prefix):
@@ -284,34 +304,42 @@ def fig_ganh_absolute(results):
     ax1.axhspan(G_dense * 0.95, G_dense * 1.05, alpha=0.08, color="green")
 
     for method in METHODS:
-        data = _method_data(results, method)
-        if not data:
-            continue
-        ranks = [_rank_to_scalar(d[0]) for d in data]
-        G_vals = [_get(d[1], "thermal_conductance_anharmonic") / 1e6 for d in data]
-        ax1.plot(ranks, G_vals, f"-{MARKERS[method]}", color=COLORS[method],
-                 lw=1.5, ms=7, label=method)
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            ranks = [_rank_to_scalar(d[0]) for d in data]
+            G_vals = [_get(d[1], "thermal_conductance_anharmonic") / 1e6
+                      for d in data]
+            ax1.plot(ranks, G_vals,
+                     f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                     lw=1.5, ms=7, alpha=variant["alpha"],
+                     label=method + variant["label"])
 
     ax1.set_xlabel("Rank $R$", fontsize=12)
     ax1.set_ylabel(r"$G_{\mathrm{anh}}$ (MW/m$^2$K)", fontsize=12)
     ax1.set_title(r"(a) Thermal conductance vs rank")
-    ax1.legend(fontsize=9)
+    ax1.legend(fontsize=8, ncol=2)
     ax1.grid(True, alpha=0.3)
 
     for method in METHODS:
-        data = _method_data(results, method)
-        if not data:
-            continue
-        ranks = [_rank_to_scalar(d[0]) for d in data]
-        errs = [abs(_get(d[1], "thermal_conductance_anharmonic") / 1e6 - G_dense)
-                / G_dense * 100 for d in data]
-        ax2.semilogy(ranks, errs, f"-{MARKERS[method]}", color=COLORS[method],
-                     lw=1.5, ms=7, label=method)
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            ranks = [_rank_to_scalar(d[0]) for d in data]
+            errs = [abs(_get(d[1], "thermal_conductance_anharmonic") / 1e6 - G_dense)
+                    / G_dense * 100 for d in data]
+            ax2.semilogy(ranks, errs,
+                         f"{variant['ls']}{MARKERS[method]}",
+                         color=COLORS[method], lw=1.5, ms=7,
+                         alpha=variant["alpha"],
+                         label=method + variant["label"])
 
     ax2.set_xlabel("Rank $R$", fontsize=12)
     ax2.set_ylabel(r"$|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$ (%)", fontsize=12)
     ax2.set_title("(b) Relative transport error vs rank")
-    ax2.legend(fontsize=9)
+    ax2.legend(fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3, which="both")
 
     fig.tight_layout()
@@ -324,28 +352,33 @@ def fig_error_vs_params(results):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
 
     for method in METHODS:
-        data = _method_data(results, method)
-        if not data:
-            continue
-        n_params = [_get(d[1], "n_params") for d in data]
-        frob = [_get(d[1], "frob_err") for d in data]
-        G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
-                 / abs(G_dense) for d in data]
-        ax1.loglog(n_params, frob, f"-{MARKERS[method]}", color=COLORS[method],
-                   lw=1.5, ms=7, label=method)
-        ax2.loglog(n_params, G_err, f"-{MARKERS[method]}", color=COLORS[method],
-                   lw=1.5, ms=7, label=method)
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            n_params = [_get(d[1], "n_params") for d in data]
+            frob = [_get(d[1], "frob_err") for d in data]
+            G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
+                     / abs(G_dense) for d in data]
+            ax1.loglog(n_params, frob,
+                       f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                       lw=1.5, ms=7, alpha=variant["alpha"],
+                       label=method + variant["label"])
+            ax2.loglog(n_params, G_err,
+                       f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                       lw=1.5, ms=7, alpha=variant["alpha"],
+                       label=method + variant["label"])
 
     ax1.set_xlabel("Number of parameters", fontsize=12)
     ax1.set_ylabel(r"$\|\Phi - \tilde\Phi\|_F / \|\Phi\|_F$", fontsize=12)
     ax1.set_title("(a) Frobenius error vs parameters")
-    ax1.legend(fontsize=9)
+    ax1.legend(fontsize=8, ncol=2)
     ax1.grid(True, alpha=0.3, which="both")
 
     ax2.set_xlabel("Number of parameters", fontsize=12)
     ax2.set_ylabel(r"$|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$", fontsize=12)
     ax2.set_title("(b) Transport error vs parameters")
-    ax2.legend(fontsize=9)
+    ax2.legend(fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3, which="both")
 
     fig.tight_layout()
@@ -357,19 +390,24 @@ def fig_frob_vs_transport(results):
     fig, ax = plt.subplots(figsize=(7, 5.5))
 
     for method in METHODS:
-        data = _method_data(results, method)
-        if not data:
-            continue
-        frob = [_get(d[1], "frob_err") for d in data]
-        G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
-                 / abs(G_dense) for d in data]
-        ax.loglog(frob, G_err, MARKERS[method], color=COLORS[method],
-                  ms=9, label=method)
-        for i, rank in enumerate(data):
-            R = _rank_to_scalar(rank[0])
-            ax.annotate(f"$R={R}$", (frob[i], G_err[i]),
-                        textcoords="offset points", xytext=(5, 4), fontsize=7,
-                        color=COLORS[method])
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            frob = [_get(d[1], "frob_err") for d in data]
+            G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
+                     / abs(G_dense) for d in data]
+            marker = MARKERS[method]
+            face = COLORS[method] if variant["tag"] == "plain" else "none"
+            ax.loglog(frob, G_err, marker, color=COLORS[method],
+                      markerfacecolor=face, markeredgecolor=COLORS[method],
+                      ms=9, alpha=variant["alpha"],
+                      label=method + variant["label"])
+            for i, rank in enumerate(data):
+                R = _rank_to_scalar(rank[0])
+                ax.annotate(f"$R={R}$", (frob[i], G_err[i]),
+                            textcoords="offset points", xytext=(5, 4), fontsize=7,
+                            color=COLORS[method], alpha=variant["alpha"])
 
     xx = np.logspace(-4, 0, 50)
     ax.plot(xx, xx, "k--", alpha=0.3, lw=1, label="1:1")
@@ -378,7 +416,7 @@ def fig_frob_vs_transport(results):
     ax.set_ylabel(r"Transport error $|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$",
                   fontsize=12)
     ax.set_title("Frobenius vs transport error")
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=8, ncol=2)
     ax.grid(True, alpha=0.3, which="both")
     fig.tight_layout()
     _save(fig, "frob_vs_transport_error")
@@ -395,10 +433,11 @@ def fig_conservation(results):
         bar_colors.append(COLOR_DENSE)
 
     for method in METHODS:
-        for rank, res in _method_data(results, method):
-            labels.append(f"{method} R={_rank_tag(rank)}")
-            conserv.append(_get(res, "heat_flow_conservation") * 100)
-            bar_colors.append(COLORS[method])
+        for variant in VARIANTS:
+            for rank, res in _method_data(results, method, variant):
+                labels.append(f"{method}{variant['label']} R={_rank_tag(rank)}")
+                conserv.append(_get(res, "heat_flow_conservation") * 100)
+                bar_colors.append(COLORS[method])
 
     x = np.arange(len(labels))
     bars = ax.bar(x, conserv, color=bar_colors, alpha=0.8, edgecolor="gray", lw=0.5)
@@ -432,16 +471,20 @@ def fig_scba_convergence(results):
         "Waring":  24,
     }
     for method in METHODS:
-        key = f"{method}_R{_rank_tag(repr_ranks[method])}"
-        if key not in results:
-            continue
-        conv = results[key].get("convergence_history", None)
-        if conv is None or len(conv) == 0:
-            continue
-        conv = np.asarray(conv)
-        ax.semilogy(np.arange(2, 2 + len(conv)), conv, f"-{MARKERS[method]}",
-                    color=COLORS[method], lw=1.5, ms=5,
-                    label=f"{method} $R={_rank_tag(repr_ranks[method])}$")
+        for variant in VARIANTS:
+            key = f"{method}{variant['suffix']}_R{_rank_tag(repr_ranks[method])}"
+            if key not in results:
+                continue
+            conv = results[key].get("convergence_history", None)
+            if conv is None or len(conv) == 0:
+                continue
+            conv = np.asarray(conv)
+            ax.semilogy(np.arange(2, 2 + len(conv)), conv,
+                        f"{variant['ls']}{MARKERS[method]}",
+                        color=COLORS[method], lw=1.5, ms=5,
+                        alpha=variant["alpha"],
+                        label=f"{method}{variant['label']} "
+                              f"$R={_rank_tag(repr_ranks[method])}$")
 
     ax.axhline(TRANSPORT_KW["scba_tol"], color="gray", lw=0.8, ls="--", alpha=0.5)
     ax.set_xlabel("SCBA iteration", fontsize=12)
@@ -669,15 +712,17 @@ def print_summary(results):
     print("-" * 78)
 
     for method in METHODS:
-        for rank, res in _method_data(results, method):
-            G = _get(res, "thermal_conductance_anharmonic")
-            frob = _get(res, "frob_err") * 100
-            G_err = abs(G - G_dense) / abs(G_dense) * 100
-            c = _get(res, "heat_flow_conservation") * 100
-            t = _get(res, "wall_time")
-            n_p = int(_get(res, "n_params"))
-            print(f"{method:<10} {_rank_tag(rank):>8} {n_p:>8} {frob:>8.2f} "
-                  f"{G/1e6:>12.2f} {G_err:>8.2f} {c:>9.2f} {t:>6.0f}")
+        for variant in VARIANTS:
+            label = method + variant["label"]
+            for rank, res in _method_data(results, method, variant):
+                G = _get(res, "thermal_conductance_anharmonic")
+                frob = _get(res, "frob_err") * 100
+                G_err = abs(G - G_dense) / abs(G_dense) * 100
+                c = _get(res, "heat_flow_conservation") * 100
+                t = _get(res, "wall_time")
+                n_p = int(_get(res, "n_params"))
+                print(f"{label:<12} {_rank_tag(rank):>8} {n_p:>8} {frob:>8.2f} "
+                      f"{G/1e6:>12.2f} {G_err:>8.2f} {c:>9.2f} {t:>6.0f}")
         print("-" * 78)
 
 
