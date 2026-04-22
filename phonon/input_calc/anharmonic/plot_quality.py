@@ -68,8 +68,9 @@ VARIANTS = [
      "fit_kw": {"enforce_asr": True}},
 ]
 
-# Rank sweep per method. HOSVD ranks are (R1, R2) tuples.
-RANK_SWEEP = {
+# Rank sweep per method (used on small dim_sc <= 60; fc3_prim 2x2x2).
+# HOSVD ranks are (R1, R2) tuples.
+RANK_SWEEP_SMALL = {
     "mSVD":    [4, 8, 12, 16, 24, 36],
     "HOSVD":   [(3, 4), (3, 8), (6, 8), (6, 16), (6, 24), (6, 36)],
     "CP":      [8, 16, 24, 36, 48],
@@ -77,16 +78,48 @@ RANK_SWEEP = {
     "Waring":  [8, 16, 24, 36, 48, 64],
 }
 
-# Fit-time hyperparameters. Mirrors the defaults in compare_fc3_approximations.py
-# so Frobenius errors reported here match the offline sweep.
-FIT_KWARGS = {
+# Extended grid for the larger fc3_prim_vasp supercell (dim_sc=162).  Mode-(2,3)
+# SVD needs ~118 sv's for 99.99% Frobenius mass on that tensor, so Waring in
+# particular must reach the low hundreds for a fair comparison.
+RANK_SWEEP_LARGE = {
+    "mSVD":    [8, 16, 32, 64, 96, 128, 160],
+    "HOSVD":   [(3, 8), (6, 16), (6, 32), (6, 48), (6, 96), (6, 128)],
+    "CP":      [16, 32, 64, 96, 128, 192, 256],
+    "INDSCAL": [16, 32, 64, 96, 128, 192, 256],
+    "Waring":  [16, 32, 64, 96, 128, 192, 256, 384],
+}
+
+
+def rank_sweep_for(dim_sc: int) -> dict:
+    return RANK_SWEEP_LARGE if dim_sc > 60 else RANK_SWEEP_SMALL
+
+
+# Fit-time hyperparameters. Mirrors compare_fc3_approximations.py.  On large
+# dim_sc we drop the slow shifted-power init for Waring (Kolda 2015) and lean
+# on CP-symmetrised init + L-BFGS, which matches the same basin at 10x the speed.
+FIT_KWARGS_SMALL = {
     "mSVD":    {},
     "HOSVD":   {"refine": True, "hooi_iters": 12},
     "CP":      {"n_restarts": 10, "max_iter": 800, "lbfgs_iters": 500},
     "INDSCAL": {"n_restarts": 8,  "max_iter": 800, "lbfgs_iters": 600},
     "Waring":  {"n_restarts": 5,  "n_power_repeats": 10,
-                "n_power_iters": 200, "lbfgs_iters": 400},
+                "n_power_iters": 200, "lbfgs_iters": 400,
+                "power_init": True,  "cp_init": True},
 }
+FIT_KWARGS_LARGE = {
+    "mSVD":    {},
+    "HOSVD":   {"refine": True, "hooi_iters": 8},
+    "CP":      {"n_restarts": 4, "max_iter": 600, "lbfgs_iters": 400},
+    "INDSCAL": {"n_restarts": 3, "max_iter": 600, "lbfgs_iters": 500},
+    "Waring":  {"n_restarts": 2,  "n_power_repeats": 4,
+                "n_power_iters": 80, "lbfgs_iters": 500,
+                "power_init": False, "cp_init": True,
+                "max_time_s": 900.0, "early_stop_rel_err": 1e-8},
+}
+
+
+def fit_kwargs_for(dim_sc: int) -> dict:
+    return FIT_KWARGS_LARGE if dim_sc > 60 else FIT_KWARGS_SMALL
 
 
 TRANSPORT_KW = dict(
@@ -153,22 +186,55 @@ def load_result(name):
 # Fit + reconstruct per method
 # =========================================================================
 
-def fit_and_reconstruct(method, rank, target, variant):
-    """Run the fc3_compression fitter and return (M_stacked, rel_err, fit_time, n_params)."""
+def fit_and_reconstruct(method, rank, target, variant, prev_res=None):
+    """Run the fc3_compression fitter and return (M_stacked, rel_err,
+    fit_time, n_params, res).
+
+    ``prev_res`` is the CompressionResult from the previous (lower) rank for
+    the same (method, variant); used for progressive warm-starts on
+    CP/INDSCAL/Waring (Bro 1998, Acar-Kolda-Dunlavy 2011).  Returning the
+    full result object lets the caller pass it as the next ``prev_res``.
+    """
+    from compare_fc3_approximations import (
+        _progressive_cp_init, _fit_cp_with_init, _fit_indscal_with_init,
+        _fit_waring_with_init, _rank_to_scalar,
+    )
     fitter = fc3c.FITTERS[method]
-    kw = dict(FIT_KWARGS.get(method, {}))
+    kw = dict(fit_kwargs_for(target.dim_sc).get(method, {}))
     kw.update(variant["fit_kw"])
     t0 = time.time()
+    warm_ok = method in ("CP", "INDSCAL", "Waring")
+
+    init_override = None
+    if (warm_ok and prev_res is not None
+            and _rank_to_scalar(rank) > _rank_to_scalar(prev_res.rank)):
+        init_override = _progressive_cp_init(
+            prev_res, target, _rank_to_scalar(rank),
+            enforce_asr=variant["fit_kw"].get("enforce_asr", False),
+        )
+        if method == "CP":
+            kw["n_restarts"] = min(kw.get("n_restarts", 10), 2)
+        elif method == "INDSCAL":
+            kw["n_restarts"] = min(kw.get("n_restarts", 8), 2)
+        elif method == "Waring":
+            kw["n_restarts"] = min(kw.get("n_restarts", 5), 1)
+
     if method == "HOSVD":
         R1, R2 = rank
         res = fitter(target, R1=R1, R2=R2, **kw)
+    elif init_override is not None and method == "CP":
+        res = _fit_cp_with_init(fitter, target, rank, init_override, kw)
+    elif init_override is not None and method == "INDSCAL":
+        res = _fit_indscal_with_init(fitter, target, rank, init_override, kw)
+    elif init_override is not None and method == "Waring":
+        res = _fit_waring_with_init(fitter, target, rank, init_override, kw)
     else:
         res = fitter(target, rank=rank, **kw)
     fit_time = time.time() - t0
 
-    T_approx = fc3c.reconstruct(res, target)  # (n_dof, dim_sc, dim_sc)
+    T_approx = fc3c.reconstruct(res, target)
     M_stacked = T_approx.reshape(target.n_dof * target.dim_sc, target.dim_sc)
-    return M_stacked, float(res.rel_err), fit_time, int(res.n_params)
+    return M_stacked, float(res.rel_err), fit_time, int(res.n_params), res
 
 
 # =========================================================================
@@ -205,9 +271,11 @@ def collect_all(fc3_subdir: str, load_only: bool = False):
               f"MW/(m^2 K)")
 
     # --- Per-method rank sweeps (over unconstrained and ASR-enforced variants) ---
+    rank_sweep = rank_sweep_for(target.dim_sc)
     for method in METHODS:
         for variant in VARIANTS:
-            for rank in RANK_SWEEP[method]:
+            prev_fit = None  # rolls forward for progressive warm-starts
+            for rank in rank_sweep[method]:
                 key = f"{method}{variant['suffix']}_R{_rank_tag(rank)}"
                 cached = load_result(key)
                 if cached is not None:
@@ -218,8 +286,11 @@ def collect_all(fc3_subdir: str, load_only: bool = False):
                     continue
 
                 print(f"\nRunning {method}{variant['suffix']} R={rank}...")
-                M_approx, frob_err, fit_time, n_params = fit_and_reconstruct(
-                    method, rank, target, variant)
+                M_approx, frob_err, fit_time, n_params, fit_res = (
+                    fit_and_reconstruct(method, rank, target, variant,
+                                        prev_res=prev_fit)
+                )
+                prev_fit = fit_res
 
                 t0 = time.time()
                 res = anharmonic_transmission_q(
@@ -743,13 +814,20 @@ def main():
                              "(default: fc3_prim_vasp; use fc3_prim for 2x2x2)")
     args = parser.parse_args()
 
+    # Scope cache per dataset so fc3_prim and fc3_prim_vasp runs don't mix.
+    CACHE_DIR = CACHE_DIR_BASE / args.fc3_subdir
     if args.hilbert:
-        CACHE_DIR = CACHE_DIR_BASE.parent / (CACHE_DIR_BASE.name + "_hilbert")
+        CACHE_DIR = CACHE_DIR_BASE.parent / (CACHE_DIR_BASE.name + "_hilbert") / args.fc3_subdir
         TRANSPORT_KW["hilbert_retarded"] = True
         print("*** Hilbert-transform retarded self-energy enabled ***")
 
+    # Scope figure output per dataset too.
+    global FIG_DIR
+    FIG_DIR = script_dir / "figures" / args.fc3_subdir
+
     print(f"FC3 dataset: {args.fc3_subdir}")
     print(f"Cache dir:   {CACHE_DIR}")
+    print(f"Figure dir:  {FIG_DIR}")
 
     results = collect_all(fc3_subdir=args.fc3_subdir, load_only=args.load)
 
