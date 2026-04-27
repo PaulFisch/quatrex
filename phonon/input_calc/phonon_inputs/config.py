@@ -108,6 +108,71 @@ class ThirdOrderConfig:
 
 
 @dataclass
+class HiphiveConfig:
+    """Hiphive FC3 settings via randomized rattled supercells.
+
+    Builds a force-constant potential up to 3rd order from a small set
+    of rattled supercell DFT calculations. Compared to phono3py finite
+    displacements, hiphive needs many fewer DFT runs but each run
+    contains forces from many simultaneously displaced atoms.
+
+    Parameters
+    ----------
+    supercell : 3 ints
+        Diagonal supercell multipliers used for the rattled structures.
+    n_structures : int
+        Number of rattled supercells to generate.
+    rattle_method : str
+        "mc" for Monte-Carlo rattling (recommended; respects d_min),
+        or "normal" for plain normal-distribution rattling.
+    rattle_std : float
+        Rattle standard deviation in Angstrom. For mc rattling the
+        final RMS displacement also depends on n_iter.
+    rattle_d_min : float
+        Minimum interatomic distance allowed during MC rattling, in
+        Angstrom. Ignored for "normal" rattling.
+    rattle_n_iter : int
+        Number of MC iterations per atom (mc rattling only).
+    rattle_seed : int
+        Seed for the rattle RNG.
+    cutoffs : list[float]
+        Cutoff radii (Angstrom) per cluster order. The list length sets
+        the maximum order; e.g. [6.0, 4.0] gives 2nd order to 6 A and
+        3rd order to 4 A.
+    fit_method : str
+        scikit-learn / trainstation fit method, e.g. "least-squares",
+        "lasso", "rfe", "ardr".
+    fit_kwargs : dict
+        Extra kwargs forwarded to the fit method (e.g. {"alpha": 1e-4}).
+    fc_calculator : str
+        Name written into the produced phono3py params file. Pure
+        bookkeeping for downstream consumers.
+    calculator : str
+        DFT calculator: "qe" or "vasp".
+    work_dir : str
+        Directory (relative to the config file) where rattled inputs
+        and force outputs are stored.
+    pw_timeout : int
+        Per-DFT-job timeout in seconds.
+    """
+
+    supercell: list[int] = field(default_factory=lambda: [2, 2, 2])
+    n_structures: int = 5
+    rattle_method: str = "mc"
+    rattle_std: float = 0.03
+    rattle_d_min: float = 2.0
+    rattle_n_iter: int = 10
+    rattle_seed: int = 42
+    cutoffs: list[float] = field(default_factory=lambda: [6.0, 4.0])
+    fit_method: str = "least-squares"
+    fit_kwargs: dict = field(default_factory=dict)
+    fc_calculator: str = "hiphive"
+    calculator: str = "qe"
+    work_dir: str = "./fc3_hiphive"
+    pw_timeout: int = 3600
+
+
+@dataclass
 class DFPTConfig:
     """DFPT force constant settings via QE ph.x + D3Q.
 
@@ -155,8 +220,9 @@ class PhononInputConfig:
     )
     quatrex_output: QuatrexOutputConfig = field(default_factory=QuatrexOutputConfig)
     thirdorder: ThirdOrderConfig = field(default_factory=ThirdOrderConfig)
+    hiphive: HiphiveConfig = field(default_factory=HiphiveConfig)
     dfpt: DFPTConfig = field(default_factory=DFPTConfig)
-    fc_method: str = "finite_displacement"  # "finite_displacement" or "dfpt"
+    fc_method: str = "finite_displacement"  # "finite_displacement", "dfpt", or "hiphive"
     relax: RelaxConfig = field(default_factory=RelaxConfig)
 
 

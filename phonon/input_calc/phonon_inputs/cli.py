@@ -8,6 +8,10 @@ Usage:
     python -m phonon_inputs fc3-run --config config.yaml
     python -m phonon_inputs fc3-reap --config config.yaml
     python -m phonon_inputs fc3-all --config config.yaml
+    python -m phonon_inputs fc3-hiphive-sow  --config config.yaml
+    python -m phonon_inputs fc3-hiphive-run  --config config.yaml
+    python -m phonon_inputs fc3-hiphive-reap --config config.yaml
+    python -m phonon_inputs fc3-hiphive-all  --config config.yaml
 """
 
 import argparse
@@ -104,6 +108,14 @@ def _get_dft_config(config):
     return config.qe, config.qe.pw_command
 
 
+def _get_hiphive_dft_config(config):
+    """Return the DFT config and command for the hiphive calculator."""
+    calc = config.hiphive.calculator
+    if calc == "vasp":
+        return config.vasp, config.vasp.vasp_command
+    return config.qe, config.qe.pw_command
+
+
 def cmd_fc3_sow(config_path: str) -> None:
     """Generate phono3py displaced supercells and write DFT inputs."""
     from .config import load_config
@@ -177,6 +189,72 @@ def cmd_fc3_all(config_path: str) -> None:
         fc_calculator=tc.fc_calculator,
         calculator=tc.calculator,
     )
+    print(f"\nFC3 file: {fc3_path}")
+
+
+def cmd_hiphive_sow(config_path: str) -> None:
+    """Generate hiphive rattled supercells and write DFT inputs."""
+    from .config import load_config
+    from .hiphive_fc3 import sow
+    from .structure import load_structure
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+
+    hh = config.hiphive
+    dft_config, _ = _get_hiphive_dft_config(config)
+    work_dir = Path(config_path).parent / hh.work_dir
+
+    n_disp = sow(cell, work_dir, dft_config, hh)
+    print(f"\n{n_disp} rattled inputs in {work_dir}")
+    print("Run 'fc3-hiphive-run' to execute DFT, then 'fc3-hiphive-reap' to fit FC3.")
+
+
+def cmd_hiphive_run(config_path: str) -> None:
+    """Run DFT for all hiphive rattled structures."""
+    from .config import load_config
+    from .hiphive_fc3 import run_displacements
+
+    config = load_config(config_path)
+    hh = config.hiphive
+    dft_config, dft_command = _get_hiphive_dft_config(config)
+    work_dir = Path(config_path).parent / hh.work_dir
+
+    run_displacements(
+        work_dir, dft_command,
+        timeout=hh.pw_timeout,
+        calculator=hh.calculator,
+        dft_config=dft_config,
+    )
+
+
+def cmd_hiphive_reap(config_path: str) -> None:
+    """Fit hiphive cluster expansion and write fc3.hdf5."""
+    from .config import load_config
+    from .hiphive_fc3 import reap
+
+    config = load_config(config_path)
+    hh = config.hiphive
+    work_dir = Path(config_path).parent / hh.work_dir
+
+    fc3_path = reap(work_dir, hh_config=hh)
+    print(f"\nFC3 file: {fc3_path}")
+
+
+def cmd_hiphive_all(config_path: str) -> None:
+    """Full hiphive FC3 pipeline: sow + run + reap."""
+    from .config import load_config
+    from .hiphive_fc3 import generate_fc3
+    from .structure import load_structure
+
+    config = load_config(config_path)
+    cell = load_structure(config.structure)
+
+    hh = config.hiphive
+    dft_config, _ = _get_hiphive_dft_config(config)
+    work_dir = Path(config_path).parent / hh.work_dir
+
+    fc3_path = generate_fc3(cell, work_dir, dft_config, hh)
     print(f"\nFC3 file: {fc3_path}")
 
 
@@ -331,6 +409,26 @@ def main():
     p_fc3_all = sub.add_parser("fc3-all", help="Full FC3 pipeline: sow + run + reap")
     p_fc3_all.add_argument("--config", required=True, help="YAML config file")
 
+    p_hh_sow = sub.add_parser(
+        "fc3-hiphive-sow", help="Generate hiphive rattled supercells + DFT inputs"
+    )
+    p_hh_sow.add_argument("--config", required=True, help="YAML config file")
+
+    p_hh_run = sub.add_parser(
+        "fc3-hiphive-run", help="Run DFT for hiphive rattled structures"
+    )
+    p_hh_run.add_argument("--config", required=True, help="YAML config file")
+
+    p_hh_reap = sub.add_parser(
+        "fc3-hiphive-reap", help="Fit hiphive cluster expansion -> fc3.hdf5"
+    )
+    p_hh_reap.add_argument("--config", required=True, help="YAML config file")
+
+    p_hh_all = sub.add_parser(
+        "fc3-hiphive-all", help="Full hiphive FC3 pipeline: sow + run + reap"
+    )
+    p_hh_all.add_argument("--config", required=True, help="YAML config file")
+
     p_dfpt_sow = sub.add_parser("dfpt-sow", help="Generate DFPT input files")
     p_dfpt_sow.add_argument("--config", required=True, help="YAML config file")
 
@@ -358,6 +456,10 @@ def main():
         "fc3-run": lambda: cmd_fc3_run(args.config),
         "fc3-reap": lambda: cmd_fc3_reap(args.config),
         "fc3-all": lambda: cmd_fc3_all(args.config),
+        "fc3-hiphive-sow": lambda: cmd_hiphive_sow(args.config),
+        "fc3-hiphive-run": lambda: cmd_hiphive_run(args.config),
+        "fc3-hiphive-reap": lambda: cmd_hiphive_reap(args.config),
+        "fc3-hiphive-all": lambda: cmd_hiphive_all(args.config),
         "dfpt-sow": lambda: cmd_dfpt_sow(args.config),
         "dfpt-run": lambda: cmd_dfpt_run(args.config),
         "dfpt-reap": lambda: cmd_dfpt_reap(args.config),
