@@ -1,4 +1,4 @@
-"""FC3 approximation quality: transport error for the five canonical ansatze.
+"""FC3 approximation quality: thermal-conductance error for the five canonical ansatze.
 
 Drives the new :mod:`phonon_inputs.fc3_compression` module (mSVD, HOSVD, CP,
 INDSCAL, Waring) and feeds each reconstruction back into
@@ -40,13 +40,14 @@ from phonon_inputs import fc3_compression as fc3c
 # =========================================================================
 
 # Methods and styles — naming follows the thesis (fc3_compression subsections).
+# Colours: Paul Tol "bright" qualitative palette (colourblind-safe, print-friendly).
 METHODS = ["mSVD", "HOSVD", "CP", "INDSCAL", "Waring"]
 COLORS = {
-    "mSVD":    "#2ca02c",
-    "HOSVD":   "#8c564b",
-    "CP":      "#ff7f0e",
-    "INDSCAL": "#1f77b4",
-    "Waring":  "#9467bd",
+    "mSVD":    "#4477AA",  # blue
+    "HOSVD":   "#228833",  # green
+    "CP":      "#CCBB44",  # yellow
+    "INDSCAL": "#66CCEE",  # cyan
+    "Waring":  "#AA3377",  # purple
 }
 MARKERS = {
     "mSVD":    "o",
@@ -55,7 +56,14 @@ MARKERS = {
     "INDSCAL": "^",
     "Waring":  "D",
 }
-COLOR_DENSE = "#d62728"
+COLOR_DENSE = "#BB5566"  # muted red, consistent with Tol palette
+
+# Hard-thresholded FC3 (keep top-K largest |Phi|) — not a fitted ansatz, so
+# separate colour/marker.  Plotted alongside the five compressions wherever
+# parameter count or Frobenius error is on an axis.
+COLOR_THRESHOLD = "#000000"
+MARKER_THRESHOLD = "*"
+LABEL_THRESHOLD = "Top-K thresh."
 
 # Variants: unconstrained ("plain") and ASR-enforced ("asr"). Plain variant
 # keeps the existing cache-key convention (no suffix) for backward compatibility;
@@ -82,10 +90,10 @@ RANK_SWEEP_SMALL = {
 # SVD needs ~118 sv's for 99.99% Frobenius mass on that tensor, so Waring in
 # particular must reach the low hundreds for a fair comparison.
 RANK_SWEEP_LARGE = {
-    "mSVD":    [8, 16, 32, 64, 96, 128, 160],
-    "HOSVD":   [(3, 8), (6, 16), (6, 32), (6, 48), (6, 96), (6, 128)],
-    "CP":      [16, 32, 64, 96, 128, 192, 256],
-    "INDSCAL": [16, 32, 64, 96, 128, 192, 256],
+    "mSVD":    [1, 2, 4, 8, 16, 32, 64, 96, 128, 160],
+    "HOSVD":   [(3, 4), (3, 8), (6, 16), (6, 32), (6, 48), (6, 96), (6, 128)],
+    "CP":      [1, 2, 4, 8, 16, 32, 64, 96, 128, 192, 256],
+    "INDSCAL": [1, 2, 4, 8, 16, 32, 64, 96, 128, 192, 256],
     "Waring":  [16, 32, 64, 96, 128, 192, 256, 384],
 }
 
@@ -124,7 +132,7 @@ def fit_kwargs_for(dim_sc: int) -> dict:
 
 TRANSPORT_KW = dict(
     q_mesh_transverse=(4, 4),
-    freq_range_thz=(0.0, 18.0, 141),
+    freq_range_thz=(0.0, 22.0, 241),
     transport_direction="x",
     eta_factor=0.5,
     temperature=300.0,
@@ -241,6 +249,26 @@ def fit_and_reconstruct(method, rank, target, variant, prev_res=None):
 # Data collection
 # =========================================================================
 
+def _load_threshold_results() -> dict:
+    """Pick up hard-threshold transport runs cached by
+    compare_fc3_thresholded.py / sweep_fc3_threshold.py.  Returns a dict
+    keyed by ``threshold_K{K}``.
+    """
+    out = {}
+    if not CACHE_DIR.exists():
+        return out
+    for p in sorted(CACHE_DIR.glob("threshold_top*.npz")):
+        try:
+            k = int(p.stem.replace("threshold_top", ""))
+        except ValueError:
+            continue
+        res = load_result(p.stem)
+        if res is None:
+            continue
+        out[f"threshold_K{k}"] = res
+    return out
+
+
 def collect_all(fc3_subdir: str, load_only: bool = False):
     phonon, _ = load_primitive_cell(work_dir, fc3_subdir=fc3_subdir)
     fc3_path = work_dir / fc3_subdir / "fc3.hdf5"
@@ -248,10 +276,12 @@ def collect_all(fc3_subdir: str, load_only: bool = False):
         fc3_raw = np.array(f["fc3"])
 
     target = fc3c.build_fc3_target(fc3_raw, phonon)
+    nnz_full = int(np.count_nonzero(target.T))
     print(f"FC3 target: n_dof={target.n_dof}, dim_sc={target.dim_sc}, "
-          f"||T||_F={target.target_norm:.4e}")
+          f"||T||_F={target.target_norm:.4e}, nnz={nnz_full}")
 
-    results = {}
+    results = {"nnz_full": nnz_full}
+    results.update(_load_threshold_results())
 
     # --- Dense reference ---
     cached = load_result("dense")
@@ -335,6 +365,33 @@ def _parse_rank(s: str):
     return tuple(int(p) for p in parts)
 
 
+def _threshold_data(results, drop_blowups: bool = True):
+    """Return sorted (K, result) pairs for hard-threshold FC3 runs.
+
+    ``drop_blowups`` filters out pathological SCBA fixed points (relative G
+    error > 100%, or conservation error > 10%), which otherwise destroy log
+    axes.  Such points arise when tied-magnitude entries get split at very
+    small K (symmetry-related triples) — see sweep_fc3_threshold.py.
+    """
+    pairs = []
+    for key, val in results.items():
+        if not key.startswith("threshold_K"):
+            continue
+        try:
+            k = int(key[len("threshold_K"):])
+        except ValueError:
+            continue
+        if drop_blowups:
+            G_err_abs = abs(_get(val, "thermal_conductance_anharmonic", 0.0))
+            frob_err = _get(val, "frob_err", 0.0)
+            conserv = abs(_get(val, "heat_flow_conservation", 0.0))
+            if frob_err >= 10.0 or conserv >= 0.1:
+                continue
+        pairs.append((k, val))
+    pairs.sort(key=lambda x: x[0])
+    return pairs
+
+
 def _method_data(results, method, variant=None):
     """Collect (rank, result) pairs for ``method`` and the requested ``variant``.
 
@@ -409,7 +466,7 @@ def fig_ganh_absolute(results):
 
     ax2.set_xlabel("Rank $R$", fontsize=12)
     ax2.set_ylabel(r"$|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$ (%)", fontsize=12)
-    ax2.set_title("(b) Relative transport error vs rank")
+    ax2.set_title("(b) Relative thermal conductance error vs rank")
     ax2.legend(fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3, which="both")
 
@@ -419,6 +476,8 @@ def fig_ganh_absolute(results):
 
 def fig_error_vs_params(results):
     G_dense = _get(results["dense"], "thermal_conductance_anharmonic")
+    nnz_full = results.get("nnz_full", None)
+    EPS = 1e-8
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
 
@@ -431,14 +490,42 @@ def fig_error_vs_params(results):
             frob = [_get(d[1], "frob_err") for d in data]
             G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
                      / abs(G_dense) for d in data]
-            ax1.loglog(n_params, frob,
-                       f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
-                       lw=1.5, ms=7, alpha=variant["alpha"],
-                       label=method + variant["label"])
-            ax2.loglog(n_params, G_err,
-                       f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
-                       lw=1.5, ms=7, alpha=variant["alpha"],
-                       label=method + variant["label"])
+            np1, fr = zip(*[(p, e) for p, e in zip(n_params, frob) if e > EPS]) \
+                if any(e > EPS for e in frob) else ([], [])
+            np2, ge = zip(*[(p, e) for p, e in zip(n_params, G_err) if e > EPS]) \
+                if any(e > EPS for e in G_err) else ([], [])
+            if np1:
+                ax1.loglog(np1, fr,
+                           f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                           lw=1.5, ms=7, alpha=variant["alpha"],
+                           label=method + variant["label"])
+            if np2:
+                ax2.loglog(np2, ge,
+                           f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                           lw=1.5, ms=7, alpha=variant["alpha"],
+                           label=method + variant["label"])
+
+    thr_data = _threshold_data(results)
+    if thr_data:
+        ks = [k for k, _ in thr_data]
+        frob_thr = [_get(r, "frob_err") for _, r in thr_data]
+        G_err_thr = [abs(_get(r, "thermal_conductance_anharmonic") - G_dense)
+                     / abs(G_dense) for _, r in thr_data]
+        pk_f, fk = zip(*[(p, e) for p, e in zip(ks, frob_thr) if e > EPS]) \
+            if any(e > EPS for e in frob_thr) else ([], [])
+        pk_g, gk = zip(*[(p, e) for p, e in zip(ks, G_err_thr) if e > EPS]) \
+            if any(e > EPS for e in G_err_thr) else ([], [])
+        if pk_f:
+            ax1.loglog(pk_f, fk, MARKER_THRESHOLD, color=COLOR_THRESHOLD,
+                       ms=10, lw=1.2, ls="-", label=LABEL_THRESHOLD)
+        if pk_g:
+            ax2.loglog(pk_g, gk, MARKER_THRESHOLD, color=COLOR_THRESHOLD,
+                       ms=10, lw=1.2, ls="-", label=LABEL_THRESHOLD)
+
+    if nnz_full is not None:
+        for ax in (ax1, ax2):
+            ax.axvline(nnz_full, color="k", ls=":", lw=1.2, alpha=0.7,
+                       label=f"Dense nnz = {nnz_full}")
 
     ax1.set_xlabel("Number of parameters", fontsize=12)
     ax1.set_ylabel(r"$\|\Phi - \tilde\Phi\|_F / \|\Phi\|_F$", fontsize=12)
@@ -448,7 +535,7 @@ def fig_error_vs_params(results):
 
     ax2.set_xlabel("Number of parameters", fontsize=12)
     ax2.set_ylabel(r"$|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$", fontsize=12)
-    ax2.set_title("(b) Transport error vs parameters")
+    ax2.set_title("(b) Heat conductivity error vs parameters")
     ax2.legend(fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3, which="both")
 
@@ -458,6 +545,7 @@ def fig_error_vs_params(results):
 
 def fig_frob_vs_transport(results):
     G_dense = _get(results["dense"], "thermal_conductance_anharmonic")
+    EPS = 1e-8
     fig, ax = plt.subplots(figsize=(7, 5.5))
 
     for method in METHODS:
@@ -468,25 +556,50 @@ def fig_frob_vs_transport(results):
             frob = [_get(d[1], "frob_err") for d in data]
             G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense)
                      / abs(G_dense) for d in data]
+            keep = [i for i, (f, g) in enumerate(zip(frob, G_err))
+                    if f > EPS and g > EPS]
+            if not keep:
+                continue
+            frob_k = [frob[i] for i in keep]
+            gerr_k = [G_err[i] for i in keep]
+            ranks_k = [data[i][0] for i in keep]
             marker = MARKERS[method]
             face = COLORS[method] if variant["tag"] == "plain" else "none"
-            ax.loglog(frob, G_err, marker, color=COLORS[method],
+            ax.loglog(frob_k, gerr_k, marker, color=COLORS[method],
                       markerfacecolor=face, markeredgecolor=COLORS[method],
                       ms=9, alpha=variant["alpha"],
                       label=method + variant["label"])
-            for i, rank in enumerate(data):
-                R = _rank_to_scalar(rank[0])
-                ax.annotate(f"$R={R}$", (frob[i], G_err[i]),
+            for i, rank in enumerate(ranks_k):
+                R = _rank_to_scalar(rank)
+                ax.annotate(f"$R={R}$", (frob_k[i], gerr_k[i]),
                             textcoords="offset points", xytext=(5, 4), fontsize=7,
                             color=COLORS[method], alpha=variant["alpha"])
+
+    thr_data = _threshold_data(results)
+    if thr_data:
+        frob_thr = [_get(r, "frob_err") for _, r in thr_data]
+        G_err_thr = [abs(_get(r, "thermal_conductance_anharmonic") - G_dense)
+                     / abs(G_dense) for _, r in thr_data]
+        keep = [i for i, (f, g) in enumerate(zip(frob_thr, G_err_thr))
+                if f > EPS and g > EPS]
+        if keep:
+            fk = [frob_thr[i] for i in keep]
+            gk = [G_err_thr[i] for i in keep]
+            ks_k = [thr_data[i][0] for i in keep]
+            ax.loglog(fk, gk, MARKER_THRESHOLD, color=COLOR_THRESHOLD,
+                      ms=10, label=LABEL_THRESHOLD)
+            for i, k in enumerate(ks_k):
+                ax.annotate(f"K={k}", (fk[i], gk[i]),
+                            textcoords="offset points", xytext=(5, 4), fontsize=7,
+                            color=COLOR_THRESHOLD)
 
     xx = np.logspace(-4, 0, 50)
     ax.plot(xx, xx, "k--", alpha=0.3, lw=1, label="1:1")
     ax.plot(xx, xx ** 2, "k:", alpha=0.3, lw=1, label=r"$\varepsilon^2$")
     ax.set_xlabel(r"Frobenius error $\|\Phi - \tilde\Phi\|_F / \|\Phi\|_F$", fontsize=12)
-    ax.set_ylabel(r"Transport error $|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$",
+    ax.set_ylabel(r"Heat conductivity error $|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$",
                   fontsize=12)
-    ax.set_title("Frobenius vs transport error")
+    ax.set_title("Frobenius vs thermal conductance error")
     ax.legend(fontsize=8, ncol=2)
     ax.grid(True, alpha=0.3, which="both")
     fig.tight_layout()
@@ -509,6 +622,11 @@ def fig_conservation(results):
                 labels.append(f"{method}{variant['label']} R={_rank_tag(rank)}")
                 conserv.append(_get(res, "heat_flow_conservation") * 100)
                 bar_colors.append(COLORS[method])
+
+    for k, res in _threshold_data(results):
+        labels.append(f"Top-K={k}")
+        conserv.append(_get(res, "heat_flow_conservation") * 100)
+        bar_colors.append(COLOR_THRESHOLD)
 
     x = np.arange(len(labels))
     bars = ax.bar(x, conserv, color=bar_colors, alpha=0.8, edgecolor="gray", lw=0.5)
@@ -581,15 +699,16 @@ def fig_spectral_current(results):
              ":", color="gray", lw=1, alpha=0.6, label="Ballistic")
     ax1.plot(freqs, J_ref, "-", color=COLOR_DENSE, lw=2, label="Dense")
 
+    # Spread across quality: low rank (visible deviation) -> high rank (converged).
+    # Ranks are chosen to exist in both the small and large supercell sweeps.
     repr_configs = [
-        ("mSVD",    16,      "-"),
-        ("mSVD",    24,      "--"),
-        ("HOSVD",   (6, 16), "-"),
-        ("CP",      24,      "-"),
-        ("INDSCAL", 24,      "-"),
-        ("INDSCAL", 48,      "--"),
-        ("Waring",  24,      "-"),
-        ("Waring",  48,      "--"),
+        ("mSVD",    8,       "-"),
+        ("mSVD",    64,      "--"),
+        ("HOSVD",   (3, 8),  "-"),
+        ("INDSCAL", 16,      "-"),
+        ("INDSCAL", 64,      "--"),
+        ("Waring",  16,      "-"),
+        ("Waring",  64,      "--"),
     ]
     for method, rank, ls in repr_configs:
         key = f"{method}_R{_rank_tag(rank)}"
@@ -688,6 +807,169 @@ def fig_spectral_current_lr(results):
 
     fig.tight_layout()
     _save(fig, "spectral_current_lr")
+
+
+def fig_frob_and_ganh_vs_params(results):
+    """(a) Relative Frobenius error vs params, (b) absolute G_anh vs params."""
+    G_dense = _get(results["dense"], "thermal_conductance_anharmonic") / 1e6
+    nnz_full = results.get("nnz_full", None)
+    EPS = 1e-8
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    for method in METHODS:
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            n_params = [_get(d[1], "n_params") for d in data]
+            frob = [_get(d[1], "frob_err") for d in data]
+            keep = [(p, e) for p, e in zip(n_params, frob) if e > EPS]
+            if not keep:
+                continue
+            pk, fk = zip(*keep)
+            ax1.loglog(pk, fk,
+                       f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                       lw=1.5, ms=7, alpha=variant["alpha"],
+                       label=method + variant["label"])
+
+    ax1.set_xlabel("Number of parameters", fontsize=12)
+    ax1.set_ylabel(r"$\|\Phi - \tilde\Phi\|_F / \|\Phi\|_F$", fontsize=12)
+    ax1.set_title("(a) Relative Frobenius error vs parameters")
+    ax1.grid(True, alpha=0.3, which="both")
+
+    ax2.axhline(G_dense, color=COLOR_DENSE, lw=2, ls="-",
+                label=f"Dense ({G_dense:.0f})")
+    ax2.axhspan(G_dense * 0.95, G_dense * 1.05, alpha=0.08, color="green")
+
+    for method in METHODS:
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            n_params = [_get(d[1], "n_params") for d in data]
+            G_vals = [_get(d[1], "thermal_conductance_anharmonic") / 1e6
+                      for d in data]
+            ax2.semilogx(n_params, G_vals,
+                         f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                         lw=1.5, ms=7, alpha=variant["alpha"],
+                         label=method + variant["label"])
+
+    thr_data = _threshold_data(results)
+    if thr_data:
+        ks = [k for k, _ in thr_data]
+        frob_thr = [_get(r, "frob_err") for _, r in thr_data]
+        G_thr = [_get(r, "thermal_conductance_anharmonic") / 1e6
+                 for _, r in thr_data]
+        keep_f = [(k, f) for k, f in zip(ks, frob_thr) if f > EPS]
+        if keep_f:
+            pk, fk = zip(*keep_f)
+            ax1.loglog(pk, fk, MARKER_THRESHOLD, color=COLOR_THRESHOLD,
+                       ms=10, lw=1.2, ls="-", label=LABEL_THRESHOLD)
+        ax2.semilogx(ks, G_thr, MARKER_THRESHOLD, color=COLOR_THRESHOLD,
+                     ms=10, lw=1.2, ls="-", label=LABEL_THRESHOLD)
+
+    if nnz_full is not None:
+        for ax in (ax1, ax2):
+            ax.axvline(nnz_full, color="k", ls=":", lw=1.2, alpha=0.7,
+                       label=f"Dense nnz = {nnz_full}")
+
+    ax2.set_xlabel("Number of parameters", fontsize=12)
+    ax2.set_ylabel(r"$G_{\mathrm{anh}}$ (MW/m$^2$K)", fontsize=12)
+    ax2.set_title("(b) Thermal conductance vs parameters")
+    ax2.grid(True, alpha=0.3, which="both")
+
+    ax1.legend(fontsize=8, ncol=2)
+    ax2.legend(fontsize=8, ncol=2)
+
+    fig.tight_layout()
+    _save(fig, "frob_and_ganh_vs_params")
+
+
+def fig_kappa_err_and_spectral(results):
+    """(a) Relative thermal conductance error vs params, (b) spectral heat current."""
+    if "dense" not in results:
+        return
+
+    G_dense_W = _get(results["dense"], "thermal_conductance_anharmonic")
+    nnz_full = results.get("nnz_full", None)
+    EPS = 1e-8
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    for method in METHODS:
+        for variant in VARIANTS:
+            data = _method_data(results, method, variant)
+            if not data:
+                continue
+            n_params = [_get(d[1], "n_params") for d in data]
+            G_err = [abs(_get(d[1], "thermal_conductance_anharmonic") - G_dense_W)
+                     / abs(G_dense_W) for d in data]
+            keep = [(p, e) for p, e in zip(n_params, G_err) if e > EPS]
+            if not keep:
+                continue
+            pk, ek = zip(*keep)
+            ax1.loglog(pk, ek,
+                       f"{variant['ls']}{MARKERS[method]}", color=COLORS[method],
+                       lw=1.5, ms=7, alpha=variant["alpha"],
+                       label=method + variant["label"])
+
+    thr_data = _threshold_data(results)
+    if thr_data:
+        ks = [k for k, _ in thr_data]
+        G_err_thr = [abs(_get(r, "thermal_conductance_anharmonic") - G_dense_W)
+                     / abs(G_dense_W) for _, r in thr_data]
+        keep = [(k, e) for k, e in zip(ks, G_err_thr) if e > EPS]
+        if keep:
+            pk, ek = zip(*keep)
+            ax1.loglog(pk, ek, MARKER_THRESHOLD, color=COLOR_THRESHOLD,
+                       ms=10, lw=1.2, ls="-", label=LABEL_THRESHOLD)
+
+    if nnz_full is not None:
+        ax1.axvline(nnz_full, color="k", ls=":", lw=1.2, alpha=0.7,
+                    label=f"Dense nnz = {nnz_full}")
+
+    ax1.set_xlabel("Number of parameters", fontsize=12)
+    ax1.set_ylabel(r"$|G - G_{\mathrm{dense}}| / G_{\mathrm{dense}}$", fontsize=12)
+    ax1.set_title("(a) Relative thermal conductance error vs parameters")
+    ax1.legend(fontsize=8, ncol=2)
+    ax1.grid(True, alpha=0.3, which="both")
+
+    r_dense = results["dense"]
+    freqs = r_dense["freqs_thz"]
+    J_ref = r_dense["spectral_heat_current"]
+
+    ax2.plot(freqs, r_dense["spectral_heat_current_ballistic"],
+             ":", color="gray", lw=1, alpha=0.6, label="Ballistic")
+    ax2.plot(freqs, J_ref, "-", color=COLOR_DENSE, lw=2, label="Dense")
+
+    repr_configs = [
+        ("mSVD",    8,       "-"),
+        ("mSVD",    64,      "--"),
+        ("HOSVD",   (3, 8),  "-"),
+        ("INDSCAL", 16,      "-"),
+        ("INDSCAL", 64,      "--"),
+        ("Waring",  16,      "-"),
+        ("Waring",  64,      "--"),
+    ]
+    for method, rank, ls in repr_configs:
+        key = f"{method}_R{_rank_tag(rank)}"
+        if key not in results:
+            continue
+        r = results[key]
+        ax2.plot(r["freqs_thz"], r["spectral_heat_current"],
+                 ls, color=COLORS[method], lw=1.2,
+                 label=f"{method} $R={_rank_tag(rank)}$", alpha=0.85)
+
+    ax2.set_xlabel("Frequency (THz)", fontsize=12)
+    ax2.set_ylabel("Spectral heat current (W/THz)", fontsize=12)
+    ax2.set_title("(b) Spectral heat current")
+    ax2.legend(fontsize=7, ncol=2)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(freqs[0], freqs[-1])
+
+    fig.tight_layout()
+    _save(fig, "kappa_err_and_spectral")
 
 
 def fig_hilbert_comparison():
@@ -796,6 +1078,18 @@ def print_summary(results):
                       f"{G/1e6:>12.2f} {G_err:>8.2f} {c:>9.2f} {t:>6.0f}")
         print("-" * 78)
 
+    thr = _threshold_data(results, drop_blowups=False)
+    if thr:
+        for k, res in thr:
+            G = _get(res, "thermal_conductance_anharmonic")
+            frob = _get(res, "frob_err") * 100
+            G_err = abs(G - G_dense) / abs(G_dense) * 100
+            c = _get(res, "heat_flow_conservation") * 100
+            t = _get(res, "wall_time")
+            print(f"{'Top-K':<12} {k:>8} {k:>8} {frob:>8.2f} "
+                  f"{G/1e6:>12.2f} {G_err:>8.2f} {c:>9.2f} {t:>6.0f}")
+        print("-" * 78)
+
 
 # =========================================================================
 # Main
@@ -843,6 +1137,8 @@ def main():
     fig_scba_convergence(results)
     fig_spectral_current(results)
     fig_spectral_current_lr(results)
+    fig_frob_and_ganh_vs_params(results)
+    fig_kappa_err_and_spectral(results)
     fig_hilbert_comparison()
 
     print_summary(results)

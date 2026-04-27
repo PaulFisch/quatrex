@@ -127,8 +127,11 @@ def _write_qe_input(
     lines.append("&ELECTRONS\n")
     lines.append(f"   conv_thr         = {qe_config.conv_thr}\n")
     if use_restart_data:
+        # Only chain the charge density. Wavefunction restart breaks if the
+        # number of k-points changes between seed and current run (e.g. when
+        # symmetry is broken by a displacement), since QE expects one wfc
+        # file per k-point.
         lines.append("   startingpot      = 'file'\n")
-        lines.append("   startingwfc      = 'file'\n")
     lines.append("/\n")
 
     lines.append("ATOMIC_SPECIES\n")
@@ -209,7 +212,6 @@ def _rewrite_qe_restart_flags(inp_path: Path, use_restart_data: bool) -> None:
         replacement = (
             "&ELECTRONS\n"
             "   startingpot      = 'file'\n"
-            "   startingwfc      = 'file'\n"
         )
         if marker not in text:
             raise ValueError(f"Could not find &ELECTRONS in {inp_path}")
