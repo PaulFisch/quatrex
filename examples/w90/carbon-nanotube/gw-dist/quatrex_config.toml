@@ -21,7 +21,6 @@ symmetric = true
 
 [outputs] # Select which outputs to write.
 electron_ldos = true
-contact_currents = true
 device_currents = true
 electron_density = false
 hole_density = false
@@ -77,6 +76,7 @@ obc.residual_tolerance = 1e-4
 
 [coulomb_screening] # ==================================================
 interaction_cutoff = 8 # Å
+epsilon_r = 4.0
 
 num_connected_blocks = 2 # Can be 1, 2, 3, or "auto"
 
@@ -85,7 +85,7 @@ solver.max_batch_size = 1000
 
 obc.algorithm = "spectral"
 obc.nevp_solver = "beyn"
-obc.block_sections = 2
+obc.block_sections = 1
 
 # Parameters for Beyn's method.
 obc.num_ref_iterations = 2

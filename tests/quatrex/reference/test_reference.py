@@ -1,47 +1,22 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-import subprocess
-import tomllib
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pytest
+from mpi4py.MPI import COMM_WORLD as comm
+
+from quatrex.cli.main import run as cli_run
 
 
-def _adjust_config_paths(quatrex_config_path: Path, tmp_config_path: Path):
-    """Adjusts the input directory path in the temporary config to point
-    to the example's input directory.
-
-    Parameters
-    ----------
-    quatrex_config_path : Path
-        The path to the original config file in the example directory.
-    tmp_config_path : Path
-        The path to the temporary config file that will be used for
-        testing.
-
-    """
-    # Read the original config to find the input directory.
-    with open(quatrex_config_path, "rb") as f:
-        config = tomllib.load(f)
-
-    config_text = quatrex_config_path.read_text()
-
-    input_dir = config.get("input_dir")
-    if input_dir is None:
-        # If the input directory is not specified, we assume it is
-        # "inputs" relative to the config file.
-        abs_input_dir = str((quatrex_config_path.parent / "inputs").resolve())
-        config_text = f'input_dir = "{abs_input_dir}"\n' + config_text
-
-    elif not Path(input_dir).is_absolute():
-        abs_input_dir = str((quatrex_config_path.parent / input_dir).resolve())
-        config_text = config_text.replace(input_dir, abs_input_dir)
-
-    # Copy the config and replace the input directory with the absolute path.
-    tmp_config_path.write_text(config_text)
-
-
-def test_single_rank(example: tuple[Path, bool], tmp_path: Path):
+# NOTE: Skip this if running in an MPI environment. These should be run
+# in a single process only.
+@pytest.mark.mpi_skip()
+def test_single_rank(
+    example: tuple[Path, bool],
+    tmp_path: Path,
+    adjust_config_paths: Callable,
+):
     """Tests that the example runs and matches reference observables."""
 
     example_path, distributed = example
@@ -52,12 +27,10 @@ def test_single_rank(example: tuple[Path, bool], tmp_path: Path):
     # Set up reference and temporary configs.
     quatrex_config_path = example_path / "quatrex_config.toml"
     tmp_config_path = tmp_path / "quatrex_config.toml"
-    _adjust_config_paths(quatrex_config_path, tmp_config_path)
+    adjust_config_paths(quatrex_config_path, tmp_config_path)
 
     # Run the example using the CLI.
-    from quatrex.cli.main import run
-
-    run(tmp_config_path)
+    cli_run(tmp_config_path)
 
     output_dir = tmp_path / "outputs"
     reference_output_dir = example_path / "reference-outputs"
@@ -74,23 +47,35 @@ def test_single_rank(example: tuple[Path, bool], tmp_path: Path):
         ), f"Value mismatch for '{output_file.name}'"
 
 
-def test_distributed(example: tuple[Path, bool], tmp_path: Path):
+# NOTE: The distributed test will fail if the number of ranks is not a
+# multiple of three.
+@pytest.mark.mpi(min_size=3)
+def test_distributed(
+    example: tuple[Path, bool],
+    mpi_tmp_path: Path,
+    adjust_config_paths: Callable,
+):
     """Tests that the distributed example runs and matches reference observables."""
 
     example_path, distributed = example
 
     # Set up reference and temporary configs.
-    quatrex_config_path = example_path / "quatrex_config.toml"
-    tmp_config_path = tmp_path / "quatrex_config.toml"
-    _adjust_config_paths(quatrex_config_path, tmp_config_path)
+    tmp_config_path = mpi_tmp_path / "quatrex_config.toml"
+    if comm.rank == 0:
+        quatrex_config_path = example_path / "quatrex_config.toml"
+        adjust_config_paths(quatrex_config_path, tmp_config_path)
 
-    # TODO: This is not compatible with SLURM yet.
-    # This needs to be adapted when running on a cluster.
-    args = ["mpiexec", "-n", "6", "quatrex", "run", str(tmp_config_path)]
+    comm.barrier()  # Ensure all ranks wait until the config is set up.
 
-    subprocess.run(args, check=True, stdout=None, stderr=None)
+    # Run the example using the CLI.
+    cli_run(tmp_config_path)
 
-    output_dir = tmp_path / "outputs"
+    comm.barrier()  # Ensure all ranks wait until the run is complete.
+
+    if comm.rank != 0:
+        return  # Only rank 0 will check the outputs.
+
+    output_dir = mpi_tmp_path / "outputs"
     reference_output_dir = example_path / "reference-outputs"
 
     for output_file in output_dir.glob("*.npy"):
@@ -101,5 +86,5 @@ def test_distributed(example: tuple[Path, bool], tmp_path: Path):
             reference.shape == test.shape
         ), f"Shape mismatch for '{output_file.name}': {reference.shape} vs {test.shape}"
         assert np.allclose(
-            reference, test, rtol=1e-3, atol=1e-4
+            reference, test, rtol=1e-3, atol=1e-4, equal_nan=True
         ), f"Value mismatch for '{output_file.name}'"

@@ -107,7 +107,6 @@ def _create_coo_dsdbsparse(
     return coo, dsdbsparse
 
 
-@pytest.mark.mpi
 class TestCreation:
     """Tests the creation methods of DSDBSparse."""
 
@@ -146,7 +145,13 @@ class TestCreation:
         assert zeros.shape == dsdbsparse.shape
 
 
-@pytest.mark.mpi
+@pytest.mark.mpi(min_size=2)
+class TestCreationDist(TestCreation):
+    """Tests all tests of TestCreation in distributed setting."""
+
+    pass
+
+
 class TestConversion:
     """Tests for the conversion methods of DSDBSparse."""
 
@@ -196,6 +201,13 @@ class TestConversion:
         dsdbsparse.symmetrize(op)
 
         assert xp.allclose(reference, dsdbsparse.to_dense())
+
+
+@pytest.mark.mpi(min_size=2)
+class TestConversionDist(TestConversion):
+    """Tests all tests of TestConversion in distributed setting."""
+
+    pass
 
 
 def _create_new_block_sizes(
@@ -264,11 +276,9 @@ def _get_block_inds(block: tuple, block_sizes: NDArray) -> tuple:
     return index, in_bounds
 
 
-@pytest.mark.mpi
 class TestAccess:
     """Tests for the access methods of DSDBSparse."""
 
-    @pytest.mark.usefixtures("accessed_block")
     def test_get_block(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -308,7 +318,6 @@ class TestAccess:
                 # Find the correct rank in block-comm
                 assert xp.allclose(reference_block, dsdbsparse.blocks[accessed_block])
 
-    @pytest.mark.usefixtures("accessed_block")
     def test_get_sparse_block(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -374,7 +383,6 @@ class TestAccess:
                 else:
                     raise ValueError("Unknown DSDBSparse type.")
 
-    @pytest.mark.usefixtures("accessed_block")
     def test_set_block(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -437,7 +445,6 @@ class TestAccess:
 
         assert xp.allclose(dense, dsdbsparse.to_dense())
 
-    @pytest.mark.usefixtures("accessed_block", "stack_index")
     def test_get_block_substack(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -491,7 +498,6 @@ class TestAccess:
                     dsdbsparse.stack[stack_index].blocks[accessed_block],
                 )
 
-    @pytest.mark.usefixtures("accessed_block", "stack_index")
     def test_get_sparse_block_substack(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -561,7 +567,6 @@ class TestAccess:
                 else:
                     raise ValueError("Unknown DSDBSparse type.")
 
-    @pytest.mark.usefixtures("accessed_block", "stack_index")
     def test_set_block_substack(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -643,7 +648,6 @@ class TestAccess:
 
         assert xp.allclose(dense, dsdbsparse.to_dense())
 
-    @pytest.mark.usefixtures("block_change_factor")
     def test_block_sizes_setter(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -734,6 +738,13 @@ class TestAccess:
         assert xp.allclose(reference, dsdbsparse.diagonal())
 
 
+@pytest.mark.mpi(min_size=2)
+class TestAccessDist(TestAccess):
+    """Tests all tests of TestAccess in distributed setting."""
+
+    pass
+
+
 @pytest.mark.mpi(min_size=3)
 class TestDistribution:
     """Tests for the distribution methods of DSDBSparse."""
@@ -768,7 +779,6 @@ class TestDistribution:
 
         assert xp.allclose(original_data, dsdbsparse._data)
 
-    @pytest.mark.usefixtures("accessed_element")
     def test_getitem_stack(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -792,7 +802,6 @@ class TestDistribution:
         # is on a different rank in the comm.block.
         assert xp.allclose(reference, test) or (test == 0).all()
 
-    @pytest.mark.usefixtures("accessed_element")
     def test_getitem_nnz(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -818,7 +827,6 @@ class TestDistribution:
         # is on a different rank in the comm.block.
         assert xp.allclose(reference, test) or (test == 0).all()
 
-    @pytest.mark.usefixtures("accessed_element")
     def test_setitem_stack(
         self,
         dsdbsparse_type_dist: DSDBSparse,
@@ -857,7 +865,6 @@ class TestDistribution:
 
         assert xp.allclose(dense, dsdbsparse.to_dense())
 
-    @pytest.mark.usefixtures("accessed_element")
     def test_setitem_nnz(
         self,
         dsdbsparse_type_dist: DSDBSparse,
