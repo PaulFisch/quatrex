@@ -1,0 +1,118 @@
+## phonon_inputs configuration: H-passivated <100> Si nanowire — VASP
+## Smallest practical <100> SiNW: 9 Si core atoms + 44 H surface atoms (53 total).
+## Wire axis along z, period c = a_Si = 5.43 A; ~12 A vacuum gap in x and y.
+## Bulk Si lattice constant a = 5.43 A (PBE equilibrium).
+## Geometry built by carving an R_core = 3.5 A column out of bulk Si and
+## capping every undercoordinated surface Si along its missing sp3 directions
+## with H at d(Si-H) = 1.48 A.
+##
+## Designed as a small but physically reasonable testcase:
+##   - 53-atom unit cell, 1x1x2 supercell (106 atoms) for FC3
+##   - H-passivation gapped + small sigma keeps SCF cheap (no metallic surface states)
+##   - relax (ISIF=2) keeps the cell fixed; vc-relax would collapse the vacuum
+##   - LREAL=Auto on the supercell -> fast forces (vacuum-rich cell)
+##
+## Usage:
+##   python -m phonon_inputs pipeline  --config config_sinw100_vasp.yaml
+##   python -m phonon_inputs pipeline  --config config_sinw100_vasp.yaml --skip-relax
+##   python -m phonon_inputs fc3-sow   --config config_sinw100_vasp.yaml
+##   python -m phonon_inputs fc3-run   --config config_sinw100_vasp.yaml
+##   python -m phonon_inputs fc3-reap  --config config_sinw100_vasp.yaml
+
+structure:
+  source: inline
+  symbols:
+    [Si, Si, Si, Si, Si, Si, Si, Si, Si,
+     H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H,
+     H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H, H]
+  lattice:
+    - [18.0000, 0.0000, 0.0000]   # vacuum direction (a)
+    - [0.0000, 18.0000, 0.0000]   # vacuum direction (b)
+    - [0.0000,  0.0000, 5.4300]   # wire axis (c) = a_Si
+  scaled_positions:
+    - [0.424583, 0.424583, 0.250000]   # Si
+    - [0.349167, 0.500000, 0.500000]   # Si
+    - [0.424583, 0.575417, 0.750000]   # Si
+    - [0.500000, 0.349167, 0.500000]   # Si
+    - [0.575417, 0.424583, 0.750000]   # Si
+    - [0.500000, 0.500000, 0.000000]   # Si
+    - [0.575417, 0.575417, 0.250000]   # Si
+    - [0.500000, 0.650833, 0.500000]   # Si
+    - [0.650833, 0.500000, 0.500000]   # Si
+    - [0.472054, 0.472054, 0.407363]   # H
+    - [0.472054, 0.377112, 0.092637]   # H
+    - [0.377112, 0.472054, 0.092637]   # H
+    - [0.377112, 0.377112, 0.407363]   # H
+    - [0.377112, 0.377112, 0.092637]   # H
+    - [0.396638, 0.547471, 0.342637]   # H
+    - [0.396638, 0.452529, 0.657363]   # H
+    - [0.301696, 0.547471, 0.657363]   # H
+    - [0.301696, 0.547471, 0.342637]   # H
+    - [0.301696, 0.452529, 0.657363]   # H
+    - [0.301696, 0.452529, 0.342637]   # H
+    - [0.472054, 0.622888, 0.907363]   # H
+    - [0.472054, 0.527946, 0.592637]   # H
+    - [0.377112, 0.622888, 0.907363]   # H
+    - [0.377112, 0.622888, 0.592637]   # H
+    - [0.377112, 0.527946, 0.907363]   # H
+    - [0.547471, 0.396638, 0.342637]   # H
+    - [0.547471, 0.301696, 0.657363]   # H
+    - [0.547471, 0.301696, 0.342637]   # H
+    - [0.452529, 0.396638, 0.657363]   # H
+    - [0.452529, 0.301696, 0.657363]   # H
+    - [0.452529, 0.301696, 0.342637]   # H
+    - [0.622888, 0.472054, 0.907363]   # H
+    - [0.622888, 0.377112, 0.907363]   # H
+    - [0.622888, 0.377112, 0.592637]   # H
+    - [0.527946, 0.472054, 0.592637]   # H
+    - [0.527946, 0.377112, 0.907363]   # H
+    - [0.622888, 0.622888, 0.407363]   # H
+    - [0.622888, 0.622888, 0.092637]   # H
+    - [0.622888, 0.527946, 0.092637]   # H
+    - [0.527946, 0.622888, 0.092637]   # H
+    - [0.527946, 0.527946, 0.407363]   # H
+    - [0.547471, 0.698304, 0.657363]   # H
+    - [0.547471, 0.698304, 0.342637]   # H
+    - [0.547471, 0.603362, 0.657363]   # H
+    - [0.452529, 0.698304, 0.657363]   # H
+    - [0.452529, 0.698304, 0.342637]   # H
+    - [0.452529, 0.603362, 0.342637]   # H
+    - [0.698304, 0.547471, 0.657363]   # H
+    - [0.698304, 0.547471, 0.342637]   # H
+    - [0.698304, 0.452529, 0.657363]   # H
+    - [0.698304, 0.452529, 0.342637]   # H
+    - [0.603362, 0.547471, 0.657363]   # H
+    - [0.603362, 0.452529, 0.342637]   # H
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Si: Si                        # uses potpaw_PBE/Si/POTCAR
+    H: H                          # uses potpaw_PBE/H/POTCAR
+  encut: 400                      # eV - covers H ENMAX (250) and Si ENMAX (245) comfortably
+  ediff: 1.0e-7                   # eV
+  ismear: 0                       # Gaussian smearing (semiconductor: H-passivated SiNW is gapped)
+  sigma: 0.01                     # eV - narrow smearing fine for gapped wire
+  prec: Accurate
+  lreal: Auto                     # real-space projectors -> faster on the 106-atom supercell
+  lwave: false
+  lcharg: false
+  ncore: 4                        # cores per orbital
+  kpar: 1
+  kpoints_scf: [1, 1, 2]
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; mpirun -np 128 --bind-to core --map-by core /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std"
+
+relax:
+  calculation: relax              # ISIF=2: atoms only -> keeps wire length & vacuum fixed
+  forc_conv_thr: 0.005            # eV/A - relaxes Si-H bonds and surface reconstruction
+  calculator: vasp
+  work_dir: ./relax_sinw100_vasp
+
+thirdorder:
+  supercell: [1, 1, 2]            # 106 atoms - small, captures up to ~5.4 A along wire
+  cutoff_pair_distance: 4.0       # Angstrom - covers Si-Si up to 2nd neighbors + Si-H
+  displacement_distance: 0.02     # Angstrom - balances FD noise vs anharmonicity
+  fc_calculator: symfc            # symmetry-adapted fitting
+  calculator: vasp
+  work_dir: ./fc3_sinw100_vasp
+  pw_timeout: 7200                # 2 hours per displacement (106 atoms, but vacuum-rich)
