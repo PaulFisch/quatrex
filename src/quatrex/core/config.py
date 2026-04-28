@@ -11,6 +11,7 @@ from typing import Literal
 
 import numba as nb
 import numpy as np
+from mpi4py.MPI import COMM_WORLD as mpi_comm_world
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -25,7 +26,7 @@ from pydantic import (
 from typing_extensions import Self
 
 from qttools import xp
-from qttools.comm import comm as qtx_comm
+from qttools.comm import comm
 from qttools.datastructures import DSDBCOO, DSDBSparse
 from qttools.profiling import Profiler
 
@@ -72,6 +73,21 @@ class SCBAConfig(BaseModel):
 
     symmetric: bool = False
 
+    align_self_energy_to_complex_axes: bool = True
+    r"""Whether to discard parts of the self-energy.
+
+    This affects the self-energy in the following way:
+    - The real parts of the lesser/greater self-energy are discarded.
+    - The imaginary part of the retarded self-energy from any previous
+    computation is zeroed.
+
+    This happens before the imaginary part of the retarded self-energy
+    is computed from the lesser and greater parts as
+    $$\mathrm{Im}\left[\mathbf{\Sigma}^R\right] =
+    \frac{\mathbf{\Sigma}^> - \mathbf{\Sigma}^<}{2i}$$.
+
+    """
+
 
 class PoissonConfig(BaseModel):
     """Options for the Poisson solver."""
@@ -102,7 +118,7 @@ class MemoizerConfig(BaseModel):
 
     mode: Literal["auto", "force", "force-after-first", "off"] = "auto"
     """The memoization mode to determine when to do fixed-point iterations.
-    
+
     - "auto": Automatically decides whether to use memoization based on the
         specified tolerances. Only useful if all ranks memoize.
     - "force": Always use memoization.
@@ -115,7 +131,7 @@ class MemoizerConfig(BaseModel):
 
     relative_tol: PositiveFloat = 2e-1
     """The relative tolerance for the fixed-point iterations.
-    
+
     Only used if `mode` is set to "auto".
     """
 
@@ -143,10 +159,42 @@ class SolverConfig(BaseModel):
     # The maximum number of energies per batch.
     max_batch_size: PositiveInt = 100
 
-    # Whether to compute the current via the Meir-Wingreen formula.
-    compute_current: bool = False
+    compute_current: bool | None = None
+    """Whether to compute the current via the Meir-Wingreen formula.
+
+    This is only supported for the `"rgf"` algorithm. If not set, it is
+    automatically determined based on the algorithm. (i.e. `True` for
+    `"rgf"` and `False` for `"inv"`)
+
+    If `True`, the current is computed between each layer and from/to the
+    leads. This way of computing the current is usually preferable as it
+    is independet of any interaction cutoffs, since it is computed from
+    the temporarily densified Green's functions and self-energies.
+
+    !!! note
+        This is parameter is only used in the Electron Solver. The
+        Coulomb screening solver does not compute currents, so this
+        parameter is ignored for the Coulomb screening solver.
+
+    """
 
     direct_solver: Literal["superlu", "mumps", "cudss"] = "superlu"
+
+    @model_validator(mode="after")
+    def set_compute_current(self) -> Self:
+        """Sets the `compute_current` parameter based on the algorithm."""
+        if self.compute_current is None:
+            if self.algorithm == "rgf":
+                self.compute_current = True
+            else:
+                self.compute_current = False
+
+        if self.compute_current and self.algorithm != "rgf":
+            raise ValueError(
+                "Current computation is only supported for the RGF algorithm."
+            )
+
+        return self
 
 
 class OBCConfig(BaseModel):
@@ -162,7 +210,7 @@ class OBCConfig(BaseModel):
 
     algorithm: Literal["sancho-rubio", "spectral"] = "spectral"
     """The OBC algorithm to use.
-    
+
     - "sancho-rubio": Uses the Sancho-Rubio iterative scheme to compute the
         surface Green's functions. This method achieves exponential convergence
         compared to the linear convergence of fixed-point iterations.
@@ -221,14 +269,14 @@ class OBCConfig(BaseModel):
     $$ \mathbf{g}_{n+1} = [\mathbf{M}_{0} - \mathbf{M}_{-1} \mathbf{g}_{n} \mathbf{M}_{1} ]^{-1} $$
 
     This is needed to improve the accuracy of the surface Green's functions
-    if not enough eigenpairs are considered. 
+    if not enough eigenpairs are considered.
 
     Only used if `algorithm` is set to "spectral".
     """
 
     min_propagation: PositiveFloat = 1e-2
     r"""The minimum propagation speed for propagating modes.
-    
+
     The propagation speed is computed as:
 
     $$ abs(real(\frac{dE}{dk})) / abs(imag(\frac{dE}{dk})) $$
@@ -237,7 +285,7 @@ class OBCConfig(BaseModel):
 
     residual_tolerance: PositiveFloat = 1e-3
     r"""The tolerance for the residual of the eigenpairs.
-    
+
     The residuals are computed as:
 
     $$ \lvert \sum \limits_{n=-b}^{b} \lambda^{b} \mathbf{M}_{n} \vec{v} \rvert $$
@@ -249,7 +297,7 @@ class OBCConfig(BaseModel):
 
     residual_normalization: bool = True
     """Whether to normalize the residuals by the norm of the eigenvalue.
-    
+
     This is useful to avoid that large eigenvalues have large residuals
     and small eigenvalues have small residuals.
     """
@@ -261,7 +309,7 @@ class OBCConfig(BaseModel):
     The residual is computed as:
 
     $$ \lvert \mathbf{g} - [\mathbf{M}_{0} - \mathbf{M}_{-1} \mathbf{g} \mathbf{M}_{1} ]^{-1} \rvert / \lvert \mathbf{g} \rvert $$
-    
+
     This parameter is only used if the `formalism` is `wf`. Otherwise, the memoizer
     is responsible for residual checking and warnings.
     """
@@ -271,9 +319,9 @@ class OBCConfig(BaseModel):
         non-decaying ones in the spectral OBC solver.
 
     Modes that are very close to the unit contour could be misclassified
-    with 'min_decay' and 'min_propagation' conditions i.e. 
+    with 'min_decay' and 'min_propagation' conditions i.e.
     when their decay is smaller than 'min_decay' but they are not propagating fast enough.
-    The not fast enough propagating ones with decay smaller than 'eta_decay' are 
+    The not fast enough propagating ones with decay smaller than 'eta_decay' are
     considered as well decaying modes.
     """
 
@@ -287,7 +335,7 @@ class OBCConfig(BaseModel):
     # Parameters for subspace NEVP solvers.
     r_o: PositiveFloat = 10.0
     """The outer radius of the contour in the complex plane for the contour methods.
-    
+
     This parameter should not be too large to avoid having too many eigenpairs
     inside the contour. It should also not be too small to avoid missing important
     eigenpairs. If a eigenpair is too close to the contour,
@@ -303,7 +351,7 @@ class OBCConfig(BaseModel):
 
     m_0: PositiveInt = 10
     """The subspace guess in the contour methods.
-    
+
     The guess has to be larger than the expected number of eigenvalues
     inside the contour. If too small, the method will fail. If too large, the method
     will be not/less efficient.
@@ -360,7 +408,7 @@ class LyapunovConfig(BaseModel):
 
     reduce_sparsity: bool = True
     r"""Whether to use the sparsity of $\mathbf{A}$ to accelerate the Lyapunov solver.
-    
+
     This is done by removing zero rows and columns from $\mathbf{A}$, solving the reduced
     Lyapunov equation, and then expanding the solution back to the original size.
     """
@@ -390,7 +438,7 @@ class LyapunovConfig(BaseModel):
         of the solution of the spectral Lyapunov solver.
 
     This is not used in the doubling method. Additionally, the number of iterations in
-    the memoizer is also independent of this parameter.  
+    the memoizer is also independent of this parameter.
     """
 
     memoizer: MemoizerConfig = MemoizerConfig()
@@ -528,30 +576,72 @@ class CoulombScreeningConfig(BaseModel):
 
     filtering_iteration_limit: PositiveInt = 1
 
+    align_polarization_to_complex_axes: bool = True
+    r"""Whether to discard parts of the polarization.
+
+    This affects the polarization in the following way:
+    - The real parts of the lesser/greater polarization are discarded.
+    - The imaginary part of the retarded polarization from previous
+    computation is zeroed.
+
+    This happens before the imaginary part of the retarded polarization
+    is computed from the lesser and greater parts as
+    $$\mathrm{Im}\left[\mathbf{P}^R\right] = \frac{\mathbf{P}^> -
+    \mathbf{P}^<}{2i}$$.
+
+    """
+
+    include_energy_renormalization: Literal["self-energy", "polarization", "both"] = (
+        "self-energy"
+    )
+    r"""Whether to compute the real part of the retarded polarization and/or self-energy.
+
+    Possible values are `"self-energy"`, `"polarization"`, and `"both"`.
+
+    The full retarded interaction quantities are complex-valued, where
+    the real part is computed from the imaginary part using the
+    Kramers-Kronig relations:
+
+    $$\mathbf{X}^{R} = \frac{\mathbf{X}^{>} - \mathbf{X}^{<}}{2} +
+    \frac{1}{2\pi} \mathrm{p.v.} \int_{-\infty}^{\infty}  dE' \,
+    \frac{\mathbf{X}^{>} - \mathbf{X}^{<}}{E^{'} - E}$$
+
+    The real part only leads to only a shift in the energy, so it is
+    often neglected:
+
+    $$\mathbf{X}^{R} \approx \frac{\mathbf{X}^{>} - \mathbf{X}^{<}}{2}$$
+
+    The default is to only include the real part in the Coulomb
+    screening self-energy and not in the polarization.
+
+    The real part is computed using a Hilbert transform. For the Coulomb
+    screening self-energy, this Hilbert transform can lead to errors at
+    the edges of the energy window. The `apply_hilbert_correction`
+    option can be used to apply a correction to the Hilbert transform to
+    mitigate these errors.
+
+    """
+
     apply_hilbert_correction: bool = False
     """Whether to apply the corrections for the edges of the energy window
     to the hilbert transform when computing the retarded self-energy.
 
     Computing the correction is slightly more expensive.
-    """
-
-    discard_real_parts: bool = True
-    r"""Whether to discard the real parts of the lesser/greater polarization and self-energy.
-
-    This affects the retarded parts in the following way:
-    For Polarization and Coulomb Screening Self-Energy if the `discard_real_parts` flag is set,
-    the imaginary part is only computed from only the lesser and greater parts by $\frac{\mathbf{X}^> - \mathbf{X}^<}{2}$.
-    Else, the imaginary part can also contain contributions from the Hilbert transformation.
 
     """
 
-    compute_retarded_polarization: bool = False
-    r"""Whether to compute the Hilbert part of the retarded polarization function.
-    
-    If not set, the retarded polarization is computed only from
-    the lesser and greater parts by $\frac{\mathbf{P}^> - \mathbf{P}^<}{2}$.
+    @model_validator(mode="after")
+    def check_hilbert_correction_applicable(self) -> Self:
+        """Checks if the Hilbert correction can be applied."""
+        if (
+            self.apply_hilbert_correction
+            and self.include_energy_renormalization not in ["self-energy", "both"]
+        ):
+            raise ValueError(
+                "Hilbert correction can only be applied if the real part of the self-energy is included."
+            )
 
-    """
+        return self
 
 
 class PhotonConfig(BaseModel):
@@ -608,7 +698,6 @@ class OutputConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # Only the spectral currents are saved by default.
-    contact_currents: bool = True
     device_currents: bool = True
 
     potential: bool = False
@@ -789,7 +878,7 @@ class DeviceConfig(BaseModel):
     !!! warning
 
         Currently, `False` is not supported since
-        the code does not correctly handle overlap matrices in the case 
+        the code does not correctly handle overlap matrices in the case
         of kpoints.
 
     """
@@ -914,7 +1003,8 @@ class BandEdgeConfig(BaseModel):
     block_sections: PositiveInt = 1
 
     @field_validator("use_eigvalsh", mode="after")
-    def check_use_eigvalsh(cls, value, info) -> bool:
+    @classmethod
+    def check_use_eigvalsh(cls, value) -> bool:
         if not value:
             raise NotImplementedError(
                 "Only use_eigvalsh=True is supported at the moment."
@@ -922,6 +1012,7 @@ class BandEdgeConfig(BaseModel):
         return value
 
     @field_validator("eigvalsh_compute_location", mode="after")
+    @classmethod
     def check_eigvalsh_location(cls, value) -> Literal["numpy", "cupy"]:
         if value == "cupy" and xp.__name__ != "cupy":
             warnings.warn(
@@ -965,50 +1056,6 @@ class CommConfig(BaseModel):
     stack_all_reduce: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     stack_bcast: Literal["host_mpi", "device_mpi", "nccl"] | None = None
 
-    block_comm_config: dict[str, str] = {}
-    stack_comm_config: dict[str, str] = {}
-
-    @model_validator(mode="after")
-    def set_defaults(self) -> Self:
-        if xp.__name__ == "cupy":
-            self.block_comm_config = {
-                "all_to_all": self.block_all_to_all or "host_mpi",
-                "all_gather": self.block_all_gather or "host_mpi",
-                "all_reduce": self.block_all_reduce or "host_mpi",
-                "bcast": self.block_bcast or "host_mpi",
-            }
-
-            self.stack_comm_config = {
-                "all_to_all": self.stack_all_to_all or "host_mpi",
-                "all_gather": self.stack_all_gather or "host_mpi",
-                "all_reduce": self.stack_all_reduce or "host_mpi",
-                "bcast": self.stack_bcast or "host_mpi",
-            }
-        else:
-            self.block_comm_config = {
-                "all_to_all": self.block_all_to_all or "device_mpi",
-                "all_gather": self.block_all_gather or "device_mpi",
-                "all_reduce": self.block_all_reduce or "device_mpi",
-                "bcast": self.block_bcast or "device_mpi",
-            }
-
-            self.stack_comm_config = {
-                "all_to_all": self.stack_all_to_all or "device_mpi",
-                "all_gather": self.stack_all_gather or "device_mpi",
-                "all_reduce": self.stack_all_reduce or "device_mpi",
-                "bcast": self.stack_bcast or "device_mpi",
-            }
-
-        # configure the comm
-        qtx_comm.configure(
-            block_comm_size=self.block_comm_size,
-            block_comm_config=self.block_comm_config,
-            stack_comm_config=self.stack_comm_config,
-            override=True,
-        )
-
-        return self
-
 
 class ComputeConfig(BaseModel):
     """All configurations concerning computational details."""
@@ -1030,37 +1077,12 @@ class ComputeConfig(BaseModel):
     comm: CommConfig = CommConfig()
 
     @field_validator("dsdbsparse_type", mode="before")
+    @classmethod
     def set_dsdbsparse(cls, value) -> DSDBSparse:
         """Converts the string value to the corresponding DSDBSparse object."""
         if value == "DSDBCOO":
             return DSDBCOO
         raise ValueError(f"Invalid value '{value}' for dbsparse")
-
-    @model_validator(mode="after")
-    def set_threading(self) -> Self:
-
-        # TODO: set the number of threads automatically based on the available cores
-        # problems is that we do not know yet how many energy points there will be
-        # has to be after unifying the configs
-        if self.numba_num_threads is None:
-            self.numba_num_threads = 1
-        if self.blas_num_threads is None:
-            self.blas_num_threads = 1
-
-        nb.set_num_threads(self.numba_num_threads)
-        nb.config.THREADING_LAYER = self.numba_threading_layer
-
-        if self.numba_num_threads == 1 and self.blas_num_threads in [
-            "sequential_blas_under_openmp",
-            1,
-        ]:
-            if qtx_comm.rank == 0:
-                warnings.warn(
-                    "The CPU code will run sequentially which may impact performance.",
-                    UserWarning,
-                )
-
-        return self
 
 
 class QuatrexConfig(BaseModel):
@@ -1169,23 +1191,6 @@ class QuatrexConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def resolve_profiler_path(self):
-        """Resolves the simulation directory path."""
-        if not self.outputs.profiling_path.is_absolute():
-            self.outputs.profiling_path = (
-                self.config_dir / self.outputs.profiling_path
-            ).resolve()
-
-        # Saving will strip the extension
-        profiler.set_parameters(
-            print_path=self.outputs.profiling_path,
-            save_path=self.outputs.profiling_path,
-            save_format=self.outputs.profiling_save_format,
-        )
-
-        return self
-
-    @model_validator(mode="after")
     def check_device_block_size(self) -> Self:
         """Checks that block size is consistent with other parameters."""
 
@@ -1210,6 +1215,10 @@ class QuatrexConfig(BaseModel):
 def parse_config(config_file: Path) -> QuatrexConfig:
     """Reads the TOML config file.
 
+    Only rank 0 process reads the config file. It is then broadcasted to
+    the other processes. Each process then parses the config into a
+    `QuatrexConfig` object.
+
     Parameters
     ----------
     config_file : Path
@@ -1221,19 +1230,129 @@ def parse_config(config_file: Path) -> QuatrexConfig:
         The parsed configuration object.
 
     """
+    config = None
+    if mpi_comm_world.rank == 0:
+        config_file = Path(config_file).resolve()
 
-    config_file = Path(config_file).resolve()
+        with open(config_file, "rb") as f:
+            config = tomllib.load(f)
 
-    with open(config_file, "rb") as f:
-        config = tomllib.load(f)
+        if "simulation_dir" in config:
+            simulation_dir = config["simulation_dir"]
+            if not os.path.isabs(simulation_dir):
+                parent_dir = os.path.dirname(os.path.abspath(config_file))
+                simulation_dir = Path(os.path.join(parent_dir, simulation_dir))
+                config["simulation_dir"] = simulation_dir
 
-    if "simulation_dir" in config:
-        simulation_dir = config["simulation_dir"]
-        if not os.path.isabs(simulation_dir):
-            parent_dir = os.path.dirname(os.path.abspath(config_file))
-            simulation_dir = Path(os.path.join(parent_dir, simulation_dir))
-            config["simulation_dir"] = simulation_dir
+        config["config_dir"] = config_file.parent
 
-    config["config_dir"] = config_file.parent
+    config = mpi_comm_world.bcast(config, root=0)
 
     return QuatrexConfig(**config)
+
+
+def _setup_profiler(config: QuatrexConfig) -> None:
+    """Sets up the profiler based on the given configuration.
+
+    Parameters
+    ----------
+    config : QuatrexConfig
+        The configuration object containing the profiling settings.
+
+    """
+
+    if not config.outputs.profiling_path.is_absolute():
+        config.outputs.profiling_path = (
+            config.config_dir / config.outputs.profiling_path
+        ).resolve()
+
+    # Saving will strip the extension
+    profiler.set_parameters(
+        print_path=config.outputs.profiling_path,
+        save_path=config.outputs.profiling_path,
+        save_format=config.outputs.profiling_save_format,
+    )
+
+
+def _setup_comm(comm_config: CommConfig) -> None:
+    """Sets up the communication backend.
+
+    Parameters
+    ----------
+    comm_config : CommConfig
+        The communication configuration containing the communication settings.
+
+    """
+    default_backend = "host_mpi" if xp.__name__ == "cupy" else "device_mpi"
+
+    block_comm_config = {
+        "all_to_all": comm_config.block_all_to_all or default_backend,
+        "all_gather": comm_config.block_all_gather or default_backend,
+        "all_reduce": comm_config.block_all_reduce or default_backend,
+        "bcast": comm_config.block_bcast or default_backend,
+    }
+
+    stack_comm_config = {
+        "all_to_all": comm_config.stack_all_to_all or default_backend,
+        "all_gather": comm_config.stack_all_gather or default_backend,
+        "all_reduce": comm_config.stack_all_reduce or default_backend,
+        "bcast": comm_config.stack_bcast or default_backend,
+    }
+
+    comm.configure(
+        block_comm_size=comm_config.block_comm_size,
+        block_comm_config=block_comm_config,
+        stack_comm_config=stack_comm_config,
+        override=True,
+    )
+
+
+def _setup_threading(compute_config: ComputeConfig):
+    """Sets up the threading layer.
+
+    Parameters
+    ----------
+    compute_config : ComputeConfig
+        The compute configuration containing the threading settings.
+
+    """
+
+    # TODO: set the number of threads automatically based on the available cores
+    # problems is that we do not know yet how many energy points there will be
+    # has to be after unifying the configs
+    # NOTE: here we could now do this tuening
+    if compute_config.numba_num_threads is None:
+        compute_config.numba_num_threads = 1
+    if compute_config.blas_num_threads is None:
+        compute_config.blas_num_threads = 1
+
+    nb.set_num_threads(compute_config.numba_num_threads)
+    nb.config.THREADING_LAYER = compute_config.numba_threading_layer
+
+    if compute_config.numba_num_threads == 1 and compute_config.blas_num_threads in [
+        "sequential_blas_under_openmp",
+        1,
+    ]:
+        if comm.rank == 0:
+            warnings.warn(
+                "The CPU code will run sequentially which may impact performance.",
+                UserWarning,
+            )
+
+
+def setup_context(config: QuatrexConfig) -> None:
+    """Sets up the simulation context based on the given configuration.
+
+    This includes setting up the profiler, the communication backend,
+    and the threading layer.
+
+    Parameters
+    ----------
+    config : QuatrexConfig
+        The configuration object containing the settings for the
+        simulation context.
+
+    """
+    _setup_profiler(config)
+    _setup_comm(config.compute.comm)
+    _setup_threading(config.compute)

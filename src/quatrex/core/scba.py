@@ -13,12 +13,7 @@ from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
 from qttools.utils.mpi_utils import distributed_load, get_section_sizes
 from quatrex.core.config import QuatrexConfig
-from quatrex.core.observables import (
-    contact_currents,
-    current_conservation,
-    density,
-    device_current,
-)
+from quatrex.core.observables import current_conservation, density, device_current
 from quatrex.core.utils import compute_num_connected_blocks, compute_sparsity_pattern
 from quatrex.coulomb_screening import CoulombScreeningSolver, PCoulombScreening
 from quatrex.device.inputs import (
@@ -394,11 +389,7 @@ class SCBA:
             energies_path = self.config.input_dir / "photon_energies.npy"
             self.photon_energies = distributed_load(energies_path)
             self.pi_photon = PiPhoton(...)
-            self.photon_solver = PhotonSolver(
-                self.config,
-                self.photon_energies,
-                ...,
-            )
+            self.photon_solver = PhotonSolver(self.config, self.photon_energies)
             self.sigma_photon = SigmaPhoton(...)
 
         # ----- Phonons ------------------------------------------------
@@ -407,11 +398,7 @@ class SCBA:
                 energies_path = self.config.input_dir / "phonon_energies.npy"
                 self.phonon_energies = distributed_load(energies_path)
                 self.pi_phonon = PiPhonon(...)
-                self.phonon_solver = PhononSolver(
-                    self.config,
-                    self.phonon_energies,
-                    ...,
-                )
+                self.phonon_solver = PhononSolver(config, self.phonon_energies)
                 self.sigma_phonon = SigmaPhonon(...)
 
             elif self.config.phonon.model == "pseudo-scattering":
@@ -440,17 +427,12 @@ class SCBA:
             # Make the self-energy Hermitian (removing the skew-Hermitian part).
             self.data.sigma_retarded.symmetrize(xp.add)
 
-        if self.config.coulomb_screening.discard_real_parts:
+        if self.config.scba.align_self_energy_to_complex_axes:
             self.data.sigma_lesser._data.real = 0
             self.data.sigma_greater._data.real = 0
             # Make sure that the imaginary part comes only from
             # sigma_greater - sigma_lesser.
             self.data.sigma_retarded._data.imag = 0
-
-        # Now add the imaginary, skew-Hermitian part back.
-        self.data.sigma_retarded.data += 0.5 * (
-            self.data.sigma_greater.data - self.data.sigma_lesser.data
-        )
 
     @profiler.profile(label="SCBA: Update Sigma", level="default", comm=comm)
     def _update_sigma(self) -> None:
@@ -477,11 +459,14 @@ class SCBA:
         max_diff = np.empty_like(local_max_diff)
         global_comm.Allreduce(local_max_diff, max_diff, op=MPI.MAX)
 
-        i_left = xp.real(self.observables.electron_current.get("left", 0.0))
-        i_right = xp.real(self.observables.electron_current.get("right", 0.0))
+        meir_wingreen_current = self.observables.electron_current.get(
+            "meir-wingreen", [0, 0]
+        )
+        i_left = xp.real(meir_wingreen_current[..., 0])
+        i_right = xp.real(meir_wingreen_current[..., -1])
 
         dE = self.energies[1] - self.energies[0]
-        current_diff = xp.abs(xp.sum(i_left) * dE + xp.sum(i_right) * dE)
+        current_diff = xp.abs(xp.sum(i_left) * dE - xp.sum(i_right) * dE)
 
         current_conservation_abs, current_conservation_rel = current_conservation(
             self.data.g_lesser,
@@ -598,26 +583,11 @@ class SCBA:
                 overlap,
             ) / (2 * xp.pi)
 
-        if self.config.outputs.contact_currents:
-            self.observables.electron_current = dict(
-                zip(
-                    ("left", "right"),
-                    contact_currents(
-                        self.data.g_lesser,
-                        self.data.g_greater,
-                        self.electron_solver.obc_blocks,
-                    ),
-                )
-            )
         if self.config.outputs.device_currents:
             self.observables.electron_current["device"] = device_current(
                 self.data.g_lesser, self.electron_solver.hamiltonian
             )
             if self.config.electron.solver.compute_current:
-                if comm.block.size > 1:
-                    raise NotImplementedError(
-                        "Meir-Wingreen current is not implemented for distributed SCBA."
-                    )
 
                 local_current = self.electron_solver.meir_wingreen_current
                 meir_wingreen_current = comm.stack.all_gather_v(
@@ -685,23 +655,11 @@ class SCBA:
         if self.config.outputs.hole_density:
             outputs[f"hole_density_{iteration}.npy"] = self.observables.hole_density
 
-        if self.config.outputs.contact_currents:
-            outputs.update(
-                {
-                    f"i_{contact}_{iteration}.npy": current
-                    for contact, current in self.observables.electron_current.items()
-                }
-            )
         if self.config.outputs.device_currents:
             outputs[f"device_current_{iteration}.npy"] = (
                 self.observables.electron_current["device"]
             )
             if self.config.electron.solver.compute_current:
-                if comm.block.size > 1:
-                    raise NotImplementedError(
-                        "Meir-Wingreen current is not implemented for distributed SCBA."
-                    )
-
                 outputs[f"meir_wingreen_current_{iteration}.npy"] = (
                     self.observables.electron_current["meir-wingreen"]
                 )
@@ -813,6 +771,11 @@ class SCBA:
 
             # Symmetrize the self-energy.
             self._symmetrize_sigma()
+
+            # Add the anti-Hermitian part to the retarded self-energy.
+            self.data.sigma_retarded.data += 0.5 * (
+                self.data.sigma_greater.data - self.data.sigma_lesser.data
+            )
 
             if self._has_converged():
                 if comm.rank == 0:

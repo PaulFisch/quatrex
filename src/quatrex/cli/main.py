@@ -135,11 +135,12 @@ def run(
             )
 
     from qttools.profiling import Profiler
-    from quatrex.core.config import parse_config
+    from quatrex.core.config import parse_config, setup_context
 
     profiler = Profiler()
 
     config = parse_config(config)
+    setup_context(config)
 
     secho_header()
 
@@ -168,7 +169,7 @@ def main(
     ] = False,
 ):
     """Quantum Transport at the Exascale and Beyond."""
-    ...
+    pass
 
 
 def run_cli():
