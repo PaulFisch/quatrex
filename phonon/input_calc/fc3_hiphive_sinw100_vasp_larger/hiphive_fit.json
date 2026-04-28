@@ -1,0 +1,13 @@
+{
+  "fit_method": "least-squares",
+  "fit_kwargs": {},
+  "cutoffs": [
+    5.0,
+    4.0
+  ],
+  "n_structures": 15,
+  "n_parameters": 18340,
+  "rmse_train": 1.558411728452062e-14,
+  "rmse_test": 0.8408672197507138,
+  "calculator": "vasp"
+}
