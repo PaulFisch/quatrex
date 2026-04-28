@@ -97,10 +97,10 @@ vasp:
   lreal: Auto                     # real-space projectors -> faster on the 106-atom supercell
   lwave: false
   lcharg: false
-  ncore: 4                        # cores per orbital
-  kpar: 1
-  kpoints_scf: [1, 1, 2]
-  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; mpirun -np 128 --bind-to core --map-by core /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std"
+  ncore: 8                        # cores per band group (one EPYC NUMA domain)
+  kpar: 4                         # one k-point per group; clean 128 = 4*32 split
+  kpoints_scf: [1, 1, 4]          # 1x1x2 supercell -> 4 z-kpts ~ 8 in primitive units
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; mpirun -np 128 --bind-to core --map-by socket:PE=1 /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std"
 
 relax:
   calculation: relax              # ISIF=2: atoms only -> keeps wire length & vacuum fixed
@@ -110,8 +110,8 @@ relax:
 
 thirdorder:
   supercell: [1, 1, 2]            # 106 atoms - small, captures up to ~5.4 A along wire
-  cutoff_pair_distance: 4.0       # Angstrom - covers Si-Si up to 2nd neighbors + Si-H
-  displacement_distance: 0.02     # Angstrom - balances FD noise vs anharmonicity
+  cutoff_pair_distance: null
+  displacement_distance: 0.03     # Angstrom - slightly larger; phono3py prefers > 0.02 here
   fc_calculator: symfc            # symmetry-adapted fitting
   calculator: vasp
   work_dir: ./fc3_sinw100_vasp
