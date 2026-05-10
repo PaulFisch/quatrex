@@ -1,0 +1,71 @@
+## phonon_inputs configuration: (3,3) armchair carbon nanotube — VASP
+## Smallest practical metallic CNT: 12 atoms in the primitive cell.
+## Tube axis along z (period T = sqrt(3) * 1.42 A ~ 2.4595 A).
+## ~10 A vacuum gap around the tube in x and y to decouple periodic images.
+## Geometry generated with ase.build.nanotube(3, 3, length=1, bond=1.42).
+##
+## Designed as a small but physically reasonable testcase:
+##   - 12-atom unit cell, 1x1x3 supercell (36 atoms) for FC3
+##   - Pair cutoff 3.5 A captures up to 3rd-neighbor C-C couplings
+##   - Vacuum-rich cell: Gamma in x,y; metallic CNT needs k-mesh along z
+##   - relax (ISIF=2) keeps the cell fixed; vc-relax would collapse the vacuum
+##
+## Usage:
+##   python -m phonon_inputs pipeline  --config config_cnt33_vasp.yaml
+##   python -m phonon_inputs pipeline  --config config_cnt33_vasp.yaml --skip-relax
+##   python -m phonon_inputs fc3-sow   --config config_cnt33_vasp.yaml
+##   python -m phonon_inputs fc3-run   --config config_cnt33_vasp.yaml
+##   python -m phonon_inputs fc3-reap  --config config_cnt33_vasp.yaml
+
+structure:
+  source: inline
+  symbols: [C, C, C, C, C, C, C, C, C, C, C, C]
+  lattice:
+    - [14.0000, 0.0000, 0.0000]   # vacuum direction (a)
+    - [0.0000, 14.0000, 0.0000]   # vacuum direction (b)
+    - [0.0000,  0.0000, 2.4595]   # tube axis (c) = sqrt(3) * 1.42 A
+  scaled_positions:
+    - [0.645286, 0.500000, 0.000000]
+    - [0.611295, 0.593388, 0.000000]
+    - [0.572643, 0.625821, 0.500000]
+    - [0.474771, 0.643079, 0.500000]
+    - [0.427357, 0.625821, 0.000000]
+    - [0.363476, 0.549691, 0.000000]
+    - [0.354714, 0.500000, 0.500000]
+    - [0.388705, 0.406612, 0.500000]
+    - [0.427357, 0.374179, 0.000000]
+    - [0.525229, 0.356921, 0.000000]
+    - [0.572643, 0.374179, 0.500000]
+    - [0.636524, 0.450309, 0.500000]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    C: C                          # uses potpaw_PBE/C/POTCAR
+  encut: 400                      # eV - matches C ENMAX (400 eV); enough for forces
+  ediff: 1.0e-6                   # eV - tight enough for accurate forces, fast SCF
+  ismear: 0                       # Gaussian smearing (works for metallic CNT with small sigma)
+  sigma: 0.05                     # eV - narrow but sufficient for (3,3) metallic states
+  prec: Accurate
+  lreal: Auto                     # real-space projectors -> faster on the 36-atom supercell
+  lwave: false                    # don't write WAVECAR (saves disk for many disp jobs)
+  lcharg: false
+  ncore: 4                        # cores per orbital
+  kpar: 2                         # k-point parallel groups (2 of the 4 z-kpts per group)
+  kpoints_scf: [1, 1, 4]          # 1x1x3 supercell -> 4 z-kpts ~ 12 in primitive units
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: relax              # ISIF=2: atoms only -> keeps tube length & vacuum fixed
+  forc_conv_thr: 0.005            # eV/A - relaxed: bond length adjusts cleanly at this level
+  calculator: vasp
+  work_dir: ./relax_cnt33_vasp
+
+thirdorder:
+  supercell: [1, 1, 3]            # 36 atoms - small, captures up to ~3.7 A along tube
+  cutoff_pair_distance: 3.5       # Angstrom - covers C-C up to 3rd neighbors along the tube
+  displacement_distance: 0.02     # Angstrom - balances FD noise vs anharmonicity
+  fc_calculator: symfc            # symmetry-adapted fitting (few displacements needed)
+  calculator: vasp
+  work_dir: ./fc3_cnt33_vasp
+  pw_timeout: 3600                # 1 hour per displacement (CNT supercell is mostly vacuum)

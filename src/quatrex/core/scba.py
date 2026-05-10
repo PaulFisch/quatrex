@@ -30,6 +30,7 @@ from quatrex.electron import (
 )
 from quatrex.grid import get_electron_energies
 from quatrex.phonon import PhononSolver, PiPhonon
+from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 from quatrex.photon import PhotonSolver, PiPhoton
 
 profiler = Profiler()
@@ -216,8 +217,9 @@ class SCBAData:
         if config.scba.photon:
             raise NotImplementedError
 
-        if config.scba.phonon and config.phonon.model == "negf":
-            raise NotImplementedError
+        # NEGF phonon model: SigmaPhononPhonon adds its 3-phonon
+        # contribution into the existing sigma_* DSDBSparse buffers
+        # owned by SCBAData; no extra allocation is needed here.
 
 
 @dataclass
@@ -395,11 +397,20 @@ class SCBA:
         # ----- Phonons ------------------------------------------------
         if self.config.scba.phonon:
             if self.config.phonon.model == "negf":
+                # Phonon energy grid (eV-equivalent). Loaded from disk
+                # so the SCBA driver can be reused for both electron-
+                # and phonon-driven simulations.
                 energies_path = self.config.input_dir / "phonon_energies.npy"
                 self.phonon_energies = distributed_load(energies_path)
-                self.pi_phonon = PiPhonon(...)
-                self.phonon_solver = PhononSolver(config, self.phonon_energies)
-                self.sigma_phonon = SigmaPhonon(...)
+                # The phonon Dyson solver consumes Sigma^{<,>,R} from
+                # SigmaPhononPhonon below. PiPhonon remains a stub: in
+                # the 3-phonon case there is no separate "polarization"
+                # screened by a Dyson equation — Phi is the bare vertex.
+                self.sigma_phonon_phonon = SigmaPhononPhonon(
+                    config,
+                    self.phonon_energies,
+                    block_sizes=np.asarray(self.data.g_lesser.block_sizes),
+                )
 
             elif self.config.phonon.model == "pseudo-scattering":
                 self.sigma_phonon = SigmaPhonon(config, self.energies)
@@ -487,7 +498,11 @@ class SCBA:
     def _compute_phonon_interaction(self):
         """Computes the phonon interaction."""
         if self.config.phonon.model == "negf":
-            raise NotImplementedError
+            # 3-phonon scattering is handled by
+            # _compute_phonon_phonon_interaction(); nothing else to do
+            # here unless a separate electron-phonon NEGF channel is
+            # added later.
+            return
 
         elif self.config.phonon.model == "pseudo-scattering":
             self.sigma_phonon.compute(
@@ -557,7 +572,20 @@ class SCBA:
 
     @profiler.profile(label="SCBA: Phonon-Phonon interactions", level="default", comm=comm)
     def _compute_phonon_phonon_interaction(self):
-        pass
+        """Adds the 3-phonon scattering self-energy to Sigma_*."""
+        if not self.config.scba.phonon:
+            return
+        if self.config.phonon.model != "negf":
+            return
+        self.sigma_phonon_phonon.compute(
+            self.data.g_lesser,
+            self.data.g_greater,
+            out=(
+                self.data.sigma_lesser,
+                self.data.sigma_greater,
+                self.data.sigma_retarded,
+            ),
+        )
 
     @profiler.profile(label="SCBA: G observables", level="default", comm=comm)
     def _compute_electron_observables(self) -> None:

@@ -1,0 +1,47 @@
+## Hiphive FC3 configuration matching config_prim.yaml (Si primitive,
+## 2x2x2 supercell, ecutwfc=60, k=2x2x2). Lattice constant matches the
+## relaxed value used to produce fc3_prim/fc3.hdf5 (a/2 = 2.734685 A),
+## so the hiphive FC3 can be compared to the existing FD result directly.
+##
+## Usage:
+##   python -m phonon_inputs fc3-hiphive-sow  --config config_fc3_hiphive_prim.yaml
+##   python -m phonon_inputs fc3-hiphive-run  --config config_fc3_hiphive_prim.yaml
+##   python -m phonon_inputs fc3-hiphive-reap --config config_fc3_hiphive_prim.yaml
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.000000, 2.734685, 2.734685]
+    - [2.734685, 0.000000, 2.734685]
+    - [2.734685, 2.734685, 0.000000]
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: ./pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 60
+  ecutrho_factor: 8
+  kpoints_scf: [2, 2, 2]
+  conv_thr: 1.0e-10
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "mpirun -np 4 pw.x"
+
+hiphive:
+  supercell: [2, 2, 2]
+  n_structures: 6
+  rattle_method: mc
+  rattle_std: 0.04
+  rattle_d_min: 2.0
+  rattle_n_iter: 10
+  rattle_seed: 42
+  cutoffs: [3.8, 3.5]      # constrained to < half the 2x2x2 FCC supercell size (~3.86 A)
+  fit_method: least-squares
+  fit_kwargs: {}
+  calculator: qe
+  work_dir: ./fc3_hiphive_prim
+  pw_timeout: 1800

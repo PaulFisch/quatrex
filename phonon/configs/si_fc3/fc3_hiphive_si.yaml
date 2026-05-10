@@ -1,0 +1,48 @@
+## Hiphive FC3 configuration: Si primitive cell (2-atom FCC)
+## Fits a force-constant potential up to 3rd order from a small set of
+## rattled supercell DFT calculations.
+##
+## Usage:
+##   python -m phonon_inputs fc3-hiphive-sow  --config config_fc3_hiphive_si.yaml
+##   python -m phonon_inputs fc3-hiphive-run  --config config_fc3_hiphive_si.yaml
+##   python -m phonon_inputs fc3-hiphive-reap --config config_fc3_hiphive_si.yaml
+## Or all at once:
+##   python -m phonon_inputs fc3-hiphive-all  --config config_fc3_hiphive_si.yaml
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,    2.7009, 2.7009]
+    - [2.7009, 0.0,    2.7009]
+    - [2.7009, 2.7009, 0.0   ]
+  scaled_positions:
+    - [0.0,  0.0,  0.0 ]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: ./scf_disp/pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 36
+  ecutrho_factor: 8
+  kpoints_scf: [4, 4, 4]
+  conv_thr: 1.0e-10
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "pw.x"
+
+hiphive:
+  supercell: [3, 3, 3]            # FC cutoffs must stay below ~half the supercell side
+  n_structures: 8                 # rattled DFT runs (typically 5-15 is enough)
+  rattle_method: mc               # "mc" (recommended) or "normal"
+  rattle_std: 0.03                # Angstrom; final RMS displacement ~ sqrt(n_iter) * rattle_std
+  rattle_d_min: 2.0               # Angstrom; minimum allowed interatomic distance
+  rattle_n_iter: 10
+  rattle_seed: 42
+  cutoffs: [6.0, 4.0]             # [2nd-order, 3rd-order] cluster cutoffs in Angstrom
+  fit_method: least-squares       # also: "lasso", "ardr", "rfe", "ridge"
+  fit_kwargs: {}                  # e.g. {alpha: 1.0e-4} for lasso
+  calculator: qe                  # "qe" or "vasp"
+  work_dir: ./fc3_hiphive_si
+  pw_timeout: 3600

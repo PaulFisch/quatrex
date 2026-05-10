@@ -3,7 +3,7 @@
 
 from qttools import NDArray, xp
 from qttools.fft.convolve import _naive_convolve
-from quatrex.coulomb_screening.polarization import hilbert_transform
+from quatrex.core.fft_utils import hilbert_transform
 
 
 def naive_hilbert_transform(a: NDArray, energies: NDArray) -> NDArray:
