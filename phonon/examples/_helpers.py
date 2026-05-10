@@ -34,10 +34,34 @@ def add_common_args(
 
 
 def write_config(cfg: dict, out_path: Path) -> Path:
-    """Write a config dict as YAML and report a one-line summary."""
+    """Write a config dict as YAML and report a one-line summary.
+
+    Uses a custom dumper so that the structure is compact and matches the
+    hand-written canonical configs:
+      * ``structure.symbols``       — inline, e.g. ``[Si, Si, H, H]``
+      * ``structure.lattice``       — outer block, inner inline rows
+      * ``structure.scaled_positions`` — outer block, inner inline triples
+      * Everything else             — block style (one key per line)
+    """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(yaml.dump(cfg, sort_keys=False, default_flow_style=False))
+
+    class _CompactDumper(yaml.SafeDumper):
+        pass
+
+    def _list_representer(dumper, data):
+        # Inner-most sequences (no nested lists) → inline; outer → block.
+        flow = not any(isinstance(x, (list, tuple)) for x in data)
+        return dumper.represent_sequence(
+            "tag:yaml.org,2002:seq", data, flow_style=flow,
+        )
+
+    _CompactDumper.add_representer(list, _list_representer)
+    _CompactDumper.add_representer(tuple, _list_representer)
+
+    out_path.write_text(
+        yaml.dump(cfg, Dumper=_CompactDumper, sort_keys=False)
+    )
     syms = cfg["structure"]["symbols"]
     counts = summarise_atoms(syms)
     summary = " + ".join(f"{n} {sp}" for sp, n in counts.items())
