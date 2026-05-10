@@ -1,0 +1,68 @@
+## phonon_inputs configuration: Finite linear Si chain (smallest test fixture).
+##
+## 8-atom linear Si chain along z, spacing 2.35 Å (~Si-Si bulk bond), large
+## vacuum in x/y. Designed as the smallest sane example for the
+## finite_analysis pipeline — also serves as the unit-test fixture for
+## tests/phonon_inputs/finite_analysis/test_chain_pipeline.py.
+##
+## Usage:
+##   python -m phonon_inputs pipeline  --config config_si_chain_vasp.yaml
+##
+## Notes:
+##   * No periodic geometry; vacuum in all three directions makes everything
+##     sufficiently isolated, but supercell=[1,1,1] keeps the FC machinery
+##     running on a single replica.
+##   * VASP is the calculator of record so the same DFT settings as the
+##     SiNW config can be reused on the cluster.
+##   * Acoustic-frequency window will be small; check fc3_distance vs the
+##     2.35 Å bond.
+
+structure:
+  source: inline
+  symbols: [Si, Si, Si, Si, Si, Si, Si, Si]
+  lattice:
+    - [15.000, 0.000, 0.000]
+    - [0.000, 15.000, 0.000]
+    - [0.000, 0.000, 18.800]   # 8 atoms × 2.35 Å spacing
+  scaled_positions:
+    - [0.5, 0.5, 0.0625]
+    - [0.5, 0.5, 0.1875]
+    - [0.5, 0.5, 0.3125]
+    - [0.5, 0.5, 0.4375]
+    - [0.5, 0.5, 0.5625]
+    - [0.5, 0.5, 0.6875]
+    - [0.5, 0.5, 0.8125]
+    - [0.5, 0.5, 0.9375]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Si: Si
+  encut: 400
+  ediff: 1.0e-7
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: Auto
+  lwave: false
+  lcharg: false
+  ncore: 8
+  kpar: 1
+  kpoints_scf: [1, 1, 1]
+  vasp_command: "ulimit -s unlimited; mpirun -np 32 vasp_std"
+
+relax:
+  calculation: relax
+  forc_conv_thr: 0.005
+  calculator: vasp
+  work_dir: ./relax_si_chain_vasp
+  fc_method: thirdorder
+
+thirdorder:
+  supercell: [1, 1, 1]            # finite — no replication
+  cutoff_pair_distance: 5.0
+  displacement_distance: 0.03
+  fc_calculator: symfc
+  calculator: vasp
+  work_dir: ./fc3_si_chain_vasp
+  pw_timeout: 3600

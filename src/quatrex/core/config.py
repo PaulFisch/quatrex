@@ -681,13 +681,43 @@ class PhononConfig(BaseModel):
     left_temperature: PositiveFloat | None = None
     right_temperature: PositiveFloat | None = None
 
+    # --- 3-phonon (anharmonic) scattering ----------------------------
+    fc3_path: Path | None = None
+    """Path to the FC3 source consumed by ``SigmaPhononPhonon``.
+
+    Required when ``model == "negf"``. Format: HDF5 produced by the
+    ``phonon_inputs`` pipeline (phono3py / hiphive / DFPT). The Phase-2
+    sparse-block writer in ``phonon_inputs/quatrex_writer.py`` will
+    extend this to consume an on-disk block-sparse Phi.
+    """
+
+    retarded_method: Literal["half", "fft"] = "fft"
+    """How to reconstruct ``Sigma^R`` from ``Sigma^{<,>}``.
+
+    - ``"half"``: ``Sigma^R = (Sigma^> - Sigma^<) / 2``.
+    - ``"fft"``: also add the bosonic Hilbert correction
+      ``i/2 * H[Sigma^> - Sigma^<]`` (uses the same FFT kernel as
+      ``coulomb_screening/polarization.py``).
+    """
+
+    phonon_phonon_truncation_warn: NonNegativeFloat = 0.01
+    """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
+    warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
+
     @model_validator(mode="after")
     def check_phonon_energy_or_deformation_potential(self):
-        """Check if 'phonon_energy' and 'deformation_potential' are set."""
+        """Validate model-specific required parameters."""
         if self.model == "pseudo-scattering" and (
             self.phonon_energy is None or self.deformation_potential is None
         ):
-            raise ValueError("'phonon_energy' and 'deformation_potential' must be set.")
+            raise ValueError(
+                "'phonon_energy' and 'deformation_potential' must be set "
+                "for model='pseudo-scattering'."
+            )
+        if self.model == "negf" and self.fc3_path is None:
+            raise ValueError(
+                "'fc3_path' must be set for model='negf'."
+            )
 
         return self
 

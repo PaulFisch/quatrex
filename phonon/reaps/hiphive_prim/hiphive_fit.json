@@ -1,0 +1,13 @@
+{
+  "fit_method": "least-squares",
+  "fit_kwargs": {},
+  "cutoffs": [
+    3.8,
+    3.5
+  ],
+  "n_structures": 6,
+  "n_parameters": 5,
+  "rmse_train": 0.3440830973397085,
+  "rmse_test": 0.23078499492067434,
+  "calculator": "qe"
+}
