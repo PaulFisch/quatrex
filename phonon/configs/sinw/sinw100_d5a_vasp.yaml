@@ -52,14 +52,14 @@ relax:
   work_dir: ./relax_sinw100_d5a_vasp
 hiphive:
   supercell: [1, 1, 2]
-  n_structures: 6
+  n_structures: 24
   rattle_method: mc
-  rattle_std: 0.03
+  rattle_std: 0.04
   rattle_d_min: 1.0
   rattle_n_iter: 20
   rattle_seed: 42
   cutoffs: [5.0, 4.0]
-  fit_method: least-squares
+  fit_method: rfe
   fit_kwargs: {}
   calculator: vasp
   work_dir: ./fc3_hiphive_sinw100_d5a_vasp
