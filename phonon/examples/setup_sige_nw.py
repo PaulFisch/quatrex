@@ -6,7 +6,7 @@ unchanged. The lattice constant stays at the Si value — this is intended
 as a mass-mismatch test, not a fully relaxed alloy.
 
 Usage:
-    python examples/setup_sige_nw.py --base configs/sinw/sinw100_vasp.yaml --frac-ge 0.5
+    python examples/setup_sige_nw.py --base configs/sinw/sinw100_d5a_vasp.yaml --frac-ge 0.5
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def main() -> None:
     here = Path(__file__).resolve()
     p.add_argument(
         "--base", type=Path,
-        default=here.parent.parent / "configs" / "sinw" / "sinw100_vasp.yaml",
+        default=here.parent.parent / "configs" / "sinw" / "sinw100_d5a_vasp.yaml",
         help="Base SiNW config to alloy",
     )
     p.add_argument("--frac-ge", type=float, default=0.5)

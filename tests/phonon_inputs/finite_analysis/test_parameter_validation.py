@@ -142,7 +142,7 @@ def test_displacement_distance_warn_too_large():
 
 @pytest.mark.parametrize("rel", [
     "configs/si_primitive/prim_vasp.yaml",
-    "configs/sinw/sinw100_vasp.yaml",
+    "configs/sinw/sinw100_d5a_vasp.yaml",
     "configs/chain/si_chain.yaml",
 ])
 def test_validate_headline_configs_no_error(rel):

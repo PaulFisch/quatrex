@@ -3,7 +3,7 @@
 Usage::
 
     python -m phonon_inputs.finite_analysis \
-        --config phonon/configs/sinw/sinw100_vasp.yaml \
+        --config phonon/configs/sinw/sinw100_d5a_vasp.yaml \
         --analyses fc_quality,sparsity,decomposition,physical \
         --out-dir finite_analysis_out/sinw100
 
