@@ -48,10 +48,17 @@ def sigma_block_heatmap(
     out_path: Path,
     title: str,
 ) -> None:
-    """Render the per-(I,J) Σ^< Frobenius norm as a block-tridiagonal heatmap."""
+    """Render the per-(I,J) Σ^< Frobenius norm as a slab × slab heatmap.
+
+    The grid is sized ``n_blocks × n_blocks`` and shows every entry present
+    in ``block_frob`` — so off-tridiagonal blocks appear automatically when
+    the upstream ``compute_sse_with_cutoffs`` was called with
+    ``sigma_block_distance > 1``. Empty cells stay at the colormap floor.
+    """
     grid = np.zeros((n_blocks, n_blocks))
     for (I, J), (lesser, _) in block_frob.items():
-        grid[I, J] = lesser
+        if 0 <= I < n_blocks and 0 <= J < n_blocks:
+            grid[I, J] = lesser
     fig, ax = plt.subplots(figsize=(5.5, 5.0))
     if (grid > 0).any():
         floor = max(grid[grid > 0].min(), 1e-30)
@@ -65,6 +72,63 @@ def sigma_block_heatmap(
     ax.set_ylabel("I (slab)")
     ax.set_title(title)
     fig.colorbar(im, ax=ax, label=r"$\|\Sigma^<_{IJ}\|_F$  [THz²]")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    fig.savefig(Path(out_path).with_suffix(".pdf"))
+    plt.close(fig)
+
+
+def sigma_atomic_block_heatmap(
+    sigma_blocks: dict[tuple[int, int], np.ndarray],
+    block_sizes: np.ndarray,
+    out_path: Path,
+    title: str,
+) -> None:
+    """Per-atom-pair Frobenius norm of Σ blocks, like ``sparsity_fc2_heatmap``.
+
+    For each Σ_{IJ} block of shape ``(n_freq, 3*nA, 3*nB)`` we reshape to
+    ``(n_freq, nA, 3, nB, 3)`` and take the Frobenius norm over
+    ``(n_freq, 3, 3)``, giving an ``nA × nB`` atom-pair norm. Concatenated
+    along all (I, J) blocks this is the dense ``n_atoms × n_atoms``
+    coordinate heatmap. Atoms are in z-sorted order (matching the DOF
+    ordering inside the blocks).
+    """
+    block_sizes = np.asarray(block_sizes, dtype=int)
+    n_blocks = block_sizes.size
+    atom_sizes = block_sizes // 3
+    offsets = np.concatenate(([0], np.cumsum(atom_sizes)))
+    n_atoms = int(offsets[-1])
+
+    norms = np.zeros((n_atoms, n_atoms))
+    for (I, J), block in sigma_blocks.items():
+        if not (0 <= I < n_blocks and 0 <= J < n_blocks):
+            continue
+        nA = int(atom_sizes[I])
+        nB = int(atom_sizes[J])
+        # block has shape (n_freq, 3*nA, 3*nB) → (n_freq, nA, 3, nB, 3)
+        reshaped = block.reshape(block.shape[0], nA, 3, nB, 3)
+        # Frobenius norm over (frequency, 3, 3): per atom-pair scalar.
+        sub = np.sqrt(np.sum(np.abs(reshaped) ** 2, axis=(0, 2, 4)))
+        norms[offsets[I]:offsets[I+1], offsets[J]:offsets[J+1]] = sub
+
+    fig, ax = plt.subplots(figsize=(6.5, 6.0))
+    if (norms > 0).any():
+        floor = max(norms[norms > 0].min(), 1e-30)
+        im = ax.imshow(
+            norms, origin="lower", cmap="magma",
+            norm=matplotlib.colors.LogNorm(vmin=floor, vmax=norms.max()),
+        )
+    else:
+        im = ax.imshow(norms, origin="lower", cmap="magma")
+    # Slab boundaries (dashed lines).
+    for k in range(1, n_blocks):
+        ax.axvline(offsets[k] - 0.5, color="white", lw=0.4, ls="--", alpha=0.5)
+        ax.axhline(offsets[k] - 0.5, color="white", lw=0.4, ls="--", alpha=0.5)
+    ax.set_xlabel("atom j (z-sorted)")
+    ax.set_ylabel("atom i (z-sorted)")
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax,
+                 label=r"$\|\Sigma^<_{ij}\|_F$  [THz², integrated over $\omega$]")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     fig.savefig(Path(out_path).with_suffix(".pdf"))
@@ -154,6 +218,12 @@ def run_sse_sparsity(
         title=(f"Σ^< block Frobenius — synthetic GF — {bundle.name}  "
                f"(|I-J| ≤ {d_sigma})"),
     )
+    sigma_atomic_block_heatmap(
+        res.sigma_lesser, bundle.block_sizes,
+        out_dir / "sse_sigma_atomic_heatmap_synth.png",
+        title=(f"Σ^< atomic-block Frobenius — synthetic GF — {bundle.name}  "
+               f"(|I-J| ≤ {d_sigma})"),
+    )
 
     quatrex_status = "skipped"
     if run_quatrex:
@@ -170,6 +240,9 @@ def run_sse_sparsity(
             out_dir / "sse_sigma_heatmap_quatrex.png",
             title=f"Σ^< block Frobenius — quatrex SCBA — {bundle.name}",
         )
+        # The quatrex SCBA returns the per-(I,J) Frobenius norms only, not the
+        # full block tensors, so the atomic-coordinate heatmap is only produced
+        # for the synthetic-GF branch above.
         quatrex_status = "ok"
 
     return {
