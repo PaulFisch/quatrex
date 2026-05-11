@@ -1,0 +1,13 @@
+{
+  "fit_method": "rfe",
+  "fit_kwargs": {},
+  "cutoffs": [
+    5.0,
+    4.0
+  ],
+  "n_structures": 24,
+  "n_parameters": 1027,
+  "rmse_train": 1.1397374635303734,
+  "rmse_test": 1.3235304588559713,
+  "calculator": "vasp"
+}

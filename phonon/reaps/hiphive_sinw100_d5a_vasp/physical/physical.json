@@ -4,14 +4,14 @@
     "rel_frob": 0.0
   },
   "fc2_asr": {
-    "max_abs": 5.662137425588298e-15,
-    "rel_frob": 1.7958520678972707e-16
+    "max_abs": 5.329070518200751e-15,
+    "rel_frob": 9.399130631944476e-17
   },
   "fc2_psd": {
-    "n_neg_eigvals": 43,
-    "min_eigval": -2.959737090909145,
-    "max_eigval": 15.282714547271327,
-    "max_neg_rel": 0.19366566598848078
+    "n_neg_eigvals": 0,
+    "min_eigval": -8.713251149768331e-16,
+    "max_eigval": 19.548925594455472,
+    "max_neg_rel": 4.4571509097357306e-17
   },
   "fc3_perm_sym": {
     "perm_ikj_rel": 0.0,
@@ -21,21 +21,21 @@
     "perm_kji_rel": 0.0
   },
   "fc3_asr_legs": {
-    "norm": 1.0180125614613979e+22,
-    "leg_j": 6.844851199774588e+21,
-    "leg_k": 6.844851199774587e+21,
-    "leg_j_rel": 0.6723739430040557,
-    "leg_k_rel": 0.6723739430040556
+    "norm": 8.594407541349676e+21,
+    "leg_j": 6.851655556666293e+21,
+    "leg_k": 6.851655556666295e+21,
+    "leg_j_rel": 0.7972225570757959,
+    "leg_k_rel": 0.7972225570757961
   },
   "dispersion": {
-    "min_omega_overall_thz": -26.895355766003686,
+    "min_omega_overall_thz": -7.265411974233014e-07,
     "n_acoustic": 3,
-    "n_imaginary": 487,
-    "n_optical": 833,
-    "n_negative_modes": 487,
-    "max_acoustic_at_gamma_thz": 26.580915208109488,
-    "mean_acoustic_at_gamma_thz": 26.11116620154138,
-    "highest_optical_thz": 61.11544475268092
+    "n_imaginary": 0,
+    "n_optical": 1320,
+    "n_negative_modes": 0,
+    "max_acoustic_at_gamma_thz": 7.265411974233014e-07,
+    "mean_acoustic_at_gamma_thz": 4.770741400809897e-07,
+    "highest_optical_thz": 69.12134379463849
   },
   "units": {
     "dispersion.*_thz": "THz",
