@@ -486,7 +486,7 @@ def _write_vasp_relax_inputs(
         f.write(f"LWAVE = .FALSE.\n")
         f.write(f"LCHARG = .FALSE.\n")
         f.write("IBRION = 2\n")      # CG relaxation
-        f.write("NSW = 100\n")        # max ionic steps
+        f.write(f"NSW = {vasp_config.nsw}\n")  # max ionic steps
         f.write(f"ISIF = {isif}\n")   # 2=ions, 3=ions+cell
         f.write("ISYM = 2\n")         # symmetry on for relaxation
         if vasp_config.ncore is not None:
