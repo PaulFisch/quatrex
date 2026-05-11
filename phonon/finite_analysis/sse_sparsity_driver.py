@@ -33,6 +33,7 @@ from .sse_cutoffs import (
     run_sse_cutoffs,
     block_frob_diff,
     standard_cutoff_grid,
+    SSEResult,
 )
 
 
@@ -240,4 +241,127 @@ def run_cutoffs(
             for label, d in diffs.items()
         },
         "heat_current_W": {label: tr.heat_current_W for label, tr in traces.items()},
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Off-tridiagonal Σ audit                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def _sigma_block_frob_by_distance(
+    result: SSEResult, n_blocks: int,
+) -> dict[int, dict[str, float]]:
+    """Aggregate ‖Σ^{<,>}_{IJ}‖_F by ``|I - J|``.
+
+    Returns ``{d: {"sum_lesser": s_l, "max_lesser": m_l,
+                   "sum_greater": s_g, "max_greater": m_g, "count": n}}``.
+    """
+    out: dict[int, dict[str, float]] = {}
+    for (I, J), block in result.sigma_lesser.items():
+        d = abs(I - J)
+        e = out.setdefault(d, {"sum_lesser": 0.0, "max_lesser": 0.0,
+                               "sum_greater": 0.0, "max_greater": 0.0,
+                               "count": 0})
+        norm = float(np.linalg.norm(block))
+        e["sum_lesser"] += norm
+        e["max_lesser"] = max(e["max_lesser"], norm)
+        e["count"] += 1
+    for (I, J), block in result.sigma_greater.items():
+        d = abs(I - J)
+        e = out.setdefault(d, {"sum_lesser": 0.0, "max_lesser": 0.0,
+                               "sum_greater": 0.0, "max_greater": 0.0,
+                               "count": 0})
+        norm = float(np.linalg.norm(block))
+        e["sum_greater"] += norm
+        e["max_greater"] = max(e["max_greater"], norm)
+    return out
+
+
+def run_sigma_block_audit(
+    bundle: SystemBundle,
+    out_dir: Path,
+    *,
+    n_freq_pos: int = 64,
+    eta_thz: float | None = None,
+    temperature_k: float = 300.0,
+    max_block_distance: int | None = None,
+) -> dict:
+    """Compute Σ on all block pairs up to ``max_block_distance`` and report
+    how Frobenius weight decays with ``|I - J|``.
+
+    Writes:
+      - ``sigma_block_decay.csv`` — per-distance sum / max / fraction-of-total
+      - ``sigma_block_decay.png`` — semilogy bar chart of max-norm vs distance
+
+    Default ``max_block_distance = n_blocks - 1`` (full block matrix). Cost
+    scales roughly cubically with the bandwidth, so use ``--sigma-max-dist``
+    on the CLI to cap it if the wire is long.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    phi_blocks, gl_blocks, gg_blocks, _freqs, dw, _ = build_sse_inputs(
+        bundle, n_freq_pos=n_freq_pos, eta_thz=eta_thz,
+        temperature_k=temperature_k,
+    )
+    n_blocks = int(np.asarray(bundle.block_sizes).size)
+    d_max = n_blocks - 1 if max_block_distance is None else int(max_block_distance)
+    d_max = max(1, min(d_max, n_blocks - 1))
+
+    result = compute_sse_with_cutoffs(
+        phi_blocks, gl_blocks, gg_blocks,
+        bundle.block_sizes, dw,
+        sigma_block_distance=d_max,
+    )
+    decay = _sigma_block_frob_by_distance(result, n_blocks)
+    total_l = sum(e["sum_lesser"] for e in decay.values()) or 1.0
+    total_g = sum(e["sum_greater"] for e in decay.values()) or 1.0
+
+    with open(out_dir / "sigma_block_decay.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "block_distance", "count",
+            "sum_frob_lesser", "max_frob_lesser", "frac_total_lesser",
+            "sum_frob_greater", "max_frob_greater", "frac_total_greater",
+        ])
+        for d in sorted(decay):
+            e = decay[d]
+            w.writerow([
+                d, e["count"],
+                f"{e['sum_lesser']:.6e}", f"{e['max_lesser']:.6e}",
+                f"{e['sum_lesser'] / total_l:.6e}",
+                f"{e['sum_greater']:.6e}", f"{e['max_greater']:.6e}",
+                f"{e['sum_greater'] / total_g:.6e}",
+            ])
+
+    distances = sorted(decay)
+    max_l = [decay[d]["max_lesser"] for d in distances]
+    max_g = [decay[d]["max_greater"] for d in distances]
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.semilogy(distances, max_l, "o-", label=r"max $\|\Sigma^<_{IJ}\|_F$")
+    ax.semilogy(distances, max_g, "s--", label=r"max $\|\Sigma^>_{IJ}\|_F$")
+    ax.axvline(1.0, color="grey", lw=0.8, ls=":",
+               label="tridiagonal transport cutoff")
+    ax.set_xlabel("block distance $|I - J|$")
+    ax.set_ylabel("Frobenius norm of $\\Sigma_{IJ}$")
+    ax.set_title(f"{bundle.name}: Σ block-norm decay (full bubble)")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_dir / "sigma_block_decay.png", dpi=150)
+    plt.close(fig)
+
+    # Headline number: fraction of weight beyond the transport solver's cutoff.
+    frac_l_kept = sum(decay[d]["sum_lesser"] for d in decay if d <= 1) / total_l
+    frac_g_kept = sum(decay[d]["sum_greater"] for d in decay if d <= 1) / total_g
+    return {
+        "max_block_distance": d_max,
+        "frac_lesser_in_tridiagonal": float(frac_l_kept),
+        "frac_greater_in_tridiagonal": float(frac_g_kept),
+        "max_frob_lesser_by_distance": {
+            int(d): float(decay[d]["max_lesser"]) for d in distances
+        },
+        "max_frob_greater_by_distance": {
+            int(d): float(decay[d]["max_greater"]) for d in distances
+        },
     }

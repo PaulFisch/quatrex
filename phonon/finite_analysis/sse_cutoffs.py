@@ -237,15 +237,23 @@ def compute_sse_with_cutoffs(
     fc3_distance_cutoff: float | None = None,
     fc3_magnitude_threshold: float | None = None,
     distances_atom: np.ndarray | None = None,
+    sigma_block_distance: int = 1,
 ) -> SSEResult:
     """Compute Σ^{<,>} blocks under the requested cutoffs.
+
+    ``sigma_block_distance`` sets the largest ``|I - J|`` for which Σ blocks
+    are produced (default ``1`` → block-tridiagonal, matching the NEGF
+    transport solver's assumption). Pass a larger value to *audit* how much
+    of the bubble lives in off-tridiagonal Σ; the result still respects the
+    NN-tridiagonal phi support, so contributions above ``|I - J| > 2`` are
+    only non-zero through G blocks of finite range.
 
     The order of operations:
       1. Apply FC3 cutoffs (NN, distance, magnitude) to ``phi_blocks``.
       2. Apply diagonal-G projection if requested.
-      3. Loop over (I, J) ∈ NN block-tridiagonal pairs and accumulate the
-         bubble contribution from every (K1, K2) triplet that has a
-         (J, K2, K1) partner.
+      3. Loop over (I, J) with ``|I - J| <= sigma_block_distance`` and
+         accumulate the bubble contribution from every (K1, K2) triplet
+         that has a (J, K2, K1) partner.
     """
     if diag_G_everywhere:
         gl = diagonalise_g_blocks(g_lesser_blocks, keep_diag_blocks_only=True)
@@ -301,12 +309,14 @@ def compute_sse_with_cutoffs(
     # which can be recovered with ``diag_G_in_se=True``). Any (J, K2', K1')
     # not present in phi_blocks is silently skipped (zero contribution).
     g_keys = set(gl.keys())
-    if not diag_G_in_se:
+    if not diag_G_in_se and not diag_G_everywhere:
         # The "off-diagonal-G" path (default) requires the G dict to cover at
         # least every NN-tridiagonal (K, K') pair, otherwise we silently miss
         # bubble contributions. ``synthetic_gf.gf_to_block_dict(..., nn_only=
         # False)`` provides the full (n_blocks × n_blocks) coverage; ``True``
         # gives only NN. Here we accept either NN-tridiagonal *or* full.
+        # When ``diag_G_everywhere=True`` the diagonalisation above intentionally
+        # strips the off-diagonals, so the check is skipped for that config.
         nn_required = {
             (K, Kp) for K in range(n_blocks)
             for Kp in range(max(0, K - 1), min(n_blocks, K + 2))
@@ -319,9 +329,10 @@ def compute_sse_with_cutoffs(
                 f"{sorted(missing)[:8]}{'...' if len(missing) > 8 else ''}. "
                 "Use gf_to_block_dict(..., nn_only=False) (or True) to build G."
             )
+    d_sigma = max(0, int(sigma_block_distance))
     pair_index: dict[tuple[int, int], list] = {}
     for (I, K1, K2), phi_left in phi.items():
-        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+        for J in range(max(0, I - d_sigma), min(n_blocks, I + d_sigma + 1)):
             k1_range = (K1,) if diag_G_in_se else range(n_blocks)
             for K1_prime in k1_range:
                 if (K1, K1_prime) not in g_keys:
@@ -380,6 +391,7 @@ class CutoffConfig:
     fc3_nn_only: bool = True
     fc3_distance_cutoff: float | None = None
     fc3_magnitude_threshold: float | None = None
+    sigma_block_distance: int = 1
 
 
 def standard_cutoff_grid() -> list[CutoffConfig]:
@@ -418,6 +430,7 @@ def run_sse_cutoffs(
             fc3_distance_cutoff=cfg.fc3_distance_cutoff,
             fc3_magnitude_threshold=cfg.fc3_magnitude_threshold,
             distances_atom=distances,
+            sigma_block_distance=cfg.sigma_block_distance,
         )
     return results
 
