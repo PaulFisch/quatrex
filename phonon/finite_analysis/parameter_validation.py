@@ -193,9 +193,7 @@ def _hiphive_is_active(cfg) -> bool:
     hh = getattr(cfg, "hiphive", None)
     if hh is None:
         return False
-    relax = getattr(cfg, "relax", None)
-    fc_method = getattr(relax, "fc_method", None) if relax else None
-    return fc_method == "hiphive"
+    return getattr(cfg, "fc_method", None) == "hiphive"
 
 
 def _check_hiphive_n_structures(cfg) -> CheckResult | None:
