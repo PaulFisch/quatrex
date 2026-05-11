@@ -39,6 +39,7 @@ ALL_ANALYSES = (
     "physical",
     "sse_sparsity",
     "cutoffs",
+    "sigma_audit",
 )
 
 
@@ -130,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="Left-lead temperature K for Landauer Q (default: 305)")
     p.add_argument("--T-R", type=float, default=None,
                    help="Right-lead temperature K for Landauer Q (default: 295)")
+    p.add_argument("--sigma-max-dist", type=int, default=None,
+                   help="sigma_audit: largest |I-J| computed (default: n_blocks-1)")
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args(argv)
 
@@ -221,6 +224,14 @@ def main(argv: list[str] | None = None) -> int:
             temperature_k=args.temperature,
             gamma_lead_thz=args.gamma_lead_thz,
             T_L=args.T_L, T_R=args.T_R,
+        )
+    if "sigma_audit" in analyses:
+        from .sse_sparsity_driver import run_sigma_block_audit
+        summary["sigma_audit"] = run_sigma_block_audit(
+            bundle, out / "sigma_audit",
+            n_freq_pos=args.n_freq_pos, eta_thz=args.eta_thz,
+            temperature_k=args.temperature,
+            max_block_distance=args.sigma_max_dist,
         )
 
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
