@@ -133,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="Right-lead temperature K for Landauer Q (default: 295)")
     p.add_argument("--sigma-max-dist", type=int, default=None,
                    help="sigma_audit: largest |I-J| computed (default: n_blocks-1)")
+    p.add_argument("--sse-sigma-distance", type=int, default=None,
+                   help="sse_sparsity: largest |I-J| in the heatmap "
+                        "(default: n_blocks-1, the full block matrix; "
+                        "pass 1 to recover the tridiagonal-only behaviour)")
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args(argv)
 
@@ -202,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                 n_freq_pos=args.n_freq_pos, eta_thz=args.eta_thz,
                 temperature_k=args.temperature,
                 run_quatrex=run_quatrex,
+                sigma_block_distance=args.sse_sigma_distance,
             )
         except ImportError as exc:
             # Soft fallback: rerun without the quatrex-side cross-check.
@@ -215,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                 n_freq_pos=args.n_freq_pos, eta_thz=args.eta_thz,
                 temperature_k=args.temperature,
                 run_quatrex=False,
+                sigma_block_distance=args.sse_sigma_distance,
             )
     if "cutoffs" in analyses:
         from .sse_sparsity_driver import run_cutoffs

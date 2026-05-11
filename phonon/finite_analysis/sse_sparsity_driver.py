@@ -119,7 +119,17 @@ def run_sse_sparsity(
     eta_thz: float | None = None,
     temperature_k: float = 300.0,
     run_quatrex: bool = False,
+    sigma_block_distance: int | None = None,
 ) -> dict:
+    """Σ block-norm heatmap from the synthetic GF, optionally cross-checked
+    with the quatrex SCBA.
+
+    ``sigma_block_distance`` controls the largest ``|I - J|`` block computed
+    for the synthetic branch; default ``n_blocks - 1`` (the full matrix), so
+    the heatmap visualises off-tridiagonal contributions. Pass ``1`` to
+    recover the transport-solver-equivalent tridiagonal restriction.
+    The quatrex SCBA cross-check is intrinsically tridiagonal.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -127,15 +137,22 @@ def run_sse_sparsity(
         bundle, n_freq_pos=n_freq_pos, eta_thz=eta_thz,
         temperature_k=temperature_k,
     )
+    n_blocks = int(np.asarray(bundle.block_sizes).size)
+    if sigma_block_distance is None:
+        d_sigma = n_blocks - 1
+    else:
+        d_sigma = max(1, min(int(sigma_block_distance), n_blocks - 1))
 
     res = compute_sse_with_cutoffs(
         phi_blocks, gl_blocks, gg_blocks, bundle.block_sizes, dw,
+        sigma_block_distance=d_sigma,
     )
     _csv_block_frob(res.block_frob, out_dir / "sse_sigma_block_frob_synth.csv")
     sigma_block_heatmap(
         res.block_frob, bundle.n_slabs,
         out_dir / "sse_sigma_heatmap_synth.png",
-        title=f"Σ^< block Frobenius — synthetic GF — {bundle.name}",
+        title=(f"Σ^< block Frobenius — synthetic GF — {bundle.name}  "
+               f"(|I-J| ≤ {d_sigma})"),
     )
 
     quatrex_status = "skipped"
