@@ -51,12 +51,13 @@ vasp:
   kpoints_scf: [1, 1, 1]
   vasp_command: "ulimit -s unlimited; mpirun -np 32 vasp_std"
 
+fc_method: thirdorder
+
 relax:
   calculation: relax
   forc_conv_thr: 0.005
   calculator: vasp
   work_dir: ./relax_si_chain_vasp
-  fc_method: thirdorder
 
 thirdorder:
   supercell: [1, 1, 1]            # finite — no replication

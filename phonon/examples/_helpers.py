@@ -139,11 +139,11 @@ def default_relax_block(
     calculator: str = "vasp",
 ) -> dict[str, Any]:
     return {
+        "fc_method": fc_method,
         "relax": {
             "calculation": calculation, "forc_conv_thr": forc_conv_thr,
             "calculator": calculator, "work_dir": work_dir,
-            "fc_method": fc_method,
-        }
+        },
     }
 
 

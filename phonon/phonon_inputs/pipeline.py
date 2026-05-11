@@ -91,6 +91,12 @@ def run_pipeline(
     # Step 2: FC2 + FC3
     # ------------------------------------------------------------------
     method = config.fc_method
+    valid_methods = {"finite_displacement", "thirdorder", "dfpt", "hiphive"}
+    if method not in valid_methods:
+        raise ValueError(
+            f"fc_method={method!r} is not recognised. "
+            f"Expected one of {sorted(valid_methods)}."
+        )
 
     if method == "dfpt":
         from .dfpt import generate_fc_dfpt
@@ -105,6 +111,24 @@ def run_pipeline(
         print("=" * 60)
 
         fc3_path = generate_fc_dfpt(cell, fc_dir, config.qe, dc)
+
+    elif method == "hiphive":
+        from .hiphive_fc3 import generate_fc3 as hiphive_generate_fc3
+
+        hh = config.hiphive
+        fc_dir = base_dir / hh.work_dir
+        dft_config = config.vasp if hh.calculator == "vasp" else config.qe
+
+        print("\n" + "=" * 60)
+        print("Step 2: Force constants (FC2 + FC3) via hiphive (rattled SCs)")
+        print(f"  Supercell: {tuple(hh.supercell)}, work_dir: {fc_dir}")
+        print(f"  n_structures: {hh.n_structures}, rattle_std: {hh.rattle_std} A "
+              f"(method: {hh.rattle_method})")
+        print(f"  Cutoffs: FC2={hh.cutoffs[0]} A, FC3={hh.cutoffs[1]} A; "
+              f"fit: {hh.fit_method}")
+        print("=" * 60)
+
+        fc3_path = hiphive_generate_fc3(cell, fc_dir, dft_config, hh)
 
     else:
         from .thirdorder import generate_fc3

@@ -1,5 +1,6 @@
 """Configuration dataclasses and YAML loader."""
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -226,8 +227,14 @@ class PhononInputConfig:
     relax: RelaxConfig = field(default_factory=RelaxConfig)
 
 
-def _dict_to_dataclass(cls, d):
-    """Recursively convert a dict to a nested dataclass instance."""
+def _dict_to_dataclass(cls, d, *, path: str = ""):
+    """Recursively convert a dict to a nested dataclass instance.
+
+    Unknown keys are surfaced via :func:`warnings.warn` rather than silently
+    dropped — they almost always indicate a misplaced field (e.g. putting
+    top-level ``fc_method`` under ``relax:``) and the silent-drop behaviour
+    has cost real DFT time in the past.
+    """
     if not isinstance(d, dict):
         return d
     fieldtypes = {f.name: f.type for f in cls.__dataclass_fields__.values()}
@@ -235,12 +242,18 @@ def _dict_to_dataclass(cls, d):
     for k, v in d.items():
         if k in fieldtypes:
             ft = cls.__dataclass_fields__[k].type
-            # Check if the field type is itself a dataclass
-            origin = getattr(ft, "__origin__", None)
             if hasattr(ft, "__dataclass_fields__"):
-                kwargs[k] = _dict_to_dataclass(ft, v)
+                child_path = f"{path}.{k}" if path else k
+                kwargs[k] = _dict_to_dataclass(ft, v, path=child_path)
             else:
                 kwargs[k] = v
+        else:
+            here = f"{path}.{k}" if path else k
+            warnings.warn(
+                f"Unknown config key {here!r} (not a field of "
+                f"{cls.__name__}); ignored. Check for misplaced keys.",
+                stacklevel=3,
+            )
     return cls(**kwargs)
 
 
