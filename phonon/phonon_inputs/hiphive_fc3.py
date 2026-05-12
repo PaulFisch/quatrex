@@ -115,16 +115,60 @@ def _generate_phonon_rattled(
 ):
     """Generate phonon-rattled ASE Atoms from a seed FC2.
 
-    Uses :func:`hiphive.structure_generation.generate_phonon_rattled_structures`
-    to draw displacements from the harmonic distribution at the given
-    temperature. ``qm_statistics=True`` uses Bose–Einstein occupation
-    (preferred at low T); ``imag_freq_factor`` rescales imaginary modes
-    to ``|ω|`` to avoid divergent ``1/ω`` amplitudes — set to 0 to drop
-    them or 1 to keep them at the same magnitude.
+    Uses :func:`hiphive.structure_generation.generate_phonon_rattled_structures`,
+    which samples displacements
+
+        R_a = R_a^0 + Σ_s X_{as} √[ℏ(0.5 + n_BE(T, |ω_s|))/(m_a ω_s)] · ...
+
+    Imaginary modes get ``w² → imag_freq_factor × |w²|``. ``imag_freq_factor=1.0``
+    (the hiphive default) flips them to the same magnitude with positive sign.
+    **``imag_freq_factor=0.0`` is unsafe**: it zeroes the frequency, then
+    hiphive divides by zero in ``np.sqrt(... / ω_s)`` and the resulting
+    displacements are NaN. This wrapper rejects that combination upfront
+    and prints the imaginary-mode count + max-magnitude diagnostic so
+    the user knows whether the seed FC2 is healthy enough to phonon-rattle.
     """
+    if imag_freq_factor == 0.0:
+        raise ValueError(
+            "phonon_rattle_imag_freq_factor=0.0 produces NaN displacements "
+            "(hiphive zeroes the frequency and then divides by it). Use 1.0 "
+            "(the hiphive default — flips imaginary modes to positive same-"
+            "magnitude frequencies) or a small positive value (< 1) to damp them. "
+            "If the seed FC2 has many imaginary modes the right fix is to "
+            "increase phonon_rattle_bootstrap_n or switch to rattle_method=mc."
+        )
+
+    # Diagnose the seed FC2 before sampling. Hiphive accepts both
+    # (3N, 3N) and (N, N, 3, 3); reshape to (3N, 3N) for diagonalisation
+    # and mass-weight via the atoms object.
+    import numpy as _np
+    fc2 = _np.asarray(fc2_seed)
+    if fc2.ndim == 4:
+        n = fc2.shape[0]
+        D = fc2.transpose(0, 2, 1, 3).reshape(3 * n, 3 * n)
+    else:
+        D = fc2.copy()
+    masses = _np.asarray(atoms_ideal.get_masses())
+    minv = 1.0 / _np.sqrt(_np.repeat(masses, 3))
+    Dm = D * minv[:, None] * minv[None, :]
+    Dm = 0.5 * (Dm + Dm.T)
+    eig = _np.linalg.eigvalsh(Dm)
+    n_imag = int(_np.sum(eig < -1e-8))
+    n_zero = int(_np.sum(_np.abs(eig) <= 1e-8))
+    if n_imag > 0:
+        max_imag = float(_np.sqrt(-eig.min()))
+        print(
+            f"  WARNING: seed FC2 has {n_imag} imaginary mode(s) (max |ω| ≈ "
+            f"{max_imag:.3f} √eV/(Å²·amu), plus {n_zero} zero/acoustic). "
+            f"phonon-rattle will sample along their |ω|-magnitude with "
+            f"imag_freq_factor={imag_freq_factor}; the resulting fit "
+            f"will likely also have imaginary modes. Consider increasing "
+            f"phonon_rattle_bootstrap_n or using rattle_method=mc."
+        )
+
     from hiphive.structure_generation import generate_phonon_rattled_structures
 
-    return generate_phonon_rattled_structures(
+    rattled = generate_phonon_rattled_structures(
         atoms_ideal,
         fc2_seed,
         n_structures=n_structures,
@@ -132,6 +176,21 @@ def _generate_phonon_rattled(
         QM_statistics=qm_statistics,
         imag_freq_factor=imag_freq_factor,
     )
+
+    # Hard catch: if any structure has NaN positions the cluster job
+    # will silently produce garbage. Fail loud here.
+    for i, r in enumerate(rattled, start=1):
+        pos = _np.asarray(r.positions)
+        if not _np.isfinite(pos).all():
+            n_bad = int((~_np.isfinite(pos)).sum())
+            raise RuntimeError(
+                f"phonon-rattle structure #{i} has {n_bad} non-finite "
+                f"position entries. This always indicates an unsafe "
+                f"imag_freq_factor or a degenerate seed FC2 (zero-mode "
+                f"divided by zero). Refit the seed (more bootstrap_n, "
+                f"or switch to rattle_method=mc) and try again."
+            )
+    return rattled
 
 
 # ========================================================================

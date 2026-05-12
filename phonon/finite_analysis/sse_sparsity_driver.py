@@ -139,22 +139,92 @@ def _frob_bar_chart(
     diffs: dict[str, dict[tuple[int, int], float]],
     out_path: Path,
 ) -> None:
-    """Bar chart: mean rel-Frob diff vs baseline, per cutoff config."""
-    labels = list(diffs.keys())
-    means = [
-        np.mean([v for v in diffs[lbl].values() if np.isfinite(v)])
-        if diffs[lbl] else 0.0
-        for lbl in labels
-    ]
-    fig, ax = plt.subplots(figsize=(7.0, 4.0))
-    ax.bar(labels, means)
+    """Mean + max relative Frobenius gap vs the baseline per cutoff config.
+
+    Renders the mean as a coloured bar and the per-(I,J) maximum as an
+    overlaid open marker so the user can see both the typical and the
+    worst-case effect of each cutoff. Bars are coloured by cutoff family
+    (diag-G, FC3 magnitude, FC3 distance).
+    """
+    labels: list[str] = list(diffs.keys())
+    means: list[float] = []
+    maxes: list[float] = []
+    for lbl in labels:
+        vals = [v for v in diffs[lbl].values() if np.isfinite(v)]
+        means.append(float(np.mean(vals)) if vals else 0.0)
+        maxes.append(float(np.max(vals)) if vals else 0.0)
+
+    # Colour bars by cutoff family.
+    family_palette = {
+        "baseline": "#888888",
+        "diag_G":   "#4477AA",   # Tol blue
+        "mag":      "#CCBB44",   # Tol yellow
+        "dist":     "#AA3377",   # Tol purple
+        "other":    "#228833",   # Tol green
+    }
+
+    def _family(lbl: str) -> str:
+        s = lbl.lower()
+        if "baseline" in s:
+            return "baseline"
+        if "diag" in s and "g" in s:
+            return "diag_G"
+        if "mag" in s or "thresh" in s:
+            return "mag"
+        if "dist" in s:
+            return "dist"
+        return "other"
+
+    colors = [family_palette[_family(lbl)] for lbl in labels]
+
+    fig, ax = plt.subplots(figsize=(max(7.0, 0.7 * len(labels) + 2), 4.5))
+    x = np.arange(len(labels))
+    ax.bar(
+        x, [m if m > 0 else 1e-30 for m in means], color=colors,
+        edgecolor="black", lw=0.5, alpha=0.85, label="mean per (I, J)",
+    )
+    ax.plot(
+        x, [m if m > 0 else 1e-30 for m in maxes],
+        "o", color="black", markersize=6, mfc="none", mew=1.4,
+        label="max per (I, J)",
+    )
+
+    # Annotate each bar with the numeric value.
+    for xi, m in zip(x, means, strict=False):
+        if m > 0:
+            ax.text(
+                xi, m * 1.18, f"{m:.1e}",
+                ha="center", va="bottom", fontsize=8,
+            )
+
     ax.set_yscale("log")
-    ax.set_ylabel(r"mean $\|\Sigma^< - \Sigma^<_\mathrm{baseline}\|_F / \|\Sigma^<_\mathrm{baseline}\|_F$")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=30, ha="right")
+    ax.set_ylabel(
+        r"$\|\Sigma^<_{\mathrm{cutoff}} - \Sigma^<_{\mathrm{baseline}}\|_F"
+        r" / \|\Sigma^<_{\mathrm{baseline}}\|_F$"
+    )
     ax.set_title("Cutoff sensitivity of phonon-phonon SSE")
-    ax.tick_params(axis="x", rotation=30)
+    ax.grid(True, axis="y", which="both", alpha=0.3, lw=0.4)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+
+    # Family legend (manual handles to avoid one entry per bar).
+    from matplotlib.patches import Patch
+    handles = [
+        Patch(facecolor=family_palette[k], edgecolor="black", lw=0.5,
+              label=k) for k in family_palette
+        if any(_family(lbl) == k for lbl in labels)
+    ]
+    handles.append(plt.Line2D(
+        [], [], marker="o", color="black", mfc="none", mew=1.4,
+        ls="", markersize=6, label="max per (I, J)",
+    ))
+    ax.legend(handles=handles, frameon=False, fontsize=8, loc="best")
+
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    fig.savefig(Path(out_path).with_suffix(".pdf"))
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    fig.savefig(Path(out_path).with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
 
 
@@ -227,6 +297,33 @@ def run_sse_sparsity(
 
     quatrex_status = "skipped"
     if run_quatrex:
+        # The dense bubble cross-check allocates a (n_fft × n_dof³) complex
+        # intermediate. n_dof is the FULL supercell DOF count, so for any
+        # SiNW-scale system this is tens to hundreds of GiB and stalls the
+        # analysis on a single core. Guard hard at 30 GiB; the user can
+        # still force-run by passing run_quatrex=True directly to this
+        # function from Python (the guard only fires when the projected
+        # buffer is enormous).
+        n_dof = int(np.sum(bundle.block_sizes))
+        n_fft = 2 * (2 * n_freq_pos + 1) - 1
+        gib = n_fft * n_dof ** 3 * 16 / (1024 ** 3)
+        if gib > 30.0:
+            quatrex_status = (
+                f"skipped (dense-bubble intermediate would be "
+                f"~{gib:.0f} GiB at n_dof={n_dof}, n_fft={n_fft}; cross-check "
+                f"is a chain/primitive-cell regression test, not a "
+                f"production tool — pass --with-quatrex-crosscheck only on "
+                f"≤ 50-atom supercells)"
+            )
+            print(f"sse_sparsity: {quatrex_status}")
+            return {
+                "units": {"dw": "THz"},
+                "n_phi_blocks": len(phi_blocks),
+                "n_sigma_blocks": len(res.block_frob),
+                "n_unstable_modes": modes.n_unstable,
+                "dw": float(dw),
+                "quatrex_status": quatrex_status,
+            }
         from .sse_quatrex_run import run_dense_scba_crosscheck
         quatrex_blocks = run_dense_scba_crosscheck(
             bundle, n_freq_pos=n_freq_pos, eta_thz=eta_thz,
