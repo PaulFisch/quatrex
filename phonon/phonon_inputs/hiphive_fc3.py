@@ -105,6 +105,55 @@ def _generate_rattled(
     )
 
 
+def _seed_from_existing_fc3(
+    work_dir: Path, fc3_path: Path, atoms_ideal,
+) -> None:
+    """Extract FC2 from an existing ``fc3.hdf5`` and write
+    ``work_dir/fc2_seed.npy`` in the ``(N, N, 3, 3)`` format hiphive expects.
+
+    Used by the phonon-rattle workflow when
+    ``HiphiveConfig.phonon_rattle_seed_fc3`` is set — bypasses the bootstrap
+    DFT batch entirely and seeds the phonon-rattle pool from a converged
+    FC2 (mc-rattle reap, phono3py reap, or any other source with the same
+    primitive cell + supercell layout).
+    """
+    import h5py
+    fc3_path = Path(fc3_path)
+    if not fc3_path.exists():
+        raise FileNotFoundError(
+            f"phonon_rattle_seed_fc3 points at a missing file: {fc3_path}"
+        )
+    with h5py.File(fc3_path, "r") as f:
+        if "fc2" not in f:
+            raise KeyError(
+                f"{fc3_path} has no 'fc2' dataset. Re-reap the upstream "
+                "calculation with `fc3-hiphive-reap` (or thirdorder-reap) "
+                "so it writes FC2 alongside FC3."
+            )
+        fc2 = np.asarray(f["fc2"][:], dtype=np.float64)
+    n_atoms = len(atoms_ideal)
+    if fc2.shape[:2] != (n_atoms, n_atoms):
+        raise ValueError(
+            f"phonon_rattle_seed_fc3 FC2 has shape {fc2.shape}; expected "
+            f"({n_atoms}, {n_atoms}, 3, 3). Source supercell must match the "
+            "current rattle supercell exactly."
+        )
+    seed_path = work_dir / FC2_SEED_FILENAME
+    work_dir.mkdir(parents=True, exist_ok=True)
+    np.save(seed_path, fc2)
+    summary = {
+        "stage": "seed_from_existing",
+        "source": str(fc3_path),
+        "fc2_shape": list(fc2.shape),
+        "fc2_max": float(np.max(np.abs(fc2))),
+    }
+    (work_dir / "hiphive_bootstrap.json").write_text(json.dumps(summary, indent=2))
+    print(
+        f"phonon-rattle: seeded FC2 from {fc3_path} "
+        f"(max |FC2| = {summary['fc2_max']:.3e}); wrote {seed_path}."
+    )
+
+
 def _generate_phonon_rattled(
     atoms_ideal,
     fc2_seed: np.ndarray,
@@ -112,6 +161,8 @@ def _generate_phonon_rattled(
     temperature_k: float,
     qm_statistics: bool,
     imag_freq_factor: float,
+    max_imag_modes: int = 6,
+    atoms_for_min_image=None,
 ):
     """Generate phonon-rattled ASE Atoms from a seed FC2.
 
@@ -158,13 +209,26 @@ def _generate_phonon_rattled(
     if n_imag > 0:
         max_imag = float(_np.sqrt(-eig.min()))
         print(
-            f"  WARNING: seed FC2 has {n_imag} imaginary mode(s) (max |ω| ≈ "
-            f"{max_imag:.3f} √eV/(Å²·amu), plus {n_zero} zero/acoustic). "
-            f"phonon-rattle will sample along their |ω|-magnitude with "
-            f"imag_freq_factor={imag_freq_factor}; the resulting fit "
-            f"will likely also have imaginary modes. Consider increasing "
-            f"phonon_rattle_bootstrap_n or using rattle_method=mc."
+            f"  seed FC2 has {n_imag} imaginary mode(s) (max |ω| ≈ "
+            f"{max_imag:.3f} √eV/(Å²·amu), plus {n_zero} zero/acoustic)."
         )
+        if n_imag > max_imag_modes:
+            raise RuntimeError(
+                f"Seed FC2 has {n_imag} imaginary modes (cap = "
+                f"{max_imag_modes} via phonon_rattle_max_seed_imag). "
+                "Phonon-rattle's per-mode amplitude scales as "
+                "1/√|ω|, so a handful of small-|ω| imaginary modes "
+                "blow up displacements and produce hiphive's 'Duplicates "
+                "in permutation' or NaN POSCARs.\n\n"
+                "Recommended fix: complete an mc-rattle reap on the same "
+                "supercell and point ``phonon_rattle_seed_fc3`` at its "
+                "fc3.hdf5. The phonon-rattle pool is then a finite-T "
+                "refinement on a converged harmonic model — the workflow "
+                "used by Eriksson et al. 2019 (Adv. Theory Simul. 2, "
+                "1800184) and Carrete et al. 2017.\n\n"
+                "Override with phonon_rattle_max_seed_imag: <large int> "
+                "if you understand the risk."
+            )
 
     from hiphive.structure_generation import generate_phonon_rattled_structures
 
@@ -177,6 +241,33 @@ def _generate_phonon_rattled(
         imag_freq_factor=imag_freq_factor,
     )
 
+    # Hiphive's ``find_permutation`` matches each rattled atom to the
+    # nearest ideal-supercell atom in *Cartesian* coordinates. If
+    # any atom has wandered across more than half a lattice vector
+    # the matching can collide ("Duplicates in permutation"). Wrap
+    # each rattled position back to its starting min-image so the
+    # matching is unambiguous even at finite T. This is a no-op for
+    # well-conditioned seeds where displacements ≪ NN spacing.
+    if atoms_for_min_image is not None:
+        ref_pos = _np.asarray(atoms_for_min_image.positions)
+        cell = _np.asarray(atoms_for_min_image.cell)
+        cell_inv = _np.linalg.inv(cell)
+        max_disp = 0.0
+        for r in rattled:
+            pos = _np.asarray(r.positions)
+            delta = pos - ref_pos
+            frac = delta @ cell_inv
+            frac -= _np.round(frac)
+            wrapped_pos = ref_pos + frac @ cell
+            r.set_positions(wrapped_pos)
+            max_disp = max(max_disp, float(_np.max(_np.linalg.norm(
+                wrapped_pos - ref_pos, axis=1,
+            ))))
+        print(
+            f"  phonon-rattle: max atomic displacement after min-image "
+            f"fold = {max_disp:.3f} Å."
+        )
+
     # Hard catch: if any structure has NaN positions the cluster job
     # will silently produce garbage. Fail loud here.
     for i, r in enumerate(rattled, start=1):
@@ -188,6 +279,7 @@ def _generate_phonon_rattled(
                 f"position entries. This always indicates an unsafe "
                 f"imag_freq_factor or a degenerate seed FC2 (zero-mode "
                 f"divided by zero). Refit the seed (more bootstrap_n, "
+                f"set phonon_rattle_seed_fc3 to a converged fc3.hdf5, "
                 f"or switch to rattle_method=mc) and try again."
             )
     return rattled
@@ -241,12 +333,30 @@ def sow(
     # ---- Phonon-rattle dispatch (two-stage) --------------------------------
     if hh_config.rattle_method == "phonon":
         seed_path = work_dir / FC2_SEED_FILENAME
+        # Preferred path: load FC2 from an existing converged fc3.hdf5
+        # (e.g. a completed mc-rattle reap on the same primitive). This
+        # mirrors how the literature uses phonon-rattle — as a finite-T
+        # refinement on top of a converged harmonic model, NOT as a
+        # from-scratch sampler.
+        if not seed_path.exists() and hh_config.phonon_rattle_seed_fc3:
+            _seed_from_existing_fc3(
+                work_dir,
+                Path(hh_config.phonon_rattle_seed_fc3).expanduser(),
+                atoms_ideal,
+            )
         if not seed_path.exists():
-            # Stage 1: emit bootstrap mc-rattle pool into work_dir/bootstrap/
+            # Fallback: emit a bootstrap mc-rattle pool. Works well for
+            # high-symmetry bulk crystals; on low-symmetry quasi-1-D
+            # systems (SiNW) the bootstrap FC2 is usually saturated
+            # with imaginary modes — bootstrap_reap will refuse to
+            # write the seed in that case, and you should pre-build
+            # an mc-rattle reap and point phonon_rattle_seed_fc3 at
+            # it instead.
             boot_dir = work_dir / BOOTSTRAP_DIRNAME
             print(
-                f"hiphive phonon-rattle: no seed FC2 found at {seed_path}. "
-                f"Writing bootstrap mc-rattle pool to {boot_dir}/ "
+                f"hiphive phonon-rattle: no seed FC2 found at {seed_path}, "
+                f"no phonon_rattle_seed_fc3 set. Writing bootstrap "
+                f"mc-rattle pool to {boot_dir}/ "
                 f"(n={hh_config.phonon_rattle_bootstrap_n})."
             )
             boot_cfg = replace(
@@ -271,6 +381,8 @@ def sow(
             temperature_k=hh_config.phonon_rattle_temperature_k,
             qm_statistics=hh_config.phonon_rattle_qm,
             imag_freq_factor=hh_config.phonon_rattle_imag_freq_factor,
+            max_imag_modes=hh_config.phonon_rattle_max_seed_imag,
+            atoms_for_min_image=atoms_ideal,
         )
     else:
         rattled = _generate_rattled(
@@ -514,27 +626,77 @@ def bootstrap_reap(
     for s in structures:
         sc.add_structure(s)
 
-    opt = Optimizer(sc.get_fit_data(), fit_method="least-squares")
-    opt.train()
+    # Use ARDR (or ridge as fallback) instead of bare least-squares.
+    # Bootstrap pools are always small (typically 4–8 structures), so
+    # least-squares fits marginally-determined long-wavelength modes by
+    # noise and the resulting FC2 has many imaginary modes. ARDR's
+    # automatic relevance pruning produces a much cleaner FC2 from the
+    # same pool. The post-fit rotational sum rule (Huang + Born–Huang)
+    # then closes the spurious ZA-flexural gap.
+    bootstrap_fit_method = "ardr"
+    try:
+        opt = Optimizer(
+            sc.get_fit_data(), fit_method=bootstrap_fit_method,
+        )
+        opt.train()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ardr failed ({exc!r}); falling back to ridge.")
+        bootstrap_fit_method = "ridge"
+        opt = Optimizer(
+            sc.get_fit_data(), fit_method=bootstrap_fit_method,
+        )
+        opt.train()
     print(
-        f"  parameters: {opt.n_parameters}, "
+        f"  fit_method={bootstrap_fit_method}, "
+        f"parameters: {opt.n_parameters}, "
         f"RMSE train: {opt.rmse_train:.4e}, "
         f"RMSE test: "
         f"{opt.rmse_test if opt.rmse_test is not None else float('nan'):.4e}"
     )
-    fcp = ForceConstantPotential(cs, opt.parameters)
+    params = opt.parameters
+
+    # Apply Huang + Born-Huang rotational projection if requested.
+    rot_mode = getattr(hh_config, "rotational_sum_rule", "off")
+    rot_before = float("nan")
+    rot_after = float("nan")
+    if rot_mode == "post_fit":
+        from .hiphive_convergence import (
+            _apply_rotational_sum_rules, _rotational_residual_pair,
+        )
+        rot_before, _ = _rotational_residual_pair(cs, params, mode="off")
+        params = _apply_rotational_sum_rules(cs, params)
+        rot_after, _ = _rotational_residual_pair(cs, params, mode="off")
+        print(
+            f"  rotational sum rules projected: "
+            f"residual {rot_before:.3e} -> {rot_after:.3e}"
+        )
+
+    fcp = ForceConstantPotential(cs, params)
     fcs = fcp.get_force_constants(atoms_ideal)
     fc2 = fcs.get_fc_array(order=2)
 
-    # Phonopy convention for ``generate_phonon_rattled_structures``:
-    # (N, N, 3, 3) is accepted directly.
-    seed_path = work_dir / FC2_SEED_FILENAME
-    np.save(seed_path, fc2)
+    # Diagnose FC2 PSD-ness BEFORE writing the seed. The downstream
+    # phonon-rattle amplitude diverges as 1/√|ω| for small |ω|, so a
+    # seed with even a handful of imaginary modes produces "Duplicates
+    # in permutation" or NaN POSCARs. Refuse to write a bad seed.
+    masses = np.asarray(atoms_ideal.get_masses())
+    minv = 1.0 / np.sqrt(np.repeat(masses, 3))
+    n = n_super
+    D = fc2.transpose(0, 2, 1, 3).reshape(3 * n, 3 * n)
+    Dm = D * minv[:, None] * minv[None, :]
+    Dm = 0.5 * (Dm + Dm.T)
+    eig = np.linalg.eigvalsh(Dm)
+    n_imag = int(np.sum(eig < -1e-8))
+    max_seed_imag = getattr(hh_config, "phonon_rattle_max_seed_imag", 6)
 
     summary = {
         "stage": "bootstrap",
         "n_structures": n_disp,
         "cutoffs": fc2_cutoff,
+        "fit_method": bootstrap_fit_method,
+        "rotational_sum_rule": rot_mode,
+        "rotational_residual_before": rot_before,
+        "rotational_residual_after": rot_after,
         "rmse_train": float(opt.rmse_train),
         "rmse_test": (
             float(opt.rmse_test) if opt.rmse_test is not None else None
@@ -542,9 +704,37 @@ def bootstrap_reap(
         "n_parameters": int(len(opt.parameters)),
         "calculator": calculator,
         "fc2_max": float(np.max(np.abs(fc2))),
+        "n_imag_modes_in_seed": n_imag,
+        "max_seed_imag_allowed": max_seed_imag,
     }
     (work_dir / "hiphive_bootstrap.json").write_text(json.dumps(summary, indent=2))
-    print(f"  Saved seed FC2: {seed_path} (max |FC2| = {summary['fc2_max']:.3e})")
+
+    if n_imag > max_seed_imag:
+        bad_path = work_dir / (FC2_SEED_FILENAME + ".rejected")
+        np.save(bad_path, fc2)
+        raise RuntimeError(
+            f"Bootstrap seed FC2 has {n_imag} imaginary mode(s) "
+            f"(cap = {max_seed_imag} via phonon_rattle_max_seed_imag). "
+            f"Refusing to write {FC2_SEED_FILENAME} — phonon-rattle "
+            f"would produce 'Duplicates in permutation' or NaN POSCARs.\n\n"
+            f"Saved the bad fit to {bad_path.name} for diagnosis. "
+            f"hiphive_bootstrap.json carries the full numerics.\n\n"
+            "Recommended next step: run an mc-rattle reap on the same "
+            "supercell to convergence, then set\n"
+            "    hiphive.phonon_rattle_seed_fc3: "
+            "<path-to-mc-rattle-fc3.hdf5>\n"
+            "and re-run; the phonon-rattle workflow then refines the "
+            "converged FC2 at finite T (the workflow used in "
+            "Eriksson et al. 2019 / Carrete et al. 2017)."
+        )
+
+    # Phonopy convention for generate_phonon_rattled_structures.
+    seed_path = work_dir / FC2_SEED_FILENAME
+    np.save(seed_path, fc2)
+    print(
+        f"  Saved seed FC2: {seed_path} "
+        f"(max |FC2| = {summary['fc2_max']:.3e}, n_imag = {n_imag})"
+    )
     return seed_path
 
 
