@@ -91,7 +91,7 @@ hiphive:
     pool_size: 32
     test_fraction: 0.2
     seed: 0
-    fit_methods: [ardr, rfe-cv]
+    fit_methods: [ardr, rfe]
     dispersion_q_mesh: [1, 1, 16]
   phonon_rattle_temperature_k: 300.0
   phonon_rattle_bootstrap_n: 6
