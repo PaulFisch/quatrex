@@ -140,6 +140,61 @@ def test_bubble_matches_sparse_block_reference(bK1, bK2, ne):
     np.testing.assert_allclose(got, ref, atol=1e-12)
 
 
+@pytest.mark.parametrize("bK1,bK1p,bK2,bK2p", [
+    # Off-diagonal G blocks: G(K, K') has bK != bK' on the trailing axis.
+    # Mirrors what compute_sse_with_cutoffs passes when diag_G_in_se=False:
+    # the inner G dict spans every (K, K') with |K-K'| <= 1.
+    (9, 6, 6, 9),   # both G off-diagonal, asymmetric inner blocks
+    (4, 6, 4, 4),   # only G_a off-diagonal
+    (3, 3, 5, 7),   # only G_b off-diagonal
+])
+def test_bubble_handles_rectangular_offdiagonal_G(bK1, bK1p, bK2, bK2p):
+    """Off-diagonal G(K, K') blocks have ``bK != bK'`` on the trailing
+    axis. The kernel must size its pad from G_a/G_b directly — sizing
+    from phi_left silently truncates the trailing axis."""
+    rng = np.random.default_rng(seed=bK1 * 100 + bK2 + bK1p + bK2p)
+    nI, nJ, ne = 2, 3, 5
+    # phi_left has the "outgoing" K1, K2 shape; phi_right ties them back
+    # via the K1', K2' inner indices on the J vertex.
+    phi_left = (
+        rng.standard_normal((nI, bK1, bK2))
+        + 1j * rng.standard_normal((nI, bK1, bK2))
+    )
+    phi_right = (
+        rng.standard_normal((nJ, bK2p, bK1p))
+        + 1j * rng.standard_normal((nJ, bK2p, bK1p))
+    )
+    G_a = (
+        rng.standard_normal((ne, bK1, bK1p))
+        + 1j * rng.standard_normal((ne, bK1, bK1p))
+    )
+    G_b = (
+        rng.standard_normal((ne, bK2, bK2p))
+        + 1j * rng.standard_normal((ne, bK2, bK2p))
+    )
+    n_fft = 2 * ne - 1
+    prefactor = 0.5j * 1.0545718e-34 * 0.1 / (2 * np.pi)
+
+    # Direct ground truth: inline the einsum chain with the right shapes.
+    Ga_pad = np.zeros((n_fft, bK1, bK1p), dtype=complex)
+    Ga_pad[:ne] = G_a
+    Gb_pad = np.zeros((n_fft, bK2, bK2p), dtype=complex)
+    Gb_pad[:ne] = G_b
+    Ga_fft = np.fft.fft(Ga_pad, axis=0)
+    Gb_fft = np.fft.fft(Gb_pad, axis=0)
+    A = np.einsum("ace,wed->wacd", phi_left, Gb_fft)
+    B = np.einsum("wacd,wcb->wabd", A, Ga_fft)
+    S_hat = np.einsum("wabd,Jdb->waJ", B, phi_right)
+    expected = prefactor * np.fft.ifft(S_hat, axis=0)[:ne]
+
+    got = bubble_dense(
+        phi_left=phi_left, phi_right=phi_right,
+        G_a=G_a, G_b=G_b, n_fft=n_fft, prefactor=prefactor,
+    )
+    np.testing.assert_allclose(got, expected, atol=1e-12)
+    assert got.shape == (ne, nI, nJ)
+
+
 def test_bubble_input_not_mutated_when_zero_freq_set():
     """``zero_freq_idx`` must not modify the caller's arrays."""
     rng = np.random.default_rng(seed=1)
