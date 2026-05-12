@@ -40,6 +40,7 @@ ALL_ANALYSES = (
     "sse_sparsity",
     "cutoffs",
     "sigma_audit",
+    "transport_quality",
 )
 
 
@@ -122,8 +123,27 @@ def main(argv: list[str] | None = None) -> int:
                    help="Lorentzian half-width for the synthetic GF (default: 2 dω)")
     p.add_argument("--temperature", type=float, default=300.0,
                    help="Bose temperature in K (default: 300)")
-    p.add_argument("--skip-quatrex-run", action="store_true",
-                   help="Do not invoke the SCBA loop for sse_sparsity")
+    p.add_argument(
+        "--with-quatrex-crosscheck", action="store_true",
+        help=(
+            "Also run the dense-supercell SCBA cross-check inside "
+            "sse_sparsity. Off by default: it allocates a "
+            "(n_fft × n_dof³) complex tensor on the FULL supercell — "
+            "~8 GiB for d5a, ~200 GiB for d9a, ~600 GiB for d12a — "
+            "and runs single-threaded, so on any system bigger than "
+            "the analytic Si chain it stalls the analysis for minutes "
+            "or hours. Only enable on small (< 50-atom) supercells "
+            "where you want to verify the block-decomposed bubble "
+            "against the dense reference."
+        ),
+    )
+    # Legacy alias: --skip-quatrex-run used to flip the default the
+    # other way (the cross-check ran unless skipped, which was the
+    # wrong default for SiNW-scale systems). Accept but ignore.
+    p.add_argument(
+        "--skip-quatrex-run", action="store_true",
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--gamma-lead-thz", type=float, default=None,
                    help="Synthetic lead broadening Γ for cutoffs transport "
                         "(default: from finite_analysis.constants)")
@@ -131,6 +151,22 @@ def main(argv: list[str] | None = None) -> int:
                    help="Left-lead temperature K for Landauer Q (default: 305)")
     p.add_argument("--T-R", type=float, default=None,
                    help="Right-lead temperature K for Landauer Q (default: 295)")
+    p.add_argument(
+        "--tq-q-mesh", type=str, default="1,1",
+        help="transport_quality: transverse q-mesh as 'Nx,Ny' "
+             "(default '1,1', appropriate for 1-D nanowires).",
+    )
+    p.add_argument(
+        "--tq-temperature", type=float, default=300.0,
+        help="transport_quality: device temperature in K (default 300).",
+    )
+    p.add_argument(
+        "--tq-force-recompute", action="store_true",
+        help="transport_quality: ignore any cached cells and recompute. "
+             "Without this flag the analysis reuses "
+             "<out-dir>/transport_quality/cache/{method}_r{rank}.npz so "
+             "rerunning with new ranks only touches the missing cells.",
+    )
     p.add_argument("--sigma-max-dist", type=int, default=None,
                    help="sigma_audit: largest |I-J| computed (default: n_blocks-1)")
     p.add_argument("--sse-sigma-distance", type=int, default=None,
@@ -199,7 +235,13 @@ def main(argv: list[str] | None = None) -> int:
         summary["physical"] = run_physical_tests(bundle, out / "physical")
     if "sse_sparsity" in analyses:
         from .sse_sparsity_driver import run_sse_sparsity
-        run_quatrex = not args.skip_quatrex_run
+        run_quatrex = bool(args.with_quatrex_crosscheck)
+        if args.skip_quatrex_run:
+            warnings.warn(
+                "--skip-quatrex-run is now the default behaviour; flag "
+                "ignored. Use --with-quatrex-crosscheck to opt in.",
+                DeprecationWarning, stacklevel=2,
+            )
         try:
             summary["sse_sparsity"] = run_sse_sparsity(
                 bundle, out / "sse_sparsity",
@@ -238,6 +280,22 @@ def main(argv: list[str] | None = None) -> int:
             n_freq_pos=args.n_freq_pos, eta_thz=args.eta_thz,
             temperature_k=args.temperature,
             max_block_distance=args.sigma_max_dist,
+        )
+    if "transport_quality" in analyses:
+        from .transport_quality import run_transport_quality
+        try:
+            qx, qy = (int(s) for s in args.tq_q_mesh.split(","))
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit(
+                f"--tq-q-mesh must be 'Nx,Ny' (got {args.tq_q_mesh!r}): {exc}"
+            )
+        summary["transport_quality"] = run_transport_quality(
+            bundle, out / "transport_quality",
+            scalar_ranks=args.rank_sweep,
+            q_mesh_transverse=(qx, qy),
+            temperature=args.tq_temperature,
+            force_recompute=args.tq_force_recompute,
+            verbose=args.verbose,
         )
 
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))

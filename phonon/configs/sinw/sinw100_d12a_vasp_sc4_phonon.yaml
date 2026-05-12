@@ -112,7 +112,7 @@ hiphive:
   phonon_rattle_temperature_k: 300.0
   phonon_rattle_bootstrap_n: 8
   phonon_rattle_bootstrap_seed: 0
-  phonon_rattle_imag_freq_factor: 0.0
+  phonon_rattle_imag_freq_factor: 1.0
   phonon_rattle_qm: true
   calculator: vasp
   work_dir: ./fc3_hiphive_sinw100_d12a_sc4_vasp_phonon
