@@ -263,8 +263,24 @@ def cmd_hiphive_reap(config_path: str) -> None:
     print(f"\nFC3 file: {fc3_path}")
 
 
-def cmd_hiphive_all(config_path: str) -> None:
-    """Full hiphive FC3 pipeline: sow + run + reap."""
+def cmd_hiphive_all(
+    config_path: str,
+    *,
+    with_convergence: bool = False,
+    with_analysis: str | None = None,
+    analyses: str = "all",
+) -> None:
+    """Full hiphive FC3 pipeline: sow + run + reap.
+
+    For ``rattle_method='phonon'`` :func:`generate_fc3` internally
+    performs the longer bootstrap-aware sequence
+    (sow → run → bootstrap_reap → sow → run → reap); for mc / normal
+    rattling it's the canonical three-step flow.
+
+    Optionally chains the convergence sweep and / or the
+    :mod:`finite_analysis` analyses after the reap, so a single CLI
+    invocation can drive the whole audit chain.
+    """
     from .config import load_config
     from .hiphive_fc3 import generate_fc3
     from .structure import load_structure
@@ -274,10 +290,42 @@ def cmd_hiphive_all(config_path: str) -> None:
 
     hh = config.hiphive
     dft_config, _ = _get_hiphive_dft_config(config)
-    work_dir = Path(config_path).parent / hh.work_dir
+    config_dir = Path(config_path).parent
+    work_dir = config_dir / hh.work_dir
 
     fc3_path = generate_fc3(cell, work_dir, dft_config, hh)
     print(f"\nFC3 file: {fc3_path}")
+
+    if with_convergence:
+        print("\n--- post-reap: hiphive convergence sweep ---")
+        cmd_hiphive_convergence(config_path, out_dir=None)
+
+    if with_analysis:
+        print(f"\n--- post-reap: finite_analysis → {with_analysis} ---")
+        # Resolve the analysis output dir relative to the config dir so
+        # the user can pass a short relative path.
+        analysis_out = Path(with_analysis)
+        if not analysis_out.is_absolute():
+            analysis_out = (config_dir / analysis_out).resolve()
+        analysis_out.mkdir(parents=True, exist_ok=True)
+        try:
+            import finite_analysis.cli as fa_cli
+        except ImportError as exc:
+            raise SystemExit(
+                f"--with-analysis requested but finite_analysis is "
+                f"unavailable: {exc}. Run `python -m finite_analysis run "
+                f"--config {config_path} --analyses {analyses} "
+                f"--out-dir {analysis_out}` separately."
+            )
+        rc = fa_cli.main([
+            "run",
+            "--config", str(config_path),
+            "--fc3-path", str(fc3_path),
+            "--out-dir", str(analysis_out),
+            "--analyses", analyses,
+        ])
+        if rc != 0:
+            raise SystemExit(rc)
 
 
 def cmd_hiphive_bootstrap_reap(config_path: str) -> None:
@@ -531,9 +579,31 @@ def main():
     p_hh_reap.add_argument("--config", required=True, help="YAML config file")
 
     p_hh_all = sub.add_parser(
-        "fc3-hiphive-all", help="Full hiphive FC3 pipeline: sow + run + reap"
+        "fc3-hiphive-all",
+        help="Full hiphive FC3 pipeline. For rattle_method=phonon this "
+             "runs the two-stage bootstrap workflow (sow → run → "
+             "bootstrap_reap → sow → run → reap) end-to-end; for mc/normal "
+             "rattling it's the canonical sow → run → reap. Optionally "
+             "chains the convergence sweep and finite_analysis on top.",
     )
     p_hh_all.add_argument("--config", required=True, help="YAML config file")
+    p_hh_all.add_argument(
+        "--with-convergence", action="store_true",
+        help="After the FC3 reap, run fc3-hiphive-convergence "
+             "(uses HiphiveConfig.convergence).",
+    )
+    p_hh_all.add_argument(
+        "--with-analysis", metavar="OUT_DIR", default=None,
+        help="After the FC3 reap, also run `finite_analysis run` writing "
+             "into OUT_DIR (relative to the config file's directory, or "
+             "absolute). Use --analyses to control which analyses run.",
+    )
+    p_hh_all.add_argument(
+        "--analyses", default="all",
+        help="Comma-separated analyses for --with-analysis "
+             "(default: 'all'). Same syntax as `finite_analysis run "
+             "--analyses`.",
+    )
 
     p_hh_boot = sub.add_parser(
         "fc3-hiphive-bootstrap-reap",
@@ -583,7 +653,12 @@ def main():
         "fc3-hiphive-sow": lambda: cmd_hiphive_sow(args.config),
         "fc3-hiphive-run": lambda: cmd_hiphive_run(args.config),
         "fc3-hiphive-reap": lambda: cmd_hiphive_reap(args.config),
-        "fc3-hiphive-all": lambda: cmd_hiphive_all(args.config),
+        "fc3-hiphive-all": lambda: cmd_hiphive_all(
+            args.config,
+            with_convergence=getattr(args, "with_convergence", False),
+            with_analysis=getattr(args, "with_analysis", None),
+            analyses=getattr(args, "analyses", "all"),
+        ),
         "fc3-hiphive-bootstrap-reap": lambda: cmd_hiphive_bootstrap_reap(
             args.config,
         ),
