@@ -211,14 +211,36 @@ def cmd_hiphive_sow(config_path: str) -> None:
 
 
 def cmd_hiphive_run(config_path: str) -> None:
-    """Run DFT for all hiphive rattled structures."""
+    """Run DFT for all hiphive rattled structures.
+
+    For ``rattle_method == "phonon"`` the run is auto-routed to the
+    bootstrap subdirectory while ``fc2_seed.npy`` is still missing; once
+    the seed is present (i.e. after ``fc3-hiphive-bootstrap-reap``) the
+    next invocation runs the main pool in ``work_dir`` itself.
+    """
     from .config import load_config
-    from .hiphive_fc3 import run_displacements
+    from .hiphive_fc3 import BOOTSTRAP_DIRNAME, FC2_SEED_FILENAME, run_displacements
 
     config = load_config(config_path)
     hh = config.hiphive
     dft_config, dft_command = _get_hiphive_dft_config(config)
     work_dir = Path(config_path).parent / hh.work_dir
+
+    if hh.rattle_method == "phonon":
+        boot_dir = work_dir / BOOTSTRAP_DIRNAME
+        seed_path = work_dir / FC2_SEED_FILENAME
+        if boot_dir.exists() and not seed_path.exists():
+            print(
+                f"phonon-rattle stage 1: running DFT in bootstrap dir "
+                f"{boot_dir} (fc2_seed.npy not yet present)."
+            )
+            run_displacements(
+                boot_dir, dft_command,
+                timeout=hh.pw_timeout,
+                calculator=hh.calculator,
+                dft_config=dft_config,
+            )
+            return
 
     run_displacements(
         work_dir, dft_command,
