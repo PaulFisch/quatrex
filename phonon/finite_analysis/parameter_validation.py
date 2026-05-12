@@ -242,6 +242,63 @@ def _check_hiphive_cutoffs(cfg) -> CheckResult | None:
     )
 
 
+def _check_hiphive_cutoff_vs_supercell(cfg) -> CheckResult | None:
+    """FC2 cutoff must be safely below L/2 along every periodic axis of
+    the rattled supercell. Hiphive aborts with
+    "Found cluster (0, k) in two orbits" if any cluster wraps the cell;
+    even when it doesn't, cutoffs close to L/2 leave zone-boundary
+    modes poorly determined (the SiNW(100) [1,1,2] supercell with
+    cutoff 5 Å lies 0.4 Å below L/2 = 5.43 Å — within the danger zone
+    and the most common cause of imaginary modes at the Z-axis
+    zone boundary).
+    """
+    if not _hiphive_is_active(cfg):
+        return None
+    hh = getattr(cfg, "hiphive", None)
+    cutoffs = getattr(hh, "cutoffs", None)
+    supercell = getattr(hh, "supercell", None)
+    structure = getattr(cfg, "structure", None)
+    lattice = getattr(structure, "lattice", None)
+    if not (cutoffs and supercell and lattice):
+        return None
+    fc2_cut = float(cutoffs[0])
+    chk = Check(
+        key="hiphive.cutoffs[0]_vs_supercell",
+        message="FC2 cutoff should be ≤ 0.8 × L/2 along every periodic axis",
+        recommendation=(
+            "Either extend the supercell along the tight axis "
+            "(e.g. [1, 1, 2] → [1, 1, 4]) or reduce hiphive.cutoffs[0]. "
+            "Cutoffs near L/2 leave zone-boundary modes poorly "
+            "determined and routinely produce imaginary modes."
+        ),
+    )
+    import numpy as np
+    lat = np.asarray(lattice, dtype=float)
+    sc = np.asarray(supercell, dtype=int)
+    # Periodic length along each axis of the rattled supercell.
+    axis_lengths = np.linalg.norm(lat * sc[:, None], axis=1)
+    half_lengths = 0.5 * axis_lengths
+    tight = [
+        i for i, hL in enumerate(half_lengths)
+        if hL > 1e-6 and fc2_cut > 0.8 * hL
+    ]
+    if not tight:
+        return CheckResult(
+            chk, passed=True, actual=fc2_cut, severity="info",
+            notes=f"L/2 = {half_lengths.round(2).tolist()} Å vs cutoff {fc2_cut} Å.",
+        )
+    notes = (
+        f"FC2 cutoff {fc2_cut} Å is within 20% of L/2 along axis(es) "
+        f"{tight}: L/2 = {half_lengths[tight].round(2).tolist()} Å."
+    )
+    sev: Severity = "error" if any(
+        fc2_cut > half_lengths[i] for i in tight
+    ) else "warn"
+    return CheckResult(
+        chk, passed=False, actual=fc2_cut, severity=sev, notes=notes,
+    )
+
+
 def _check_displacement_distance(cfg) -> CheckResult | None:
     td = getattr(cfg, "thirdorder", None)
     if td is None:
@@ -329,6 +386,7 @@ CHECKERS: list[Callable[[Any], CheckResult | None]] = [
     _check_kpoints_scf,
     _check_hiphive_n_structures,
     _check_hiphive_cutoffs,
+    _check_hiphive_cutoff_vs_supercell,
     _check_displacement_distance,
     _check_thirdorder_cutoff,
     _check_supercell_size,

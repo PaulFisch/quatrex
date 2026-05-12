@@ -59,7 +59,7 @@ vasp:
   lcharg: false
   ncore: 8
   kpar: 4
-  kpoints_scf: [1, 1, 2]
+  kpoints_scf: [1, 1, 4]
   vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; mpirun -np 128 --bind-to core --map-by socket:PE=1 /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std"
 fc_method: hiphive
 relax:
@@ -68,18 +68,39 @@ relax:
   calculator: vasp
   work_dir: ./relax_sinw100_d9a_sc4_vasp
 hiphive:
+  # ----------------------------------------------------------------------
+  # SiNW(100), d ~ 9 Å (21 Si + 16 H per primitive, 74 atoms in [1,1,2]).
+  # Settings rationale: see phonon/phonon_inputs/HIPHIVE_FITTING_NOTES.md
+  # ----------------------------------------------------------------------
   supercell: [1, 1, 4]
-  n_structures: 12
-  rattle_method: mc
-  rattle_std: 0.03
-  rattle_d_min: 1.0
+  # 32 × 74 × 3 = 7104 equations vs ~3000 FC3 parameters — ~2× overdet.
+  # Previous setting (n_structures=6, least-squares) was severely
+  # underdetermined and produced large FC3 ASR + rotational violations.
+  n_structures: 16
+  # Phonon-rattle workflow (FC2-bootstrap); see README in this dir.
+  rattle_method: phonon
+  rattle_std: 0.04
+  rattle_d_min: 1.4
   rattle_n_iter: 20
   rattle_seed: 42
   cutoffs: [5.0, 4.0]
-  fit_method: least-squares
+  fit_method: ardr
   fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  convergence:
+    sizes: [6, 10, 12, 16]
+    pool_size: 16
+    test_fraction: 0.2
+    seed: 0
+    fit_methods: [ardr, rfe]
+    dispersion_q_mesh: [1, 1, 16]
+  phonon_rattle_temperature_k: 300.0
+  phonon_rattle_bootstrap_n: 6
+  phonon_rattle_bootstrap_seed: 0
+  phonon_rattle_imag_freq_factor: 0.0
+  phonon_rattle_qm: true
   calculator: vasp
-  work_dir: ./fc3_hiphive_sinw100_d9a_sc4_vasp
+  work_dir: ./fc3_hiphive_sinw100_d9a_sc4_vasp_phonon
   pw_timeout: 7200
 thirdorder:
   supercell: [1, 1, 4]
