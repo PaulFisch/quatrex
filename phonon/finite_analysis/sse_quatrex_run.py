@@ -39,7 +39,9 @@ from pathlib import Path
 
 import numpy as np
 
-from phonon_inputs.anharmonic import _compute_phph_self_energy_finite
+from solver.se_finite import (
+    compute_phph_self_energy_finite as _compute_phph_self_energy_finite,
+)
 from phonon_inputs.constants import HBAR_SI, KB_SI, THZ_TO_RAD
 
 from ._utils import expand_atom_perm_to_dofs, project_dense_to_blocks

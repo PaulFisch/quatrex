@@ -29,6 +29,7 @@ from qttools.profiling import Profiler
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.fft_utils import hilbert_transform
 from quatrex.core.sse import ScatteringSelfEnergy
+from quatrex.phonon.bubble import bubble_dense
 from quatrex.phonon.fc3_loader import (
     PhiBlocks,
     load_device_fc3,
@@ -257,26 +258,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     ) -> NDArray:
         """FFT 3-phonon bubble for one block triplet pair (THz²)."""
         ne = G_inner_a.shape[0]
-        bI, bK1, bK2 = phi_left.shape
-        bJ = phi_right.shape[0]
-
-        Ga_pad = xp.zeros((n_fft, bK1, bK1), dtype=complex)
-        Ga_pad[:ne] = G_inner_a
-        Gb_pad = xp.zeros((n_fft, bK2, bK2), dtype=complex)
-        Gb_pad[:ne] = G_inner_b
-
-        Ga_fft = xp.fft.fft(Ga_pad, axis=0)
-        Gb_fft = xp.fft.fft(Gb_pad, axis=0)
-
-        # A[w, a, c, d_g] = Σ_{d_phi} Φ_{a c d_phi} G[d_phi, d_g](w)
-        A = xp.einsum("ace,wed->wacd", phi_left, Gb_fft)
-        # B[w, a, b, d] = Σ_c A[w, a, c, d] * G[c, b](w) (= Σ_{c,d_phi} Φ G_{de} G_{cf})
-        B = xp.einsum("wacd,wcb->wabd", A, Ga_fft)
-        # Σ̂[w, a, J] = Σ_{b, d} B[w, a, b, d] · Φ_right[J, d, b]
-        S_hat = xp.einsum("wabd,Jdb->waJ", B, phi_right)
-
-        S = xp.fft.ifft(S_hat, axis=0)[:ne]
-        return prefactor * S
+        return bubble_dense(
+            phi_left=phi_left,
+            phi_right=phi_right,
+            G_a=G_inner_a,
+            G_b=G_inner_b,
+            n_fft=n_fft,
+            prefactor=prefactor,
+            out_slice=slice(0, ne),
+            zero_freq_idx=None,
+            xp=xp,
+        )
 
     # ------------------------------------------------------------------
     # Internals — distribution helpers

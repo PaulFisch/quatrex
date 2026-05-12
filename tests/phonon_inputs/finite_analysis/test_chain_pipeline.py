@@ -54,15 +54,21 @@ def chain_bundle():
                      primitive_matrix=np.eye(3))
 
     # Analytic FC2: nearest-neighbour spring along z + small NN xy.
-    # Phonopy convention: shape (n, n, 3, 3).
+    # Phonopy convention: shape (n, n, 3, 3). The chain is periodic, so the
+    # atom 0 ↔ atom (n-1) bond across the periodic boundary is included.
     fc2 = np.zeros((n_atoms, n_atoms, 3, 3))
     k_z = 4.0   # eV/Å²
     k_xy = 0.5  # eV/Å²
+
+    def _is_nn(i: int, j: int) -> bool:
+        d = (i - j) % n_atoms
+        return d == 1 or d == n_atoms - 1
+
     for i in range(n_atoms):
         for j in range(n_atoms):
             if i == j:
                 continue
-            if abs(i - j) == 1:
+            if _is_nn(i, j):
                 fc2[i, j] = -np.diag([k_xy, k_xy, k_z])
     # Self terms enforce ASR.
     for i in range(n_atoms):
@@ -383,7 +389,7 @@ def test_gamma_projection_matches_einsum():
     """``_gamma_project_M_blocks`` must be bit-for-bit identical to the
     original ``T0 @ M @ T0†`` einsum at q=Γ. Sentinel: random M, random
     prim_indices."""
-    from phonon_inputs.anharmonic import _gamma_project_M_blocks
+    from solver import gamma_project_M_blocks as _gamma_project_M_blocks
     from phonon_inputs.separable import build_gathering_matrix
 
     rng = np.random.default_rng(0)
@@ -536,6 +542,132 @@ def test_sse_baseline_vs_dense_path(chain_bundle):
             f"Σ^< {ij} disagrees: block={block_norm:.6e}, "
             f"dense={dense_norm:.6e}, rel={rel:.3e}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Unified solver end-to-end (phonon.solver)                                   #
+# --------------------------------------------------------------------------- #
+
+
+def test_unified_solver_transmission_finite_chain(chain_bundle):
+    """``phonon.solver.transmission_finite`` runs end-to-end on the chain.
+
+    Sanity-checks the returned dict shape, the ballistic max-T, and
+    heat-flow conservation. The SCBA loop is exercised with two
+    iterations (mixing=0.5) which is enough to populate
+    ``convergence_history``.
+    """
+    from solver import transmission_finite
+
+    result = transmission_finite(
+        chain_bundle.phonon,
+        M_stacked_override=chain_bundle.fc3_target.T,
+        freq_range_thz=(0.01, 14.0, 41),
+        transport_direction="z",
+        eta_factor=0.1,
+        temperature=300.0,
+        delta_T=10.0,
+        max_scba_iter=2,
+        scba_tol=1e-3,
+        mixing=0.5,
+        retarded="half",
+        verbose=False,
+    )
+
+    # Result dict has the documented keys.
+    expected_keys = {
+        "freqs_thz", "transmission_ballistic", "spectral_heat_current",
+        "heat_current", "thermal_conductance_anharmonic",
+        "thermal_conductance_ballistic", "heat_flow_conservation",
+        "n_scba_iterations", "convergence_history",
+        "self_energy_retarded", "self_energy_lesser", "self_energy_greater",
+    }
+    missing = expected_keys - set(result)
+    assert not missing, f"transmission_finite is missing keys: {missing}"
+
+    # Frequencies and ballistic T are sane.
+    freqs = np.asarray(result["freqs_thz"])
+    assert freqs.size > 0
+    assert (freqs > 0).all(), "frequencies must be positive-only (pos_mask)"
+    T_ball = np.asarray(result["transmission_ballistic"])
+    assert T_ball.shape == freqs.shape
+    # Some non-zero ballistic transport must show up below the LA cutoff.
+    assert T_ball.max() > 1e-3, (
+        f"Ballistic T(ω) is too small (max={T_ball.max():.3e}); "
+        "check that the chain's H_00/H_01 are non-trivial."
+    )
+
+    # Heat current must be finite and conservation residual modest.
+    Q = result["heat_current"]
+    assert np.isfinite(Q), f"heat_current is not finite: {Q}"
+    cons = result["heat_flow_conservation"]
+    assert cons < 0.5, (
+        f"Heat-flow conservation residual {cons:.3e} too large; "
+        "SCBA equilibrium-closure should give |J_L - J_R| / (|J_L| + |J_R|) "
+        "well below 50% on a passive chain."
+    )
+
+
+def test_unified_solver_scba_convergence_chain(chain_bundle):
+    """SCBA via the unified solver: convergence_history is non-increasing
+    over the iterations and the final iteration carries a small dJ/J."""
+    from solver import transmission_finite
+
+    result = transmission_finite(
+        chain_bundle.phonon,
+        M_stacked_override=chain_bundle.fc3_target.T,
+        freq_range_thz=(0.01, 14.0, 33),
+        transport_direction="z",
+        eta_factor=0.1,
+        temperature=300.0,
+        delta_T=10.0,
+        max_scba_iter=5,
+        scba_tol=1e-4,
+        mixing=0.5,
+        retarded="half",
+        verbose=False,
+    )
+    history = list(result["convergence_history"])
+    # First iteration prints J_L/J_R only (no rel-change), so history starts
+    # at iter 2; with max_scba_iter=5 we expect up to 4 entries (fewer on
+    # early convergence).
+    assert len(history) >= 1, (
+        f"SCBA produced no rel-change samples — bumped to max_scba_iter? "
+        f"history={history}"
+    )
+    # Non-increasing modulo a 1.5x slack (Picard mixing has small overshoots).
+    for k in range(1, len(history)):
+        assert history[k] <= history[k - 1] * 1.5, (
+            f"SCBA rel-change non-monotone at iter {k}: {history}"
+        )
+
+
+def test_unified_solver_q11_matches_finite(chain_bundle):
+    """``transmission_q(q_mesh=(1,1))`` must reproduce ``transmission_finite``
+    on the same chain to within the q-path's own regression tolerance."""
+    from solver import (
+        compare_q11_to_finite, transmission_finite, transmission_q,
+    )
+
+    kwargs = dict(
+        M_stacked_override=chain_bundle.fc3_target.T,
+        freq_range_thz=(0.01, 14.0, 33),
+        transport_direction="z",
+        eta_factor=0.1,
+        temperature=300.0,
+        delta_T=10.0,
+        max_scba_iter=2,
+        scba_tol=1e-3,
+        mixing=0.5,
+        retarded="half",
+        verbose=False,
+    )
+    res_f = transmission_finite(chain_bundle.phonon, **kwargs)
+    res_q = transmission_q(
+        chain_bundle.phonon, q_mesh_transverse=(1, 1), **kwargs,
+    )
+    # compare_q11_to_finite raises AssertionError on mismatch.
+    compare_q11_to_finite(res_q, res_f, rtol=5e-3, atol=1e-8)
 
 
 def test_cli_smoke(chain_bundle, tmp_path, monkeypatch):

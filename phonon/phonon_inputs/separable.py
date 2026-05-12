@@ -42,11 +42,18 @@ from .constants import (
     KB_SI,
     THZ_TO_RAD,
 )
-from .anharmonic import (
-    _build_device_hamiltonian,
-    _compute_obc_self_energies,
-    _solve_green_functions,
+from solver.leads import (
+    build_device_hamiltonian as _build_device_hamiltonian,
+    solve_green_functions as _solve_green_functions,
 )
+
+# Legacy stub. The pre-solver-unification ``anharmonic.py`` exported
+# ``_compute_obc_self_energies = None``; the only references to it in
+# this module (line ~760) are inside a code path that is currently
+# unreachable from any external caller. Preserved here as None so the
+# attribute lookup still resolves; calling it raises ``TypeError``,
+# which is the same behaviour as before.
+_compute_obc_self_energies = None
 
 
 # ---------------------------------------------------------------------------

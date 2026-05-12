@@ -14,7 +14,7 @@ sys.path.insert(0, str(work_dir))
 from run_anharmonic import load_primitive_cell
 from phonon_inputs.constants import CONVERSION_THZ2, HBAR_SI, KB_SI, THZ_TO_RAD
 from phonon_inputs.convention import get_btd_blocks
-from phonon_inputs.anharmonic import _build_device_hamiltonian
+from solver.leads import build_device_hamiltonian as _build_device_hamiltonian
 from phonon_inputs.validation import _ballistic_transmission
 
 phonon, _ = load_primitive_cell(work_dir)

@@ -77,7 +77,8 @@ hiphive:
   # Previous setting (n_structures=6, least-squares) was severely
   # underdetermined and produced large FC3 ASR + rotational violations.
   n_structures: 32
-  rattle_method: mc
+  # Phonon-rattle workflow (FC2-bootstrap); see README in this dir.
+  rattle_method: phonon
   rattle_std: 0.04
   rattle_d_min: 1.4
   rattle_n_iter: 20
@@ -99,7 +100,7 @@ hiphive:
   phonon_rattle_imag_freq_factor: 1.0
   phonon_rattle_qm: true
   calculator: vasp
-  work_dir: ./fc3_hiphive_sinw100_d9a_vasp
+  work_dir: ./fc3_hiphive_sinw100_d9a_vasp_phonon
   pw_timeout: 7200
 thirdorder:
   supercell: [1, 1, 2]

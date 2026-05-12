@@ -27,11 +27,16 @@ import numpy as np
 import torch
 
 from .constants import CONVERSION_FC3_THZ, CONVERSION_THZ2, HBAR_SI, KB_SI, THZ_TO_RAD
-from .anharmonic import (
-    _build_device_hamiltonian,
-    _compute_obc_self_energies,
-    _solve_green_functions,
+from solver.leads import (
+    build_device_hamiltonian as _build_device_hamiltonian,
+    solve_green_functions as _solve_green_functions,
 )
+
+# Legacy stub. The pre-solver-unification ``anharmonic.py`` exported
+# ``_compute_obc_self_energies = None``; the only references in this
+# module (line ~1430) are inside an unreachable legacy code path.
+# Preserved here as None to keep the import-time semantics identical.
+_compute_obc_self_energies = None
 
 # All 6 permutations of (0, 1, 2)
 S3_PERMS = list(itertools.permutations(range(3)))
