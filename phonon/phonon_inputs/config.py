@@ -146,7 +146,7 @@ class ConvergenceConfig:
     pool_size: int = 32
     test_fraction: float = 0.2
     seed: int = 0
-    fit_methods: tuple[str, ...] = ("rfe-cv", "ardr")
+    fit_methods: tuple[str, ...] = ("rfe", "ardr")
     dispersion_q_mesh: list[int] = field(default_factory=lambda: [8, 8, 8])
 
 

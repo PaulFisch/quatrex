@@ -157,6 +157,7 @@ def run_convergence_check(
 
                 dmax_thz, n_imag = _dispersion_metrics(
                     fcp, primitive, cv_cfg.dispersion_q_mesh,
+                    supercell=list(hh_cfg.supercell),
                 )
                 results[(size, fit_method)] = FitResult(
                     size=size,
@@ -319,9 +320,20 @@ def _apply_rotational_sum_rules(cs, parameters):
     )
 
 
-def _dispersion_metrics(fcp, primitive, q_mesh) -> tuple[float, int]:
+def _dispersion_metrics(
+    fcp, primitive, q_mesh, *, supercell: list[int] | None = None,
+) -> tuple[float, int]:
     """Diagonalise the fitted FC2 on ``q_mesh`` and report max frequency
     and imaginary-mode count.
+
+    Parameters
+    ----------
+    supercell
+        Diagonal supercell multipliers used by the FC fit (e.g.
+        ``[1, 1, 2]``). The phonopy instance built here must use the
+        same supercell so the FC2 cutoff fits inside L/2; otherwise
+        hiphive's ``get_force_constants`` aborts with
+        "Found cluster (0, k) in two orbits".
 
     Returns
     -------
@@ -344,7 +356,8 @@ def _dispersion_metrics(fcp, primitive, q_mesh) -> tuple[float, int]:
             cell=primitive.cell,
             scaled_positions=primitive.get_scaled_positions(),
         )
-    ph = Phonopy(primitive, supercell_matrix=np.eye(3, dtype=int))
+    sc_matrix = np.diag(list(supercell)) if supercell else np.eye(3, dtype=int)
+    ph = Phonopy(primitive, supercell_matrix=sc_matrix)
     # ``fcp.get_force_constants`` expects an ASE-like atoms object with
     # ``get_scaled_positions``; the phonopy Supercell doesn't expose one.
     from ase import Atoms as _Atoms
