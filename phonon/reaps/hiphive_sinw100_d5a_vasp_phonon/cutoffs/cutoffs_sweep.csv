@@ -1,0 +1,7 @@
+label,mean_rel_diff_lesser,max_rel_diff_lesser
+baseline,0.000000e+00,0.000000e+00
+diag_G_in_se,3.772944e+01,1.087592e+02
+diag_G_everywhere,3.772944e+01,1.087592e+02
+mag_thresh_1e-2,3.070906e-01,9.888650e-01
+mag_thresh_1e-3,1.624667e-02,1.161458e-01
+mag_thresh_1e-4,0.000000e+00,0.000000e+00
