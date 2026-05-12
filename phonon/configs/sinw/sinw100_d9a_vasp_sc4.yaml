@@ -59,24 +59,26 @@ vasp:
   lcharg: false
   ncore: 8
   kpar: 4
-  kpoints_scf: [1, 1, 4]
+  kpoints_scf: [1, 1, 2]
   vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; mpirun -np 128 --bind-to core --map-by socket:PE=1 /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std"
 fc_method: hiphive
 relax:
   calculation: relax
   forc_conv_thr: 0.005
   calculator: vasp
-  work_dir: ./relax_sinw100_d9a_vasp
+  work_dir: ./relax_sinw100_d9a_sc4_vasp
 hiphive:
   # ----------------------------------------------------------------------
-  # SiNW(100), d ~ 9 Å (21 Si + 16 H per primitive, 74 atoms in [1,1,2]).
-  # Settings rationale: see phonon/phonon_inputs/HIPHIVE_FITTING_NOTES.md
+  # SiNW(100), d ~ 9 Å (21 Si + 16 H per primitive, 148 atoms in [1,1,4]).
+  # The [1,1,4] supercell raises L/2 along z to 10.86 Å, well above the
+  # FC2 cutoff of 5 Å — fixes the Z-zone-boundary imaginary modes seen
+  # at [1,1,2]. Settings rationale: HIPHIVE_FITTING_NOTES.md.
   # ----------------------------------------------------------------------
-  supercell: [1, 1, 2]
-  # 32 × 74 × 3 = 7104 equations vs ~3000 FC3 parameters — ~2× overdet.
-  # Previous setting (n_structures=6, least-squares) was severely
-  # underdetermined and produced large FC3 ASR + rotational violations.
-  n_structures: 32
+  supercell: [1, 1, 4]
+  # 16 × 148 × 3 = 7104 equations vs ~3000 FC3 parameters — same overdet.
+  # margin as the [1,1,2] × 32 recipe but with 2× more atoms per structure
+  # and 2× fewer DFT runs.
+  n_structures: 16
   rattle_method: mc
   rattle_std: 0.04
   rattle_d_min: 1.4
@@ -87,8 +89,8 @@ hiphive:
   fit_kwargs: {}
   rotational_sum_rule: post_fit
   convergence:
-    sizes: [12, 18, 24, 32]
-    pool_size: 32
+    sizes: [6, 10, 12, 16]
+    pool_size: 16
     test_fraction: 0.2
     seed: 0
     fit_methods: [ardr, rfe]
@@ -99,13 +101,13 @@ hiphive:
   phonon_rattle_imag_freq_factor: 0.0
   phonon_rattle_qm: true
   calculator: vasp
-  work_dir: ./fc3_hiphive_sinw100_d9a_vasp
+  work_dir: ./fc3_hiphive_sinw100_d9a_sc4_vasp
   pw_timeout: 7200
 thirdorder:
-  supercell: [1, 1, 2]
+  supercell: [1, 1, 4]
   cutoff_pair_distance: null
   displacement_distance: 0.03
   fc_calculator: symfc
   calculator: vasp
-  work_dir: ./fc3_sinw100_d9a_vasp
+  work_dir: ./fc3_sinw100_d9a_sc4_vasp
   pw_timeout: 7200

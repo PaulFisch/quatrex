@@ -49,24 +49,20 @@ relax:
   calculation: relax
   forc_conv_thr: 0.005
   calculator: vasp
-  work_dir: ./relax_sinw100_d5a_vasp
+  work_dir: ./relax_sinw100_d5a_sc4_vasp
 hiphive:
   # ----------------------------------------------------------------------
   # SiNW(100), d ~ 5 Å (9 Si + 12 H per primitive, 42 atoms in [1,1,2]).
   # Settings rationale: see phonon/phonon_inputs/HIPHIVE_FITTING_NOTES.md
   # ----------------------------------------------------------------------
-  supercell: [1, 1, 2]
+  supercell: [1, 1, 4]
   # 32 = master pool for the convergence sweep (subsampled at 12/18/24/32);
   # 32 × 42 × 3 = 4032 equations vs ~1000 cluster parameters — comfortable
   # 4× overdetermination for the FC3 fit at cutoffs [5, 4] Å.
-  n_structures: 32
-  # Phonon-rattle workflow (FC2-bootstrap). `fc3-hiphive-sow` writes a
-  # small mc-rattle bootstrap pool into ./<work_dir>/bootstrap/ on its
-  # first invocation; after DFT and `fc3-hiphive-bootstrap-reap` produce
-  # fc2_seed.npy, a second `fc3-hiphive-sow` emits the phonon-rattled
-  # main pool at phonon_rattle_temperature_k. See README in this dir.
-  rattle_method: phonon
+  n_structures: 16
+  rattle_method: mc
   rattle_std: 0.04
+  # 1.4 Å avoids H–H collapse below their NN distance (1.42 Å in this cell).
   rattle_d_min: 1.4
   rattle_n_iter: 20
   rattle_seed: 42
@@ -84,8 +80,8 @@ hiphive:
   # Convergence sweep: refit at {12, 18, 24, 32} with two methods; pick the
   # smallest n_structures where rmse_test and dispersion_max_thz saturate.
   convergence:
-    sizes: [12, 18, 24, 32]
-    pool_size: 32
+    sizes: [6, 10, 12, 16]
+    pool_size: 16
     test_fraction: 0.2
     seed: 0
     fit_methods: [ardr, rfe]
@@ -99,13 +95,13 @@ hiphive:
   phonon_rattle_imag_freq_factor: 0.0
   phonon_rattle_qm: true
   calculator: vasp
-  work_dir: ./fc3_hiphive_sinw100_d5a_vasp_phonon
+  work_dir: ./fc3_hiphive_sinw100_d5a_sc4_vasp
   pw_timeout: 7200
 thirdorder:
-  supercell: [1, 1, 2]
+  supercell: [1, 1, 4]
   cutoff_pair_distance: null
   displacement_distance: 0.03
   fc_calculator: symfc
   calculator: vasp
-  work_dir: ./fc3_sinw100_d5a_vasp
+  work_dir: ./fc3_sinw100_d5a_sc4_vasp
   pw_timeout: 7200
