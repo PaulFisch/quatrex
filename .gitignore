@@ -176,3 +176,6 @@ hostfile
 
 # quatrex output files
 *quatrex_times*
+
+# Phonon data
+disp-*.in

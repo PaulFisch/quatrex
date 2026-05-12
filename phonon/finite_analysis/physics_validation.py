@@ -201,7 +201,7 @@ def kramers_kronig_consistency(
 
     Returns the relative-Frobenius gap between the two Σ^R arrays.
     """
-    from phonon_inputs.anharmonic import _build_retarded
+    from solver.retarded import build_retarded as _build_retarded
 
     Sigma_R_pv = _build_retarded(sigma_lesser, sigma_greater, omega_grid_thz, method="pv")
     Sigma_R_fft = _build_retarded(sigma_lesser, sigma_greater, omega_grid_thz, method="fft")

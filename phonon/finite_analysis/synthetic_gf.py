@@ -27,7 +27,10 @@ from typing import Iterable
 import numpy as np
 
 from phonon_inputs.constants import AMU_KG, CONVERSION, THZ_TO_RAD
-from phonon_inputs.anharmonic import _build_frequency_grid, _bose_full_axis
+from solver.grids import (
+    build_frequency_grid as _build_frequency_grid,
+    bose_full_axis as _bose_full_axis,
+)
 
 from ._utils import expand_atom_perm_to_dofs
 from .loader import SystemBundle

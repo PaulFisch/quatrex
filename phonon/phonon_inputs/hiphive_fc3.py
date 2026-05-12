@@ -39,6 +39,8 @@ from .structure import structure_from_ase, structure_to_ase
 
 REFERENCE_DIRNAME = _to.REFERENCE_VASP_DIRNAME  # "reference" (VASP)
 META_FILENAME = "hiphive_meta.json"
+BOOTSTRAP_DIRNAME = "bootstrap"
+FC2_SEED_FILENAME = "fc2_seed.npy"
 
 
 # ========================================================================
@@ -75,9 +77,10 @@ def _generate_rattled(
     n_iter: int,
     seed: int,
 ):
-    """Generate rattled ASE Atoms via hiphive.
+    """Generate mc- or normal-rattled ASE Atoms via hiphive.
 
-    Returns a list of ase.Atoms with displacements applied.
+    For phonon-mode rattling see :func:`_generate_phonon_rattled`, which
+    needs a pre-fit FC2 and is dispatched at the :func:`sow` level.
     """
     if method == "mc":
         from hiphive.structure_generation import generate_mc_rattled_structures
@@ -97,7 +100,37 @@ def _generate_rattled(
             atoms_ideal, n_structures, rattle_std=rattle_std, seed=seed,
         )
     raise ValueError(
-        f"Unknown rattle_method: {method!r}. Use 'mc' or 'normal'."
+        f"Unknown rattle_method: {method!r}. Use 'mc' or 'normal' "
+        "(phonon-rattling has its own dispatch path)."
+    )
+
+
+def _generate_phonon_rattled(
+    atoms_ideal,
+    fc2_seed: np.ndarray,
+    n_structures: int,
+    temperature_k: float,
+    qm_statistics: bool,
+    imag_freq_factor: float,
+):
+    """Generate phonon-rattled ASE Atoms from a seed FC2.
+
+    Uses :func:`hiphive.structure_generation.generate_phonon_rattled_structures`
+    to draw displacements from the harmonic distribution at the given
+    temperature. ``qm_statistics=True`` uses Bose–Einstein occupation
+    (preferred at low T); ``imag_freq_factor`` rescales imaginary modes
+    to ``|ω|`` to avoid divergent ``1/ω`` amplitudes — set to 0 to drop
+    them or 1 to keep them at the same magnitude.
+    """
+    from hiphive.structure_generation import generate_phonon_rattled_structures
+
+    return generate_phonon_rattled_structures(
+        atoms_ideal,
+        fc2_seed,
+        n_structures=n_structures,
+        temperature=temperature_k,
+        QM_statistics=qm_statistics,
+        imag_freq_factor=imag_freq_factor,
     )
 
 
@@ -118,8 +151,19 @@ def sow(
     the first electronic seed for subsequent runs (see thirdorder.py for
     how QE/VASP restart data is reused).
 
-    Returns the number of rattled structures generated (excluding the
-    reference).
+    ``rattle_method='phonon'`` routes through a two-stage workflow:
+
+      1. **Bootstrap.** If ``work_dir/fc2_seed.npy`` is missing, write a
+         small mc-rattle pool into ``work_dir/bootstrap/`` (see
+         :data:`HiphiveConfig.phonon_rattle_bootstrap_n`). The caller
+         then runs DFT in the bootstrap dir and invokes
+         :func:`bootstrap_reap` to produce the seed.
+      2. **Main.** With the seed present, this function generates
+         :data:`HiphiveConfig.n_structures` phonon-rattled structures
+         via :func:`generate_phonon_rattled_structures`.
+
+    Returns the number of rattled structures generated in the active
+    stage (excluding the reference).
     """
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -135,15 +179,50 @@ def sow(
 
     atoms_ideal = structure_to_ase(sc)
 
-    rattled = _generate_rattled(
-        atoms_ideal,
-        n_structures=hh_config.n_structures,
-        method=hh_config.rattle_method,
-        rattle_std=hh_config.rattle_std,
-        d_min=hh_config.rattle_d_min,
-        n_iter=hh_config.rattle_n_iter,
-        seed=hh_config.rattle_seed,
-    )
+    # ---- Phonon-rattle dispatch (two-stage) --------------------------------
+    if hh_config.rattle_method == "phonon":
+        seed_path = work_dir / FC2_SEED_FILENAME
+        if not seed_path.exists():
+            # Stage 1: emit bootstrap mc-rattle pool into work_dir/bootstrap/
+            boot_dir = work_dir / BOOTSTRAP_DIRNAME
+            print(
+                f"hiphive phonon-rattle: no seed FC2 found at {seed_path}. "
+                f"Writing bootstrap mc-rattle pool to {boot_dir}/ "
+                f"(n={hh_config.phonon_rattle_bootstrap_n})."
+            )
+            boot_cfg = replace(
+                hh_config,
+                rattle_method="mc",
+                n_structures=hh_config.phonon_rattle_bootstrap_n,
+                rattle_seed=hh_config.phonon_rattle_bootstrap_seed,
+                work_dir=str(boot_dir),
+            )
+            return sow(cell, boot_dir, dft_config, boot_cfg)
+        # Stage 2: phonon-rattled main pool from the seed FC2.
+        fc2_seed = np.load(seed_path)
+        print(
+            f"hiphive phonon-rattle: loaded seed FC2 from {seed_path} "
+            f"(shape {fc2_seed.shape}); generating {hh_config.n_structures} "
+            f"phonon-rattled structures at T={hh_config.phonon_rattle_temperature_k} K."
+        )
+        rattled = _generate_phonon_rattled(
+            atoms_ideal,
+            fc2_seed=fc2_seed,
+            n_structures=hh_config.n_structures,
+            temperature_k=hh_config.phonon_rattle_temperature_k,
+            qm_statistics=hh_config.phonon_rattle_qm,
+            imag_freq_factor=hh_config.phonon_rattle_imag_freq_factor,
+        )
+    else:
+        rattled = _generate_rattled(
+            atoms_ideal,
+            n_structures=hh_config.n_structures,
+            method=hh_config.rattle_method,
+            rattle_std=hh_config.rattle_std,
+            d_min=hh_config.rattle_d_min,
+            n_iter=hh_config.rattle_n_iter,
+            seed=hh_config.rattle_seed,
+        )
     n_disp = len(rattled)
 
     # Persist metadata so reap can reconstruct atoms_ideal and ClusterSpace
@@ -299,6 +378,117 @@ def _atoms_from_meta(entry: dict):
     )
 
 
+def bootstrap_reap(
+    work_dir: Path,
+    hh_config: HiphiveConfig,
+) -> Path:
+    """Fit an FC2-only force-constant model on the bootstrap pool.
+
+    Stage 2 of the phonon-rattle workflow expects ``work_dir/fc2_seed.npy``
+    to exist; this function produces it from ``work_dir/bootstrap/``:
+
+      1. Read forces from each ``disp-XXXXX`` calculation in the
+         bootstrap directory (created by :func:`sow` when
+         ``rattle_method == "phonon"`` and the seed is missing).
+      2. Build a hiphive :class:`ClusterSpace` with only the FC2
+         cutoff (``cutoffs[:1]``) and fit by least-squares.
+      3. Extract the supercell FC2 in the ``(N, N, 3, 3)`` phonopy
+         convention and save it to ``work_dir/fc2_seed.npy``.
+
+    The next :func:`sow` call detects the seed and switches to the
+    phonon-rattled main stage.
+    """
+    import ase
+    from hiphive import (
+        ClusterSpace, ForceConstantPotential, StructureContainer,
+    )
+    from hiphive.utilities import prepare_structures
+    from trainstation import Optimizer
+
+    work_dir = Path(work_dir)
+    boot_dir = work_dir / BOOTSTRAP_DIRNAME
+    if not boot_dir.exists():
+        raise FileNotFoundError(
+            f"Bootstrap directory missing: {boot_dir}. Run "
+            f"`fc3-hiphive-sow` first with rattle_method='phonon' to "
+            "create the bootstrap mc-rattle pool."
+        )
+    meta = _load_meta(boot_dir)
+    n_disp = meta["n_structures"]
+    atoms_ideal = _atoms_from_meta(meta["supercell_atoms"])
+    primitive = _atoms_from_meta(meta["primitive"])
+    n_super = len(atoms_ideal)
+    calculator = meta["calculator"]
+
+    print(f"Bootstrap reap: reading {n_disp} {calculator.upper()} outputs "
+          f"from {boot_dir}...")
+
+    rattled = []
+    for i in range(1, n_disp + 1):
+        if calculator == "qe":
+            out_file = boot_dir / f"disp-{i:05d}.out"
+            forces = _to._parse_qe_forces(out_file, n_super)
+            inp_file = boot_dir / f"disp-{i:05d}.in"
+            positions = _read_positions_from_qe_input(inp_file, n_super)
+        elif calculator == "vasp":
+            disp_dir = boot_dir / f"disp-{i:05d}"
+            forces = _to._parse_vasp_forces(disp_dir, n_super)
+            positions = _read_positions_from_vasp_poscar(
+                disp_dir / "POSCAR", n_super,
+            )
+        else:
+            raise ValueError(f"Unknown calculator: {calculator!r}")
+        rat = ase.Atoms(
+            symbols=list(atoms_ideal.get_chemical_symbols()),
+            cell=atoms_ideal.cell,
+            positions=positions,
+            pbc=True,
+        )
+        rat.arrays["forces"] = forces
+        rattled.append(rat)
+
+    fc2_cutoff = list(hh_config.cutoffs)[:1]
+    print(f"  Fitting FC2-only model with cutoffs={fc2_cutoff} A...")
+    cs = ClusterSpace(primitive, fc2_cutoff)
+    structures = prepare_structures(rattled, atoms_ideal)
+    sc = StructureContainer(cs)
+    for s in structures:
+        sc.add_structure(s)
+
+    opt = Optimizer(sc.get_fit_data(), fit_method="least-squares")
+    opt.train()
+    print(
+        f"  parameters: {opt.n_parameters}, "
+        f"RMSE train: {opt.rmse_train:.4e}, "
+        f"RMSE test: "
+        f"{opt.rmse_test if opt.rmse_test is not None else float('nan'):.4e}"
+    )
+    fcp = ForceConstantPotential(cs, opt.parameters)
+    fcs = fcp.get_force_constants(atoms_ideal)
+    fc2 = fcs.get_fc_array(order=2)
+
+    # Phonopy convention for ``generate_phonon_rattled_structures``:
+    # (N, N, 3, 3) is accepted directly.
+    seed_path = work_dir / FC2_SEED_FILENAME
+    np.save(seed_path, fc2)
+
+    summary = {
+        "stage": "bootstrap",
+        "n_structures": n_disp,
+        "cutoffs": fc2_cutoff,
+        "rmse_train": float(opt.rmse_train),
+        "rmse_test": (
+            float(opt.rmse_test) if opt.rmse_test is not None else None
+        ),
+        "n_parameters": int(len(opt.parameters)),
+        "calculator": calculator,
+        "fc2_max": float(np.max(np.abs(fc2))),
+    }
+    (work_dir / "hiphive_bootstrap.json").write_text(json.dumps(summary, indent=2))
+    print(f"  Saved seed FC2: {seed_path} (max |FC2| = {summary['fc2_max']:.3e})")
+    return seed_path
+
+
 def reap(
     work_dir: Path,
     hh_config: HiphiveConfig | None = None,
@@ -397,7 +587,42 @@ def reap(
         f"RMSE test: {rmse_test:.4e}"
     )
 
-    fcp = ForceConstantPotential(cs, opt.parameters)
+    # Rotational sum-rule policy: "off" | "post_fit" | "constrained".
+    # See HIPHIVE_FITTING_NOTES.md § 2.3. ``constrained`` is not yet
+    # implemented because no current YAML uses it; an explicit error is
+    # raised so the user notices the config drift.
+    rotational_mode = (
+        getattr(hh_config, "rotational_sum_rule", "off") if hh_config is not None
+        else meta.get("rotational_sum_rule", "off")
+    )
+    params = opt.parameters
+    rotational_residual_before = float("nan")
+    rotational_residual_after = float("nan")
+    if rotational_mode in ("post_fit", "constrained"):
+        from .hiphive_convergence import (
+            _apply_rotational_sum_rules,
+            _rotational_residual_pair,
+        )
+        if rotational_mode == "constrained":
+            raise NotImplementedError(
+                "rotational_sum_rule='constrained' is not yet wired up "
+                "in reap(); use 'post_fit' instead. "
+                "See HIPHIVE_FITTING_NOTES.md."
+            )
+        rotational_residual_before, _ = _rotational_residual_pair(
+            cs, params, mode="off",
+        )
+        params = _apply_rotational_sum_rules(cs, params)
+        rotational_residual_after, _ = _rotational_residual_pair(
+            cs, params, mode="off",
+        )
+        print(
+            f"  Rotational sum rules ('Huang' + 'Born-Huang') projected: "
+            f"residual {rotational_residual_before:.3e} -> "
+            f"{rotational_residual_after:.3e}"
+        )
+
+    fcp = ForceConstantPotential(cs, params)
     fcs = fcp.get_force_constants(atoms_ideal)
 
     # Enforce the acoustic sum rule (ASR) on FC2 and FC3. The unconstrained
@@ -440,6 +665,9 @@ def reap(
         "rmse_train": rmse_train,
         "rmse_test": rmse_test,
         "calculator": calculator,
+        "rotational_sum_rule": rotational_mode,
+        "rotational_residual_before": rotational_residual_before,
+        "rotational_residual_after": rotational_residual_after,
     }
     (work_dir / "hiphive_fit.json").write_text(json.dumps(summary, indent=2))
 

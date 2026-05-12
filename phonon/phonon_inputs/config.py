@@ -110,6 +110,47 @@ class ThirdOrderConfig:
 
 
 @dataclass
+class ConvergenceConfig:
+    """Convergence sweep for the hiphive FC3 fit.
+
+    Subsamples ``sizes`` structures from a master pool of ``pool_size``
+    DFT-evaluated rattled supercells and refits each subset with every
+    method in :attr:`fit_methods`. The output of
+    :func:`hiphive_convergence.run_convergence_check` is a JSON summary
+    plus a side-by-side plot of RMSE / dispersion stability vs.
+    ``n_structures``.
+
+    Attributes
+    ----------
+    sizes
+        Subsample sizes to sweep. Must be sorted ascending.
+    pool_size
+        Master DFT pool size. ``sow`` produces this many displacements;
+        ``run_convergence_check`` subsamples down to each ``sizes`` entry.
+    test_fraction
+        ``train_size`` argument forwarded to ``trainstation.Optimizer``
+        (the test fraction is ``1 - train_size``).
+    seed
+        RNG seed for the subsampling permutation. Reproducibility across
+        sweeps requires this to be fixed.
+    fit_methods
+        Tuple of ``trainstation`` fit methods to compare. See
+        ``phonon_inputs/HIPHIVE_FITTING_NOTES.md`` for the recommended
+        set under different regimes.
+    dispersion_q_mesh
+        Q-mesh on which the post-fit dispersion is evaluated for the
+        ``dispersion_max_thz`` and ``n_imaginary`` metrics.
+    """
+
+    sizes: list[int] = field(default_factory=lambda: [6, 12, 18, 24])
+    pool_size: int = 32
+    test_fraction: float = 0.2
+    seed: int = 0
+    fit_methods: tuple[str, ...] = ("rfe-cv", "ardr")
+    dispersion_q_mesh: list[int] = field(default_factory=lambda: [8, 8, 8])
+
+
+@dataclass
 class HiphiveConfig:
     """Hiphive FC3 settings via randomized rattled supercells.
 
@@ -172,6 +213,20 @@ class HiphiveConfig:
     calculator: str = "qe"
     work_dir: str = "./fc3_hiphive"
     pw_timeout: int = 3600
+    # Phase-5 additions: rotational sum-rule enforcement and the
+    # n_structures convergence sweep. See HIPHIVE_FITTING_NOTES.md for
+    # the rationale and the suggested default per system type.
+    rotational_sum_rule: str = "off"  # "off" | "post_fit" | "constrained"
+    convergence: ConvergenceConfig | None = None
+    # Phase-6 additions: phonon-mode rattle ("phonon-rattled" pool from
+    # hiphive.structure_generation.generate_phonon_rattled_structures).
+    # Requires a seed FC2; the bootstrap stage runs a small mc-rattle
+    # pool to fit one, then the main pool uses the seed.
+    phonon_rattle_temperature_k: float = 300.0
+    phonon_rattle_bootstrap_n: int = 4
+    phonon_rattle_bootstrap_seed: int = 0
+    phonon_rattle_imag_freq_factor: float = 1.0
+    phonon_rattle_qm: bool = True
 
 
 @dataclass
@@ -228,6 +283,20 @@ class PhononInputConfig:
     relax: RelaxConfig = field(default_factory=RelaxConfig)
 
 
+def _unwrap_optional_dataclass(ft):
+    """If ``ft`` is ``Dataclass | None`` (or ``Optional[Dataclass]``),
+    return the dataclass type; otherwise return None.
+    """
+    import typing
+    if hasattr(ft, "__dataclass_fields__"):
+        return ft
+    args = typing.get_args(ft)
+    if not args:
+        return None
+    dc = [a for a in args if hasattr(a, "__dataclass_fields__")]
+    return dc[0] if len(dc) == 1 else None
+
+
 def _dict_to_dataclass(cls, d, *, path: str = ""):
     """Recursively convert a dict to a nested dataclass instance.
 
@@ -243,9 +312,10 @@ def _dict_to_dataclass(cls, d, *, path: str = ""):
     for k, v in d.items():
         if k in fieldtypes:
             ft = cls.__dataclass_fields__[k].type
-            if hasattr(ft, "__dataclass_fields__"):
+            nested = _unwrap_optional_dataclass(ft)
+            if nested is not None and v is not None:
                 child_path = f"{path}.{k}" if path else k
-                kwargs[k] = _dict_to_dataclass(ft, v, path=child_path)
+                kwargs[k] = _dict_to_dataclass(nested, v, path=child_path)
             else:
                 kwargs[k] = v
         else:

@@ -1,61 +1,43 @@
-"""Phonon-phonon SSE under various cutoffs.
+"""Cutoff-sweep harness for the 3-phonon bubble.
 
-The 3-phonon bubble in block-tridiagonal storage is
+The bubble integrand
 
-    Σ^{<,>}_{IJ}(ω) = i ℏ / 2 ×
-                  Σ_{K1, K1', K2, K2'}  Φ^{(I,K1,K2)}
-                                      · G^{<,>}(K1, K1')(ω)
-                                      · G^{<,>}(K2, K2')(ω)
-                                      · Φ^{(J, K2', K1')}.
+    Σ^{<,>}_{IJ}(ω) = i ℏ / 2 × Σ_{K₁,K₁',K₂,K₂'} Φ^{(I,K₁,K₂)}
+                        · G^{<,>}(K₁,K₁')(ω) · G^{<,>}(K₂,K₂')(ω)
+                        · Φ^{(J,K₂',K₁')}
 
-Note the **four**-index inner sum: with G in block-tridiagonal storage
-(|K - K'| ≤ 1), each diagonal-pair contribution is augmented by
-contributions from the off-diagonal G blocks. The original quatrex
-:func:`SigmaPhononPhonon._bubble_block` is the K1 = K1', K2 = K2'
-diagonal-only sub-case; this module enumerates the full sum by default
-and exposes a ``diag_G_in_se`` flag to recover the diagonal-only
-restriction for direct comparison.
+is delegated to the canonical kernel :func:`quatrex.phonon.bubble.bubble_dense`
+(the same kernel that backs ``transmission_finite``). This module wraps
+the kernel with the cutoff policy from :mod:`phonon.solver.cutoffs`
+(``diag_G_in_se``, ``fc3_nn_only``, ``fc3_distance_cutoff``,
+``fc3_magnitude_threshold``) and lets the caller pick a
+``sigma_block_distance`` to opt out of the block-tridiagonal restriction
+when auditing how much Σ weight lives off the NN band.
 
-Five cutoff knobs are exposed:
-
-  * ``diag_G_in_se``: keep only the diagonal G blocks (K1 = K1', K2 = K2')
-    inside the bubble — recovers the original block-tridiagonal NEGF
-    approximation.
-  * ``diag_G_everywhere``: same restriction applied globally before any
-    computation.
-  * ``fc3_nn_only``: drop block triplets that are not nearest-neighbour
-    (``|I-J|, |I-K|, |J-K| > 1``); already the default of
-    :func:`fc3_to_phi_blocks`.
-  * ``fc3_distance_cutoff``: drop FC3 entries whose triplet diameter
-    (max pairwise distance among the three atoms) exceeds the cutoff.
-  * ``fc3_magnitude_threshold``: drop FC3 entries whose magnitude is below
-    ``threshold × max|Φ|``.
-
-Outputs are returned as a :class:`SSEResult` carrying the per-(I,J)
-Σ^{<,>} block dict so the caller can compare two configurations
-block-wise.
-
-**Frequency-grid convention.** This module operates on the symmetric
-``[-fmax, ..., -dω, 0, dω, ..., fmax]`` axis built by
-:func:`phonon_inputs.anharmonic._build_frequency_grid`. The ω=0 sample is
-zeroed before convolution and the IFFT output is sliced ``[mid:mid+ne]``
-so the result lives on the same symmetric grid. The legacy one-sided
-quatrex convention lives in
-:func:`finite_analysis._compat.bubble_block_legacy_quatrex` for
-bit-for-bit cross-checks against ``SigmaPhononPhonon._bubble_block``.
+**Frequency-grid convention.** Inputs ride on the symmetric
+``[-fmax, ..., -Δω, 0, Δω, ..., fmax]`` axis built by
+:func:`phonon.solver.grids.build_frequency_grid`. The ω=0 sample is
+zeroed inside ``bubble_dense`` (``zero_freq_idx=mid``) and the IFFT is
+sliced ``[mid : mid + ne]`` so Σ lives on the same axis as G.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import numpy as np
 
-from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+from quatrex.phonon.bubble import bubble_dense
 from quatrex.phonon.units import bubble_prefactor_thz
 
-from ._utils import expand_atom_perm_to_dofs, min_image_distance_matrix
+from solver.cutoffs import (
+    CutoffPolicy,
+    apply_fc3_cutoffs as _apply_fc3_cutoffs_policy,
+    diagonalise_g_blocks as _diagonalise_g_blocks_policy,
+)
+
+from ._utils import min_image_distance_matrix
 from .loader import SystemBundle
 from .synthetic_gf import gf_to_block_dict
 
@@ -83,50 +65,22 @@ def apply_fc3_cutoffs(
     distances_atom: np.ndarray | None = None,
     distance_cutoff_A: float | None = None,
     magnitude_threshold: float | None = None,
+    fc3_nn_only: bool = False,
 ) -> dict[tuple[int, int, int], np.ndarray]:
-    """Return a copy of ``phi_blocks`` with the requested cutoffs applied.
+    """Compatibility wrapper around :func:`phonon.solver.cutoffs.apply_fc3_cutoffs`.
 
-    ``distance_cutoff_A`` and ``magnitude_threshold`` are independent
-    masks; both, either, or neither may be active. Empty blocks are
-    dropped from the dict.
+    Translates the legacy keyword surface (``distance_cutoff_A``,
+    ``magnitude_threshold``) into a :class:`CutoffPolicy`.
     """
-    if not phi_blocks:
-        return {}
-    block_sizes = np.asarray(block_sizes, dtype=int)
-    offsets = np.concatenate(([0], np.cumsum(block_sizes)))
-
-    if magnitude_threshold is not None:
-        max_abs = max(np.abs(b).max() for b in phi_blocks.values()) or 1.0
-        mag_floor = magnitude_threshold * max_abs
-    else:
-        mag_floor = None
-
-    out: dict[tuple[int, int, int], np.ndarray] = {}
-    for (I, J, K), block in phi_blocks.items():
-        modified = block.copy()
-        if distance_cutoff_A is not None:
-            if distances_atom is None:
-                raise ValueError(
-                    "distances_atom required for distance_cutoff_A"
-                )
-            # For every (a, b, c) entry inside the block, look up the atomic
-            # triplet distance via DOF→atom mapping.
-            i_atoms = (offsets[I] + np.arange(block.shape[0])) // 3
-            j_atoms = (offsets[J] + np.arange(block.shape[1])) // 3
-            k_atoms = (offsets[K] + np.arange(block.shape[2])) // 3
-            d_ij = distances_atom[i_atoms[:, None], j_atoms[None, :]]
-            d_ik = distances_atom[i_atoms[:, None], k_atoms[None, :]]
-            d_jk = distances_atom[j_atoms[:, None], k_atoms[None, :]]
-            diam = np.maximum(
-                np.maximum(d_ij[:, :, None], d_ik[:, None, :]),
-                d_jk[None, :, :],
-            )
-            modified = np.where(diam > distance_cutoff_A, 0.0, modified)
-        if mag_floor is not None:
-            modified = np.where(np.abs(modified) < mag_floor, 0.0, modified)
-        if np.any(modified):
-            out[(I, J, K)] = modified
-    return out
+    policy = CutoffPolicy(
+        fc3_nn_only=fc3_nn_only,
+        fc3_distance_cutoff=distance_cutoff_A,
+        fc3_magnitude_threshold=magnitude_threshold,
+    )
+    return _apply_fc3_cutoffs_policy(
+        phi_blocks, block_sizes,
+        policy=policy, distances_atom=distances_atom,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -141,7 +95,15 @@ def diagonalise_g_blocks(
 ) -> dict[tuple[int, int], np.ndarray]:
     """Return a copy where every diagonal G(K,K) block is masked to its
     DOF-diagonal. Off-diagonal (K, K') blocks are dropped if
-    ``keep_diag_blocks_only`` (default), otherwise zeroed."""
+    ``keep_diag_blocks_only`` (default), otherwise zeroed.
+
+    Note: the canonical block-level projection used by the unified
+    solver is :func:`phonon.solver.cutoffs.diagonalise_g_blocks`, which
+    simply drops the off-(K, K') entries without zeroing the diagonal
+    block's off-DOF-diagonal entries. The extra DOF-diagonal masking
+    here is preserved for the legacy ``diag_G_everywhere`` audit; new
+    callers should prefer the policy version.
+    """
     out: dict[tuple[int, int], np.ndarray] = {}
     for (I, J), block in g_blocks.items():
         if I == J:
@@ -173,55 +135,31 @@ def _bubble_block_standalone(
     G_inner_a: np.ndarray, G_inner_b: np.ndarray,
     n_fft: int, prefactor: complex,
 ) -> np.ndarray:
-    """Pure FFT bubble for the symmetric-ω finite_analysis convention.
+    """Bubble block on the symmetric ω-axis.
 
-    Shape contract:
-        phi_left   : (b_I, b_K1, b_K2)
-        phi_right  : (b_J, b_K2_prime, b_K1_prime)
-        G_inner_a  : (n_freq, b_K1, b_K1_prime)         — G(K1, K1')
-        G_inner_b  : (n_freq, b_K2, b_K2_prime)         — G(K2, K2')
-
-    G is on the symmetric ``[-fmax, ..., -dω, 0, dω, ..., fmax]`` axis built
-    by :func:`phonon_inputs.anharmonic._build_frequency_grid`. The ω=0 sample
-    is zeroed before convolution and the IFFT output is sliced ``[mid:mid+ne]``
-    so the result lives on the same symmetric grid.
-
-    The legacy one-sided convention used by quatrex
-    :func:`SigmaPhononPhonon._bubble_block` lives in
-    :func:`finite_analysis._compat.bubble_block_legacy_quatrex` for
-    bit-for-bit cross-checks.
+    Thin wrapper over the canonical kernel
+    :func:`quatrex.phonon.bubble.bubble_dense` that pins the dense
+    reference convention (zero the ω=0 sample before FFT, slice
+    ``[mid : mid + ne]`` from the IFFT). The historical inline einsum
+    implementation has been deleted — see git history pre-Phase 3.
     """
     ne = G_inner_a.shape[0]
-    bI, bK1, bK2 = phi_left.shape
-    bJ, bK2_prime, bK1_prime = phi_right.shape
-    assert G_inner_a.shape == (ne, bK1, bK1_prime)
-    assert G_inner_b.shape == (ne, bK2, bK2_prime)
-    # _build_frequency_grid always returns 2*nfreq_pos+1 (odd) samples; the
-    # symmetric-grid bookkeeping below depends on a well-defined ω=0 sample.
-    assert ne % 2 == 1, (
-        f"Symmetric-grid bubble requires odd ne; got ne={ne}. "
-        "Use _build_frequency_grid (which always returns odd) to avoid this."
-    )
-
+    if ne % 2 != 1:
+        raise ValueError(
+            f"Symmetric-grid bubble requires odd ne; got ne={ne}. "
+            "Use _build_frequency_grid (which always returns odd) to avoid this."
+        )
     mid = ne // 2
-    Ga_clean = G_inner_a.copy()
-    Gb_clean = G_inner_b.copy()
-    Ga_clean[mid] = 0.0
-    Gb_clean[mid] = 0.0
-
-    Ga_pad = np.zeros((n_fft, bK1, bK1_prime), dtype=complex)
-    Gb_pad = np.zeros((n_fft, bK2, bK2_prime), dtype=complex)
-    Ga_pad[:ne] = Ga_clean
-    Gb_pad[:ne] = Gb_clean
-
-    Ga_fft = np.fft.fft(Ga_pad, axis=0)
-    Gb_fft = np.fft.fft(Gb_pad, axis=0)
-
-    A = np.einsum("ace,wed->wacd", phi_left, Gb_fft)
-    B = np.einsum("wacd,wcb->wabd", A, Ga_fft)
-    S_hat = np.einsum("wabd,Jdb->waJ", B, phi_right)
-
-    return prefactor * np.fft.ifft(S_hat, axis=0)[mid:mid + ne]
+    return bubble_dense(
+        phi_left=phi_left,
+        phi_right=phi_right,
+        G_a=G_inner_a,
+        G_b=G_inner_b,
+        n_fft=n_fft,
+        prefactor=prefactor,
+        out_slice=slice(mid, mid + ne),
+        zero_freq_idx=mid,
+    )
 
 
 def compute_sse_with_cutoffs(
@@ -231,6 +169,7 @@ def compute_sse_with_cutoffs(
     block_sizes: np.ndarray,
     dw_thz: float,
     *,
+    policy: CutoffPolicy | None = None,
     diag_G_in_se: bool = False,
     diag_G_everywhere: bool = False,
     fc3_nn_only: bool = True,
@@ -240,6 +179,13 @@ def compute_sse_with_cutoffs(
     sigma_block_distance: int = 1,
 ) -> SSEResult:
     """Compute Σ^{<,>} blocks under the requested cutoffs.
+
+    Either pass a :class:`CutoffPolicy` (preferred — the unified solver
+    API) or the legacy individual keyword arguments. Mixing the two is
+    not supported: when ``policy`` is given the four legacy
+    cutoff kwargs are ignored. ``diag_G_everywhere`` and
+    ``sigma_block_distance`` remain top-level kwargs because they govern
+    the bubble *driver*, not the FC3 vertex.
 
     ``sigma_block_distance`` sets the largest ``|I - J|`` for which Σ blocks
     are produced (default ``1`` → block-tridiagonal, matching the NEGF
@@ -255,6 +201,12 @@ def compute_sse_with_cutoffs(
          accumulate the bubble contribution from every (K1, K2) triplet
          that has a (J, K2, K1) partner.
     """
+    if policy is not None:
+        diag_G_in_se = policy.diag_G_in_se
+        fc3_nn_only = policy.fc3_nn_only
+        fc3_distance_cutoff = policy.fc3_distance_cutoff
+        fc3_magnitude_threshold = policy.fc3_magnitude_threshold
+
     if diag_G_everywhere:
         gl = diagonalise_g_blocks(g_lesser_blocks, keep_diag_blocks_only=True)
         gg = diagonalise_g_blocks(g_greater_blocks, keep_diag_blocks_only=True)

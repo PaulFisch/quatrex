@@ -32,7 +32,7 @@ sys.path.insert(0, str(work_dir))
 
 from phonon_inputs.structure import load_phonopy_calculation
 from phonon_inputs.force_constants import load_fc3_thirdorder, load_fc3_phono3py
-from phonon_inputs.anharmonic import anharmonic_transmission_q
+from solver import transmission_q as anharmonic_transmission_q
 
 # ---------------------------------------------------------------------------
 # Primitive cell workflow (preferred)

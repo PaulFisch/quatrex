@@ -268,7 +268,7 @@ if __name__ == "__main__":
 
     # --- Computation mode ---
     from run_anharmonic import load_primitive_cell
-    from phonon_inputs.anharmonic import anharmonic_transmission_q
+    from solver import transmission_q as anharmonic_transmission_q
 
     print("=" * 60)
     print("Loading Si primitive cell (phono3py)...")

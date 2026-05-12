@@ -258,6 +258,90 @@ def cmd_hiphive_all(config_path: str) -> None:
     print(f"\nFC3 file: {fc3_path}")
 
 
+def cmd_hiphive_bootstrap_reap(config_path: str) -> None:
+    """Fit the bootstrap FC2 for the phonon-rattle workflow.
+
+    Reads forces from ``hiphive.work_dir/bootstrap/``, fits an FC2-only
+    model with ``cutoffs[:1]``, and saves ``hiphive.work_dir/fc2_seed.npy``.
+    The next ``fc3-hiphive-sow`` invocation picks up the seed and emits
+    the main phonon-rattled pool.
+    """
+    from .config import load_config
+    from .hiphive_fc3 import bootstrap_reap
+
+    config = load_config(config_path)
+    hh = config.hiphive
+    work_dir = Path(config_path).parent / hh.work_dir
+
+    seed = bootstrap_reap(work_dir, hh_config=hh)
+    print(f"\nSeed FC2: {seed}")
+
+
+def cmd_hiphive_convergence(config_path: str, out_dir: str | None) -> None:
+    """Refit the hiphive cluster expansion across a sweep of n_structures
+    and fit_methods.
+
+    Loads the existing ``hiphive_meta.json`` from the reap work_dir,
+    parses every DFT-evaluated rattled structure, then forwards to
+    :func:`hiphive_convergence.run_convergence_check`. The result is a
+    JSON summary plus a PDF/PNG plot.
+    """
+    import ase
+
+    from . import thirdorder as _to
+    from .config import load_config
+    from .hiphive_convergence import run_convergence_check
+    from .hiphive_fc3 import (
+        _atoms_from_meta, _load_meta,
+        _read_positions_from_qe_input,
+        _read_positions_from_vasp_poscar,
+    )
+
+    config = load_config(config_path)
+    hh = config.hiphive
+    work_dir = Path(config_path).parent / hh.work_dir
+    if out_dir is None:
+        out_dir = str(work_dir / "convergence")
+
+    meta = _load_meta(work_dir)
+    n_disp = meta["n_structures"]
+    atoms_ideal = _atoms_from_meta(meta["supercell_atoms"])
+    primitive = _atoms_from_meta(meta["primitive"])
+    n_super = len(atoms_ideal)
+    calculator = meta["calculator"]
+
+    rattled = []
+    for i in range(1, n_disp + 1):
+        if calculator == "qe":
+            out_file = work_dir / f"disp-{i:05d}.out"
+            forces = _to._parse_qe_forces(out_file, n_super)
+            positions = _read_positions_from_qe_input(
+                work_dir / f"disp-{i:05d}.in", n_super,
+            )
+        elif calculator == "vasp":
+            disp_dir = work_dir / f"disp-{i:05d}"
+            forces = _to._parse_vasp_forces(disp_dir, n_super)
+            positions = _read_positions_from_vasp_poscar(
+                disp_dir / "POSCAR", n_super,
+            )
+        else:
+            raise ValueError(f"Unknown calculator: {calculator!r}")
+        rat = ase.Atoms(
+            symbols=list(atoms_ideal.get_chemical_symbols()),
+            cell=atoms_ideal.cell,
+            positions=positions,
+            pbc=True,
+        )
+        rat.arrays["forces"] = forces
+        rattled.append(rat)
+
+    print(f"Loaded {len(rattled)} rattled structures from {work_dir}")
+    results = run_convergence_check(
+        rattled, primitive, atoms_ideal, hh, Path(out_dir),
+    )
+    print(f"\nWrote {len(results)} fit results to {out_dir}/")
+
+
 def cmd_dfpt_sow(config_path: str) -> None:
     """Generate DFPT input files (SCF + ph.x + d3q.x)."""
     from .config import load_config
@@ -429,6 +513,24 @@ def main():
     )
     p_hh_all.add_argument("--config", required=True, help="YAML config file")
 
+    p_hh_boot = sub.add_parser(
+        "fc3-hiphive-bootstrap-reap",
+        help="Fit FC2-only on the bootstrap mc-rattle pool; produces "
+             "fc2_seed.npy for the phonon-rattle main stage.",
+    )
+    p_hh_boot.add_argument("--config", required=True, help="YAML config file")
+
+    p_hh_conv = sub.add_parser(
+        "fc3-hiphive-convergence",
+        help="Refit hiphive cluster expansion over a sweep of n_structures "
+             "and fit_methods (uses HiphiveConfig.convergence).",
+    )
+    p_hh_conv.add_argument("--config", required=True, help="YAML config file")
+    p_hh_conv.add_argument(
+        "--out-dir", default=None,
+        help="Output directory (default: <work_dir>/convergence)",
+    )
+
     p_dfpt_sow = sub.add_parser("dfpt-sow", help="Generate DFPT input files")
     p_dfpt_sow.add_argument("--config", required=True, help="YAML config file")
 
@@ -460,6 +562,12 @@ def main():
         "fc3-hiphive-run": lambda: cmd_hiphive_run(args.config),
         "fc3-hiphive-reap": lambda: cmd_hiphive_reap(args.config),
         "fc3-hiphive-all": lambda: cmd_hiphive_all(args.config),
+        "fc3-hiphive-bootstrap-reap": lambda: cmd_hiphive_bootstrap_reap(
+            args.config,
+        ),
+        "fc3-hiphive-convergence": lambda: cmd_hiphive_convergence(
+            args.config, getattr(args, "out_dir", None),
+        ),
         "dfpt-sow": lambda: cmd_dfpt_sow(args.config),
         "dfpt-run": lambda: cmd_dfpt_run(args.config),
         "dfpt-reap": lambda: cmd_dfpt_reap(args.config),

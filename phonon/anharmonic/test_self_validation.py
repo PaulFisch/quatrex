@@ -38,7 +38,7 @@ COMMON_KW = dict(
 
 def test_zero_scattering():
     """M_stacked = 0 → anharmonic result equals ballistic exactly."""
-    from phonon_inputs.anharmonic import anharmonic_transmission_finite
+    from solver import transmission_finite as anharmonic_transmission_finite
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
@@ -63,7 +63,7 @@ def test_zero_scattering():
 
 def test_zero_delta_T():
     """delta_T = 0 → zero heat current."""
-    from phonon_inputs.anharmonic import anharmonic_transmission_finite
+    from solver import transmission_finite as anharmonic_transmission_finite
 
     res = anharmonic_transmission_finite(
         phonon, str(fc3_path), delta_T=0.0, **COMMON_KW)
@@ -77,8 +77,10 @@ def test_zero_delta_T():
 
 def test_q_vs_finite():
     """q_mesh=(1,1) should agree with the finite (Gamma-only) code."""
-    from phonon_inputs.anharmonic import (
-        anharmonic_transmission_q, anharmonic_transmission_finite)
+    from solver import (
+        transmission_q as anharmonic_transmission_q,
+        transmission_finite as anharmonic_transmission_finite,
+    )
 
     res_q = anharmonic_transmission_q(
         phonon, str(fc3_path), q_mesh_transverse=(1, 1),
@@ -110,7 +112,7 @@ def test_sigma_r_sign():
     This is the dissipation condition: Γ represents broadening and
     must be positive semidefinite for positive frequencies.
     """
-    from phonon_inputs.anharmonic import anharmonic_transmission_finite
+    from solver import transmission_finite as anharmonic_transmission_finite
 
     res = anharmonic_transmission_finite(
         phonon, str(fc3_path), delta_T=10.0, **COMMON_KW)

@@ -77,9 +77,9 @@ def sigma_retarded(
         absolute T(ω) but cheap; useful for comparing the *change* in Σ
         across cutoff configurations.
 
-    See ``phonon_inputs.anharmonic._build_retarded`` (this delegates to it).
+    See :func:`phonon.solver.retarded.build_retarded` (this delegates to it).
     """
-    from phonon_inputs.anharmonic import _build_retarded
+    from solver.retarded import build_retarded as _build_retarded
     return _build_retarded(sigma_lesser, sigma_greater, omega_grid_thz, method=method)
 
 
@@ -148,7 +148,7 @@ def sancho_rubio_lead_self_energies(
         converge are filled with NaN; the caller can fall back to the
         synthetic broadening for those.
     """
-    from phonon_inputs.anharmonic import _sancho_rubio_batch
+    from solver.leads import sancho_rubio_batch as _sancho_rubio_batch
     from .synthetic_gf import dynamical_matrix
 
     D = dynamical_matrix(bundle, z_sorted=True)
@@ -184,7 +184,7 @@ def sancho_rubio_lead_self_energies(
         valid_L[:] = valid_L_batch
     except np.linalg.LinAlgError:
         # Per-ω fallback for singular cases.
-        from phonon_inputs.anharmonic import _sancho_rubio
+        from solver.leads import sancho_rubio as _sancho_rubio
         for iw in range(omega_grid_thz.size):
             try:
                 g_L[iw] = _sancho_rubio(z2[iw], H_00_L, H_01_L,
@@ -199,7 +199,7 @@ def sancho_rubio_lead_self_energies(
         g_R[:] = g_R_batch
         valid_R[:] = valid_R_batch
     except np.linalg.LinAlgError:
-        from phonon_inputs.anharmonic import _sancho_rubio
+        from solver.leads import sancho_rubio as _sancho_rubio
         for iw in range(omega_grid_thz.size):
             try:
                 g_R[iw] = _sancho_rubio(z2[iw], H_00_R, H_01_R,
@@ -228,7 +228,7 @@ def sancho_rubio_lead_self_energies(
 
 def _z2_grid(freqs_thz: np.ndarray, eta_thz: float) -> np.ndarray:
     """``(ω + iη)²`` along the frequency axis (matches the standalone
-    convention in :mod:`phonon_inputs.anharmonic`)."""
+    convention in :mod:`phonon.solver.grids`)."""
     return (freqs_thz + 1j * eta_thz) ** 2
 
 
@@ -406,7 +406,7 @@ def transport_trace_scba(
     the true non-equilibrium two-lead steady state. For absolute
     transport between two reservoirs at T_L ≠ T_R the proper closure
     couples Γ_lead with the lead temperatures; this is what
-    ``phonon_inputs.anharmonic.anharmonic_transmission_finite`` does
+    :func:`phonon.solver.transmission_finite` does
     (Sancho-Rubio leads + the full Keldysh system per ω). Here we focus
     on Σ self-consistency and use the simpler closure to keep the SCBA
     loop tractable; the final transport trace is then computed by
