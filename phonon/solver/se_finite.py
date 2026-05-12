@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 from phonon_inputs.constants import HBAR_SI
-from quatrex.phonon.bubble import bubble_dense
+from .bubble import bubble_dense
 
 
 def compute_phph_self_energy_finite(

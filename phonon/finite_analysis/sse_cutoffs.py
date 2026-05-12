@@ -28,7 +28,7 @@ from typing import Sequence
 
 import numpy as np
 
-from quatrex.phonon.bubble import bubble_dense
+from solver.bubble import bubble_dense
 from quatrex.phonon.units import bubble_prefactor_thz
 
 from solver.cutoffs import (
