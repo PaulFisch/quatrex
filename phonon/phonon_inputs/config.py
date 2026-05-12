@@ -220,13 +220,27 @@ class HiphiveConfig:
     convergence: ConvergenceConfig | None = None
     # Phase-6 additions: phonon-mode rattle ("phonon-rattled" pool from
     # hiphive.structure_generation.generate_phonon_rattled_structures).
-    # Requires a seed FC2; the bootstrap stage runs a small mc-rattle
-    # pool to fit one, then the main pool uses the seed.
+    # Requires a seed FC2. Two ways to obtain it:
+    #   - Set ``phonon_rattle_seed_fc3`` to an existing fc3.hdf5 from a
+    #     completed mc-rattle (or finite-displacement) reap. **Recommended.**
+    #     The phonon-rattle pass then refines that converged FC2 at
+    #     finite T without needing a bootstrap DFT batch.
+    #   - Leave it ``None`` to run the bootstrap stage: a small mc-rattle
+    #     pool is sowed/run/fit-with-ridge first. Only works when the
+    #     bootstrap pool gives a clean PSD FC2 (rarely the case for
+    #     low-symmetry quasi-1-D systems like SiNW).
     phonon_rattle_temperature_k: float = 300.0
     phonon_rattle_bootstrap_n: int = 4
     phonon_rattle_bootstrap_seed: int = 0
     phonon_rattle_imag_freq_factor: float = 1.0
     phonon_rattle_qm: bool = True
+    phonon_rattle_seed_fc3: str | None = None
+    # Sanity threshold: refuse to proceed with a seed FC2 that has more
+    # than this many imaginary modes. Hiphive's phonon-rattle ∝ 1/√|ω|,
+    # so even a few small-|ω| imaginary modes inflate displacements to
+    # the point where atoms swap places ("Duplicates in permutation").
+    # Set to a large integer to bypass.
+    phonon_rattle_max_seed_imag: int = 6
 
 
 @dataclass
