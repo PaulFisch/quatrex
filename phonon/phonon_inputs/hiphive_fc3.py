@@ -843,19 +843,81 @@ def generate_fc3(
     dft_config: QEConfig | VASPConfig,
     hh_config: HiphiveConfig,
 ) -> Path:
-    """Full hiphive FC3 pipeline: sow + run + reap."""
+    """Full hiphive FC3 pipeline.
+
+    For mc / normal rattling this is the canonical
+    sow → run → reap sequence. For ``rattle_method='phonon'`` the
+    pipeline performs the longer two-stage workflow:
+
+      1. **sow** writes the bootstrap mc-rattle pool into
+         ``work_dir/bootstrap/`` (because ``fc2_seed.npy`` is missing).
+      2. **run_displacements** in ``work_dir/bootstrap/``.
+      3. **bootstrap_reap** fits an FC2-only model and writes
+         ``work_dir/fc2_seed.npy``.
+      4. **sow** detects the seed and writes the main phonon-rattled
+         pool into ``work_dir/`` itself.
+      5. **run_displacements** in ``work_dir/``.
+      6. **reap** fits the cluster expansion to all orders, applies
+         the rotational sum rule, and writes ``fc3.hdf5``.
+
+    The bootstrap stages are skipped if ``fc2_seed.npy`` already exists.
+    """
+    work_dir = Path(work_dir)
     dft_command = (
         dft_config.pw_command
         if hh_config.calculator == "qe"
         else dft_config.vasp_command
     )
 
-    sow(cell, work_dir, dft_config, hh_config)
+    # --- Stage 1 + bootstrap reap (phonon-rattle only) ------------------
+    if hh_config.rattle_method == "phonon":
+        seed_path = work_dir / FC2_SEED_FILENAME
+        if not seed_path.exists():
+            boot_dir = work_dir / BOOTSTRAP_DIRNAME
+            # If sow has already emitted the bootstrap pool, don't re-sow
+            # (preserves any partial DFT output the user has already run).
+            need_boot_sow = not (boot_dir / META_FILENAME).exists()
+            if need_boot_sow:
+                print(
+                    "hiphive phonon-rattle pipeline: emitting bootstrap pool."
+                )
+                sow(cell, work_dir, dft_config, hh_config)
+            else:
+                print(
+                    "hiphive phonon-rattle pipeline: bootstrap pool already "
+                    f"present in {boot_dir}; proceeding to DFT."
+                )
+            print("hiphive phonon-rattle pipeline: running bootstrap DFT.")
+            run_displacements(
+                boot_dir,
+                dft_command,
+                timeout=hh_config.pw_timeout,
+                calculator=hh_config.calculator,
+                dft_config=dft_config,
+            )
+            print("hiphive phonon-rattle pipeline: fitting bootstrap FC2.")
+            bootstrap_reap(work_dir, hh_config=hh_config)
+        else:
+            print(
+                "hiphive phonon-rattle pipeline: found existing seed FC2 "
+                f"at {seed_path}; skipping bootstrap."
+            )
+
+    # --- Stage 2 (main pool) --------------------------------------------
+    # Detect whether main-stage sow has already run (avoids re-emitting
+    # rattled inputs over a partially-completed DFT batch).
+    if not (work_dir / META_FILENAME).exists():
+        sow(cell, work_dir, dft_config, hh_config)
+    else:
+        print(
+            f"hiphive pipeline: main-stage sow already done in {work_dir}; "
+            "proceeding to DFT."
+        )
     run_displacements(
-        Path(work_dir),
+        work_dir,
         dft_command,
         timeout=hh_config.pw_timeout,
         calculator=hh_config.calculator,
         dft_config=dft_config,
     )
-    return reap(Path(work_dir), hh_config=hh_config)
+    return reap(work_dir, hh_config=hh_config)
