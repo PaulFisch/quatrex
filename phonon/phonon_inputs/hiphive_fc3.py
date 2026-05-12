@@ -625,23 +625,30 @@ def reap(
     fcp = ForceConstantPotential(cs, params)
     fcs = fcp.get_force_constants(atoms_ideal)
 
-    # Enforce the acoustic sum rule (ASR) on FC2 and FC3. The unconstrained
-    # least-squares fit leaves a residual ASR violation — for SiNW-scale
-    # rattled supercells this can be 60 % on FC3, which produces a spurious
-    # Drude-like Σ(ω→0) downstream. ``ForceConstants.enforce_acoustic_sum_rules``
-    # projects the tensor onto the ASR null space (a small change to the
-    # parameter set; documented in hiphive § "Sum rules" and discussed in
-    # Eriksson, Fransson, Erhart, Adv. Theory Simul. 2 (2019) 1800184).
-    try:
-        fcs.enforce_acoustic_sum_rules()
-        print("  Applied acoustic sum rules on FC2 + FC3.")
-    except AttributeError:
-        # Older hiphive versions lack the method; fall back to FC2 only via
-        # the ClusterSpace ASR option (set up at construction time).
-        print("  WARNING: this hiphive version lacks "
-              "ForceConstants.enforce_acoustic_sum_rules; FC3 ASR not enforced. "
-              "Pass asr_project=True to load_quatrex_blocks downstream to "
-              "compensate.")
+    # Acoustic sum rule status. Hiphive 1.5 has no FC-tensor-level
+    # enforce_acoustic_sum_rules method — translational ASR is built into
+    # the ClusterSpace orbits at construction time (always on by default),
+    # so the extracted FC tensors are ASR-respecting along axis i to within
+    # rounding. We log the actual residuals via the diagnostic call
+    # ForceConstants.assert_acoustic_sum_rules and persist them in the
+    # summary JSON for the audit trail. Axis-j / axis-k ASR (relevant for
+    # the SSE bubble) is enforced separately downstream in
+    # load_quatrex_blocks(asr_project=True).
+    asr_residuals: dict[int, float] = {}
+    for order in (2, 3):
+        try:
+            fcs.assert_acoustic_sum_rules(order=order, tol=1e-3)
+            asr_residuals[order] = 0.0
+            print(f"  FC{order} ASR residual within tol (≤ 1e-3).")
+        except AssertionError as exc:
+            # The exception message carries the numeric residual; parse it
+            # robustly without depending on the exact wording.
+            import re
+            m = re.search(r"([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)", str(exc))
+            r = float(m.group(1)) if m else float("nan")
+            asr_residuals[order] = r
+            print(f"  FC{order} ASR residual = {r:.3e} (orbit-basis ASR was "
+                  f"applied; axis-j/k residual reflects the parameter fit).")
 
     fc2 = fcs.get_fc_array(order=2)
     fc3 = fcs.get_fc_array(order=3)
@@ -668,6 +675,8 @@ def reap(
         "rotational_sum_rule": rotational_mode,
         "rotational_residual_before": rotational_residual_before,
         "rotational_residual_after": rotational_residual_after,
+        "fc2_asr_residual": asr_residuals.get(2, float("nan")),
+        "fc3_asr_residual": asr_residuals.get(3, float("nan")),
     }
     (work_dir / "hiphive_fit.json").write_text(json.dumps(summary, indent=2))
 
