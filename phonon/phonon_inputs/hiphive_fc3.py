@@ -43,6 +43,28 @@ BOOTSTRAP_DIRNAME = "bootstrap"
 FC2_SEED_FILENAME = "fc2_seed.npy"
 
 
+def _fold_positions_to_min_image(positions, ref_positions, cell):
+    """Wrap each atom's position back to the nearest periodic image of
+    the corresponding ideal-supercell atom.
+
+    Necessary because hiphive's ``find_permutation`` (and any tool that
+    matches displaced → ideal atoms via raw Cartesian distance) chokes
+    when an atom has been written across a periodic boundary — the raw
+    distance is then a full lattice vector and the matching collides
+    with another atom ("Duplicates in permutation"). VASP-written
+    POSCARs in rattled disp-XXXXX dirs from older sow runs are routinely
+    one full ``c``-vector away from their ideal positions; the forces
+    are physically correct under PBC, the labels just need re-mapping.
+    """
+    pos = np.asarray(positions, dtype=np.float64)
+    ref = np.asarray(ref_positions, dtype=np.float64)
+    cell = np.asarray(cell, dtype=np.float64)
+    cinv = np.linalg.inv(cell)
+    frac = (pos - ref) @ cinv
+    frac -= np.round(frac)
+    return ref + frac @ cell
+
+
 # ========================================================================
 # Supercell + rattled-structure generation
 # ========================================================================
@@ -609,6 +631,9 @@ def bootstrap_reap(
             )
         else:
             raise ValueError(f"Unknown calculator: {calculator!r}")
+        positions = _fold_positions_to_min_image(
+            positions, atoms_ideal.positions, atoms_ideal.cell,
+        )
         rat = ase.Atoms(
             symbols=list(atoms_ideal.get_chemical_symbols()),
             cell=atoms_ideal.cell,
@@ -802,6 +827,9 @@ def reap(
         else:
             raise ValueError(f"Unknown calculator: {calculator!r}")
 
+        positions = _fold_positions_to_min_image(
+            positions, atoms_ideal.positions, atoms_ideal.cell,
+        )
         rat = ase.Atoms(
             symbols=list(atoms_ideal.get_chemical_symbols()),
             cell=atoms_ideal.cell,
