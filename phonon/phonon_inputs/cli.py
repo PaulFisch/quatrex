@@ -396,6 +396,12 @@ def cmd_hiphive_convergence(config_path: str, out_dir: str | None) -> None:
             )
         else:
             raise ValueError(f"Unknown calculator: {calculator!r}")
+        # Fold across-the-cell POSCARs back to the min image so
+        # hiphive's find_permutation can match atoms to ideal labels.
+        from .hiphive_fc3 import _fold_positions_to_min_image
+        positions = _fold_positions_to_min_image(
+            positions, atoms_ideal.positions, atoms_ideal.cell,
+        )
         rat = ase.Atoms(
             symbols=list(atoms_ideal.get_chemical_symbols()),
             cell=atoms_ideal.cell,
