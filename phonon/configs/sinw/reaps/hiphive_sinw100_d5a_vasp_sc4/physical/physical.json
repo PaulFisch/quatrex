@@ -1,0 +1,46 @@
+{
+  "fc2_hermiticity": {
+    "max_abs": 0.0,
+    "rel_frob": 0.0
+  },
+  "fc2_asr": {
+    "max_abs": 6.768891003261501e-15,
+    "rel_frob": 1.649480434486596e-16
+  },
+  "fc2_psd": {
+    "n_neg_eigvals": 3,
+    "min_eigval": -0.00715220477056387,
+    "max_eigval": 12.443109586695641,
+    "max_neg_rel": 0.0005747923958020199
+  },
+  "fc3_perm_sym": {
+    "perm_ikj_rel": 0.0,
+    "perm_jik_rel": 0.0,
+    "perm_jki_rel": 0.0,
+    "perm_kij_rel": 0.0,
+    "perm_kji_rel": 0.0
+  },
+  "fc3_asr_legs": {
+    "norm": 4.385564983886852e+21,
+    "leg_j": 3.4867673183013427e+21,
+    "leg_k": 3.4867673183013416e+21,
+    "leg_j_rel": 0.7950554446490221,
+    "leg_k_rel": 0.7950554446490219
+  },
+  "dispersion": {
+    "min_omega_overall_thz": -1.3221194549019244,
+    "n_acoustic": 5,
+    "n_imaginary": 11,
+    "n_optical": 1307,
+    "n_negative_modes": 11,
+    "max_acoustic_at_gamma_thz": 4.7574199249100157e-07,
+    "mean_acoustic_at_gamma_thz": 2.2913602242862334e-07,
+    "highest_optical_thz": 55.14614886923146
+  },
+  "units": {
+    "dispersion.*_thz": "THz",
+    "dispersion.*omega*": "THz",
+    "fc2_psd.min_eigval": "eV/(\u00c5\u00b2\u00b7amu)",
+    "fc2_psd.max_eigval": "eV/(\u00c5\u00b2\u00b7amu)"
+  }
+}
