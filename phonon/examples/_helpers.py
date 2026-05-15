@@ -87,8 +87,15 @@ def default_vasp_block(
     *,
     kpoints_scf: tuple[int, int, int] = (1, 1, 4),
     encut: int = 400,
-    ediff: float = 1.0e-7,
-    sigma: float = 0.01,
+    # EDIFF tightened 1e-7 → 1e-8. FC fits read forces F = −∇E directly;
+    # 1e-7 leaves O(meV/Å) noise in the forces which feeds back into FC2
+    # as ~0.01 eV/Å² noise. 1e-8 is the textbook level for phonon work and
+    # only adds 2–4 SCF iterations per displacement.
+    ediff: float = 1.0e-8,
+    # Smearing tightened 0.01 → 0.005 eV. SiNWs are semiconductors with
+    # ~0.5–2 eV gap; smearing kT-equivalent should be well below the gap.
+    # 0.005 eV ≈ 58 K, comfortably small.
+    sigma: float = 0.005,
     ncore: int = 8,
     kpar: int = 4,
     vasp_command: str = "ulimit -s unlimited; mpirun -np 128 vasp_std",
@@ -135,7 +142,12 @@ def default_relax_block(
     work_dir: str, *,
     fc_method: str = "hiphive",
     calculation: str = "relax",
-    forc_conv_thr: float = 0.005,
+    # Tightened 0.005 → 0.001 eV/Å. 5 meV/Å residual forces show up in FC2
+    # as a Γ-point quasi-linear term that the harmonic fit absorbs as
+    # spurious negative curvature (the same mechanism behind the d9a
+    # −38 THz Γ catastrophe). 1 meV/Å gets the linear contribution below
+    # the FC2 fit's own RMSE so the harmonic spectrum is clean at Γ.
+    forc_conv_thr: float = 0.001,
     calculator: str = "vasp",
 ) -> dict[str, Any]:
     return {

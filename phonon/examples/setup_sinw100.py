@@ -24,13 +24,37 @@ from _helpers import (  # noqa: E402  (sys.path bootstrap above)
 )
 from _nanowire import build_h_passivated_wire  # noqa: E402
 
-A_SI = 5.43      # Å, bulk Si lattice constant (PBE eq.)
-D_SI_H = 1.48    # Å, Si–H bond length
+# PBE-equilibrium Si lattice constant. The previous default 5.43 Å is the
+# room-temperature experimental value; PBE optimises slightly larger.
+# Using 5.470 Å with a PBE functional avoids a built-in 0.7 % compressive
+# strain on the wire core, which otherwise shifts every bulk-derived mode
+# by O(3 cm⁻¹) via the Grüneisen relation. Tested against the PBE-relaxed
+# diamond Si reference in `phonon/reaps/si_primitive_vasp/`.
+A_SI = 5.470
+D_SI_H = 1.48    # Å, Si–H bond length (SiH₄ reference, PBE)
+
+
+def _suggest_fc2_cutoff(envelope_A: float) -> float:
+    """FC2 cutoff covering both wire cross-section and the second-NN z-shell.
+
+    SiNWs have a free transverse direction: any pair of atoms with
+    Cartesian separation > cutoffs[0] gets zero FC2 by construction. For
+    a wire diameter d, cross-section pairs span up to ~d, so we want
+    cutoffs[0] ≳ d + 1 NN shell (~2.4 Å). Cap at 12 Å so the cluster
+    space stays tractable; for the d12a wire that lands at 12 Å, which
+    still misses a few diametrical pairs but keeps n_parameters under
+    O(10 000).
+    """
+    return min(12.0, max(5.0, envelope_A + 2.4))
 
 
 def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
+    # vacuum_A=None lets the builder size the box so adjacent periodic
+    # images are MIN_INTERWIRE_VACUUM_A apart for the actual H-shell
+    # radius (was a hard-coded 18.0, which gave d12a only 4 Å vacuum and
+    # contaminated the DFT with image overlap).
     wire = build_h_passivated_wire(
-        a_lattice=A_SI, diameter_A=diameter_A, vacuum_A=18.0,
+        a_lattice=A_SI, diameter_A=diameter_A, vacuum_A=None,
         n_z=1, species="Si", d_x_h=D_SI_H,
     )
     new_lat = wire.get_cell().array
@@ -39,6 +63,11 @@ def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
     syms = [syms[k] for k in order]
     cart_all = wire.get_positions()[order]
     frac = (cart_all @ np.linalg.inv(new_lat)) % 1.0
+
+    # Use the actual H-shell envelope to pick the FC2 cutoff.
+    center_xy = 0.5 * new_lat.diagonal()[:2]
+    envelope_A = float(np.linalg.norm(cart_all[:, :2] - center_xy, axis=1).max())
+    fc2_cutoff = _suggest_fc2_cutoff(envelope_A)
 
     tag = f"sinw100_d{int(diameter_A)}a"
     cfg = {
@@ -51,6 +80,18 @@ def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
         **default_relax_block(f"./relax_{tag}_vasp"),
         **default_hiphive_block(
             f"./fc3_hiphive_{tag}_vasp", [1, 1, supercell_z],
+            cutoffs=(fc2_cutoff, 4.0),
+            rattle_d_min=1.4,  # Si-H 1.48 Å, H-H 2.4 Å — 1.4 keeps both safe
+            # Rattle amplitude reduced 0.04 → 0.03 Å and n_iter 20 → 10 to
+            # keep mc-rattle Si-Si pairs above VASP's RWIGS-derived "two
+            # ions too close" warning threshold (≈ RWIGS_Si × 2 ≈ 2.6 Å)
+            # in most rattled structures. Cumulative RMS displacement
+            # ≈ std × √n_iter ≈ 0.095 Å (was ~0.18 Å); worst-case Si-Si
+            # ≈ 2.35 − 0.19 ≈ 2.16 Å, still above the warning floor for
+            # most structures. 0.03 Å matches the value used in the
+            # hiphive Si-thermal-conductivity tutorial.
+            rattle_std=0.03,
+            rattle_n_iter=10,
         ),
         **default_thirdorder_block(
             f"./fc3_{tag}_vasp", [1, 1, supercell_z],

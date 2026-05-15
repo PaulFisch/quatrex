@@ -122,7 +122,13 @@ def create_phonopy(
 
 
 def create_phonopy_from_config(config: PhononInputConfig) -> Phonopy:
-    """Create a Phonopy object from the full configuration."""
+    """Create a Phonopy object from the full configuration.
+
+    Loads the structure from the YAML *as-is*. Sow-time entry points
+    should call :func:`resolve_structure_for_sow` first and pass the
+    result into :func:`create_phonopy` directly so that the equilibrium
+    geometry comes from the completed relax, not the YAML draft.
+    """
     cell = load_structure(config.structure)
     return create_phonopy(
         cell,
@@ -130,6 +136,97 @@ def create_phonopy_from_config(config: PhononInputConfig) -> Phonopy:
         primitive_matrix=np.eye(3),
         displacement_distance=config.supercell.displacement_distance,
     )
+
+
+def resolve_structure_for_sow(
+    config: PhononInputConfig,
+    config_dir: Path,
+    *,
+    from_yaml: bool = False,
+) -> PhonopyAtoms:
+    """Resolve the structure that feeds an FC sow / DFT-input step.
+
+    Default behaviour (production-safe): require a completed relax in
+    ``config.relax.work_dir`` and load its output (``CONTCAR`` for VASP,
+    ``relax.out`` for QE). The unrelaxed YAML positions are *not* a
+    valid starting point for any FC fit — linear forces at non-equilibrium
+    leak into the harmonic fit as artificial curvature, which is the
+    typical cause of widespread imaginary modes in downstream dispersion.
+
+    Parameters
+    ----------
+    config : PhononInputConfig
+        Loaded top-level config.
+    config_dir : Path
+        Directory of the YAML file (used to resolve relative work_dirs).
+    from_yaml : bool
+        Opt-out: skip the relax check and return the YAML structure as-is.
+        Use only when the YAML already encodes the converged equilibrium
+        (e.g. you pasted a relaxed CONTCAR's positions in by hand) or for
+        non-DFT smoke tests where the geometry doesn't matter.
+
+    Raises
+    ------
+    SystemExit
+        If the relax directory or its output file is missing and
+        ``from_yaml`` is False.
+    """
+    if from_yaml:
+        print(
+            "structure source: YAML (--from-yaml). "
+            "Skipping the relax-output check; assuming the YAML positions "
+            "are already a converged equilibrium."
+        )
+        return load_structure(config.structure)
+
+    rc = config.relax
+    relax_dir = Path(rc.work_dir)
+    if not relax_dir.is_absolute():
+        relax_dir = (config_dir / relax_dir).resolve()
+
+    calc = rc.calculator.lower()
+    if calc == "vasp":
+        out_file = relax_dir / "CONTCAR"
+        parser_label = "CONTCAR"
+    elif calc == "qe":
+        out_file = relax_dir / "relax.out"
+        parser_label = "relax.out"
+    else:
+        raise SystemExit(
+            f"Unknown relax.calculator={rc.calculator!r}. "
+            "Expected 'vasp' or 'qe'."
+        )
+
+    if not relax_dir.exists():
+        raise SystemExit(
+            f"Relax directory does not exist: {relax_dir}\n"
+            f"(config.relax.work_dir = {rc.work_dir!r}, resolved against "
+            f"{config_dir}). Run `python -m phonon_inputs.cli pipeline "
+            "--config <yaml>` (or the relax step manually) first, or pass "
+            "--from-yaml if you intentionally want to sow from the "
+            "unrelaxed YAML structure."
+        )
+    if not out_file.exists():
+        raise SystemExit(
+            f"Expected relax output not found: {out_file}\n"
+            f"The relax directory exists but {parser_label} is missing — "
+            "the relax probably didn't finish. Re-run the relax (e.g. "
+            "`python -m phonon_inputs.cli pipeline --config <yaml>`), or "
+            "pass --from-yaml to sow from the unrelaxed YAML structure."
+        )
+
+    if calc == "vasp":
+        from .qe_interface import parse_vasp_relax_output
+        cell = parse_vasp_relax_output(relax_dir)
+    else:
+        from .qe_interface import parse_qe_relax_output
+        cell = parse_qe_relax_output(out_file)
+
+    print(
+        f"structure source: relaxed {parser_label} from {relax_dir}\n"
+        "  (pass --from-yaml to sow from the unrelaxed YAML instead.)"
+    )
+    return cell
 
 
 def load_phonopy_calculation(
