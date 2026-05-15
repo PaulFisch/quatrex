@@ -107,6 +107,20 @@ def _passivate_with_nl(
         threshold=h_h_clash_A,
         si_si_bonds=si_si_bonds,
     )
+    # Second clash resolution: drop H atoms that landed within Si-H bonding
+    # distance of a *non-host* Si. This is the typical cause of over-
+    # coordinated Si atoms after passivation: a corner Si fully bonded to
+    # 4 Si still gets a stray H from a *different* host whose missing-
+    # bond direction happens to point near it. The check uses 1.85 Å,
+    # which bonds Si-H (1.48 Å) but excludes legitimately-non-bonded
+    # Si-H pairs across the surface (~2.5 Å+).
+    h_positions, h_host = _resolve_si_h_overlap(
+        h_positions, h_host=h_host,
+        si_positions=positions,
+        si_indices=[i for i, a in enumerate(wire) if a.symbol == species],
+        cell=cell,
+        threshold=1.85,
+    )
     if len(h_positions) == 0:
         return wire
 
@@ -204,6 +218,42 @@ def _missing_bond_directions(
     ]
 
 
+def _resolve_si_h_overlap(
+    h_pos: np.ndarray,
+    *,
+    h_host: list[int],
+    si_positions: np.ndarray,
+    si_indices: list[int],
+    cell: np.ndarray,
+    threshold: float,
+) -> tuple[np.ndarray, list[int]]:
+    """Drop H atoms within ``threshold`` Å of any non-host Si (z-PBC).
+
+    Each H is placed at host_Si + d_x_h × unit_vector, which is correct
+    if no other Si sits within d_x_h + ε of that point. On wires where
+    the sp3 missing-bond direction of a partly-coordinated host happens
+    to point near a fully-coordinated neighbour Si, the placed H lands
+    in that neighbour's bonding shell — the neighbour ends up with 5
+    "neighbours" (4 Si bonds + this stray H). This pass removes such
+    H atoms.
+    """
+    if len(h_pos) == 0:
+        return h_pos, list(h_host)
+    cz = cell[2, 2]
+    keep = np.ones(len(h_pos), dtype=bool)
+    for hi in range(len(h_pos)):
+        host_id = h_host[hi]
+        for si_idx, si_pos in zip(si_indices, si_positions):
+            if si_idx == host_id:
+                continue
+            d = h_pos[hi] - si_pos
+            d[2] -= np.round(d[2] / cz) * cz
+            if np.linalg.norm(d) < threshold:
+                keep[hi] = False
+                break
+    return h_pos[keep], [h for h, k in zip(h_host, keep) if k]
+
+
 def _resolve_h_clashes(
     h_pos: np.ndarray,
     *,
@@ -246,22 +296,44 @@ def _resolve_h_clashes(
         host.pop(kill)
 
 
+MIN_INTERWIRE_VACUUM_A = 14.0
+"""Minimum gap between any atom and its xy periodic image. 14 Å keeps the
+H 1s tails (~3 Å) on adjacent wires from overlapping appreciably — the
+"isolated wire" approximation the structure is supposed to embody."""
+
+
 def build_h_passivated_wire(
     *,
     a_lattice: float,
     diameter_A: float,
-    vacuum_A: float = 18.0,
+    vacuum_A: float | None = None,
     n_z: int = 1,
     species: str = "Si",
     d_x_h: float = 1.48,
+    check_coordination: bool = True,
+    strict_coordination: bool = False,
 ) -> Atoms:
     """Return an H-passivated <100> diamond nanowire as an ASE Atoms object.
 
-    The cell is set to ``diag(vacuum_A, vacuum_A, n_z * a_lattice)`` with
+    The cell is set to ``diag(L_xy, L_xy, n_z * a_lattice)`` with
     ``pbc=(False, False, True)`` — true 1-D periodicity along z.
 
-    The carved column is centred in the vacuum box before passivation so
-    that NeighborList sees a single isolated wire (periodic only in z).
+    ``vacuum_A`` controls the xy box edge. Pass an explicit value (>= the
+    wire-plus-H envelope + ~MIN_INTERWIRE_VACUUM_A) to fix it; pass
+    ``None`` (the recommended default) and the box is sized after H
+    placement so that the gap between adjacent periodic images is exactly
+    ``MIN_INTERWIRE_VACUUM_A`` for the actual H-shell radius. A hard-coded
+    18 Å (the previous default) is too small for d12a wires (only 4 Å
+    inter-image gap) which contaminates the DFT with image overlap.
+
+    ``check_coordination`` (default True) counts bonded neighbours
+    (Si + H) per Si and reports any under-coordination. Pass
+    ``strict_coordination=True`` to raise ``RuntimeError`` instead of
+    warning — useful when generating new wire diameters where you want
+    a hard guarantee that every Si has its 4 bonds. The default is to
+    warn so legacy callers (small-radius wires whose corner Si genuinely
+    can't host all 4 sp3 H atoms without H–H clashes) still produce a
+    structure, but loudly.
     """
     n_xy = max(3, int(np.ceil(diameter_A / a_lattice)) + 2)
     bulk_block = _diamond_block(a_lattice, n_xy=n_xy, n_z=n_z)
@@ -270,23 +342,126 @@ def build_h_passivated_wire(
 
     carved = _carve_column(bulk_block, radius_A=diameter_A / 2.0)
 
-    new_cell = np.diag([vacuum_A, vacuum_A, n_z * a_lattice])
+    # Build with a placeholder box big enough to host the largest possible
+    # H shell (carve radius + d_x_h + slack), then resize the box once
+    # we know where the H atoms actually landed.
+    placeholder_L = max(
+        (diameter_A + 2 * d_x_h) + 2 * MIN_INTERWIRE_VACUUM_A,
+        18.0,
+    )
     pos = carved.get_positions()
     src_cell = carved.get_cell().array
-    pos[:, 0] += 0.5 * vacuum_A - 0.5 * src_cell[0, 0]
-    pos[:, 1] += 0.5 * vacuum_A - 0.5 * src_cell[1, 1]
+    pos[:, 0] += 0.5 * placeholder_L - 0.5 * src_cell[0, 0]
+    pos[:, 1] += 0.5 * placeholder_L - 0.5 * src_cell[1, 1]
 
     wire = Atoms(
         symbols=[a.symbol for a in carved],
         positions=pos,
-        cell=new_cell,
+        cell=np.diag([placeholder_L, placeholder_L, n_z * a_lattice]),
         pbc=(False, False, True),
     )
 
     wire = _passivate_with_nl(
         wire, a_lattice=a_lattice, d_x_h=d_x_h, species=species,
     )
+
+    # Resize box so periodic-image gap == MIN_INTERWIRE_VACUUM_A in xy.
+    all_pos = wire.get_positions()
+    center_xy = 0.5 * placeholder_L * np.array([1.0, 1.0])
+    radii = np.linalg.norm(all_pos[:, :2] - center_xy, axis=1)
+    envelope = float(radii.max())
+    if vacuum_A is None:
+        L_xy = 2 * envelope + MIN_INTERWIRE_VACUUM_A
+    else:
+        L_xy = float(vacuum_A)
+        gap = L_xy - 2 * envelope
+        if gap < MIN_INTERWIRE_VACUUM_A:
+            print(
+                f"WARNING: requested vacuum_A={L_xy:.2f} Å leaves only "
+                f"{gap:.2f} Å between adjacent H shells "
+                f"(< MIN_INTERWIRE_VACUUM_A={MIN_INTERWIRE_VACUUM_A:.1f}). "
+                "DFT will see image overlap; bump vacuum_A or pass None."
+            )
+    # Re-centre atoms inside the resized cell.
+    all_pos[:, 0] += 0.5 * L_xy - 0.5 * placeholder_L
+    all_pos[:, 1] += 0.5 * L_xy - 0.5 * placeholder_L
+    wire.set_cell(np.diag([L_xy, L_xy, n_z * a_lattice]))
+    wire.set_positions(all_pos)
+
+    if check_coordination:
+        _check_coordination(
+            wire, a_lattice=a_lattice, species=species,
+            strict=strict_coordination,
+        )
     return wire
+
+
+def _check_coordination(
+    wire: Atoms, *, a_lattice: float, species: str = "Si",
+    strict: bool = False,
+) -> None:
+    """Count bonded neighbours per ``species`` atom; warn (or raise) on != 4.
+
+    A "bonded neighbour" uses species-pair-specific cutoffs (z-PBC aware):
+
+      * Si–Si  ≤ 2.60 Å  (catches NN ≈ 2.35, rejects 2nd-NN ≈ 3.84)
+      * Si–H   ≤ 1.90 Å  (catches Si–H bond ≈ 1.48, rejects 2.79 Å
+                          "near" pairs where an H placed for a different
+                          host happens to sit within range of this Si)
+
+    The previous uniform per-atom radius of 0.6 × √3 a/4 ≈ 1.42 (paired
+    2.84 Å) over-counted Si–H pairs at 2.7–2.8 Å as bonds, producing
+    spurious "5-neighbour" reports for atoms that are actually under-
+    passivated (3 real bonds + 2 spurious "near" H).
+
+    With ``strict=True`` raises ``RuntimeError``; default warns. Narrow
+    wires (d ≲ 6 Å) cannot cap every sp3 direction without H–H clashes
+    so corner Si end up under-coordinated by construction.
+    """
+    SI_SI_BOND = 2.60
+    SI_H_BOND = 1.90
+    symbols = wire.get_chemical_symbols()
+    positions = wire.get_positions()
+    cell = wire.cell.array
+    cz = cell[2, 2]
+
+    bad: list[tuple[int, int]] = []
+    for i, sym_i in enumerate(symbols):
+        if sym_i != species:
+            continue
+        n_bonded = 0
+        for j in range(len(wire)):
+            if j == i:
+                continue
+            d = positions[j] - positions[i]
+            d[2] -= np.round(d[2] / cz) * cz
+            r = float(np.linalg.norm(d))
+            sym_j = symbols[j]
+            if sym_i == "Si" and sym_j == "Si" and r <= SI_SI_BOND:
+                n_bonded += 1
+            elif {sym_i, sym_j} == {"Si", "H"} and r <= SI_H_BOND:
+                n_bonded += 1
+        if n_bonded != 4:
+            bad.append((i, n_bonded))
+    if not bad:
+        return
+    msg = (
+        f"Coordination: {len(bad)} of "
+        f"{sum(1 for a in wire if a.symbol == species)} {species} "
+        f"atom(s) have != 4 bonded neighbours "
+        f"(typical corner under-passivation for narrow wires):\n"
+        + "\n".join(f"  atom {i}: {n} neighbours" for i, n in bad)
+        + "\n\nUnder-passivation leaves a dangling bond that DFT-relax "
+        "tries to close via local surface reconstruction. For wires "
+        "with d ≳ 8 Å this is unphysical and you should re-tune the "
+        "passivation (lower radial_dot_min, raise h_h_clash_A); for "
+        "narrow wires it's intrinsic to the geometry and the relax "
+        "will produce a small dimerisation that the rattle workflow "
+        "captures correctly."
+    )
+    if strict:
+        raise RuntimeError("[STRICT] " + msg)
+    print("WARNING: " + msg)
 
 
 def bulk_diamond_supercell(

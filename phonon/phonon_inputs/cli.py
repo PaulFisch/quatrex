@@ -21,17 +21,26 @@ from pathlib import Path
 import numpy as np
 
 
-def cmd_generate(config_path: str, skip_dft: bool = False) -> None:
+def cmd_generate(
+    config_path: str, skip_dft: bool = False, *, from_yaml: bool = False,
+) -> None:
     """Full pipeline: structure -> FC -> blocks -> quatrex files."""
     from .config import load_config
     from .convention import extract_blocks
     from .force_constants import produce_force_constants
     from .qe_interface import load_existing_forces, run_qe_displacements
     from .quatrex_writer import write_all
-    from .structure import create_phonopy_from_config, load_structure
+    from .structure import create_phonopy, resolve_structure_for_sow
 
     config = load_config(config_path)
-    phonon = create_phonopy_from_config(config)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
+    phonon = create_phonopy(
+        cell,
+        supercell_matrix=np.array(config.supercell.matrix),
+        primitive_matrix=np.eye(3),
+        displacement_distance=config.supercell.displacement_distance,
+    )
 
     n_super = len(phonon.supercell.positions)
     n_disp = len(phonon.displacements)
@@ -116,18 +125,19 @@ def _get_hiphive_dft_config(config):
     return config.qe, config.qe.pw_command
 
 
-def cmd_fc3_sow(config_path: str) -> None:
+def cmd_fc3_sow(config_path: str, *, from_yaml: bool = False) -> None:
     """Generate phono3py displaced supercells and write DFT inputs."""
     from .config import load_config
-    from .structure import load_structure
+    from .structure import resolve_structure_for_sow
     from .thirdorder import sow
 
     config = load_config(config_path)
-    cell = load_structure(config.structure)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
 
     tc = config.thirdorder
     dft_config, _ = _get_dft_config(config)
-    work_dir = Path(config_path).parent / tc.work_dir
+    work_dir = config_dir / tc.work_dir
     supercell = tuple(tc.supercell)
 
     n_disp = sow(
@@ -168,18 +178,19 @@ def cmd_fc3_reap(config_path: str) -> None:
     print(f"\nFC3 file: {fc3_path}")
 
 
-def cmd_fc3_all(config_path: str) -> None:
+def cmd_fc3_all(config_path: str, *, from_yaml: bool = False) -> None:
     """Full FC3 pipeline: sow + run + reap."""
     from .config import load_config
-    from .structure import load_structure
+    from .structure import resolve_structure_for_sow
     from .thirdorder import generate_fc3
 
     config = load_config(config_path)
-    cell = load_structure(config.structure)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
 
     tc = config.thirdorder
     dft_config, _ = _get_dft_config(config)
-    work_dir = Path(config_path).parent / tc.work_dir
+    work_dir = config_dir / tc.work_dir
     supercell = tuple(tc.supercell)
 
     fc3_path = generate_fc3(
@@ -192,18 +203,19 @@ def cmd_fc3_all(config_path: str) -> None:
     print(f"\nFC3 file: {fc3_path}")
 
 
-def cmd_hiphive_sow(config_path: str) -> None:
+def cmd_hiphive_sow(config_path: str, *, from_yaml: bool = False) -> None:
     """Generate hiphive rattled supercells and write DFT inputs."""
     from .config import load_config
     from .hiphive_fc3 import sow
-    from .structure import load_structure
+    from .structure import resolve_structure_for_sow
 
     config = load_config(config_path)
-    cell = load_structure(config.structure)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
 
     hh = config.hiphive
     dft_config, _ = _get_hiphive_dft_config(config)
-    work_dir = Path(config_path).parent / hh.work_dir
+    work_dir = config_dir / hh.work_dir
 
     n_disp = sow(cell, work_dir, dft_config, hh)
     print(f"\n{n_disp} rattled inputs in {work_dir}")
@@ -269,6 +281,7 @@ def cmd_hiphive_all(
     with_convergence: bool = False,
     with_analysis: str | None = None,
     analyses: str = "all",
+    from_yaml: bool = False,
 ) -> None:
     """Full hiphive FC3 pipeline: sow + run + reap.
 
@@ -283,14 +296,14 @@ def cmd_hiphive_all(
     """
     from .config import load_config
     from .hiphive_fc3 import generate_fc3
-    from .structure import load_structure
+    from .structure import resolve_structure_for_sow
 
     config = load_config(config_path)
-    cell = load_structure(config.structure)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
 
     hh = config.hiphive
     dft_config, _ = _get_hiphive_dft_config(config)
-    config_dir = Path(config_path).parent
     work_dir = config_dir / hh.work_dir
 
     fc3_path = generate_fc3(cell, work_dir, dft_config, hh)
@@ -328,22 +341,43 @@ def cmd_hiphive_all(
             raise SystemExit(rc)
 
 
-def cmd_hiphive_bootstrap_reap(config_path: str) -> None:
+def cmd_hiphive_bootstrap_reap(
+    config_path: str, *, source_dir: str | None = None,
+) -> None:
     """Fit the bootstrap FC2 for the phonon-rattle workflow.
 
-    Reads forces from ``hiphive.work_dir/bootstrap/``, fits an FC2-only
-    model with ``cutoffs[:1]``, and saves ``hiphive.work_dir/fc2_seed.npy``.
-    The next ``fc3-hiphive-sow`` invocation picks up the seed and emits
-    the main phonon-rattled pool.
+    Default: reads forces from ``hiphive.work_dir/bootstrap/``, fits an
+    FC2-only model with ``cutoffs[:1]``, and saves
+    ``hiphive.work_dir/fc2_seed.npy``. The next ``fc3-hiphive-sow``
+    invocation picks up the seed and emits the main phonon-rattled pool.
+
+    ``source_dir`` (or the config's ``phonon_rattle_seed_dft_dir``) lets
+    you point the FC2 fit at an external mc-rattle work_dir whose DFT
+    outputs are already on disk — skips the bootstrap DFT batch.
     """
     from .config import load_config
-    from .hiphive_fc3 import bootstrap_reap
+    from .hiphive_fc3 import (
+        BOOTSTRAP_DIRNAME, _fit_fc2_seed_from_source, bootstrap_reap,
+    )
 
     config = load_config(config_path)
     hh = config.hiphive
     work_dir = Path(config_path).parent / hh.work_dir
 
-    seed = bootstrap_reap(work_dir, hh_config=hh)
+    src = source_dir or hh.phonon_rattle_seed_dft_dir
+    if src is not None:
+        src_path = Path(src).expanduser()
+        if not src_path.is_absolute():
+            src_path = (work_dir / src_path).resolve()
+        seed = _fit_fc2_seed_from_source(
+            source_dir=src_path,
+            target_dir=work_dir,
+            hh_config=hh,
+            stage_label="seed_from_dft_dir",
+            log_prefix="External-source seed",
+        )
+    else:
+        seed = bootstrap_reap(work_dir, hh_config=hh)
     print(f"\nSeed FC2: {seed}")
 
 
@@ -418,17 +452,18 @@ def cmd_hiphive_convergence(config_path: str, out_dir: str | None) -> None:
     print(f"\nWrote {len(results)} fit results to {out_dir}/")
 
 
-def cmd_dfpt_sow(config_path: str) -> None:
+def cmd_dfpt_sow(config_path: str, *, from_yaml: bool = False) -> None:
     """Generate DFPT input files (SCF + ph.x + d3q.x)."""
     from .config import load_config
     from .dfpt import sow
-    from .structure import load_structure
+    from .structure import resolve_structure_for_sow
 
     config = load_config(config_path)
-    cell = load_structure(config.structure)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
 
     dc = config.dfpt
-    work_dir = Path(config_path).parent / dc.work_dir
+    work_dir = config_dir / dc.work_dir
 
     n = sow(cell, work_dir, config.qe, dc)
     print(f"\n{n} d3q.x triplet inputs + SCF/ph/q2r/qq2rr in {work_dir}")
@@ -462,17 +497,18 @@ def cmd_dfpt_reap(config_path: str) -> None:
     print(f"\nFC2+FC3 file: {fc3_path}")
 
 
-def cmd_dfpt_all(config_path: str) -> None:
+def cmd_dfpt_all(config_path: str, *, from_yaml: bool = False) -> None:
     """Full DFPT pipeline: sow + run + reap."""
     from .config import load_config
     from .dfpt import generate_fc_dfpt
-    from .structure import load_structure
+    from .structure import resolve_structure_for_sow
 
     config = load_config(config_path)
-    cell = load_structure(config.structure)
+    config_dir = Path(config_path).parent
+    cell = resolve_structure_for_sow(config, config_dir, from_yaml=from_yaml)
 
     dc = config.dfpt
-    work_dir = Path(config_path).parent / dc.work_dir
+    work_dir = config_dir / dc.work_dir
 
     fc3_path = generate_fc_dfpt(cell, work_dir, config.qe, dc)
     print(f"\nFC2+FC3 file: {fc3_path}")
@@ -546,10 +582,21 @@ def main():
     )
     sub = parser.add_subparsers(dest="command")
 
+    FROM_YAML_HELP = (
+        "Sow from the YAML structure even when a completed relax exists. "
+        "Default: require a relaxed CONTCAR (VASP) / relax.out (QE) in "
+        "config.relax.work_dir; pass this only if the YAML already encodes "
+        "the converged equilibrium or for a non-DFT smoke test."
+    )
+
+    def _add_from_yaml(p):
+        p.add_argument("--from-yaml", action="store_true", help=FROM_YAML_HELP)
+
     p_gen = sub.add_parser("generate", help="Full pipeline")
     p_gen.add_argument("--config", required=True, help="YAML config file")
     p_gen.add_argument("--skip-dft", action="store_true",
                        help="Load existing QE outputs instead of running")
+    _add_from_yaml(p_gen)
 
     p_ext = sub.add_parser("extract-blocks", help="Extract blocks only")
     p_ext.add_argument("--config", required=True, help="YAML config file")
@@ -559,6 +606,7 @@ def main():
 
     p_fc3_sow = sub.add_parser("fc3-sow", help="Generate phono3py displacements + DFT inputs (QE/VASP)")
     p_fc3_sow.add_argument("--config", required=True, help="YAML config file")
+    _add_from_yaml(p_fc3_sow)
 
     p_fc3_run = sub.add_parser("fc3-run", help="Run DFT for FC3 displacements (QE/VASP)")
     p_fc3_run.add_argument("--config", required=True, help="YAML config file")
@@ -568,11 +616,13 @@ def main():
 
     p_fc3_all = sub.add_parser("fc3-all", help="Full FC3 pipeline: sow + run + reap")
     p_fc3_all.add_argument("--config", required=True, help="YAML config file")
+    _add_from_yaml(p_fc3_all)
 
     p_hh_sow = sub.add_parser(
         "fc3-hiphive-sow", help="Generate hiphive rattled supercells + DFT inputs"
     )
     p_hh_sow.add_argument("--config", required=True, help="YAML config file")
+    _add_from_yaml(p_hh_sow)
 
     p_hh_run = sub.add_parser(
         "fc3-hiphive-run", help="Run DFT for hiphive rattled structures"
@@ -610,6 +660,7 @@ def main():
              "(default: 'all'). Same syntax as `finite_analysis run "
              "--analyses`.",
     )
+    _add_from_yaml(p_hh_all)
 
     p_hh_boot = sub.add_parser(
         "fc3-hiphive-bootstrap-reap",
@@ -617,6 +668,13 @@ def main():
              "fc2_seed.npy for the phonon-rattle main stage.",
     )
     p_hh_boot.add_argument("--config", required=True, help="YAML config file")
+    p_hh_boot.add_argument(
+        "--source-dir", default=None,
+        help="Fit FC2 on this external work_dir's disp-XXXXX outputs "
+             "instead of the local bootstrap/ pool (typically a sibling "
+             "mc-rattle batch). Overrides the config's "
+             "phonon_rattle_seed_dft_dir.",
+    )
 
     p_hh_conv = sub.add_parser(
         "fc3-hiphive-convergence",
@@ -631,6 +689,7 @@ def main():
 
     p_dfpt_sow = sub.add_parser("dfpt-sow", help="Generate DFPT input files")
     p_dfpt_sow.add_argument("--config", required=True, help="YAML config file")
+    _add_from_yaml(p_dfpt_sow)
 
     p_dfpt_run = sub.add_parser("dfpt-run", help="Run DFPT calculations")
     p_dfpt_run.add_argument("--config", required=True, help="YAML config file")
@@ -640,6 +699,7 @@ def main():
 
     p_dfpt_all = sub.add_parser("dfpt-all", help="Full DFPT: sow + run + reap")
     p_dfpt_all.add_argument("--config", required=True, help="YAML config file")
+    _add_from_yaml(p_dfpt_all)
 
     p_pipe = sub.add_parser("pipeline", help="Full pipeline: relax -> FC2 + FC3")
     p_pipe.add_argument("--config", required=True, help="YAML config file")
@@ -648,15 +708,21 @@ def main():
 
     args = parser.parse_args()
 
+    fy = lambda: getattr(args, "from_yaml", False)  # noqa: E731
+
     commands = {
-        "generate": lambda: cmd_generate(args.config, skip_dft=args.skip_dft),
+        "generate": lambda: cmd_generate(
+            args.config, skip_dft=args.skip_dft, from_yaml=fy(),
+        ),
         "extract-blocks": lambda: cmd_extract_blocks(args.config),
         "validate": lambda: cmd_validate(args.config),
-        "fc3-sow": lambda: cmd_fc3_sow(args.config),
+        "fc3-sow": lambda: cmd_fc3_sow(args.config, from_yaml=fy()),
         "fc3-run": lambda: cmd_fc3_run(args.config),
         "fc3-reap": lambda: cmd_fc3_reap(args.config),
-        "fc3-all": lambda: cmd_fc3_all(args.config),
-        "fc3-hiphive-sow": lambda: cmd_hiphive_sow(args.config),
+        "fc3-all": lambda: cmd_fc3_all(args.config, from_yaml=fy()),
+        "fc3-hiphive-sow": lambda: cmd_hiphive_sow(
+            args.config, from_yaml=fy(),
+        ),
         "fc3-hiphive-run": lambda: cmd_hiphive_run(args.config),
         "fc3-hiphive-reap": lambda: cmd_hiphive_reap(args.config),
         "fc3-hiphive-all": lambda: cmd_hiphive_all(
@@ -664,17 +730,18 @@ def main():
             with_convergence=getattr(args, "with_convergence", False),
             with_analysis=getattr(args, "with_analysis", None),
             analyses=getattr(args, "analyses", "all"),
+            from_yaml=fy(),
         ),
         "fc3-hiphive-bootstrap-reap": lambda: cmd_hiphive_bootstrap_reap(
-            args.config,
+            args.config, source_dir=getattr(args, "source_dir", None),
         ),
         "fc3-hiphive-convergence": lambda: cmd_hiphive_convergence(
             args.config, getattr(args, "out_dir", None),
         ),
-        "dfpt-sow": lambda: cmd_dfpt_sow(args.config),
+        "dfpt-sow": lambda: cmd_dfpt_sow(args.config, from_yaml=fy()),
         "dfpt-run": lambda: cmd_dfpt_run(args.config),
         "dfpt-reap": lambda: cmd_dfpt_reap(args.config),
-        "dfpt-all": lambda: cmd_dfpt_all(args.config),
+        "dfpt-all": lambda: cmd_dfpt_all(args.config, from_yaml=fy()),
         "pipeline": lambda: cmd_pipeline(
             args.config, skip_relax=args.skip_relax,
         ),

@@ -355,7 +355,27 @@ def sow(
     # ---- Phonon-rattle dispatch (two-stage) --------------------------------
     if hh_config.rattle_method == "phonon":
         seed_path = work_dir / FC2_SEED_FILENAME
-        # Preferred path: load FC2 from an existing converged fc3.hdf5
+        # Preferred path A: refit an FC2-only model on an existing
+        # mc-rattle DFT batch (forces already on disk, no need to wait
+        # for the upstream FC3 reap). Takes precedence over the fc3.hdf5
+        # path because it uses the user's chosen ``cutoffs[:1]`` and the
+        # ARDR + post-fit-RSR recipe optimised for FC2-only fits.
+        if not seed_path.exists() and hh_config.phonon_rattle_seed_dft_dir:
+            src = Path(hh_config.phonon_rattle_seed_dft_dir).expanduser()
+            if not src.is_absolute():
+                src = (work_dir / src).resolve()
+            print(
+                f"hiphive phonon-rattle: seeding FC2 by refitting forces "
+                f"from external mc-rattle work_dir {src}."
+            )
+            _fit_fc2_seed_from_source(
+                source_dir=src,
+                target_dir=work_dir,
+                hh_config=hh_config,
+                stage_label="seed_from_dft_dir",
+                log_prefix="External-source seed",
+            )
+        # Preferred path B: load FC2 from an existing converged fc3.hdf5
         # (e.g. a completed mc-rattle reap on the same primitive). This
         # mirrors how the literature uses phonon-rattle — as a finite-T
         # refinement on top of a converged harmonic model, NOT as a
@@ -571,25 +591,31 @@ def _atoms_from_meta(entry: dict):
     )
 
 
-def bootstrap_reap(
-    work_dir: Path,
+def _fit_fc2_seed_from_source(
+    source_dir: Path,
+    target_dir: Path,
     hh_config: HiphiveConfig,
+    *,
+    stage_label: str = "bootstrap",
+    log_prefix: str = "Bootstrap reap",
 ) -> Path:
-    """Fit an FC2-only force-constant model on the bootstrap pool.
+    """Read rattled-supercell DFT forces from ``source_dir`` and fit an
+    FC2-only force-constant model. Writes ``target_dir/fc2_seed.npy`` and
+    ``target_dir/hiphive_bootstrap.json``.
 
-    Stage 2 of the phonon-rattle workflow expects ``work_dir/fc2_seed.npy``
-    to exist; this function produces it from ``work_dir/bootstrap/``:
+    ``source_dir`` must carry a ``hiphive_meta.json`` (so we know the
+    primitive, supercell layout, calculator, and ``disp-XXXXX`` count)
+    plus the corresponding ``disp-XXXXX/`` outputs. Two valid sources:
 
-      1. Read forces from each ``disp-XXXXX`` calculation in the
-         bootstrap directory (created by :func:`sow` when
-         ``rattle_method == "phonon"`` and the seed is missing).
-      2. Build a hiphive :class:`ClusterSpace` with only the FC2
-         cutoff (``cutoffs[:1]``) and fit by least-squares.
-      3. Extract the supercell FC2 in the ``(N, N, 3, 3)`` phonopy
-         convention and save it to ``work_dir/fc2_seed.npy``.
+      * the bootstrap mc-rattle pool sown by :func:`sow` itself
+        (``work_dir/bootstrap/``) — original use,
+      * any sibling mc-rattle work_dir that already has DFT outputs —
+        new path used by ``HiphiveConfig.phonon_rattle_seed_dft_dir``.
 
-    The next :func:`sow` call detects the seed and switches to the
-    phonon-rattled main stage.
+    The fit uses ``cutoffs[:1]`` of ``hh_config``, ARDR (with ridge as a
+    fallback), and the same Huang+Born–Huang post-fit projection as
+    :func:`reap`. The seed is rejected if it carries more imaginary modes
+    than ``phonon_rattle_max_seed_imag``.
     """
     import ase
     from hiphive import (
@@ -598,33 +624,51 @@ def bootstrap_reap(
     from hiphive.utilities import prepare_structures
     from trainstation import Optimizer
 
-    work_dir = Path(work_dir)
-    boot_dir = work_dir / BOOTSTRAP_DIRNAME
-    if not boot_dir.exists():
+    source_dir = Path(source_dir)
+    target_dir = Path(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not source_dir.exists():
         raise FileNotFoundError(
-            f"Bootstrap directory missing: {boot_dir}. Run "
-            f"`fc3-hiphive-sow` first with rattle_method='phonon' to "
-            "create the bootstrap mc-rattle pool."
+            f"FC2-seed source directory missing: {source_dir}. "
+            "Run `fc3-hiphive-sow` (and DFT) there first, or check the "
+            "phonon_rattle_seed_dft_dir path in your config."
         )
-    meta = _load_meta(boot_dir)
+    meta = _load_meta(source_dir)
     n_disp = meta["n_structures"]
     atoms_ideal = _atoms_from_meta(meta["supercell_atoms"])
     primitive = _atoms_from_meta(meta["primitive"])
     n_super = len(atoms_ideal)
     calculator = meta["calculator"]
 
-    print(f"Bootstrap reap: reading {n_disp} {calculator.upper()} outputs "
-          f"from {boot_dir}...")
+    # Sanity: the caller's hh_config must agree with the source meta on
+    # supercell multipliers and primitive lattice. If they disagree the
+    # resulting FC2 has the wrong (N, N, 3, 3) shape for the phonon-rattle
+    # stage and downstream :func:`generate_phonon_rattled_structures` will
+    # raise a cryptic shape error.
+    src_super = tuple(meta.get("supercell", []))
+    cfg_super = tuple(hh_config.supercell)
+    if src_super and src_super != cfg_super:
+        raise ValueError(
+            f"FC2-seed source supercell {src_super} does not match the "
+            f"current hiphive.supercell {cfg_super}. Re-run the source "
+            "mc-rattle batch with the same supercell or change "
+            "phonon_rattle_seed_dft_dir to a sibling batch that matches."
+        )
+
+    print(
+        f"{log_prefix}: reading {n_disp} {calculator.upper()} outputs "
+        f"from {source_dir}..."
+    )
 
     rattled = []
     for i in range(1, n_disp + 1):
         if calculator == "qe":
-            out_file = boot_dir / f"disp-{i:05d}.out"
+            out_file = source_dir / f"disp-{i:05d}.out"
             forces = _to._parse_qe_forces(out_file, n_super)
-            inp_file = boot_dir / f"disp-{i:05d}.in"
+            inp_file = source_dir / f"disp-{i:05d}.in"
             positions = _read_positions_from_qe_input(inp_file, n_super)
         elif calculator == "vasp":
-            disp_dir = boot_dir / f"disp-{i:05d}"
+            disp_dir = source_dir / f"disp-{i:05d}"
             forces = _to._parse_vasp_forces(disp_dir, n_super)
             positions = _read_positions_from_vasp_poscar(
                 disp_dir / "POSCAR", n_super,
@@ -715,7 +759,8 @@ def bootstrap_reap(
     max_seed_imag = getattr(hh_config, "phonon_rattle_max_seed_imag", 6)
 
     summary = {
-        "stage": "bootstrap",
+        "stage": stage_label,
+        "source_dir": str(source_dir),
         "n_structures": n_disp,
         "cutoffs": fc2_cutoff,
         "fit_method": bootstrap_fit_method,
@@ -732,13 +777,13 @@ def bootstrap_reap(
         "n_imag_modes_in_seed": n_imag,
         "max_seed_imag_allowed": max_seed_imag,
     }
-    (work_dir / "hiphive_bootstrap.json").write_text(json.dumps(summary, indent=2))
+    (target_dir / "hiphive_bootstrap.json").write_text(json.dumps(summary, indent=2))
 
     if n_imag > max_seed_imag:
-        bad_path = work_dir / (FC2_SEED_FILENAME + ".rejected")
+        bad_path = target_dir / (FC2_SEED_FILENAME + ".rejected")
         np.save(bad_path, fc2)
         raise RuntimeError(
-            f"Bootstrap seed FC2 has {n_imag} imaginary mode(s) "
+            f"Seed FC2 (stage={stage_label}) has {n_imag} imaginary mode(s) "
             f"(cap = {max_seed_imag} via phonon_rattle_max_seed_imag). "
             f"Refusing to write {FC2_SEED_FILENAME} — phonon-rattle "
             f"would produce 'Duplicates in permutation' or NaN POSCARs.\n\n"
@@ -748,19 +793,51 @@ def bootstrap_reap(
             "supercell to convergence, then set\n"
             "    hiphive.phonon_rattle_seed_fc3: "
             "<path-to-mc-rattle-fc3.hdf5>\n"
-            "and re-run; the phonon-rattle workflow then refines the "
-            "converged FC2 at finite T (the workflow used in "
-            "Eriksson et al. 2019 / Carrete et al. 2017)."
+            "(or hiphive.phonon_rattle_seed_dft_dir: "
+            "<path-to-mc-rattle-work_dir>) and re-run; phonon-rattle "
+            "then refines a converged FC2 at finite T (the workflow used "
+            "in Eriksson et al. 2019 / Carrete et al. 2017)."
         )
 
     # Phonopy convention for generate_phonon_rattled_structures.
-    seed_path = work_dir / FC2_SEED_FILENAME
+    seed_path = target_dir / FC2_SEED_FILENAME
     np.save(seed_path, fc2)
     print(
         f"  Saved seed FC2: {seed_path} "
         f"(max |FC2| = {summary['fc2_max']:.3e}, n_imag = {n_imag})"
     )
     return seed_path
+
+
+def bootstrap_reap(
+    work_dir: Path,
+    hh_config: HiphiveConfig,
+) -> Path:
+    """Fit an FC2-only force-constant model on the bootstrap pool.
+
+    Stage 2 of the phonon-rattle workflow expects ``work_dir/fc2_seed.npy``
+    to exist; this function produces it from ``work_dir/bootstrap/``.
+
+    Thin wrapper around :func:`_fit_fc2_seed_from_source`, used when the
+    bootstrap pool is the local ``work_dir/bootstrap/`` mc-rattle batch
+    that :func:`sow` emits when ``rattle_method == "phonon"`` and no
+    ``phonon_rattle_seed_*`` config is set.
+    """
+    work_dir = Path(work_dir)
+    boot_dir = work_dir / BOOTSTRAP_DIRNAME
+    if not boot_dir.exists():
+        raise FileNotFoundError(
+            f"Bootstrap directory missing: {boot_dir}. Run "
+            f"`fc3-hiphive-sow` first with rattle_method='phonon' to "
+            "create the bootstrap mc-rattle pool."
+        )
+    return _fit_fc2_seed_from_source(
+        source_dir=boot_dir,
+        target_dir=work_dir,
+        hh_config=hh_config,
+        stage_label="bootstrap",
+        log_prefix="Bootstrap reap",
+    )
 
 
 def reap(

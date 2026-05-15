@@ -235,6 +235,19 @@ class HiphiveConfig:
     phonon_rattle_imag_freq_factor: float = 1.0
     phonon_rattle_qm: bool = True
     phonon_rattle_seed_fc3: str | None = None
+    # Like ``phonon_rattle_seed_fc3`` but points at an mc-rattle (or any
+    # other rattled) hiphive *work_dir* that already has DFT outputs
+    # (``hiphive_meta.json`` + ``disp-XXXXX/``) — typically the sibling
+    # mc-rattle reap directory for the same primitive. The phonon-rattle
+    # sow refits an FC2-only model on those forces (cutoffs[:1] + ARDR +
+    # post-fit Huang/Born–Huang) and writes ``fc2_seed.npy`` *without*
+    # needing the upstream mc-rattle reap to have completed. Useful when
+    # the mc-rattle DFT batch has run but its full FC3 fit / fc3.hdf5 is
+    # not (yet) on disk, or when you want the seed FC2 to come from the
+    # mc-rattle forces with FC2-only cutoffs (cleaner separation between
+    # harmonic seed and anharmonic refinement). Takes precedence over
+    # ``phonon_rattle_seed_fc3`` when both are set.
+    phonon_rattle_seed_dft_dir: str | None = None
     # Sanity threshold: refuse to proceed with a seed FC2 that has more
     # than this many imaginary modes. Hiphive's phonon-rattle ∝ 1/√|ω|,
     # so even a few small-|ω| imaginary modes inflate displacements to
