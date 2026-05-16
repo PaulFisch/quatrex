@@ -1,0 +1,208 @@
+{
+  "units": {
+    "frob_rel_err": "dimensionless (relative Frobenius)",
+    "G_anh_rel_err": "dimensionless (relative thermal conductance)",
+    "G_anh": "W/(m\u00b2\u00b7K)",
+    "fit_time_s": "s",
+    "transport_time_s": "s"
+  },
+  "dense": {
+    "G_anh": 31003258.541025925,
+    "G_ball": 52901871.379931346,
+    "conservation_err": 0.00172858040874222,
+    "n_scba_iter": 8,
+    "transport_time_s": 149.6291515827179
+  },
+  "per_method": {
+    "mSVD": [
+      {
+        "rank": "2",
+        "n_params": 32258,
+        "frob_rel_err": 0.9174542228834612,
+        "G_anh_rel_err": 0.7062824514268956,
+        "fit_time_s": 0.17946481704711914,
+        "transport_time_s": 38.02093029022217,
+        "error": null
+      },
+      {
+        "rank": "4",
+        "n_params": 64516,
+        "frob_rel_err": 0.8267072366813297,
+        "G_anh_rel_err": 0.7063103188077907,
+        "fit_time_s": 0.1641066074371338,
+        "transport_time_s": 37.987316846847534,
+        "error": null
+      },
+      {
+        "rank": "8",
+        "n_params": 129032,
+        "frob_rel_err": 0.610884559184591,
+        "G_anh_rel_err": 0.7062503778350444,
+        "fit_time_s": 0.18990778923034668,
+        "transport_time_s": 80.54992771148682,
+        "error": null
+      },
+      {
+        "rank": "16",
+        "n_params": 258064,
+        "frob_rel_err": 0.2476737290277686,
+        "G_anh_rel_err": 0.7008632763146855,
+        "fit_time_s": 0.19214415550231934,
+        "transport_time_s": 132.67794060707092,
+        "error": null
+      }
+    ],
+    "HOSVD": [
+      {
+        "rank": "2_2",
+        "n_params": 636,
+        "frob_rel_err": 0.9214738932909936,
+        "G_anh_rel_err": 0.7063326152543422,
+        "fit_time_s": 2.7068674564361572,
+        "transport_time_s": 40.0436532497406,
+        "error": null
+      },
+      {
+        "rank": "4_4",
+        "n_params": 1300,
+        "frob_rel_err": 0.8356813162796786,
+        "G_anh_rel_err": 0.7063326134817827,
+        "fit_time_s": 3.031604528427124,
+        "transport_time_s": 46.62774085998535,
+        "error": null
+      },
+      {
+        "rank": "8_8",
+        "n_params": 2808,
+        "frob_rel_err": 0.6296477971451273,
+        "G_anh_rel_err": 0.7063326101090288,
+        "fit_time_s": 3.709214925765991,
+        "transport_time_s": 44.39657473564148,
+        "error": null
+      },
+      {
+        "rank": "16_16",
+        "n_params": 7216,
+        "frob_rel_err": 0.30426059359516006,
+        "G_anh_rel_err": 0.6771100270373727,
+        "fit_time_s": 4.9651875495910645,
+        "transport_time_s": 147.87109470367432,
+        "error": null
+      }
+    ],
+    "CP": [
+      {
+        "rank": "2",
+        "n_params": 1136,
+        "frob_rel_err": 0.9214738932909913,
+        "G_anh_rel_err": 0.7063326153019847,
+        "fit_time_s": 3.170952558517456,
+        "transport_time_s": 38.74152946472168,
+        "error": null
+      },
+      {
+        "rank": "4",
+        "n_params": 2272,
+        "frob_rel_err": 0.8356004626923562,
+        "G_anh_rel_err": 0.7063326125774404,
+        "fit_time_s": 3.4144163131713867,
+        "transport_time_s": 36.63265943527222,
+        "error": null
+      },
+      {
+        "rank": "8",
+        "n_params": 4544,
+        "frob_rel_err": 0.6296475116597291,
+        "G_anh_rel_err": 0.7063326095180436,
+        "fit_time_s": 35.3819842338562,
+        "transport_time_s": 43.183454275131226,
+        "error": null
+      },
+      {
+        "rank": "16",
+        "n_params": 9088,
+        "frob_rel_err": 0.31766930219684275,
+        "G_anh_rel_err": 0.5337726739327794,
+        "fit_time_s": 112.27333354949951,
+        "transport_time_s": 134.31346893310547,
+        "error": null
+      }
+    ],
+    "INDSCAL": [
+      {
+        "rank": "2",
+        "n_params": 630,
+        "frob_rel_err": 0.9214738932909913,
+        "G_anh_rel_err": 0.7063326153020565,
+        "fit_time_s": 4.038455009460449,
+        "transport_time_s": 35.449774742126465,
+        "error": null
+      },
+      {
+        "rank": "4",
+        "n_params": 1260,
+        "frob_rel_err": 0.8384520140816683,
+        "G_anh_rel_err": 0.7063326147440785,
+        "fit_time_s": 4.132593154907227,
+        "transport_time_s": 31.221879959106445,
+        "error": null
+      },
+      {
+        "rank": "8",
+        "n_params": 2520,
+        "frob_rel_err": 0.63718386850059,
+        "G_anh_rel_err": 0.7063326097707837,
+        "fit_time_s": 99.22712278366089,
+        "transport_time_s": 32.86169505119324,
+        "error": null
+      },
+      {
+        "rank": "16",
+        "n_params": 5040,
+        "frob_rel_err": 0.31580877895638154,
+        "G_anh_rel_err": 0.5450884263405256,
+        "fit_time_s": 210.0881929397583,
+        "transport_time_s": 139.30973601341248,
+        "error": null
+      }
+    ],
+    "Waring": [
+      {
+        "rank": "2",
+        "n_params": 506,
+        "frob_rel_err": 0.9999999996723615,
+        "G_anh_rel_err": 0.6950847926506362,
+        "fit_time_s": 154.98175621032715,
+        "transport_time_s": 69.38915753364563,
+        "error": null
+      },
+      {
+        "rank": "4",
+        "n_params": 1012,
+        "frob_rel_err": 0.9999999993769807,
+        "G_anh_rel_err": 0.6847588447969005,
+        "fit_time_s": 297.9368133544922,
+        "transport_time_s": 52.84759449958801,
+        "error": null
+      },
+      {
+        "rank": "8",
+        "n_params": 2024,
+        "frob_rel_err": 0.8795858139063444,
+        "G_anh_rel_err": 0.7063326148676492,
+        "fit_time_s": 666.1894998550415,
+        "transport_time_s": 36.68417716026306,
+        "error": null
+      },
+      {
+        "rank": "16",
+        "n_params": 4048,
+        "frob_rel_err": 0.4706386008330233,
+        "G_anh_rel_err": 0.24280476912179824,
+        "fit_time_s": 1240.8046672344208,
+        "transport_time_s": 124.6267249584198,
+        "error": null
+      }
+    ]
+  }
+}
