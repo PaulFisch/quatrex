@@ -98,10 +98,25 @@ class SystemBundle:
 # --------------------------------------------------------------------------- #
 
 
-def _build_phonopy(cfg, supercell_override: list | None = None) -> Phonopy:
-    """Build a :class:`Phonopy` object using ``supercell_override`` if given,
-    otherwise falling back to the YAML's ``thirdorder.supercell``."""
-    cell = load_structure(cfg.structure)
+def _build_phonopy(
+    cfg,
+    supercell_override: list | None = None,
+    primitive_override: PhonopyAtoms | None = None,
+) -> Phonopy:
+    """Build a :class:`Phonopy` object.
+
+    Resolution order for the primitive cell:
+      1. ``primitive_override`` if supplied (typically the primitive from
+         ``hiphive_meta.json``, which is the structure hiphive actually fit
+         on — the relaxed CONTCAR positions, not the YAML's pre-relax draft).
+      2. ``load_structure(cfg.structure)`` (the YAML structure block) as
+         the fallback for non-hiphive reaps (phono3py, DFPT).
+
+    Resolution order for the supercell matrix:
+      1. ``supercell_override`` (typically ``hiphive_meta.json``'s ``supercell``).
+      2. ``cfg.thirdorder.supercell`` (the YAML's thirdorder block).
+    """
+    cell = primitive_override if primitive_override is not None else load_structure(cfg.structure)
     sc = supercell_override if supercell_override is not None else cfg.thirdorder.supercell
     sc_matrix = np.array(sc)
     if sc_matrix.ndim == 1:
@@ -113,16 +128,55 @@ def _build_phonopy(cfg, supercell_override: list | None = None) -> Phonopy:
     )
 
 
-def _supercell_from_reap_metadata(fc3_path: Path) -> list | None:
-    """Look for ``hiphive_meta.json`` next to ``fc3.hdf5`` and return its
-    ``supercell`` field. Returns None if the file is absent."""
+def _hiphive_meta_at(fc3_path: Path) -> dict | None:
+    """Read ``hiphive_meta.json`` next to ``fc3.hdf5`` if present.
+
+    Hiphive reaps drop this file alongside ``fc3.hdf5`` at sow time, holding
+    the primitive (symbols, cell, scaled_positions) and supercell layout
+    the FC arrays were fit on. Using it as the source of truth for the
+    analysis-time primitive avoids a class of bugs where the YAML primitive
+    has drifted from the relaxed positions hiphive actually saw (see
+    `scratch/imag_audit/INVESTIGATION_NOTES.md` for the d9a case).
+    """
     import json
     meta_path = fc3_path.with_name("hiphive_meta.json")
     if not meta_path.exists():
         return None
     try:
-        return json.loads(meta_path.read_text()).get("supercell")
+        return json.loads(meta_path.read_text())
     except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _supercell_from_reap_metadata(fc3_path: Path) -> list | None:
+    """Look for ``hiphive_meta.json`` next to ``fc3.hdf5`` and return its
+    ``supercell`` field. Returns None if the file is absent.
+
+    Kept for backwards compatibility; new code should call
+    :func:`_hiphive_meta_at` for the full meta blob.
+    """
+    meta = _hiphive_meta_at(fc3_path)
+    return None if meta is None else meta.get("supercell")
+
+
+def _primitive_from_reap_metadata(fc3_path: Path) -> PhonopyAtoms | None:
+    """Reconstruct the primitive cell from ``hiphive_meta.json`` if present.
+
+    Returns a :class:`PhonopyAtoms` built from the meta's ``primitive``
+    block (symbols, cell, scaled_positions). Used by :func:`load_system` so
+    that the analysis-time phonopy is identical to the cell hiphive fit on.
+    """
+    meta = _hiphive_meta_at(fc3_path)
+    if meta is None or "primitive" not in meta:
+        return None
+    p = meta["primitive"]
+    try:
+        return PhonopyAtoms(
+            symbols=list(p["symbols"]),
+            cell=np.asarray(p["cell"]),
+            scaled_positions=np.asarray(p["scaled_positions"]),
+        )
+    except (KeyError, TypeError, ValueError):
         return None
 
 
@@ -276,7 +330,18 @@ def load_system(
         else _resolve_fc3_path(cfg, config_path.parent)
     )
     sc_override = _supercell_from_reap_metadata(fc3_path)
-    phonon = _build_phonopy(cfg, supercell_override=sc_override)
+    # Prefer the primitive cell hiphive itself fit on (saved in
+    # hiphive_meta.json). The YAML's primitive can drift away if the YAML
+    # was regenerated after the relax/sow ran on the cluster — that drift
+    # causes wrong q-phase factors at non-Γ q and silently scrambles the
+    # dispersion. Fall back to the YAML primitive only when there's no
+    # meta sitting next to fc3.hdf5 (phono3py / DFPT reaps).
+    primitive_override = _primitive_from_reap_metadata(fc3_path)
+    phonon = _build_phonopy(
+        cfg,
+        supercell_override=sc_override,
+        primitive_override=primitive_override,
+    )
     fc2, fc3 = _read_fc_hdf5(fc3_path)
 
     n_super_expected = phonon.supercell.masses.shape[0]
