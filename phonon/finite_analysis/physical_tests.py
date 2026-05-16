@@ -83,15 +83,39 @@ def fc3_perm_symmetry(T_lifted: np.ndarray) -> dict[str, float]:
 def fc3_asr_legs(T_lifted: np.ndarray, n_super: int) -> dict[str, float]:
     """Wraps :func:`asr_residual` on the (n_dof, dim_sc, dim_sc) layout.
 
-    The lifted FC3 is S3-symmetric, so legs 1/2/3 are interchangeable for
-    ASR purposes. A ``UserWarning`` is emitted when the relative residual
-    on either leg exceeds :data:`constants.ASR_REL_RESIDUAL_WARN`.
+    Reports ``||Σ_j Φ³_{ijk}|| / ||Φ³||`` (axis-j) and the analogous
+    axis-k residual. For an S3-symmetric lifted FC3 these two are equal.
 
-    **Note**: neither :mod:`synthetic_gf` nor :mod:`sse_cutoffs` ASR-projects
-    FC3 before consuming it. A large residual here propagates through to a
-    finite Drude-like weight at ω→0 in the bubble. ASR-project FC3 upstream
-    (e.g. via ``asr_project_factor``) if you need the bubble to honour the
-    sum rule strictly.
+    **What this measures (and what it does NOT).**
+    Hiphive's :class:`hiphive.ClusterSpace` enforces the *axis-i*
+    (translational) ASR on FC3 by orbit construction. It does **not**
+    enforce the axis-j and axis-k variants — those would constrain the
+    same parameter set that already encodes axis-i ASR plus the cluster
+    symmetries, and a generic cluster expansion's FC3 will have a
+    nonzero ``leg_j_rel``.
+
+    Empirical baselines (from `scratch/imag_audit/`):
+      * Bulk Si fits — `leg_j_rel = 0.000` (perfectly symmetric, all
+        species identical, cluster space is small and tightly
+        constrained).
+      * H-passivated SiNW fits — `leg_j_rel ≈ 0.80` consistently across
+        every diameter and every fit_method we have tried. Driven by
+        the reduced (1-D) periodicity, the Si/H mass imbalance, and the
+        fact that the cluster space alone does not constrain axis-j/k.
+
+    So ``leg_j_rel ≈ 0.8`` on a SiNW is **not** a fit defect — it is
+    the expected per-axis violation from a hiphive cluster expansion
+    on a low-symmetry quasi-1-D system. It IS a real consequence for
+    downstream consumers that integrate FC3 along axis-j or axis-k
+    (the SSE bubble Σ at ω→0 picks up a Drude-like weight), and
+    :mod:`synthetic_gf` / :mod:`sse_cutoffs` neither project nor
+    re-symmetrise FC3 upstream. Project explicitly via
+    :func:`phonon_inputs.fc3_compression.asr_project_factor` (or
+    :func:`load_quatrex_blocks(asr_project=True)`) before consuming
+    FC3 if the bubble needs the sum rule strictly enforced.
+
+    A ``UserWarning`` is emitted when the relative residual on either
+    leg exceeds :data:`constants.ASR_REL_RESIDUAL_WARN`.
     """
     import warnings as _warnings
     from .constants import ASR_REL_RESIDUAL_WARN

@@ -35,17 +35,27 @@ D_SI_H = 1.48    # Å, Si–H bond length (SiH₄ reference, PBE)
 
 
 def _suggest_fc2_cutoff(envelope_A: float) -> float:
-    """FC2 cutoff covering both wire cross-section and the second-NN z-shell.
+    """FC2 cutoff that covers the full wire cross-section + 1 NN shell.
 
     SiNWs have a free transverse direction: any pair of atoms with
     Cartesian separation > cutoffs[0] gets zero FC2 by construction. For
-    a wire diameter d, cross-section pairs span up to ~d, so we want
-    cutoffs[0] ≳ d + 1 NN shell (~2.4 Å). Cap at 12 Å so the cluster
-    space stays tractable; for the d12a wire that lands at 12 Å, which
-    still misses a few diametrical pairs but keeps n_parameters under
-    O(10 000).
+    a wire of H-shell radius ``envelope_A``, the cross-section spans the
+    full diameter ``2 × envelope`` (top-to-bottom of the H envelope). So
+    we want ``cutoffs[0] ≳ 2 × envelope + 1 NN shell`` (≈ 0.5 Å more for
+    a safety margin).
+
+    Previous formula was ``envelope + 2.4`` (only ~radius + 1 NN), which
+    undershoots: for d5a it gave 6.1 Å but the cross-section spans 7.4 Å,
+    so cross-section pairs at separations 6.1–7.4 Å were zeroed and the
+    Γ-point harmonic spectrum picked up 4–7 imaginary modes. The d5a SC4
+    cutoff sweep (`scratch/imag_audit/pass1_cutoff_sweep.json`) confirmed
+    that ``cutoffs[0] ≥ 7 Å`` is required to give a clean Γ-point dispersion
+    — exactly where the new formula lands.
+
+    Capped at 12 Å so the cluster-space parameter count stays tractable
+    on the d12a wire (otherwise ~50 000 params at cutoff 14.5 Å).
     """
-    return min(12.0, max(5.0, envelope_A + 2.4))
+    return min(12.0, max(5.0, 2.0 * envelope_A + 0.5))
 
 
 def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
@@ -82,16 +92,18 @@ def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
             f"./fc3_hiphive_{tag}_vasp", [1, 1, supercell_z],
             cutoffs=(fc2_cutoff, 4.0),
             rattle_d_min=1.4,  # Si-H 1.48 Å, H-H 2.4 Å — 1.4 keeps both safe
-            # Rattle amplitude reduced 0.04 → 0.03 Å and n_iter 20 → 10 to
-            # keep mc-rattle Si-Si pairs above VASP's RWIGS-derived "two
-            # ions too close" warning threshold (≈ RWIGS_Si × 2 ≈ 2.6 Å)
-            # in most rattled structures. Cumulative RMS displacement
-            # ≈ std × √n_iter ≈ 0.095 Å (was ~0.18 Å); worst-case Si-Si
-            # ≈ 2.35 − 0.19 ≈ 2.16 Å, still above the warning floor for
-            # most structures. 0.03 Å matches the value used in the
-            # hiphive Si-thermal-conductivity tutorial.
             rattle_std=0.03,
-            rattle_n_iter=10,
+            # rattle_n_iter 2 (was 10). Hiphive's mc-rattle accumulates
+            # displacement roughly LINEARLY in n_iter (each MC step adds
+            # an independent Gaussian δr ~ rattle_std). So with std=0.03
+            # and n_iter=10 we saw realised displacements of 0.27–0.37 Å
+            # max, with Si–Si bonds compressed to 2.04 Å (13 % vs eq 2.35) —
+            # well outside the harmonic regime. The d9a SC4 fit was
+            # dominated by these anharmonic contributions on the light
+            # H atoms, producing 51 H-localised Γ-imaginary modes.
+            # n_iter=2 keeps cumulative peaks ≈ 0.06–0.08 Å, well inside
+            # harmonic. (Hiphive thermal-conductivity tutorial uses 1.)
+            rattle_n_iter=2,
         ),
         **default_thirdorder_block(
             f"./fc3_{tag}_vasp", [1, 1, supercell_z],
