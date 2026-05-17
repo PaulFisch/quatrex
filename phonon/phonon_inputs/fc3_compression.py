@@ -942,10 +942,18 @@ def fit_waring(
 
     candidates: list[tuple[float, np.ndarray, np.ndarray, str]] = []
 
-    # Init magnitudes: |v_r| ~ 1, |lam_r| ~ |T_lifted|/sqrt(rank) so that the
-    # initial approx has magnitude ~ |T_lifted| when components are roughly
-    # orthogonal.
-    lam_scale = T_lifted_norm / np.sqrt(rank)
+    # Init magnitudes: |v_r| ~ 1, |lam_r| ~ |T_target|/sqrt(rank) so the
+    # initial approximation has magnitude ~ |T_target| when components are
+    # roughly orthogonal. T_target is whichever tensor the loss actually
+    # compares against — the lift for ``loss="lift"`` and the primitive
+    # slice (norm Tn) for ``loss="primitive"``. Previously this was
+    # hard-coded to ``T_lifted_norm``, so the primitive path started with
+    # an initial Tap that is ~6× the primitive target (T_lifted_norm is
+    # typically ~sqrt(6) × Tn for an S3-symmetric lift), causing the
+    # L-BFGS refinement to overshoot and collapse to λ = 0 — the
+    # rank-2/rank-4 "frob_rel_err = 1.0" pathology observed on SiNW.
+    target_norm_for_init = Tn if loss == "primitive" else (T_lifted_norm or 1.0)
+    lam_scale = target_norm_for_init / np.sqrt(rank)
 
     def _seed_random() -> tuple[np.ndarray, np.ndarray]:
         V = rng.normal(0, 1.0 / np.sqrt(dim_sc), (dim_sc, rank))
@@ -969,6 +977,24 @@ def fit_waring(
             print(f"    {tag}: err={err_ref:.4e}  (best={candidates[0][0]:.4e})",
                   flush=True)
 
+    def _rescale_lam_for_target(lam0: np.ndarray, V0: np.ndarray) -> np.ndarray:
+        """Power/CP init returns lambdas scaled to the LIFTED tensor. When
+        the L-BFGS loss is on the primitive slice, that initial Tap is
+        too big (the primitive's Frobenius is smaller than the lift's by
+        roughly ``sqrt(6) × sqrt(n_dof/dim_sc)``). Rescale once so the
+        initial loss is close to ‖T‖² rather than ‖T_lifted‖²; that
+        avoids the L-BFGS step-1 overshoot that drives λ → 0.
+        """
+        if loss != "primitive":
+            return lam0
+        # Compute the actual primitive reconstruction norm at this init.
+        Vs = V0[prim_idx]
+        T_init = np.einsum("r,mr,jr,kr->mjk", lam0, Vs, V0, V0, optimize=True)
+        init_norm = float(np.linalg.norm(T_init))
+        if init_norm < 1e-30:
+            return lam0
+        return lam0 * (Tn / init_norm)
+
     # --- Init: tensorly power iteration (deflation-based on the lift) ---
     if power_init and _HAVE_TENSORLY:
         try:
@@ -977,6 +1003,7 @@ def fit_waring(
             )
             if enforce_asr:
                 V0 = asr_project_factor(V0, n_super)
+            lam0 = _rescale_lam_for_target(lam0, V0)
             V_ref, lam_ref, err_ref = refine(V0, lam0)
             _register(V_ref, lam_ref, err_ref, "power")
         except Exception as exc:
@@ -989,6 +1016,7 @@ def fit_waring(
             V0, lam0 = _waring_cp_init(T_lifted, rank, seed)
             if enforce_asr:
                 V0 = asr_project_factor(V0, n_super)
+            lam0 = _rescale_lam_for_target(lam0, V0)
             V_ref, lam_ref, err_ref = refine(V0, lam0)
             _register(V_ref, lam_ref, err_ref, "cp")
         except Exception as exc:

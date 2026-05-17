@@ -370,6 +370,12 @@ def load_system(
         "n_super": int(masses.shape[0]),
         "nat_prim": int(phonon.primitive.masses.shape[0]),
         "z_already_sorted": bool(np.array_equal(atom_perm, np.arange(len(atom_perm)))),
+        "hiphive_cutoffs": (
+            list(cfg.hiphive.cutoffs)
+            if getattr(cfg, "hiphive", None) is not None
+            and getattr(cfg.hiphive, "cutoffs", None) is not None
+            else None
+        ),
     }
 
     return SystemBundle(

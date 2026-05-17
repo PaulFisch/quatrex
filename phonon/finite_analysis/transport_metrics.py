@@ -526,7 +526,13 @@ def plot_transport_compare(
         )
     ax_t.set_xlabel(r"$\omega$  [THz]")
     ax_t.set_ylabel(r"$T(\omega)$")
-    ax_t.set_title(f"Ballistic transmission — {system_name}")
+    # The transmission curves below include the phonon-phonon SE built
+    # from the cutoff-truncated bubble inserted into the Dyson equation —
+    # not the pristine harmonic transmission. Naming is intentionally
+    # "with SE inserted" so the absolute scale (which depends on Γ_lead
+    # and the half-Hilbert Σ^R choice) is not mistaken for the
+    # harmonic-Caroli reference.
+    ax_t.set_title(f"Transmission with phonon-phonon SE — {system_name}")
     ax_t.grid(alpha=0.3, which="both")
     ax_t.legend(fontsize=8)
 

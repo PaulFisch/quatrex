@@ -79,17 +79,19 @@ def fit_decomposition(
     scalar_ranks: Iterable[int] = (2, 4, 8, 16, 32),
     methods: Iterable[str] | None = None,
     extra_kwargs: dict | None = None,
-    skip_pcp: bool = False,
+    include_pcp: bool = False,
     verbose: bool = False,
 ) -> list[DecompRow]:
     """Fit every (method, rank) combination and tabulate (params, error, nnz).
 
-    PCP requires ``phonon`` and ``fc3_raw`` as kwargs and is the slowest /
-    least reliable fitter; pass ``skip_pcp=True`` to drop it.
+    PCP requires ``phonon`` and ``fc3_raw`` as kwargs, is the slowest /
+    least reliable fitter, and routinely produces reconstructions that are
+    *denser* than the input FC3 (rank-2 in this codebase emits 50+× the
+    dense nnz). It is therefore opt-in via ``include_pcp=True``.
     """
     target = bundle.fc3_target
     methods_list = list(methods) if methods is not None else list(FITTERS.keys())
-    if skip_pcp and "PCP" in methods_list:
+    if not include_pcp and "PCP" in methods_list:
         methods_list.remove("PCP")
 
     ranks_per_method = default_ranks_per_method(scalar_ranks, methods_list)
@@ -242,19 +244,34 @@ def plot_nnz_vs_eps(
     out_path: Path,
     *,
     system_name: str = "",
+    failed_frob_threshold: float = 0.99,
 ) -> None:
-    """Reconstructed-tensor nnz at ε = 1e-3 vs sparse-dense baseline."""
+    """Reconstructed-tensor nnz at ε = 1e-3 vs sparse-dense baseline.
+
+    Rows whose Frobenius error is above ``failed_frob_threshold`` (default
+    0.99 → fit explains < 1% of the tensor) are dropped from the plot: an
+    nnz=0 reconstruction collapses to the bottom of a semilogy axis and
+    produces a misleading vertical jump when the next rank suddenly fits
+    something non-trivial. Skipped (method, rank) cells are listed in a
+    footnote so the reader can see which fits diverged.
+    """
     rows = list(rows)
+    valid_rows = [r for r in rows if r.frob_err <= failed_frob_threshold]
+    skipped = [r for r in rows if r.frob_err > failed_frob_threshold]
+
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
-    methods = sorted({r.method for r in rows})
+    methods = sorted({r.method for r in valid_rows})
+    y_cap = 2 * baseline["nnz_at_1em3"]
+    off_scale: list[DecompRow] = []
     for m in methods:
-        m_rows = [r for r in rows if r.method == m]
+        m_rows = [r for r in valid_rows if r.method == m]
         m_rows.sort(key=lambda r: r.n_params)
         ax.semilogy(
             [r.n_params for r in m_rows],
             [r.nnz_at_1em3 for r in m_rows],
             "o-", label=m, lw=1.5, ms=5,
         )
+        off_scale.extend(r for r in m_rows if r.nnz_at_1em3 > y_cap)
     ax.axhline(
         baseline["nnz_at_1em3"], color="k", ls="--", lw=1.0,
         label=f"dense FC3 nnz @ε=1e-3 ({baseline['nnz_at_1em3']:,})",
@@ -262,13 +279,40 @@ def plot_nnz_vs_eps(
     ax.set_xlabel("number of parameters")
     ax.set_ylabel("nonzeros in reconstruction at ε=1e-3")
     ax.set_xscale("log")
+    ax.set_ylim(top=y_cap)
     ax.set_title(f"FC3 decomposition: reconstruction nnz vs. parameter count — {system_name}")
     ax.grid(alpha=0.3, which="both")
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=9, loc="lower right")
+    footnotes: list[str] = []
+    if skipped:
+        footnotes.append(
+            f"not converged (Frobenius err > {failed_frob_threshold}): "
+            + ", ".join(f"{r.method} r={_format_rank(r.rank)}" for r in skipped)
+        )
+    if off_scale:
+        footnotes.append(
+            "off-scale (nnz ≫ dense FC3 baseline): "
+            + ", ".join(
+                f"{r.method} r={_format_rank(r.rank)} → {r.nnz_at_1em3:,}"
+                for r in off_scale
+            )
+        )
+    if footnotes:
+        ax.text(
+            0.02, -0.18, "\n".join(footnotes),
+            transform=ax.transAxes, fontsize=7, color="grey",
+            ha="left", va="top",
+        )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    fig.savefig(Path(out_path).with_suffix(".pdf"))
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(Path(out_path).with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
+
+
+def _format_rank(rank) -> str:
+    if isinstance(rank, tuple):
+        return f"{rank[0]}-{rank[1]}"
+    return str(rank)
 
 
 # --------------------------------------------------------------------------- #
@@ -282,14 +326,14 @@ def run_decomposition(
     *,
     scalar_ranks: Iterable[int] = (2, 4, 8, 16, 32),
     methods: Iterable[str] | None = None,
-    skip_pcp: bool = False,
+    include_pcp: bool = False,
     verbose: bool = False,
 ) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = fit_decomposition(
         bundle, scalar_ranks=scalar_ranks, methods=methods,
-        skip_pcp=skip_pcp, verbose=verbose,
+        include_pcp=include_pcp, verbose=verbose,
     )
     baseline = baseline_dense_nnz(bundle)
     write_decomp_csv(rows, out_dir / "decomp_rank_sweep.csv")

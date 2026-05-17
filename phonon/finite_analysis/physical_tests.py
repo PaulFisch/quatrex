@@ -283,22 +283,16 @@ def fc2_psd_summary(fc2: np.ndarray, masses: np.ndarray) -> dict[str, float]:
     }
 
 
-def plot_dispersion(
-    bundle: SystemBundle, out_path: Path, *, n_q: int = 21
-) -> dict[str, float]:
-    qs, freqs = dispersion_along_axis(bundle, n_q=n_q)
-    fig, ax = plt.subplots(figsize=(6.5, 4.0))
-    for band in range(freqs.shape[1]):
-        ax.plot(qs, freqs[:, band] * THZ_TO_CM1, "k-", lw=0.6, alpha=0.6)
-    ax.set_xlabel(f"q along axis {bundle.transport_axis}  [reciprocal lattice units]")
-    ax.set_ylabel(r"frequency  [cm$^{-1}$]")
-    ax.set_title(f"Phonon dispersion (sanity) — {bundle.name}")
-    ax.axhline(0.0, color="r", ls="--", lw=0.8)
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    fig.savefig(Path(out_path).with_suffix(".pdf"))
-    plt.close(fig)
+def dispersion_residuals(bundle: SystemBundle, *, n_q: int = 21) -> dict[str, float]:
+    """Compute the dispersion-sanity residuals without rendering a plot.
+
+    The PDF dispersion plot used to be emitted from this routine into
+    ``physical_dispersion.pdf``, but that figure was a near-perfect
+    duplicate of the one produced by ``fc_quality.plot_dispersion_compare``.
+    The merged ``fc_quality/`` directory keeps the visualisation; only
+    the numerical residuals live here.
+    """
+    _, freqs = dispersion_along_axis(bundle, n_q=n_q)
     return dispersion_sanity(freqs)
 
 
@@ -327,7 +321,7 @@ def run_physical_tests(bundle: SystemBundle, out_dir: Path) -> dict:
         fc2_psd=fc2_psd_summary(bundle.fc2, bundle.masses),
         fc3_perm_sym=fc3_perm_symmetry(bundle.fc3_target.T_lifted),
         fc3_asr_legs=fc3_asr_legs(bundle.fc3_target.T_lifted, bundle.n_super),
-        dispersion=plot_dispersion(bundle, out_dir / "physical_dispersion.png"),
+        dispersion=dispersion_residuals(bundle),
     )
     payload = asdict(summary)
     payload["units"] = {

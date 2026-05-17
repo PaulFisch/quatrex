@@ -166,7 +166,7 @@ def test_decomposition_msvd_bounds(chain_bundle):
     from finite_analysis.decomposition import fit_decomposition
     rows = fit_decomposition(
         chain_bundle, scalar_ranks=(2, chain_bundle.fc3_target.dim_sc),
-        methods=["mSVD"], skip_pcp=True,
+        methods=["mSVD"], include_pcp=False,
     )
     assert any(
         r.method == "mSVD" and isinstance(r.rank, int)
@@ -688,10 +688,12 @@ def test_cli_smoke(chain_bundle, tmp_path, monkeypatch):
         "--config", str(config),
         "--fc3-path", str(fc3),
         "--out-dir", str(tmp_path / "cli_out"),
-        "--analyses", "physical,sparsity",
+        "--analyses", "physical,fc_quality",
         "--n-slabs-hint", "2",
     ])
     assert rc == 0
     assert (tmp_path / "cli_out" / "summary.json").exists()
     assert (tmp_path / "cli_out" / "physical" / "physical.json").exists()
-    assert (tmp_path / "cli_out" / "sparsity" / "sparsity_fc2_heatmap.png").exists()
+    # The legacy ``sparsity/`` analysis is now folded into ``fc_quality/``.
+    assert (tmp_path / "cli_out" / "fc_quality" / "sparsity_fc2_heatmap.png").exists()
+    assert (tmp_path / "cli_out" / "fc_quality" / "fc_quality_fc3_distance.pdf").exists()
