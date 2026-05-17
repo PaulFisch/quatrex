@@ -162,18 +162,21 @@ def plot_fc3_scatter_3d(
     rel_threshold: float = 1e-3,
     max_points: int = 50_000,
 ) -> None:
-    """3D scatter of FC3 atomic-triplet support, colored by log-magnitude.
+    """3D scatter of FC3 atomic-triplet support + a 2D projection.
 
-    The full ``(n, n, n)`` FC3 atomic-block-norm tensor is computed (compact
-    layout uses primitive indices on the first axis); entries above
-    ``rel_threshold * max`` are plotted. If more than ``max_points`` survive,
-    the threshold is raised until they fit.
+    Two panels side-by-side:
+      * Left: the same 3D scatter as before, with a fixed elevation /
+        azimuth so triplet bands along the wire axis are legible.
+        Marker alpha is reduced so dense clouds don't pile into a
+        single dark blob.
+      * Right: 2D projection onto the (i, j) plane (max over k) so the
+        reader can compare to the FC2 atomic-block heatmap without
+        having to mentally collapse the 3D view.
     """
     norms = fc3_atomic_block_norms(bundle.fc3_raw)
     if norms.shape[0] != norms.shape[1]:
-        # Compact layout: lift to (nat_prim, n, n) only — i-axis is primitive.
         p2s = bundle.phonon.primitive.p2s_map.astype(int)
-        i_axis_label = "i (primitive atom -> supercell idx)"
+        i_axis_label = "i (primitive atom → supercell idx)"
         x_coords = p2s
     else:
         i_axis_label = "i (supercell)"
@@ -187,20 +190,44 @@ def plot_fc3_scatter_3d(
     iI, jI, kI = np.nonzero(mask)
     vals = norms[iI, jI, kI]
 
-    fig = plt.figure(figsize=(8.0, 7.0))
-    ax = fig.add_subplot(111, projection="3d")
-    p = ax.scatter(
+    fig = plt.figure(figsize=(13.0, 6.0))
+    ax3d = fig.add_subplot(1, 2, 1, projection="3d")
+    ax3d.view_init(elev=20, azim=35)
+    p3 = ax3d.scatter(
         x_coords[iI], jI, kI,
-        c=np.log10(vals), cmap="magma", s=4, alpha=0.55,
+        c=np.log10(vals), cmap="viridis", s=10, alpha=0.45,
+        edgecolor="none",
     )
-    ax.set_xlabel(i_axis_label)
-    ax.set_ylabel("j (supercell)")
-    ax.set_zlabel("k (supercell)")
-    ax.set_title(
+    ax3d.set_xlabel(i_axis_label)
+    ax3d.set_ylabel("j (supercell)")
+    ax3d.set_zlabel("k (supercell)")
+    ax3d.set_title(
         f"FC3 support — {bundle.name}\n"
-        f"({mask.sum():,} pts above {floor:.2e} eV/Å³)"
+        f"({int(mask.sum()):,} pts above {floor:.2e} eV/Å³)"
     )
-    fig.colorbar(p, ax=ax, label=r"$\log_{10}\|\Phi_{3,ijk}\|_F$  [eV/Å³]")
+
+    # 2D projection: collapse over k by taking max so the strongest
+    # triplet involving each (i, j) atom pair is shown.
+    proj_ij = norms.max(axis=2)
+    if proj_ij.shape[0] != proj_ij.shape[1]:
+        # Compact layout — lift the i-axis to supercell indices so the
+        # projection is square and the FC2 heatmap is directly comparable.
+        proj_full = np.zeros((norms.shape[1], norms.shape[1]))
+        proj_full[p2s, :] = proj_ij
+        proj_ij = proj_full
+    ax2d = fig.add_subplot(1, 2, 2)
+    pos = proj_ij > 0
+    floor_2d = max(proj_ij[pos].min() if pos.any() else floor, 1e-30)
+    im = ax2d.imshow(
+        proj_ij, origin="lower", cmap="viridis",
+        norm=matplotlib.colors.LogNorm(vmin=floor_2d, vmax=proj_ij.max() or 1.0),
+    )
+    ax2d.set_xlabel("j (supercell)")
+    ax2d.set_ylabel("i (supercell)")
+    ax2d.set_title(r"$\max_k\,\|\Phi_{3,ijk}\|_F$  (projection)")
+    fig.colorbar(p3, ax=ax3d, label=r"$\log_{10}\|\Phi_{3,ijk}\|_F$  [eV/Å³]",
+                 shrink=0.7)
+    fig.colorbar(im, ax=ax2d, label=r"$\max_k\,\|\Phi_{3,ijk}\|_F$  [eV/Å³]")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     fig.savefig(Path(out_path).with_suffix(".pdf"))

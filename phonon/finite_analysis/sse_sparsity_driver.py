@@ -146,7 +146,12 @@ def _frob_bar_chart(
     worst-case effect of each cutoff. Bars are coloured by cutoff family
     (diag-G, FC3 magnitude, FC3 distance).
     """
-    labels: list[str] = list(diffs.keys())
+    # The baseline column is the reference, so baseline−baseline = 0 by
+    # construction. Plotting it as a clipped 1e-30 bar would dominate the
+    # left edge of the chart and squeeze the readable y-range. Drop it
+    # here; the family-coloured legend below still mentions baseline if
+    # any other label references it.
+    labels: list[str] = [lbl for lbl in diffs.keys() if lbl != "baseline"]
     means: list[float] = []
     maxes: list[float] = []
     for lbl in labels:

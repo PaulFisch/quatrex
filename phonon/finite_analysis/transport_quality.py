@@ -390,7 +390,7 @@ def run_transport_quality(
     mixing: float = 0.5,
     anderson_mixing: bool = True,
     extra_kwargs: dict | None = None,
-    skip_pcp: bool = True,
+    include_pcp: bool = False,
     force_recompute: bool = False,
     verbose: bool = True,
 ) -> dict:
@@ -407,7 +407,7 @@ def run_transport_quality(
         transport_direction = "xyz"[bundle.transport_axis]
 
     methods_list = list(methods) if methods is not None else list(METHOD_ORDER)
-    if skip_pcp and "PCP" in methods_list:
+    if not include_pcp and "PCP" in methods_list:
         methods_list.remove("PCP")
 
     extra = dict(extra_kwargs or {})
@@ -471,16 +471,22 @@ def run_transport_quality(
             elif cell.error is not None:
                 print(f"    !! FAILED: {cell.error}")
 
+    # Cross-section area used for the W/(m²·K) conductance — extracted
+    # once here so the CSV and per-wire plot share the same number.
+    A_c_m2 = _box_cross_section_m2(bundle, solver_kw["transport_direction"])
+
     # --- write tabular outputs -------------------------------------------
-    _write_csv(cells, out_dir / "transport_quality.csv", dense)
-    summary = _build_summary(cells, dense)
+    _write_csv(cells, out_dir / "transport_quality.csv", dense, A_c_m2)
+    summary = _build_summary(cells, dense, A_c_m2)
     (out_dir / "transport_quality.json").write_text(
         json.dumps(summary, indent=2, default=str)
     )
 
     # --- plots -----------------------------------------------------------
     _plot_frob_vs_params(cells, dense, out_dir / "transport_quality_frob_vs_params")
-    _plot_ganh_vs_params(cells, dense, out_dir / "transport_quality_ganh_vs_params")
+    _plot_ganh_vs_params(
+        cells, dense, out_dir / "transport_quality_ganh_vs_params", A_c_m2,
+    )
     _plot_frob_vs_transport_err(
         cells, dense, out_dir / "transport_quality_frob_vs_transport_err",
     )
@@ -496,13 +502,49 @@ def run_transport_quality(
 # ---------------------------------------------------------------------------
 
 
-def _write_csv(cells: list[QualityCell], path: Path, dense: QualityCell) -> None:
+def _box_cross_section_m2(bundle: SystemBundle, transport_direction: str) -> float:
+    """Cross-section perpendicular to transport, in m². Same definition as
+    ``solver/dense.py:508–513`` (norm of the cross product of the
+    primitive lattice vectors perpendicular to the transport axis) so
+    the per-wire pW/K conversion is consistent with the W/(m²·K)
+    conductance returned by the solver. For SiNW the box is mostly
+    vacuum; this is documented next to the per-wire column.
+    """
+    lattice = bundle.phonon.primitive.cell
+    tidx = "xyz".index(transport_direction)
+    perp = [i for i in range(3) if i != tidx]
+    a1 = np.asarray(lattice[perp[0]])
+    a2 = np.asarray(lattice[perp[1]])
+    return float(np.linalg.norm(np.cross(a1, a2))) * 1e-20
+
+
+def _ballistic_collapse(cell: QualityCell, dense: QualityCell,
+                        tol: float = 1e-5) -> bool:
+    """True when the SCBA reduced to the ballistic fixed point — i.e. the
+    reconstructed FC3 produced a vanishing bubble and G_anh ≈ G_ball.
+    A common failure mode of low-rank FC3 fits, surfaced in the plots
+    and the CSV so the reader doesn't mistake "flat horizontal line"
+    for "low transport error".
+    """
+    if not (np.isfinite(cell.G_anh) and np.isfinite(cell.G_ball)):
+        return False
+    denom = max(abs(cell.G_ball), 1e-30)
+    return abs(cell.G_anh - cell.G_ball) / denom < tol
+
+
+def _write_csv(cells: list[QualityCell], path: Path, dense: QualityCell,
+               A_c_m2: float) -> None:
     rows = []
     for c in cells:
         rel_G = (
             abs(c.G_anh - dense.G_anh) / max(abs(dense.G_anh), 1e-30)
             if np.isfinite(c.G_anh) else float("nan")
         )
+        # Per-wire conductance: G_anh [W/(m²·K)] × A_c [m²] = W/K. Scale
+        # to pW/K because absolute values for ~1-nm SiNW are tens of
+        # pW/K, much more readable than the 3e7 W/(m²·K) numbers.
+        G_anh_pW_per_K = c.G_anh * A_c_m2 * 1e12 if np.isfinite(c.G_anh) else float("nan")
+        G_ball_pW_per_K = c.G_ball * A_c_m2 * 1e12 if np.isfinite(c.G_ball) else float("nan")
         rows.append({
             "method": c.method,
             "rank": _rank_tag(c.rank),
@@ -510,11 +552,14 @@ def _write_csv(cells: list[QualityCell], path: Path, dense: QualityCell) -> None
             "frob_rel_err": c.frob_rel_err,
             "fit_time_s": c.fit_time_s,
             "transport_time_s": c.transport_time_s,
-            "G_anh": c.G_anh,
+            "G_anh_W_per_m2_K": c.G_anh,
+            "G_anh_pW_per_K": G_anh_pW_per_K,
             "G_anh_rel_err_vs_dense": rel_G,
-            "G_ball": c.G_ball,
+            "G_ball_W_per_m2_K": c.G_ball,
+            "G_ball_pW_per_K": G_ball_pW_per_K,
             "conservation_err": c.conservation_err,
             "n_scba_iter": c.n_scba_iter,
+            "ballistic_collapse": _ballistic_collapse(c, dense),
             "error": c.error or "",
         })
     with open(path, "w", newline="") as f:
@@ -524,7 +569,8 @@ def _write_csv(cells: list[QualityCell], path: Path, dense: QualityCell) -> None
             w.writerow(r)
 
 
-def _build_summary(cells: list[QualityCell], dense: QualityCell) -> dict:
+def _build_summary(cells: list[QualityCell], dense: QualityCell,
+                   A_c_m2: float) -> dict:
     by_method: dict[str, list[dict]] = {}
     for c in cells:
         if c.method == "dense":
@@ -547,12 +593,23 @@ def _build_summary(cells: list[QualityCell], dense: QualityCell) -> dict:
             "frob_rel_err": "dimensionless (relative Frobenius)",
             "G_anh_rel_err": "dimensionless (relative thermal conductance)",
             "G_anh": "W/(m²·K)",
+            "G_anh_pW_per_K": "pW/K (per wire, box-area convention)",
             "fit_time_s": "s",
             "transport_time_s": "s",
+        },
+        "cross_section": {
+            "A_c_m2": A_c_m2,
+            "note": (
+                "Box cross-section perpendicular to the transport axis "
+                "(includes vacuum padding for isolated wires). Per-wire "
+                "pW/K = G_anh × A_c × 1e12. See solver/dense.py:508."
+            ),
         },
         "dense": {
             "G_anh": dense.G_anh,
             "G_ball": dense.G_ball,
+            "G_anh_pW_per_K": dense.G_anh * A_c_m2 * 1e12,
+            "G_ball_pW_per_K": dense.G_ball * A_c_m2 * 1e12,
             "conservation_err": dense.conservation_err,
             "n_scba_iter": dense.n_scba_iter,
             "transport_time_s": dense.transport_time_s,
@@ -614,39 +671,76 @@ def _plot_frob_vs_params(cells, dense, out_base: Path) -> None:
     _save(fig, out_base)
 
 
-def _plot_ganh_vs_params(cells, dense, out_base: Path) -> None:
+def _plot_ganh_vs_params(cells, dense, out_base: Path, A_c_m2: float) -> None:
     if not np.isfinite(dense.G_anh):
         return
-    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    fig, ax = plt.subplots(figsize=(7.0, 4.8))
+    # Primary y-axis: per-wire pW/K (natural unit for a nanowire). The
+    # secondary y-axis on the right keeps the W/(m²·K) convention for
+    # cross-system comparability with the Si/Ge interface result.
+    to_pW_per_K = lambda g: g * A_c_m2 * 1e12  # noqa: E731
+
+    collapsed_x: list[float] = []
+    collapsed_y: list[float] = []
     plotted = False
     for method in METHOD_ORDER:
         rows = _method_cells(cells, method)
         if not rows:
             continue
         x = [c.n_params for c in rows]
-        y = [c.G_anh for c in rows]
+        y = [to_pW_per_K(c.G_anh) for c in rows]
         ax.plot(
             x, y, "-", color=PALETTE[method], marker=MARKERS[method],
             markersize=6, lw=1.5, label=method,
         )
+        for c, yv in zip(rows, y, strict=True):
+            if _ballistic_collapse(c, dense):
+                collapsed_x.append(c.n_params)
+                collapsed_y.append(yv)
         plotted = True
     if not plotted:
         plt.close(fig)
         return
-    # Dense reference: horizontal band ±1%.
+
+    # Two reference lines: dense G_anh (the target) and dense G_ball
+    # (the ballistic fixed point that bad fits collapse onto).
     ax.axhline(
-        dense.G_anh, color=PALETTE["dense"], lw=1.4, ls="-",
-        label=f"dense ({dense.G_anh:.2e})",
+        to_pW_per_K(dense.G_anh), color=PALETTE["dense"], lw=1.6, ls="-",
+        label=f"dense $G_{{anh}}$ = {to_pW_per_K(dense.G_anh):.2f} pW/K",
     )
-    ax.axhspan(
-        0.99 * dense.G_anh, 1.01 * dense.G_anh,
-        color=PALETTE["dense"], alpha=0.12, lw=0,
+    ax.axhline(
+        to_pW_per_K(dense.G_ball), color="0.55", lw=1.2, ls=":",
+        label=f"dense $G_{{ball}}$ = {to_pW_per_K(dense.G_ball):.2f} pW/K",
     )
+    if collapsed_x:
+        ax.scatter(
+            collapsed_x, collapsed_y, s=110, facecolors="none",
+            edgecolors="red", linewidths=1.4, zorder=5,
+            label="ballistic collapse (Σ ≈ 0)",
+        )
+
     ax.set_xlabel(r"# parameters")
-    ax.set_ylabel(r"anharmonic $G_{\mathrm{anh}}$  [W/(m$^2$·K)]")
+    ax.set_ylabel(r"$G_{\mathrm{anh}}$  [pW/K  per wire]")
     ax.set_title("Anharmonic thermal conductance vs. compression budget")
     _setup_axes(ax, xlog=True)
-    ax.legend(fontsize=9, frameon=False)
+    # Bound the y-axis so the dense_G_ball line is at most ~1.1× the top.
+    ymax = 1.1 * to_pW_per_K(dense.G_ball)
+    ax.set_ylim(top=ymax, bottom=0)
+
+    # Right-hand axis: same data in W/(m²·K) for cross-system comparison.
+    ax_r = ax.twinx()
+    ax_r.set_ylim(0, ymax / (A_c_m2 * 1e12))
+    ax_r.set_ylabel(r"$G_{\mathrm{anh}}$  [W/(m$^2$·K)]")
+    for sp in ("top",):
+        ax_r.spines[sp].set_visible(False)
+
+    ax.legend(fontsize=8, frameon=False, loc="upper left", ncol=2)
+    fig.text(
+        0.01, -0.02,
+        f"Box cross-section A_c = {A_c_m2 * 1e20:.1f} Å² "
+        f"({A_c_m2:.2e} m²). Includes vacuum padding for isolated NW.",
+        fontsize=7, color="grey",
+    )
     fig.tight_layout()
     _save(fig, out_base)
 
@@ -689,9 +783,11 @@ def _plot_frob_vs_transport_err(cells, dense, out_base: Path) -> None:
 def _plot_spectral_current(cells, dense, out_base: Path) -> None:
     if dense.freqs_thz.size == 0:
         return
-    fig, ax = plt.subplots(figsize=(7.0, 4.5))
+    fig, ax = plt.subplots(figsize=(7.0, 4.8))
+    # Convert W/THz → pW/THz so the y-axis reads in physical units
+    # instead of "1e-22 W/THz" exponent labels.
     ax.plot(
-        dense.freqs_thz, dense.spectral_heat_current,
+        dense.freqs_thz, dense.spectral_heat_current * 1e12,
         color=PALETTE["dense"], lw=2.0, label="dense",
     )
     for method in METHOD_ORDER:
@@ -702,13 +798,25 @@ def _plot_spectral_current(cells, dense, out_base: Path) -> None:
         if c.freqs_thz.size == 0:
             continue
         ax.plot(
-            c.freqs_thz, c.spectral_heat_current,
+            c.freqs_thz, c.spectral_heat_current * 1e12,
             color=PALETTE[method], lw=1.2, alpha=0.85,
             label=f"{method} r{_rank_tag(c.rank)}",
         )
     ax.set_xlabel(r"$\omega$  [THz]")
-    ax.set_ylabel(r"spectral heat current  [W/THz]")
+    ax.set_ylabel(r"spectral heat current  [pW/THz]")
     ax.set_title("Spectral current — dense vs. highest-rank approximations")
+    # The lowest plotted frequency is Δω, not exact ω=0; mark it so the
+    # finite low-ω weight isn't misread as an unphysical Drude term at
+    # ω=0 (which is excluded from the integration by pos_mask in
+    # solver/dense.py).
+    if dense.freqs_thz.size:
+        dw = float(dense.freqs_thz[0])
+        ax.axvline(dw, color="grey", ls=":", lw=0.7, alpha=0.7)
+        ax.text(
+            dw, ax.get_ylim()[1] * 0.95,
+            f"  $\\Delta\\omega$ = {dw:.2f} THz  (ω=0 excluded)",
+            fontsize=7, color="grey", va="top", ha="left",
+        )
     _setup_axes(ax)
     ax.legend(fontsize=9, frameon=False, ncol=2)
     fig.tight_layout()
@@ -716,8 +824,10 @@ def _plot_spectral_current(cells, dense, out_base: Path) -> None:
 
 
 def _plot_conservation(cells, out_base: Path) -> None:
-    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    fig, ax = plt.subplots(figsize=(7.0, 4.8))
     plotted = False
+    bailed_x: list[float] = []
+    bailed_y: list[float] = []
     for method in METHOD_ORDER:
         rows = _method_cells(cells, method)
         if not rows:
@@ -728,14 +838,28 @@ def _plot_conservation(cells, out_base: Path) -> None:
             x, y, "-", color=PALETTE[method], marker=MARKERS[method],
             markersize=6, lw=1.5, label=method,
         )
+        # A 2-iteration SCBA is the "Σ ≈ 0 → ballistic on first
+        # iterate" pathology (mixing converges trivially because there
+        # is nothing to update). Mark these so the tiny conservation
+        # residual isn't mistaken for a good fit.
+        for c, yv in zip(rows, y, strict=True):
+            if c.n_scba_iter <= 2:
+                bailed_x.append(c.n_params)
+                bailed_y.append(yv)
         plotted = True
     if not plotted:
         plt.close(fig)
         return
+    if bailed_x:
+        ax.scatter(
+            bailed_x, bailed_y, s=100, facecolors="none", edgecolors="red",
+            linewidths=1.4, zorder=5,
+            label="SCBA bailed at iter ≤ 2 (Σ ≈ 0)",
+        )
     ax.set_xlabel(r"# parameters")
     ax.set_ylabel(r"$|J_L - J_R| / (|J_L| + |J_R|)$")
     ax.set_title("Heat-flow conservation residual per fit")
     _setup_axes(ax, xlog=True, ylog=True)
-    ax.legend(fontsize=9, frameon=False)
+    ax.legend(fontsize=8, frameon=False, ncol=2)
     fig.tight_layout()
     _save(fig, out_base)

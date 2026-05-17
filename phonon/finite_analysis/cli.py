@@ -4,18 +4,25 @@ Usage::
 
     python -m phonon_inputs.finite_analysis \
         --config phonon/configs/sinw/sinw100_d5a_vasp.yaml \
-        --analyses fc_quality,sparsity,decomposition,physical \
+        --analyses fc_quality,decomposition,physical \
         --out-dir finite_analysis_out/sinw100
 
 The full analysis set is::
 
     --analyses all              # every analysis below
-    --analyses fc_quality       # FC2/FC3 magnitude binning + dispersion
-    --analyses sparsity         # 2D heatmap, 1D decay, 3D scatter, nnz table
-    --analyses decomposition    # six-method rank sweep + reconstruction nnz
-    --analyses physical         # ASR, perm, Hermiticity, dispersion sanity
+    --analyses fc_quality       # FC2/FC3 magnitude binning, dispersion,
+                                #   atomic-block heatmap, 3D scatter, nnz table
+    --analyses decomposition    # rank sweep + reconstruction nnz
+    --analyses physical         # ASR, perm, Hermiticity, dispersion residuals
+                                #   (numerical only — the dispersion PDF is
+                                #   produced by fc_quality)
     --analyses sse_sparsity     # synthetic + (optional) quatrex Σ blocks
     --analyses cutoffs          # cutoff-hierarchy parametric sweep
+    --analyses sigma_audit      # block-distance Σ audit
+    --analyses transport_quality# FC3-quality vs SCBA transport
+
+The legacy ``sparsity`` analysis has been folded into ``fc_quality``;
+passing it as a top-level analysis is no longer accepted.
 
 Each analysis writes into a per-system subdirectory; a top-level
 ``summary.json`` rolls up the headline numbers across all analyses.
@@ -34,7 +41,6 @@ from .loader import load_system
 
 ALL_ANALYSES = (
     "fc_quality",
-    "sparsity",
     "decomposition",
     "physical",
     "sse_sparsity",
@@ -43,17 +49,36 @@ ALL_ANALYSES = (
     "transport_quality",
 )
 
+# Renamed / folded analyses: accept the old name once and rewrite to the
+# new one with a deprecation warning.
+_ANALYSIS_ALIASES = {
+    "sparsity": "fc_quality",
+}
+
 
 def _parse_analyses(arg: str) -> list[str]:
     if arg.strip().lower() == "all":
         return list(ALL_ANALYSES)
     parts = [p.strip() for p in arg.split(",") if p.strip()]
-    bad = [p for p in parts if p not in ALL_ANALYSES]
-    if bad:
-        raise SystemExit(
-            f"unknown analyses: {bad}; choose from {ALL_ANALYSES} or 'all'"
-        )
-    return parts
+    out: list[str] = []
+    for p in parts:
+        if p in _ANALYSIS_ALIASES:
+            new = _ANALYSIS_ALIASES[p]
+            warnings.warn(
+                f"--analyses {p!r} has been folded into {new!r}; "
+                "treating as such.",
+                DeprecationWarning, stacklevel=2,
+            )
+            if new not in out:
+                out.append(new)
+        elif p in ALL_ANALYSES:
+            if p not in out:
+                out.append(p)
+        else:
+            raise SystemExit(
+                f"unknown analyses: {[p]}; choose from {ALL_ANALYSES} or 'all'"
+            )
+    return out
 
 
 def _parse_ranks(arg: str) -> list[int]:
@@ -104,9 +129,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="Override the resolved fc3.hdf5 path")
     p.add_argument("--out-dir", type=Path, required=True,
                    help="Per-system output directory")
-    p.add_argument("--analyses", type=str, default="fc_quality,sparsity,physical",
+    p.add_argument("--analyses", type=str, default="fc_quality,physical",
                    help="Comma-separated subset of "
-                        f"{ALL_ANALYSES} or 'all' (default: a fast subset)")
+                        f"{ALL_ANALYSES} or 'all' (default: a fast subset). "
+                        "Legacy 'sparsity' is auto-folded into 'fc_quality'.")
     p.add_argument("--name", type=str, default=None,
                    help="System name (default: config filename stem)")
     p.add_argument("--n-slabs-hint", type=int, default=None,
@@ -115,8 +141,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="Cartesian axis along which to slab the device")
     p.add_argument("--rank-sweep", type=_parse_ranks, default=[2, 4, 8, 16],
                    help="Comma-separated decomposition ranks (default: 2,4,8,16)")
-    p.add_argument("--skip-pcp", action="store_true",
-                   help="Skip the PCP fitter in the decomposition sweep")
+    p.add_argument("--include-pcp", action="store_true",
+                   help="Opt-in: also fit PCP in the decomposition sweep. "
+                        "Off by default — PCP reconstructions are typically "
+                        "denser than the input FC3 and slow to fit.")
     p.add_argument("--n-freq-pos", type=int, default=64,
                    help="Positive-frequency grid points for the synthetic GF")
     p.add_argument("--eta-thz", type=float, default=None,
@@ -220,14 +248,11 @@ def main(argv: list[str] | None = None) -> int:
     if "fc_quality" in analyses:
         from .fc_quality import run_fc_quality
         summary["fc_quality"] = run_fc_quality(bundle, out / "fc_quality")
-    if "sparsity" in analyses:
-        from .sparsity import run_sparsity
-        summary["sparsity"] = run_sparsity(bundle, out / "sparsity")
     if "decomposition" in analyses:
         from .decomposition import run_decomposition
         summary["decomposition"] = run_decomposition(
             bundle, out / "decomposition",
-            scalar_ranks=args.rank_sweep, skip_pcp=args.skip_pcp,
+            scalar_ranks=args.rank_sweep, include_pcp=args.include_pcp,
             verbose=args.verbose,
         )
     if "physical" in analyses:

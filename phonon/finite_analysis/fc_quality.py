@@ -160,13 +160,64 @@ def plot_fc2_distance(bins: dict[str, np.ndarray], out_path: Path, system_name: 
     plt.close(fig)
 
 
-def plot_fc3_distance(bins: dict[str, np.ndarray], out_path: Path, system_name: str) -> None:
-    fig, ax = plt.subplots(figsize=(6.5, 4.0))
-    ax.semilogy(bins["diameter_A"], bins["mean_norm"], "o-", lw=1.3, ms=4)
+def plot_fc3_distance(
+    bins: dict[str, np.ndarray], out_path: Path, system_name: str,
+    *, fc3_cutoff_A: float | None = None,
+) -> None:
+    """FC3 magnitude vs triplet diameter.
+
+    Draws filled bars (mean Frobenius per non-empty bin) with marker size
+    scaled by the number of triplets in the bin, plus the hiphive cutoff
+    as a dashed vertical line. Empty bins are suppressed — for SiNW with
+    ``r_cut^(3) = 4 Å`` only ~4 bins carry data, and the older
+    ``semilogy("o-")`` line wrapped through them on a 12-Å range was
+    visually almost empty.
+    """
+    centers = np.asarray(bins["diameter_A"])
+    means = np.asarray(bins["mean_norm"])
+    counts = np.asarray(bins.get("count", np.zeros_like(means)))
+    nonzero = means > 0
+
+    fig, ax = plt.subplots(figsize=(7.0, 4.2))
+    if not nonzero.any():
+        ax.text(0.5, 0.5, "no FC3 data in any bin", ha="center", va="center",
+                transform=ax.transAxes)
+    else:
+        # Bar width: 0.9 × bin spacing, capped so bars don't visually
+        # overlap on a wide x-range.
+        if centers.size > 1:
+            bin_width = 0.9 * float(np.median(np.diff(centers)))
+        else:
+            bin_width = 0.5
+        ax.bar(
+            centers[nonzero], means[nonzero], width=bin_width,
+            color="#4477AA", alpha=0.75, edgecolor="black", lw=0.4,
+            label="mean per non-empty bin",
+        )
+        if counts.any():
+            # Per-bin triplet count as a marker, marker size scales with
+            # log(count) so the eye picks up which bins are statistically
+            # supported.
+            sizes = 8 + 20 * np.log10(np.maximum(counts[nonzero], 1))
+            ax.scatter(
+                centers[nonzero], means[nonzero], s=sizes,
+                facecolor="none", edgecolor="black", lw=0.7,
+                label="triplet count (marker $\\propto \\log_{10}n$)",
+                zorder=3,
+            )
+        ax.set_yscale("log")
+
+    if fc3_cutoff_A is not None and fc3_cutoff_A > 0:
+        ax.axvline(
+            fc3_cutoff_A, color="red", ls="--", lw=1.2, alpha=0.7,
+            label=f"hiphive $r_\\mathrm{{cut}}^{{(3)}}$ = {fc3_cutoff_A:.2f} Å",
+        )
+
     ax.set_xlabel("triplet diameter [Å]")
     ax.set_ylabel(r"mean $\|\Phi_{3,ijk}\|_F$  [eV/Å³]")
     ax.set_title(f"FC3 magnitude vs triplet diameter — {system_name}")
     ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8, frameon=False, loc="upper right")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     fig.savefig(Path(out_path).with_suffix(".pdf"))
@@ -264,13 +315,37 @@ def run_fc_quality(
     *,
     convergence_variants: list[dict] | None = None,
 ) -> dict:
+    """Unified FC quality + sparsity report.
+
+    Subsumes the legacy ``sparsity/`` analysis and the dispersion PDF that
+    used to live under ``physical/``. The merged directory contains:
+
+      * ``fc_quality_fc2_distance.{png,pdf}`` — FC2 magnitude vs distance
+      * ``fc_quality_fc3_distance.{png,pdf}`` — FC3 magnitude vs triplet diameter
+      * ``fc_quality_dispersion.{png,pdf}`` — Γ→Z dispersion (sanity)
+      * ``sparsity_fc2_heatmap.{png,pdf}`` — FC2 atomic-block Frobenius
+      * ``sparsity_fc3_decay_1d.{png,pdf}`` — FC3 atomic-block 1D decay
+      * ``sparsity_fc3_scatter_3d.{png,pdf}`` — FC3 3D scatter + 2D projection
+      * ``sparsity_nnz_table.csv`` — nnz at thresholds 1e-2 … 1e-5
+      * ``fc_quality.json`` — numerical summary
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     fc2_bins = fc2_distance_bins(bundle)
     fc3_bins = fc3_distance_bins(bundle)
+    fc3_cutoff = None
+    try:
+        cutoffs = bundle.meta.get("hiphive_cutoffs") or []
+        if len(cutoffs) >= 2:
+            fc3_cutoff = float(cutoffs[1])
+    except (AttributeError, TypeError, ValueError):
+        fc3_cutoff = None
     plot_fc2_distance(fc2_bins, out_dir / "fc_quality_fc2_distance.png", bundle.name)
-    plot_fc3_distance(fc3_bins, out_dir / "fc_quality_fc3_distance.png", bundle.name)
+    plot_fc3_distance(
+        fc3_bins, out_dir / "fc_quality_fc3_distance.png", bundle.name,
+        fc3_cutoff_A=fc3_cutoff,
+    )
 
     high_sym = freqs_at_high_sym(bundle)
     units = {
@@ -291,18 +366,35 @@ def run_fc_quality(
         bundles = load_convergence_variants(
             Path(bundle.meta["config_path"]), convergence_variants,
         )
-        # Insert the original bundle as the reference.
         bundles = {bundle.name: bundle, **bundles}
         rows = convergence_table(bundles)
-        plot_dispersion_compare(
-            bundles, out_dir / "fc_quality_dispersion.png"
-        )
+        plot_dispersion_compare(bundles, out_dir / "fc_quality_dispersion.png")
         summary["convergence_rows"] = rows
     else:
-        # Single-bundle dispersion plot for completeness.
         plot_dispersion_compare(
             {bundle.name: bundle}, out_dir / "fc_quality_dispersion.png"
         )
+
+    # Sparsity outputs absorbed from the former ``sparsity/`` analysis.
+    from .sparsity import (
+        plot_fc2_heatmap, plot_fc3_decay_1d, plot_fc3_scatter_3d,
+        nnz_table, write_nnz_table_csv,
+    )
+    plot_fc2_heatmap(bundle, out_dir / "sparsity_fc2_heatmap.png")
+    plot_fc3_decay_1d(bundle, out_dir / "sparsity_fc3_decay_1d.png")
+    plot_fc3_scatter_3d(bundle, out_dir / "sparsity_fc3_scatter_3d.png")
+    nnz_rows = nnz_table(bundle)
+    write_nnz_table_csv(nnz_rows, out_dir / "sparsity_nnz_table.csv")
+    nnz_1em3 = next(r for r in nnz_rows if r.eps == 1e-3)
+    summary["sparsity"] = {
+        "fc2_max": float(np.max(np.abs(bundle.fc2))),
+        "fc3_max": float(np.max(np.abs(bundle.fc3_raw))),
+        "nnz_eps_1e_3": {
+            "eps": nnz_1em3.eps,
+            "fc2_nnz": nnz_1em3.fc2_nnz, "fc2_total": nnz_1em3.fc2_total,
+            "fc3_nnz": nnz_1em3.fc3_nnz, "fc3_total": nnz_1em3.fc3_total,
+        },
+    }
 
     (out_dir / "fc_quality.json").write_text(json.dumps(summary, indent=2))
     return summary
