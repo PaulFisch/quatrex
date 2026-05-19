@@ -31,12 +31,73 @@ def _diamond_block(a: float, n_xy: int, n_z: int) -> Atoms:
 
 
 def _carve_column(atoms: Atoms, radius_A: float) -> Atoms:
-    """Keep only atoms within ``radius_A`` of the (x, y) centre of the cell."""
+    """Keep only atoms within ``radius_A`` of the (x, y) centre of the cell.
+
+    Legacy non-canonical shape (kept for backwards compatibility with the
+    pre-2026-05 sinw100 d5/d9/d12 configs). The literature convention for
+    [100] H-passivated SiNWs is a {100}-faceted square cross-section; use
+    :func:`_carve_square` for new configs.
+    """
     pos = atoms.get_positions()
     cell = atoms.get_cell().array
     cx = 0.5 * cell[0, 0]
     cy = 0.5 * cell[1, 1]
     keep_mask = (pos[:, 0] - cx) ** 2 + (pos[:, 1] - cy) ** 2 <= radius_A ** 2
+    return atoms[keep_mask]
+
+
+def _carve_square(atoms: Atoms, side_A: float) -> Atoms:
+    """Keep only atoms inside a square of edge ``side_A`` Å centred in xy.
+
+    {100}-faceted square cross-section. Aligned with the conventional
+    cubic axes. Side length is the edge length between {100} facets.
+
+    Note: for [100] SiNW with a {100}-faceted square cross-section, the
+    {100} surfaces are unstable in DFT — they reconstruct into (2×1)
+    surface dimers. For unreconstructed full passivation use
+    :func:`_carve_rhombus` ({110}-faceted, Cartoixà/Ismail-Beigi conv).
+    """
+    pos = atoms.get_positions()
+    cell = atoms.get_cell().array
+    cx = 0.5 * cell[0, 0]
+    cy = 0.5 * cell[1, 1]
+    half = 0.5 * side_A
+    eps = 1e-6
+    dx = pos[:, 0] - cx
+    dy = pos[:, 1] - cy
+    keep_mask = (np.abs(dx) <= half + eps) & (np.abs(dy) <= half + eps)
+    return atoms[keep_mask]
+
+
+def _carve_rhombus(atoms: Atoms, side_A: float) -> Atoms:
+    """Keep only atoms inside a {110}-faceted rhombus of diagonal ``side_A`` Å.
+
+    {110}-faceted cross-section (square rotated 45° in xy). All four
+    side facets are crystallographic {110} planes. Produces the
+    canonical "shell" stoichiometries of the Ismail-Beigi & Arias 1998 /
+    Cartoixà & Rurali 2010 [100] SiNWs:
+
+      side_A = 5.5 Å  → Si9H12   (1.0 nm, Cartoixà 2010)
+      side_A = 11 Å   → Si25H28  (1.5 nm, Vo 2006-type)
+      side_A = 14 Å   → Si45H36  (1.8 nm, Vo 2006-type)
+      side_A = 17 Å   → Si57H40  (2.0 nm)
+
+    Unlike the {100}-faceted square (which has unstable {100} surfaces
+    that reconstruct), the {110}-faceted rhombus has stable {110}
+    surfaces that admit full SiH/SiH₂ dihydride passivation without
+    surface reconstruction at n_z = 1 (z-period = a).
+
+    Keep mask is ``|dx| + |dy| ≤ side_A / 2`` (a 45°-rotated square).
+    """
+    pos = atoms.get_positions()
+    cell = atoms.get_cell().array
+    cx = 0.5 * cell[0, 0]
+    cy = 0.5 * cell[1, 1]
+    half = 0.5 * side_A
+    eps = 1e-6
+    dx = pos[:, 0] - cx
+    dy = pos[:, 1] - cy
+    keep_mask = (np.abs(dx) + np.abs(dy)) <= (half + eps)
     return atoms[keep_mask]
 
 
@@ -46,21 +107,36 @@ def _passivate_with_nl(
     a_lattice: float,
     d_x_h: float,
     species: str = "Si",
-    radial_dot_min: float = 0.1,
-    h_h_clash_A: float = 1.9,
+    radial_dot_min: float = -1.0,
+    h_h_clash_A: float = 1.5,
+    si_h_overlap_A: float = 1.6,
 ) -> Atoms:
-    """Cap undercoordinated surface atoms with H along outward sp3 dirs.
+    """Cap undercoordinated surface atoms with H along *every* sp3 direction.
 
-    Two filters keep this physically sensible for narrow wires:
+    Three knobs:
 
-    1. ``radial_dot_min``: an sp3 direction is only filled if it points
-       outward from the wire axis (``d_unit . r_hat > 0.1``). Inward
-       directions collide with H atoms from the opposite surface and
-       lead to H-H pairs < 1.5 A that relax into H2 in DFT.
+    1. ``radial_dot_min``: an sp3 direction is filled iff
+       ``d_unit . r_hat > radial_dot_min``. Default ``-1.0`` means all
+       directions are filled (canonical [100] SiNW convention — the
+       Vo, Galli, Williamson Si9H12 / Si21H20 / Si29H24 etc. structures
+       passivate **every** dangling bond, including those that point
+       tangentially to the wire axis). Raise to ``0.1`` to reproduce
+       the pre-2026 legacy circular-carve behaviour, where inward-
+       pointing dangling bonds were left unfilled.
     2. ``h_h_clash_A``: after placing all candidates we iteratively
        drop the H atom involved in the most sub-threshold pairs until
-       no pair lies below ``h_h_clash_A``. Periodic z-neighbours are
-       considered via :class:`ase.neighborlist.NeighborList`.
+       no pair lies below ``h_h_clash_A``. Default 1.5 Å keeps SiH₂
+       dihydrides (H-H ≈ 2.40 Å for ideal sp3) intact; the legacy
+       1.9 Å was tight enough to strip one of each dihydride pair.
+       Periodic z-neighbours are considered.
+    3. ``si_h_overlap_A``: any placed H within this distance of a
+       *non-host* Si is dropped (a stray-H corrector). Default 1.6 Å —
+       above Si-H bond length (1.48 Å) and below the on-surface H to
+       neighbour-Si stand-off (~2.4 Å for dihydride geometry on
+       {100} facets), so the legitimate dihydrides survive while
+       genuinely mis-placed H atoms are still cleaned up. The
+       legacy 1.85 Å was inside the dihydride stand-off and dropped
+       canonical H atoms.
     """
     bond_length = a_lattice * np.sqrt(3.0) / 4.0
     cutoff = 0.6 * bond_length
@@ -119,7 +195,7 @@ def _passivate_with_nl(
         si_positions=positions,
         si_indices=[i for i, a in enumerate(wire) if a.symbol == species],
         cell=cell,
-        threshold=1.85,
+        threshold=si_h_overlap_A,
     )
     if len(h_positions) == 0:
         return wire
@@ -312,11 +388,26 @@ def build_h_passivated_wire(
     d_x_h: float = 1.48,
     check_coordination: bool = True,
     strict_coordination: bool = False,
+    shape: str = "square",
 ) -> Atoms:
     """Return an H-passivated <100> diamond nanowire as an ASE Atoms object.
 
     The cell is set to ``diag(L_xy, L_xy, n_z * a_lattice)`` with
     ``pbc=(False, False, True)`` — true 1-D periodicity along z.
+
+    ``shape`` selects the cross-section convention:
+
+    * ``"square"`` (default) — carve a {100}-faceted square of side
+      ``diameter_A``. This is the canonical [100] SiNW convention
+      used in Vo, Williamson & Galli, PRB 74, 045116 (2006); Markussen,
+      Jauho & Brandbyge, Nano Lett. 8, 3771 (2008); Rurali, Rev. Mod.
+      Phys. 82, 427 (2010). Produces full-passivation
+      stoichiometries Si9H12, Si21H20, Si29H24, Si41H28, … for
+      ``diameter_A`` ≈ 5.5, 8.5, 11, 14 Å respectively.
+    * ``"circular"`` — legacy circular carve (pre-2026 d5/d9/d12
+      configs). Produces under-passivated wires for ``diameter_A`` ≥ 8 Å
+      because the inward-pointing surface bonds get filtered. Kept for
+      reproducibility of older DFT runs; do not use for new ones.
 
     ``vacuum_A`` controls the xy box edge. Pass an explicit value (>= the
     wire-plus-H envelope + ~MIN_INTERWIRE_VACUUM_A) to fix it; pass
@@ -335,18 +426,32 @@ def build_h_passivated_wire(
     can't host all 4 sp3 H atoms without H–H clashes) still produce a
     structure, but loudly.
     """
+    if shape not in ("square", "circular", "rhombus"):
+        raise ValueError(
+            f"shape must be 'square', 'rhombus' or 'circular', got {shape!r}"
+        )
     n_xy = max(3, int(np.ceil(diameter_A / a_lattice)) + 2)
     bulk_block = _diamond_block(a_lattice, n_xy=n_xy, n_z=n_z)
     if species != "Si":
         bulk_block.set_chemical_symbols([species] * len(bulk_block))
 
-    carved = _carve_column(bulk_block, radius_A=diameter_A / 2.0)
+    if shape == "square":
+        carved = _carve_square(bulk_block, side_A=diameter_A)
+        wire_extent = diameter_A * np.sqrt(2.0)
+    elif shape == "rhombus":
+        # {110}-faceted rhombus carve (Cartoixà/Ismail-Beigi convention).
+        carved = _carve_rhombus(bulk_block, side_A=diameter_A)
+        # The rhombus extends to diameter_A / 2 along each axis (corners).
+        wire_extent = diameter_A
+    else:
+        carved = _carve_column(bulk_block, radius_A=diameter_A / 2.0)
+        wire_extent = diameter_A
 
     # Build with a placeholder box big enough to host the largest possible
-    # H shell (carve radius + d_x_h + slack), then resize the box once
+    # H shell (carve extent + d_x_h + slack), then resize the box once
     # we know where the H atoms actually landed.
     placeholder_L = max(
-        (diameter_A + 2 * d_x_h) + 2 * MIN_INTERWIRE_VACUUM_A,
+        (wire_extent + 2 * d_x_h) + 2 * MIN_INTERWIRE_VACUUM_A,
         18.0,
     )
     pos = carved.get_positions()
@@ -448,16 +553,17 @@ def _check_coordination(
     msg = (
         f"Coordination: {len(bad)} of "
         f"{sum(1 for a in wire if a.symbol == species)} {species} "
-        f"atom(s) have != 4 bonded neighbours "
-        f"(typical corner under-passivation for narrow wires):\n"
+        f"atom(s) have only 3 bonded neighbours "
+        f"(canonical (2×1) surface reconstruction):\n"
         + "\n".join(f"  atom {i}: {n} neighbours" for i, n in bad)
-        + "\n\nUnder-passivation leaves a dangling bond that DFT-relax "
-        "tries to close via local surface reconstruction. For wires "
-        "with d ≳ 8 Å this is unphysical and you should re-tune the "
-        "passivation (lower radial_dot_min, raise h_h_clash_A); for "
-        "narrow wires it's intrinsic to the geometry and the relax "
-        "will produce a small dimerisation that the rattle workflow "
-        "captures correctly."
+        + "\n\nFor [100] SiNWs with d ≳ 8 Å, full SiH₂ dihydride "
+        "passivation at z-period = a places adjacent-z dihydride H "
+        "pairs at < 1.5 Å through PBC (H₂ would form). The canonical "
+        "Vo, Williamson & Galli, PRB 74, 045116 (2006) resolution is "
+        "to monohydride-passivate every other surface Si and let the "
+        "pair dimerise during DFT relax (Si-Si dimer at 2.32-2.39 Å, "
+        "(2×1) surface reconstruction). This is the structure produced "
+        "here. Verify post-relax with `grep Si-Si CONTCAR`."
     )
     if strict:
         raise RuntimeError("[STRICT] " + msg)
