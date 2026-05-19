@@ -13,9 +13,15 @@ from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
 from qttools.utils.mpi_utils import distributed_load, get_section_sizes
 from quatrex.core.config import QuatrexConfig
+from quatrex.core.interaction import (
+    CoulombScreeningInteraction,
+    Interaction,
+    PhononPhononInteraction,
+    PseudoScatteringPhononInteraction,
+    build_interactions,
+)
 from quatrex.core.observables import current_conservation, density, device_current
 from quatrex.core.utils import compute_num_connected_blocks, compute_sparsity_pattern
-from quatrex.coulomb_screening import CoulombScreeningSolver, PCoulombScreening
 from quatrex.device.inputs import (
     create_coordinate_grid,
     distributed_read_xyz,
@@ -23,14 +29,10 @@ from quatrex.device.inputs import (
 )
 from quatrex.electron import (
     ElectronSolver,
-    SigmaCoulombScreening,
-    SigmaFock,
-    SigmaPhonon,
     SigmaPhoton,
 )
 from quatrex.grid import get_electron_energies
 from quatrex.phonon import PhononSolver, PiPhonon
-from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 from quatrex.photon import PhotonSolver, PiPhoton
 
 profiler = Profiler()
@@ -278,6 +280,23 @@ class Observables:
 class SCBA:
     """Self-consistent Born approximation (SCBA) solver.
 
+    Architecture
+    ------------
+    The SCBA loop is driven by two registries:
+
+    * ``self.subsystems``: the physical Green's-function subsystems
+      (currently ``{"electron"}`` or ``{"phonon"}``; a future coupled
+      e-ph run would carry both keys). Each subsystem owns its own
+      Dyson solve via :class:`SubsystemSolver`. The driver iterates
+      over the registry instead of branching on ``simulation_type``.
+
+    * ``self.interactions``: a list of :class:`Interaction` instances
+      (Coulomb screening, phonon-phonon, ...). Each interaction
+      reads from one or more subsystems' Green's functions and writes
+      its contribution into the appropriate ``sigma_*`` buffer. A
+      future :class:`ElectronPhononInteraction` plugs in through the
+      same interface without further driver changes.
+
     Parameters
     ----------
     config : QuatrexConfig
@@ -312,22 +331,43 @@ class SCBA:
                 f"Each comm.block has {num_energies_per_rank} grid points.", flush=True
             )
 
+        # ----- Subsystem solvers (Green's function side) --------------
+        # The registry currently carries one subsystem; a future e-ph
+        # coupled run would carry both ``electron`` and ``phonon``.
+        self.subsystems: dict[str, object] = {}
         if config.simulation_type == "electron":
             self.electron_solver = ElectronSolver(
                 self.config,
                 self.energies,
                 sparsity_pattern=self.data.sparsity_pattern,
             )
+            self.subsystems["electron"] = self.electron_solver
         elif config.simulation_type == "phonon":
             self.phonon_solver = PhononSolver(
                 self.config,
                 self.energies,
                 sparsity_pattern=self.data.sparsity_pattern,
             )
+            self.subsystems["phonon"] = self.phonon_solver
         else:
-            raise NotImplementedError("Simulation type not yet supported")
+            raise NotImplementedError(
+                f"simulation_type={config.simulation_type!r} not yet "
+                "supported. The Interaction registry is in place so a "
+                "future ElectronPhononInteraction can drive the "
+                "electron and phonon subsystems in the same SCBA "
+                "iteration; allocate a second SCBAData for the "
+                "second subsystem and append the e-ph SSE to "
+                "self.interactions."
+            )
 
-        # ----- Coulomb screening --------------------------------------
+        # ----- Interaction registry ----------------------------------
+        # Each interaction owns its own scattering-self-energy
+        # machinery; the SCBA driver iterates over the registry rather
+        # than branching on ``config.scba.*`` flags.
+        self._coulomb_screening_interaction: Interaction | None = None
+        self._phonon_phonon_interaction: Interaction | None = None
+        self._pseudo_scattering_phonon_interaction: Interaction | None = None
+
         if self.config.scba.coulomb_screening:
             # Load the Coulomb matrix.
             coulomb_matrix, __ = load_matrix(
@@ -353,40 +393,14 @@ class SCBA:
                 # Remove the zero energy to avoid division by zero.
                 self.coulomb_screening_energies += 1e-6
 
-            (
-                coulomb_matrix.dtranspose()
-                if coulomb_matrix.distribution_state != "nnz"
-                else None
-            )
-            self.sigma_fock = SigmaFock(
-                self.config,
-                coulomb_matrix,
-                self.energies,
-            )
-            # Have to transpose the coulomb matrix back to the original distribution.
-            (
-                coulomb_matrix.dtranspose()
-                if coulomb_matrix.distribution_state == "nnz"
-                else None
-            )
-
-            # NOTE: No sparsity information required here.
-            self.p_coulomb_screening = PCoulombScreening(
-                self.config,
-                self.coulomb_screening_energies,
-            )
-            self.coulomb_screening_solver = CoulombScreeningSolver(
-                self.config,
-                coulomb_matrix,
-                self.coulomb_screening_energies,
+            self._coulomb_screening_interaction = CoulombScreeningInteraction(
+                config=self.config,
+                electron_energies=self.energies,
+                coulomb_screening_energies=self.coulomb_screening_energies,
+                coulomb_matrix=coulomb_matrix,
                 sparsity_pattern=self.data.sparsity_pattern,
             )
-            self.sigma_coulomb_screening = SigmaCoulombScreening(
-                self.config,
-                self.energies,
-            )
 
-        # ----- Photons ------------------------------------------------
         if self.config.scba.photon:
             energies_path = self.config.input_dir / "photon_energies.npy"
             self.photon_energies = distributed_load(energies_path)
@@ -394,7 +408,6 @@ class SCBA:
             self.photon_solver = PhotonSolver(self.config, self.photon_energies)
             self.sigma_photon = SigmaPhoton(...)
 
-        # ----- Phonons ------------------------------------------------
         if self.config.scba.phonon:
             if self.config.phonon.model == "negf":
                 # Phonon energy grid (eV-equivalent). Loaded from disk
@@ -402,22 +415,33 @@ class SCBA:
                 # and phonon-driven simulations.
                 energies_path = self.config.input_dir / "phonon_energies.npy"
                 self.phonon_energies = distributed_load(energies_path)
-                # The phonon Dyson solver consumes Sigma^{<,>,R} from
-                # SigmaPhononPhonon below. PiPhonon remains a stub: in
-                # the 3-phonon case there is no separate "polarization"
-                # screened by a Dyson equation — Phi is the bare vertex.
-                self.sigma_phonon_phonon = SigmaPhononPhonon(
-                    config,
-                    self.phonon_energies,
-                    block_sizes=np.asarray(self.data.g_lesser.block_sizes),
+                # PiPhonon remains a stub: in the 3-phonon case there
+                # is no separate "polarization" screened by a Dyson
+                # equation — Phi is the bare vertex.
+                self._phonon_phonon_interaction = PhononPhononInteraction(
+                    config=self.config,
+                    phonon_energies=self.phonon_energies,
+                    block_sizes=self.data.g_lesser.block_sizes,
                 )
 
             elif self.config.phonon.model == "pseudo-scattering":
-                self.sigma_phonon = SigmaPhonon(config, self.energies)
+                self._pseudo_scattering_phonon_interaction = (
+                    PseudoScatteringPhononInteraction(
+                        config=self.config,
+                        electron_energies=self.energies,
+                    )
+                )
 
         self.data = SCBAData(
             config, electron_energies=self.energies
         )  # real data
+
+        # Build the ordered interaction registry after all per-
+        # interaction state has been constructed. The order in which
+        # interactions write into ``sigma_*`` doesn't matter for the
+        # currently registered ones (each is an independent additive
+        # contribution).
+        self.interactions: list[Interaction] = build_interactions(self)
 
     def _stash_sigma(self) -> None:
         """Stash the current into the previous self-energy buffers."""
@@ -494,98 +518,18 @@ class SCBA:
 
         return False  # TODO: :-)
 
-    @profiler.profile(label="SCBA: Phonon interactions", level="default", comm=comm)
-    def _compute_phonon_interaction(self):
-        """Computes the phonon interaction."""
-        if self.config.phonon.model == "negf":
-            # 3-phonon scattering is handled by
-            # _compute_phonon_phonon_interaction(); nothing else to do
-            # here unless a separate electron-phonon NEGF channel is
-            # added later.
-            return
+    @profiler.profile(label="SCBA: Interactions", level="default", comm=comm)
+    def _compute_interactions(self) -> None:
+        """Iterate the interaction registry, accumulating into sigma_*.
 
-        elif self.config.phonon.model == "pseudo-scattering":
-            self.sigma_phonon.compute(
-                self.data.g_lesser,
-                self.data.g_greater,
-                out=(
-                    self.data.sigma_lesser,
-                    self.data.sigma_greater,
-                    self.data.sigma_retarded,
-                ),
-            )
-
-    @profiler.profile(label="SCBA: Photon interactions", level="default", comm=comm)
-    def _compute_photon_interaction(self):
-        """Computes the photon interaction."""
-        raise NotImplementedError
-
-    @profiler.profile(label="SCBA: Electron interactions", level="default", comm=comm)
-    def _compute_coulomb_screening_interaction(self):
-        """Computes the Coulomb screening interaction."""
-
-        self.data.p_greater.allocate_data()
-        self.data.p_lesser.allocate_data()
-        self.data.p_retarded.allocate_data()
-
-        self.p_coulomb_screening.compute(
-            self.data.g_lesser,
-            self.data.g_greater,
-            out=(self.data.p_lesser, self.data.p_greater, self.data.p_retarded),
-        )
-
-        self.data.w_greater.allocate_data()
-        self.data.w_lesser.allocate_data()
-
-        self.coulomb_screening_solver.solve(
-            self.data.p_lesser,
-            self.data.p_greater,
-            self.data.p_retarded,
-            out=(self.data.w_lesser, self.data.w_greater),
-        )
-
-        self._compute_coulomb_screening_observables()
-
-        self.data.p_lesser.free_data()
-        self.data.p_greater.free_data()
-        self.data.p_retarded.free_data()
-
-        self.sigma_fock.compute(
-            self.data.g_lesser,
-            out=(self.data.sigma_retarded,),
-        )
-
-        self.sigma_coulomb_screening.compute(
-            self.data.g_lesser,
-            self.data.g_greater,
-            self.data.w_lesser,
-            self.data.w_greater,
-            out=(
-                self.data.sigma_lesser,
-                self.data.sigma_greater,
-                self.data.sigma_retarded,
-            ),
-        )
-
-        self.data.w_greater.free_data()
-        self.data.w_lesser.free_data()
-
-    @profiler.profile(label="SCBA: Phonon-Phonon interactions", level="default", comm=comm)
-    def _compute_phonon_phonon_interaction(self):
-        """Adds the 3-phonon scattering self-energy to Sigma_*."""
-        if not self.config.scba.phonon:
-            return
-        if self.config.phonon.model != "negf":
-            return
-        self.sigma_phonon_phonon.compute(
-            self.data.g_lesser,
-            self.data.g_greater,
-            out=(
-                self.data.sigma_lesser,
-                self.data.sigma_greater,
-                self.data.sigma_retarded,
-            ),
-        )
+        Each :class:`Interaction` reads from ``self.data.g_*`` and
+        additively writes its contribution into ``self.data.sigma_*``;
+        the order in which they fire is set by
+        :func:`quatrex.core.interaction.build_interactions` and is
+        currently order-independent because the contributions commute.
+        """
+        for interaction in self.interactions:
+            interaction.compute(self)
 
     @profiler.profile(label="SCBA: G observables", level="default", comm=comm)
     def _compute_electron_observables(self) -> None:
@@ -737,15 +681,12 @@ class SCBA:
             with profiler.profile_range(
                 label="SCBA: Iteration", level="default", comm=comm
             ):
-                if self.config.simulation_type == "electron":
-                    self.electron_solver.solve(
-                        self.data.sigma_lesser,
-                        self.data.sigma_greater,
-                        self.data.sigma_retarded,
-                        out=(self.data.g_lesser, self.data.g_greater, self.data.g_retarded),
-                    )
-                else:
-                    self.phonon_solver.solve(
+                # Drive each subsystem's Dyson solve. Single-subsystem
+                # runs have exactly one entry in self.subsystems; the
+                # loop generalises to a future coupled e-ph run that
+                # carries both keys.
+                for solver in self.subsystems.values():
+                    solver.solve(
                         self.data.sigma_lesser,
                         self.data.sigma_greater,
                         self.data.sigma_retarded,
@@ -774,14 +715,7 @@ class SCBA:
                         m.dtranspose(discard=True)  # These can be safely discarded.
                         assert m.distribution_state == "nnz"
 
-                if self.config.scba.coulomb_screening:
-                    self._compute_coulomb_screening_interaction()
-
-                if self.config.scba.photon:
-                    self._compute_photon_interaction()
-
-                if self.config.scba.phonon:
-                    self._compute_phonon_interaction()
+                self._compute_interactions()
 
                 with profiler.profile_range(
                     label="SCBA: stack->nnz transpose back", level="default", comm=comm
