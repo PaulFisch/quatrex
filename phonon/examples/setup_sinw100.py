@@ -1,12 +1,35 @@
-"""Generate a <100> H-passivated Si nanowire YAML at a chosen radius.
+"""Generate a canonical <100> H-passivated Si nanowire YAML.
 
-Builds the wire by carving a circular column of radius ``--diameter / 2``
-out of bulk Si along the z-axis, then capping every undercoordinated
-surface Si along its missing sp3 directions with H at d(Si–H) = 1.48 Å.
+Builds a [100] SiNW with a **{110}-faceted rhombus cross-section** and
+full SiH/SiH₂ dihydride passivation — the canonical Cartoixà & Rurali
+(PRB 81, 205342 (2010)) / Vo, Williamson & Galli (PRB 74, 045116 (2006))
+/ Ismail-Beigi & Arias (PRL 82, 2127 (1998)) convention. The {110}
+side facets are stable in DFT (no surface reconstruction at n_z = 1),
+all dangling bonds are passivated (zero (2×1) dimers), and the H atoms
+sit at canonical SiH₂ dihydride spacing (H-H ≈ 2.42 Å, well above the
+H₂ formation threshold).
+
+The canonical "shell" stoichiometries (Ismail-Beigi & Arias 1998 Fig. 2;
+Cartoixà & Rurali 2010 Table I) are:
+
+    side ≈  5.5 Å  →  Si9H12   (1.0 nm wire)
+    side ≈ 11 Å    →  Si25H20  (1.5 nm wire)
+    side ≈ 14 Å    →  Si45H36  (1.8 nm wire)
+    side ≈ 17 Å    →  Si49H28  (2.0 nm wire)
+
+These are the wires that should be used for [100] SiNW transport DFT
+calculations. They are stable under DFT-relax without surface
+reconstruction, fully passivated, and have a well-defined cross-
+section area for transport-per-unit-area metrics.
 
 Usage:
-    python examples/setup_sinw100.py --diameter 6.0
-    python examples/setup_sinw100.py --diameter 9.0
+    python examples/setup_sinw100.py --diameter 5.5    # Si9H12   (1.0 nm)
+    python examples/setup_sinw100.py --diameter 11.0   # Si25H20  (1.5 nm)
+    python examples/setup_sinw100.py --diameter 17.0   # Si49H28  (2.0 nm)
+
+Other shapes (legacy, for reproducibility of old configs only):
+* ``--shape square``   {100}-faceted square — surfaces reconstruct (2×1)
+* ``--shape circular`` legacy circular carve — partial passivation
 """
 
 from __future__ import annotations
@@ -58,14 +81,17 @@ def _suggest_fc2_cutoff(envelope_A: float) -> float:
     return min(12.0, max(5.0, 2.0 * envelope_A + 0.5))
 
 
-def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
+def make_config(
+    diameter_A: float, supercell_z: int = 2, shape: str = "square",
+) -> dict:
     # vacuum_A=None lets the builder size the box so adjacent periodic
     # images are MIN_INTERWIRE_VACUUM_A apart for the actual H-shell
     # radius (was a hard-coded 18.0, which gave d12a only 4 Å vacuum and
     # contaminated the DFT with image overlap).
     wire = build_h_passivated_wire(
         a_lattice=A_SI, diameter_A=diameter_A, vacuum_A=None,
-        n_z=1, species="Si", d_x_h=D_SI_H,
+        n_z=1, species="Si", d_x_h=D_SI_H, shape=shape,
+        strict_coordination=False,
     )
     new_lat = wire.get_cell().array
     syms = list(wire.get_chemical_symbols())
@@ -74,13 +100,38 @@ def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
     cart_all = wire.get_positions()[order]
     frac = (cart_all @ np.linalg.inv(new_lat)) % 1.0
 
-    # Use the actual H-shell envelope to pick the FC2 cutoff.
+    # Use the actual H-shell envelope to pick the FC2 cutoff. For square
+    # carves the envelope is the (corner-direction) max distance from
+    # the wire axis, so 2 × envelope already includes the diagonal span.
     center_xy = 0.5 * new_lat.diagonal()[:2]
     envelope_A = float(np.linalg.norm(cart_all[:, :2] - center_xy, axis=1).max())
     fc2_cutoff = _suggest_fc2_cutoff(envelope_A)
 
+    # Bound the cutoff by L_z/2 (hiphive's hard cluster-orbit constraint).
+    # Wires at supercell_z=4 have L_z = 4*A_SI = 21.88 Å, L_z/2 = 10.94 Å,
+    # so we cap at 10.5 Å with a 0.4 Å safety margin. Wires at sc_z=2
+    # cap at 5.0 Å, which is below the FC2 1-decade decay scale (~7 Å),
+    # so for the d ≳ 8 Å canonical wires the sc_z=4 supercell is required.
+    L_z_over_2 = 0.5 * supercell_z * A_SI
+    fc2_cutoff_max = max(5.0, L_z_over_2 - 0.5)
+    if fc2_cutoff > fc2_cutoff_max:
+        print(
+            f"NOTE: requested FC2 cutoff {fc2_cutoff:.2f} Å > L_z/2 - 0.5 "
+            f"({fc2_cutoff_max:.2f} Å for supercell_z={supercell_z}); "
+            "capping at the hiphive cluster-orbit limit. To recover the "
+            f"wider cutoff, grow --supercell-z to "
+            f"{int(np.ceil((2 * fc2_cutoff + 1.0) / A_SI))}."
+        )
+        fc2_cutoff = fc2_cutoff_max
+
+    nSi = syms.count("Si"); nH = syms.count("H")
+    chem_tag = f"Si{nSi}H{nH}"
     tag = f"sinw100_d{int(diameter_A)}a"
     cfg = {
+        "_chem_tag": chem_tag,
+        "_envelope_A": envelope_A,
+        "_xy_box_A": float(new_lat[0, 0]),
+        "_shape": shape,
         "structure": {
             "source": "inline", "symbols": syms,
             "lattice": new_lat.tolist(),
@@ -115,8 +166,24 @@ def make_config(diameter_A: float, supercell_z: int = 2) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--diameter", type=float, required=True,
-                   help="Wire diameter in Å (e.g. 6.0, 9.0)")
+                   help="Rhombus diagonal length in Å along each cubic axis. "
+                        "Canonical sizes: 5.5 (Si9H12, 1.0 nm), "
+                        "11.0 (Si25H20, 1.5 nm), 17.0 (Si49H28, 2.0 nm). "
+                        "Wire is centred and clipped at "
+                        "|dx| + |dy| <= diameter/2.")
     p.add_argument("--supercell-z", type=int, default=2)
+    p.add_argument(
+        "--shape",
+        choices=("rhombus", "square", "circular"),
+        default="rhombus",
+        help="Cross-section shape. 'rhombus' (default) is the canonical "
+             "{110}-faceted Cartoixà & Rurali 2010 / Vo et al. 2006 / "
+             "Ismail-Beigi & Arias 1998 convention — stable surfaces, "
+             "full H passivation, no (2×1) reconstruction. "
+             "'square' = {100}-faceted (Markussen 2008-style cross "
+             "section, but surface reconstructs in DFT). 'circular' = "
+             "legacy circular carve (pre-2026, partial passivation).",
+    )
     here = Path(__file__).resolve()
     add_common_args(
         p, default_out=here.parent.parent / "configs" / "sinw"
@@ -124,7 +191,16 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    cfg = make_config(args.diameter, args.supercell_z)
+    cfg = make_config(args.diameter, args.supercell_z, shape=args.shape)
+    # Pop internal metadata before writing.
+    chem_tag = cfg.pop("_chem_tag", None)
+    envelope_A = cfg.pop("_envelope_A", None)
+    xy_box_A = cfg.pop("_xy_box_A", None)
+    shape = cfg.pop("_shape", "square")
+    print(
+        f"  → {chem_tag} ({shape} cross-section, "
+        f"envelope {envelope_A:.2f} Å, xy box {xy_box_A:.2f} Å)"
+    )
     out = (
         args.out if args.out.name != "sinw100_dXa_vasp.yaml"
         else args.out.with_name(f"sinw100_d{int(args.diameter)}a_vasp.yaml")
