@@ -357,7 +357,10 @@ def sweep_length(
                 eta_factor=args.eta_factor,
                 max_scba_iter=args.max_scba_iter,
                 scba_tol=args.scba_tol,
+                conservation_tol=args.conservation_tol,
                 mixing=args.mixing,
+                anderson_mixing=args.anderson_mixing,
+                anderson_depth=args.anderson_depth,
                 ballistic_only=k.ballistic_only,
                 verbose=args.verbose,
             )
