@@ -123,128 +123,160 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     ) -> None:
         """Compute the 3-phonon self-energy contribution.
 
+        The bubble runs in ``stack`` distribution (each rank holds an
+        ω slice of every BT-band block). Only the diagonal blocks
+        $g_{KK}$ enter the contraction, so only those are gathered to
+        full ω; off-diagonal $G$ blocks are never communicated. The
+        ``(I,J)`` output loop is split across ``comm.block``: each
+        rank computes only the ``(I,J)`` outputs whose row index
+        ``I`` lies in its local block range.
+
+        The input distribution state of every buffer is restored on
+        exit, so the routine is composable with both the legacy
+        ``stack``-state SCBA loop and the production
+        ``stack`` → ``nnz`` → ``stack`` SCBA pattern.
+
         Parameters
         ----------
         g_lesser, g_greater
-            Phonon Green's functions; will be operated on in stack
-            distribution.
+            Phonon Green's functions.
         out
             ``(sigma_lesser, sigma_greater, sigma_retarded)`` —
-            additive: this routine adds its contribution.
+            additive: this routine adds its contribution into the
+            existing buffers.
         """
         sigma_lesser, sigma_greater, sigma_retarded = out
 
-        # Ensure we are in stack distribution (matches Dyson solver).
-        for m in (
+        all_bufs = (
             g_lesser, g_greater, sigma_lesser, sigma_greater, sigma_retarded,
-        ):
+        )
+
+        # Remember each buffer's incoming distribution state so we
+        # can restore it on exit. ``dtranspose`` toggles state
+        # unconditionally, so we must keep track ourselves.
+        incoming_states = {id(m): m.distribution_state for m in all_bufs}
+
+        # Move to stack distribution: the FFT-along-ω needs the full
+        # axis on a single rank, which is what ``stack`` provides
+        # after the diagonal-block all-gather below.
+        for m in all_bufs:
             if m.distribution_state != "stack":
                 m.dtranspose()
 
-        # Gather full ω-axis for every BTD G block
-        gl_full, gg_full = self._gather_full_btd(g_lesser, g_greater)
+        try:
+            self._compute_in_stack(
+                g_lesser, g_greater,
+                sigma_lesser, sigma_greater, sigma_retarded,
+            )
+        finally:
+            # Restore incoming distribution states. ``dtranspose``
+            # toggles unconditionally, so if the buffer was nnz on
+            # entry, calling ``dtranspose`` once now takes it back
+            # from stack to nnz.
+            for m in all_bufs:
+                if m.distribution_state != incoming_states[id(m)]:
+                    m.dtranspose()
 
-        # Local axis for output assignment + Hilbert transform.
-        ne_local = int(self.local_frequencies.shape[0])
-        # Full ω-axis recovered from the gather.
-        ne_full = next(iter(gl_full.values())).shape[0]
+    # ------------------------------------------------------------------
+    # Internals — stack-state compute path
+    # ------------------------------------------------------------------
+
+    def _compute_in_stack(
+        self,
+        g_lesser: DSDBSparse,
+        g_greater: DSDBSparse,
+        sigma_lesser: DSDBSparse,
+        sigma_greater: DSDBSparse,
+        sigma_retarded: DSDBSparse,
+    ) -> None:
+        """Bubble + write-back, assuming all buffers are in stack."""
+        # Local block range (global indices) for this comm.block rank.
+        block_start, block_end = self._block_range(g_lesser)
+        num_local_blocks = block_end - block_start
+
+        # Gather diagonal G blocks at full ω across comm.stack, then
+        # (when comm.block.size > 1) collect them across comm.block so
+        # every rank has every diagonal block at full ω.
+        gl_diag, gg_diag = self._gather_diagonal_blocks(
+            g_lesser, g_greater, block_start, num_local_blocks,
+        )
+        if not gl_diag:
+            return  # nothing local to do
+
+        # Full-ω axis recovered from the gather, plus the frequency
+        # axis itself (needed for the Hilbert transform that closes
+        # the retarded SSE).
+        ne_full = next(iter(gl_diag.values())).shape[0]
         full_freqs = self._gather_frequencies(ne_full)
         n_fft = 2 * ne_full - 1
         prefactor = bubble_prefactor_thz(
             float(full_freqs[1] - full_freqs[0])
         )
 
-        # Compute Σ^{<,>} blocks at the full w resolution on every
-        # rank, then slice back to the local energy chunk.
-        sl_full: dict[tuple[int, int], NDArray] = {}
-        sg_full: dict[tuple[int, int], NDArray] = {}
-        for (I, J), pairs in self._phi_pair_index.items():
+        # Local ω slice: we accumulate at full ω on this rank, then
+        # write only the slice owned by this comm.stack rank.
+        e_lo = int(np.sum(g_lesser.stack_section_sizes[: ranks.stack.rank]))
+        ne_local = int(self.local_frequencies.shape[0])
+        e_hi = e_lo + ne_local
+
+        sl_view = sigma_lesser.stack[...]
+        sg_view = sigma_greater.stack[...]
+        sr_view = sigma_retarded.stack[...]
+
+        for (I_glob, J_glob), pairs in self._phi_pair_index.items():
+            # Distribute (I, J) outputs across comm.block: each rank
+            # only handles outputs whose row I is in its block range.
+            if not (block_start <= I_glob < block_end):
+                continue
+
+            # Output indices are local-to-rank. The block indexer
+            # accepts col indices in [0, num_blocks - block_start);
+            # filter to keep only outputs that resolve to a valid
+            # local addressable block.
+            J_loc = J_glob - block_start
+            if J_loc < 0 or J_loc >= len(g_lesser.local_block_sizes):
+                continue
+            I_loc = I_glob - block_start
+
+            sl_full = None
+            sg_full = None
             for K1, K2, phi_left, phi_right in pairs:
-                key_a = (K1, K1)
-                key_b = (K2, K2)
-                if key_a not in gl_full or key_b not in gl_full:
-                    continue  # skip if G block is missing (shouldn't happen)
-                self._accumulate_pair(
-                    I=I, J=J,
+                if K1 not in gl_diag or K2 not in gl_diag:
+                    continue
+                sl = self._bubble_block(
                     phi_left=phi_left, phi_right=phi_right,
-                    gl_a=gl_full[key_a], gl_b=gl_full[key_b],
-                    gg_a=gg_full[key_a], gg_b=gg_full[key_b],
-                    sl_out=sl_full, sg_out=sg_full,
+                    G_inner_a=gl_diag[K1], G_inner_b=gl_diag[K2],
                     n_fft=n_fft, prefactor=prefactor,
                 )
+                sg = self._bubble_block(
+                    phi_left=phi_left, phi_right=phi_right,
+                    G_inner_a=gg_diag[K1], G_inner_b=gg_diag[K2],
+                    n_fft=n_fft, prefactor=prefactor,
+                )
+                sl_full = sl if sl_full is None else sl_full + sl
+                sg_full = sg if sg_full is None else sg_full + sg
 
-        # Sigma^R from the bosonic Hilbert transform on the FULL axis,
-        # so the integral is consistent across ranks.
-        sr_full: dict[tuple[int, int], NDArray] = {}
-        for key in set(sl_full) | set(sg_full):
-            sl = sl_full.get(key)
-            sg = sg_full.get(key)
-            if sl is None:
-                sl = xp.zeros_like(sg)
-            if sg is None:
-                sg = xp.zeros_like(sl)
-            delta = sg - sl
-            sr = 0.5 * delta
+            if sl_full is None:
+                continue
+
+            delta = sg_full - sl_full
+            sr_full = 0.5 * delta
             if self.retarded_method == "fft":
-                sr = sr + 0.5j * hilbert_transform(delta, full_freqs)
-            sr_full[key] = sr
+                sr_full = sr_full + 0.5j * hilbert_transform(delta, full_freqs)
 
-        # Slice back to local energy chunk and write into the
-        # DSDBSparse outputs (additive).
-        e_lo = self._local_energy_offset(ne_local, ne_full)
-        e_hi = e_lo + ne_local
-        sigma_lesser_view = sigma_lesser.stack[...]
-        sigma_greater_view = sigma_greater.stack[...]
-        sigma_retarded_view = sigma_retarded.stack[...]
-        for (I, J), block in sl_full.items():
-            sigma_lesser_view.blocks[I, J] = (
-                sigma_lesser_view.blocks[I, J] + block[e_lo:e_hi]
+            sl_view.blocks[I_loc, J_loc] = (
+                sl_view.blocks[I_loc, J_loc] + sl_full[e_lo:e_hi]
             )
-        for (I, J), block in sg_full.items():
-            sigma_greater_view.blocks[I, J] = (
-                sigma_greater_view.blocks[I, J] + block[e_lo:e_hi]
+            sg_view.blocks[I_loc, J_loc] = (
+                sg_view.blocks[I_loc, J_loc] + sg_full[e_lo:e_hi]
             )
-        for (I, J), block in sr_full.items():
-            sigma_retarded_view.blocks[I, J] = (
-                sigma_retarded_view.blocks[I, J] + block[e_lo:e_hi]
+            sr_view.blocks[I_loc, J_loc] = (
+                sr_view.blocks[I_loc, J_loc] + sr_full[e_lo:e_hi]
             )
 
     # ------------------------------------------------------------------
     # Internals — block-bubble FFT contraction
     # ------------------------------------------------------------------
-
-    def _accumulate_pair(
-        self,
-        *,
-        I: int,
-        J: int,
-        phi_left: NDArray,
-        phi_right: NDArray,
-        gl_a: NDArray,
-        gl_b: NDArray,
-        gg_a: NDArray,
-        gg_b: NDArray,
-        sl_out: dict[tuple[int, int], NDArray],
-        sg_out: dict[tuple[int, int], NDArray],
-        n_fft: int,
-        prefactor: complex,
-    ) -> None:
-        for gx_a, gx_b, sx_out in (
-            (gl_a, gl_b, sl_out),
-            (gg_a, gg_b, sg_out),
-        ):
-            sigma_block = self._bubble_block(
-                phi_left=phi_left,
-                phi_right=phi_right,
-                G_inner_a=gx_a,
-                G_inner_b=gx_b,
-                n_fft=n_fft,
-                prefactor=prefactor,
-            )
-            key = (I, J)
-            if key not in sx_out:
-                sx_out[key] = xp.zeros_like(sigma_block)
-            sx_out[key] = sx_out[key] + sigma_block
 
     def _bubble_block(
         self,
@@ -274,53 +306,103 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     # Internals — distribution helpers
     # ------------------------------------------------------------------
 
-    def _gather_full_btd(
-        self, g_lesser: DSDBSparse, g_greater: DSDBSparse
-    ) -> tuple[
-        dict[tuple[int, int], NDArray],
-        dict[tuple[int, int], NDArray],
-    ]:
-        """All-gather BTD G blocks across ``comm.stack``.
+    @staticmethod
+    def _block_range(m: DSDBSparse) -> tuple[int, int]:
+        """Return the [start, end) global-block range owned by this
+        ``comm.block`` rank.
+        """
+        start = int(m.block_section_offsets[ranks.block.rank])
+        end = int(m.block_section_offsets[ranks.block.rank + 1])
+        return start, end
 
-        Returns dicts mapping ``(I, J)`` (with ``|I-J| <= 1``) to a
-        ``(ne_full, b_I, b_J)`` array, replicated on every rank.
+    def _gather_diagonal_blocks(
+        self,
+        g_lesser: DSDBSparse,
+        g_greater: DSDBSparse,
+        block_start: int,
+        num_local_blocks: int,
+    ) -> tuple[
+        dict[int, NDArray],
+        dict[int, NDArray],
+    ]:
+        """Gather diagonal $G_{KK}$ blocks at full ω on every rank.
+
+        Returns dicts mapping the **global** transport-cell index ``K``
+        to a ``(ne_full, n_K, n_K)`` array. Only diagonal blocks are
+        gathered: the 3-phonon bubble (\\cref{eq:phph_pair_index})
+        consumes ``G[(K1, K1)]`` and ``G[(K2, K2)]`` exclusively, so
+        BT-off-diagonal $G$ blocks never enter the contraction.
+
+        For ``comm.block.size > 1`` we additionally
+        ``comm.block.all_gather`` the locally-gathered diagonals so
+        every block rank can address every global ``K`` (the FC3
+        block-pair index may reference $K$ outside this rank's range).
+        Currently requires uniform block sizes; mixed sizes raise a
+        clear ``NotImplementedError``.
         """
         gl_view = g_lesser.stack[...]
         gg_view = g_greater.stack[...]
 
-        if ranks.stack.size == 1:
-            out_l = {}
-            out_g = {}
-            for I in range(self.n_blocks):
-                for dJ in (-1, 0, 1):
-                    J = I + dJ
-                    if 0 <= J < self.n_blocks:
-                        out_l[(I, J)] = xp.asarray(gl_view.blocks[I, J])
-                        out_g[(I, J)] = xp.asarray(gg_view.blocks[I, J])
-            return out_l, out_g
+        # Local diagonals at full ω.
+        gl_local: dict[int, NDArray] = {}
+        gg_local: dict[int, NDArray] = {}
+        for K_loc in range(num_local_blocks):
+            K_glob = block_start + K_loc
+            local_l = xp.asarray(gl_view.blocks[K_loc, K_loc])
+            local_g = xp.asarray(gg_view.blocks[K_loc, K_loc])
+            if ranks.stack.size == 1:
+                gl_local[K_glob] = local_l
+                gg_local[K_glob] = local_g
+            else:
+                gl_local[K_glob] = ranks.stack.all_gather_v(
+                    local_l, axis=0, mask=g_lesser._stack_padding_mask,
+                )
+                gg_local[K_glob] = ranks.stack.all_gather_v(
+                    local_g, axis=0, mask=g_greater._stack_padding_mask,
+                )
 
-        out_l: dict[tuple[int, int], NDArray] = {}
-        out_g: dict[tuple[int, int], NDArray] = {}
-        for I in range(self.n_blocks):
-            for dJ in (-1, 0, 1):
-                J = I + dJ
-                if not (0 <= J < self.n_blocks):
-                    continue
-                local_l = xp.asarray(gl_view.blocks[I, J])
-                local_g = xp.asarray(gg_view.blocks[I, J])
-                full_l = ranks.stack.all_gather_v(
-                    local_l,
-                    axis=0,
-                    mask=g_lesser._stack_padding_mask,
-                )
-                full_g = ranks.stack.all_gather_v(
-                    local_g,
-                    axis=0,
-                    mask=g_greater._stack_padding_mask,
-                )
-                out_l[(I, J)] = full_l
-                out_g[(I, J)] = full_g
-        return out_l, out_g
+        if ranks.block.size == 1:
+            return gl_local, gg_local
+
+        # Cross-rank gather across comm.block. Currently uniform block
+        # sizes only (consistent with how SCBAData allocates them).
+        block_sizes_arr = np.asarray(self.block_sizes)
+        if int(block_sizes_arr.min()) != int(block_sizes_arr.max()):
+            raise NotImplementedError(
+                "Non-uniform block sizes are not yet supported in the "
+                "multi-block-rank phonon-phonon SSE distribution path. "
+                "Run with a single comm.block rank or use uniform "
+                "block sizes (SCBAData enforces uniformity by default)."
+            )
+        nbs = int(block_sizes_arr[0])
+        ne_full = next(iter(gl_local.values())).shape[0]
+
+        # Pack local diagonals into a contiguous tensor, gather across
+        # comm.block, then re-key by global block index.
+        local_l_stack = xp.stack(
+            [gl_local[block_start + K_loc] for K_loc in range(num_local_blocks)],
+            axis=0,
+        )
+        local_g_stack = xp.stack(
+            [gg_local[block_start + K_loc] for K_loc in range(num_local_blocks)],
+            axis=0,
+        )
+        global_l_stack = ranks.block.all_gather_v(local_l_stack, axis=0)
+        global_g_stack = ranks.block.all_gather_v(local_g_stack, axis=0)
+        # Expected shape after gather: (n_blocks, ne_full, nbs, nbs).
+        assert global_l_stack.shape[0] == self.n_blocks, (
+            f"comm.block gather produced {global_l_stack.shape[0]} blocks; "
+            f"expected {self.n_blocks}"
+        )
+        del nbs  # only used by the assert above; silence linter
+
+        gl_diag = {
+            K: global_l_stack[K] for K in range(self.n_blocks)
+        }
+        gg_diag = {
+            K: global_g_stack[K] for K in range(self.n_blocks)
+        }
+        return gl_diag, gg_diag
 
     def _gather_frequencies(self, ne_full: int) -> NDArray:
         """All-gather the local frequency slice into the full axis."""
@@ -331,17 +413,3 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             xp.asarray(self.local_frequencies, dtype=float),
             axis=0,
         )
-
-    def _local_energy_offset(self, ne_local: int, ne_full: int) -> int:
-        """Offset of this rank's local energy slice in the full axis.
-
-        Falls back to a contiguous-equal-split assumption if no
-        explicit offset can be queried; this matches how
-        ``get_electron_energies`` partitions linspace grids in
-        production.
-        """
-        if ranks.stack.size == 1:
-            return 0
-        # Contiguous equal split (matches grid.energies handling).
-        rank = ranks.stack.rank
-        return rank * (ne_full // ranks.stack.size)
