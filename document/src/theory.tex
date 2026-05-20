@@ -1996,30 +1996,42 @@ sampling.
 \label{ssec:phph_sparsity}
 % ----------------------------------------------------------------------
 
-Four sparsity patterns reduce the dense ring cost
+Three block-level sparsity patterns reduce the dense ring cost
 \cref{eq:cic_cost} by several orders of magnitude before any further
-approximation is introduced. These mirror the sparsity
-exploitations of the GW solver
+approximation is introduced. These mirror the sparsity exploitations
+of the GW solver
 \cite{vetsch_ab-initio_2025, deuschle_electron-electron_2025} and
 follow from the same physical assumption -- a real-space cut-off on
 inter-atomic interactions -- applied to the harmonic and cubic
-parts of the lattice Hamiltonian.
+parts of the lattice Hamiltonian. The cut-offs act at the granularity
+of \emph{transport-cell blocks}: a block is either present in full
+(stored as a dense $\NBS\times\NBS$ or $\NBS\times\NBS\times\NBS$
+array) or absent. Within a present block the implementation uses
+dense BLAS/einsum throughout
+(\cref{ssec:phph_distribution,ssec:phph_dist_impl}); intra-block
+atom-pair sparsity is \emph{not} exploited at compute time. CRS/COO
+representations exist in the storage layer
+(\texttt{DSDBSparse} in \cite{vetsch_ab-initio_2025}) only to (i)
+record which block pairs are non-zero in the BT band and (ii) carry
+the \texttt{stack}/\texttt{nnz} redistribution traffic; the inner
+linear algebra always operates on the dense block view.
 
 We denote by $r_{\mathrm{cut}}$ the physical real-space cut-off
 radius applied to both IFC2 and IFC3 (in \AA), by $r_c$ the
 corresponding bandwidth on the block-tridiagonal representation of
 $G^{\gtrless}$ (the number of primitive blocks within $r_{\mathrm{cut}}$
-along the transport direction), by $N_\mathrm{c,x}$ the FC3 cut-off
-in transport-cell units along the transport direction
-($N_\mathrm{c,x}\le 3$ typically), and by $C_a$ the number of atoms
-within $r_{\mathrm{cut}}$ of any reference atom.
+along the transport direction), and by $N_\mathrm{c,x}$ the FC3
+cut-off in transport-cell units along the transport direction
+($N_\mathrm{c,x}\le 3$ typically). The transport-cell size $\NBS$
+absorbs all the intra-cell degrees of freedom.
 
 \paragraph{(a)~BT-band cut-off on $G^{\gtrless}$.} As in the
 electronic GW problem, applying $r_{\mathrm{cut}}$ to the harmonic
 dynamical matrix gives $G^{\gtrless}$ a block-banded structure of
 width $r_c$ along the transport direction. Block entries $G_{KK'}$
-are non-zero only for $|K-K'|\le r_c$. The total non-zero count of
-$G$ per frequency, before any intra-block sparsity, is
+are non-zero only for $|K-K'|\le r_c$, and each non-zero block is
+stored densely as an $\NBS\times\NBS$ matrix. The total entry count
+of $G$ per frequency is
 \begin{equation}\label{eq:G_bb_nnz}
   \mathrm{nnz}(G)_\mathrm{BB}
   = \cO\!\bigl(\NB\,r_c\,\NBS^{2}\bigr)
@@ -2030,7 +2042,8 @@ $G$ per frequency, before any intra-block sparsity, is
 constants with pair distance (\cref{sub:fc3_compression}) admits the
 same real-space cut-off $r_{\mathrm{cut}}$ on $\Phi^{(3)}$. For
 transport-cell labels $(I,K_1,K_2)$, $\tilde\Phi^{(3)}_{I,K_1,K_2}$
-is non-zero only when
+is non-zero (and stored as a dense $\NBS\times\NBS\times\NBS$
+array) only when
 \begin{equation}\label{eq:fc3_block_support}
   |I-K_1|, \quad |I-K_2|, \quad |K_1-K_2| \le N_\mathrm{c,x}.
 \end{equation}
@@ -2053,8 +2066,9 @@ over the transverse cells preserves block-sparsity along the transport direction
 
 \paragraph{(c)~Output BT band.} $\Sigma$ inherits the BT structure of
 the upstream SCBA solver: only $(I,J)$ with $|I-J|\le 1$ are
-retained. The number of distinct output block-pairs is therefore
-$\cO(\NB)$, and the bubble decomposes into a finite sum
+retained, and each retained block is stored densely. The number of
+distinct output block-pairs is $\cO(\NB)$, and the bubble decomposes
+into a finite sum
 \begin{equation}\label{eq:sigma_block_sum}
   \Sigma_{IJ}(\omega;\qp)
   = \frac{i\hbar}{2}
@@ -2064,59 +2078,62 @@ $\cO(\NB)$, and the bubble decomposes into a finite sum
 This output truncation is consistent with the input truncation (a)
 on $G$.
 
-\paragraph{(d)~Intra-block atom-pair sparsity.} Within a single
-transport cell of size $\NBS = 3 N_a N_U$ ($N_a$ atoms per primitive
-cell, $N_U$ primitive cells per transport cell), the same cut-off
-$r_{\mathrm{cut}}$ acts at the atomic level. Each atom couples to only
-$C_a$ neighbours within $r_{\mathrm{cut}}$, so each row of an
-intra-block matrix carries $\cO(C_a)$ non-zero atom pairs
-(times $3\times 3 = 9$ Cartesian-direction entries each, absorbed
-into the constant). The block-level non-zero counts are therefore
-\begin{equation}\label{eq:phph_intra_block_nnz}
-  \mathrm{nnz}\bigl(G^{\gtrless}_{KK'}\bigr) = \cO(\NBS\,C_a),
-  \qquad
-  \mathrm{nnz}\bigl(\Phi^{(3)}_{I,K_1,K_2}\bigr) = \cO(\NBS\,C_a^{2}).
+\paragraph{Per-pair kernel cost.} For each surviving block triple
+$(I, K_1, K_2)$ and its conjugate $(J, K_2, K_1)$, the per-frequency
+ring contraction
+\cref{eq:phph_step_A,eq:phph_step_B,eq:phph_step_S} is evaluated as
+three dense \texttt{einsum} contractions on dense
+$\NBS^{3}$- and $\NBS^{2}$-shaped tensors. The intermediates
+$A\in\mathbb{C}^{N_\tau\times\NBS\times\NBS\times\NBS}$ and
+$B\in\mathbb{C}^{N_\tau\times\NBS\times\NBS\times\NBS}$ both have
+$\cO(N_\tau\,\NBS^{3})$ entries; the dominant arithmetic is the
+$B$-build at $\cO(N_\tau\,\NBS^{4})$ flops per pair (per $\tau$,
+$\cO(\NBS^{4})$). The per-pair ring cost is therefore
+\begin{equation}\label{eq:cic_block_dense}
+  \mathcal{C}_\mathrm{ic}^\mathrm{block}
+  = \cO\!\bigl(\NBS^{4}\bigr).
 \end{equation}
+This coincides with the dense-ring estimate \cref{eq:cic_cost} on a
+single transport cell because there is no intra-block sparsity to
+exploit; the savings relative to the naive global ring (which would
+scan all of $\ndof = N_\mathrm{AO}$) come entirely from the
+block-level cut-offs (a)--(c), not from intra-block sparsity. With
+GPU-resident dense BLAS this kernel is compute-bound for
+$\NBS\gtrsim 10^{2}$ and saturates the device's FP64 (or FP32)
+throughput.
 
-\paragraph{Sparsity propagation through the kernel.} The sparsity
-patterns above are not lost by the half-tree contractions in
-\cref{eq:balanced_tree,eq:balanced_pair}. They propagate
-through the pipeline in the same way that they do in
-sparse--sparse matrix multiplication. We make this precise for the
-half-tree $T_1(x)_{y_2y_4} = \sum_{y_1}\Phi_{x,y_1,y_2}g_{y_1,y_4}$.
-
-For fixed transport-cell labels $(I,K_1,K_2)$ within FC3 support, the
-non-zero entries of $\Phi^{(3)}_{I,K_1,K_2}$ at the atomic level
-correspond to triples $(\mu,\nu_1,\nu_2)$ where atoms $\mu,\nu_1,\nu_2$
-are mutually within $r_{\mathrm{cut}}$ of one another. For each such
-$(\mu,\nu_1)$, $g_{\nu_1,\nu_4}$ is non-zero only for $\nu_4$ within
-$r_{\mathrm{cut}}$ of $\nu_1$. The contraction therefore scans
-$\mathrm{nnz}(\Phi)\cdot C_a = \cO(\NBS\,C_a^{3})$ entries to
-produce $T_1$ at fixed $(I,K_1,K_2)$, and $T_1$ itself has support
-on $(I,K_1,K_2)$ atoms-within-cut-off triples, with non-zero count
-$\cO(\NBS\,C_a^{2})$. The second half-tree has the same shape; the
-final ring-closing contraction over the shared $(\nu_2,\nu_4)$
-indices runs over the joint support, again $\cO(\NBS\,C_a^{3})$ per
-working point. The per-pair ring cost reduces from $\NBS^{4}$ to
-\begin{equation}\label{eq:cic_sparse}
-  \mathcal{C}_\mathrm{ic}^\mathrm{sparse}
-  = \cO\!\bigl(\NBS\,C_a^{3}\bigr),
-\end{equation}
-a saving of $(\NBS/C_a)^{3} = (N_a/C_a)^{3}$ over the dense kernel.
-For Si nanoribbons with $N_a/C_a\sim 25$, this is roughly $1.5\times
-10^{4}$.
-
-Combining \cref{eq:cic_sparse} with the q-space cost
+Combining \cref{eq:cic_block_dense} with the q-space cost
 \cref{eq:cost_q} and the $\mathcal{P}$-cardinality bound
 $|\mathcal{P}(I,J)|=\cO(N_\mathrm{c,x}^{2})$, the total q-space SSE
 cost reduces to
 \begin{equation}\label{eq:cost_phph_total}
   \mathcal{W}_\mathrm{phph}
   = \cO\!\bigl(N_\tau\,N_q^{2}\,\NB\,N_\mathrm{c,x}^{2}\,
-               \NBS\,C_a^{3}\bigr)
+               \NBS^{4}\bigr)
   = \cO\!\bigl(N_\tau\,N_q^{2}\,N_{AO}\,N_\mathrm{c,x}^{2}\,
-               C_a^{3}\bigr).
+               \NBS^{3}\bigr).
 \end{equation}
+The $\NBS^{3}$ scaling sets a hard upper bound on the
+transport-cell size that can be handled at fixed compute budget and
+motivates the FC3 decomposition of \cref{sec:phph_decomp}, which
+replaces $\NBS^{3}$ by $R\,\NBS$ in the per-pair kernel.
+
+\paragraph{Notation: intra-block dimension $C_a$ in later sections.}
+The separable kernel of \cref{ssec:phph_separable} and the full
+decomposition derivations of \cref{sec:phph_decomp} are written in
+terms of a generic intra-block dimension $C_a$ -- the number of
+atoms within $r_\mathrm{cut}$ of any reference atom, which would
+control the per-block density if intra-block sparsity were
+exploited by the inner kernel. The present quatrex implementation
+runs dense BLAS within each block, so the effective value is
+$C_a=\NBS$ and all cost comparisons in those sections collapse to
+the block-dense baseline \cref{eq:cic_block_dense,eq:cost_phph_total}.
+Retaining $C_a$ symbolically keeps the decomposition derivations
+forward-compatible with a future implementation that exploits
+intra-block sparsity (e.g.\ via block-CSR BLAS or atom-pair-sparse
+einsum kernels); the operation counts in that hypothetical regime
+would become $\NBS\to\NBS$, $\NBS^{2}\to\NBS\,C_a$,
+$\NBS^{3}\to\NBS\,C_a^{2}$, $\NBS^{4}\to\NBS\,C_a^{3}$.
 
 % ----------------------------------------------------------------------
 \subsection{Separable FC3 approximation}
@@ -2174,7 +2191,11 @@ The combined per-pair cost is
   \cO\!\bigl(R\,\ndof\,r_c\,C_a + R^{2}\,\ndof\,C_a\bigr),
 \end{equation}
 to be compared with $\cO(\ndof\,C_a^{3}/\NBS)$ from
-\cref{eq:cic_sparse}. For
+\cref{eq:cic_block_dense} under the assumption that intra-block
+sparsity is exploitable (cf.\ the forward note in
+\cref{ssec:phph_sparsity}: in the current dense-kernel
+implementation $C_a=\NBS$, and the comparison collapses to the
+asymptotically equivalent $\cO(\NBS^{3})$ baseline). For
 $R\ll C_a^{2}$ the separable form is the cheaper one.
 Structurally richer decompositions (Tucker, CP, INDSCAL, symmetric
 CP; \cref{sub:fc3_tucker,sub:fc3_cp,sub:fc3_indscal,sub:fc3_symcp})
@@ -2336,20 +2357,19 @@ from the sparsity bookkeeping of \cref{ssec:phph_sparsity} together
 with the distribution above.
 
 \emph{Stage~1 (FFT, $G$ in \texttt{nnz})}. Memory: each rank holds
-the full $\omega$-axis for its share of the BT-band non-zeros. With
-$\mathrm{nnz}(G)$ per $\omega$ given by
-\cref{eq:G_bb_nnz} times the intra-block density $C_a/\NBS$, the
+the full $\omega$-axis for its share of the BT-band non-zero blocks.
+With $\mathrm{nnz}(G)$ per $\omega$ given by \cref{eq:G_bb_nnz}, the
 per-rank footprint is
 \begin{equation}
   M^{(1)}_\mathrm{rank}
-  = \cO\!\Bigl(\frac{N_\omega \cdot N_{AO}\,r_c\,C_a}{P}\Bigr).
+  = \cO\!\Bigl(\frac{N_\omega \cdot N_{AO}\,r_c\,\NBS}{P}\Bigr).
 \end{equation}
-Computation: each non-zero $(i,j)$ entry is FFT'd independently
+Computation: each non-zero $(I,J)$ block is FFT'd elementwise
 along $\omega$; per-rank work is the same expression times
 $\log N_\omega$:
 \begin{equation}
   W^{(1)}_\mathrm{rank}
-  = \cO\!\Bigl(\frac{N_\omega\log N_\omega \cdot N_{AO}\,r_c\,C_a}{P}\Bigr).
+  = \cO\!\Bigl(\frac{N_\omega\log N_\omega \cdot N_{AO}\,r_c\,\NBS}{P}\Bigr).
 \end{equation}
 Communication: the \texttt{stack}$\to$\texttt{nnz} dtranspose has
 the same volume as the memory footprint (this is the entire payload
@@ -2357,18 +2377,18 @@ that traverses the dtranspose).
 
 \emph{Stage~2 (ring contraction, $g(\tau)$ in \texttt{stack})}. The
 arithmetic at each working point is bounded by
-\cref{eq:cic_sparse}; summed over all working points and
+\cref{eq:cic_block_dense}; summed over all working points and
 distributed across all ranks,
 \begin{equation}
   W^{(2)}_\mathrm{rank}
-  = \cO\!\Bigl(\frac{N_q^{2}\,N_\tau\,N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{3}}{P}\Bigr).
+  = \cO\!\Bigl(\frac{N_q^{2}\,N_\tau\,N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}\Bigr).
 \end{equation}
 Memory: dominated by the FC3 dictionary, which is partitioned along
 its first leg $I$ across $P_S$ but not along $\omega$ (the FC3 is
 $\omega$-independent). Each $P_S$ rank therefore holds
 \begin{equation}
   M^{(2)}_\mathrm{rank}
-  = \cO\!\Bigl(\frac{N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{2}}{P_S}\Bigr).
+  = \cO\!\Bigl(\frac{N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{2}}{P_S}\Bigr).
 \end{equation}
 The $g(\tau)$ payload itself is in \texttt{stack} and adds an
 $\cO(M^{(1)}_\mathrm{rank})$ contribution which is sub-leading at
@@ -2376,18 +2396,17 @@ production block sizes. Communication: the only Stage~2
 communication is the spatial halo exchange discussed below.
 
 \emph{Stage~3 (IFFT, $\sigma(\tau)$ in \texttt{nnz})}. The output
-$\Sigma$ inherits the BT band of $\Sigma$ and the intra-block
-atom-pair sparsity inherited from the $g$ blocks (the contraction
-with $\Phi$ does not introduce new non-zeros beyond the FC3
-support). The output non-zero count per $\omega$ is therefore
-$\cO(N_{AO}\,C_a)$, similar to $G$ but without the BT-band factor
-$r_c$. Memory, computation, and communication scale as
+$\Sigma$ inherits the BT band of $G$: only $|I-J|\le 1$ blocks are
+retained, each stored densely. The output entry count per $\omega$
+is therefore $\cO(N_{AO}\,\NBS)$ (the BT-band factor $r_c$ of $G$
+is replaced by the strict $|I-J|\le 1$ output band). Memory and
+computation scale as
 \begin{equation}
   M^{(3)}_\mathrm{rank}
-    = \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,C_a}{P}\Bigr),
+    = \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,\NBS}{P}\Bigr),
   \qquad
   W^{(3)}_\mathrm{rank}
-    = \cO\!\Bigl(\frac{N_\omega\log N_\omega\,N_{AO}\,C_a}{P}\Bigr).
+    = \cO\!\Bigl(\frac{N_\omega\log N_\omega\,N_{AO}\,\NBS}{P}\Bigr).
 \end{equation}
 
 \paragraph{Spatial decomposition and halo.} When $P_S>1$ ranks
@@ -2395,11 +2414,11 @@ partition the transport-direction blocks, the FC3 cut-off implies
 that for any output block $I\in\mathcal{I}_p$, only $g_{KK'}$ blocks
 with $|K-I|, |K'-I|\le N_\mathrm{c,x}$ enter Stage~2. Each $P_S$
 rank therefore needs only its assigned range $\mathcal{I}_p$ plus a
-halo of width $N_\mathrm{c,x}$. The halo traffic per
+halo of width $N_\mathrm{c,x}$ blocks. The halo traffic per
 $(P_E,P_S)$ rank is
 \begin{equation}\label{eq:halo_volume}
   V_\mathrm{halo}^\mathrm{rank}
-  = \cO\!\Bigl(\frac{N_\tau\,N_\mathrm{c,x}\,\NBS\,C_a}{P_E}\Bigr),
+  = \cO\!\Bigl(\frac{N_\tau\,N_\mathrm{c,x}\,\NBS^{2}}{P_E}\Bigr),
 \end{equation}
 independent of $\NB$.
 
@@ -2407,14 +2426,14 @@ independent of $\NB$.
 balance across stages and ranks, giving
 \begin{align}
   W^\mathrm{rank}_\mathrm{phph}
-    &= \cO\!\Bigl(\frac{N_q^{2}\,N_\tau\,N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{3}}{P}\Bigr),
+    &= \cO\!\Bigl(\frac{N_q^{2}\,N_\tau\,N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}\Bigr),
     \label{eq:cost_phph_dist}\\
   V^\mathrm{rank}_\mathrm{phph}
-    &= \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,r_c\,C_a}{P}\Bigr),
+    &= \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,r_c\,\NBS}{P}\Bigr),
     \label{eq:vol_phph_dist}\\
   M^\mathrm{rank}_\mathrm{phph}
-    &= \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,r_c\,C_a}{P}\Bigr)
-       + \cO\!\Bigl(\frac{N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{2}}{P_S}\Bigr).
+    &= \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,r_c\,\NBS}{P}\Bigr)
+       + \cO\!\Bigl(\frac{N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{2}}{P_S}\Bigr).
     \label{eq:mem_phph_dist}
 \end{align}
 The two terms in \cref{eq:mem_phph_dist} reflect the two kinds of
@@ -2429,31 +2448,177 @@ arithmetic; Stages~1 and 3 dominate the communication.
 % ----------------------------------------------------------------------
 
 The peak memory consumer in the per-pair kernel is the intermediate
-$A$ or $B$ in \cref{eq:phph_step_A,eq:phph_step_B}, of nominal size
-$\cO(N_\mathrm{fft}\,\NBS\,C_a^{2})$ on the joint sparse support of
-$\Phi_L$ and $g_b$. At production block sizes
-($\NBS\sim 2\times 10^{3}$, $C_a\sim 30$, $N_\omega\sim 10^{4}$),
-this is $\cO(\mathrm{few}\;\mathrm{GB})$ per block triplet in
-complex FP64. The $\tau$-axis is point-wise within Stage~2, so it
-can be batched without inducing additional communication; batches
-are sized adaptively from the free HBM at runtime, and the
-corresponding range of $w$-indices is processed before moving to the
-next batch. The output $(I,J)$-axis can be batched analogously,
-since the contributions from different $(I,J)$ pairs at fixed
-$\tau$ are independent.
+$A$ or $B$ in \cref{eq:phph_step_A,eq:phph_step_B}, both of which
+are dense $\NBS^{3}$-shaped tensors per $\tau$, i.e.\
+$\cO(N_\mathrm{fft}\,\NBS^{3})$ entries across the padded grid.
+At production block sizes ($\NBS\sim 2\times 10^{3}$,
+$N_\omega\sim 10^{4}$), this is several TB per block triplet in
+complex FP64 -- well beyond a single device. Two batching axes keep
+the resident working set bounded:
+\begin{itemize}
+  \item The $\tau$-axis is point-wise within Stage~2 and can be
+        batched without inducing additional communication. Batches
+        of $N_b$ contiguous $\tau$-slices are sized adaptively from
+        the free HBM at runtime, mirroring the GW polarisation
+        kernel's batching strategy (\texttt{PCoulombScreening.compute}
+        in \cite{vetsch_ab-initio_2025}).
+  \item The output $(I,J)$-axis is batched analogously, since the
+        contributions from different $(I,J)$ pairs are independent;
+        the per-batch intermediate footprint is then
+        $\cO(N_b\,\NBS^{3})$ per active $(I,J)$ pair.
+\end{itemize}
 
 The FC3 dictionary, with non-zero count
-$\cO(\NB\,N_\mathrm{c,x}^{2}\,\NBS\,C_a^{2})$ after intra-block
-sparsity \cref{eq:phph_intra_block_nnz}, is partitioned along its
-first leg $I$ across the $P_S$ spatial ranks. With $N_a\sim 700$
-atoms per cell ($\NBS\sim 2000$), $N_\mathrm{c,x}=3$ shells, and
-$C_a\sim 30$ neighbours within cutoff, the per-rank FC3 footprint
-becomes a few GB and fits comfortably in HBM. If even smaller
-footprints are required, the compressed FC3 representations of
+$\cO(\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3})$ for block-dense storage,
+is partitioned along its first leg $I$ across the $P_S$ spatial
+ranks. With $\NBS\sim 2000$, $N_\mathrm{c,x}=3$ shells, the per-rank
+FC3 footprint is hundreds of GB on a single device -- the
+single-device regime is only practical for much smaller transport
+cells ($\NBS\lesssim 300$). The compressed FC3 representations of
 \cref{eq:fc3_lowrank,sub:fc3_compression} replace the per-block
-$\NBS\,C_a^{2}$ count by $R\,\NBS$ at moderate $R$ and integrate
-into the same kernel and distribution scheme without further
-modification.
+$\NBS^{3}$ count by $R\,\NBS$ at moderate $R$ and integrate into
+the same kernel and distribution scheme without further
+modification; together with the GPU-resident dense BLAS that
+already dominates Stage~2's arithmetic, they bring per-rank FC3
+storage and per-pair arithmetic back to the few-GB / few-TFLOP
+regime that fits a single HBM device.
+
+% ----------------------------------------------------------------------
+\subsection{Implemented distributed phonon-phonon SSE}
+\label{ssec:phph_dist_impl}
+% ----------------------------------------------------------------------
+
+The current quatrex production implementation
+(\texttt{quatrex.phonon.sse\_phonon\_phonon.SigmaPhononPhonon})
+realises the dense-block kernel of \cref{eq:cic_block_dense} on
+top of the distribution scheme of \cref{ssec:phph_distribution}.
+It uses no FC3 decomposition (\cref{sec:phph_decomp} remains a
+future optimisation), and it deliberately runs the contraction in
+the \texttt{stack} distribution rather than the \texttt{nnz}
+distribution used by the GW polarisation
+\cite{vetsch_ab-initio_2025}: the phonon bubble couples block
+triples through $\mathcal{P}(I,J)$ and so does not admit the same
+per-nnz locality that makes the GW polarisation embarrassingly
+parallel in \texttt{nnz}. The distribution exposes two levers:
+\begin{itemize}
+  \item ``\textbf{Frequency} $P_E$ via \texttt{comm.stack}.'' Each
+        rank holds an $\omega$-slice of every BT-band $G$ and
+        $\Sigma$ block. Inside the bubble, the diagonal blocks
+        $g_{KK}(\omega)$ are all-gathered along $\omega$ across
+        \texttt{comm.stack} into a full-axis tensor of shape
+        $(N_\omega, \NBS, \NBS)$. Only diagonal blocks enter the
+        contraction (\cref{eq:phph_pair_index} restricts to
+        $G_{K_1K_1}\,G_{K_2K_2}$), so off-diagonal BT-band $G$
+        blocks are never communicated.
+  \item ``\textbf{Spatial} $P_S$ via \texttt{comm.block}.'' Each
+        rank owns a contiguous global-block range
+        $[I_\mathrm{lo}, I_\mathrm{hi})$ determined by
+        \texttt{block\_section\_offsets}. The outer
+        $(I,J)\in\mathcal{P}$ loop is filtered to $I\in
+        [I_\mathrm{lo}, I_\mathrm{hi})$ so each rank contributes
+        only the output blocks it owns; cross-rank diagonal blocks
+        are made available through an additional
+        \texttt{comm.block.all\_gather} of the locally-owned
+        diagonals (requires uniform block sizes, which
+        \texttt{SCBAData} enforces by default).
+\end{itemize}
+
+\paragraph{Pipeline.} A single SCBA iteration invokes the
+implemented routine in three phases, all stack-resident:
+\begin{enumerate}[label=(\roman*)]
+  \item \emph{State restoration contract.} On entry the routine
+        records each buffer's incoming distribution state and, if
+        necessary, dtranspose's everything to \texttt{stack}. On
+        exit (\texttt{finally} block) the incoming state is
+        restored on every buffer. This makes the routine composable
+        with the SCBA loop's \texttt{stack}$\to$\texttt{nnz}
+        dtranspose: the GW polarisation runs in \texttt{nnz} and
+        the phph SSE returns control with everything still in
+        \texttt{nnz}, exactly as the surrounding driver expects.
+  \item \emph{Diagonal-only gather.} For each local block $K$, the
+        $\omega$-axis of $g_{KK}^{<,>}$ is all-gathered across
+        \texttt{comm.stack} into a full-axis array. When
+        $P_S>1$ a subsequent \texttt{comm.block.all\_gather} of the
+        stacked local diagonals produces, on every rank, the full
+        global $\{g_{KK}\}_{K=0}^{N_B-1}$ dictionary at full
+        $\omega$.
+  \item \emph{Per-rank bubble + write-back.} For each
+        $(I,J)\in\mathcal{P}$ with $I\in[I_\mathrm{lo},
+        I_\mathrm{hi})$ and $|I-J|\le 1$, the rank walks the
+        precomputed block-pair index
+        $\mathcal{P}(I,J)$, accumulates
+        $\Sigma^{<,>}_{IJ}(\omega)$ via the dense
+        \texttt{bubble\_dense} kernel (three \texttt{einsum}s on
+        dense $\NBS$-shaped tensors plus an FFT along $\omega$),
+        forms $\Sigma^R$ from the bosonic Hilbert transform
+        $\Sigma^R = \tfrac{1}{2}(\Sigma^>{-}\Sigma^<)
+        + \tfrac{i}{2}\mathcal{H}\{\Sigma^>{-}\Sigma^<\}$, and
+        writes the $[e_\mathrm{lo}{:}e_\mathrm{hi}]$
+        $\omega$-slice -- where
+        $e_\mathrm{lo}=\sum_{r<\mathtt{stack.rank}}
+        \mathtt{stack\_section\_sizes}_r$ -- into the
+        local-block-indexed output buffer
+        $\Sigma_{\bullet}.\mathtt{blocks}[I_\mathrm{loc},
+        J_\mathrm{loc}]$.
+\end{enumerate}
+
+\paragraph{Per-rank cost.} The dominant arithmetic is the dense
+ring of \cref{eq:cic_block_dense} summed over the rank's owned
+outputs, giving
+\begin{equation}\label{eq:cost_phph_impl}
+  W^\mathrm{rank}_{\mathrm{phph,impl}}
+  = \cO\!\Bigl(
+      \frac{N_\omega\,\log N_\omega \cdot \NB\,N_\mathrm{c,x}^{2}\,\NBS^{4}}{P_S}
+    \Bigr),
+\end{equation}
+where the $P_E$ factor does \emph{not} appear because each
+\texttt{comm.stack} rank still computes the bubble at full
+$\omega$ on its assigned $(I,J)$ outputs (this is the cost of not
+distributing along $\omega$; recovering it would require a
+distributed 1-D FFT, deferred). Communication is dominated by the
+diagonal-block gather:
+\begin{equation}\label{eq:vol_phph_impl}
+  V^\mathrm{rank}_{\mathrm{phph,impl}}
+  = \cO\!\Bigl(\frac{N_\omega\,\NB\,\NBS^{2}}{P}\Bigr),
+\end{equation}
+i.e.\ the per-$\omega$ payload of $N_B$ diagonal blocks of size
+$\NBS\times\NBS$, divided across the $P=P_EP_S$ ranks. The FC3
+dictionary is partitioned along $I$ across $P_S$ only:
+\begin{equation}\label{eq:mem_phph_impl}
+  M^\mathrm{rank}_{\mathrm{phph,impl}}
+  = \cO\!\Bigl(\frac{N_\omega\,\NB\,\NBS^{2}}{P}\Bigr)
+  + \cO\!\Bigl(\frac{\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P_S}\Bigr).
+\end{equation}
+
+\paragraph{Validation.} The implementation is pinned against the
+single-block dense reference of
+\texttt{phonon.solver.dense.compute\_phph\_self\_energy\_finite}
+(see \texttt{tests/quatrex/phonon/test\_sse\_phonon\_phonon.py})
+in two regimes: (i) one transport cell, where the production
+\texttt{\_bubble\_block} reproduces the dense reference to
+$<10^{-10}$ relative Frobenius; (ii) multi-block ($N_B\ge 3$),
+where an independently written reference assembles the BTD
+$\Sigma_{IJ}$ output from the same FC3 dictionary and the same
+diagonal $G$ blocks, again matching to $<10^{-10}$. A second test
+pins the state-restoration contract.
+
+\paragraph{Composition with the Interaction registry.}
+The implemented bubble is registered as
+\texttt{PhononPhononInteraction}, one of several concrete
+\texttt{Interaction} instances iterated by the SCBA driver
+(\texttt{quatrex.core.scba.SCBA.\_compute\_interactions}). The
+registry is the architectural seam for adding a coupled
+electron-phonon SSE: a future
+\texttt{ElectronPhononInteraction} reads from both the electron
+and phonon subsystems' Green's functions and writes its
+contribution into the appropriate $\sigma_*$ buffer, using the
+same \texttt{comm.stack}/\texttt{comm.block} grid and the same
+\texttt{dtranspose} machinery as the existing interactions, with
+no further driver-side changes required. In particular, the
+state-restoration contract above guarantees that
+\texttt{PhononPhononInteraction.compute} can be sequenced before
+or after a future \texttt{ElectronPhononInteraction.compute}
+without spurious distribution-state transitions between them.
 
 % ----------------------------------------------------------------------
 \section{Phonon-Phonon SSE with decomposed FC3}
@@ -2729,9 +2894,11 @@ transport). The cost of the SpMM is
 $\cO(R\cdot\mathrm{nnz}(g))=\cO(R\,\ndof\,r_c\,C_a)$.
 
 \paragraph{(b) Intra-block atom-pair sparsity of $g$ — preserved.}
-Within each $\NBS\times\NBS$ block, $g_{IJ}$ has density $C_a/\NBS$
-(\cref{eq:phph_intra_block_nnz}). The block-level SpMM $V_I=\sum_J
-g_{IJ}\,W_J$ is therefore a sparse--dense block product with cost
+Within each $\NBS\times\NBS$ block, $g_{IJ}$ has nominal density
+$C_a/\NBS$ (with $C_a=\NBS$ in the present dense-block kernel; see
+the forward note in \cref{ssec:phph_sparsity}). The block-level SpMM
+$V_I=\sum_J g_{IJ}\,W_J$ is therefore a sparse--dense block product
+with cost
 $\cO(R\,\NBS\,C_a)$ per source block $J$, summed over the $\cO(r_c)$
 blocks within bandwidth, giving $\cO(R\,\NBS\,r_c\,C_a)$ per output
 block and $\cO(R\,\ndof\,r_c\,C_a)$ for the full SpMM.
@@ -2831,7 +2998,9 @@ algebra libraries:
         compute-bound.
   \item \emph{Step \cref{eq:kernel_step4}: sparse-output sandwich.}
         $\Sigma = A\,H\,A^{\!\top}$ restricted to the output BT band
-        and intra-block atom-pair sparsity (\cref{eq:phph_intra_block_nnz}).
+        and any available intra-block atom-pair sparsity
+        (with $C_a=\NBS$ in the present dense-block kernel; see the
+        forward note in \cref{ssec:phph_sparsity}).
         Implemented as: (i) precompute $T=AH$, a dense $\ndof\times R$
         matrix, cost $\cO(R^{2}\ndof)$; (ii) for each non-zero
         entry $(x,x')$ in the output support, compute
