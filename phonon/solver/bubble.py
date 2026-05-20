@@ -25,6 +25,125 @@ from __future__ import annotations
 import numpy as np
 
 
+def precompute_g_fft(G, *, n_fft, zero_freq_idx=None, dc_handling="zero",
+                     xp=None):
+    """Return the zero-padded FFT of one G block, ready for ``bubble_dense``.
+
+    The dense reference and the multi-slab driver both call
+    :func:`bubble_dense` many times per SCBA iteration with the same
+    G(K,K') blocks; precomputing the FFT here lets callers amortise
+    that cost across every bubble it appears in. The ``zero_freq_idx``
+    + ``dc_handling`` regularisation is applied here (with the same
+    semantics as inside ``bubble_dense``) so the returned tensor
+    represents the actual G fed into the convolution.
+
+    Returns a complex ``(n_fft, ne_K, ne_Kp)`` array.
+    """
+    if xp is None:
+        xp = np
+    ne, bK, bKp = G.shape
+    if zero_freq_idx is not None and dc_handling != "keep":
+        if dc_handling not in ("zero", "interpolate"):
+            raise ValueError(
+                f"Unknown dc_handling={dc_handling!r}. "
+                "Use 'zero', 'interpolate', or 'keep'."
+            )
+        G = G.copy()
+        if dc_handling == "zero":
+            G[zero_freq_idx] = 0.0
+        else:  # interpolate
+            if zero_freq_idx <= 0 or zero_freq_idx >= ne - 1:
+                raise ValueError(
+                    f"dc_handling='interpolate' needs zero_freq_idx in "
+                    f"(0, ne-1); got {zero_freq_idx} with ne={ne}."
+                )
+            G[zero_freq_idx] = 0.5 * (
+                G[zero_freq_idx - 1] + G[zero_freq_idx + 1]
+            )
+    G_pad = xp.zeros((n_fft, bK, bKp), dtype=complex)
+    G_pad[:ne] = G
+    return xp.fft.fft(G_pad, axis=0)
+
+
+def _bubble_contract_batched_matmul(phi_left, phi_right,
+                                    G_a_fft, G_b_fft, xp=np):
+    """Three-matmul kernel for ``S[w,a,J] = phi_L[ace] * G_b[wed] *
+    G_a[wcb] * phi_R[Jdb]``.
+
+    Profiling on the 4-operand fused ``opt_einsum.contract`` showed
+    that the chosen path falls back to ``c_einsum`` (slow Python
+    walker) for the contractions that share the ``w`` batch axis
+    between ``G_a`` and ``G_b`` — ``tensordot`` cannot handle shared
+    broadcast indices. The kernel below does the same arithmetic but
+    routes everything through BLAS ``matmul`` (with explicit
+    reshapes), which gives ~5-10x more speedup on d5a sizes.
+    """
+    nI = phi_left.shape[0]
+    nJ = phi_right.shape[0]
+    n_w = G_a_fft.shape[0]
+    # G_a indices (w, c, b); shape (n_w, bK1, bK1p).
+    bK1 = G_a_fft.shape[1]
+    bK1p = G_a_fft.shape[2]
+    # G_b indices (w, e, d); shape (n_w, bK2, bK2p).
+    bK2 = G_b_fft.shape[1]
+    bK2p = G_b_fft.shape[2]
+    # phi_left indices (a, c, e); shape (nI, bK1, bK2).
+    # phi_right indices (J, d, b); shape (nJ, bK2p, bK1p).
+
+    # Step 1: T1[w, a, c, d] = sum_e phi_L[a, c, e] * G_b[w, e, d]
+    #   reshape phi_L -> (a*c, e), batched matmul (1, a*c, e) @ (w, e, d).
+    phi_L_r = phi_left.reshape(nI * bK1, bK2)
+    T1 = phi_L_r @ G_b_fft  # (w, a*c, d)
+    T1 = T1.reshape(n_w, nI, bK1, bK2p)  # (w, a, c, d)
+
+    # Step 2: T2[w, a, d, b] = sum_c T1[w, a, c, d] * G_a[w, c, b]
+    # Move c to inner axis of the LHS: (w, a, c, d) -> (w, a, d, c)
+    T1_t = T1.transpose(0, 1, 3, 2)
+    T1_t_r = T1_t.reshape(n_w, nI * bK2p, bK1)
+    T2 = T1_t_r @ G_a_fft  # (w, a*d, b)
+    T2 = T2.reshape(n_w, nI, bK2p, bK1p)  # (w, a, d, b)
+
+    # Step 3: S[w, a, J] = sum_{b, d} T2[w, a, d, b] * phi_R[J, d, b]
+    # Both LHS and RHS already in (d, b) order — flatten the trailing
+    # pair directly, no transpose.
+    T2_r = T2.reshape(n_w, nI, bK2p * bK1p)
+    phi_R_r = phi_right.reshape(nJ, bK2p * bK1p)
+    return T2_r @ phi_R_r.T  # (w, a, J)
+
+
+def bubble_dense_from_fft(
+    *,
+    phi_left,
+    phi_right,
+    G_a_fft,
+    G_b_fft,
+    ne: int,
+    prefactor,
+    out_slice: slice | None = None,
+    xp=None,
+):
+    """Bubble integrand from pre-FFT'd G blocks.
+
+    Skips the input zero-pad + forward FFT (the caller is expected to
+    have done that once via :func:`precompute_g_fft`) and runs only
+    the fused contraction + inverse FFT. Used by the multi-slab driver
+    in :mod:`phonon.solver.se_finite` to amortise the FFT cost across
+    every bubble that touches the same G block.
+
+    Returns ``prefactor * IFFT(S_hat)[out_slice]`` of shape
+    ``(len(out_slice), nI, nJ)``.
+    """
+    if xp is None:
+        xp = np
+    if out_slice is None:
+        out_slice = slice(0, ne)
+
+    S_hat = _bubble_contract_batched_matmul(
+        phi_left, phi_right, G_a_fft, G_b_fft, xp=xp,
+    )
+    return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]
+
+
 def bubble_dense(
     *,
     phi_left,
@@ -148,16 +267,7 @@ def bubble_dense(
     Ga_fft = xp.fft.fft(Ga_pad, axis=0)
     Gb_fft = xp.fft.fft(Gb_pad, axis=0)
 
-    # Fused 4-operand contraction. opt_einsum picks an optimal
-    # pairwise contraction path; on d5a sizes this is ~40-100x faster
-    # than three sequential np.einsum calls without ``optimize``.
-    # ``opt_einsum.contract`` auto-detects the array backend (numpy,
-    # cupy, etc.) from the operand types.
-    import opt_einsum
-    S_hat = opt_einsum.contract(
-        "ace,Jdb,wcb,wed->waJ",
-        phi_left, phi_right, Ga_fft, Gb_fft,
-        optimize="optimal",
+    S_hat = _bubble_contract_batched_matmul(
+        phi_left, phi_right, Ga_fft, Gb_fft, xp=xp,
     )
-
     return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]

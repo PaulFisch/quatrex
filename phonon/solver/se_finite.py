@@ -19,10 +19,13 @@ pair in the SCBA loop via :func:`phonon.solver.retarded.build_retarded`.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 from phonon_inputs.constants import HBAR_SI
-from .bubble import bubble_dense
+from .bubble import bubble_dense, bubble_dense_from_fft, precompute_g_fft
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +123,22 @@ def _build_pair_index(
     return pair_index
 
 
+def _default_n_threads() -> int:
+    """How many worker threads to use for the (I, J) loop.
+
+    Honours ``QUATREX_PHPH_THREADS`` first. Otherwise auto-detects
+    via ``os.cpu_count()`` and uses every visible core. The bubble
+    kernel releases the GIL during BLAS matmul/FFT, so the workers
+    can run in parallel; cap BLAS threads to 1 per worker (via
+    ``OMP_NUM_THREADS=1`` / ``OPENBLAS_NUM_THREADS=1``) to avoid
+    oversubscription on many-core hosts.
+    """
+    env = os.environ.get("QUATREX_PHPH_THREADS")
+    if env is not None:
+        return max(1, int(env))
+    return max(1, os.cpu_count() or 1)
+
+
 def compute_phph_self_energy_finite_multi_slab(
     g_lesser_blocks: dict[tuple[int, int], np.ndarray],
     g_greater_blocks: dict[tuple[int, int], np.ndarray],
@@ -131,6 +150,7 @@ def compute_phph_self_energy_finite_multi_slab(
     sigma_cutoff: int | None = None,
     g_cutoff: int | None = None,
     dc_handling: str = "interpolate",
+    n_threads: int | None = None,
 ) -> tuple[
     dict[tuple[int, int], np.ndarray],
     dict[tuple[int, int], np.ndarray],
@@ -193,25 +213,90 @@ def compute_phph_self_energy_finite_multi_slab(
             f"greater-only={set(gg.keys()) - g_keys}"
         )
 
+    # Pre-FFT every distinct G block once: every (I, J) inner loop
+    # touches the same handful of G blocks many times, so this saves
+    # O(n_pairs) redundant FFTs per SCBA iter.
+    gl_fft = {
+        key: precompute_g_fft(
+            blk, n_fft=n_fft, zero_freq_idx=mid, dc_handling=dc_handling,
+        )
+        for key, blk in gl.items()
+    }
+    gg_fft = {
+        key: precompute_g_fft(
+            blk, n_fft=n_fft, zero_freq_idx=mid, dc_handling=dc_handling,
+        )
+        for key, blk in gg.items()
+    }
+
     pair_index = _build_pair_index(
         phi_dev_blocks, g_keys, n_slabs, sigma_cutoff=sigma_cutoff,
     )
 
-    sl_out: dict[tuple[int, int], np.ndarray] = {}
-    sg_out: dict[tuple[int, int], np.ndarray] = {}
+    # Flatten to one task per bubble call (one (I, J, K1, K2, K1p,
+    # K2p, kind) tuple = one bubble_dense_from_fft invocation). This
+    # gives ~|pair_index| * |quadruples| * 2 tasks instead of just
+    # |pair_index|, so threading scales beyond the n_slabs^2 limit of
+    # the outer-only parallelisation.
+    tasks: list[tuple] = []
     for (I, J), pairs in pair_index.items():
         for K1, K2, K1p, K2p, phi_left, phi_right in pairs:
-            for gx, sx in ((gl, sl_out), (gg, sg_out)):
-                block = bubble_dense(
-                    phi_left=phi_left, phi_right=phi_right,
-                    G_a=gx[(K1, K1p)], G_b=gx[(K2, K2p)],
-                    n_fft=n_fft, prefactor=prefactor,
-                    out_slice=freq_sl, zero_freq_idx=mid,
-                    dc_handling=dc_handling,
-                )
-                if (I, J) not in sx:
-                    sx[(I, J)] = block
-                else:
-                    sx[(I, J)] = sx[(I, J)] + block
+            tasks.append(
+                (I, J, K1, K2, K1p, K2p, phi_left, phi_right, "lesser"),
+            )
+            tasks.append(
+                (I, J, K1, K2, K1p, K2p, phi_left, phi_right, "greater"),
+            )
+
+    def _compute_one_bubble(task):
+        I, J, K1, K2, K1p, K2p, phi_left, phi_right, kind = task
+        gx_fft = gl_fft if kind == "lesser" else gg_fft
+        blk = bubble_dense_from_fft(
+            phi_left=phi_left, phi_right=phi_right,
+            G_a_fft=gx_fft[(K1, K1p)],
+            G_b_fft=gx_fft[(K2, K2p)],
+            ne=n_freq, prefactor=prefactor,
+            out_slice=freq_sl,
+        )
+        return (I, J, kind), blk
+
+    sl_out: dict[tuple[int, int], np.ndarray] = {}
+    sg_out: dict[tuple[int, int], np.ndarray] = {}
+
+    def _accumulate(key_block):
+        (I, J, kind), blk = key_block
+        target = sl_out if kind == "lesser" else sg_out
+        existing = target.get((I, J))
+        target[(I, J)] = blk if existing is None else existing + blk
+
+    n_workers = max(1, n_threads if n_threads is not None
+                    else _default_n_threads())
+    # Cap to the number of tasks so we don't spawn 256 idle workers
+    # at small n_slabs.
+    n_workers = min(n_workers, max(1, len(tasks)))
+
+    if n_workers == 1 or len(tasks) <= 1:
+        for t in tasks:
+            _accumulate(_compute_one_bubble(t))
+    else:
+        # threadpoolctl caps BLAS threads inside the parallel region
+        # so we don't over-subscribe the host (each worker still
+        # benefits from BLAS-level parallelism for the matmuls, but
+        # only with as many threads as we have unused cores).
+        try:
+            from threadpoolctl import threadpool_limits
+            cm = threadpool_limits(limits=1, user_api="blas")
+        except ImportError:
+            class _Noop:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            cm = _Noop()
+        with cm, ThreadPoolExecutor(max_workers=n_workers) as pool:
+            for kb in pool.map(_compute_one_bubble, tasks):
+                _accumulate(kb)
 
     return sl_out, sg_out

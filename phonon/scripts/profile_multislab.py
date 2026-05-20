@@ -13,11 +13,33 @@ small breakdown of:
   * ``build_retarded`` (per-iter Hilbert/PV),
   * ``build_device_fc3_blocks`` (one-shot, outside the SCBA loop).
 
-Use::
+Threading
+---------
+The SSE kernel parallelises over individual bubble calls via a
+``ThreadPoolExecutor``. To exploit the parallelism on a many-core host:
 
-    /home/paul/miniconda3/envs/quatrex-dev/bin/python \\
+  * Set ``QUATREX_PHPH_THREADS=<N>`` to pick the worker count
+    explicitly (default = ``os.cpu_count()``).
+  * Set ``OPENBLAS_NUM_THREADS=1`` and ``OMP_NUM_THREADS=1`` to stop
+    BLAS from over-subscribing the same cores the worker pool is
+    using. The kernel uses ``threadpoolctl`` to do this
+    automatically inside the parallel region, but exporting the env
+    vars at job-launch is the cleanest way to make sure no other
+    library oversubscribes.
+
+cProfile + threads is well known to serialise: the profiler holds an
+internal lock that turns the parallel work into a sequence. Use this
+script with ``QUATREX_PHPH_THREADS=1`` for hot-spot analysis, and a
+plain (non-cProfile) timer for wall-time measurements of the parallel
+scaling.
+
+Cluster invocation example::
+
+    OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \\
+    QUATREX_PHPH_THREADS=32 \\
+        /home/paul/miniconda3/envs/quatrex-dev/bin/python \\
         phonon/scripts/profile_multislab.py \\
-        --n-slabs 2 --ne 21 --max-iter 2 --top 30
+        --n-slabs 4 --ne 41 --max-iter 2 --top 30
 """
 
 from __future__ import annotations
