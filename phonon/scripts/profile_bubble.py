@@ -86,6 +86,29 @@ def v3_fused_opt_einsum(phi_left, phi_right, Ga_fft, Gb_fft):
     )
 
 
+def v5_three_matmul(phi_left, phi_right, Ga_fft, Gb_fft):
+    """The kernel actually shipped in bubble.py — three batched
+    matmuls + reshapes. Routes the shared-w contractions through
+    BLAS GEMM instead of falling back to slow c_einsum."""
+    nI = phi_left.shape[0]
+    nJ = phi_right.shape[0]
+    bK1 = Ga_fft.shape[1]
+    bK1p = Ga_fft.shape[2]
+    bK2 = Gb_fft.shape[1]
+    bK2p = Gb_fft.shape[2]
+    n_w = Ga_fft.shape[0]
+    phi_L_r = phi_left.reshape(nI * bK1, bK2)
+    T1 = phi_L_r @ Gb_fft
+    T1 = T1.reshape(n_w, nI, bK1, bK2p)
+    T1_t = T1.transpose(0, 1, 3, 2)
+    T1_t_r = T1_t.reshape(n_w, nI * bK2p, bK1)
+    T2 = T1_t_r @ Ga_fft
+    T2 = T2.reshape(n_w, nI, bK2p, bK1p)
+    T2_r = T2.reshape(n_w, nI, bK2p * bK1p)
+    phi_R_r = phi_right.reshape(nJ, bK2p * bK1p)
+    return T2_r @ phi_R_r.T
+
+
 def _build_v4_expression(n_dof: int, n_fft: int):
     """Pre-compute the contraction path; returns a callable expression."""
     import opt_einsum
@@ -161,6 +184,8 @@ def main() -> None:
 
     t4 = _time("v4 opt_einsum precomputed expression", v4_precomputed,
                *inputs, runs=args.runs)
+    t5 = _time("v5 three-matmul (shipped kernel)", v5_three_matmul,
+               *inputs, runs=args.runs)
 
     print()
     print(
@@ -168,6 +193,7 @@ def main() -> None:
         f"  v2={t1/t2:6.2f}x"
         f"  v3={t1/t3:6.2f}x"
         f"  v4={t1/t4:6.2f}x"
+        f"  v5={t1/t5:6.2f}x"
     )
 
     if args.check_match:
@@ -176,6 +202,7 @@ def main() -> None:
             ("v2", v2_three_einsum_optimal),
             ("v3", v3_fused_opt_einsum),
             ("v4", v4_precomputed),
+            ("v5", v5_three_matmul),
         ):
             r = fn(*inputs)
             diff = float(np.max(np.abs(r - r1)))

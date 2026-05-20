@@ -101,15 +101,26 @@ def bubble_dense(
     Ga_fft = xp.fft.fft(Ga_pad, axis=0)
     Gb_fft = xp.fft.fft(Gb_pad, axis=0)
 
-    # Fused 4-operand contraction via opt_einsum (auto-detects the
-    # array backend from the operands). On d5a sizes this is roughly
-    # 40-100x faster than the three sequential np.einsum calls without
-    # ``optimize``.
-    import opt_einsum
-    S_hat = opt_einsum.contract(
-        "ace,Jdb,wcb,wed->waJ",
-        phi_left, phi_right, Ga_fft, Gb_fft,
-        optimize="optimal",
-    )
+    # Three-matmul kernel — same arithmetic as the four-operand
+    # einsum but routes everything through BLAS by reshaping
+    # ``(a, c)`` and ``(a, d)`` so the shared ``w`` axis is a clean
+    # batch dimension that batched matmul can handle. opt_einsum
+    # falls back to slow ``c_einsum`` for the shared-w step.
+    nI = phi_left.shape[0]
+    nJ = phi_right.shape[0]
+    n_w = Ga_fft.shape[0]
+
+    phi_L_r = phi_left.reshape(nI * bK1, bK2)
+    T1 = phi_L_r @ Gb_fft  # (w, a*c, d)
+    T1 = T1.reshape(n_w, nI, bK1, bK2p)  # (w, a, c, d)
+
+    T1_t = T1.transpose(0, 1, 3, 2)  # (w, a, d, c)
+    T1_t_r = T1_t.reshape(n_w, nI * bK2p, bK1)
+    T2 = T1_t_r @ Ga_fft  # (w, a*d, b)
+    T2 = T2.reshape(n_w, nI, bK2p, bK1p)  # (w, a, d, b)
+
+    T2_r = T2.reshape(n_w, nI, bK2p * bK1p)
+    phi_R_r = phi_right.reshape(nJ, bK2p * bK1p)
+    S_hat = T2_r @ phi_R_r.T  # (w, a, J)
 
     return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]

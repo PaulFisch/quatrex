@@ -32,6 +32,7 @@ dependencies = [
     "scipy",
     "numba",
     "mpi4py",
+    "opt_einsum>=3.3",
     "pydantic",
     "matplotlib",
     "threadpoolctl",
