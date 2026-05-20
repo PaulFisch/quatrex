@@ -53,8 +53,12 @@ from .leads import (
     compute_obc_batch,
     solve_green_batch,
 )
+from .fc3_device import build_device_fc3_blocks
 from .retarded import build_retarded
-from .se_finite import compute_phph_self_energy_finite
+from .se_finite import (
+    compute_phph_self_energy_finite,
+    compute_phph_self_energy_finite_multi_slab,
+)
 from .se_q import compute_phph_self_energy_q_dense
 
 
@@ -354,6 +358,271 @@ def scba_loop(
 
 
 # ---------------------------------------------------------------------------
+# Device-storage SCBA loop for the multi-slab finite path
+# ---------------------------------------------------------------------------
+
+
+def scba_loop_dev(
+    *,
+    z2_arr, freqs_thz, dw_thz, omega_rad, pos_mask,
+    n_slabs, n_dof, N_D,
+    H_D_list, obc_list, btd_blocks_list,
+    n_kpts,
+    se_kernel,
+    T_L, T_R,
+    max_scba_iter, scba_tol, conservation_tol,
+    mixing, anderson_mixing, anderson_depth,
+    scattering_contacts,
+    retarded,
+    verbose,
+):
+    """SCBA fixed-point with device-storage self-energies.
+
+    Mirrors :func:`scba_loop` but stores
+    ``Sigma^{<,>,R}`` as ``(n_kpts, nfreq, N_D, N_D)`` device-matrix
+    buffers so the multi-slab driver can populate off-diagonal blocks
+    ``Sigma_{IJ}`` produced by
+    :func:`compute_phph_self_energy_finite_multi_slab`.
+
+    Parameters
+    ----------
+    se_kernel : callable(G_less_dev, G_great_dev)
+        ``G_*_dev`` have shape ``(n_kpts, nfreq, N_D, N_D)``. The
+        callable must return ``(Sigma_l, Sigma_g)`` of the same shape.
+    retarded : {"pv", "fft", "half"}
+        Method for rebuilding ``Sigma^R`` from the mixed
+        ``Sigma^{<,>}`` pair.
+    """
+    nfreq = len(freqs_thz)
+
+    Sigma_R = np.zeros((n_kpts, nfreq, N_D, N_D), dtype=complex)
+    Sigma_l = np.zeros_like(Sigma_R)
+    Sigma_g = np.zeros_like(Sigma_R)
+
+    convergence_history = []
+    J_total_prev = 0.0
+    rel_change = float('inf')
+    sig_change = float('inf')
+    conservation_err = 1.0
+    _anderson_x_hist = []
+    _anderson_f_hist = []
+
+    spectral_J_L = np.zeros(nfreq)
+    spectral_J_R = np.zeros(nfreq)
+
+    sl0 = slice(0, n_dof)
+    sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
+
+    G_less_dev_q = np.zeros((n_kpts, nfreq, N_D, N_D), dtype=complex)
+    G_great_dev_q = np.zeros_like(G_less_dev_q)
+    G_ret_dev_q = np.zeros_like(G_less_dev_q)
+
+    for scba_iter in range(max_scba_iter):
+        if scattering_contacts and scba_iter > 0:
+            for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks_list):
+                lead_L = Sigma_R[iq, :, sl0, sl0]
+                lead_R = Sigma_R[iq, :, sl_last, sl_last]
+                try:
+                    obc_try = compute_obc_batch(
+                        z2_arr, H_00_iq, H_01_iq, freqs_thz, T_L, T_R,
+                        n_slabs=n_slabs,
+                        lead_sigma_r_L=lead_L, lead_sigma_r_R=lead_R)
+                    if not np.any(np.isnan(obc_try["Sigma_L_R"])):
+                        obc_list[iq] = obc_try
+                    elif verbose:
+                        print(f"    WARNING: scattering-contact OBC "
+                              f"diverged for iq={iq}, keeping previous")
+                except RuntimeError:
+                    if verbose:
+                        print(f"    WARNING: scattering-contact OBC "
+                              f"failed for iq={iq}, keeping previous")
+
+        G_less_dev_q[:] = 0.0
+        G_great_dev_q[:] = 0.0
+        G_ret_dev_q[:] = 0.0
+        spectral_J_L[:] = 0.0
+        spectral_J_R[:] = 0.0
+
+        for iq in range(n_kpts):
+            H_D = H_D_list[iq]
+            obc = obc_list[iq]
+
+            Sig_R_dev = Sigma_R[iq]
+            Sig_l_dev = Sigma_l[iq]
+            Sig_g_dev = Sigma_g[iq]
+
+            G_ret, G_less, G_great = solve_green_batch(
+                z2_arr, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev)
+
+            G_less_dev_q[iq] = G_less
+            G_great_dev_q[iq] = G_great
+            G_ret_dev_q[iq] = G_ret
+
+            SLg_Gl = obc["Sigma_L_greater"][:, sl0, sl0] @ G_less[:, sl0, sl0]
+            SLl_Gg = obc["Sigma_L_lesser"][:, sl0, sl0] @ G_great[:, sl0, sl0]
+            spectral_J_L += HBAR_SI * omega_rad * np.real(
+                np.trace(SLg_Gl - SLl_Gg, axis1=-2, axis2=-1))
+
+            SRl_Gg = obc["Sigma_R_lesser"][:, sl_last, sl_last] @ G_great[:, sl_last, sl_last]
+            SRg_Gl = obc["Sigma_R_greater"][:, sl_last, sl_last] @ G_less[:, sl_last, sl_last]
+            spectral_J_R += HBAR_SI * omega_rad * np.real(
+                np.trace(SRl_Gg - SRg_Gl, axis1=-2, axis2=-1))
+
+        spectral_J_L /= n_kpts
+        spectral_J_R /= n_kpts
+
+        J_L_total = np.sum(spectral_J_L[pos_mask]) * dw_thz * 1e12
+        J_R_total = np.sum(spectral_J_R[pos_mask]) * dw_thz * 1e12
+        J_total = 0.5 * (J_L_total + J_R_total)
+        J_denom = abs(J_L_total) + abs(J_R_total)
+        conservation_err = (abs(J_L_total - J_R_total) / J_denom
+                            if J_denom > 0 else 0.0)
+
+        if verbose and scba_iter <= 2:
+            max_l_err = 0.0
+            max_r_err = 0.0
+            for iq in range(n_kpts):
+                for l in range(n_slabs):
+                    sl = slice(l * n_dof, (l + 1) * n_dof)
+                    le, re = check_full_axis_symmetry(
+                        G_ret_dev_q[iq, :, sl, sl],
+                        G_less_dev_q[iq, :, sl, sl],
+                        G_great_dev_q[iq, :, sl, sl], freqs_thz)
+                    max_l_err = max(max_l_err, le)
+                    max_r_err = max(max_r_err, re)
+            if max_l_err > 1e-3 or max_r_err > 1e-3:
+                print(f"    Symmetry: |G^<+G^>(-)|={max_l_err:.2e}, "
+                      f"|G^R-G^R(-)*|={max_r_err:.2e}")
+
+        Sigma_l_new, Sigma_g_new = se_kernel(G_less_dev_q, G_great_dev_q)
+
+        symmetrize_lesser_greater(Sigma_l_new, Sigma_g_new)
+
+        sig_r_norm = (
+            np.max(np.abs(Sigma_l_new)) + np.max(np.abs(Sigma_g_new))
+        )
+
+        if verbose and scba_iter == 0:
+            gl_max = np.max(np.abs(G_less_dev_q))
+            print(f"    G diagnostic: max|G^<| = {gl_max:.4e}")
+            print(f"    Self-energy: max|Sigma^R| = {sig_r_norm:.4e} THz^2")
+
+        _Sigma_prev = np.concatenate([Sigma_l.ravel(), Sigma_g.ravel()])
+
+        if scba_iter == 0:
+            Sigma_l = Sigma_l_new.copy()
+            Sigma_g = Sigma_g_new.copy()
+        elif anderson_mixing:
+            x_in = np.concatenate([Sigma_l.ravel(), Sigma_g.ravel()])
+            x_out = np.concatenate([
+                Sigma_l_new.ravel(), Sigma_g_new.ravel()])
+            f_k = x_out - x_in
+            _anderson_x_hist.append(x_in)
+            _anderson_f_hist.append(f_k)
+
+            m = len(_anderson_f_hist)
+            if m >= 2:
+                n_use = min(m - 1, anderson_depth)
+                dF = np.column_stack([
+                    _anderson_f_hist[-n_use + j] - _anderson_f_hist[-n_use + j - 1]
+                    for j in range(n_use)])
+                dX = np.column_stack([
+                    _anderson_x_hist[-n_use + j] - _anderson_x_hist[-n_use + j - 1]
+                    for j in range(n_use)])
+                FtF = dF.conj().T @ dF
+                Ftf = dF.conj().T @ f_k
+                reg = 1e-8 * np.trace(FtF).real / max(FtF.shape[0], 1)
+                gamma = np.linalg.solve(
+                    FtF + reg * np.eye(FtF.shape[0]), Ftf)
+                x_mixed = (x_in + mixing * f_k) - (dX + mixing * dF) @ gamma
+            else:
+                x_mixed = x_in + mixing * f_k
+
+            sz = Sigma_l.size
+            Sigma_l = x_mixed[:sz].reshape(Sigma_l.shape)
+            Sigma_g = x_mixed[sz:].reshape(Sigma_g.shape)
+
+            if len(_anderson_x_hist) > anderson_depth + 2:
+                _anderson_x_hist.pop(0)
+                _anderson_f_hist.pop(0)
+        else:
+            alpha = mixing
+            Sigma_l = (1 - alpha) * Sigma_l + alpha * Sigma_l_new
+            Sigma_g = (1 - alpha) * Sigma_g + alpha * Sigma_g_new
+
+        Sigma_R = build_retarded(
+            Sigma_l, Sigma_g, freqs_thz, method=retarded)
+
+        total_viol = 0
+        total_max = 0.0
+        for iq in range(n_kpts):
+            for l in range(n_slabs):
+                sl = slice(l * n_dof, (l + 1) * n_dof)
+                nv, mv = check_broadening_sign(
+                    Sigma_R[iq, :, sl, sl], freqs_thz, "SCBA", tol=1e-8)
+                total_viol += nv
+                total_max = max(total_max, mv)
+        if total_viol > 0 and verbose:
+            print(f"    WARNING: Gamma sign violations: {total_viol} points, "
+                  f"max = {total_max:.2e}")
+
+        if scba_iter > 0:
+            rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
+            _Sigma_now = np.concatenate([
+                Sigma_l.ravel(), Sigma_g.ravel()])
+            sig_norm = np.linalg.norm(_Sigma_now)
+            sig_change = (np.linalg.norm(_Sigma_now - _Sigma_prev)
+                          / (sig_norm + 1e-30) if sig_norm > 0 else 0.0)
+            convergence_history.append(rel_change)
+            if verbose:
+                print(f"    SCBA iter {scba_iter + 1}: "
+                      f"J = {J_total:.4e} W, "
+                      f"conservation = {conservation_err:.4e}, "
+                      f"dJ/J = {rel_change:.4e}, "
+                      f"dSig/Sig = {sig_change:.4e}, "
+                      f"max|Sigma^R| = {np.max(np.abs(Sigma_R)):.2e} THz^2")
+            numerically_converged = (sig_change < scba_tol
+                                      and rel_change < scba_tol)
+            conserving = conservation_err < conservation_tol
+
+            if numerically_converged and conserving:
+                if verbose:
+                    print(f"    Converged after {scba_iter + 1} iterations "
+                          f"(dJ/J={rel_change:.2e}, dSig/Sig={sig_change:.2e}, "
+                          f"conservation={conservation_err:.2e})")
+                break
+
+            if numerically_converged and not conserving:
+                if verbose:
+                    print(f"    Numerically converged but conservation "
+                          f"NOT satisfied ({conservation_err:.2e} > "
+                          f"{conservation_tol:.2e}), continuing...")
+        else:
+            if verbose:
+                print(f"    SCBA iter 1: "
+                      f"J_L = {J_L_total:.4e} W, J_R = {J_R_total:.4e} W")
+
+        J_total_prev = J_total
+
+    else:
+        if verbose:
+            print(f"  WARNING: SCBA did not converge after {max_scba_iter} "
+                  f"iterations (dJ/J={rel_change:.2e}, "
+                  f"dSig/Sig={sig_change:.2e}, "
+                  f"conservation={conservation_err:.2e})")
+
+    return {
+        "spectral_J_L": spectral_J_L,
+        "spectral_J_R": spectral_J_R,
+        "Sigma_R": Sigma_R,
+        "Sigma_l": Sigma_l,
+        "Sigma_g": Sigma_g,
+        "conservation_err": conservation_err,
+        "convergence_history": convergence_history,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Γ-only supercell→primitive projection of the FC3 vertex
 # ---------------------------------------------------------------------------
 
@@ -409,22 +678,50 @@ def transmission_finite(
     n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
-    retarded: str = "half",
+    retarded: str = "fft",
     scattering_contacts: bool = False,
     hilbert_retarded: bool = False,
+    sigma_cutoff: int | None = None,
+    vertex_cutoff: int | None = None,
+    g_cutoff: int | None = None,
+    dc_handling: str = "interpolate",
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
 
-    This is the canonical ``n_slabs=1`` solver.  :func:`transmission_q`
-    with ``q_mesh=(1,1)`` must reproduce this result exactly.
+    Computes the full multi-slab 3-phonon self-energy on a finite
+    ``n_slabs``-cell device. By default every approximation against
+    the strict SCBA expression is disabled (see ``sigma_cutoff``,
+    ``vertex_cutoff``, ``g_cutoff``, ``dc_handling`` below); the
+    remaining approximation in the dense path is the non-self-consistent
+    lead self-energy (controlled by ``scattering_contacts``).
 
     Parameters
     ----------
-    retarded : {"half", "pv", "fft"}
-        Method for reconstructing Σ^R from Σ^{<,>}.  Default ``"half"``
-        matches the q-path entry point so q=(1,1) reproduces finite.
+    retarded : {"fft", "pv", "half"}
+        Method for reconstructing Sigma^R from the mixed Sigma^{<,>}.
+        Default ``"fft"`` retains the level shift via the FFT-Hilbert
+        transform; ``"half"`` reproduces the historical broadening-only
+        approximation; ``"pv"`` does the singularity-subtracted PV
+        integral (slowest).
     hilbert_retarded : bool
         Legacy flag.  If ``True``, overrides ``retarded`` to ``"fft"``.
+    sigma_cutoff : int or None
+        Maximum ``|I - J|`` for produced Sigma blocks. ``None``
+        (default) imposes no truncation; pass ``0`` to recover the
+        BTD-diagonal-only behaviour of the legacy solver.
+    vertex_cutoff : int or None
+        Maximum slab-distance retained in the FC3 vertex blocks
+        ``Phi_{I, K, K'}``. ``None`` (default) keeps every triplet
+        supported by the supercell FC3.
+    g_cutoff : int or None
+        Maximum ``|K - K'|`` for G blocks used in the inner bubble
+        sum. ``None`` (default) keeps every available block; pass
+        ``0`` to restrict to diagonal G.
+    dc_handling : {"interpolate", "zero", "keep"}
+        How to treat the omega = 0 sample of G before the bubble FFT
+        (see :func:`phonon.solver.bubble.bubble_dense`). The legacy
+        behaviour is ``"zero"``; the new default ``"interpolate"``
+        replaces ``G[0]`` by the midpoint of its neighbours.
     """
     if hilbert_retarded:
         retarded = "fft"
@@ -456,16 +753,22 @@ def transmission_finite(
         M_stacked = build_realspace_fc3_matrices(
             fc3_raw, n_atoms, masses_super, ref_sc_atoms)
 
-    M_blocks = M_stacked.reshape(n_dof, dim_sc, dim_sc)
-    Phi = gamma_project_M_blocks(M_blocks, prim_indices, n_atoms)
+    # Build the device-resolved FC3 vertex dict (multi-slab).
+    phi_dev_blocks = build_device_fc3_blocks(
+        M_stacked, prim_indices, slab_indices,
+        n_atoms, n_slabs, vertex_cutoff=vertex_cutoff,
+    )
 
     if verbose:
         if M_stacked_override is None:
             print(f"  FC3 raw shape: {fc3_raw.shape}")
         print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
         print(f"  M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
-        print(f"  Phi norm: {np.linalg.norm(Phi):.4e}")
+        print(f"  Phi device blocks: {len(phi_dev_blocks)} "
+              f"(vertex_cutoff={vertex_cutoff})")
         print(f"  Device: {n_slabs} slab(s), {N_D} DOFs (finite, Gamma only)")
+        print(f"  Cutoffs: sigma={sigma_cutoff}, vertex={vertex_cutoff}, "
+              f"g={g_cutoff}; dc_handling={dc_handling}")
 
     T_L = temperature + delta_T / 2.0
     T_R = temperature - delta_T / 2.0
@@ -522,18 +825,46 @@ def transmission_finite(
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
-    def se_kernel(G_lesser_slab, G_greater_slab):
-        Sigma_l_new = np.zeros((n_slabs, 1, nfreq, n_dof, n_dof), dtype=complex)
+    def _g_dict_from_dense(g_dense, *, max_offset):
+        """Build {(K, K'): block} dict from a dense (nfreq, N_D, N_D) G.
+
+        ``max_offset = None`` includes every (K, K') pair; otherwise
+        keeps only ``|K - K'| <= max_offset``.
+        """
+        out: dict[tuple[int, int], np.ndarray] = {}
+        for K in range(n_slabs):
+            sK = slice(K * n_dof, (K + 1) * n_dof)
+            for Kp in range(n_slabs):
+                if max_offset is not None and abs(K - Kp) > max_offset:
+                    continue
+                sKp = slice(Kp * n_dof, (Kp + 1) * n_dof)
+                out[(K, Kp)] = g_dense[:, sK, sKp]
+        return out
+
+    def se_kernel(G_less_dev_q, G_great_dev_q):
+        Sigma_l_new = np.zeros((1, nfreq, N_D, N_D), dtype=complex)
         Sigma_g_new = np.zeros_like(Sigma_l_new)
-        for l in range(n_slabs):
-            sl_n, sg_n = compute_phph_self_energy_finite(
-                G_lesser_slab[l, 0], G_greater_slab[l, 0],
-                Phi, freqs_thz, dw_thz)
-            Sigma_l_new[l, 0] = sl_n
-            Sigma_g_new[l, 0] = sg_n
+
+        gl = _g_dict_from_dense(G_less_dev_q[0], max_offset=g_cutoff)
+        gg = _g_dict_from_dense(G_great_dev_q[0], max_offset=g_cutoff)
+        sl_blocks, sg_blocks = compute_phph_self_energy_finite_multi_slab(
+            gl, gg, phi_dev_blocks, n_slabs,
+            freqs_thz, dw_thz,
+            sigma_cutoff=sigma_cutoff,
+            g_cutoff=g_cutoff,
+            dc_handling=dc_handling,
+        )
+        for (I, J), block in sl_blocks.items():
+            sI = slice(I * n_dof, (I + 1) * n_dof)
+            sJ = slice(J * n_dof, (J + 1) * n_dof)
+            Sigma_l_new[0, :, sI, sJ] = block
+        for (I, J), block in sg_blocks.items():
+            sI = slice(I * n_dof, (I + 1) * n_dof)
+            sJ = slice(J * n_dof, (J + 1) * n_dof)
+            Sigma_g_new[0, :, sI, sJ] = block
         return Sigma_l_new, Sigma_g_new
 
-    scba_result = scba_loop(
+    scba_result = scba_loop_dev(
         z2_arr=z2_arr, freqs_thz=freqs_thz, dw_thz=dw_thz,
         omega_rad=omega_rad, pos_mask=pos_mask,
         n_slabs=n_slabs, n_dof=n_dof, N_D=N_D,
@@ -582,9 +913,9 @@ def transmission_finite(
         "delta_T": delta_T,
         "n_scba_iterations": len(convergence_history) + 1,
         "convergence_history": convergence_history,
-        "self_energy_retarded": Sigma_R[:, 0, pos_mask],
-        "self_energy_lesser": Sigma_l[:, 0, pos_mask],
-        "self_energy_greater": Sigma_g[:, 0, pos_mask],
+        "self_energy_retarded": Sigma_R[0, pos_mask],
+        "self_energy_lesser": Sigma_l[0, pos_mask],
+        "self_energy_greater": Sigma_g[0, pos_mask],
     }
 
 

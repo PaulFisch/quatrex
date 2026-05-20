@@ -10,8 +10,6 @@ Implements
 The cubic vertex Phi is supplied as a block-sparse dict
 (see quatrex.phonon.fc3_loader); the convolution is performed via
 FFT along the energy axis. Internal units are THz / THz^2
-(see quatrex.phonon.units), matching the standalone reference at
-phonon/phonon_inputs/anharmonic.py.
 """
 
 from __future__ import annotations

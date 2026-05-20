@@ -1,4 +1,4 @@
-"""Shared FFT bubble kernel for the 3-phonon scattering self-energy.
+"""FFT bubble kernel for the 3-phonon scattering self-energy.
 
 The bubble integrand is
 
@@ -8,14 +8,7 @@ The bubble integrand is
         * phi_right_{J,d,f}
 
 evaluated as a frequency convolution via zero-padded FFTs along the
-omega axis. The prefactor is supplied by the caller (typically
-``0.5j * hbar * d_omega / (2 * pi)``).
-
-Both the dense reference solver (``phonon.solver.dense``, formerly
-``phonon/phonon_inputs/anharmonic.py``) and the production
-block-sparse solver (``quatrex.phonon.sse_phonon_phonon``) call into
-this kernel; they differ only in the output slice and DC handling
-which are exposed as parameters.
+omega axis. The prefactor is supplied by the caller (``0.5j * hbar * d_omega / (2 * pi)``).
 """
 
 from __future__ import annotations
@@ -108,8 +101,15 @@ def bubble_dense(
     Ga_fft = xp.fft.fft(Ga_pad, axis=0)
     Gb_fft = xp.fft.fft(Gb_pad, axis=0)
 
-    A = xp.einsum("ace,wed->wacd", phi_left, Gb_fft)
-    B = xp.einsum("wacd,wcb->wabd", A, Ga_fft)
-    S_hat = xp.einsum("wabd,Jdb->waJ", B, phi_right)
+    # Fused 4-operand contraction via opt_einsum (auto-detects the
+    # array backend from the operands). On d5a sizes this is roughly
+    # 40-100x faster than the three sequential np.einsum calls without
+    # ``optimize``.
+    import opt_einsum
+    S_hat = opt_einsum.contract(
+        "ace,Jdb,wcb,wed->waJ",
+        phi_left, phi_right, Ga_fft, Gb_fft,
+        optimize="optimal",
+    )
 
     return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]
