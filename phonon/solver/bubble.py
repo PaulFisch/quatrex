@@ -65,18 +65,10 @@ def precompute_g_fft(G, *, n_fft, zero_freq_idx=None, dc_handling="zero",
     return xp.fft.fft(G_pad, axis=0)
 
 
-def _bubble_contract_batched_matmul(phi_left, phi_right,
-                                    G_a_fft, G_b_fft, xp=np):
-    """Three-matmul kernel for ``S[w,a,J] = phi_L[ace] * G_b[wed] *
-    G_a[wcb] * phi_R[Jdb]``.
-
-    Profiling on the 4-operand fused ``opt_einsum.contract`` showed
-    that the chosen path falls back to ``c_einsum`` (slow Python
-    walker) for the contractions that share the ``w`` batch axis
-    between ``G_a`` and ``G_b`` — ``tensordot`` cannot handle shared
-    broadcast indices. The kernel below does the same arithmetic but
-    routes everything through BLAS ``matmul`` (with explicit
-    reshapes), which gives ~5-10x more speedup on d5a sizes.
+def _bubble_contract_chunk(phi_left, phi_right, G_a_fft, G_b_fft):
+    """Three-matmul kernel over a single contiguous block of the
+    frequency axis. See :func:`_bubble_contract_batched_matmul` for
+    the index convention; this is the un-chunked inner kernel.
     """
     nI = phi_left.shape[0]
     nJ = phi_right.shape[0]
@@ -91,24 +83,82 @@ def _bubble_contract_batched_matmul(phi_left, phi_right,
     # phi_right indices (J, d, b); shape (nJ, bK2p, bK1p).
 
     # Step 1: T1[w, a, c, d] = sum_e phi_L[a, c, e] * G_b[w, e, d]
-    #   reshape phi_L -> (a*c, e), batched matmul (1, a*c, e) @ (w, e, d).
     phi_L_r = phi_left.reshape(nI * bK1, bK2)
     T1 = phi_L_r @ G_b_fft  # (w, a*c, d)
     T1 = T1.reshape(n_w, nI, bK1, bK2p)  # (w, a, c, d)
 
     # Step 2: T2[w, a, d, b] = sum_c T1[w, a, c, d] * G_a[w, c, b]
-    # Move c to inner axis of the LHS: (w, a, c, d) -> (w, a, d, c)
     T1_t = T1.transpose(0, 1, 3, 2)
     T1_t_r = T1_t.reshape(n_w, nI * bK2p, bK1)
     T2 = T1_t_r @ G_a_fft  # (w, a*d, b)
     T2 = T2.reshape(n_w, nI, bK2p, bK1p)  # (w, a, d, b)
 
     # Step 3: S[w, a, J] = sum_{b, d} T2[w, a, d, b] * phi_R[J, d, b]
-    # Both LHS and RHS already in (d, b) order — flatten the trailing
-    # pair directly, no transpose.
     T2_r = T2.reshape(n_w, nI, bK2p * bK1p)
     phi_R_r = phi_right.reshape(nJ, bK2p * bK1p)
     return T2_r @ phi_R_r.T  # (w, a, J)
+
+
+def bubble_chunk_peak_bytes_per_w(
+    *, nI: int, nJ: int, bK1: int, bK1p: int, bK2: int, bK2p: int,
+    itemsize: int = 16,
+) -> int:
+    """Transient bytes the matmul kernel holds per frequency sample.
+
+    The chunked kernel processes ``w_chunk`` frequencies at a time;
+    multiply this by the chunk length to bound a chunk's peak. The
+    four ``(n_w, n_dof^3)``-shaped intermediates dominate.
+    """
+    big = nI * max(bK1, bK2p) * max(bK1p, bK2p) * itemsize
+    small = nI * nJ * itemsize
+    return int(4 * big + 2 * small)
+
+
+def _bubble_contract_batched_matmul(phi_left, phi_right,
+                                    G_a_fft, G_b_fft, xp=np,
+                                    max_bytes: int | None = None):
+    """Three-matmul kernel for ``S[w,a,J] = phi_L[ace] * G_b[wed] *
+    G_a[wcb] * phi_R[Jdb]``.
+
+    Profiling on the 4-operand fused ``opt_einsum.contract`` showed
+    that the chosen path falls back to ``c_einsum`` (slow Python
+    walker) for the contractions that share the ``w`` batch axis
+    between ``G_a`` and ``G_b`` — ``tensordot`` cannot handle shared
+    broadcast indices. The kernel below does the same arithmetic but
+    routes everything through BLAS ``matmul`` (with explicit
+    reshapes), ~5-10x faster on d5a sizes.
+
+    ``max_bytes`` bounds the transient memory: the frequency axis is
+    a perfect batch dimension (each ``w`` is independent), so when
+    the full contraction would exceed ``max_bytes`` the kernel slices
+    the ``w`` axis into chunks that each fit. ``None`` (default)
+    disables chunking — the whole axis is contracted at once.
+    """
+    nI = phi_left.shape[0]
+    nJ = phi_right.shape[0]
+    n_w = G_a_fft.shape[0]
+    bK1 = G_a_fft.shape[1]
+    bK1p = G_a_fft.shape[2]
+    bK2 = G_b_fft.shape[1]
+    bK2p = G_b_fft.shape[2]
+
+    if max_bytes is None:
+        return _bubble_contract_chunk(phi_left, phi_right, G_a_fft, G_b_fft)
+
+    per_w = bubble_chunk_peak_bytes_per_w(
+        nI=nI, nJ=nJ, bK1=bK1, bK1p=bK1p, bK2=bK2, bK2p=bK2p,
+    )
+    w_chunk = max(1, min(n_w, int(max_bytes // max(per_w, 1))))
+    if w_chunk >= n_w:
+        return _bubble_contract_chunk(phi_left, phi_right, G_a_fft, G_b_fft)
+
+    S_hat = xp.empty((n_w, nI, nJ), dtype=complex)
+    for w0 in range(0, n_w, w_chunk):
+        w1 = min(w0 + w_chunk, n_w)
+        S_hat[w0:w1] = _bubble_contract_chunk(
+            phi_left, phi_right, G_a_fft[w0:w1], G_b_fft[w0:w1],
+        )
+    return S_hat
 
 
 def bubble_dense_from_fft(
@@ -120,6 +170,7 @@ def bubble_dense_from_fft(
     ne: int,
     prefactor,
     out_slice: slice | None = None,
+    max_bytes: int | None = None,
     xp=None,
 ):
     """Bubble integrand from pre-FFT'd G blocks.
@@ -129,6 +180,11 @@ def bubble_dense_from_fft(
     the fused contraction + inverse FFT. Used by the multi-slab driver
     in :mod:`phonon.solver.se_finite` to amortise the FFT cost across
     every bubble that touches the same G block.
+
+    ``max_bytes`` bounds the transient memory of the contraction by
+    chunking the frequency axis (see
+    :func:`_bubble_contract_batched_matmul`). ``None`` disables
+    chunking.
 
     Returns ``prefactor * IFFT(S_hat)[out_slice]`` of shape
     ``(len(out_slice), nI, nJ)``.
@@ -140,6 +196,7 @@ def bubble_dense_from_fft(
 
     S_hat = _bubble_contract_batched_matmul(
         phi_left, phi_right, G_a_fft, G_b_fft, xp=xp,
+        max_bytes=max_bytes,
     )
     return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]
 
