@@ -25,7 +25,12 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from phonon_inputs.constants import HBAR_SI
-from .bubble import bubble_dense, bubble_dense_from_fft, precompute_g_fft
+from .bubble import (
+    bubble_chunk_peak_bytes_per_w,
+    bubble_dense,
+    bubble_dense_from_fft,
+    precompute_g_fft,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +144,57 @@ def _default_n_threads() -> int:
     return max(1, os.cpu_count() or 1)
 
 
+def _available_memory_bytes() -> int:
+    """Best-effort estimate of the per-process available RAM.
+
+    Resolution order:
+
+    1. ``QUATREX_PHPH_MEMORY_GB`` env var (in GiB).
+    2. :mod:`psutil`'s ``virtual_memory().available`` if installed.
+    3. ``/proc/meminfo``'s ``MemAvailable`` field on Linux.
+    4. Conservative 8 GiB fallback.
+    """
+    env = os.environ.get("QUATREX_PHPH_MEMORY_GB")
+    if env is not None:
+        return int(float(env) * (1 << 30))
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except ImportError:
+        pass
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    kib = int(line.split()[1])
+                    return kib * 1024
+    except (FileNotFoundError, ValueError):
+        pass
+    return 8 * (1 << 30)
+
+
+def _bubble_peak_bytes_per_worker(
+    *, n_fft: int, nI: int, nJ: int,
+    bK1: int, bK1p: int, bK2: int, bK2p: int,
+    itemsize: int = 16,
+) -> int:
+    """Conservative upper bound on the transient memory a single
+    bubble call holds at its peak.
+
+    The matmul kernel allocates ``T1``, ``T1_t`` (reshape-forced copy
+    after transpose), ``T2``, ``T2_r`` (reshape after transpose), the
+    matmul output ``S_hat``, and the inverse-FFT result. ``T1`` and
+    ``T2`` dominate; we count the four ``(n_fft, n_dof^3)``-sized
+    intermediates as alive simultaneously plus a small slack for
+    ``S_hat`` and the IFFT output.
+    """
+    big = n_fft * nI * max(bK1, bK2p) * max(bK1p, bK2p) * itemsize
+    small = n_fft * nI * nJ * itemsize  # S_hat + ifft result
+    # Four live big tensors + 2 small outputs + ~25 % slack for
+    # transient temporaries inside BLAS / numpy.
+    return int(4 * big + 2 * small + 0.25 * (4 * big + 2 * small))
+
+
 def compute_phph_self_energy_finite_multi_slab(
     g_lesser_blocks: dict[tuple[int, int], np.ndarray],
     g_greater_blocks: dict[tuple[int, int], np.ndarray],
@@ -248,6 +304,94 @@ def compute_phph_self_energy_finite_multi_slab(
                 (I, J, K1, K2, K1p, K2p, phi_left, phi_right, "greater"),
             )
 
+    # --- memory budgeting -------------------------------------------
+    # The bubble's transient peak is O(n_fft * n_dof^3); naively
+    # running N workers in parallel would need N * peak bytes. We
+    # (a) cap the worker count and (b) hand each worker a per-worker
+    # byte budget so the bubble kernel chunks the frequency axis to
+    # fit. Nothing here ever exceeds the budget, so the run cannot
+    # OOM — at worst it serialises the omega axis one sample at a
+    # time. ``per_worker_max_bytes`` is None (no chunking) when there
+    # is plenty of headroom.
+    n_workers_requested = max(
+        1, n_threads if n_threads is not None else _default_n_threads()
+    )
+    n_workers_by_tasks = max(1, len(tasks))
+    per_worker_max_bytes: int | None = None
+
+    if tasks:
+        # Uniform-DOF transport cells: every phi/G block has the same
+        # shape, so one representative sample fixes the sizing.
+        sample_phi_left = next(iter(phi_dev_blocks.values()))
+        sample_G = next(iter(gl_fft.values()))
+        nI_s, bK1_s, bK2_s = sample_phi_left.shape
+        nJ_s = sample_phi_left.shape[0]
+        bK1p_s = sample_G.shape[2]
+        bK2p_s = bK2_s
+
+        itemsize = 16  # complex128
+        full_peak = _bubble_peak_bytes_per_worker(
+            n_fft=n_fft, nI=nI_s, nJ=nJ_s,
+            bK1=bK1_s, bK1p=bK1p_s, bK2=bK2_s, bK2p=bK2p_s,
+        )
+        per_w = bubble_chunk_peak_bytes_per_w(
+            nI=nI_s, nJ=nJ_s,
+            bK1=bK1_s, bK1p=bK1p_s, bK2=bK2_s, bK2p=bK2p_s,
+        )
+        # Account for the four big transients held per chunk, with
+        # the same 25 % slack as the full-peak estimate.
+        per_w_peak = int(1.25 * per_w)
+
+        fixed_bytes = (
+            sum(g.nbytes for g in gl_fft.values())
+            + sum(g.nbytes for g in gg_fft.values())
+            + sum(p.nbytes for p in {id(p): p
+                                     for p in phi_dev_blocks.values()}.values())
+            + 2 * len(pair_index) * n_freq * nI_s * nJ_s * itemsize
+        )
+
+        total_budget = int(0.7 * _available_memory_bytes())
+        worker_budget = total_budget - fixed_bytes
+
+        if worker_budget < per_w_peak:
+            # Even a single one-frequency chunk does not fit alongside
+            # the fixed G/phi storage. This is unrecoverable without
+            # also chunking the shared dicts — surface a clear error.
+            raise MemoryError(
+                f"Multi-slab bubble: fixed G/phi storage is "
+                f"{fixed_bytes / (1 << 30):.2f} GiB and a single "
+                f"frequency chunk needs {per_w_peak / (1 << 30):.3f} GiB, "
+                f"but only {total_budget / (1 << 30):.2f} GiB is "
+                "available. Reduce n_slabs / vertex_cutoff / g_cutoff, "
+                "or set QUATREX_PHPH_MEMORY_GB higher."
+            )
+
+        # Largest worker count for which each worker still gets at
+        # least a one-frequency chunk.
+        n_workers_by_memory = max(1, worker_budget // per_w_peak)
+        n_workers = min(
+            n_workers_requested, n_workers_by_tasks, n_workers_by_memory,
+        )
+
+        per_worker_share = worker_budget // n_workers
+        if per_worker_share >= full_peak:
+            per_worker_max_bytes = None  # plenty of headroom, no chunking
+        else:
+            per_worker_max_bytes = int(per_worker_share)
+            n_chunks_est = -(-full_peak // max(per_worker_max_bytes, 1))
+            print(
+                f"  [phph] memory cap: budget="
+                f"{total_budget / (1 << 30):.1f} GiB, fixed="
+                f"{fixed_bytes / (1 << 30):.2f} GiB, "
+                f"workers={n_workers} (requested={n_workers_requested}), "
+                f"per-worker={per_worker_share / (1 << 30):.2f} GiB; "
+                f"omega-chunking each bubble into ~{n_chunks_est} "
+                f"chunk(s)",
+                flush=True,
+            )
+    else:
+        n_workers = 1
+
     def _compute_one_bubble(task):
         I, J, K1, K2, K1p, K2p, phi_left, phi_right, kind = task
         gx_fft = gl_fft if kind == "lesser" else gg_fft
@@ -257,6 +401,7 @@ def compute_phph_self_energy_finite_multi_slab(
             G_b_fft=gx_fft[(K2, K2p)],
             ne=n_freq, prefactor=prefactor,
             out_slice=freq_sl,
+            max_bytes=per_worker_max_bytes,
         )
         return (I, J, kind), blk
 
@@ -268,12 +413,6 @@ def compute_phph_self_energy_finite_multi_slab(
         target = sl_out if kind == "lesser" else sg_out
         existing = target.get((I, J))
         target[(I, J)] = blk if existing is None else existing + blk
-
-    n_workers = max(1, n_threads if n_threads is not None
-                    else _default_n_threads())
-    # Cap to the number of tasks so we don't spawn 256 idle workers
-    # at small n_slabs.
-    n_workers = min(n_workers, max(1, len(tasks)))
 
     if n_workers == 1 or len(tasks) <= 1:
         for t in tasks:
