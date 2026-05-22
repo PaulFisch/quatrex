@@ -14,7 +14,7 @@ Usage (cluster)::
     /home/paul/miniconda3/envs/quatrex-dev/bin/python \\
         phonon/scripts/d5_cutoff_sweep.py \\
         --n-slabs 4 --t-mean 300 --delta-T 10 \\
-        --max-scba-iter 20 --scba-tol 1e-3 --anderson-mixing \\
+        --max-scba-iter 90 --scba-tol 1e-3 --anderson-mixing \\
         --out-dir phonon/scripts/out/d5_cutoff
 """
 
@@ -158,6 +158,8 @@ _CHECKPOINT_FIELDS = (
     "delta_T",
     "n_scba_iterations",
     "convergence_history",
+    "scba_converged",
+    "scba_residual",
 )
 
 
@@ -178,6 +180,11 @@ def _run_one(
     mixing: float,
     anderson_mixing: bool,
     anderson_depth: int,
+    solver: str | None,
+    anderson_safeguard: bool,
+    zero_mode_projection: bool,
+    gate_on_conservation: bool,
+    divergence_guard: bool,
     verbose: bool,
 ) -> dict[str, Any]:
     t_start = time.time()
@@ -195,6 +202,11 @@ def _run_one(
         mixing=mixing,
         anderson_mixing=anderson_mixing,
         anderson_depth=anderson_depth,
+        solver=solver,
+        anderson_safeguard=anderson_safeguard,
+        zero_mode_projection=zero_mode_projection,
+        gate_on_conservation=gate_on_conservation,
+        divergence_guard=divergence_guard,
         n_slabs=n_slabs,
         verbose=verbose,
         sigma_cutoff=key.sigma_cutoff_value,
@@ -321,6 +333,11 @@ def sweep_cutoffs(
                 mixing=args.mixing,
                 anderson_mixing=args.anderson_mixing,
                 anderson_depth=args.anderson_depth,
+                solver=args.solver,
+                anderson_safeguard=args.anderson_safeguard,
+                zero_mode_projection=args.zero_mode_projection,
+                gate_on_conservation=args.gate_on_conservation,
+                divergence_guard=args.divergence_guard,
                 verbose=args.verbose,
             )
 
@@ -461,7 +478,7 @@ def plot_convergence_overlay(
         key: CutoffKey = r["_key"]
         ax.semilogy(iters, hist, "o-", color=color, label=key.label())
     ax.set_xlabel("SCBA iteration")
-    ax.set_ylabel(r"$|\Delta J / J|$ per iter")
+    ax.set_ylabel(r"SCF residual $\|G(\Sigma)-\Sigma\| / \|\Sigma\|$")
     ax.set_title("d5a SiNW: SCBA convergence across cutoffs")
     ax.legend(frameon=False, fontsize=7, ncol=2)
     _save_fig(fig, plot_dir / "convergence_overlay")
@@ -560,6 +577,8 @@ def write_summary(
             "J_anh_pW": float(r["heat_current"]) * 1e12,
             "conservation": float(r.get("heat_flow_conservation", 0.0)),
             "n_scba_iter": int(r.get("n_scba_iterations", 0)),
+            "scba_converged": bool(r.get("scba_converged", True)),
+            "scba_residual": float(r.get("scba_residual", float("nan"))),
             "sigma_norm": float(r.get("sigma_frobenius_norm", 0.0)),
             "wall_s": float(r.get("wall_time_seconds", 0.0)),
         })
@@ -612,15 +631,48 @@ def parse_args() -> argparse.Namespace:
         "--freq-range", type=float, nargs=3, default=[0.01, 18.0, 81],
         metavar=("FMIN", "FMAX", "NPTS"),
     )
-    p.add_argument("--eta-factor", type=float, default=0.05)
+    # eta/d_omega ~ 1 resolves the propagator on the grid; the legacy
+    # 0.05 under-resolves it (see verify_discretization). Recover the
+    # eta -> 0 limit with phonon/scripts/extrapolate_eta.py.
+    p.add_argument("--eta-factor", type=float, default=1.0)
 
     # SCBA -----------------------------------------------------------------
-    p.add_argument("--max-scba-iter", type=int, default=20)
+    # d5a is strongly anharmonic; linear 0.3 needs ~65 iters,
+    # the stabilized Anderson ~47 (see the convergence audit).
+    p.add_argument("--max-scba-iter", type=int, default=90)
     p.add_argument("--scba-tol", type=float, default=1e-3)
     p.add_argument("--conservation-tol", type=float, default=2e-3)
-    p.add_argument("--mixing", type=float, default=0.5)
+    p.add_argument("--mixing", type=float, default=0.3)
     p.add_argument("--anderson-mixing", action="store_true")
-    p.add_argument("--anderson-depth", type=int, default=5)
+    p.add_argument("--anderson-depth", type=int, default=8)
+    p.add_argument(
+        "--solver", default=None,
+        choices=("linear", "anderson", "jfnk", "anderson+jfnk"),
+        help="SCBA fixed-point accelerator. Default: derived from "
+             "--anderson-mixing (anderson if set, else linear).",
+    )
+    p.add_argument(
+        "--anderson-safeguard", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Safeguarded Anderson (default); --no-anderson-safeguard "
+             "restores the legacy hard-restart scheme.",
+    )
+    p.add_argument(
+        "--zero-mode-projection", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Project the rigid-translation component out of the "
+             "self-energy each SCBA iteration (default on).",
+    )
+    p.add_argument(
+        "--gate-on-conservation", action="store_true",
+        help="Legacy stop test: require heat-flow conservation in "
+             "addition to the SCF residual.",
+    )
+    p.add_argument(
+        "--divergence-guard", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Abort early on residual blow-up (default on).",
+    )
 
     # Cutoff axes ----------------------------------------------------------
     p.add_argument(

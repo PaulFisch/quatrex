@@ -56,6 +56,12 @@ from .leads import (
 from .retarded import build_retarded, hilbert_transform_axis
 from .se_finite import compute_phph_self_energy_finite
 from .se_q import compute_phph_self_energy_q_dense
+from .zero_modes import (
+    build_translation_projector,
+    project_self_energy,
+    translation_leakage,
+    translation_vectors,
+)
 
 __all__ = [
     # Public entry points
@@ -93,4 +99,9 @@ __all__ = [
     # Self-energy drivers
     "compute_phph_self_energy_finite",
     "compute_phph_self_energy_q_dense",
+    # Zero-mode (rigid-translation) handling
+    "build_translation_projector",
+    "project_self_energy",
+    "translation_vectors",
+    "translation_leakage",
 ]
