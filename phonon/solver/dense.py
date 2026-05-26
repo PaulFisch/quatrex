@@ -60,6 +60,11 @@ from .se_finite import (
     compute_phph_self_energy_finite_multi_slab,
 )
 from .se_q import compute_phph_self_energy_q_dense
+from .causality import (
+    causality_diagnostic,
+    dynamical_stability_diagnostic,
+    enforce_causality_psd,
+)
 from .zero_modes import (
     build_dynamical_zero_mode_projector,
     build_translation_projector,
@@ -700,6 +705,8 @@ def scba_loop_dev(
     divergence_factor=10.0,
     divergence_patience=4,
     masses_primitive=None,
+    causality_projection=False,
+    track_diagnostics=False,
 ):
     """SCBA fixed-point with device-storage self-energies.
 
@@ -799,6 +806,14 @@ def scba_loop_dev(
         Returns ``(sig_l_new, sig_g_new, info)``.
         """
         Sig_R = build_retarded(sig_l, sig_g, freqs_thz, method=retarded)
+        if causality_projection:
+            # Project Sigma^R onto the causal manifold (Gamma_Sigma PSD
+            # for omega > 0) before the Dyson solve. Stabilises the loop
+            # on systems where the discretised bubble + per-iteration
+            # projection / symmetrisation leak negative eigenvalues into
+            # Gamma_Sigma (the "epic divergence" failure mode after the
+            # twist projector is already in place).
+            Sig_R = enforce_causality_psd(Sig_R, freqs_thz)
 
         G_less_dev_q[:] = 0.0
         G_great_dev_q[:] = 0.0
@@ -851,6 +866,10 @@ def scba_loop_dev(
             "J_total": J_total,
             "conservation_err": conservation_err,
         }
+        if track_diagnostics:
+            info["causality"] = causality_diagnostic(Sig_R, freqs_thz)
+            info["stability"] = dynamical_stability_diagnostic(
+                H_D_list[0], Sig_R, freqs_thz)
         return sig_l_new, sig_g_new, info
 
     def _update_scattering_obc(Sig_R):
@@ -910,6 +929,19 @@ def scba_loop_dev(
     best_l = Sigma_l.copy()
     best_g = Sigma_g.copy()
     converged = False
+    diagnostics_history = []
+    if track_diagnostics:
+        # Record iter-0 diagnostics so the trajectory starts at the
+        # lowest-order Born point.
+        diagnostics_history.append({
+            "iter": 0,
+            "resid": float("nan"),
+            "max_abs_Sigma_R": float(np.max(np.abs(info["Sigma_R"]))),
+            "conservation_err": float(info["conservation_err"]),
+            "J_total": float(info["J_total"]),
+            "causality": info.get("causality", {}),
+            "stability": info.get("stability", {}),
+        })
 
     if solver in ("linear", "anderson", "anderson+jfnk"):
         J_total_prev = info["J_total"]
@@ -927,6 +959,17 @@ def scba_loop_dev(
             resid = float(np.linalg.norm(f)
                           / (np.linalg.norm(x_in) + 1e-300))
             convergence_history.append(resid)
+            if track_diagnostics:
+                diagnostics_history.append({
+                    "iter": scba_iter,
+                    "resid": resid,
+                    "max_abs_Sigma_R":
+                        float(np.max(np.abs(info["Sigma_R"]))),
+                    "conservation_err": float(info["conservation_err"]),
+                    "J_total": float(info["J_total"]),
+                    "causality": info.get("causality", {}),
+                    "stability": info.get("stability", {}),
+                })
 
             if verbose and scba_iter <= 3:
                 max_l_err = 0.0
@@ -1047,6 +1090,7 @@ def scba_loop_dev(
         "Sigma_g": Sigma_g,
         "conservation_err": info["conservation_err"],
         "convergence_history": convergence_history,
+        "diagnostics_history": diagnostics_history,
         "converged": converged,
         "scba_residual": best_resid,
     }
@@ -1122,6 +1166,9 @@ def transmission_finite(
     divergence_guard: bool = True,
     auto_extend_fmax: bool = True,
     fmax_margin: float = 1.05,
+    causality_projection: bool = False,
+    track_diagnostics: bool = False,
+    vertex_scale: float = 1.0,
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
 
@@ -1233,6 +1280,12 @@ def transmission_finite(
         fc3_raw = load_fc3_raw(fc3_hdf5)
         M_stacked = build_realspace_fc3_matrices(
             fc3_raw, n_atoms, masses_super, ref_sc_atoms)
+    if vertex_scale != 1.0:
+        # Bescond-style coupling rescaling (JAP 110, 094517, 2011):
+        # Sigma scales as vertex_scale**2. Sweep vertex_scale in (0, 1]
+        # and fit Pade in vertex_scale**2 to extrapolate the SCBA
+        # answer at vertex_scale=1 without iterating the loop.
+        M_stacked = M_stacked * float(vertex_scale)
 
     # Build the device-resolved FC3 vertex dict (multi-slab).
     phi_dev_blocks = build_device_fc3_blocks(
@@ -1366,6 +1419,8 @@ def transmission_finite(
         gate_on_conservation=gate_on_conservation,
         divergence_guard=divergence_guard,
         masses_primitive=phonon.primitive.masses,
+        causality_projection=causality_projection,
+        track_diagnostics=track_diagnostics,
     )
 
     spectral_J_L = scba_result["spectral_J_L"]
@@ -1402,6 +1457,7 @@ def transmission_finite(
         "convergence_history": convergence_history,
         "scba_converged": scba_result.get("converged", True),
         "scba_residual": scba_result.get("scba_residual", float("nan")),
+        "diagnostics_history": scba_result.get("diagnostics_history", []),
         "self_energy_retarded": Sigma_R[0, pos_mask],
         "self_energy_lesser": Sigma_l[0, pos_mask],
         "self_energy_greater": Sigma_g[0, pos_mask],
