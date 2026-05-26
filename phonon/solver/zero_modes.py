@@ -99,6 +99,80 @@ def project_self_energy(sigma, Q, *, in_place=False):
     return projected
 
 
+def build_dynamical_zero_mode_projector(H_00, H_01, n_slabs, *,
+                                         threshold_rel=1e-4):
+    """Projector onto the complement of *every* near-zero mode of the
+    cell dynamical matrix at the zone centre.
+
+    The translation projector :func:`build_translation_projector`
+    handles the three rigid-cartesian zero modes that are guaranteed
+    by the FC2 acoustic sum rule. A 1-D wire at q=0 generally has a
+    fourth near-zero mode -- the rigid rotation about the wire axis
+    ("twist") -- which leaves the translation projector untouched but
+    feeds the same instability: its Bose-enhanced ``G^<`` at
+    ``omega -> 0`` injects an IR singularity into the bubble that
+    drives ``Im Sigma^R`` non-causal and the SCBA loop unstable. This
+    projector reads the cell-level dynamical matrix
+    ``H_00 + H_01 + H_01^dagger`` (the periodic Gamma matrix), picks
+    every eigenvector with eigenvalue below ``threshold_rel *
+    max(eigvals)``, replicates each one uniformly across the
+    ``n_slabs`` device slabs (the q=0 phase), orthonormalises the
+    replicated vectors, and returns ``Q = I - V V^T``.
+
+    For a typical wire this yields the same 3 translation modes plus
+    the twist, and for a higher-symmetry system any additional
+    accidentally-soft cell mode. For a bulk crystal with FC2 ASR clean
+    the result reduces to the translation projector.
+
+    Parameters
+    ----------
+    H_00, H_01 : (n_dof, n_dof) complex
+        Periodic dynamical-matrix on-site and coupling blocks in
+        THz^2 (as built by :func:`phonon_inputs.convention.get_btd_blocks`).
+    n_slabs : int
+    threshold_rel : float
+        Eigenvalue cutoff, relative to the largest eigenvalue of the
+        cell dynamical matrix. Default ``1e-4`` matches the threshold
+        used by :func:`verify_zero_modes.check_acoustic_modes`.
+
+    Returns
+    -------
+    Q : (n_slabs*n_dof, n_slabs*n_dof) real array
+        Idempotent projector onto the device subspace orthogonal to
+        every replicated cell zero mode.
+    """
+    H_00 = np.asarray(H_00)
+    H_01 = np.asarray(H_01)
+    n_dof = H_00.shape[0]
+    dyn = H_00 + H_01 + H_01.conj().T
+    dyn = 0.5 * (dyn + dyn.conj().T)
+    eigvals, eigvecs = np.linalg.eigh(dyn)
+    scale = float(eigvals.max().real)
+    cutoff = float(threshold_rel) * scale
+    zero_idx = np.where(eigvals.real < cutoff)[0]
+    if zero_idx.size == 0:
+        N_D = n_slabs * n_dof
+        return np.eye(N_D)
+    V_cell = eigvecs[:, zero_idx]  # (n_dof, n_zero)
+    N_D = n_slabs * n_dof
+    # Replicate each cell mode uniformly across slabs (q=0 phase) so
+    # the device-level mode is the rigid-body extension of the cell
+    # mode -- the actual zero mode of the open finite device in the
+    # absence of leads.
+    V_dev = np.zeros((N_D, V_cell.shape[1]), dtype=V_cell.dtype)
+    for k in range(V_cell.shape[1]):
+        for l in range(n_slabs):
+            V_dev[l * n_dof:(l + 1) * n_dof, k] = V_cell[:, k]
+    # Orthonormalise (the replicated vectors are orthogonal as long as
+    # the cell modes are, which np.linalg.eigh guarantees).
+    norms = np.linalg.norm(V_dev, axis=0)
+    V_dev = V_dev / np.where(norms > 0, norms, 1.0)
+    Q = np.eye(N_D, dtype=V_dev.dtype) - V_dev @ V_dev.conj().T
+    if np.allclose(Q.imag, 0.0):
+        Q = Q.real
+    return Q
+
+
 def translation_leakage(sigma, Q):
     """Relative weight of ``sigma`` in the translational subspace.
 

@@ -60,7 +60,11 @@ from .se_finite import (
     compute_phph_self_energy_finite_multi_slab,
 )
 from .se_q import compute_phph_self_energy_q_dense
-from .zero_modes import build_translation_projector, project_self_energy
+from .zero_modes import (
+    build_dynamical_zero_mode_projector,
+    build_translation_projector,
+    project_self_energy,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -754,16 +758,33 @@ def scba_loop_dev(
 
     Q_trans = None
     if zero_mode_projection:
-        if masses_primitive is None:
-            raise ValueError(
-                "zero_mode_projection=True requires masses_primitive")
-        n_atoms_prim = len(np.asarray(masses_primitive))
-        if n_dof % n_atoms_prim != 0:
-            raise ValueError(
-                f"n_dof={n_dof} is not a multiple of "
-                f"len(masses_primitive)={n_atoms_prim}")
-        Q_trans = build_translation_projector(
-            masses_primitive, n_slabs, n_cart=n_dof // n_atoms_prim)
+        # Use the dynamical projector built from H_00 + H_01 + H_01^T
+        # when the periodic blocks are available -- this catches every
+        # near-zero cell mode (the three cartesian translations plus
+        # any soft cell mode such as the wire-twist) instead of only
+        # the rigid translations. For a 1-D Si nanowire with C4
+        # symmetry the twist mode at q=0 leaves the translation
+        # projector untouched but feeds the same IR / acoustic
+        # instability that destabilises SCBA. Fall back to the
+        # mass-weighted translation projector when btd_blocks_list is
+        # empty (toy harnesses that build H_D directly).
+        if btd_blocks_list:
+            h00_g, h01_g = btd_blocks_list[0]
+            Q_trans = build_dynamical_zero_mode_projector(
+                h00_g, h01_g, n_slabs)
+        else:
+            if masses_primitive is None:
+                raise ValueError(
+                    "zero_mode_projection=True needs either "
+                    "btd_blocks_list (dynamical projector) or "
+                    "masses_primitive (translation-only fallback)")
+            n_atoms_prim = len(np.asarray(masses_primitive))
+            if n_dof % n_atoms_prim != 0:
+                raise ValueError(
+                    f"n_dof={n_dof} is not a multiple of "
+                    f"len(masses_primitive)={n_atoms_prim}")
+            Q_trans = build_translation_projector(
+                masses_primitive, n_slabs, n_cart=n_dof // n_atoms_prim)
 
     # Buffers reused by every _scba_step call.
     G_less_dev_q = np.zeros(shape, dtype=complex)
