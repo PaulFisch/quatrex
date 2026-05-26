@@ -64,6 +64,73 @@ from .zero_modes import build_translation_projector, project_self_energy
 
 
 # ---------------------------------------------------------------------------
+# Frequency-grid safety: fmax >= 2 * omega_max
+# ---------------------------------------------------------------------------
+
+
+def _device_omega_max(H_00, H_01):
+    """Largest phonon frequency (in THz) of the periodic Gamma-point
+    dynamical matrix ``H_00 + H_01 + H_01^\\dagger``. Used to size the
+    bubble-convolution frequency grid: the 3-phonon convolution has
+    support ``[-2 omega_max, 2 omega_max]``.
+    """
+    dyn = H_00 + H_01 + H_01.conj().T
+    dyn = 0.5 * (dyn + dyn.conj().T)
+    eigs = np.linalg.eigvalsh(dyn)
+    return float(np.sqrt(max(eigs.max().real, 0.0)))
+
+
+def _ensure_fmax(freq_range_thz, H_00, H_01, *, name, auto_extend,
+                 margin=1.05, verbose=False):
+    """Return a (possibly extended) ``freq_range_thz`` whose ``fmax``
+    safely contains the 3-phonon bubble's convolution support.
+
+    If the caller's ``fmax`` is below ``margin * 2 * omega_max`` the
+    function -- by default -- transparently extends it (and rescales
+    ``nfreq_pos`` to keep ``d_omega`` roughly constant). Setting
+    ``auto_extend=False`` instead emits a ``RuntimeWarning`` and
+    returns the caller's range unchanged. The verbose path prints a
+    one-line confirmation either way.
+    """
+    fmin, fmax, n_pos = freq_range_thz
+    fmin = float(fmin)
+    fmax = float(fmax)
+    n_pos = int(n_pos)
+    omega_max = _device_omega_max(H_00, H_01)
+    fmax_req = float(margin) * 2.0 * omega_max
+    if fmax >= fmax_req:
+        if verbose:
+            print(f"  {name}: omega_max={omega_max:.1f} THz, "
+                  f"fmax={fmax:.1f} THz >= {fmax_req:.1f} THz (OK)")
+        return (fmin, fmax, n_pos)
+    if not auto_extend:
+        warnings.warn(
+            f"{name}: freq_range fmax={fmax:.1f} THz < "
+            f"{margin:g}*2*omega_max={fmax_req:.1f} THz. The 3-phonon "
+            f"bubble convolution will be truncated/aliased; Sigma will "
+            f"pick up large spurious contributions and SCBA will likely "
+            f"diverge. Pass fmax >= {fmax_req:.0f} THz or leave "
+            f"auto_extend_fmax=True.",
+            RuntimeWarning, stacklevel=3)
+        return (fmin, fmax, n_pos)
+    # Auto-extend, preserving the user's requested d_omega.
+    dw = fmax / max(n_pos, 1)
+    new_fmax = float(np.ceil(fmax_req))
+    new_n_pos = int(np.ceil(new_fmax / dw))
+    if verbose:
+        print(f"  {name}: auto-extending fmax {fmax:.1f} -> {new_fmax:.1f} "
+              f"THz (2*omega_max={2 * omega_max:.1f}); "
+              f"nfreq_pos {n_pos} -> {new_n_pos} (d_omega preserved)")
+    else:
+        warnings.warn(
+            f"{name}: auto-extended freq_range fmax "
+            f"{fmax:.1f} -> {new_fmax:.1f} THz (2*omega_max="
+            f"{2 * omega_max:.1f}); nfreq_pos {n_pos} -> {new_n_pos}.",
+            stacklevel=3)
+    return (fmin, new_fmax, new_n_pos)
+
+
+# ---------------------------------------------------------------------------
 # FC3 loading
 # ---------------------------------------------------------------------------
 
@@ -1032,6 +1099,8 @@ def transmission_finite(
     zero_mode_projection: bool = True,
     gate_on_conservation: bool = False,
     divergence_guard: bool = True,
+    auto_extend_fmax: bool = True,
+    fmax_margin: float = 1.05,
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
 
@@ -1108,13 +1177,27 @@ def transmission_finite(
         build_realspace_fc3_matrices,
     )
 
-    freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
-        freq_range_thz, eta_factor=eta_factor)
-    nfreq = len(freqs_thz)
-
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
     N_D = n_slabs * n_dof
+
+    # Auto-extend fmax if it is below 2*omega_max of the device. The
+    # 3-phonon bubble's frequency-convolution support is
+    # [-2*omega_max, 2*omega_max]; with fmax < 2*omega_max the convolution
+    # is truncated/aliased and the bubble picks up huge spurious
+    # contributions -- a fake "strong coupling" regime that destabilises
+    # SCBA (the dominant cause of divergence on H-terminated wires).
+    H_00, H_01 = get_btd_blocks(
+        phonon, (0.0, 0.0), transport_direction=transport_direction,
+        conversion_factor=CONVERSION_THZ2)
+    H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
+    freq_range_thz = _ensure_fmax(
+        freq_range_thz, H_00, H_01, name="transmission_finite",
+        auto_extend=auto_extend_fmax, margin=fmax_margin, verbose=verbose)
+
+    freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
+        freq_range_thz, eta_factor=eta_factor)
+    nfreq = len(freqs_thz)
 
     prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
         phonon, transport_direction)
@@ -1165,11 +1248,6 @@ def transmission_finite(
               f"gate_on_conservation={gate_on_conservation}, "
               f"divergence_guard={divergence_guard}")
         print(f"  Retarded SE: {retarded}")
-
-    H_00, H_01 = get_btd_blocks(
-        phonon, (0.0, 0.0), transport_direction=transport_direction,
-        conversion_factor=CONVERSION_THZ2)
-    H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
 
     if verbose:
         suffix = " (will update each SCBA iter)" if scattering_contacts else ""
@@ -1330,6 +1408,8 @@ def transmission_q(
     retarded: str = "half",
     scattering_contacts: bool = False,
     hilbert_retarded: bool = False,
+    auto_extend_fmax: bool = True,
+    fmax_margin: float = 1.05,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -1350,13 +1430,22 @@ def transmission_q(
         build_q_diff_map,
     )
 
-    freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
-        freq_range_thz, eta_factor=eta_factor)
-    nfreq = len(freqs_thz)
-
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
     N_D = n_slabs * n_dof
+
+    # Ensure fmax >= 2*omega_max before sizing the frequency grid; see
+    # _ensure_fmax / transmission_finite docstring for the rationale.
+    _h00g, _h01g = get_btd_blocks(
+        phonon, (0.0, 0.0), transport_direction=transport_direction,
+        conversion_factor=CONVERSION_THZ2)
+    freq_range_thz = _ensure_fmax(
+        freq_range_thz, _h00g, _h01g, name="transmission_q",
+        auto_extend=auto_extend_fmax, margin=fmax_margin, verbose=verbose)
+
+    freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
+        freq_range_thz, eta_factor=eta_factor)
+    nfreq = len(freqs_thz)
 
     prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
         phonon, transport_direction)
