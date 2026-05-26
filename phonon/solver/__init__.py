@@ -57,6 +57,7 @@ from .retarded import build_retarded, hilbert_transform_axis
 from .se_finite import compute_phph_self_energy_finite
 from .se_q import compute_phph_self_energy_q_dense
 from .zero_modes import (
+    build_dynamical_zero_mode_projector,
     build_translation_projector,
     project_self_energy,
     translation_leakage,
@@ -101,6 +102,7 @@ __all__ = [
     "compute_phph_self_energy_q_dense",
     # Zero-mode (rigid-translation) handling
     "build_translation_projector",
+    "build_dynamical_zero_mode_projector",
     "project_self_energy",
     "translation_vectors",
     "translation_leakage",
