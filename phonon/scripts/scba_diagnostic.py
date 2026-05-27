@@ -185,23 +185,51 @@ _TRAJ_FIELDS = (
 
 
 def _flatten_diag(d):
-    """Flatten a single trajectory point's nested causality/stability
-    dicts into the flat ``_TRAJ_FIELDS`` row."""
+    """Flatten a single trajectory point into ``_TRAJ_FIELDS``.
+
+    Handles both the live-run shape (with nested ``causality`` /
+    ``stability`` sub-dicts produced by ``_scba_step``) and the
+    CSV-loaded shape (where the same fields are already flat).
+    """
     c = d.get("causality") or {}
     s = d.get("stability") or {}
+
+    def _pick(key_flat, key_nested, nested_src, default=0.0, cast=float):
+        if key_flat in d:
+            v = d[key_flat]
+        elif nested_src and key_nested in nested_src:
+            v = nested_src[key_nested]
+        else:
+            v = default
+        try:
+            return cast(v)
+        except (TypeError, ValueError):
+            return default
+
     return {
-        "iter": int(d.get("iter", -1)),
-        "resid": float(d.get("resid", float("nan"))),
-        "max_abs_Sigma_R": float(d.get("max_abs_Sigma_R", float("nan"))),
-        "conservation_err": float(d.get("conservation_err", float("nan"))),
-        "J_total": float(d.get("J_total", float("nan"))),
-        "n_violation_points": int(c.get("n_violation_points", 0)),
-        "max_violation": float(c.get("max_violation", 0.0)),
-        "mean_violation": float(c.get("mean_violation", 0.0)),
-        "omega_at_max_causality": float(c.get("omega_at_max", 0.0)),
-        "min_eig_HD_plus_ReSigma":
-            float(s.get("min_eig_HD_plus_ReSigma", float("nan"))),
-        "omega_at_min_stability": float(s.get("omega_at_min", 0.0)),
+        "iter": _pick("iter", "iter", None, default=-1, cast=int),
+        "resid": _pick("resid", "resid", None, default=float("nan")),
+        "max_abs_Sigma_R": _pick(
+            "max_abs_Sigma_R", "max_abs_Sigma_R", None,
+            default=float("nan")),
+        "conservation_err": _pick(
+            "conservation_err", "conservation_err", None,
+            default=float("nan")),
+        "J_total": _pick(
+            "J_total", "J_total", None, default=float("nan")),
+        "n_violation_points": _pick(
+            "n_violation_points", "n_violation_points", c, cast=int),
+        "max_violation": _pick(
+            "max_violation", "max_violation", c),
+        "mean_violation": _pick(
+            "mean_violation", "mean_violation", c),
+        "omega_at_max_causality": _pick(
+            "omega_at_max_causality", "omega_at_max", c),
+        "min_eig_HD_plus_ReSigma": _pick(
+            "min_eig_HD_plus_ReSigma", "min_eig_HD_plus_ReSigma", s,
+            default=float("nan")),
+        "omega_at_min_stability": _pick(
+            "omega_at_min_stability", "omega_at_min", s),
     }
 
 
@@ -369,7 +397,7 @@ def _plot_pade(runs, out_dir):
         xs = np.linspace(0, 1.05, 50)
         ys = np.polyval(coef, xs)
         ax.plot(xs, ys, "-", color="C0", alpha=0.7,
-                label=r"Pad\'e fit (deg $\le$2)")
+                label=r"Pad\'e fit (deg $\leq$ 2)")
         ax.plot([1.0], [extr], "*", color="C3", markersize=14,
                 label=f"$G_{{anh}}(\\lambda^2{{=}}1)$={extr:.3g}")
     ax.set_xlabel(r"$\lambda^2$")
@@ -440,6 +468,9 @@ def parse_args():
     p.add_argument("--runs", nargs="+", default=["all"],
                    help="subset by name; 'all' runs everything")
     p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--replot-only", action="store_true",
+                   help="skip all SCBA compute and just regenerate plots "
+                        "and summary from existing checkpoints under --out-dir")
     return p.parse_args()
 
 
@@ -454,14 +485,19 @@ def main():
                    "args": {k: (str(v) if isinstance(v, Path) else v)
                             for k, v in vars(args).items()}}, fh, indent=2)
 
-    print("[load ] system bundle ...", flush=True)
-    transport_axis = "xyz".index(args.transport_direction)
-    bundle = load_system(args.config, validate=False,
-                         transport_axis=transport_axis)
-    fc3 = Path(bundle.meta.get("fc3_path", "")).expanduser().resolve()
-    if not fc3.exists():
-        raise FileNotFoundError(f"fc3.hdf5 not found at {fc3}")
-    print(f"[load ] fc3.hdf5 : {fc3}", flush=True)
+    if args.replot_only:
+        bundle = None
+        fc3 = None
+        print("[replot] skipping system bundle (--replot-only)", flush=True)
+    else:
+        print("[load ] system bundle ...", flush=True)
+        transport_axis = "xyz".index(args.transport_direction)
+        bundle = load_system(args.config, validate=False,
+                             transport_axis=transport_axis)
+        fc3 = Path(bundle.meta.get("fc3_path", "")).expanduser().resolve()
+        if not fc3.exists():
+            raise FileNotFoundError(f"fc3.hdf5 not found at {fc3}")
+        print(f"[load ] fc3.hdf5 : {fc3}", flush=True)
 
     matrix = _matrix(args)
     if args.runs and args.runs != ["all"]:
@@ -475,18 +511,29 @@ def main():
         run_dir = out / spec.name
         ckpt = run_dir / "result.npz"
         traj_csv = run_dir / "trajectory.csv"
-        if ckpt.exists() and traj_csv.exists() and not args.overwrite:
+        cached = ckpt.exists() and traj_csv.exists() and not args.overwrite
+        if cached or args.replot_only:
+            if not (ckpt.exists() and traj_csv.exists()):
+                print(f"=== {spec.name}  (no cache, skipping under "
+                      f"--replot-only)", flush=True)
+                continue
             print(f"=== {spec.name}  (cached, skipping)", flush=True)
             with np.load(ckpt, allow_pickle=False) as data:
                 res = {k: data[k] for k in data.files}
-            # rehydrate diagnostics from CSV
             traj = []
             with open(traj_csv) as fh:
                 header = fh.readline().strip().split(",")
                 for line in fh:
                     vals = line.strip().split(",")
-                    traj.append({h: float(v) if h != "iter" else int(v)
-                                 for h, v in zip(header, vals)})
+                    row = {}
+                    for h, v in zip(header, vals):
+                        if v == "" or v == "nan":
+                            row[h] = float("nan")
+                        elif h == "iter":
+                            row[h] = int(float(v))
+                        else:
+                            row[h] = float(v)
+                    traj.append(row)
             res["diagnostics_history"] = traj
             results.append({"spec": spec, "ok": True, "wall": 0.0,
                             "result": res, "error": None})
