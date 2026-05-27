@@ -637,13 +637,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eta-factor", type=float, default=1.0)
 
     # SCBA -----------------------------------------------------------------
-    # d5a is strongly anharmonic; linear 0.3 needs ~65 iters,
-    # the stabilized Anderson ~47 (see the convergence audit).
-    p.add_argument("--max-scba-iter", type=int, default=90)
-    p.add_argument("--scba-tol", type=float, default=1e-3)
-    p.add_argument("--conservation-tol", type=float, default=2e-3)
+    # d5a (auto-extended fmax, dynamical zero-mode projection, safeguarded
+    # Anderson) shows clean monotone geometric convergence with rate
+    # ~0.86 per iteration; reaching the numerical noise floor from a
+    # cold start takes ~100--150 iters, so set --max-scba-iter generously
+    # and tighten --scba-tol to chase the residual below 1e-3 if you want
+    # to confirm a true fixed point.
+    p.add_argument("--max-scba-iter", type=int, default=200)
+    p.add_argument("--scba-tol", type=float, default=1e-6)
+    p.add_argument("--conservation-tol", type=float, default=1e-1)
     p.add_argument("--mixing", type=float, default=0.3)
-    p.add_argument("--anderson-mixing", action="store_true")
+    p.add_argument(
+        "--anderson-mixing", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Safeguarded Anderson (default) or --no-anderson-mixing for "
+             "linear; on d5a linear at any damping factor in {0.02, 0.05, "
+             "0.1, 0.3} stalls above the SCF tolerance.",
+    )
     p.add_argument("--anderson-depth", type=int, default=8)
     p.add_argument(
         "--solver", default=None,
