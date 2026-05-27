@@ -276,6 +276,69 @@ def _load_or_run(
 # =============================================================================
 
 
+def _temperature_keys(args) -> list[SweepKeyT]:
+    """Enumerate every (T_mean, ΔT, n_slabs) key for the temperature sweep.
+
+    Used both by the cache pre-scan (to decide whether to load the
+    system bundle at all) and by :func:`sweep_temperature` (to drive
+    the actual run). Keeping the enumeration in one place guarantees
+    the scan and the run see exactly the same set of checkpoints.
+    """
+    return [
+        SweepKeyT(
+            t_mean=float(t_mean),
+            delta_T=float(delta_T),
+            n_slabs=int(args.length_for_t_sweep),
+            ballistic_only=bool(args.ballistic_only),
+        )
+        for t_mean in args.t_means
+        for delta_T in args.delta_Ts
+    ]
+
+
+def _length_keys(args) -> list[SweepKeyL]:
+    """Enumerate every n_slabs key for the length sweep (see ``_temperature_keys``)."""
+    return [
+        SweepKeyL(
+            n_slabs=int(n_slabs),
+            t_mean=float(args.t_for_l_sweep),
+            delta_T=float(args.dt_for_l_sweep),
+            ballistic_only=bool(args.ballistic_only),
+        )
+        for n_slabs in args.lengths
+    ]
+
+
+def _scan_cache(out_dir: Path, args) -> dict[str, dict[str, list[str]]]:
+    """Inspect which sweep checkpoints already exist on disk.
+
+    Returns ``{sweep: {"cached": [names], "missing": [names]}}`` so the
+    caller can decide whether to load the (expensive) system bundle at
+    all. ``--overwrite`` is *not* treated as "missing" here -- the goal
+    is just to enumerate what is on disk; the run loop in
+    ``_load_or_run`` still honours ``--overwrite`` on a per-point basis.
+    """
+    out: dict[str, dict[str, list[str]]] = {
+        "temperature": {"cached": [], "missing": []},
+        "length": {"cached": [], "missing": []},
+    }
+    if not args.skip_temperature:
+        ck = out_dir / "checkpoints" / "temperature"
+        for k in _temperature_keys(args):
+            path = ck / k.filename()
+            out["temperature"]["cached" if path.exists() else "missing"].append(
+                path.name
+            )
+    if not args.skip_length:
+        ck = out_dir / "checkpoints" / "length"
+        for k in _length_keys(args):
+            path = ck / k.filename()
+            out["length"]["cached" if path.exists() else "missing"].append(
+                path.name
+            )
+    return out
+
+
 def sweep_temperature(
     *,
     bundle,
@@ -288,42 +351,34 @@ def sweep_temperature(
     ck_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict[str, Any]] = []
-    for t_mean in args.t_means:
-        for delta_T in args.delta_Ts:
-            key = SweepKeyT(
-                t_mean=float(t_mean),
-                delta_T=float(delta_T),
-                n_slabs=int(args.length_for_t_sweep),
-                ballistic_only=bool(args.ballistic_only),
+    for key in _temperature_keys(args):
+        def runner(k: SweepKeyT) -> dict[str, Any]:
+            return _run_one(
+                bundle=bundle, fc3_hdf5=fc3_hdf5,
+                temperature=k.t_mean, delta_T=k.delta_T,
+                n_slabs=k.n_slabs,
+                transport_direction=args.transport_direction,
+                freq_range=tuple(args.freq_range),
+                eta_factor=args.eta_factor,
+                max_scba_iter=args.max_scba_iter,
+                scba_tol=args.scba_tol,
+                conservation_tol=args.conservation_tol,
+                mixing=args.mixing,
+                anderson_mixing=args.anderson_mixing,
+                anderson_depth=args.anderson_depth,
+                ballistic_only=k.ballistic_only,
+                verbose=args.verbose,
             )
 
-            def runner(k: SweepKeyT) -> dict[str, Any]:
-                return _run_one(
-                    bundle=bundle, fc3_hdf5=fc3_hdf5,
-                    temperature=k.t_mean, delta_T=k.delta_T,
-                    n_slabs=k.n_slabs,
-                    transport_direction=args.transport_direction,
-                    freq_range=tuple(args.freq_range),
-                    eta_factor=args.eta_factor,
-                    max_scba_iter=args.max_scba_iter,
-                    scba_tol=args.scba_tol,
-                    conservation_tol=args.conservation_tol,
-                    mixing=args.mixing,
-                    anderson_mixing=args.anderson_mixing,
-                    anderson_depth=args.anderson_depth,
-                    ballistic_only=k.ballistic_only,
-                    verbose=args.verbose,
-                )
-
-            point = _load_or_run(
-                ck_dir / key.filename(), key, runner,
-                overwrite=args.overwrite,
-                replot_only=args.replot_only,
-            )
-            if point is None:
-                continue
-            point["_key"] = key
-            results.append(point)
+        point = _load_or_run(
+            ck_dir / key.filename(), key, runner,
+            overwrite=args.overwrite,
+            replot_only=args.replot_only,
+        )
+        if point is None:
+            continue
+        point["_key"] = key
+        results.append(point)
     return results
 
 
@@ -339,14 +394,7 @@ def sweep_length(
     ck_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict[str, Any]] = []
-    for n_slabs in args.lengths:
-        key = SweepKeyL(
-            n_slabs=int(n_slabs),
-            t_mean=float(args.t_for_l_sweep),
-            delta_T=float(args.dt_for_l_sweep),
-            ballistic_only=bool(args.ballistic_only),
-        )
-
+    for key in _length_keys(args):
         def runner(k: SweepKeyL) -> dict[str, Any]:
             return _run_one(
                 bundle=bundle, fc3_hdf5=fc3_hdf5,
@@ -801,7 +849,33 @@ def main() -> None:
     with open(out_dir / "invocation.json", "w") as f:
         json.dump(invocation, f, indent=2)
 
-    if not args.replot_only:
+    # Pre-scan the checkpoint directory before doing any work: lets us
+    # report what is already on disk vs. what needs computing, and --
+    # if every requested sweep point is already cached -- skip loading
+    # the (multi-second) system bundle and fc3.hdf5 entirely. The
+    # per-point ``_load_or_run`` cache check still runs as before, so
+    # the only thing this short-circuit saves on a fully cached run is
+    # the bundle/fc3 read.
+    cache_info = _scan_cache(out_dir, args)
+    n_cached = sum(len(v["cached"]) for v in cache_info.values())
+    n_missing = sum(len(v["missing"]) for v in cache_info.values())
+    print(
+        f"[cache] {n_cached} cached, {n_missing} to compute "
+        f"(overwrite={args.overwrite})",
+        flush=True,
+    )
+    for sweep, info in cache_info.items():
+        if info["cached"] or info["missing"]:
+            print(
+                f"  {sweep}: cached={len(info['cached'])}, "
+                f"missing={len(info['missing'])}",
+                flush=True,
+            )
+
+    need_compute = (
+        not args.replot_only and (n_missing > 0 or args.overwrite)
+    )
+    if need_compute:
         print("[load ] system bundle ...", flush=True)
         transport_axis = "xyz".index(args.transport_direction)
         bundle = load_system(
@@ -819,6 +893,12 @@ def main() -> None:
     else:
         bundle = None
         fc3_hdf5 = None
+        if not args.replot_only:
+            print(
+                "[load ] skipping system bundle (all checkpoints cached; "
+                "pass --overwrite to recompute)",
+                flush=True,
+            )
 
     # --- (a) temperature sweep -------------------------------------------
     results_T: list[dict[str, Any]] = []
