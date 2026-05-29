@@ -1,0 +1,533 @@
+\chapter{Results}
+
+% ----------------------------------------------------------------------
+\section{Ballistic Phonon NEGF}
+\label{sec:harmonic_validation}
+% ----------------------------------------------------------------------
+
+To validate the harmonic transport implementation, the QuaTrEx results
+are compared against simpler reference calculations based on direct
+Sancho--Rubio decimation and the Caroli formula.  A naive
+Sancho--Rubio + Caroli Python code is used as reference.  These
+reference cases serve both as correctness checks for the harmonic
+backbone and as a baseline for interpreting later anharmonic
+corrections. We also compare to Si/Ge transmission results in \citet{guo_anharmonic_2021}.
+
+\subsection{Bulk validation}
+\label{sec:bulk_validation}
+
+The simplest test is a homogeneous bulk silicon system.  In this case,
+the extracted harmonic blocks are used both in QuaTrEx and in a
+standalone reference implementation of Sancho--Rubio plus Caroli.  Both
+calculations are run with identical harmonic inputs, the same
+transverse-wavevector mesh, and the same frequency grid.
+
+Agreement between the two transmission curves confirms that:
+\begin{itemize}
+  \item the block extraction from phonopy is correct,
+  \item the BTD assembly from unit-cell blocks is consistent,
+  \item the open-boundary-condition treatment in QuaTrEx matches the
+        reference implementation.
+\end{itemize}
+
+\subsection{Si/Ge interface}
+\label{sec:sige}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=\textwidth]{fig/reference/si_ge_quatrex_comparison.png}
+  \caption{Ballistic phonon transmission on a $20\times20$ transverse
+    $k$-mesh with 101 frequency points.
+    \textbf{Left:} Homogeneous bulk Si.
+    \textbf{Right:} Si/Ge interface in the mass-mismatch approximation.}
+  \label{fig:quatrex_comparison}
+\end{figure}
+
+As a more realistic reference problem, a ballistic Si/Ge interface is
+constructed using a mass-mismatch model.  In this approximation, the
+harmonic force constants are taken from bulk Si throughout, and the
+distinction between Si and Ge enters only through the atomic masses,
+\begin{equation}
+  m_\mathrm{Si} = 28.09\;\mathrm{amu},
+  \qquad
+  m_\mathrm{Ge} = 72.64\;\mathrm{amu}.
+\end{equation}
+This is justified by the similarity of the Si and Ge interatomic force
+constants together with their substantial mass difference.
+
+The heterogeneous system is partitioned into three regions:
+\begin{itemize}
+  \item \textbf{Left lead:} Si force constants with Si masses,
+  \item \textbf{Device:} Si force constants with mixed Si/Ge masses,
+  \item \textbf{Right lead:} Si force constants with Ge masses.
+\end{itemize}
+Atoms with fractional coordinate $z<0.5$ are
+assigned Si mass in the device cell and the remainder Ge mass.  The
+coupling between left lead and device is taken from the Si lead, while
+the coupling between device and right lead is taken from the Ge lead.
+
+For the harmonic inputs, the Si force constants are obtained from a DFT
+calculation at the equilibrium lattice constant $a = \qty{5.466}{\angstrom}$.
+The calculation uses the conventional 8-atom diamond cell and a
+$2\times2\times2$ supercell. The DFT parameters are summarized in
+\cref{tab:si-dft-parameters}. Because of diamond symmetry, this setup
+reduces to a single displaced calculation in the harmonic
+finite-displacement workflow.
+
+\begin{table}[tb]
+  \centering
+  \caption{DFT parameters used to compute the harmonic Si force
+  constants.}
+  \label{tab:si-dft-parameters}
+  \begin{tabular}{ll}
+    \toprule
+    Parameter & Value \\
+    \midrule
+    Plane-wave cutoff      & \qty{60}{\rydberg} \\
+    Charge-density cutoff  & \qty{480}{\rydberg} \\
+    Supercell $k$-mesh     & $4\times4\times4$ \\
+    SCF threshold          & \qty{1e-10}{\rydberg} \\
+    Smearing               & Gaussian, \qty{0.01}{\rydberg} \\
+    Exchange--correlation  & PBE \\
+    Pseudopotential        & \path|Si.pbe-n-rrkjus_psl.1.0.0.UPF| \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The corresponding phonopy calculation is performed with the native QE
+interface. On loading, the lattice vectors and harmonic force constants
+are converted from \unit{\bohr} and
+\unit{\rydberg\per\bohr\squared} to \unit{\angstrom} and
+\unit{\electronvolt\per\angstrom\squared}, respectively, as described
+in \cref{sec:phonopy_units}. The Ge and interface models are obtained
+by cloning the Si harmonic model and substituting the atomic masses.
+
+The transport parameters used for the Si/Ge interface calculation are
+listed in \cref{tab:sige-transport-parameters}.
+
+\begin{table}[tb]
+  \centering
+  \caption{Transport parameters used for the Si/Ge interface
+  calculation.}
+  \label{tab:sige-transport-parameters}
+  \begin{tabular}{ll}
+    \toprule
+    Parameter & Value \\
+    \midrule
+    Transverse $k$-mesh
+      & $20\times20$ \\
+    Frequency range
+      & \qtyrange{0.01}{16.0}{\tera\hertz}, 101 points \\
+    Transport direction
+      & $z$ (001) \\
+    Transport cells, $n_L/n_D/n_R$
+      & $5$, $2/1/2$ \\
+    Broadening $\eta$
+      & $\tfrac12\Delta\omega^2
+         \approx \qty{5.05e23}{\radian\squared\per\second\squared}$ \\
+    Reservoir temperatures, $T_L/T_R$
+      & \qty{301}{\kelvin} / \qty{299}{\kelvin} \\
+    OBC algorithm
+      & Sancho--Rubio \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+At the $\Gamma$ point, the maximum optical frequency of the Si model is
+15.55\,THz, consistent with reference values.  The Ge mass-mismatch
+clone gives 9.67\,THz, in agreement with the simple mass-scaling
+relation
+\begin{equation}
+  f_\mathrm{Ge}
+  = f_\mathrm{Si}\sqrt{\frac{m_\mathrm{Si}}{m_\mathrm{Ge}}}.
+\end{equation}
+
+The resulting interfacial thermal conductance at 300\,K is
+\begin{equation}
+  G = 196\;\mathrm{MW/(m^2\,K)}.
+\end{equation}
+This may be compared with the literature values
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  Reference & $G$ [MW/(m$^2$\,K)] \\
+  \midrule
+  Latour et al.\ (2017) & 210 \\
+  Tian et al.\ (2012) & 209 \\
+  Present calculation & 196 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The remaining $\sim 7\%$ deviation is likely due to the coarser
+transverse-wavevector mesh and the very coarse DFT and FC2 calculation.
+
+% ----------------------------------------------------------------------
+\section{FC3 Compression}
+\label{sec:fc3_compression}
+% ----------------------------------------------------------------------
+
+% ----------------------------------------------------------------------
+\subsection{Numerical comparison on silicon FC3}
+\label{sub:fc3_results}
+% ----------------------------------------------------------------------
+
+We fit the four currently working compression approaches of \cref{sub:fc3_matsvd,sub:fc3_tucker,sub:fc3_cp,sub:fc3_indscal}
+to the mass-weighted FC3 tensor
+$\Phi\in\mathbb{R}^{(3 \nprim)\times \ndof \times \ndof}$ produced by finite-displacement
+DFT in a $3{\times}3{\times}3$ supercell of silicon. The working are
+$\nprim=2$, $\ndof=3\nprim \Ncell^3 = 162$, so the dense tensor has
+\begin{equation}\label{eq:fc3_full_entries}
+  N_{\mathrm{full}}
+  = \nprim\cdot 3\cdot (\ndof)^{2}
+  = 6\cdot 162^{2}
+  = 157\,464
+\end{equation}
+double-precision entries.
+
+All transport numbers are obtained by feeding the reconstructed $\tilde\Phi$ back into the same
+SCBA + NEGF pipeline used for the dense reference: a single device slab, a $4{\times}4$
+transverse $\qp$-mesh, $400$ positive frequency bins in $[0,22]$~THz, $T=300$~K and
+$\Delta T=10$~K, Anderson mixing of depth~$5$, SCBA tolerance $10^{-10}$, and at most $500$
+SCBA iterations. We compute the anharmonic thermal conducatance
+$G_{\mathrm{anh}}$ per area (MW\,m$^{-2}$\,K$^{-1}$).
+Errors on both axes are relative to the dense reference, computed once with the raw FC3.
+
+\paragraph{Fit protocol.} All fits are measured by the relative Frobenius error
+\begin{equation}\label{eq:fc3_rel_err}
+  \varepsilon(\tilde\Phi)
+  = \frac{\|\Phi - \tilde\Phi\|_F}{\|\Phi\|_F}
+\end{equation}
+with respect to the dense tensor. The mSVD and HOSVD are computed in closed form from
+LAPACK SVDs of the relevant matricisations. HOSVD is followed by $8$ steps of HOOI refinement.
+The CP and INDSCAL fits combine a CP-ALS initialisation (from the \texttt{tensorly} package) with
+progressive warm-starts from the previous rank, followed by $400$--$600$ L-BFGS iterations with
+a strong-Wolfe line search on the full factor set. $3$--$4$ random restarts are taken per rank
+and the best-of-restarts fit is kept. Each ansatz is fitted in two variants: an unconstrained
+``plain'' variant and an ``ASR'' variant in which the factor matrices are iteratively projected
+onto the acoustic-sum-rule null space during optimisation.
+
+The Waring / symmetric-CP fitter of
+\cref{sub:fc3_symcp} does not yet converge reliably on this reference tensor and is therefore
+omitted from the numerical results below. The present implementation combines shifted
+symmetric higher-order power-method (SS-HOPM) initialisation \cite{kolda_shifted_2011} with an
+L-BFGS refinement of a single shared factor matrix. On ranks $R\ge 16$ we observe the
+classical symptoms of the non-closed rank-$R$ set \cite{stegeman_degeneracy_2006,
+de_silva_tensor_2008}: the loss decreases slowly while the factor norms $\|v_r\|$ grow
+unboundedly and near-cancelling rank-one terms appear, so that stopping at any finite
+iteration count gives a residual that depends sensitively on the random seed and is often
+worse than the INDSCAL fit at the same rank. Norm penalties, trust-region L-BFGS, and
+degeneracy-aware line searches \cite{stegeman_degeneracy_2006, kolda_numerical_2015} were trued
+but did not work to improve the sweep.
+
+\paragraph{Frobenius convergence.} \Cref{fig:fc3_frob_and_ganh}~(a) plots $\varepsilon$ versus
+parameter count for the four working compressions. The transport axis in
+\cref{fig:fc3_frob_and_ganh}~(b) and the left panel of \cref{fig:fc3_kappa_and_spectral}
+converge dramatically faster than the Frobenius residual. Already at rank $R=8$ the relative
+conductance error $\varepsilon_G = |G - G_{\mathrm{dense}}|/G_{\mathrm{dense}}$ is
+$0.78\%$ (mSVD, $\varepsilon=12.8\%$), $0.71\%$ (CP, $\varepsilon=16.4\%$) and $0.33\%$
+(INDSCAL, $\varepsilon=16.6\%$). By $R=16$--$32$ all methods sit below $0.5\%$ in transport
+while their Frobenius residuals are still in the range $5$--$11\%$.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fig/fc3_prim_vasp/frob_and_ganh_vs_params.pdf}
+  \caption{FC3 compression on the $3{\times}3{\times}3$ silicon primitive-row tensor
+    ($\ndof=162$).
+    (a)~Relative Frobenius error \eqref{eq:fc3_rel_err} versus parameter count on log--log
+    axes. (b)~Absolute anharmonic conductance $G_{\mathrm{anh}}$ (MW\,m$^{-2}$\,K$^{-1}$)
+    versus parameter count on a semi-log $x$ axis. The dashed horizontal line marks the dense
+    reference $G_{\mathrm{anh}}^{\mathrm{dense}}=757.46$~MW\,m$^{-2}$\,K$^{-1}$. The dotted vertical line marks $N_{\mathrm{nnz}}$, the
+    non-zeros in the full matrix.}
+  \label{fig:fc3_frob_and_ganh}
+\end{figure}
+
+In particular, the spectral heat current curves in
+\cref{fig:fc3_kappa_and_spectral}~(b) are visually indistinguishable from the dense reference
+already at INDSCAL $R=16$--$24$ or mSVD $R=16$, while the corresponding Frobenius residuals are
+$10\%$ or more. only at $R\le 4$ does the spectral current show visible distortion. The practical consequence is that on this system the relevant quality metric for phonon NEGF is
+some observable transport residual $\varepsilon_G$ (or the spectral current residual), not the Frobenius
+norm that the fitters themselves minimise. Targeting $\varepsilon_G\le 1\%$ is already achieved
+by INDSCAL at $R=8$ ($1\,344$ parameters, $117\times$ compression) and mSVD at $R=8$ ($9\,080$
+parameters, $17\times$ compression). Reaching $\varepsilon_G\le 0.1\%$ costs INDSCAL $R=32$
+($29\times$), HOSVD $(6,32)$ ($19\times$) or mSVD $R=32$ ($4.3\times$).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fig/fc3_prim_vasp/kappa_err_and_spectral.pdf}
+  \caption{(a)~Relative thermal-conductance error
+    $|G-G_{\mathrm{dense}}|/G_{\mathrm{dense}}$ versus parameter count on log--log axes;
+    dotted vertical line: $N_{\mathrm{nnz}}$ reference.
+    (b)~Spectral heat current $J(\omega)$ for representative fits against the dense reference
+    (red) and the purely ballistic current (dotted grey). The compressed curves overlay the
+    dense reference visibly at INDSCAL $R\ge 16$ and mSVD $R\ge 16$.}
+  \label{fig:fc3_kappa_and_spectral}
+\end{figure}
+
+\paragraph{Conservation of heat current.} The heat-flow conservation residual
+$|J_L-J_R|/(|J_L|+|J_R|)$ remains below $0.2\%$ across the entire sweep. The dense reference
+sits at $0.01\%$. All compressed fits stay within a factor $\sim 20$ of that floor,
+with the largest deviations --- $1.66\%$ for CP $R=4$ and $1.29\%$ for INDSCAL $R=2$
+--- at the very lowest ranks where $\varepsilon$ is $60$--$80\%$. Once $R\ge 8$ the conservation
+residual falls back to $0.01$--$0.15\%$ for every method, and shows no systematic trend with
+rank. The ASR-projected variants do not improve this floor in any measurable way.
+\todo[inline]{compare with sparse, discuss sparse decompositions}
+
+\section{Finite-Structure Validation}
+\label{sec:finite_validation}
+
+\paragraph{Motivation.} Before tackling the full $q_\perp$-resolved anharmonic
+problem, we validate the harmonic and cubic force-constant inputs and the
+resulting phonon-phonon self-energy machinery on a family of \emph{finite}
+structures (no transverse periodicity, ``$\Gamma$-only'' devices). Each
+system is processed by a uniform analysis driver
+(\path{phonon/input_calc/finite_analysis/}) that produces a fixed report of
+quality, sparsity, decomposition, physical-invariant, and self-energy
+diagnostics. The analyses below are reported for the H-passivated SiNW(100)
+of Sec.~\ref{sec:fc3_compression}\todo{cross-ref correct subsection} and a
+finite Si chain (8 atoms, the smallest test fixture); additional structures
+(SiNW family at varying diameter, Ge/SiGe NW, finite CNT(3,3) segment) are
+scaffolded under the same driver and will be filled in once the cluster
+reaps land.
+
+\subsection{System set}
+\label{sec:fv_systems}
+
+\todo[inline]{Table summarising n\_atoms, supercell, FC source (hiphive
+vs FD vs DFPT), reaped FC2 and FC3 max magnitudes, slab decomposition,
+and reference for each structure. Generated by
+\texttt{finite\_analysis} \texttt{summary.tex} \texttt{\textbackslash{}input}.}
+
+\subsection{FC2/FC3 quality and convergence}
+\label{sec:fv_quality}
+
+For the H-passivated SiNW(100) on a $[1,1,4]$ supercell
+($\nsuper{=}84$ atoms, $\ndof{=}252$, $L_z = \qty{21.88}{\angstrom}$)
+the hiphive fit lands at $r_\mathrm{cut}^{(2)} =
+\qty{7.88}{\angstrom}$ for FC2 and $r_\mathrm{cut}^{(3)} =
+\qty{4.0}{\angstrom}$ for FC3. The FC2 cutoff is within the
+0.8\,$L_z/2 = \qty{8.72}{\angstrom}$ warning band by
+$\qty{0.84}{\angstrom}$ (cf.\ \cref{ap:fa_modules,parameter\_validation.py}),
+which is also visible in the FC2 atomic-block heatmap
+(\cref{fig:fv_sparsity_sinw}): the upper-left and lower-right corner
+blocks are non-zero, corresponding to atoms near $z=0$ coupling to
+atoms near $z=L_z$ through the periodic image. The FC3 distance
+plot collapses onto four discrete bins at
+$d \in \{0.2, 1.5, 2.4, 3.3\}\,\text{\AA}$ because the
+$\qty{4}{\angstrom}$ cutoff allows only the four shortest triplet
+diameters in this primitive cell; a histogram annotation marks the
+cutoff position.
+
+The $d_9$ variant ($\mathrm{Si}_{21}\mathrm{H}_{16}$, core diameter
+$\sim\!\qty{0.86}{\nano\metre}$) was originally configured with an
+$\qty{11.36}{\angstrom}$ FC2 cutoff covering the entire cross
+section, but hiphive rejects it on a $[1,1,4]$ supercell
+($r_\mathrm{cut}^{(2)} > L_z/2 = \qty{10.94}{\angstrom}$). We
+reap the $d_9$ structure with a reduced
+$r_\mathrm{cut}^{(2)} = \qty{9.5}{\angstrom}$ and rely on the
+already-fast distance decay of $\|\Phi_2\|_F$ (one decade by
+$\qty{7}{\angstrom}$ on the $d_5$ result) to argue that the
+remaining FC2 weight beyond $\qty{9.5}{\angstrom}$ is small. A
+matching $d_9$ reap on a $[1,1,8]$ supercell that restores the
+$\qty{11.36}{\angstrom}$ cutoff is left for follow-on work.
+
+\todo[inline]{Per-system: distance-binned mean $\|\Phi_{2,ij}\|_F$ and
+$\|\Phi_{3,ijk}\|_F$ on log axis, plus the $\Gamma\to Z$ phonon dispersion.
+Where multiple reaps exist (different supercell sizes, displacement
+amplitudes, hiphive cutoffs), overlay the dispersions to expose the
+slowest-converging modes.}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/fc_quality_fc2_distance.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/fc_quality_fc3_distance.pdf}
+  \caption{FC magnitude decay with interatomic separation for the
+  53-atom SiNW(100). Left: FC2 atomic-block Frobenius norm vs distance
+  (hiphive $r_\mathrm{cut}^{(2)} = 5.0$\,\AA{} truncation). Right: FC3
+  triplet-Frobenius norm vs triplet diameter
+  ($r_\mathrm{cut}^{(3)} = 4.0$\,\AA{}). Both axes are logarithmic.}
+  \label{fig:fv_quality_sinw}
+\end{figure}
+
+\subsection{Force-constant sparsity structure}
+\label{sec:fv_sparsity}
+
+\todo[inline]{Per-system: FC2 atomic-block-Frobenius heatmap (atoms
+$z$-sorted), FC3 1D decay (same data as above, kept here for the
+sparsity narrative), and the 3D scatter of FC3 nonzero indices coloured
+by $\log_{10}|\Phi_3|$. The 3D plot makes the sparsity pattern
+visually obvious; add a small inset showing the nnz table at
+$\varepsilon \in \{10^{-2}, 10^{-3}, 10^{-4}, 10^{-5}\}$.}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/sparsity_fc2_heatmap.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/sparsity_fc3_scatter_3d.pdf}
+  \caption{Sparsity structure of the SiNW(100) force constants.
+  Left: FC2 atomic-block Frobenius heatmap on a logarithmic colour scale,
+  with atoms sorted along the wire axis. Right: 3D scatter of FC3 nonzero
+  triplets above a $10^{-3}$ relative threshold; colour encodes
+  $\log_{10}\|\Phi_{3,ijk}\|_F$.}
+  \label{fig:fv_sparsity_sinw}
+\end{figure}
+
+\subsection{FC3 tensor decompositions on finite structures}
+\label{sec:fv_decomp}
+
+The five decomposition methods of \cref{sec:fc3_compression} (PCP is
+disabled by default; cf.\ \cref{ap:fa_modules}) are run on the
+SiNW(100) supercell FC3 tensor at ranks $R\in\{2,4,8,16\}$.  Two
+findings dominate the result and shape the plot design:
+
+\begin{itemize}
+\item \emph{Best-rank Frobenius residuals are large}. mSVD reaches
+  $\varepsilon = 0.25$ at $R=16$, HOSVD/CP/INDSCAL $\varepsilon
+  \approx 0.30$--$0.32$. The 252-DOF supercell tensor is too high-
+  dimensional for the ranks reachable here in reasonable time.
+\item \emph{The transport observable collapses to ballistic
+  ($G_\mathrm{anh} \to G_\mathrm{ball}$) for 15 of 20 fits.}
+  When the reconstruction has $\varepsilon \gtrsim 0.6$ the
+  reconstructed FC3 is close to zero in Frobenius norm; the
+  phonon-phonon self-energy bubble is then negligible, the SCBA
+  reaches its fixed point in two iterations at $\Sigma \approx 0$,
+  and the device transports ballistically. In the
+  $G_\mathrm{anh}$-vs.-parameter plot
+  (\cref{fig:fv_transport_quality_sinw}, panel a) we flag these
+  fits with an open red marker and draw both the dense
+  $G_\mathrm{anh}$ and the dense $G_\mathrm{ball}$ reference lines.
+  Only Waring at $R=16$ (and to a lesser extent CP/INDSCAL at the
+  same rank) sit between the two — i.e., produce a non-trivial
+  bubble at all.
+\end{itemize}
+
+The Waring fitter is currently unreliable below $R=8$: at $R\in\{2,4\}$
+it returns the zero tensor (Frobenius residual $\approx 1$,
+reconstruction nnz $= 0$). These rows are excluded from the
+nnz-vs-parameter plot (\cref{fig:fv_decomp_sinw}, panel b) to avoid a
+spurious vertical jump from the rank-4 zero to the rank-16
+$\sim\!1.5\times 10^{5}$ entries; the failures are listed in the
+figure's footnote.
+
+\todo[inline]{The same six-method sweep as Sec.~\ref{sec:fc3_compression}
+but on the finite-structure FC3. Two figures: (i) Frobenius error vs
+parameter count on log--log axes, (ii) reconstruction nnz at
+$\varepsilon = 10^{-3}$ vs parameter count, with the dense-thresholded
+sparse FC3 baseline drawn as a horizontal reference. The second panel
+answers whether each decomposition genuinely \emph{saves} nonzeros for a
+target accuracy.}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/decomp_frob_vs_params.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/decomp_nnz_vs_eps.pdf}
+  \caption{FC3 tensor-decomposition trade-offs on the SiNW(100).
+  Left: relative Frobenius error vs parameter count for mSVD, HOSVD, CP,
+  INDSCAL, Waring, PCP. Right: reconstructed-tensor nonzero count at
+  $\varepsilon = 10^{-3}$; the dashed horizontal line is the
+  sparse-thresholded dense FC3 baseline.}
+  \label{fig:fv_decomp_sinw}
+\end{figure}
+
+\subsection{Physical invariants}
+\label{sec:fv_physical}
+
+\todo[inline]{Report the four invariant residuals (FC2 Hermiticity,
+FC2 ASR, FC3 permutational symmetry on the $S_3$-lift, FC3 ASR on legs
+$j$ and $k$) as a single per-system table. The lifted FC3 is
+$S_3$-symmetric \emph{by construction} (cf.\ Sec.~\ref{sec:fc3_compression}),
+so its permutational residuals are at machine precision. The FC3 ASR
+residuals expose whether the fit (hiphive least-squares vs phono3py
+finite-difference vs DFPT) enforces the sum rule. For the
+hiphive-fit SiNW(100) the FC3 ASR residual is large ($\sim 60\%$
+relative); this should propagate through to a finite Drude weight at
+$\omega = 0$ in the SSE.}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.6\linewidth]{fig/finite_analysis/sinw100/fc_quality/fc_quality_dispersion.pdf}
+  \caption{Phonon dispersion sanity check for the SiNW(100) along the
+  periodic axis. Imaginary modes (negative branches) indicate FC2
+  instabilities — typically incomplete relaxation or hiphive's
+  least-squares fit returning a slightly indefinite dynamical matrix.}
+  \label{fig:fv_dispersion_sinw}
+\end{figure}
+
+\subsection{Phonon-phonon self-energy sparsity}
+\label{sec:fv_sse}
+
+The block-resolved heatmap of $\|\Sigma^<_{IJ}\|_F$
+(\cref{fig:fv_sse_sinw}, left) is organised by transport slabs
+(16 slabs of 5--6 atoms each for the $d_5$ supercell, in $z$-sorted
+order). The visible blockiness — diagonal slabs are systematically
+brighter than off-diagonal ones — is a real feature of the
+short-range bubble: $\Sigma_{IJ}$ is driven by triplet diagrams
+$\Phi^{(I,K,K')}\,G\,G\,\Phi^{(J,K',K)}$ that are non-zero only when
+both $\Phi$ vertices share atoms with the on-block atoms, so
+$|I-J|=0$ has more contributing triplets than $|I-J|=1$.
+
+To rule out a spurious diagonal-aggregation bug we also report a
+per-atom-pair Frobenius heatmap
+(\path{sse_sigma_atomic_heatmap_synth.pdf}): reshape each
+$(n_\omega,3 n_A,3 n_B)$ block into $(n_\omega,n_A,3,n_B,3)$ and
+reduce the Frobenius norm over the $(\omega,3,3)$ axes. In this
+atomic-resolution view the bright diagonals continue smoothly across
+the slab boundaries (the dashed white grid), confirming that
+neighbouring atoms across a slab boundary couple as strongly as
+diametrically-opposite atoms within the same slab. The slab-binned
+appearance is purely an aggregation artefact: a $(I,I)$ slab pair
+sums $\sim n_A^2$ atomic Frobenius contributions whereas
+$(I,I\pm 1)$ sums only the $\sim 2 n_A$ atom pairs that lie within
+$r_\mathrm{cut}^{(3)}$ of the slab boundary.
+
+\todo[inline]{Two routes to the SSE on a representative Green's function:
+\textbf{(i)} a synthetic eigenmode-resolved $G^{<,>}$ built from the
+mass-weighted FC2 spectrum (Lorentzian-broadened, see
+\path{finite_analysis/synthetic_gf.py}) — fast, deterministic, ideal
+for parametric sweeps; \textbf{(ii)} an actual short SCBA run via the
+quatrex solver with $\mathbf{k}_\perp = (1,1,1)$. Compare the
+per-$(I,J)$ Frobenius norms of $\Sigma^{<,>}$; the residual rel-difference
+is dominated by the retarded-reconstruction choice (\texttt{half} vs
+\texttt{fft} Hilbert) and by SCBA mixing.}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/sse_sigma_heatmap_synth.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/sse_sigma_heatmap_quatrex.pdf}
+  \caption{Block Frobenius norms of $\Sigma^<(\omega)$ on the
+  block-tridiagonal grid for the SiNW(100): synthetic-GF prediction
+  (left) vs short SCBA from the quatrex solver (right).}
+  \label{fig:fv_sse_sinw}
+\end{figure}
+
+\subsection{Cutoff hierarchy and transport sensitivity}
+\label{sec:fv_cutoffs}
+
+\todo[inline]{Sweep the four cutoff knobs of
+\path{finite_analysis/sse_cutoffs.py}: (a) diagonal-$G$ inside the SE
+bubble, (b) diagonal-$G$ everywhere, (c) FC3 nearest-neighbour-only
+($|I-J|, |I-K|, |J-K| \le 1$), and (d) FC3 magnitude threshold
+$\varepsilon \in \{10^{-2}, 10^{-3}, 10^{-4}\}$ relative to
+$\max|\Phi_3|$. Report
+$\|\Sigma - \Sigma_\mathrm{baseline}\|_F / \|\Sigma_\mathrm{baseline}\|_F$
+(block-summed and as a heatmap) plus the corresponding change in
+ballistic transmission and Landauer heat current.}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/cutoffs_sigma_frob_vs_cutoff.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/transport_vs_cutoff.pdf}
+  \caption{Cutoff sensitivity for the SiNW(100). Left: relative
+  Frobenius change of $\Sigma^<$ for each cutoff configuration.
+  Right: corresponding change in transmission $T(\omega)$ and the
+  integrated heat current.}
+  \label{fig:fv_cutoffs_sinw}
+\end{figure}
+
+\subsection{Summary}
+\label{sec:fv_summary}
+
+\todo[inline]{One paragraph distilling the headline findings: the
+recommended FC3 magnitude/distance cutoff that costs $\le X\%$ in
+transport, the recommended decomposition method-and-rank for a target
+$\varepsilon_G$, and any structure-specific caveats (e.g.\ SiNW
+hiphive-fit FC3 violates ASR by $\sim 60\%$ — should we ASR-project
+post-fit?).}

@@ -441,6 +441,27 @@ def _band_label(t_mean: float, delta_T: float) -> str:
     return rf"$\bar T={t_mean:g}\,$K, $\Delta T={delta_T:g}\,$K"
 
 
+def _autoclip_xlim(curves, tol_rel=1e-4, pad=2.0):
+    """Tightest x-window that contains every curve down to ``tol_rel``
+    of its own peak. The bubble grid runs to ``2*omega_max`` for FFT
+    reasons, but the observable ``j(omega) ~ (n_L-n_R)`` dies past a
+    few times ``kT/h``; the full grid just squashes the meaningful
+    range. Returns ``(xmin, xmax)`` or ``None``.
+    """
+    significant = []
+    for freqs, vals in curves:
+        peak = float(np.max(np.abs(vals)))
+        if peak <= 0:
+            continue
+        mask = np.abs(vals) > tol_rel * peak
+        if mask.any():
+            significant.append(float(np.asarray(freqs)[mask].max()))
+            significant.append(float(np.asarray(freqs)[mask].min()))
+    if not significant:
+        return None
+    return (max(0.0, min(significant) - pad), max(significant) + pad)
+
+
 def plot_convergence(
     results: list[dict[str, Any]],
     out_dir: Path,
@@ -579,15 +600,21 @@ def plot_temperature_sweep(
     rep_pts = sorted(by_t_mean[rep_t], key=lambda r: float(r["delta_T"]))
     if rep_pts:
         fig, ax = plt.subplots(figsize=(6.2, 3.8))
+        curves = []
         for i, r in enumerate(rep_pts):
             color = CMAP_T(i / max(1, len(rep_pts) - 1))
             freqs = np.asarray(r["freqs_thz"])
             j_ball = np.asarray(r["spectral_heat_current_ballistic"]) * 1e12
             ax.plot(freqs, j_ball, color=color,
                     label=rf"$\Delta T={float(r['delta_T']):g}\,$K (ball.)")
+            curves.append((freqs, j_ball))
             j_anh = np.asarray(r["spectral_heat_current"]) * 1e12
             if np.any(j_anh != 0):
                 ax.plot(freqs, j_anh, "--", color=color, alpha=0.6)
+                curves.append((freqs, j_anh))
+        xlim = _autoclip_xlim(curves)
+        if xlim is not None:
+            ax.set_xlim(*xlim)
         ax.set_xlabel(r"Frequency $\omega/2\pi$ (THz)")
         ax.set_ylabel(r"Spectral heat current (pW/THz)")
         ax.set_title(
@@ -656,14 +683,20 @@ def plot_length_sweep(
 
     # --- (b3) spectral current overlay ----------------------------------------
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
+    curves = []
     for i, r in enumerate(results_sorted):
         color = CMAP_L(i / max(1, len(results_sorted) - 1))
         freqs = np.asarray(r["freqs_thz"])
         j_b = np.asarray(r["spectral_heat_current_ballistic"]) * 1e12
         ax.plot(freqs, j_b, color=color, label=rf"$L={int(r['n_slabs'])}$ (ball.)")
+        curves.append((freqs, j_b))
         j_a = np.asarray(r["spectral_heat_current"]) * 1e12
         if np.any(j_a != 0):
             ax.plot(freqs, j_a, "--", color=color, alpha=0.6)
+            curves.append((freqs, j_a))
+    xlim = _autoclip_xlim(curves)
+    if xlim is not None:
+        ax.set_xlim(*xlim)
     ax.set_xlabel(r"Frequency $\omega/2\pi$ (THz)")
     ax.set_ylabel(r"Spectral heat current (pW/THz)")
     ax.set_title(

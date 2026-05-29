@@ -1,0 +1,541 @@
+\chapter{The \texttt{finite\_analysis} Package}
+\label{ap:finite_analysis}
+
+This appendix documents the validation pipeline that lives at
+\path{phonon/finite_analysis/}.  The package processes a relaxed,
+finite (no transverse $q$, single supercell as device) phonon system
+and produces all of the analyses that go into
+\cref{sec:finite_validation}: FC2/FC3 quality, sparsity structure,
+tensor decompositions, physical invariants, phonon--phonon
+self-energy structure, cutoff-hierarchy sensitivity, and ballistic +
+SCBA transport.
+
+The text is organised as: (\ref{ap:fa_overview}) high-level overview;
+(\ref{ap:fa_modules}) module reference; (\ref{ap:fa_observables})
+formal definitions of every observable with derivations; (\ref{ap:fa_validation})
+the catalogue of physical-validation tests we run; and
+(\ref{ap:fa_runbook}) the recommended workflow for producing the
+results-section figures.
+
+\section{Overview}
+\label{ap:fa_overview}
+
+The package treats a single supercell as a finite device: one slab
+decomposition along the transport axis, no transverse periodicity.
+The bare retarded propagator
+$G^R_0(\omega) = \bigl[(\omega + i\eta)^2\,\mathbb{I} - D\bigr]^{-1}$
+is built from the mass-weighted dynamical matrix $D = M^{-1/2}\Phi_2 M^{-1/2}$
+in $\mathrm{THz}^2$.  The three-phonon self-energy
+$\Sigma^{<,>}_{\mathrm{ph\text{-}ph}}(\omega)$ is computed as the
+Migdal-like sunset diagram (\textit{cf.}\ \cref{eq:sunset_lesser})
+over the device DOFs, and combined with the lead self-energy
+$\Sigma_{\mathrm{lead}}^R(\omega)$ from a Sancho--Rubio decimation on
+the first/last slab.  The full retarded $\Sigma^R$ is reconstructed
+from $(\Sigma^<, \Sigma^>)$ via the Hilbert transform (Kramers--Kronig)
+so causality is respected.  The Dyson equation is then solved per
+$\omega$ on the full $(n_{\mathrm{dof}} \times n_{\mathrm{dof}})$
+device dimension; the Caroli formula gives transmission $T(\omega)$
+and the Landauer integral gives the heat current $Q$.
+
+\subsection*{Unit system}
+The package operates in \textbf{THz/(amu$\cdot$\AA$^2)$} throughout
+(matching \path{phonon_inputs/anharmonic.py}; see
+\cref{ap:conventions_units}).  Force constants are mass-weighted up
+front by \texttt{phonon\_inputs.fc3\_compression.build\_fc3\_target},
+$D$ is built by \texttt{synthetic\_gf.dynamical\_matrix}, and the
+bubble prefactor $i\hbar\,d\omega/(4\pi)$ in
+\texttt{quatrex.phonon.units.bubble\_prefactor\_thz} closes the
+units.  Frequency grids are symmetric, $[-f_{\max}, \dots, 0, \dots,
++f_{\max}]$, with the $\omega = 0$ sample zeroed before FFT
+convolution to suppress the bosonic singularity.
+
+\section{Module reference}
+\label{ap:fa_modules}
+
+The package is organised into 14 modules.  Cross-cutting helpers are
+prefixed with an underscore.
+
+\begin{description}
+\item[\texttt{loader.py}] Reads a \texttt{phonon\_inputs} YAML config, an FC3
+  HDF5 reap, and produces a \texttt{SystemBundle} dataclass carrying
+  the phonopy object, FC2, FC3, mass-weighted FC3 target, masses,
+  supercell positions/lattice, the slab decomposition
+  \texttt{block\_sizes} and the $z$-sort permutation
+  \texttt{atom\_perm}.  When a sibling \texttt{hiphive\_meta.json}
+  sits next to \texttt{fc3.hdf5} (the hiphive reap's metadata), the
+  primitive cell is sourced from that file via
+  \texttt{\_primitive\_from\_reap\_metadata}; for phono3py / DFPT
+  reaps without that metadata the primitive falls back to the YAML
+  structure.  The metadata path is preferred because the FC arrays
+  were fit on the relaxed primitive saved at sow time, so reading
+  the primitive from the same file keeps the dispersion's q-phase
+  factors $\exp(i\vc{q}\cdot \vc{r}_j)$ consistent with the fit.  The
+  companion \texttt{load\_quatrex\_blocks} projects the FC3 onto the
+  NN-tridiagonal block dictionary that the bubble consumes; with
+  \texttt{asr\_project=True} (default \texttt{False}) it ASR-projects
+  FC3 along legs 2 and 3 first, which is the canonical way to
+  eliminate the Drude-like weight in $\Sigma$ at $\omega \to 0$ when
+  the upstream hiphive fit leaves a structural axis-$j/k$ ASR residual
+  (see \cref{sec:leg_j_rel}).
+
+\item[\texttt{constants.py}] Single home for every numeric default in
+  the package.  Notable: $\texttt{THZ\_TO\_CM1} = 33.35641$;
+  $\texttt{ASR\_REL\_RESIDUAL\_WARN} = 0.05$;
+  $\texttt{THZ\_ACOUSTIC\_BAND} = 0.01$~THz;
+  $\texttt{DEFAULT\_DROP\_THRESHOLD\_THZ} = 0.05$~THz with adaptive
+  relative cut at $10^{-3}\times \max|\omega_n|$;
+  $\texttt{DEFAULT\_ETA\_FACTOR\_DW} = 0.5$ with floor
+  $\texttt{DEFAULT\_ETA\_THZ\_FLOOR} = 0.02$~THz;
+  $\texttt{EPS\_LADDER} = (10^{-2}, 10^{-3}, 10^{-4}, 10^{-5})$ for the
+  sparsity nnz tables.
+
+\item[\texttt{\_utils.py}] Geometry primitives (minimum-image
+  pairwise distances, triplet diameter), DOF-permutation helper
+  $i_{\mathrm{atom}} \to (i_{\mathrm{atom}}, \alpha)$, and dense-block
+  $\to$ dictionary slicer.
+
+\item[\texttt{synthetic\_gf.py}] Eigenmode-resolved phonon Green's
+  functions on a symmetric $\omega$ grid.  Diagonalises the
+  mass-weighted $D$, splits the spectrum into acoustic ($|\omega| \le
+  \texttt{THZ\_ACOUSTIC\_BAND}$), imaginary ($\omega < -\texttt{THZ\_ACOUSTIC\_BAND}$,
+  warning emitted), and physical bands.  Builds $G^{<,>}(\omega)$ via
+  \cref{eq:gf_lesser_eigenmode}.
+
+\item[\texttt{sse\_cutoffs.py}] Three-phonon bubble in block-tridiagonal
+  storage.  The full off-diagonal $(K_1, K_1', K_2, K_2')$ enumeration
+  is the production path; the original \texttt{quatrex} $K_1 = K_1', K_2
+  = K_2'$ restriction is recovered by setting \texttt{diag\_G\_in\_se =
+  True}.  Five cutoff knobs documented in \cref{sec:fv_cutoffs}.  The
+  \texttt{\_compat} module retains the legacy one-sided convention for
+  bit-for-bit cross-checks.
+
+\item[\texttt{sse\_quatrex\_run.py}] Independent dense-bubble cross-check
+  invoking \texttt{phonon\_inputs.anharmonic.\_compute\_phph\_self\_energy\_finite}.
+  Also runs a Dyson + equilibrium-Keldysh SCBA loop when
+  \texttt{n\_iter > 0}.
+
+\item[\texttt{transport\_metrics.py}] $T(\omega)$, density of states,
+  Landauer heat current.  \texttt{sigma\_retarded(method)} reconstructs
+  $\Sigma^R$ from $(\Sigma^<, \Sigma^>)$ via FFT-Hilbert (default), PV
+  quadrature, or the half-approximation.  \texttt{sancho\_rubio\_lead\_self\_energies}
+  builds the lead $\Sigma_L^R$, $\Sigma_R^R$ by decimating the
+  first/last transport slab as a periodic lead unit.
+  \texttt{transport\_trace\_scba} iterates $\Sigma \leftrightarrow G$
+  via Dyson + equilibrium-FDT closure with linear mixing.
+
+\item[\texttt{physical\_tests.py}] Static FC2/FC3 invariants
+  (Hermiticity, ASR, S$_3$-permutation, dispersion-band sanity,
+  PSD diagnostic) plus the dynamical NEGF identities (detailed
+  balance, DOS sum rule).  The FC3 ASR-legs metric
+  $\mathrm{leg\_j\_rel} = \|\sum_j \Phi^3_{ijk}\|_F / \|\Phi^3\|_F$
+  measures the axis-$j$ (and analogously axis-$k$) trace of the
+  mass-weighted lifted FC3; hiphive's \texttt{ClusterSpace} enforces
+  axis-$i$ ASR by orbit construction but not the other two axes, so
+  a residual reading of $\sim 0.8$ on a SiNW reap and $\sim 0$ on a
+  bulk-Si reap is structural rather than a fit defect
+  (\cref{sec:leg_j_rel}).  Downstream consumers that need strict
+  axis-$j/k$ ASR can invoke the explicit projection via
+  \texttt{load\_quatrex\_blocks(asr\_project=True)} or
+  \texttt{phonon\_inputs.fc3\_compression.asr\_project\_factor}.
+
+\item[\texttt{physics\_validation.py}] Identity-style validators for the
+  Green's-function machinery: anti-Hermiticity, $G^R{}^\dagger = G^A$,
+  optical theorem $\Sigma^> - \Sigma^< = -2i\,\mathrm{Im}\,\Sigma^R$,
+  first-moment spectral sum rule
+  $\int 2\omega^3 A(\omega) d\omega = \mathrm{Tr}(D)$, ballistic
+  $T(\omega)$ unitarity bound, Bose-factor identity, and
+  Kramers--Kronig consistency between PV and FFT $\Sigma^R$
+  reconstructions.
+
+\item[\texttt{parameter\_validation.py}] DFT and FC-fit sanity checks
+  exposed as: a load-time warning, a CLI subcommand
+  \verb|python -m finite_analysis validate <config>|, and a
+  per-system block in \texttt{summary.json}.  The check table covers
+  ENCUT, $E_{\mathrm{cut,wfc}}$, $k$-point density on periodic axes,
+  hiphive sample count and cutoffs, displacement amplitude, third-
+  order pair-distance cutoff, and supercell extent.
+
+  \paragraph{FC2 cutoff vs.\ supercell.}  The FC2 pair cutoff
+  $r_\mathrm{cut}^{(2)}$ must obey $r_\mathrm{cut}^{(2)} < L/2$ along
+  every periodic axis, where $L$ is the periodic extent of the
+  rattled supercell --- if any cluster wraps the cell, hiphive aborts
+  with \texttt{"Found cluster $(i,j)$ in two orbits, decrease cutoff
+  (less than L/2) or increase supercell size"} at
+  \texttt{ClusterSpace} construction time (see
+  \texttt{hiphive\_fc3.py:922}).  The validator emits an
+  \emph{error} when $r_\mathrm{cut}^{(2)} > L/2$ and a \emph{warning}
+  when $r_\mathrm{cut}^{(2)} > 0.8\,L/2$; the latter band leaves
+  zone-boundary modes poorly determined and is the most common cause
+  of imaginary modes at the Z-axis zone boundary.  Concretely for
+  SiNW(100) with $z$-period $\qty{5.47}{\angstrom}$:
+  $[1,1,4]$ gives $L_z/2 = \qty{10.94}{\angstrom}$ so cutoffs
+  $\lesssim \qty{8.7}{\angstrom}$ are safe; the $d_9$ variant uses a
+  $\qty{9.5}{\angstrom}$ cutoff (within the warn band; restoring the
+  $\sim\!11\,\text{\AA}$ envelope-driven cutoff requires growing the
+  supercell to $[1,1,8]$).
+
+\item[\texttt{sparsity.py}] FC2 atomic-block-Frobenius heatmap; FC3
+  triplet-diameter $\|\Phi_3\|$ decay; 3D scatter of FC3 nonzero
+  triplets coloured by $\log_{10}|\Phi_3|$; and a CSV nnz table at
+  thresholds $\varepsilon\in\texttt{EPS\_LADDER}$.
+
+\item[\texttt{decomposition.py}] Drives the six existing FC3 tensor
+  fitters (mSVD, HOSVD, CP, INDSCAL, Waring, PCP; see
+  \cref{sec:fc3_compression}) over a rank ladder, reporting parameter
+  cost vs Frobenius reconstruction error and reconstruction-nnz at the
+  same $\varepsilon$ ladder as \texttt{sparsity}.
+
+\item[\texttt{fc\_quality.py}] Distance-binned FC2/FC3 magnitudes and
+  Brillouin-zone-line dispersion plots; supports a multi-reap
+  convergence sweep listed in the YAML's \texttt{convergence:} block.
+
+\item[\texttt{sse\_sparsity\_driver.py}] CLI-callable harnesses for the
+  ``\texttt{sse\_sparsity}'' and ``\texttt{cutoffs}'' analyses.  Both
+  consume \texttt{build\_sse\_inputs} and emit per-$(I, J)$ Frobenius
+  CSVs and heatmaps.  The cutoffs harness wires
+  \texttt{transport\_for\_cutoff\_sweep} so each cutoff configuration
+  produces a $T(\omega)$ trace and a Landauer $Q$.
+
+\item[\texttt{transport\_quality.py}] The headline ``FC3-approximation
+  quality vs.\ transport'' suite.  For each cell of the
+  $(\text{method}, \text{rank})$ grid it (i) fits the FC3 with the
+  chosen \texttt{phonon\_inputs.fc3\_compression} method, (ii)
+  reconstructs the supercell-lifted target shape
+  $(n_\mathrm{dof}, \dim_{sc}, \dim_{sc})$, (iii) runs
+  \texttt{phonon.solver.transmission\_q} with the reconstruction as
+  \texttt{M\_stacked\_override} -- the q-resolved path is the only
+  safe choice for SiNWs because the bubble runs on the primitive-cell
+  DOFs after $\Gamma$-projection, not on the full $n_\mathrm{dof}^\mathrm{super}$ --
+  and (iv) caches the result in
+  \texttt{<out\_dir>/cache/\{method\}\_\{rank\}.npz}.  Each rerun
+  re-reads cached cells and only computes the missing ones; passing
+  \texttt{force\_recompute=True} or deleting the cache directory
+  forces a full recompute.  The output plots compare Frobenius
+  reconstruction error, anharmonic conductance error, and parameter
+  count across methods.
+
+\item[\texttt{cross\_system\_plots.py}] Cross-system overlay plots
+  for the results section.  After per-system analyses have populated
+  \texttt{document/src/fig/finite\_analysis/<system>/}, this script
+  reads the CSV outputs and produces three overlays:
+  \texttt{cross\_fc3\_decay.pdf} (mean $\|\Phi_3\|$ vs triplet
+  diameter, all systems on one log-y panel),
+  \texttt{cross\_decomposition\_ranks.pdf} (Frobenius reconstruction
+  error vs parameter count, six methods $\times\,N$ systems), and
+  \texttt{cross\_summary\_table.pdf} (a one-page text-rendered table
+  of headline numbers).  Invocation:
+  \texttt{python -m finite\_analysis.cross\_system\_plots --systems
+  sinw100,si\_chain,cnt33\_finite --base-dir
+  document/src/fig/finite\_analysis --out-dir
+  document/src/fig/finite\_analysis}.
+
+\item[\texttt{\_summary.py}] Typed contract for per-analysis return
+  dicts.  \texttt{AnalysisSummary} is a \texttt{TypedDict} with a
+  \texttt{units:} mapping (bare-metric name $\to$ unit string) that
+  every \texttt{run\_<analysis>} driver populates; the CLI assembles
+  the per-analysis blocks into the top-level \texttt{summary.json}.
+
+\item[\texttt{cli.py} \& \texttt{\_\_main\_\_.py}] Single CLI entry point
+  with subcommands \texttt{run} (the full analysis) and
+  \texttt{validate} (parameter check only).
+\end{description}
+
+\section{Observables}
+\label{ap:fa_observables}
+
+\subsection{Bare propagator}
+\label{ap:fa_obs_bare}
+
+In the THz$^2$ unit system, the bare retarded propagator is
+\begin{equation}
+  \label{eq:gf_retarded_bare}
+  G^R_0(\omega) =
+  \bigl[(\omega + i\eta)^2\,\mathbb{I} - D - \Sigma^R_{\mathrm{lead}}(\omega)\bigr]^{-1},
+\end{equation}
+with $\eta$ a small numerical broadening (default
+$0.05$~THz; \texttt{DEFAULT\_ETA\_THZ\_TRANSPORT}).  The lead
+self-energy is built by Sancho--Rubio decimation on the first/last
+transport slab (\cref{ap:fa_obs_lead}).
+
+\subsection{Eigenmode synthetic Green's function}
+\label{ap:fa_obs_synthetic}
+
+For the SSE evaluation in the absence of a converged SCBA, we use
+the eigenmode-resolved displacement Green's functions
+\begin{align}
+  \label{eq:gf_lesser_eigenmode}
+  G^<(\omega) &= -2\pi i\sum_{n}\frac{\boldsymbol{\varepsilon}_n
+    \boldsymbol{\varepsilon}_n^{\mathsf{T}}}{2\omega_n}
+    \Bigl[n_{\mathrm{B}}(\omega_n)\,L_\eta(\omega - \omega_n)
+        + (n_{\mathrm{B}}(\omega_n) + 1)\,L_\eta(\omega + \omega_n)\Bigr],
+\\
+  G^>(\omega) &= -2\pi i\sum_{n}\frac{\boldsymbol{\varepsilon}_n
+    \boldsymbol{\varepsilon}_n^{\mathsf{T}}}{2\omega_n}
+    \Bigl[(n_{\mathrm{B}}(\omega_n) + 1)\,L_\eta(\omega - \omega_n)
+        + n_{\mathrm{B}}(\omega_n)\,L_\eta(\omega + \omega_n)\Bigr],
+\end{align}
+where $L_\eta(x) = (\eta/\pi)/(x^2 + \eta^2)$ is the Lorentzian
+broadening of the bare delta and the sum runs over the physical
+modes ($\omega_n > \texttt{THZ\_ACOUSTIC\_BAND}$).  These satisfy the
+bosonic full-axis identity $G^<(\omega) = [G^>(-\omega)]^{\mathsf{T}}$
+(theory.tex eq.~873--874) and are anti-Hermitian on the DOF axes;
+both checked by the chain test \texttt{test\_synthetic\_gf\_bose\_symmetry}
+and \texttt{test\_synthetic\_gf\_anti\_hermiticity}.  The Lorentzian
+prefactor $-2\pi i$ is pinned by
+\texttt{test\_synthetic\_gf\_correlator\_normalisation}, which checks
+$\int i G^<(\omega) d\omega/(2\pi)$ reproduces the equal-time
+correlator
+$\sum_n \boldsymbol{\varepsilon}_n
+       \boldsymbol{\varepsilon}_n^{\mathsf{T}}(n_{\mathrm{B}} + \tfrac12)/\omega_n$
+to better than 5\,\% on the analytic chain.
+
+\subsection{Three-phonon self-energy}
+\label{ap:fa_obs_phph}
+
+The Migdal-like sunset diagram, in block-tridiagonal device storage,
+is
+\begin{equation}
+  \label{eq:sunset_lesser}
+  \Sigma^{<,>}_{IJ}(\omega) = \frac{i\hbar}{2}
+    \sum_{K_1, K_1', K_2, K_2'}
+    \Phi^{(I, K_1, K_2)}\,
+    G^{<,>}_{(K_1, K_1')}(\omega)\,
+    G^{<,>}_{(K_2, K_2')}(\omega)\,
+    \Phi^{(J, K_2', K_1')},
+\end{equation}
+with the inner sum implicitly an $\omega$ convolution.
+\texttt{sse\_cutoffs.compute\_sse\_with\_cutoffs} enumerates
+$(K_1, K_1', K_2, K_2')$ over every $(K, K')$ pair in the supplied $G$
+dictionary.  The original \texttt{quatrex} \texttt{SigmaPhononPhonon.\_bubble\_block}
+restricts to $K_1 = K_1'$, $K_2 = K_2'$ — we recover that with
+\texttt{diag\_G\_in\_se = True}.  The full enumeration is required
+when $G$ has nontrivial off-diagonal blocks (e.g.\ the synthetic
+eigenmode $G$ of \cref{eq:gf_lesser_eigenmode}); the chain test
+\texttt{test\_sse\_baseline\_vs\_dense\_path} pins the agreement
+between the block bubble and the dense reference at $10^{-6}$
+relative.
+
+\subsection{Retarded SE reconstruction}
+\label{ap:fa_obs_retarded_se}
+
+From the contour Keldysh structure, the retarded self-energy is
+\begin{equation}
+  \Sigma^R(\omega) = \frac{1}{2}\Delta(\omega) + \frac{i}{2\pi}
+    \mathcal{P}\!\!\int\frac{\Delta(\omega')}{\omega - \omega'}\,d\omega',
+  \qquad \Delta(\omega) \equiv \Sigma^>(\omega) - \Sigma^<(\omega).
+\end{equation}
+Three implementations live in \texttt{phonon\_inputs.anharmonic.\_build\_retarded}:
+\begin{itemize}
+  \item \texttt{"fft"} (default): $\Sigma^R = \tfrac12\Delta + \tfrac{i}{2}\,
+    \mathcal{H}[\Delta]$ where $\mathcal{H}$ is the FFT Hilbert transform.
+  \item \texttt{"pv"}: singularity-subtracted principal-value
+    quadrature; analytic at the grid endpoints.
+  \item \texttt{"half"}: $\Sigma^R \approx \tfrac12\Delta$ (imaginary
+    part only); the level shift is dropped.  Adequate for cutoff-sweep
+    differential comparisons; not for absolute $T(\omega)$.
+\end{itemize}
+\texttt{transport\_metrics.transport\_trace\_from\_sigma} defaults to
+\texttt{"fft"}.  \texttt{kramers\_kronig\_consistency} reports the
+relative-Frobenius gap between PV and FFT reconstructions as a
+sanity check.
+
+\subsection{Lead self-energy}
+\label{ap:fa_obs_lead}
+
+The semi-infinite phonon lead is treated as the same first/last
+transport slab repeated periodically.  Sancho--Rubio decimation
+(\texttt{phonon\_inputs.anharmonic.\_sancho\_rubio\_batch}) returns
+the lead surface Green's function $g_{\mathrm{surf}}(\omega^2)$, and
+the lead self-energy on the device side is
+\begin{equation}
+  \Sigma^R_L(\omega) = H_{\mathrm{LD}}^\dagger\,
+    g_{\mathrm{surf}}(\omega^2 + i\eta)\,H_{\mathrm{LD}},
+\end{equation}
+with $H_{\mathrm{LD}} = D[\mathrm{slab}_0, \mathrm{slab}_1]$ the
+inter-slab coupling (and analogously for the right lead).
+$\Sigma^R_L$ is nonzero only on the first slab block (zero
+elsewhere) — pinned by \texttt{test\_sancho\_rubio\_lead\_self\_energy}.
+A per-frequency fallback handles singular $\varepsilon$ matrices that
+arise inside narrow eigenmode windows.
+
+\subsection{Transmission and heat current}
+\label{ap:fa_obs_transport}
+
+The Caroli formula for the elastic transmission, applied per
+$\omega$ on the dense $G^R$ obtained from the full Dyson equation
+\begin{equation}
+  G^R(\omega) = \bigl[(\omega + i\eta)^2\,\mathbb{I} - D
+    - \Sigma_{\mathrm{ph\text{-}ph}}^R(\omega)
+    - \Sigma_L^R(\omega) - \Sigma_R^R(\omega)\bigr]^{-1},
+\end{equation}
+is
+\begin{equation}
+  T(\omega) = \mathrm{Tr}\bigl[\Gamma_L(\omega)\,G^R(\omega)\,\Gamma_R(\omega)\,G^A(\omega)\bigr],
+\end{equation}
+with $\Gamma_\alpha = i(\Sigma_\alpha^R - \Sigma_\alpha^A) = -2\,\mathrm{Im}\,\Sigma_\alpha^R$.
+The Landauer heat current at lead temperatures $T_L, T_R$ is
+\begin{equation}
+  Q = \int_0^\infty \frac{d\omega}{2\pi}\,\hbar\omega\,T(\omega)\,
+        \bigl[n_{\mathrm{B}}(\omega, T_L) - n_{\mathrm{B}}(\omega, T_R)\bigr].
+\end{equation}
+The thermal conductance is $G = Q / \Delta T$ for small $T_L - T_R = \Delta T$.
+
+\subsection{Spectral sum rules}
+\label{ap:fa_obs_sumrules}
+
+For $A(\omega) = -\frac{1}{\pi}\,\mathrm{Im}\,\mathrm{Tr}\,G^R(\omega)$
+of the bare displacement propagator, the standard phonon sum rules
+(Maradudin et al., \S 2.3) are
+\begin{align}
+  \int_0^\infty 2\omega\,A(\omega)\,d\omega &= n_{\mathrm{dof}}, \label{eq:sum_rule_zero}\\
+  \int_0^\infty 2\omega^3\,A(\omega)\,d\omega &= \mathrm{Tr}(D), \label{eq:sum_rule_first}
+\end{align}
+exact in the $\eta \to 0$ limit on a dense $\omega$ grid.  The chain
+tests \texttt{test\_dos\_sum\_rule\_eigenmode\_gf} and
+\texttt{test\_first\_moment\_sum\_rule} pin both, the former to 10\,\%
+(grid leakage at the band edge) and the latter to 10\,\% (mode-by-mode
+agreement against $\sum_n \omega_n^2$).  \cref{eq:sum_rule_first}
+provides a non-trivial unit-system cross-check: it ties the spectral
+weight of $G^R$ to the trace of $D$ in THz$^2$ and so verifies the
+mass-weighting + unit conversion all the way through.
+
+\section{Physical-validation catalogue}
+\label{ap:fa_validation}
+
+The package runs a fixed set of physical-validation tests against
+every system; all pin true mathematical identities of the bosonic
+Keldysh formalism (\textit{cf.}\ Wang 2014; Stefanucci \& van Leeuwen
+2013).  Tests live at
+\path{tests/phonon_inputs/finite_analysis/test_chain_pipeline.py}.
+
+\begin{description}
+\item[\textsc{FC2 hermiticity}] $\Phi_2[ij,\alpha\beta] = \Phi_2[ji,\beta\alpha]$
+  to machine precision (\texttt{fc2\_hermiticity}).
+\item[\textsc{FC2 acoustic sum rule}] $\sum_j \Phi_2[ij] \approx 0$
+  ($\le 10^{-10}$ relative; \texttt{fc2\_asr\_residual}).
+\item[\textsc{FC3 permutational symmetry}] On the $S_3$-lifted FC3
+  tensor (machine precision; \texttt{fc3\_perm\_symmetry}).
+\item[\textsc{FC3 acoustic sum rule}] Per-leg Frobenius residual
+  warned above $\texttt{ASR\_REL\_RESIDUAL\_WARN} = 5\%$
+  (\texttt{fc3\_asr\_legs}).  When violated (e.g.\ hiphive
+  least-squares on SiNW gave $\sim 60\%$), \texttt{load\_quatrex\_blocks(asr\_project=True)}
+  projects FC3 onto the ASR null space along legs 2 and 3 before the
+  bubble consumes it.
+\item[\textsc{FC2 PSD}] Eigenvalue distribution of the mass-weighted
+  $D$; counts negative eigenvalues and reports the worst negative-to-
+  positive ratio (\texttt{fc2\_psd\_summary}).
+\item[\textsc{Dispersion sanity}] Splits the FC2 spectrum into
+  acoustic ($|\omega| \le \texttt{THZ\_ACOUSTIC\_BAND}$), imaginary
+  ($\omega < -\texttt{THZ\_ACOUSTIC\_BAND}$, FC2 indefinite), and
+  optical (\texttt{dispersion\_sanity}).
+\item[\textsc{Anti-Hermiticity of $G^{<,>}$}] Wang 2014 eq.~19;
+  pinned by \texttt{test\_synthetic\_gf\_anti\_hermiticity} at
+  $10^{-10}$ relative on the chain.
+\item[\textsc{Bosonic full-axis symmetry}] $G^<(\omega) =
+  [G^>(-\omega)]^{\mathsf{T}}$; \texttt{test\_synthetic\_gf\_bose\_symmetry}
+  at floating-point precision.
+\item[\textsc{Bose identity}] $n_{\mathrm{B}}(-\omega) = -1 - n_{\mathrm{B}}(\omega)$
+  (\texttt{test\_bose\_identity}; machine precision).
+\item[\textsc{Detailed balance on bubble $\Sigma$}] $\Sigma^>(\omega) =
+  e^{\beta\hbar\omega}\Sigma^<(\omega)$ within the finite Bose
+  window; \texttt{test\_detailed\_balance\_bubble\_sigma} on the chain.
+\item[\textsc{Spectral sum rules}] \cref{eq:sum_rule_zero,eq:sum_rule_first};
+  pinned by \texttt{test\_dos\_sum\_rule\_eigenmode\_gf} (10\,\%) and
+  \texttt{test\_first\_moment\_sum\_rule} (10\,\%) on the chain.
+\item[\textsc{Ballistic transmission bound}] $0 \le T(\omega) \le n_{\mathrm{modes}}$
+  (Datta 2005 eq.~9.16; checker
+  \texttt{ballistic\_transmission\_bound}).
+\item[\textsc{Optical theorem}] $\Sigma^> - \Sigma^< = -2i\,\mathrm{Im}\,\Sigma^R$
+  (\texttt{optical\_theorem\_residual}).
+\item[\textsc{$G^R{}^\dagger = G^A$}] (\texttt{retarded\_advanced\_residual}).
+\item[\textsc{Kramers--Kronig consistency}] PV vs FFT $\Sigma^R$
+  reconstructions agree (\texttt{kramers\_kronig\_consistency}).
+\item[\textsc{Sancho--Rubio convergence}] Lead $\Sigma^R$ has the
+  expected slab support and is non-zero in the optical band
+  (\texttt{test\_sancho\_rubio\_lead\_self\_energy}).
+\item[\textsc{SCBA convergence}] $\|\Delta\Sigma\|/\|\Sigma\|$
+  monotonically decreases over iterations
+  (\texttt{test\_scba\_convergence\_chain}).
+\item[\textsc{Bit-for-bit $\Gamma$-projection}] The
+  \texttt{\_gamma\_project\_M\_blocks} fast path agrees with the
+  einsum reference at floating-point precision
+  (\texttt{test\_gamma\_projection\_matches\_einsum}).
+\end{description}
+
+\section{Recommended workflow for results-section figures}
+\label{ap:fa_runbook}
+
+A condensed version of \path{phonon/finite_analysis/RESULTS_RUNBOOK.md}.
+
+\paragraph{Per system} (SiNW(100), Si chain, finite CNT(3,3))
+\begin{enumerate}
+  \item Run the cluster pipeline as described in
+    \cref{sec:fv_systems} and \cref{sec:input_gen}; the reap lands at
+    \path{phonon/reaps/<name>/fc3.hdf5}.
+  \item Sanity-check the configuration:
+    \verb|python -m finite_analysis validate <config>|.
+  \item Run the analyses:
+    \begin{verbatim}
+python -m finite_analysis \
+    --config phonon/configs/<family>/<name>.yaml \
+    --fc3-path phonon/reaps/<reap>/fc3.hdf5 \
+    --out-dir document/src/fig/finite_analysis/<system> \
+    --analyses all \
+    --rank-sweep 2,4,8,16,32 \
+    --skip-pcp
+    \end{verbatim}
+  \item Confirm the pre-flight gates: parameter validation exits 0
+    or 1 (no errors); \texttt{physical.dispersion.n\_imaginary $==$ 0}
+    (or document why); \texttt{physical.fc3\_asr\_legs.leg\_*\_rel}
+    $< 0.05$ (or pass \texttt{asr\_project=True}); \texttt{physical.fc2\_psd.n\_neg\_eigvals}
+    $== 0$.
+\end{enumerate}
+
+\paragraph{Cross-system overlay}
+\begin{verbatim}
+python -m finite_analysis.cross_system_plots \
+    --systems sinw100,si_chain,cnt33_finite \
+    --base-dir document/src/fig/finite_analysis \
+    --out-dir document/src/fig/finite_analysis
+\end{verbatim}
+produces three cross-system PDFs: FC3-decay envelope,
+decomposition-rank panels, and the headline-numbers summary table
+(\cref{sec:fv_summary}).
+
+\paragraph{Known limitations to compensate for in the writeup}
+The bubble does not ASR-project FC3 by default; pass
+\texttt{asr\_project=True} or interpret only $\omega \gtrsim 1$~THz.
+The synthetic lead model retains $\Gamma = \gamma\cdot \mathbb{I}$
+only as a diagnostic; production transport uses Sancho--Rubio.
+$\Sigma^R$ is reconstructed by FFT-Hilbert by default; the
+\texttt{"half"} option is only for differential cutoff comparisons.
+SCBA convergence is achieved via \texttt{transport\_trace\_scba} (not
+the bare \texttt{transport\_trace\_from\_sigma}); $n_{\mathrm{iter}}
+\ge 3$ with $\mathrm{mixing} = 0.5$ converges the chain to $0.1\%$.
+
+\section{References}
+\label{ap:fa_refs}
+
+The package's NEGF + phonon-transport implementation follows the
+conventions of:
+\begin{itemize}
+  \item J.-S.\ Wang, B.\ K.\ Agarwalla, H.\ Li, J.\ Thingna,
+    ``Nonequilibrium Green's function method for quantum thermal
+    transport,'' Front.\ Phys.\ \textbf{9}, 673--697 (2014).
+  \item G.\ Stefanucci, R.\ van Leeuwen, \emph{Nonequilibrium Many-
+    Body Theory of Quantum Systems: A Modern Introduction},
+    Cambridge University Press (2013).  Chapters 4–5.
+  \item S.\ Datta, \emph{Quantum Transport: Atom to Transistor},
+    Cambridge University Press (2005).  Chapter 9.
+  \item A.\ A.\ Maradudin, E.\ W.\ Montroll, G.\ H.\ Weiss,
+    I.\ P.\ Ipatova, \emph{Theory of Lattice Dynamics in the Harmonic
+    Approximation}, Solid State Physics Suppl.\ 3, Academic Press,
+    2nd ed.\ (1971).
+  \item M.\ P.\ Lopez Sancho, J.\ M.\ Lopez Sancho, J.\ Rubio,
+    ``Highly convergent schemes for the calculation of bulk and
+    surface Green functions,'' J.\ Phys.\ F: Met.\ Phys.\
+    \textbf{15}, 851 (1985).
+  \item F.\ Eriksson, E.\ Fransson, P.\ Erhart, ``The HiPhive
+    package for the extraction of high-order force constants by
+    machine learning,'' Adv.\ Theory Simul.\ \textbf{2}, 1800184 (2019).
+\end{itemize}

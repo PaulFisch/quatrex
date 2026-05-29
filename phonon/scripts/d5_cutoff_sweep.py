@@ -484,6 +484,28 @@ def plot_convergence_overlay(
     _save_fig(fig, plot_dir / "convergence_overlay")
 
 
+def _autoclip_xlim(curves, tol_rel=1e-4, pad=2.0):
+    """Tightest x-window that contains every curve down to ``tol_rel`` of
+    its own peak. The bubble convolution grid runs to ``2*omega_max``
+    for FFT/KK reasons, but the *observable* ``j(omega) ~ (n_L-n_R)``
+    is Bose-suppressed past a few times ``kT/h``; showing the full grid
+    just squashes the meaningful range. Returns ``(xmin, xmax)`` or
+    ``None`` if no curve has any weight.
+    """
+    significant = []
+    for freqs, vals in curves:
+        peak = float(np.max(np.abs(vals)))
+        if peak <= 0:
+            continue
+        mask = np.abs(vals) > tol_rel * peak
+        if mask.any():
+            significant.append(float(np.asarray(freqs)[mask].max()))
+            significant.append(float(np.asarray(freqs)[mask].min()))
+    if not significant:
+        return None
+    return (max(0.0, min(significant) - pad), max(significant) + pad)
+
+
 def plot_spectral_J_overlay(
     results: list[dict[str, Any]],
     out_dir: Path,
@@ -495,16 +517,22 @@ def plot_spectral_J_overlay(
 
     fig, ax = plt.subplots(figsize=(6.4, 4.0))
     cmap = mpl.colormaps["viridis"]
+    curves = []
     for i, r in enumerate(results):
         freqs = np.asarray(r["freqs_thz"])
         j_anh = np.asarray(r["spectral_heat_current"]) * 1e12
         color = cmap(i / max(1, len(results) - 1))
         key: CutoffKey = r["_key"]
         ax.plot(freqs, j_anh, color=color, label=key.label())
+        curves.append((freqs, j_anh))
     # Ballistic reference (same for every point).
     j_ball = np.asarray(results[0]["spectral_heat_current_ballistic"]) * 1e12
-    ax.plot(np.asarray(results[0]["freqs_thz"]), j_ball, "k--",
-            lw=1.0, alpha=0.7, label="ballistic")
+    freqs_ball = np.asarray(results[0]["freqs_thz"])
+    ax.plot(freqs_ball, j_ball, "k--", lw=1.0, alpha=0.7, label="ballistic")
+    curves.append((freqs_ball, j_ball))
+    xlim = _autoclip_xlim(curves)
+    if xlim is not None:
+        ax.set_xlim(*xlim)
     ax.set_xlabel(r"Frequency $\omega/2\pi$ (THz)")
     ax.set_ylabel(r"Spectral heat current (pW/THz)")
     ax.set_title("d5a SiNW: spectral $J(\\omega)$ across cutoffs")

@@ -1750,6 +1750,32 @@ the two factors when both have support of width $N_\omega$. Stages~1 and~3
 arrays, the SSE on the original grid is recovered by truncation to
 the first $N_\omega$ points after the inverse FFT.
 
+\paragraph{Convolution support: $f_{\max}\!\ge\!2\omega_{\max}/2\pi$.}
+The harmonic Green's functions $G^{\gtrless}(\omega)$ have spectral
+support bounded by the largest phonon frequency $\omega_{\max}$ of the
+device, i.e.\ the spectrum of
+$H_{00}+H_{01}+H_{01}^{\dagger}$. The product
+$g_1(\tau)\,g_2(\tau)$ in \cref{eq:omega_conv} has Fourier support
+that is the convolution sum of the individual supports, so
+$\Sigma^{\gtrless}(\omega)$ is nonzero on
+\begin{equation}\label{eq:conv_support}
+  \omega\in[-2\omega_{\max},\,2\omega_{\max}]
+\end{equation}
+and only there. The truncated linear convolution \cref{eq:nfft_pad} is
+unbiased on that interval \emph{only when the grid covers it}, i.e.\
+when $f_{\max}\ge 2\omega_{\max}/2\pi$. If the grid is shorter,
+$f_{\max}<2\omega_{\max}/2\pi$, the bubble contributions at
+$|\omega|\in(f_{\max},2\omega_{\max})$ are missing from the inverse
+FFT and, on a discrete grid, the residual aliases back into the
+visible window. The bubble then carries large spurious contributions
+that fake a strong-coupling self-energy and drive the SCBA loop
+unstable. The required grid size is therefore set by the stiffest
+mode of the device, not by the thermally populated bands; in
+particular, an H-terminated wire with $\omega_{\max}/2\pi\sim 64$\,THz
+from the Si--H stretch needs $f_{\max}\gtrsim 130$\,THz, not the
+$\sim 16$\,THz of a bulk-Si default. \Cref{sec:phonon_solver_pkg}
+documents the runtime safety net that enforces this condition.
+
 \paragraph{Negative-frequency handling.} The bosonic phonon Green's
 functions live on a real frequency grid centred on $\omega=0$. Both
 $\Sigma^{<}$ and $\Sigma^{>}$ involve products of $G^{\gtrless}$ at

@@ -1,0 +1,1260 @@
+\chapter{Input Generation}
+\label{ch:input_gen}
+
+
+% ======================================================================
+\section{Interatomic Force Constants}
+\label{sec:ifc}
+% ======================================================================
+
+
+% ----------------------------------------------------------------------
+\subsection{Finite-displacement FCs}
+\label{sec:finite_displacement}
+% ----------------------------------------------------------------------
+
+The FCs can be generated based on a finite-displacement workflow
+using \texttt{phono3py}, QE, and the \texttt{symfc} fitting backend.  In this
+approach, displaced supercells are generated explicitly, DFT forces are
+computed for each displaced configuration, and both FC2 and FC3 are
+reconstructed from the resulting force data.
+
+The following steps are performed:
+\begin{enumerate}
+  \item \textbf{Structure setup.}
+        The crystal structure is loaded and a phonopy object is
+        created. The unit cell is loaded via \\
+        \texttt{structure.py:load\_structure}, and a
+        \texttt{Phonopy} object with a supercell is
+        created by
+        \texttt{structure.py:create\_phonopy\_from\_config}, which
+        generates symmetry-inequivalent displacements.
+  \item \textbf{DFT force calculations.}
+        For each displaced supercell, a QE \texttt{pw.x}
+        input is written and executed.  A QE \texttt{pw.x} SCF input
+        file is written by\\
+        \texttt{qe\_interface.py:write\_qe\_scf\_input}.  Existing
+        converged outputs are detected and reused.  Forces parsed from
+        QE output are converted from Ry/bohr to eV/\AA.
+
+  \item \textbf{Force-constant reconstruction.}
+        The set of forces is passed to phono3py, which reconstructs FC3
+        and FC2 using the symmetry-adapted \texttt{symfc} backend, both
+        FC2 and FC3 are written to a common \texttt{fc3.hdf5} file
+        containing dense arrays in eV/\AA$^2$ and eV/\AA$^3$,
+        respectively.
+\end{enumerate}
+
+For the Si FCC primitive cell with a $2\times2\times2$ supercell
+(16 atoms), phono3py generates 114 symmetry-inequivalent displacements
+for a pair cutoff of 5.5\,\AA.  On the mont-fort workstations, each QE SCF
+calculation takes roughly 30\,s  with
+\texttt{ecutwfc}=60\,Ry and a $2\times2\times2$ $k$-point mesh.
+
+% ----------------------------------------------------------------------
+\subsection{DFPT FCs}
+\label{sec:dfpt}
+% ----------------------------------------------------------------------
+
+Third order FCs can be generated efficiently directly from density-functional
+perturbation theory (DFPT) due to the $2n+1$ theorem.  One possibility is to obtain FC2 from QE's linear-response phonon code \texttt{ph.x} and compute FC3 with the D3Q plugin,
+which implements third-order DFPT.  In contrast to the
+finite-displacement method, the DFPT route works directly on the unit
+cell and avoids supercell calculations. However, QE does only supports a restricted set of
+norm-conserving potentials for third-order DFPT calculations, limiting the achievable accuracy.
+
+The DFPT workflow does the following:
+\begin{enumerate}
+  \item \textbf{SCF ground state} (\texttt{pw.x}).
+        A self-consistent calculation on the unit cell with a dense
+        $k$-mesh (configured via \texttt{dfpt.kpoints}).
+
+  \item \textbf{Phonon calculation} (\texttt{ph.x}).
+        DFPT phonon calculation on a uniform $\vc{q}$-grid
+        (\texttt{dfpt.q\_mesh}) with
+        \texttt{ldisp\,=\,.true.} and \texttt{lqdir\,=\,.true.}.  This
+        produces the dynamical matrices $D(\vc{q})$ and saves the
+        first-order perturbation wavefunctions needed by D3Q.
+
+  \item \textbf{FC2 Fourier transform} (\texttt{q2r.x}).
+        The dynamical matrices are Fourier-transformed to real-space FC2
+        via QE's \texttt{q2r.x}, producing the \texttt{flfrc} file.
+        The acoustic sum rule is enforced
+        (\texttt{zasr\,=\,'crystal'}).
+
+  \item \textbf{Third-order DFPT} (\texttt{d3q.x}).
+        For each $(\vc{q}_1,\vc{q}_2)$ pair on the grid, \texttt{d3q.x}
+        computes the third-order dynamical tensor
+        $D_3(\vc{q}_1,\vc{q}_2,-\vc{q}_1-\vc{q}_2)$.  The
+        $\vc{q}$-points are specified in QE Cartesian coordinates
+        ($2\pi/a_\text{lat}$ units), the conversion from crystal
+        reciprocal coordinates is
+        \begin{equation}\label{eq:q_conversion}
+          \vc{q}_\text{cart}
+          = q_1 \hat{\vc{b}}_1 + q_2 \hat{\vc{b}}_2 + q_3 \hat{\vc{b}}_3,
+          \qquad
+          \hat{B} = (A / |\vc{a}_1|)^{-\top},
+        \end{equation}
+        where $A$ is the matrix of lattice vectors (rows, in \AA) and
+        $\hat{\vc{b}}_i$ are the rows of $\hat{B}$.
+
+        For a $2\times2\times2$ grid there are $8^2 = 64$ pairs.
+        Crystal symmetry can reduce this (e.g.\ to ${\sim}10$--15 for
+        FCC Si with $O_h$ symmetry). The current implementation
+        generates all pairs and relies on \texttt{d3q.x}'s internal
+        symmetry handling.
+
+  \item \textbf{FC3 Fourier transform} (\texttt{d3\_qq2rr.x}).
+        The $(\vc{q}_1,\vc{q}_2)$-space third-order tensors are
+        Fourier-transformed to real-space FC3
+        $\Phi_3(\vc{R}_1,\vc{R}_2)$, producing the \texttt{mat3R} file.
+
+  \item \textbf{Acoustic sum rule} (\texttt{d3\_asr.x}).
+        Enforces translational invariance on the real-space FC3,
+        $\sum_\kappa \Phi_3(\kappa,\kappa',\kappa'') = 0$ for each
+        pair $(\kappa',\kappa'')$.  The ASR type is configurable
+        (\texttt{asr}: \texttt{simple}, \texttt{crystal}, or
+        \texttt{no}).
+
+  \item \textbf{Sparsification} (\texttt{d3\_sparse.x}).
+        Zeroes FC3 entries with magnitude below a threshold
+        (\texttt{sparse\_thr}, in Ry/bohr$^3$), reducing storage
+        and downstream computation cost.
+\end{enumerate}
+
+\paragraph{Output conversion.}
+The \texttt{reap} step parses both the \texttt{q2r.x} FC2 output
+(\texttt{fc2.dat}, in Ry/bohr$^2$) and the D3Q \texttt{mat3R} file (in
+Ry/bohr$^3$) and converts to eV/\AA$^2$ and eV/\AA$^3$:
+\begin{align}
+  \Phi_2\;[\mathrm{eV/\AA^2}]
+    &= \Phi_2\;[\mathrm{Ry/bohr^2}]
+       \times \frac{E_h/2}{a_0^2},
+    &&\approx 48.59, \label{eq:fc2_conv} \\
+  \Phi_3\;[\mathrm{eV/\AA^3}]
+    &= \Phi_3\;[\mathrm{Ry/bohr^3}]
+       \times \frac{E_h/2}{a_0^3},
+    &&\approx 91.84. \label{eq:fc3_conv}
+\end{align}
+The real-space lattice vectors $\vc{R}$ in the D3Q output (integer
+crystal coordinates) are mapped to supercell atom indices
+$j = (l_1 n_2 n_3 + l_2 n_3 + l_3)\, n_\text{at} + \kappa$ with
+$l_i = R_i \bmod n_i$, matching phonopy's supercell convention.  FC2
+is expanded to the full $(N_\text{super})^2$ array via translational
+invariance.  Both arrays are saved to \texttt{fc3.hdf5} in the same
+format as the finite-displacement method.
+
+The DFPT-specific parameters are in the \texttt{dfpt} section of the
+YAML config:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Key & Default & Description \\
+  \midrule
+  \texttt{q\_mesh}   & $[2,2,2]$ & $\vc{q}$-grid for \texttt{ph.x} and \texttt{d3q.x} \\
+  \texttt{kpoints}   & $[8,8,8]$ & SCF $k$-mesh for the unit cell \\
+  \texttt{tr2\_ph}   & $10^{-14}$& \texttt{ph.x} self-consistency threshold \\
+  \texttt{ph\_command}       & \texttt{ph.x}          & \texttt{ph.x} executable \\
+  \texttt{d3q\_command}      & \texttt{d3q.x}         & \texttt{d3q.x} executable \\
+  \texttt{d3\_qq2rr\_command}& \texttt{d3\_qq2rr.x}   & Fourier transform executable \\
+  \texttt{d3\_asr\_command}  & \texttt{d3\_asr.x}     & Acoustic sum rule executable \\
+  \texttt{d3\_sparse\_command}& \texttt{d3\_sparse.x} & Sparsification executable \\
+  \texttt{asr}               & \texttt{simple}        & ASR type: \texttt{simple}, \texttt{crystal}, or \texttt{no} \\
+  \texttt{sparse\_thr}       & $10^{-5}$              & FC3 threshold (Ry/bohr$^3$); \texttt{null} to skip \\
+  \texttt{q2r\_command}      & \texttt{q2r.x}         & \texttt{q2r.x} executable \\
+  \texttt{work\_dir}         & \texttt{./dfpt}        & Working directory \\
+  \texttt{ph\_timeout}       & 7200\,s                & Timeout per \texttt{ph.x} run \\
+  \texttt{d3q\_timeout}      & 14400\,s               & Timeout per \texttt{d3q.x} triplet \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ----------------------------------------------------------------------
+\subsection{Mass-weighting and unit conversion}
+\label{sec:ifc_mass_weighting}
+% ----------------------------------------------------------------------
+
+The harmonic transport problem is formulated in terms of mass-weighted
+FC2 blocks.  Given a harmonic IFC block
+$\Phi_{\alpha\beta}(0\kappa,l'\kappa')$, the corresponding mass-weighted
+quantity is
+\begin{equation}
+  H_{\alpha\beta}(0\kappa,l'\kappa')
+  = \frac{\Phi_{\alpha\beta}(0\kappa,l'\kappa')}
+         {\sqrt{M_\kappa M_{\kappa'}}},
+\end{equation}
+with masses in amu.  In the common phonopy unit system,
+$H_{\alpha\beta}$ therefore has units
+eV/(amu$\cdot$\AA$^2$), which are later converted to
+$(\mathrm{rad/s})^2$ using the factor defined in
+\cref{sec:solver_units}.
+
+For FC3, the analogous mass-weighted tensor is
+\begin{equation}\label{eq:fc3_mw}
+  \Psi_{\alpha\beta\gamma}(\kappa\kappa'\kappa'')
+  = \frac{\Phi^{(3)}_{\alpha\beta\gamma}(\kappa\kappa'\kappa'')}
+         {\sqrt{M_\kappa M_{\kappa'} M_{\kappa''}}},
+\end{equation}
+with units
+\begin{equation}
+  [\Psi]
+  = \frac{\mathrm{eV}}
+         {\mathrm{\AA}^3\cdot\mathrm{amu}^{3/2}}.
+\end{equation}
+
+For DFPT-generated FCs, the real-space force constants are parsed in
+atomic units and converted as
+\begin{align}
+  \Phi_2\;[\mathrm{eV/\AA^2}]
+    &= \Phi_2\;[\mathrm{Ry/bohr^2}]
+       \times \frac{E_h/2}{a_0^2},
+    &&\approx 48.59, \\
+  \Phi_3\;[\mathrm{eV/\AA^3}]
+    &= \Phi_3\;[\mathrm{Ry/bohr^3}]
+       \times \frac{E_h/2}{a_0^3},
+    &&\approx 91.84.
+\end{align}
+
+Finally, the FC3 tensor can be converted to SI units for use in the
+anharmonic self-energy.  Using the harmonic conversion factor
+$C = e/(m_u A^2)$, the cubic conversion becomes
+\begin{equation}\label{eq:conversion_fc3_ifc}
+  \texttt{CONVERSION\_FC3}
+  = \frac{C}{A\sqrt{m_u}}
+  = \frac{e}{m_u^{3/2} A^3}.
+\end{equation}
+This converts
+eV/(\AA$^3\cdot$amu$^{3/2}$) into the corresponding SI units required
+by the phonon--phonon self-energy expressions.
+
+% ----------------------------------------------------------------------
+\subsection{Validation of the extracted harmonic model}
+\label{sec:extraction_validation}
+% ----------------------------------------------------------------------
+
+Before using the extracted harmonic blocks in transport calculations, it
+is important to verify that the block representation is internally
+consistent and reproduces the original phonopy dynamical matrix.  The
+present validation procedures are implemented in
+\texttt{validation.py}.
+
+\paragraph{Acoustic sum rule.}
+
+At the $\Gamma$ point, the lattice Fourier series reduces to
+\begin{equation}
+  D^{(\mathrm{B})}(\vc{0}) = \sum_{\vc{R}} H(\vc{R}).
+\end{equation}
+Translational invariance requires that the three acoustic modes vanish
+at $\Gamma$.  The validation therefore forms
+\begin{equation}
+  D_\Gamma = \sum_{\vc{R}} H(\vc{R}),
+\end{equation}
+computes its eigenvalues $\lambda_n$, and reports the corresponding
+frequencies
+\begin{equation}
+  \omega_n = \mathrm{sign}(\lambda_n)\sqrt{|\lambda_n|}.
+\end{equation}
+The three smallest $|\omega_n|$ should be close to zero.  In addition,
+the matrix should be symmetric to numerical precision, so that
+\begin{equation}
+  \max |D_\Gamma - D_\Gamma^T|
+\end{equation}
+is approximately zero.
+
+\paragraph{Block symmetry.}
+
+The real-space harmonic blocks must satisfy the Hermiticity relation
+\begin{equation}\label{eq:block_sym}
+  H(\vc{R})^T = H(-\vc{R})
+  \qquad \forall\;\vc{R}.
+\end{equation}
+The validation iterates over all block pairs
+$(\vc{R},-\vc{R})$ and reports the maximum deviation
+\begin{equation}
+  \max_{\vc{R}}
+  \|H(\vc{R})^T - H(-\vc{R})\|_\infty.
+\end{equation}
+
+\paragraph{Band-structure comparison.}
+
+A more stringent validation compares phonon frequencies reconstructed
+from the extracted blocks with those obtained directly from phonopy.
+Along a chosen $\vc{q}$-path, two spectra are computed:
+\begin{enumerate}
+  \item the phonopy reference spectrum, obtained from
+        \begin{equation}
+          D_\mathrm{ph}(\vc{q})
+          = P(\vc{q})\,D^{(\mathrm{A})}(\vc{q})\,P^\dagger(\vc{q}),
+        \end{equation}
+        converted to $(\mathrm{rad/s})^2$ and diagonalized;
+
+  \item the reconstructed spectrum, obtained from
+        \begin{equation}
+          D_\mathrm{rec}(\vc{q})
+          = \sum_{\vc{R}} H(\vc{R})\,
+            e^{2\pi i\,\vc{q}\cdot\vc{R}},
+        \end{equation}
+        and then diagonalized.
+\end{enumerate}
+The maximum eigenfrequency deviation
+\begin{equation}
+  \max_{n,\vc{q}}
+  |\omega_n^\mathrm{ph} - \omega_n^\mathrm{rec}|
+\end{equation}
+serves as a direct measure of the quality of the extraction.  In
+addition, overlay plots of the two band structures provide a visual
+consistency check.
+
+% ======================================================================
+\section{The \texttt{phonon\_inputs} Package}
+\label{sec:phonon_inputs_pkg}
+% ======================================================================
+
+The \texttt{phonon\_inputs} package implements the full sow-run-reap
+workflow for harmonic and cubic force constants, the structural
+relaxation step that precedes it, the structure / configuration
+plumbing, and the writers that emit the dynamical-matrix blocks
+consumed by the downstream NEGF solver.  The package is calculator-
+agnostic: any module that touches DFT goes through a thin adapter
+layer that supports Quantum~ESPRESSO \texttt{pw.x} and VASP equally,
+and the FC-generation backends (phono3py + \texttt{symfc}, DFPT via
+\texttt{ph.x} + \texttt{d3q.x}, and hiphive) share the same dataclass-
+based YAML schema and the same on-disk metadata format.
+
+This section walks through the package module by module.  The intent
+is to give the reader a single place to look up which module owns
+which responsibility, what data flows into it, and what it returns to
+the caller.  Module names are given relative to
+\path{phonon/phonon_inputs/}.
+
+% ----------------------------------------------------------------------
+\subsection{Top-level orchestration: \texttt{cli.py}, \texttt{pipeline.py}}
+\label{sec:pinputs_cli}
+% ----------------------------------------------------------------------
+
+\paragraph{\texttt{cli.py}.}  An \texttt{argparse}-based command-line
+front-end exposed via \texttt{python -m phonon\_inputs <command>}.  The
+commands implemented are:
+
+\begin{itemize}
+  \item \texttt{generate} -- legacy ``one-shot'' flow that builds a
+        phonopy supercell, runs all required QE displacements, and
+        produces the quatrex input files in one go (kept as a smoke
+        test for tightly coupled bulk runs).
+  \item \texttt{extract-blocks} -- reads an existing phonopy reap and
+        re-extracts the Convention~B blocks (cf.\
+        \cref{sec:convention}) without re-running DFT.
+  \item \texttt{validate} -- runs the harmonic-model validators of
+        \texttt{validation.py} on an existing reap.
+  \item \texttt{fc3-sow}, \texttt{fc3-run}, \texttt{fc3-reap},
+        \texttt{fc3-all} -- the canonical phono3py + \texttt{symfc}
+        flow.
+  \item \texttt{fc3-hiphive-sow}, \texttt{fc3-hiphive-run},
+        \texttt{fc3-hiphive-reap},
+        \texttt{fc3-hiphive-bootstrap-reap},
+        \texttt{fc3-hiphive-convergence},
+        \texttt{fc3-hiphive-all} -- the hiphive flow, with the
+        two-stage bootstrap variant for phonon-mode rattling.
+  \item \texttt{dfpt-sow}, \texttt{dfpt-run}, \texttt{dfpt-reap},
+        \texttt{dfpt-all} -- DFPT via \texttt{ph.x} + D3Q.
+  \item \texttt{pipeline} -- relax + FC generation in a single
+        invocation; calls the in-process relax driver from
+        \texttt{qe\_interface.py} and threads the relaxed cell directly
+        into the chosen FC backend.
+\end{itemize}
+
+All sow-type commands accept the flag \texttt{--from-yaml}.  Without
+that flag the structure used for sowing is loaded from the relaxed
+output of \texttt{config.relax.work\_dir} (\texttt{CONTCAR} for VASP,
+\texttt{relax.out} for QE) via
+\texttt{structure.resolve\_structure\_for\_sow}; with the flag, sowing
+falls back to the YAML structure as-is.  The default fails fast with a
+clear error message when the relax dir is missing, removing a class
+of silent failures where a sow ran on the unrelaxed YAML positions and
+the resulting FC2 absorbed residual linear forces as artificial
+negative curvature.
+
+\paragraph{\texttt{pipeline.py}.}  Implements the \texttt{pipeline}
+subcommand.  Two stages: (i) call \texttt{qe\_interface.run\_vasp\_relax}
+or \texttt{run\_qe\_relax} on the YAML structure and obtain a relaxed
+\texttt{PhonopyAtoms}; (ii) dispatch to the FC backend selected by
+\texttt{config.fc\_method} (``finite\_displacement'', ``dfpt'', or
+``hiphive'').  Because the relaxed cell is passed in memory directly to
+the sow function the pipeline path does not need to write a CONTCAR to
+disk to communicate the equilibrium geometry.
+
+\paragraph{\texttt{\_\_main\_\_.py}.}  Six-line shim:
+\texttt{from .cli import main; main()}.  Enables
+\texttt{python -m phonon\_inputs} as the entry point.
+
+% ----------------------------------------------------------------------
+\subsection{Configuration: \texttt{config.py}, \texttt{constants.py}}
+\label{sec:pinputs_config}
+% ----------------------------------------------------------------------
+
+\paragraph{\texttt{config.py}.}  A nested dataclass schema parsed from
+YAML by \texttt{load\_config}.  The top-level class
+\texttt{PhononInputConfig} aggregates:
+
+\begin{description}
+  \item[\texttt{StructureConfig}.]  \texttt{source}
+        (\texttt{inline}\,/\,\texttt{cif}\,/\,\texttt{poscar}\,/\,\texttt{phonopy\_yaml}\,/\,\texttt{qe\_input}),
+        with the inline branch providing \texttt{symbols},
+        \texttt{lattice}, and \texttt{scaled\_positions} directly.
+  \item[\texttt{SupercellConfig}.]  \texttt{matrix},
+        \texttt{displacement\_distance} for the phonopy finite-
+        displacement backend.
+  \item[\texttt{QEConfig} / \texttt{VASPConfig}.]  All knobs the DFT
+        backend writes into the input file: \texttt{ecutwfc},
+        \texttt{ecutrho\_factor}, \texttt{kpoints\_scf}, \texttt{conv\_thr},
+        \texttt{smearing}, \texttt{degauss}, \texttt{pseudo\_dir},
+        \texttt{pseudopotentials}, and the analogous VASP fields
+        \texttt{encut}, \texttt{ediff}, \texttt{ismear}, \texttt{sigma},
+        \texttt{prec}, \texttt{lreal}, \texttt{ncore}, \texttt{kpar},
+        \texttt{potcar\_dir}, \texttt{potcar\_map}.
+  \item[\texttt{ThirdOrderConfig}.]  Supercell multipliers,
+        \texttt{cutoff\_pair\_distance}, \texttt{displacement\_distance},
+        \texttt{fc\_calculator} (\texttt{symfc} by default),
+        \texttt{work\_dir}, \texttt{pw\_timeout}.
+  \item[\texttt{HiphiveConfig}.]  The full hiphive recipe:
+        \texttt{supercell}, \texttt{n\_structures}, \texttt{rattle\_method}
+        (\texttt{mc}/\texttt{normal}/\texttt{phonon}), \texttt{rattle\_std},
+        \texttt{rattle\_d\_min}, \texttt{rattle\_n\_iter},
+        \texttt{rattle\_seed}, \texttt{cutoffs}, \texttt{fit\_method},
+        \texttt{fit\_kwargs}, \texttt{rotational\_sum\_rule}, the optional
+        \texttt{convergence:} sub-block, and the phonon-rattle bootstrap
+        knobs \texttt{phonon\_rattle\_temperature\_k},
+        \texttt{phonon\_rattle\_bootstrap\_n},
+        \texttt{phonon\_rattle\_seed\_fc3} (use existing
+        \texttt{fc3.hdf5} as FC2 seed) and
+        \texttt{phonon\_rattle\_seed\_dft\_dir} (refit FC2 seed from an
+        external mc-rattle work dir's DFT outputs).
+  \item[\texttt{DFPTConfig}.]  \texttt{q\_mesh}, \texttt{kpoints},
+        \texttt{tr2\_ph}, and the binary paths for \texttt{ph.x},
+        \texttt{q2r.x}, and \texttt{d3q.x}.
+  \item[\texttt{RelaxConfig}.]  \texttt{calculation}
+        (\texttt{vc-relax}/\texttt{relax}), \texttt{forc\_conv\_thr},
+        \texttt{press\_conv\_thr}, \texttt{calculator},
+        \texttt{work\_dir}.
+  \item[\texttt{BlockExtractionConfig},
+        \texttt{QuatrexOutputConfig}.]  Block extraction parameters
+        (transport axis, $q$-mesh, amplitude cutoff) and quatrex
+        writer parameters (file paths, $k$-point grid).
+\end{description}
+
+The loader \texttt{config\_from\_dict} traverses the schema, accepting
+nested optional blocks (``\texttt{NestedConfig | None}'').  Unknown
+keys raise a clear error rather than being silently dropped.
+
+\paragraph{\texttt{constants.py}.}  All unit conversions and physical
+constants in a single place.  The constant
+\texttt{CONVERSION\_THZ2 = e/(m_u A^2)/(2\pi)^2 \cdot 10^{-24}} converts
+eV/(\AA$^2$$\cdot$amu) dynamical-matrix eigenvalues to THz$^2$ -- this
+is the canonical internal unit-system used throughout the package and
+the solver (\cref{sec:phonon_solver_pkg}).  A legacy \texttt{CONVERSION}
+constant produces (rad/s)$^2$ and is preserved for tests that compare
+to the previous unit convention.  Boltzmann's constant, $\hbar$, the
+electron mass and atomic mass unit appear here in SI.
+
+% ----------------------------------------------------------------------
+\subsection{Structure loading: \texttt{structure.py}}
+\label{sec:pinputs_structure}
+% ----------------------------------------------------------------------
+
+\texttt{structure.py} provides two functions and one helper:
+
+\begin{description}
+  \item[\texttt{load\_structure(cfg)}.]  Resolves the YAML
+        \texttt{structure:} block into a \texttt{PhonopyAtoms} object.
+        Inline structures are passed straight through; file-based
+        sources (CIF, POSCAR, phonopy YAML, QE input) are read via the
+        relevant phonopy / ASE interface.
+  \item[\texttt{resolve\_structure\_for\_sow(cfg, config\_dir, \\
+        from\_yaml=False)}.]  The default routing layer for sow-time
+        entry points.  When \texttt{from\_yaml=False} (the default) it
+        looks for \texttt{config.relax.work\_dir/CONTCAR} (VASP) or
+        \texttt{relax.out} (QE) and parses the relaxed structure from
+        there; if neither file is present it raises \texttt{SystemExit}
+        with a precise message directing the user to either run the
+        relax first or pass \texttt{--from-yaml}.  With
+        \texttt{from\_yaml=True} the YAML structure is used unchanged.
+  \item[\texttt{create\_phonopy(cell, supercell\_matrix,\\
+        primitive\_matrix, displacement\_distance)}.]  Builds a
+        \texttt{Phonopy} object with the chosen supercell and generates
+        symmetry-inequivalent displacements at the given amplitude.
+\end{description}
+
+The \texttt{Bohr/Rydberg} -- \texttt{Angstrom/eV} conversion factors
+for QE-internal storage are pinned here as well, both to honour
+phonopy's QE units (Ry/bohr$^2$) on output and to convert forces
+parsed from a QE log to eV/\AA{}.
+
+% ----------------------------------------------------------------------
+\subsection{Convention transformation and block extraction: \texttt{convention.py}}
+\label{sec:convention}
+% ----------------------------------------------------------------------
+
+Phonopy stores the dynamical matrix in what we refer to as
+\emph{Convention~A}, with phase factor
+$\exp[2\pi i\,\vc{q}\cdot(\vc{R} + \boldsymbol{\tau}' - \boldsymbol{\tau})]$
+that includes the basis-atom shifts.  The quatrex NEGF solver expects
+\emph{Convention~B}, with phase $\exp[2\pi i\,\vc{q}\cdot\vc{R}]$ and
+$D_B(\vc{q}) = P(\vc{q})\,D_A(\vc{q})\,P(\vc{q})^\dagger$ where
+$P(\vc{q}) = \mathrm{diag}\!\bigl[\exp(2\pi i\,\vc{q}\cdot\boldsymbol{\tau}_\kappa)\bigr]$
+repeated three times per atom.  The inverse discrete Fourier
+transform of $D_B(\vc{q})$ produces real-valued real-space blocks
+$H(\vc{R})$ that the solver tiles into the device block-tridiagonal.
+
+\texttt{convention.py} implements both transformations
+(\texttt{apply\_phase\_correction}, \texttt{remove\_phase\_correction})
+and the block-extraction driver \texttt{extract\_blocks(phonon,
+q\_mesh, amplitude\_cutoff)}, which iterates over a $q$-grid sampling
+the transverse Brillouin zone, computes $D_B(\vc{q})$ from the
+phonopy-internal $D_A$, and IDFTs the result onto a real-space
+$(R_x, R_y, R_z)$ block dictionary.  Blocks with Frobenius norm
+below \texttt{amplitude\_cutoff} times the maximum block norm are
+dropped.
+
+% ----------------------------------------------------------------------
+\subsection{Force-constant production: \texttt{force\_constants.py}}
+\label{sec:fc_production}
+% ----------------------------------------------------------------------
+
+\texttt{force\_constants.py} owns the harmonic FC2 reconstruction
+step: given a \texttt{Phonopy} object and the parsed forces from the
+displaced-supercell DFT runs, it calls
+\texttt{Phonopy.produce\_force\_constants} with the
+``\texttt{symmetry}'' option enabled to symmetry-adapt the FCs, and
+honours the \texttt{produce\_fc} hook from \texttt{phono3py} when an
+FC3 model is present.  The output is stored on the
+\texttt{Phonopy.force\_constants} attribute, ready for q-point
+diagonalisation by the validation routines.
+
+% ----------------------------------------------------------------------
+\subsection{DFT interface: \texttt{qe\_interface.py}}
+\label{sec:dft_interface}
+% ----------------------------------------------------------------------
+
+\texttt{qe\_interface.py} unifies the QE and VASP entry points
+behind a small set of helpers.  The QE side covers
+\texttt{write\_qe\_scf\_input} (builds a single pw.x SCF or relax
+input, encoding cell, atomic species, pseudopotentials and k-points;
+also writes restart-data block headers so successive displacements can
+reuse prior WFC/CHG when convenient),
+\texttt{parse\_qe\_force\_output} (reads forces from a finished pw.x
+run, converting Ry/bohr to eV/\AA),
+\texttt{parse\_qe\_relax\_output} (parses ``Begin final coordinates''
+or fixed-cell final positions blocks into a \texttt{PhonopyAtoms}),
+and \texttt{run\_qe\_relax}.  The VASP side covers
+\texttt{parse\_vasp\_relax\_output} (reads \texttt{CONTCAR}) and
+\texttt{run\_vasp\_relax} (writes INCAR/KPOINTS/POSCAR/POTCAR with
+the user's relaxation tolerance, runs VASP, and parses the resulting
+\texttt{CONTCAR}).  Lower-level helpers (\texttt{\_run\_and\_tee},
+\texttt{\_needs\_shell}) propagate stdout/stderr through Python and
+detect whether the VASP command requires a shell wrapper.
+
+% ----------------------------------------------------------------------
+\subsection{Phono3py + \texttt{symfc} flow: \texttt{thirdorder.py}}
+\label{sec:thirdorder}
+% ----------------------------------------------------------------------
+
+\texttt{thirdorder.py} drives the finite-displacement FC2+FC3
+pipeline.  Three calculator-agnostic public entry points,
+\texttt{sow / run\_displacements / reap}, plus a unifying
+\texttt{generate\_fc3}.
+
+\paragraph{Sow.}  Builds a \texttt{Phono3py} object with the requested
+supercell and pair cutoff, calls its built-in displacement generator
+(canonical symmetry-inequivalent finite displacements), and writes one
+DFT input per displacement: pw.x input files for QE or
+INCAR/KPOINTS/POSCAR/POTCAR directories for VASP.  A reference
+(undisplaced) calculation is sown alongside, used as the WFC/CHG
+seed for the displaced calculations to accelerate SCF convergence.
+Metadata (number of displacements, supercell layout, displacement
+distance, calculator) is written to \texttt{hiphive\_meta.json} in
+the work directory.
+
+\paragraph{Run.}  Iterates over the displaced calculations, executes
+the DFT command (in-process or via a job-submission wrapper provided
+by the user), checks for completion markers (``JOB DONE'' for QE,
+the OSZICAR final step for VASP), and skips already-completed
+calculations.  A timeout mechanism kills hung jobs.
+
+\paragraph{Reap.}  Parses forces from every displaced calculation,
+calls \texttt{phono3py.run\_force\_constants} with the
+\texttt{fc\_calculator='symfc'} backend (symmetry-adapted least
+squares; \cite{Togo2015symfc} for the underlying algorithm), and
+extracts FC2 and FC3 in the phono3py compact representation.  The
+final tensors are written to \texttt{fc3.hdf5} with datasets
+\texttt{fc2} of shape $(N, N, 3, 3)$ in eV/\AA$^2$ and \texttt{fc3} of
+shape either $(N_\mathrm{prim}, N, N, 3, 3, 3)$ (compact) or
+$(N, N, N, 3, 3, 3)$ (full) in eV/\AA$^3$, depending on the symfc
+output mode.
+
+The VASP-side helpers \texttt{\_write\_vasp\_inputs} and
+\texttt{\_refresh\_vasp\_runtime\_inputs} emit ISYM=0 in every
+displaced INCAR (rattle breaks the parent symmetry; force
+symmetrisation would otherwise produce inconsistent forces), and
+write KPOINTS at the user-configured density.
+
+% ----------------------------------------------------------------------
+\subsection{DFPT flow: \texttt{dfpt.py}}
+\label{sec:dfpt}
+% ----------------------------------------------------------------------
+
+\texttt{dfpt.py} drives the DFPT-based alternative FC pipeline using
+\texttt{ph.x} + \texttt{q2r.x} for FC2 and \texttt{d3q.x} +
+\texttt{d3\_qq2rr.x} for FC3 \cite{Mounet2005phonons}.  The sow stage
+writes a sequence of paired SCF + phonon inputs at every $q$-point of
+the configured mesh, plus the q2r control file and the third-order
+\texttt{d3q.x} inputs.  The run stage executes them in dependency
+order (SCF $\to$ ph $\to$ q2r $\to$ d3q $\to$ qq2rr).  The reap stage
+parses the produced real-space FC files into the phono3py-compatible
+\texttt{fc3.hdf5} format so downstream consumers do not need to branch
+on the FC backend.
+
+% ----------------------------------------------------------------------
+\subsection{Hiphive flow: \texttt{hiphive\_fc3.py}, \texttt{hiphive\_convergence.py}}
+\label{sec:hiphive_flow}
+% ----------------------------------------------------------------------
+
+\texttt{hiphive\_fc3.py} implements rattled-supercell sampling and the
+fit-and-project step at the heart of the hiphive workflow
+\cite{eriksson_hiphive_2019}.  Public API:
+
+\begin{description}
+  \item[\texttt{sow}.]  Generates rattled supercells.  For the default
+        \texttt{mc} rattle method, atomic displacements are drawn from
+        a Monte-Carlo walk with per-step Gaussian increments of standard
+        deviation \texttt{rattle\_std} and a hard
+        minimum-pair-distance constraint at \texttt{rattle\_d\_min},
+        for \texttt{rattle\_n\_iter} iterations; the cumulative
+        per-atom displacement scales linearly in \texttt{rattle\_n\_iter}
+        (each MC step adds an independent Gaussian increment).  For
+        \texttt{phonon} rattling, a seed FC2 is required: it can come
+        from an existing \texttt{fc3.hdf5}
+        (\texttt{phonon\_rattle\_seed\_fc3}), an external mc-rattle work
+        directory (\texttt{phonon\_rattle\_seed\_dft\_dir}, which
+        triggers an FC2-only refit on those forces), or a local
+        ``bootstrap'' stage that runs a small mc-rattle pool first and
+        fits FC2 from it.  The seed FC2 is checked for PSD-ness before
+        being used to drive the phonon-rattle amplitude (which scales as
+        $1/\sqrt{|\omega|}$ per mode and diverges for soft / imaginary
+        modes; see \cref{sec:hiphive_pathologies}).  Both rattle
+        methods write a calculator-specific DFT input per
+        \texttt{disp-XXXXX/} directory and a reference (undisplaced)
+        directory.
+
+  \item[\texttt{bootstrap\_reap}.]  Stage~1 of the phonon-rattle
+        workflow.  Reads the mc-rattle bootstrap pool's forces, fits
+        FC2-only with cutoffs $[r_c^{(2)}]$ using ARDR (with ridge as
+        fallback), applies the post-fit rotational projection, checks
+        that the resulting FC2 has at most
+        \texttt{phonon\_rattle\_max\_seed\_imag} imaginary modes, and
+        saves \texttt{fc2\_seed.npy} for stage~2.
+
+  \item[\texttt{reap}.]  Reads forces from every \texttt{disp-XXXXX/}
+        directory, builds a \texttt{ClusterSpace} with the configured
+        cutoffs, runs the selected fit method via
+        \texttt{trainstation.Optimizer}, optionally projects onto the
+        rotational manifold
+        \texttt{enforce\_rotational\_sum\_rules(cs, params,
+        sum\_rules=['Huang', 'Born-Huang'])}, builds the
+        \texttt{ForceConstantPotential} and exports FC2 and FC3 to
+        \texttt{fc3.hdf5} in the same on-disk format as the phono3py
+        reap.  A diagnostic JSON \texttt{hiphive\_fit.json} records
+        $n_\mathrm{parameters}$, RMSE train/test, rotational residual
+        before/after, and the FC2/FC3 ASR residuals.
+
+  \item[\texttt{generate\_fc3}.]  Orchestrates the full hiphive flow
+        for the \texttt{phonon} rattle method (two-stage
+        bootstrap-aware sequence) and the \texttt{mc}/\texttt{normal}
+        rattle methods (one-stage canonical flow).
+\end{description}
+
+The helper \texttt{\_seed\_from\_existing\_fc3} extracts FC2 from an
+existing \texttt{fc3.hdf5} (e.g.\ a converged mc-rattle reap on the
+same primitive) and writes it as \texttt{fc2\_seed.npy}, allowing the
+user to bypass the bootstrap stage entirely with the
+\texttt{phonon\_rattle\_seed\_fc3} config option.  The helper
+\texttt{\_fit\_fc2\_seed\_from\_source} is the corresponding entry
+point for refitting FC2 on an external mc-rattle work directory's
+\texttt{disp-XXXXX/} outputs, used by
+\texttt{phonon\_rattle\_seed\_dft\_dir}.
+
+\texttt{hiphive\_convergence.py} drives the convergence sweep
+described in \cref{sec:underdet}: for each pair of (size, fit method)
+in the user-configured grid, it subsamples the master DFT pool,
+refits, and records the same diagnostic block as the main reap.  The
+post-fit rotational projection is exposed by
+\texttt{\_apply\_rotational\_sum\_rules} and
+\texttt{\_rotational\_residual\_pair}; the latter returns
+$\|M_\mathrm{rot}\theta\|$ before and after projection for the
+``\texttt{post\_fit}'' policy.
+
+% ----------------------------------------------------------------------
+\subsection{Validation: \texttt{validation.py}}
+\label{sec:validation}
+% ----------------------------------------------------------------------
+
+\texttt{validation.py} provides the four extraction-time checks
+detailed in \cref{sec:extraction_validation}: the $\Gamma$-point ASR
+residual, the block-symmetry check $H(\vc{R})^T = H(-\vc{R})$, the
+band-structure overlay versus the phonopy reference, and a reference
+Sancho--Rubio + Caroli ballistic transmission against which the
+quatrex solver is benchmarked.  These run in the units chosen by the
+caller; the default is THz$^2$ (\texttt{conversion\_factor=CONVERSION\_THZ2}).
+
+% ----------------------------------------------------------------------
+\subsection{Tensor decompositions: \texttt{fc3\_compression.py}, \texttt{separable.py}, \texttt{pcp.py}}
+\label{sec:fc3_compression}
+% ----------------------------------------------------------------------
+
+\texttt{fc3\_compression.py} houses the six tensor-decomposition
+ansätze used to compress the supercell FC3.  All operate on the
+mass-weighted target $T \in \mathbb{R}^{n_\mathrm{dof}\times \dim_{sc}\times \dim_{sc}}$
+constructed by \texttt{build\_fc3\_target} from the raw
+$(n_{\mathrm{prim}}, n, n, 3, 3, 3)$ or $(n, n, n, 3, 3, 3)$ FC3
+together with the supercell masses:
+
+\begin{description}
+  \item[\texttt{mSVD}.]  Truncated matricisation SVD (Tucker mode-3) of
+        $T$ flattened along the third axis.
+  \item[\texttt{HOSVD}.]  Higher-order SVD (Tucker decomposition) with
+        S$_2$ symmetry on legs 2 and 3, refined by a few steps of
+        symmetric HOOI.
+  \item[\texttt{CP} / \texttt{INDSCAL} / \texttt{Waring}.]
+        Canonical polyadic decompositions of increasing symmetry: CP
+        unrestricted, INDSCAL with $b_r = c_r$ (S$_2$ symmetry on legs
+        2,~3), Waring symmetric CP on the fully S$_3$-symmetrised
+        lifted target.
+  \item[\texttt{PCP}.]  The permanent-CP ansatz of
+        \cite{eriksson_hiphive_2019}-cited Luo et al.\ (2025), wrapped
+        in \texttt{pcp.py}.  Decomposes the cluster representation
+        directly as
+        $\tilde\Phi_{l_1 b_1, l_2 b_2, l_3 b_3}^{a_1 a_2 a_3}
+         = \sum_\xi (\lambda_\xi/3!) \sum_{\sigma\in S_3}\sum_l
+           \prod_i A^\xi_{\sigma_i}(l_i - l, b_i, a_i)$
+        with three mode functions per rank.
+\end{description}
+
+The helper \texttt{asr\_residual(T\_hat, n\_super)} computes the axis-$j$
+and axis-$k$ Frobenius residuals
+$\|\sum_j T_{ijk}\|_F$ and $\|\sum_k T_{ijk}\|_F$ of the lifted
+tensor; \texttt{asr\_project\_factor} performs the corresponding
+projection onto the axis-$j$ + axis-$k$ null-space when the downstream
+consumer (e.g.\ the bubble in \cref{sec:phonon_solver_pkg}) needs
+strict ASR on those legs.
+
+\texttt{separable.py} implements the stacked-SVD low-rank
+factorisation of FC3 used by the q-resolved solver
+(\cref{sec:se_q}): for each primitive-cell row $(i, \mu)$ it
+flattens the mass-weighted slice into a matrix
+$M_{(i,\mu)} \in \mathbb{R}^{n\cdot 3 \times n \cdot 3}$, stacks the
+slices into $M_\mathrm{stacked}$, factors $M_\mathrm{stacked} =
+U_R\,\mathrm{diag}(\sigma)\,V_R^T$ by truncated SVD, and returns
+the rank-$R$ left/right factors.
+
+% ----------------------------------------------------------------------
+\subsection{Quatrex output: \texttt{quatrex\_writer.py}}
+\label{sec:quatrex_writer}
+% ----------------------------------------------------------------------
+
+\texttt{quatrex\_writer.py} emits the three files the production
+quatrex NEGF stack consumes: \texttt{dynamical\_matrix.mat} (a sparse
+MATLAB-format block dictionary keyed by $(R_x, R_y, R_z)$,
+\texttt{structure.xyz} (atomic coordinates in extended XYZ for input
+to the simulation), and \texttt{config.toml} (the simulation-side
+configuration mirror).  All paths and the transport direction are read
+from \texttt{QuatrexOutputConfig}.
+
+% ----------------------------------------------------------------------
+\subsection{I/O and bookkeeping: \texttt{io.py}}
+\label{sec:io_helpers}
+% ----------------------------------------------------------------------
+
+\texttt{io.py} provides a small NPZ + JSON sidecar pattern used by the
+SCBA and decomposition drivers: arrays go to \texttt{.npz}, scalars and
+metadata to a sibling \texttt{.json}.  \texttt{save\_transport\_results}
+and \texttt{load\_transport\_results} round-trip the SCBA output
+dictionary; an additional helper writes the per-decomposition
+``cache'' entries that \texttt{transport\_quality} in
+\texttt{finite\_analysis} (\cref{sec:transport_quality}) reads on
+restart.
+
+
+\label{sec:hiphive_pathologies}
+% ======================================================================
+
+This section documents a systematic audit of the imaginary-mode
+problem observed for the H-passivated Si nanowire (SiNW) family used
+throughout the rest of this report.  The investigation began when, even
+after a sequence of cleanups to the wire generator and the relax/sow
+plumbing (tighter \texttt{EDIFF}, $a_\mathrm{lattice}$ set to the
+PBE-equilibrium value, auto-sized vacuum, FC2 cutoff scaled with the
+wire envelope), the regenerated \texttt{cluster/reaps/} still showed
+imaginary modes in the resulting harmonic spectrum at $\Gamma$ and at
+non-$\Gamma$ wave\-vectors.  We localised the breakage to four distinct
+mechanisms, each acting on a different system and each requiring a
+targeted fix.  The raw evidence (JSON artefacts, refit sweeps,
+species-resolved eigenvalues) lives in
+\path{phonon/scratch/imag_audit/}.
+
+% ----------------------------------------------------------------------
+\subsection{What ``negative squared frequency'' means physically}
+\label{sec:imag_phys}
+% ----------------------------------------------------------------------
+
+A harmonic mode has frequency $\omega^2 = \lambda$ where $\lambda$ is
+the eigenvalue of the mass-weighted dynamical matrix
+$D = M^{-1/2}\,\Phi_2\,M^{-1/2}$.  By convention dispersion plots
+report $\mathrm{sign}(\lambda)\sqrt{|\lambda|}$, so a "negative
+frequency" is shorthand for $\lambda < 0$ -- the mode is at a saddle
+or maximum of the Born-Oppenheimer surface along the corresponding
+eigenvector.  The equation of motion is then $\ddot{x} = -\lambda x$,
+which gives exponential runaway $x(t) \sim e^{\sqrt{|\lambda|}\,t}$
+along that mode coordinate.
+
+Imaginary modes are physical in soft-mode systems (PbTiO$_3$ above its
+ferroelectric transition, anharmonically-stabilised bcc-Ti at high
+temperature, charge-density-wave instabilities)
+\cite{Tadano2015tdep}, but for an H-passivated SiNW at its ground-state
+geometry they should not appear in the harmonic spectrum.
+\Cref{tab:imag_mode_triage} lays out the triage we use to discriminate
+real soft-mode physics from numerical artifacts in our setting.
+
+\begin{table}[ht]
+  \centering
+  \begin{tabular}{lll}
+    \toprule
+    Magnitude $|\omega|$ & Location & Reading \\
+    \midrule
+    $< 0.01$ THz & $\Gamma$, three modes & ASR roundoff, ignore \\
+    $0.01$--$0.5$ THz & near-$\Gamma$ acoustic & sampling noise on a soft branch \\
+    $0.5$--$5$ THz & finite $q$, few modes & cutoff or under-determination \\
+    $> 5$ THz & many modes & ground-truth or wiring bug \\
+    \bottomrule
+  \end{tabular}
+  \caption{Imaginary-mode triage matrix.  Magnitudes are mass-weighted
+  $\omega$ on the supercell q-mesh.  The Γ-point three-acoustic-mode
+  ASR-noise band is set by the numerical conditioning of the FC fit;
+  see \cref{sec:rattle_amplitude}.}
+  \label{tab:imag_mode_triage}
+\end{table}
+
+% ----------------------------------------------------------------------
+\subsection{The four mechanisms}
+\label{sec:four_mechanisms}
+% ----------------------------------------------------------------------
+
+\Cref{tab:imag_mechanisms} summarises the four root causes we
+identified, the system on which each one is dominant, and the
+intervention that fixes it.  The rest of this section justifies each
+entry with quantitative evidence.
+
+\begin{table}[ht]
+  \small
+  \centering
+  \begin{tabular}{p{0.16\linewidth} p{0.42\linewidth} p{0.34\linewidth}}
+    \toprule
+    Mechanism & Symptom & Fix \\
+    \midrule
+    FC2 cutoff $<$ wire diameter
+      & d5a sc4: 7 Γ-imag modes ($\omega \in [-2.2,-1.2]$ THz), 90 \%
+        Si-localised.
+      & Set cutoffs[0] $\geq 2 \times \mathrm{envelope} + 0.5$ Å. \\
+    \addlinespace
+    Under-determination at large cutoffs
+      & d9a sc4 at cutoffs=[7.83, 4.0]: $n_\mathrm{eqn}/n_\mathrm{params} = 0.70$
+        (40 \% under-det).  Validator already errors.
+      & Bump $n_\mathrm{structures}$ to $4 \lceil n_\mathrm{super}/8 \rceil$.
+        Re-DFT required. \\
+    \addlinespace
+    Over-aggressive mc-rattle on light H atoms
+      & d9a sc4 with $n_\mathrm{iter}=10$: rattle peaks 0.27–0.37 Å,
+        Si–H bonds compressed 13 \%, anharmonic forces absorbed as
+        artificial negative FC2 curvature on the H subspace
+        (51 Γ-imag modes at –14 THz, 91 \% H-localised).
+      & $n_\mathrm{iter}=2$, std=0.03 Å (cumulative $\approx 0.06$ Å). \\
+    \addlinespace
+    Stale YAML positions vs the relaxed sow geometry
+      & 0.55 Å drift between \texttt{hiphive\_meta.json} (sow time) and
+        the \texttt{configs/sinw/*.yaml} the analysis pipeline reads.
+        Affects $q \neq \Gamma$ phase factors.
+      & In \texttt{loader.py}, source the primitive from
+        \texttt{hiphive\_meta.json} when present. \\
+    \bottomrule
+  \end{tabular}
+  \caption{The four mechanisms we identified and the fixes applied in
+  the code review.  ``d5a'' and ``d9a'' refer to the
+  Si$_9$H$_{12}$ and Si$_{21}$H$_{16}$ wires in
+  \texttt{phonon/configs/sinw/}.  Atom counts, lattice
+  parameters and cross-section conventions follow
+  \cite{Rurali2010colloquium,Peelaers2009sinw,CartoixaRurali2010}.}
+  \label{tab:imag_mechanisms}
+\end{table}
+
+% ----------------------------------------------------------------------
+\subsubsection{Mechanism 1: FC2 cutoff vs cross-section span}
+\label{sec:cutoff_vs_section}
+% ----------------------------------------------------------------------
+
+A hiphive ClusterSpace built with $\mathrm{cutoffs}[0] = r_c^{(2)}$
+assigns zero FC2 to any atom pair separated by more than $r_c^{(2)}$ in
+Cartesian distance \cite{eriksson_hiphive_2019}.  For a wire of
+H-shell radius $\rho$, the cross-section spans up to $2\rho$
+(top-to-bottom of the H envelope), so a cutoff with
+$r_c^{(2)} \lesssim 2\rho$ leaves transverse Si--Si pairs unconstrained.
+The corresponding modes -- breathing, ovalisation, transverse acoustic
+-- have no restoring force in the fit basis and either localise (no
+dispersion) or pick up a finite negative dynamical-matrix eigenvalue
+through coupling with rotationally-projected FC2 entries.
+
+A cutoff sweep on the d5a sc4 cluster reap (84 atoms, fixed at
+$n_\mathrm{structures}=16$, refit on the existing DFT outputs)
+quantifies this.  Each cell of \cref{tab:d5a_cutoff_sweep} is the
+$\Gamma$-point imaginary-mode count of the resulting
+mass-weighted dynamical matrix; ARDR and least-squares fits with and
+without the post-fit Huang/Born-Huang projection are reported
+separately.  The values come from
+\path{phonon/scratch/imag_audit/pass1_cutoff_sweep.json}.
+
+\begin{table}[ht]
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    $r_c^{(2)}$ (Å) & ARDR / no RSR & ARDR / RSR & LS / no RSR & LS / RSR \\
+    \midrule
+    5.0 & 13 & 16 & 16 &  6 \\
+    5.5 &  4 & 14 & 16 & 13 \\
+    6.0 &  4 &  7 &  8 & 11 \\
+    6.5 &  4 &  6 & 13 & 16 \\
+    7.0 &  4 & \textbf{0} & 15 & 16 \\
+    7.8 &  4 & \textbf{0} & 15 & 18 \\
+    \bottomrule
+  \end{tabular}
+  \caption{$n_\mathrm{imag}$ at $\Gamma$ as a function of FC2 cutoff for
+  the d5a sc4 wire (envelope $\rho = 3.7$ Å, full diameter $\approx 7.4$ Å).
+  ARDR + post-fit rotational sum rule succeeds only once
+  $r_c^{(2)} \geq 7.0$ Å, i.e.\ once the cutoff exceeds the H-envelope
+  diameter.  All fits use FC3 cutoff 4.0 Å, $n_\mathrm{structures}=16$.}
+  \label{tab:d5a_cutoff_sweep}
+\end{table}
+
+Two observations are robust.  First, ARDR without the rotational
+projection picks up a fixed-and-small $n_\mathrm{imag}=4$ for any
+$r_c^{(2)} \geq 5.5$ Å -- its sparse selection keeps FC2 close to PSD
+but does not enforce rotational invariance.  Second, the Huang +
+Born-Huang projection succeeds only once $r_c^{(2)} \geq$ the wire
+diameter; at smaller cutoffs the projection enforces rotational
+invariance perfectly but shifts FC2 onto a less-PSD manifold and
+\emph{introduces} imaginary modes, a trade-off discussed in the
+context of layered systems by \cite{Mounet2005phonons}.
+
+Refitting the d5a sc4 supercell at $r_c^{(2)} = 7.0$ Å with ARDR + RSR
+gives a clean dispersion across the full $\Gamma\to Z$ path: no
+imaginary modes across 21 q-points and 63 bands, with
+$\min \omega \approx -10^{-5}$ THz (machine epsilon) and
+$\max \omega = 62.9$ THz consistent with Si--H stretching.  The
+practical consequence for the wire generator is the formula change
+implemented in \texttt{setup\_sinw100.py:\_suggest\_fc2\_cutoff},
+\begin{equation}\label{eq:suggested_cutoff}
+  r_c^{(2)} = \min\bigl(12.0,\ \max(5.0,\ 2\rho + 0.5)\bigr) \quad [\mathrm{\AA}],
+\end{equation}
+which replaces the previous $\rho + 2.4$ formula that systematically
+undershoots.
+
+% ----------------------------------------------------------------------
+\subsubsection{Mechanism 2: Under-determination at fixed sample count}
+\label{sec:underdet}
+% ----------------------------------------------------------------------
+
+For the d9a wire the FC2 cutoff bump pushes
+$n_\mathrm{parameters}$ past
+$n_\mathrm{equations} = n_\mathrm{structures} \cdot n_\mathrm{super}\cdot 3$.
+At cutoffs $[7.83, 4.0]$ on the d9a sc4 supercell (148 atoms) the
+ClusterSpace expands to 10\,116 free parameters, while
+$n_\mathrm{eqn} = 16\cdot148\cdot3 = 7\,104$ -- a ratio of $0.70$, i.e.\
+40~\% under-determined.  ARDR's automatic relevance determination
+\cite{eriksson_hiphive_2019} sparsifies aggressively, but it minimises
+the residual training error and cannot guarantee that the FC2
+extracted from the sparse parameter subset has a positive-definite
+dynamical matrix.  Empirically the result is the d9a sc4 reap's 51
+$\Gamma$-imag modes spanning $-14$ to $-2$ THz.
+
+The validator built into \texttt{phonon\_inputs/parameter\_validation}
+already flags this with severity \texttt{warn} (it raised
+``\texttt{n\_structures should be $\geq$ 45 for 84-atom supercell}'' on
+the d5a sc4 reap before the present round of fixes).  The recommended
+$n_\mathrm{structures}$ scales with the supercell size as
+\begin{equation}\label{eq:nstruct_recommendation}
+  n_\mathrm{structures}^\mathrm{rec}
+  = 4 \cdot \bigl\lceil n_\mathrm{super}/8 \bigr\rceil,
+\end{equation}
+yielding 44 for d5a sc4, 76 for d9a sc4, and 104 for d12a sc4 -- the
+values now hard-coded in
+\texttt{configs/sinw/sinw100\_*\_vasp\_sc4*.yaml}.  This is consistent
+with the rule of thumb in the hiphive paper that FC fits for
+under-determined regimes require ``advanced regularized regression''
+together with several-times-over\-determined sampling
+\cite{eriksson_hiphive_2019}.
+
+\paragraph{Cutoff alone cannot save d9a.}
+We also ran a cutoff sweep for d9a sc4 at fixed
+$n_\mathrm{structures}=16$ (FC3 cutoff reduced to 3.0 Å for speed;
+\path{phonon/scratch/imag_audit/pass1_d9a_quick.json}).  Even at
+$r_c^{(2)}=5.0$ Å, where the ratio recovers to 3.57 ($n_\mathrm{params}=1989$,
+$n_\mathrm{eqn}=7104$), the dispersion still has 28 imaginary modes at
+$\Gamma$ with $\min\omega = -4.1$ THz, and the situation degrades at
+larger cutoffs.  So under-determination is necessary but not
+sufficient: the residual imaginary modes are driven by mechanism 3,
+the over-aggressive rattle.
+
+% ----------------------------------------------------------------------
+\subsubsection{Mechanism 3: Rattle amplitude and the H subspace}
+\label{sec:rattle_amplitude}
+% ----------------------------------------------------------------------
+
+The hiphive paper explicitly recommends rattle amplitudes
+``$\approx 0.01$--$0.05$ Å'' for accurate force-constant extraction
+and warns that ``it can become difficult to untangle the force
+contribution if higher orders are contributing to the forces.  This
+leads to higher-order contributions effectively being included in the
+fitted force constants thus reducing their accuracy''
+\cite{eriksson_hiphive_2019}.  Our previous default
+($\mathrm{rattle\_std}=0.03$ Å, $n_\mathrm{iter}=10$) was inside the
+recommended range only at first glance.  In hiphive's mc-rattle the
+per-atom cumulative displacement scales \emph{linearly} in
+$n_\mathrm{iter}$ -- each Monte-Carlo step adds an independent
+Gaussian increment of standard deviation $\mathrm{rattle\_std}$ -- so
+the realised displacements after $n_\mathrm{iter}=10$ are typically
+$\mathrm{rattle\_std}\times n_\mathrm{iter} \approx 0.3$ Å, not the
+$\mathrm{rattle\_std}\sqrt{n_\mathrm{iter}} \approx 0.1$ Å a
+square-root scaling would suggest.
+
+For three d5a sc4 disp directories we measured atomic-displacement
+peaks 0.27--0.37 Å and Si--Si nearest-neighbour distances dropping to
+2.04 Å -- a 13~\% bond compression from the equilibrium 2.351 Å, with
+forces of 6--7 eV/Å (\path{pass2_3_outcar_force_sanity.json}).  This is
+solidly in the anharmonic regime for both Si--Si bonds and the lighter
+Si--H bonds; the cubic FC3 term contributes appreciably to the force
+along these compressed bonds, but the harmonic fit absorbs the cubic
+remainder as artificial negative curvature.  The bias preferentially
+affects the H subspace because the mass-weighted dynamical-matrix
+eigenvalue $\lambda$ scales as $\Phi_2 / m$: an error
+$\delta\Phi_2$ on the H--H block produces an eigenvalue shift
+$\delta\lambda = \delta\Phi_2/m_\mathrm{H}$, which is
+$m_\mathrm{Si}/m_\mathrm{H} \approx 28$ times more sensitive than the
+analogous error on the Si--Si block.
+
+\paragraph{Species-localised pathology pattern.}
+Diagonalising the d5a sc4 mass-weighted $\Phi_2$ at $\Gamma$
+(\path{pass2_d5a_d9a_gamma_eig.json}) gives seven negative eigenvalues
+between $-2.2$ and $-1.2$ THz, with Si occupation 70--91 \% on each
+eigenvector.  The same diagonalisation for d9a sc4 gives 51 negative
+eigenvalues between $-14$ and $-2$ THz, with H occupation 88--91 \%.
+The species-localisation pattern is the clean signature of the
+mass-leverage mechanism just described.
+
+The fix is to drop $n_\mathrm{iter}$ to 2 (cumulative displacement
+$\approx 0.06$ Å, well within the harmonic regime), keeping
+$\mathrm{rattle\_std}=0.03$ Å.  This matches the hiphive
+thermal-conductivity tutorial defaults and the displacement-amplitude
+guidance in \cite{eriksson_hiphive_2019}.
+
+% ----------------------------------------------------------------------
+\subsubsection{Mechanism 4: Stale YAML positions}
+\label{sec:stale_yaml}
+% ----------------------------------------------------------------------
+
+A subtle plumbing bug: the analysis-time \texttt{Phonopy} object in
+\texttt{finite\_analysis/loader.py:\_build\_phonopy} was constructed
+from \texttt{cfg.structure}, the YAML's primitive cell, while the
+fitted FC arrays in \texttt{fc3.hdf5} were produced from the
+\emph{relaxed} primitive sown by
+\texttt{resolve\_structure\_for\_sow}.  For the d9a wire the relax
+displaced atoms by up to 0.55 Å (\path{pass2_phonopy_vs_hiphive_atoms.json}),
+so phonopy was diagonalising the dynamical matrix with the wrong atomic
+positions in the q-phase factors $\exp(i\vc{q}\cdot \vc{r}_{j}(\vc{R}))$.
+
+At $\Gamma$ this is irrelevant -- the phases collapse to unity -- so
+the $\Gamma$-imag count is unaffected.  But the entire dispersion path
+at $\vc{q} \neq 0$ silently used wrong phases, scrambling the Γ-to-Z
+band structure.  The fix is to source the primitive from
+\texttt{hiphive\_meta.json} when present:
+\texttt{loader.py:\_primitive\_from\_reap\_metadata} now does this, and
+\texttt{\_build\_phonopy} accepts a \texttt{primitive\_override} that
+\texttt{load\_system} passes in.  Bulk-Si (phono3py) reaps without a
+sibling \texttt{hiphive\_meta.json} fall back to the YAML primitive,
+preserving backward compatibility.
+
+% ----------------------------------------------------------------------
+\subsection{The \texttt{leg\_j\_rel} metric is a hiphive structural artefact}
+\label{sec:leg_j_rel}
+% ----------------------------------------------------------------------
+
+The reading
+\texttt{physical/physical.json["fc3\_asr\_legs"]["leg\_j\_rel"]}
+$\approx 0.80$ appears in every SiNW hiphive fit and is structural,
+not a fit defect.  The metric measures
+\begin{equation}
+  \mathrm{leg\_j\_rel} =
+  \frac{\bigl\| \sum_j \Phi^3_{ijk,\alpha\beta\gamma} \bigr\|_F}{\| \Phi^3 \|_F},
+\end{equation}
+i.e.\ the relative Frobenius norm of the axis-$j$ trace of the
+mass-weighted lifted FC3 tensor.  Hiphive's \texttt{ClusterSpace}
+construction enforces the axis-$i$ ASR by including the orbit-symmetry
+projector at basis-construction time, but it does \emph{not} enforce
+the analogous constraint along axes $j$ or $k$ -- those would require
+either a constrained cluster-space basis or an explicit post-fit
+projection on the FC tensor itself.
+
+Bulk-Si reaps with full octahedral point symmetry yield
+$\mathrm{leg\_j\_rel} = 0.000$ to floating-point precision
+(\path{pass3_bulk_si_leg_j.json}); quasi-1D SiNW reaps with a single
+mirror symmetry yield $\approx 0.80$ regardless of $\mathrm{fit\_method}$,
+$n_\mathrm{structures}$, or cutoffs.  The metric is therefore a
+structural feature of hiphive's cluster-space construction on a
+low-symmetry quasi-1D system, not a fit defect.
+
+A practical consequence: the SSE bubble in
+\texttt{phonon/finite\_analysis/} integrates FC3 along axis $j$
+(self-energy at frequency $\omega$ depends on $\sum_j \Phi^3_{ijk}$
+contracted with $G^<(\omega-\omega')$), so a finite
+$\mathrm{leg\_j\_rel}$ propagates to a finite Drude-like weight in
+$\Sigma_\mathrm{ph\text{-}ph}$ as $\omega \to 0$.  If strict axis-$j/k$
+ASR is required downstream, project explicitly via
+\texttt{phonon\_inputs.fc3\_compression.asr\_project\_factor} (or pass
+\texttt{asr\_project=True} to \texttt{load\_quatrex\_blocks}).  The
+\texttt{fc3\_asr\_legs} docstring and \texttt{HIPHIVE\_FITTING\_NOTES}
+now reflect this.
+
+% ----------------------------------------------------------------------
+\subsection{Post-fit rotational projection is FC2-only in practice}
+\label{sec:rsr_fc2_only}
+% ----------------------------------------------------------------------
+
+The Huang + Born-Huang post-fit projection
+$\Pi: \theta \mapsto \arg\min_{\theta'} \|\theta'-\theta\|^2$ subject
+to $M_\mathrm{rot}\theta' = 0$ (with $M_\mathrm{rot}$ the rotational
+constraint matrix exposed by
+\texttt{hiphive.core.rotational\_constraints.\allowbreak get\_rotational\_constraint\_matrix})
+operates on the unified cluster-space parameter vector and rebuilds
+both FC2 and FC3 from the projected parameters.  The relevant
+constraint structure couples FC2 and FC3 via the Born-Huang relation
+through cubic orbits of the cluster space \cite{eriksson_hiphive_2019}.
+
+For the FC3 cutoff of 4 Å used throughout this work, the projection
+touches only FC2.  Refitting d5a sc4 at cutoffs $[6.09, 4.0]$ and
+measuring before/after Frobenius distances
+(\path{pass4_d5a_rsr_delta.json}) gives
+\begin{align*}
+  \|\Phi_2^\mathrm{after} - \Phi_2^\mathrm{before}\|_F / \|\Phi_2\|_F &= 3.0 \times 10^{-2}, \\
+  \|\Phi_3^\mathrm{after} - \Phi_3^\mathrm{before}\|_F / \|\Phi_3\|_F &= 0.0,
+\end{align*}
+even though the rotational residual $\|M_\mathrm{rot}\theta\|$ drops
+from 48.8 to $3 \times 10^{-3}$ -- four orders of magnitude.  The
+cubic orbits at our $r_c^{(3)} = 4$ Å apparently do not span the
+parameter directions that $M_\mathrm{rot}$ selects, so the projection
+acts as $\Pi_2 \oplus \mathbb{1}_3$ in the FC-tensor space.
+
+A side effect is the imaginary-mode trade-off displayed in
+\cref{tab:d5a_cutoff_sweep}: at small FC2 cutoffs the projection
+enforces rotational invariance perfectly but pushes FC2 off the PSD
+cone, \emph{adding} Γ-imaginary modes.  At cutoffs that span the wire
+diameter the projection succeeds without that side-effect, and the
+$\Gamma$-imag count drops to zero.
+
+% ----------------------------------------------------------------------
+\subsection{Are these wires sensible objects?  Comparison to literature}
+\label{sec:sinw_literature}
+% ----------------------------------------------------------------------
+
+The Si nanowires we use as test systems for the
+phonon--phonon-scattering self-energy machinery are at the small end
+of the diameter range studied by first-principles phonon work.  For
+context:
+
+\begin{itemize}
+  \item Peelaers et al.\ \cite{Peelaers2009sinw} compute ab-initio
+        phonon band structures of $\langle 110 \rangle$ H-passivated
+        SiNWs with diameters $\sim 1$--$1.5$ nm and report that all
+        studied wires are dynamically stable provided the unit cell
+        along the wire axis is taken sufficiently large.  Their
+        smallest wires are similar in cross-section to our d9a and
+        d12a structures.
+  \item Cartoixà and Rurali \cite{CartoixaRurali2010,Rurali2010colloquium}
+        enumerate the canonical $\langle 100 \rangle$ H-passivated SiNW
+        family Si$_9$H$_{12}$, Si$_{21}$H$_{20}$, Si$_{37}$H$_{28}$, $\ldots$
+        Our d5a wire is identical to the smallest member of this
+        family; our d9a and d12a are circular carves (Si$_{21}$H$_{16}$
+        and Si$_{29}$H$_{22}$) that don't fall on the canonical
+        $\{100\}/\{110\}$-faceted square cross-section but use the same
+        bond chemistry, the same Si--H equilibrium of 1.48--1.50 Å
+        \cite{Vo2008atomistic}, and identical [100] axis orientation.
+  \item Vo, Williamson and Galli \cite{Vo2008atomistic} and Donadio and
+        Galli \cite{Donadio2010thermal} use SiNW diameters in the
+        $1$--$3$ nm range for thermal conductivity studies; the
+        cross-section-shape sensitivity they document supports our
+        decision to use circular carves alongside the canonical
+        faceted family.
+  \item Karamitaheri et al.\ \cite{Karamitaheri2013mvff} study SiNW
+        phonon dispersions with side lengths 1--10 nm using a modified
+        valence force field; they confirm that confinement-induced
+        flattening of acoustic branches sets in below $\sim 3$ nm,
+        which is the regime our d5a sits in firmly.
+  \item Markussen, Jauho and Brandbyge \cite{Markussen2007anisotropic}
+        use $\langle 100 \rangle$ H-passivated SiNWs in the
+        $\sim 1$--$3$ nm diameter range as test systems for ballistic
+        phonon transport -- exactly the use we put these wires to
+        downstream.
+\end{itemize}
+
+Two qualifications follow.  First, the d5a wire (9 Si in
+cross-section, $\sim 0.5$ nm of Si core, $\sim 0.7$ nm with the H
+shell) is closer to a Si chain than a 3D wire.  Quantum confinement
+on the electrons is of order 1 eV; flexural branches are not
+continuum-Euler-Bernoulli but tight-binding-chain-like.  Quantitative
+comparison to experimental SiNW transport data (which is at 10--100 nm
+diameters) is not the goal; demonstrating the Σ$_\mathrm{ph-ph}$
+infrastructure is.  Second, the under-passivation we see at the
+corners of d9a and d12a (3-coordinated Si atoms; cf.\
+\texttt{phonon/examples/\_nanowire.py:\_check\_coordination}) is
+intrinsic to the circular carve.  A canonical Cartoixà--Rurali
+Si$_{21}$H$_{20}$ carve would have all surface Si 4-coordinated;
+switching to faceted carves is an optional follow-up if we want to
+match the canonical convention exactly.
+
+% ----------------------------------------------------------------------
+\subsection{Verification protocol after the fixes}
+\label{sec:verif_post_fix}
+% ----------------------------------------------------------------------
+
+The full audit produced a punch list of seven items (A--G), summarised
+in \path{phonon/scratch/imag_audit/INVESTIGATION_NOTES.md}.  All seven
+were implemented in the code review documented elsewhere in this
+appendix.  The expected verification path is:
+
+\begin{enumerate}
+  \item \textbf{Refit d5a sc4 only} (no DFT, the existing
+        \texttt{disp-XXXXX/} forces suffice).  After the FC2 cutoff
+        bump to 7.88 Å and the rotational projection, the
+        $\Gamma\to Z$ dispersion is clean across 21 q-points × 63
+        bands with $\min\omega \approx -10^{-5}$ THz.  Already
+        verified in \path{pass1_d5a_best_dispersion.json}.
+  \item \textbf{Re-sow + re-DFT d9a sc4} with
+        $n_\mathrm{structures}=76$, $r_c^{(2)}=11.36$ Å,
+        $n_\mathrm{iter}=2$.  Expected: $n_\mathrm{imag}=0$,
+        $\max_\mathrm{acoustic@\Gamma} < 0.1$ THz.
+  \item \textbf{Re-sow + re-DFT d12a sc4} with
+        $n_\mathrm{structures}=104$, $r_c^{(2)}=12$ Å (capped),
+        $n_\mathrm{iter}=2$.
+  \item For all systems: confirm \texttt{leg\_j\_rel} stays at
+        $\sim 0.80$ (structural, expected); do not treat as a fit
+        defect.
+\end{enumerate}
+
+Item 1 is hours of refitting; items 2 and 3 are cluster runs
+(76 × 148-atom + 104 × 204-atom DFT calculations).  These are tracked
+as TODOs and will be filled into \cref{sec:fv_quality_sinw} once the
+cluster re-runs complete.

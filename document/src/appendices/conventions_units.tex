@@ -1,0 +1,221 @@
+\chapter{Conventions and Units}
+\label{ch:conventions_units}
+
+This chapter collects the unit systems, notation, and Fourier
+conventions used in this document.  The harmonic force
+constants may originate either from phonopy finite-displacement
+calculations or from Quantum ESPRESSO (QE) density-functional
+perturbation theory, while the QuaTrEx solver uses its own internal
+frequency-squared convention.  Since the later extraction, transport,
+and anharmonic self-energy steps all rely on consistent units and phase
+conventions, we summarize them here once and refer back to this section
+throughout the chapter.
+
+% ----------------------------------------------------------------------
+\section{Units in phonopy and Quantum ESPRESSO}
+\label{sec:phonopy_units}
+% ----------------------------------------------------------------------
+
+Phonopy stores force constants in eV/\AA$^2$, atomic masses in amu, and
+atomic positions in \AA.  The dynamical matrix eigenvalues therefore
+have units
+\begin{equation}
+  [\lambda] = \frac{\mathrm{eV}}{\mathrm{amu}\cdot\mathrm{\si{\angstrom}}^2}.
+\end{equation}
+Phonopy converts these eigenvalues to frequencies in THz via
+\begin{equation}\label{eq:VaspToTHz}
+  f\;[\mathrm{THz}]
+  = \mathrm{sgn}(\lambda)\,\sqrt{|\lambda|}
+    \times
+    \frac{1}{2\pi}\sqrt{\frac{e}{m_u A^2}}  \approx 15.633\;\mathrm{THz},
+\end{equation}
+where $e = 1.602\times 10^{-19}$\,J is the elementary charge,
+$m_u = 1.661\times 10^{-27}$\,kg is the atomic mass unit, and
+$A = 10^{-10}$\,m is the metre-to-\AA\ conversion factor.
+
+When phonopy is used together with the QE interface, the internal
+representation inherited from QE uses atomic units: lattice vectors are
+in bohr and force constants in Ry/bohr$^2$.  These quantities are
+therefore converted before being used together with the rest of the
+workflow.  The required relations are
+\begin{align}
+  a\;[\mathrm{\si{\angstrom}}]
+    &= a\;[\mathrm{bohr}] \times a_0,
+    & a_0 &= 0.52918\;\mathrm{\si{\angstrom}/bohr}, \\
+  \Phi\;[\mathrm{eV/\si{\angstrom}^2}]
+    &= \Phi\;[\mathrm{Ry/bohr^2}] \times \frac{E_h/2}{a_0^2},
+    & \frac{E_h/2}{a_0^2} &\approx 48.59.
+\end{align}
+Here $E_h$ denotes the Hartree energy, so that $E_h/2 = 1$\,Ry.  In the
+same way, Cartesian forces parsed from QE output are converted using
+\begin{equation}
+  1\;\mathrm{Ry/bohr} \approx 25.711\;\mathrm{eV/\si{\angstrom}}.
+\end{equation}
+
+The downstream workflow therefore treats eV, \AA, and amu as the common
+intermediate unit system, independent of whether the original data came
+from phonopy directly or through QE.  In other words, everything is
+normalized to the phonopy eV/\AA/amu convention upon loading.
+
+% ----------------------------------------------------------------------
+\section{QuaTrEx solver units}
+\label{sec:solver_units}
+% ----------------------------------------------------------------------
+
+The QuaTrEx phonon solver operates in angular frequency squared,
+\begin{equation}
+  \omega^2 \quad \text{in} \quad (\mathrm{rad/s})^2.
+\end{equation}
+Accordingly, the mass-weighted real-space blocks passed to the solver
+must be converted from the phonopy eigenvalue units
+eV/(amu$\cdot$\AA$^2$) to $(\mathrm{rad/s})^2$.  The corresponding
+conversion factor is
+\begin{equation}\label{eq:conversion}
+  C = \frac{e}{m_u A^2}
+  \approx 9.648 \times 10^{27}\;\mathrm{(rad/s)^2}.
+\end{equation}
+If $\Phi(0,\vc{R})$ denotes a harmonic force-constant block in
+eV/\AA$^2$, then the real-space matrix block used by QuaTrEx is
+\begin{equation}
+  H(\vc{R})
+  = C\,
+    \frac{\Phi(0,\vc{R})}{\sqrt{m\,m'}},
+\end{equation}
+with $m$ and $m'$ in amu.  The resulting $H(\vc{R})$ therefore has units
+of $(\mathrm{rad/s})^2$.
+
+The same logic extends to cubic force constants.  After mass-weighting,
+the third-order tensor
+\begin{equation}
+  \Psi_{\alpha\beta\gamma}
+  = \frac{\Phi^{(3)}_{\alpha\beta\gamma}}
+         {\sqrt{M_\kappa M_{\kappa'} M_{\kappa''}}}
+\end{equation}
+has units
+\begin{equation}
+  [\Psi] = \frac{\mathrm{eV}}
+                 {\mathrm{\si{\angstrom}}^3\cdot\mathrm{amu}^{3/2}}.
+\end{equation}
+Its SI conversion factor is
+\begin{equation}\label{eq:conversion_fc3}
+  \texttt{CONVERSION\_FC3}
+  = \frac{C}{A\sqrt{m_u}}
+  = \frac{e}{m_u^{3/2} A^3}
+  \approx 2.368\times10^{51},
+\end{equation}
+which converts
+eV/(\AA$^3\cdot$amu$^{3/2}$) to the SI units required in the
+phonon--phonon self-energy expressions.
+
+% ----------------------------------------------------------------------
+\section{Notation and Fourier conventions}
+\label{sec:notation_fourier}
+% ----------------------------------------------------------------------
+
+We first collect the symbols used throughout this work.
+
+\begin{center}
+\begin{tabular}{llr}
+  \toprule
+  Symbol & Meaning & Range \\
+  \midrule
+  $l,m$                              & Supercell index                              & $\Ncell$ \\
+  $\kappa,\kappa',\kappa''$          & Basis-atom within a primitive cell            & $\nprim$ \\
+  $\alpha,\alpha',\alpha''$          & Cartesian component ($x,y,z$)                & $C=3$ \\
+  $i, j, k$                          & DOF index                                    & $\ndof$ \\
+  $\mu, \nu$                         & Primitive-cell DOF index                     & $3\nprim$ \\
+  $\vq_\perp$                        & Transverse wavevector (2D BZ)                & $N_q$ points \\
+  $x,y$                              & Transport-direction DOF                      & $\ntrans = 3\nprim N_\mathrm{transport}$ \\
+  $\vR_\perp$                        & Transverse lattice vector                    & $N_q$ points (dual) \\
+  $\omega,\omega'$                   & Real frequency                               & $N_\omega$ points \\
+  $\tau$                             & Conjugate time variable                      & $N_\tau = N_\omega$ \\
+  $N$                                & Total number of $\vq$-points, $N_q$          & \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Here $\Ncell$ is the total number of supercells (e.g.\ $3^3 = 27$),
+$\nprim$ the number of atoms in the primitive cell (e.g.\ $2$ for
+bulk Si), and
+$\ndof = 3\nsuper = 3\Ncell^3\nprim$ the total number of degrees of
+freedom in the simulation.  $\ntrans$ is the total number of DOFs in
+the transport direction (i.e.\ when transverse cells are not
+included), and $N_\mathrm{transport}$ is the number of transport
+(super)-cells.
+
+Bold symbols such as $\vR$ and $\vq$ denote lattice vectors and
+wavevectors, respectively.  The displacement of atom $\kappa$ in
+cell $l$ along direction $\alpha$ is written $u_\alpha(l\kappa)$.
+The lattice vector of cell $l$ is $\vR_l$, while $\vc{\tau}_\kappa$
+denotes the basis-atom position within the unit cell.  Unless stated
+otherwise, $\vc{\tau}_\kappa$ and $\vq$ are expressed in fractional
+crystal coordinates, so that factors of $2\pi$ appear explicitly in
+all Fourier phases.
+
+The harmonic force constants are written as
+\begin{equation}
+  \Phi_{\alpha\alpha'}(0\kappa,\,l'\kappa'),
+\end{equation}
+and the corresponding mass-weighted dynamical matrix at wavevector
+$\vq$ is a Fourier transform of these real-space couplings.
+Two phase conventions are used in this work.  In the phonopy
+convention,
+\begin{equation}\label{eq:DA_conv}
+  D_{\alpha\alpha'}^{(\mathrm{A})}(\kappa\kappa',\vq)
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'} \Phi_{\alpha\alpha'}(0\kappa,\,l'\kappa')\,
+    e^{2\pi i\,\vq\cdot
+      [\vR_{l'} + \vc{\tau}_{\kappa'} - \vc{\tau}_\kappa]},
+\end{equation}
+whereas the QuaTrEx convention uses only the lattice vector in the
+phase,
+\begin{equation}\label{eq:DB_conv}
+  D_{\alpha\alpha'}^{(\mathrm{B})}(\kappa\kappa',\vq)
+  = \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}
+    \sum_{l'} \Phi_{\alpha\alpha'}(0\kappa,\,l'\kappa')\,
+    e^{2\pi i\,\vq\cdot\vR_{l'}}.
+\end{equation}
+The two are related by a diagonal unitary gauge transformation,
+\begin{equation}\label{eq:gauge_conv}
+  D^{(\mathrm{B})}(\vq)
+  = P(\vq)\,D^{(\mathrm{A})}(\vq)\,P^\dagger(\vq),
+\end{equation}
+with
+\begin{equation}
+  P(\vq)_{\kappa\alpha,\kappa'\alpha'}
+  = \delta_{\kappa\kappa'}\delta_{\alpha\alpha'}\,
+    e^{2\pi i\,\vq\cdot\vc{\tau}_\kappa}.
+\end{equation}
+Under Convention~B, the dynamical matrix is a pure lattice Fourier
+series,
+\begin{equation}\label{eq:fourier_series_conv}
+  D^{(\mathrm{B})}(\vq)
+  = \sum_{\vR} H(\vR)\,e^{2\pi i\,\vq\cdot\vR}.
+\end{equation}
+
+For the transverse directions we write $\vq_\perp$ for the
+two-dimensional transverse wavevector.  A partial Fourier sum over
+transverse lattice vectors $\vR_\perp$ then takes the form
+\begin{equation}
+  D(\vq_\perp)
+  = \sum_{\vR_\perp} M(\vR_\perp)\,
+    e^{2\pi i\,\vq_\perp\cdot\vR_\perp}.
+\end{equation}
+The transverse wavevectors are sampled on a Monkhorst--Pack mesh,
+\begin{equation}
+  q_{\perp,i} = \frac{n_i + 0.5}{N_i} - 0.5 + \mathrm{shift}_i,
+  \qquad n_i = 0,\ldots,N_i-1.
+\end{equation}
+
+We also define the discrete Fourier-transform pair
+\begin{align}
+  G(\omega;\vq) &= \sum_{\vR} g(\omega;\vR)\,e^{-i\vq\cdot\vR},
+  \label{eq:dft_fwd} \\
+  g(\omega;\vR) &= \frac{1}{N}\sum_{\vq} G(\omega;\vq)\,e^{+i\vq\cdot\vR},
+  \label{eq:dft_inv}
+\end{align}
+with the associated discrete convolution theorem
+\begin{equation}\label{eq:conv_theorem}
+  \frac{1}{N}\sum_{\vq'} A(\vq')\,B(\vq-\vq')
+  = \sum_{\vR} a(\vR)\,b(\vR)\,e^{-i\vq\cdot\vR}.
+\end{equation}

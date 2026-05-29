@@ -111,6 +111,15 @@ def _build_matrix(args) -> list[RunSpec]:
         zero_mode_projection=True,
         divergence_guard=True,
         track_diagnostics=True,
+        # Forward the grid-extension policy so the user can shrink the
+        # grid: with the default 1.05 margin the script auto-extends to
+        # ~2.1*omega_max (>=130 THz on d5a), which makes most positive-
+        # frequency samples carry Bose-suppressed Sigma^< weight. Drop
+        # the margin (e.g. ~0.6 -> fmax ~ 1.2*omega_max) or turn the
+        # auto-extend off entirely if you want to study the impact of
+        # truncating the spontaneous-emission tail of Sigma^>.
+        auto_extend_fmax=bool(args.auto_extend_fmax),
+        fmax_margin=float(args.fmax_margin),
         verbose=False,
     )
 
@@ -284,13 +293,48 @@ def _run_one(spec: RunSpec, bundle, fc3: str, args) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _fit_eta_linear(etas: np.ndarray, vals: np.ndarray):
-    """Linear fit G(eta) ~ a + b*eta; return ``(a, b, sigma_a, sigma_b, R^2)``.
+def _polyfit_with_cov(x, y, deg):
+    """polyfit + covariance, robust to the ``n_points == deg + 1`` case.
 
-    Uses ``numpy.polyfit`` with ``cov=True`` so the intercept uncertainty
-    comes from the diagonal of the parameter covariance. ``R^2`` is the
-    coefficient of determination, useful as a "is the linear assumption
-    even appropriate?" check.
+    ``np.polyfit(..., cov=True)`` rescales the covariance by the
+    residual chi-squared, which is undefined when the fit is exact
+    (n_points <= deg + 1). Catch that and return ``cov = None`` instead
+    of crashing; callers must already handle missing uncertainties.
+    """
+    try:
+        return np.polyfit(x, y, deg, cov=True)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.polyfit(x, y, deg), None
+
+
+def _r_squared(y, yhat):
+    ss_res = float(((y - yhat) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    return 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+
+
+def _runaway_ratio(xs, ys):
+    """Largest consecutive ratio ``y[i]/y[i+1]`` after sorting by ``x``.
+
+    A value much > 1 means the observable blows up as the regulator
+    shrinks -- the SCBA is in the soft-mode-runaway regime where the
+    linear extrapolation is physically meaningless. Used as a fit
+    quality flag.
+    """
+    order = np.argsort(xs)
+    ys_sorted = np.abs(ys[order])
+    if len(ys_sorted) < 2:
+        return float("nan")
+    ratios = ys_sorted[:-1] / np.maximum(ys_sorted[1:], 1e-30)
+    return float(np.max(ratios))
+
+
+def _fit_eta_linear(etas: np.ndarray, vals: np.ndarray):
+    """Linear fit G(eta) ~ a + b*eta; return
+    ``(a, b, sigma_a, sigma_b, R^2)``.
+
+    Uses :func:`_polyfit_with_cov` so the n_points == 2 case (deg+1)
+    falls back gracefully to ``sigma = NaN`` instead of crashing.
     """
     m = np.isfinite(etas) & np.isfinite(vals)
     if m.sum() < 2:
@@ -298,17 +342,18 @@ def _fit_eta_linear(etas: np.ndarray, vals: np.ndarray):
             float("nan")
     x = etas[m].astype(float)
     y = vals[m].astype(float)
-    if m.sum() == 2:
-        coef = np.polyfit(x, y, 1)
-        return float(coef[1]), float(coef[0]), float("nan"), float("nan"), \
-            float("nan")
-    coef, cov = np.polyfit(x, y, 1, cov=True)
+    fit = _polyfit_with_cov(x, y, 1)
+    if isinstance(fit, tuple) and fit[1] is not None:
+        coef, cov = fit
+        sa = float(np.sqrt(cov[1, 1]))
+        sb = float(np.sqrt(cov[0, 0]))
+    else:
+        coef = fit if not isinstance(fit, tuple) else fit[0]
+        sa = float("nan")
+        sb = float("nan")
     yhat = np.polyval(coef, x)
-    ss_res = float(((y - yhat) ** 2).sum())
-    ss_tot = float(((y - y.mean()) ** 2).sum())
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    return (float(coef[1]), float(coef[0]),
-            float(np.sqrt(cov[1, 1])), float(np.sqrt(cov[0, 0])), r2)
+    r2 = _r_squared(y, yhat) if len(y) > 2 else float("nan")
+    return float(coef[1]), float(coef[0]), sa, sb, r2
 
 
 def _fit_lambda_pade(lams: np.ndarray, vals: np.ndarray):
@@ -317,6 +362,7 @@ def _fit_lambda_pade(lams: np.ndarray, vals: np.ndarray):
     Returns ``(extrapolated_at_lambda_squared_one, sigma, coef, deg, R^2)``.
     ``deg`` is ``min(2, n_points - 1)`` -- ``[2/0]`` Pade as in
     Bescond et al. (2011), reduced when fewer points are available.
+    Robust to the ``n_points == deg + 1`` exact-fit case.
     """
     m = np.isfinite(lams) & np.isfinite(vals)
     if m.sum() < 1:
@@ -326,27 +372,39 @@ def _fit_lambda_pade(lams: np.ndarray, vals: np.ndarray):
     deg = min(2, len(x) - 1)
     if deg == 0:
         return float(y[0]), float("nan"), [float(y[0])], 0, float("nan")
-    if deg == 1:
-        coef = np.polyfit(x, y, 1)
-        return float(np.polyval(coef, 1.0)), float("nan"), coef.tolist(), 1, \
-            float("nan")
-    coef, cov = np.polyfit(x, y, 2, cov=True)
+    fit = _polyfit_with_cov(x, y, deg)
+    if isinstance(fit, tuple) and fit[1] is not None:
+        coef, cov = fit
+        # Variance at lambda^2 = 1: ones-vector through the covariance.
+        e = np.ones(deg + 1)
+        var = float(e @ cov @ e)
+        sigma = float(np.sqrt(max(var, 0.0)))
+    else:
+        coef = fit if not isinstance(fit, tuple) else fit[0]
+        sigma = float("nan")
     val_at_1 = float(np.polyval(coef, 1.0))
-    # Propagate variance to val_at_1 = c2 + c1 + c0:
-    # Var = [1, 1, 1] @ cov @ [1, 1, 1]^T
-    e = np.array([1.0, 1.0, 1.0])
-    var = float(e @ cov @ e)
-    sigma = float(np.sqrt(max(var, 0.0)))
     yhat = np.polyval(coef, x)
-    ss_res = float(((y - yhat) ** 2).sum())
-    ss_tot = float(((y - y.mean()) ** 2).sum())
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    return val_at_1, sigma, coef.tolist(), 2, r2
+    r2 = _r_squared(y, yhat) if len(y) > deg + 1 else float("nan")
+    return val_at_1, sigma, coef.tolist(), int(deg), r2
 
 
-def _verdict(rel_gap: float, args) -> str:
+def _verdict(rel_gap: float, args, *, eta_runaway=None,
+             lam_runaway=None) -> str:
+    """Render the diagnostic verdict.
+
+    A ``runaway`` ratio (max consecutive y[i]/y[i+1] after sorting by
+    the regulator) flags physical blow-up of the observable as the
+    regulator shrinks. When that exceeds ``args.runaway_warn`` the
+    extrapolation is not trustworthy, regardless of the linear-fit gap.
+    """
     if not np.isfinite(rel_gap):
         return "undetermined"
+    blow_up = max(
+        eta_runaway if eta_runaway is not None else 0.0,
+        lam_runaway if lam_runaway is not None else 0.0,
+    )
+    if np.isfinite(blow_up) and blow_up >= args.runaway_warn:
+        return "runaway"
     if rel_gap <= args.tol_consistent:
         return "consistent"
     if rel_gap <= args.tol_borderline:
@@ -429,19 +487,45 @@ def _plot_summary(eta_data, lam_data, eta_fit, lam_fit, args, out: Path) -> None
     ax.set_ylabel(r"$G_\mathrm{anh}$ (W m$^{-2}$ K$^{-1}$)")
     ax.grid(alpha=0.3)
 
-    # (d) Spectral overlay
+    # (d) Spectral overlay.
+    # The grid runs to ``2*omega_max`` for FFT-bubble reasons (Sigma^>
+    # has a non-Bose-suppressed vacuum-emission tail) but the
+    # *observable* ``j(omega)`` carries the n_L - n_R Bose-difference
+    # factor and dies past a few times ``kT/h``. Autoclip the x-axis to
+    # where the signal is visible so the meaningful 0--25 THz region
+    # isn't squashed against the y-axis.
     ax = axes[1, 1]
     eta_pts = [p for p in eta_data["points"]
                if p["converged"] and "spectral" in p]
     lam_pts = [p for p in lam_data["points"]
                if p["converged"] and "spectral" in p
                and abs(p["lambda"] - max(args.lambda_values)) < 1e-9]
+    curves = []
     for p in eta_pts:
-        ax.plot(p["freqs_thz"], p["spectral"] * 1e12, "-", alpha=0.6,
+        freqs = np.asarray(p["freqs_thz"])
+        vals = np.asarray(p["spectral"]) * 1e12
+        ax.plot(freqs, vals, "-", alpha=0.6,
                 label=rf"$\eta_w={p['eta_w_thz']:.2g}$")
+        curves.append((freqs, vals))
     for p in lam_pts:
-        ax.plot(p["freqs_thz"], p["spectral"] * 1e12, "--", alpha=0.7,
+        freqs = np.asarray(p["freqs_thz"])
+        vals = np.asarray(p["spectral"]) * 1e12
+        ax.plot(freqs, vals, "--", alpha=0.7,
                 label=rf"$\lambda={p['lambda']:g}$")
+        curves.append((freqs, vals))
+    if curves:
+        significant = []
+        for fr, vv in curves:
+            peak = float(np.max(np.abs(vv)))
+            if peak <= 0:
+                continue
+            mask = np.abs(vv) > 1e-4 * peak
+            if mask.any():
+                significant.append(float(fr[mask].max()))
+                significant.append(float(fr[mask].min()))
+        if significant:
+            ax.set_xlim(max(0.0, min(significant) - 2.0),
+                        max(significant) + 2.0)
     ax.set_xlabel(r"$\omega/2\pi$ (THz)")
     ax.set_ylabel(r"$j(\omega)$ (pW/THz)")
     ax.set_title("Spectral heat current overlay")
@@ -582,6 +666,33 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mixing", type=float, default=0.3)
     p.add_argument("--anderson-depth", type=int, default=8)
 
+    # Grid-extension policy ---------------------------------------------------
+    # The dense solver's ``_ensure_fmax`` extends the user's fmax to
+    # ``fmax_margin * 2 * omega_max`` to keep the 3-phonon bubble's FFT
+    # convolution unaliased. On d5a this pushes the grid to ~136 THz
+    # even though the observable j(omega) ~ (n_L-n_R) is concentrated
+    # below ~25 THz at 300 K. Expose the dial: dropping the margin
+    # below 1.0 truncates Sigma^>'s vacuum-emission tail and biases
+    # Re Sigma^R via the FFT-Hilbert KK reconstruction (the bias is
+    # ~3-10% of the in-band Re Sigma^R magnitude); disabling the
+    # extension entirely emits a RuntimeWarning and leaves the
+    # caller's fmax untouched -- usually a bad idea unless the user
+    # is intentionally probing the truncation error.
+    p.add_argument(
+        "--auto-extend-fmax", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Extend fmax to fmax_margin * 2 * omega_max before running "
+             "(default on). Pass --no-auto-extend-fmax to leave "
+             "--freq-range untouched at the cost of FFT-bubble aliasing.",
+    )
+    p.add_argument(
+        "--fmax-margin", type=float, default=1.05,
+        help="Multiplicative safety margin on the 2*omega_max convolution "
+             "support (default 1.05). Set <1.0 to truncate Sigma^>'s "
+             "vacuum-emission tail (saves grid points at a few-percent "
+             "bias to Re Sigma^R via KK).",
+    )
+
     # Verdict tolerances -----------------------------------------------------
     p.add_argument(
         "--tol-consistent", type=float, default=0.05,
@@ -590,6 +701,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--tol-borderline", type=float, default=0.20,
         help="|Delta|/G^eta <= this -> 'borderline'; else 'inconsistent'.",
+    )
+    p.add_argument(
+        "--runaway-warn", type=float, default=5.0,
+        help="If the largest consecutive ratio of G_anh as the "
+             "regulator shrinks exceeds this, declare the verdict "
+             "'runaway' (extrapolation not trustworthy). On d5a a "
+             "100x jump between eta=2 THz and eta=1 THz is the "
+             "imaginary-mode softening kicking in.",
     )
 
     # Modes ------------------------------------------------------------------
@@ -710,12 +829,20 @@ def main() -> None:
     rel_gap = (gap / abs(eta_extr)
                if np.isfinite(eta_extr) and eta_extr != 0
                else float("nan"))
-    verdict = _verdict(rel_gap, args)
+    # Detect soft-mode runaway: G_anh exploding as the regulator
+    # shrinks means the SCBA fixed point itself has no well-defined
+    # eta -> 0 (or lambda -> 1) limit in this regime, and the linear
+    # fit is physically meaningless.
+    eta_runaway = _runaway_ratio(etas, ge) if etas.size else float("nan")
+    lam_runaway = _runaway_ratio(lams ** 2, gl) if lams.size else float("nan")
+    verdict = _verdict(rel_gap, args, eta_runaway=eta_runaway,
+                       lam_runaway=lam_runaway)
 
     assessment = {
         "verdict": verdict,
         "tol_consistent": float(args.tol_consistent),
         "tol_borderline": float(args.tol_borderline),
+        "runaway_warn": float(args.runaway_warn),
         "eta_extrapolation": {
             "G_anh_at_eta_zero": eta_extr,
             "slope_per_thz": eta_fit[1],
@@ -723,6 +850,7 @@ def main() -> None:
             "sigma_slope": eta_fit[3],
             "R2": eta_fit[4],
             "n_converged_points": int(len(etas)),
+            "max_consecutive_ratio": eta_runaway,
         },
         "lambda_pade": {
             "G_anh_at_lambda_one": lam_extr,
@@ -732,6 +860,7 @@ def main() -> None:
             "R2": lam_fit[4],
             "n_converged_points": int(len(lams)),
             "fixed_eta_factor": float(args.lambda_eta_factor),
+            "max_consecutive_ratio": lam_runaway,
         },
         "gap": {"absolute": gap, "relative_to_eta_extrapolation": rel_gap},
     }

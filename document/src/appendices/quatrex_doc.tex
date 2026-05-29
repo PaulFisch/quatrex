@@ -1,0 +1,271 @@
+\chapter{Quatrex Documentation}
+\label{ch:quatrex_doc}
+
+% ----------------------------------------------------------------------
+\subsection{QuaTrEx Input format}
+\label{sec:quatrex_input}
+% ----------------------------------------------------------------------
+
+The QuaTrEx solver reads three input files which
+specify the real-space Hamiltonian, the crystal structure, and the
+transport parameters.
+
+\subsubsection{Input files}
+\label{sec:input_files}
+
+\paragraph{\texttt{dynamical\_matrix.mat}}
+This MATLAB \texttt{.mat} file stores the real-space blocks
+$H(\vc{R})$ in Convention~B, already converted to
+$(\mathrm{rad/s})^2$.  Each block is stored under a string key of the
+form
+\begin{equation}
+  \texttt{"[nx, ny, nz]"},
+\end{equation}
+mapping to a real matrix of dimension
+$(n_\mathrm{dof}\times n_\mathrm{dof})$, where
+$n_\mathrm{dof}=3N_b$ and $N_b$ is the number of atoms in the unit
+cell.  For nearest-neighbour interactions extracted on a
+$3\times3\times3$ mesh, the file contains up to 27 blocks.
+
+The solver interprets these blocks as real-space couplings and, for
+periodic transverse directions, performs the Fourier sum
+\begin{equation}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x,n_y)} M(n_x,n_y)\;
+    e^{2\pi i\,(k_x n_x + k_y n_y)}.
+\end{equation}
+
+\paragraph{\texttt{structure.xyz}}
+This is an extended XYZ file containing the lattice vectors in the
+header and Cartesian atomic positions in the body.  It follows the ASE
+extended-XYZ convention, for example
+\begin{verbatim}
+8
+Lattice="5.4018 0.0 0.0 0.0 5.4018 0.0 0.0 0.0 5.4018" ...
+Si  0.00000000  0.00000000  0.00000000
+...
+\end{verbatim}
+The loader (\texttt{distributed\_read\_xyz}) extracts the $3\times3$
+lattice matrix and Cartesian atom positions.  The number of atoms times
+\texttt{num\_orbitals\_per\_atom} determines $n_\mathrm{dof}$.
+
+\paragraph{\texttt{quatrex\_config.toml}}
+This file specifies the transport setup, such as transport direction,
+number of transport cells, neighbour cutoff, transverse $k$-mesh,
+broadening, and the open-boundary-condition algorithm.  Important fields are
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Field & Example value & Purpose \\
+  \midrule
+  \texttt{transport\_direction}       & \texttt{'z'}            & transport axis \\
+  \texttt{construct\_from\_unit\_cell}& \texttt{true}           & input mode selector \\
+  \texttt{num\_transport\_cells}      & 4                       & device length in unit cells \\
+  \texttt{neighbor\_cell\_cutoff}     & \texttt{[1,1,1]}        & block-range cutoff \\
+  \texttt{kpoint\_grid}               & \texttt{[4,4,1]}        & transverse mesh \\
+  \texttt{kpoint\_shift}              & \texttt{[0,0,0]}        & Monkhorst--Pack shift \\
+  \texttt{num\_orbitals\_per\_atom.Si}& 3                       & DOFs per atom \\
+  \texttt{phonon.eta}                 & \texttt{1e-8}           & broadening $(\mathrm{rad/s})^2$ \\
+  \texttt{phonon.obc.algorithm}       & \texttt{"sancho-rubio"} & OBC method \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Input modes}
+\label{sec:input_modes}
+
+QuaTrEx supports two input modes, selected by
+\texttt{construct\_from\_unit\_cell}.  In both modes the input is a
+MATLAB \texttt{.mat} file loaded by \texttt{scipy.io.loadmat}.  The
+loader (\\\texttt{distributed\_load} in
+\texttt{qttools/utils/mpi\_utils.py}) parses keys that start with
+\texttt{[} and interprets them as integer tuples:
+\begin{lstlisting}
+arr = loadmat(path)
+arr = {
+    tuple(map(int, r.strip("[]").split(","))): h_r
+    for r, h_r in arr.items()
+    if r.startswith("[")
+}
+\end{lstlisting}
+That is, a key string such as \texttt{"[0, 1, -1]"} becomes the Python
+tuple \texttt{(0, 1, -1)}.  Each value is a 2D NumPy array (real or
+complex) representing a matrix block.
+
+\paragraph{Mode 1: pre-assembled device matrix}
+If \texttt{construct\_from\_unit\_cell = false}, the
+\texttt{dynamical\_matrix.mat} file contains a single pre-assembled
+device matrix stored under the key \texttt{(0,0,0)}:
+\begin{lstlisting}
+matrix_sparray = distributed_load(f"{matrix_name}.mat")
+assert (0, 0, 0) in matrix_sparray.keys()
+matrix_sparray = matrix_sparray[(0, 0, 0)]
+\end{lstlisting}
+The result is a single sparse matrix of size
+$(N_\mathrm{blocks}\times B)^2$, where $B$ is the block size and
+$N_\mathrm{blocks}$ is the number of transport cells.  No transverse
+$k$-point Fourier assembly is performed.
+
+\paragraph{Mode 2: unit-cell blocks}
+If \texttt{construct\_from\_unit\_cell = true}, the file contains the
+dictionary of real-space unit-cell blocks
+$H(n_x,n_y,n_z)$.  The solver loads all blocks, constructs a dense
+translation grid, optionally trims it using
+\texttt{neighbor\_cell\_cutoff}, expands the blocks into
+transport-direction BTD matrices, and performs the transverse
+Fourier assembly on the chosen Monkhorst--Pack mesh.
+
+The function \texttt{\_load\_matrix\_from\_unit\_cell} loads all keys,
+determines the bounding box from the minimum and maximum key
+coordinates, and packs the blocks into a 5D array:
+\begin{lstlisting}
+# keys: array of all (nx, ny, nz) tuples
+min_coords = keys.min(axis=0)
+max_coords = keys.max(axis=0)
+grid_shape = max_coords - min_coords + 1
+unit_cells = zeros(grid_shape + matrix_shape)
+for coord, matrix in matrices.items():
+    unit_cells[coord] = matrix
+\end{lstlisting}
+The resulting array has shape
+$(G_x,G_y,G_z,n_\mathrm{dof},n_\mathrm{dof})$, where
+$(G_x,G_y,G_z)$ is the grid shape (e.g.\ $(3,3,3)$ for
+$\{-1,0,+1\}^3$).  The loader checks that
+$G_x \times G_y \times G_z = \text{number of keys}$, i.e.\ the grid
+must be dense: no missing entries are permitted.  Missing blocks must
+be stored as zero matrices.
+
+If \texttt{neighbor\_cell\_cutoff} is set (e.g.\ \texttt{[1,1,1]}),
+\texttt{trim\_tight\_binding\_matrix} zeros out all blocks beyond that
+range.  For cutoff $(c_x,c_y,c_z)$, a block at index
+$(n_x,n_y,n_z)$ (centred at zero) is kept only if
+$|n_x| \le c_x$, $|n_y| \le c_y$, $|n_z| \le c_z$.
+
+The function \texttt{expand\_tight\_binding\_matrix} converts the
+unit-cell blocks into a BTD sparse matrix for a given transverse
+periodic shift.  Along the transport direction $z$:
+\begin{enumerate}
+  \item The supercell size in the transport direction is $G_z / 2$
+        (integer division), and 1 in the transverse directions.  For
+        $G_z = 3$, this gives a supercell of one unit cell
+        ($3 // 2 = 1$).
+  \item Three BTD blocks are extracted for each transverse periodic
+        shift $(n_x,n_y)$:
+        \begin{itemize}
+          \item $n_z=-1$: lower off-diagonal,
+          \item $n_z=0$: diagonal,
+          \item $n_z=+1$: upper off-diagonal.
+        \end{itemize}
+  \item Each block is assembled by \texttt{\_get\_transport\_block},
+        which loops over all pairs of local shifts within the supercell
+        and selects the appropriate unit-cell block for each pair.
+  \item The three blocks are tiled $N_\text{transport}$ times along the
+        diagonal to build the full BTD sparse matrix.
+\end{enumerate}
+
+The function \texttt{\_assemble\_kpoint} then performs the Fourier sum
+over transverse periodic shifts.  For each $\vc{k}_\perp$ on a
+Monkhorst--Pack mesh:
+\begin{equation}\label{eq:assemble}
+  D(\vc{k}_\perp)
+  = \sum_{(n_x,n_y)} M(n_x,n_y)\;
+    e^{2\pi i\,(k_x n_x + k_y n_y)},
+\end{equation}
+where $M(n_x,n_y)$ is the BTD sparse matrix for periodic shift
+$(n_x,n_y)$, already expanded in the transport direction.  The
+$k$-points on the Monkhorst--Pack mesh are
+\begin{equation}
+  k_i = \frac{n_i + 0.5}{N_i} - 0.5 + \text{shift}_i,
+  \qquad n_i = 0,\ldots,N_i-1.
+\end{equation}
+The result is a stack of BTD matrices indexed by
+$(\omega,k_x,k_y)$.
+
+% ----------------------------------------------------------------------
+\subsection{Heterogeneous-device extension}
+\label{sec:heterogeneous}
+% ----------------------------------------------------------------------
+
+The original harmonic unit-cell input mode in QuaTrEx constructs a
+homogeneous device by repeating the same block set across all transport
+cells.  To model interfaces such as Si/Ge, the harmonic assembly was
+extended to support piecewise-defined left, device, and right regions
+with distinct block dictionaries.
+
+\subsubsection{L|D|R device model}
+
+The transport region is partitioned into three sections,
+\begin{equation}\label{eq:ldr}
+  \underbrace{L\;\cdots\;L}_{n_L\;\text{cells}}
+  \;\underbrace{D\;\cdots\;D}_{n_D\;\text{cells}}
+  \;\underbrace{R\;\cdots\;R}_{n_R\;\text{cells}},
+  \qquad
+  n_L + n_D + n_R = n_\mathrm{transport},
+\end{equation}
+where the left and right parts serve as lead-like material regions and
+the central part represents the interface or device region.
+
+\subsubsection{Configuration changes}
+
+To support this heterogeneous harmonic setup, four new configuration
+fields were added to \texttt{DeviceConfig}:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Field & Type & Purpose \\
+  \midrule
+  \texttt{num\_left\_cells}  & \texttt{PositiveInt | None} & number of left cells $n_L$ \\
+  \texttt{num\_right\_cells} & \texttt{PositiveInt | None} & number of right cells $n_R$ \\
+  \texttt{left\_matrix}      & \texttt{str | None}         & left-lead \texttt{.mat} file \\
+  \texttt{right\_matrix}     & \texttt{str | None}         & right-lead \texttt{.mat} file \\
+  \bottomrule
+\end{tabular}
+\end{center}
+This mode requires
+\texttt{construct\_from\_unit\_cell = true} and must satisfy
+\begin{equation}
+  n_L + n_R < n_\mathrm{transport},
+\end{equation}
+so that at least one transport cell remains in the device region.
+
+\subsubsection{Matrix assembly}
+
+The heterogeneous assembly is implemented by extending the harmonic
+unit-cell expansion to allow different block dictionaries in different
+transport cells.  Two new functions were added to
+\texttt{quatrex/device/inputs.py}.
+
+\texttt{\_expand\_heterogeneous\_matrix} builds a BTD sparse matrix for
+a single transverse periodic shift $(n_x,n_y)$.  Each cell is assigned
+to one of the three regions according to its index.  The diagonal block
+of cell $i$ is selected according to
+\begin{equation}
+  D_{ii} =
+  \begin{cases}
+    D_L, & i < n_L, \\
+    D_D, & n_L \le i < n_L+n_D, \\
+    D_R, & i \ge n_L+n_D.
+  \end{cases}
+\end{equation}
+
+The routine \func{_create_heterogeneous_matrix} constructs the final
+transport object. It loops over all transverse periodic shifts, calls
+\func{_expand_heterogeneous_matrix} for each shift, and combines the
+resulting blocks. At $\Gamma$, the transverse contributions are also
+summed to determine the sparsity pattern.
+
+\subsubsection{Boundary coupling}
+
+At the interfaces between the $L$, $D$, and $R$ regions, the
+off-diagonal couplings must be chosen consistently with Hermiticity.
+For harmonic real-space blocks, the relevant relation is
+\begin{equation}\label{eq:hermiticity_perp}
+  H(\vc{R}_\perp,n_z)^\dagger
+  = H(-\vc{R}_\perp,-n_z).
+\end{equation}
+At the left/device boundary, the super-diagonal coupling is taken from
+the left-lead block $H_{01}^L$, while the corresponding sub-diagonal is
+$H_{10}^L$.  At the device/right boundary, the couplings are taken from
+the right-lead blocks $H_{01}^R$ and $H_{10}^R$.  This ensures that the
+assembled heterogeneous matrix remains consistent with the physical lead
+couplings on either side of the interface.
