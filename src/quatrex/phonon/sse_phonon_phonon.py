@@ -123,7 +123,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         The bubble runs in ``stack`` distribution (each rank holds an
         omega slice of every BT-band block). Only the diagonal blocks
         $g_{KK}$ enter the contraction, so only those are gathered to
-        full ω; off-diagonal $G$ blocks are never communicated. The
+        full omega; off-diagonal $G$ blocks are never communicated. The
         ``(I,J)`` output loop is split across ``comm.block``: each
         rank computes only the ``(I,J)`` outputs whose row index
         ``I`` lies in its local block range.
