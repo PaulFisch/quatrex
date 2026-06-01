@@ -3212,3 +3212,72 @@ $\qp'$-FFT symmetrisation (\cref{ssec:phph_decomp_qspace}), an
 additional factor $N_q/\log N_q\sim 50$ is gained for production
 $N_q=400$.
  
+% ----------------------------------------------------------------------
+\subsection{Transverse-momentum (q-point) distribution and vertex streaming}
+\label{ssec:phph_qdist}
+% ----------------------------------------------------------------------
+
+The distribution of \cref{ssec:phph_distribution,ssec:phph_decomp_dist}
+spreads the work over frequency ($P_E$, \texttt{comm.stack}) and
+transport blocks ($P_S$, \texttt{comm.block}). In the
+transverse-periodic setting of \cref{ssec:phph_decomp_qspace} a third
+index appears: the external transverse momentum $\qp$. Unlike the
+finite (zone-centre) device, where each $\qp$ is an independent
+external label, the periodic self-energy
+\begin{equation}\label{eq:sigma_q_dist}
+  \Sigma^{\lessgtr}(\qp,\omega)
+  = \frac{i\hbar}{2}\frac{1}{N_q}\sum_{\qp'}\!\int\!\frac{d\omega'}{2\pi}\,
+    \tilde\Phi(\qp',\qp{-}\qp')\,
+    G^{\lessgtr}(\qp',\omega')\,G^{\lessgtr}(\qp{-}\qp',\omega{-}\omega')\,
+    \tilde\Phi(\qp{-}\qp',\qp')
+\end{equation}
+\emph{couples} the momenta through crystal-momentum conservation
+$\qp=\qp'+(\qp-\qp')$: every external $\qp$ draws on the Green's
+functions of \emph{all} internal $\qp'$. The momenta are therefore not
+embarrassingly parallel, and a naive per-$\qp$ split would replicate
+the full $G(\qp')$ set on every rank.
+
+\paragraph{The q-communicator.}
+We add $\qp$ as a third communicator axis alongside block and stack, so
+that the global ranks factor as
+$q\times\mathrm{stack}\times\mathrm{block}$. Concretely
+\texttt{QuatrexCommunicator.configure} gains a \texttt{q\_comm\_size}
+and a third \texttt{MPI\_Comm} split; the previous two-axis layout is
+recovered exactly at \texttt{q\_comm\_size}~$=1$ (the $q$-communicator
+then has one rank and is a no-op), so block and stack behaviour is
+unchanged. Each $q$-rank owns a disjoint slice of the \emph{external}
+$\qp$ mesh and stores only its own per-$\qp$ Green's functions and
+output self-energies. The \emph{internal} $\qp'$ Green's functions that
+\cref{eq:sigma_q_dist} needs are reconstructed once per SCBA iteration
+by an \texttt{all\_gather\_v} over the $q$-communicator -- the
+``data exchange between processors'' inherent to the momentum
+convolution. The explicit external-$\qp$ loop then divides as $1/P_q$,
+while the all-gather of the per-$\qp$ diagonal $G$ carries the
+communication cost; the bubble kernel itself is unchanged. This third
+axis composes with the energy and block axes without touching them: a
+production run can use all three simultaneously
+($P=P_q\,P_E\,P_S$).
+
+\paragraph{Streaming the momentum-space vertex.}
+On an accelerator the binding constraint for
+\cref{eq:sigma_q_dist} is memory rather than arithmetic. The
+Fourier-transformed FC3 vertex
+$\tilde\Phi(\qp,\qp')=T(\qp)\,M\,T(\qp')^{\dagger}$ -- with $T(\qp)$
+the supercell-to-primitive gathering matrix and $M$ the (small,
+real-space) mass-weighted FC3 -- is a dense rank-five object of size
+$N_q^{2}\,\ndof^{3}$ if materialised. At an $8\times8$ transverse mesh
+($N_q=64$) and a wire-scale cross section ($\ndof=63$) this is already
+$\sim 16$~GB, beyond a single device, and it grows as $N_q^{2}$. Since
+the kernel only ever touches the pair
+$(\tilde\Phi(\qp',\qp{-}\qp'),\,\tilde\Phi(\qp{-}\qp',\qp'))$ for the
+momenta in the current batch, we never form the full tensor: with
+\texttt{stream\_phi} enabled the kernel keeps only $T$ and $M$ and
+rebuilds $\tilde\Phi$ on the fly per momentum batch, dropping the peak
+from $\cO(N_q^{2}\ndof^{3})$ to $\cO(N_q\,\ndof^{2})$. This trades a
+vertex recomputation for memory, which is favourable on a GPU where the
+bandwidth-bound bubble contractions dominate the run time regardless,
+and it composes with the $q$-communicator at no extra communication
+(each rank streams only the vertices for its own external-$\qp$ slice).
+The result is algebraically identical to the dense path; the measured
+memory reduction and the near-ideal $q$-axis speed-up are reported in
+\cref{sec:results}.

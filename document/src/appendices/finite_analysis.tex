@@ -5,7 +5,7 @@ This appendix documents the validation pipeline that lives at
 \path{phonon/finite_analysis/}.  The package processes a relaxed,
 finite (no transverse $q$, single supercell as device) phonon system
 and produces all of the analyses that go into
-\cref{sec:finite_validation}: FC2/FC3 quality, sparsity structure,
+\cref{sec:res_fc}: FC2/FC3 quality, sparsity structure,
 tensor decompositions, physical invariants, phonon--phonon
 self-energy structure, cutoff-hierarchy sensitivity, and ballistic +
 SCBA transport.
@@ -105,7 +105,7 @@ prefixed with an underscore.
   storage.  The full off-diagonal $(K_1, K_1', K_2, K_2')$ enumeration
   is the production path; the original \texttt{quatrex} $K_1 = K_1', K_2
   = K_2'$ restriction is recovered by setting \texttt{diag\_G\_in\_se =
-  True}.  Five cutoff knobs documented in \cref{sec:fv_cutoffs}.  The
+  True}.  Five cutoff knobs documented in \cref{sec:res_cutoffs}.  The
   \texttt{\_compat} module retains the legacy one-sided convention for
   bit-for-bit cross-checks.
 
@@ -470,7 +470,7 @@ A condensed version of \path{phonon/finite_analysis/RESULTS_RUNBOOK.md}.
 \paragraph{Per system} (SiNW(100), Si chain, finite CNT(3,3))
 \begin{enumerate}
   \item Run the cluster pipeline as described in
-    \cref{sec:fv_systems} and \cref{sec:input_gen}; the reap lands at
+    \cref{sec:res_nw} and \cref{sec:input_gen}; the reap lands at
     \path{phonon/reaps/<name>/fc3.hdf5}.
   \item Sanity-check the configuration:
     \verb|python -m finite_analysis validate <config>|.
@@ -500,7 +500,7 @@ python -m finite_analysis.cross_system_plots \
 \end{verbatim}
 produces three cross-system PDFs: FC3-decay envelope,
 decomposition-rank panels, and the headline-numbers summary table
-(\cref{sec:fv_summary}).
+(\cref{sec:res_cutoffs}).
 
 \paragraph{Known limitations to compensate for in the writeup}
 The bubble does not ASR-project FC3 by default; pass
