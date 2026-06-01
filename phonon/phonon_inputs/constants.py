@@ -38,3 +38,24 @@ CONVERSION_FC3_THZ = CONVERSION_FC3 / THZ_TO_RAD**2.5
 
 # phonopy's VaspToTHz: sqrt(eigenvalue) * VaspToTHz = frequency in THz
 VASP_TO_THZ = 1 / (2 * np.pi) * np.sqrt(EV_TO_J / (AMU_KG * 1e-20))  # ≈ 15.633
+
+# Adjustable scalar prefactor on the 3-phonon bubble self-energy. DEFAULT 1.0 =
+# the self-energy as derived/implemented (the standard sunset diagram of
+# theory.tex, Sigma = (i hbar/2) Phi G G Phi, which reduces analytically to the
+# correct Fermi-golden-rule three-phonon linewidth).
+#
+# VERIFIED native (F28; scripts/verify/verify_gamma_opt.py). The native prefactor
+# was checked against phono3py's golden-rule linewidths for bulk Si on the
+# identical FC3. The AREA-INTEGRATED ratio R = int(-Im Sigma_NEGF)/int(2 w_s
+# gamma_p3p) for the Gamma-optical mode (the one with a converged 3-phonon
+# joint-DOS) is eta-INVARIANT at R/(2pi)^2 ~ 1.06 (+-4 THz window; the (2pi)^2 is
+# the THz^2-vs-THz units convention), i.e. native matches the ab-initio linewidth
+# to ~10-15% and a factor-of-4 error is excluded by an order of magnitude
+# (div4 -> 0.26, x4 -> 4.2). The "factor of 4" that earlier motivated a div4 was
+# the ON-SHELL peak ratio, which is a pure broadening artifact (gamma_NEGF ∝ eta).
+# So the div4 is RETRACTED; native is the correct physics. (Residual ~15% is the
+# window/grid method uncertainty; the convention-free closer is bulk-Si kappa from
+# the code's own SCBA vs phono3py RTA ~110 W/mK.) The thin-film over-scatter vs
+# Guo is therefore NOT a prefactor error (transport setup / their approximations /
+# XC). Do not rescale: set this away from 1.0 only to explore, never as a correction.
+PHPH_SYMMETRY_FACTOR = 1.0
