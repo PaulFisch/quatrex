@@ -505,16 +505,8 @@ class QuatrexCommunicator:
     ):
         """Configures the communicator.
 
-        The global ranks factor as ``q x stack x block`` (three
-        independent axes). The block and stack axes are unchanged from
-        the two-axis layout; with the default ``q_comm_size=1`` the q
-        axis is trivial (one rank per q-communicator) and the block and
-        stack communicators are identical to before. A ``q_comm_size>1``
-        carves a third axis out of what was the stack, so that external
-        transverse momenta (q-points) of the q-resolved phonon-phonon
-        self-energy can be distributed over ``comm.q`` while the
-        internal-q Green's functions are exchanged with
-        ``comm.q.all_gather_v``.
+        The global ranks factor as ``q * stack * block`` (three
+        independent axes)
 
         Parameters
         ----------
@@ -564,7 +556,7 @@ class QuatrexCommunicator:
                 f"Block communicator size {block_comm_size} cannot be greater than the total number of ranks {global_comm.size}."
             )
 
-        # Three-axis factorization q x stack x block. Rank layout:
+        # Rank layout:
         #   rank = (q_idx * stack_size + stack_idx) * block_comm_size + block_idx
         stack_size = global_comm.size // (block_comm_size * q_comm_size)
         block_idx = global_comm.rank % block_comm_size
