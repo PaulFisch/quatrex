@@ -8,8 +8,7 @@ Implements
         * Phi_{b e f}
 
 The cubic vertex Phi is supplied as a block-sparse dict
-(see quatrex.phonon.fc3_loader); the convolution is performed via
-FFT along the energy axis. Internal units are THz / THz^2
+(see quatrex.phonon.fc3_loader). Internal units are THz / THz^2
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     block_sizes : NDArray
         Transport-cell DOF sizes ``(N_blocks,)``.
     phi_blocks : PhiBlocks, optional
-        Pre-built block-sparse Phi dict in THz². If not provided, the
+        Pre-built block-sparse Phi dict in THz^2. If not provided, the
         loader is invoked on ``config.phonon.fc3_path``.
     """
 
@@ -122,7 +121,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         """Compute the 3-phonon self-energy contribution.
 
         The bubble runs in ``stack`` distribution (each rank holds an
-        ω slice of every BT-band block). Only the diagonal blocks
+        omega slice of every BT-band block). Only the diagonal blocks
         $g_{KK}$ enter the contraction, so only those are gathered to
         full ω; off-diagonal $G$ blocks are never communicated. The
         ``(I,J)`` output loop is split across ``comm.block``: each

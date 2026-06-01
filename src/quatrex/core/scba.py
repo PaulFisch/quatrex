@@ -219,10 +219,6 @@ class SCBAData:
         if config.scba.photon:
             raise NotImplementedError
 
-        # NEGF phonon model: SigmaPhononPhonon adds its 3-phonon
-        # contribution into the existing sigma_* DSDBSparse buffers
-        # owned by SCBAData; no extra allocation is needed here.
-
 
 @dataclass
 class Observables:
@@ -280,22 +276,12 @@ class Observables:
 class SCBA:
     """Self-consistent Born approximation (SCBA) solver.
 
-    Architecture
-    ------------
-    The SCBA loop is driven by two registries:
-
-    * ``self.subsystems``: the physical Green's-function subsystems
-      (currently ``{"electron"}`` or ``{"phonon"}``; a future coupled
-      e-ph run would carry both keys). Each subsystem owns its own
-      Dyson solve via :class:`SubsystemSolver`. The driver iterates
-      over the registry instead of branching on ``simulation_type``.
-
-    * ``self.interactions``: a list of :class:`Interaction` instances
-      (Coulomb screening, phonon-phonon, ...). Each interaction
+    The SCBA loop uses two registries:
+    * self.subsystems: the physical Green's-function subsystems
+      (currently electron or phonon)
+    * self.interactions: a list SSEs (Coulomb screening, phonon-phonon, ...). Each interaction
       reads from one or more subsystems' Green's functions and writes
-      its contribution into the appropriate ``sigma_*`` buffer. A
-      future :class:`ElectronPhononInteraction` plugs in through the
-      same interface without further driver changes.
+      its contribution
 
     Parameters
     ----------
@@ -331,9 +317,7 @@ class SCBA:
                 f"Each comm.block has {num_energies_per_rank} grid points.", flush=True
             )
 
-        # ----- Subsystem solvers (Green's function side) --------------
-        # The registry currently carries one subsystem; a future e-ph
-        # coupled run would carry both ``electron`` and ``phonon``.
+        # ----- Subsystem solvers ----------------------------------------
         self.subsystems: dict[str, object] = {}
         if config.simulation_type == "electron":
             self.electron_solver = ElectronSolver(
@@ -352,18 +336,10 @@ class SCBA:
         else:
             raise NotImplementedError(
                 f"simulation_type={config.simulation_type!r} not yet "
-                "supported. The Interaction registry is in place so a "
-                "future ElectronPhononInteraction can drive the "
-                "electron and phonon subsystems in the same SCBA "
-                "iteration; allocate a second SCBAData for the "
-                "second subsystem and append the e-ph SSE to "
-                "self.interactions."
+                "supported."
             )
 
-        # ----- Interaction registry ----------------------------------
-        # Each interaction owns its own scattering-self-energy
-        # machinery; the SCBA driver iterates over the registry rather
-        # than branching on ``config.scba.*`` flags.
+        # ----- Interactions  --------------------------------------------
         self._coulomb_screening_interaction: Interaction | None = None
         self._phonon_phonon_interaction: Interaction | None = None
         self._pseudo_scattering_phonon_interaction: Interaction | None = None
@@ -410,14 +386,8 @@ class SCBA:
 
         if self.config.scba.phonon:
             if self.config.phonon.model == "negf":
-                # Phonon energy grid (eV-equivalent). Loaded from disk
-                # so the SCBA driver can be reused for both electron-
-                # and phonon-driven simulations.
                 energies_path = self.config.input_dir / "phonon_energies.npy"
                 self.phonon_energies = distributed_load(energies_path)
-                # PiPhonon remains a stub: in the 3-phonon case there
-                # is no separate "polarization" screened by a Dyson
-                # equation — Phi is the bare vertex.
                 self._phonon_phonon_interaction = PhononPhononInteraction(
                     config=self.config,
                     phonon_energies=self.phonon_energies,
@@ -436,11 +406,6 @@ class SCBA:
             config, electron_energies=self.energies
         )  # real data
 
-        # Build the ordered interaction registry after all per-
-        # interaction state has been constructed. The order in which
-        # interactions write into ``sigma_*`` doesn't matter for the
-        # currently registered ones (each is an independent additive
-        # contribution).
         self.interactions: list[Interaction] = build_interactions(self)
 
     def _stash_sigma(self) -> None:
@@ -520,13 +485,7 @@ class SCBA:
 
     @profiler.profile(label="SCBA: Interactions", level="default", comm=comm)
     def _compute_interactions(self) -> None:
-        """Iterate the interaction registry, accumulating into sigma_*.
-
-        Each :class:`Interaction` reads from ``self.data.g_*`` and
-        additively writes its contribution into ``self.data.sigma_*``;
-        the order in which they fire is set by
-        :func:`quatrex.core.interaction.build_interactions` and is
-        currently order-independent because the contributions commute.
+        """Iterate the interaction registry, accumulating into sigma_*
         """
         for interaction in self.interactions:
             interaction.compute(self)
@@ -681,10 +640,6 @@ class SCBA:
             with profiler.profile_range(
                 label="SCBA: Iteration", level="default", comm=comm
             ):
-                # Drive each subsystem's Dyson solve. Single-subsystem
-                # runs have exactly one entry in self.subsystems; the
-                # loop generalises to a future coupled e-ph run that
-                # carries both keys.
                 for solver in self.subsystems.values():
                     solver.solve(
                         self.data.sigma_lesser,
