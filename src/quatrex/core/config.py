@@ -1086,6 +1086,16 @@ class CommConfig(BaseModel):
     stack_all_reduce: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     stack_bcast: Literal["host_mpi", "device_mpi", "nccl"] | None = None
 
+    # Transverse-momentum (q-point) communicator: a third axis alongside
+    # block x stack, used to distribute the external q of the q-resolved
+    # phonon-phonon self-energy. Default 1 leaves block/stack unchanged.
+    q_comm_size: PositiveInt = 1
+
+    q_all_to_all: Literal["host_mpi", "device_mpi", "nccl"] | None = None
+    q_all_gather: Literal["host_mpi", "device_mpi", "nccl"] | None = None
+    q_all_reduce: Literal["host_mpi", "device_mpi", "nccl"] | None = None
+    q_bcast: Literal["host_mpi", "device_mpi", "nccl"] | None = None
+
 
 class ComputeConfig(BaseModel):
     """All configurations concerning computational details."""
@@ -1329,11 +1339,20 @@ def _setup_comm(comm_config: CommConfig) -> None:
         "bcast": comm_config.stack_bcast or default_backend,
     }
 
+    q_comm_config = {
+        "all_to_all": comm_config.q_all_to_all or default_backend,
+        "all_gather": comm_config.q_all_gather or default_backend,
+        "all_reduce": comm_config.q_all_reduce or default_backend,
+        "bcast": comm_config.q_bcast or default_backend,
+    }
+
     comm.configure(
         block_comm_size=comm_config.block_comm_size,
         block_comm_config=block_comm_config,
         stack_comm_config=stack_comm_config,
         override=True,
+        q_comm_size=comm_config.q_comm_size,
+        q_comm_config=q_comm_config,
     )
 
 

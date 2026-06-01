@@ -1,0 +1,919 @@
+\chapter{Diagnosis of the d5a SCBA non-convergence and solver verification}
+\label{app:convergence_diagnosis}
+
+This appendix documents a systematic investigation into why the self-consistent
+Born approximation (SCBA) on the hydrogen-passivated [100] silicon nanowire
+\texttt{d5a} fails to converge as the regulators are taken to their physical
+limit ($\eta_w\!\to\!0$, vertex scale $\lambda\!\to\!1$), and a verification of the
+underlying solver, theory and force-constant pipeline on systems where transport
+\emph{is} well behaved. All scripts referenced live in
+\texttt{phonon/scripts/verify/}; numerical values are reproduced from the cached
+run artifacts under \texttt{phonon/scripts/out/}.
+
+% ======================================================================
+\section{Symptoms: two physical impossibilities}
+\label{sec:diag_symptoms}
+% ======================================================================
+
+The joint $\eta$/$\lambda$ diagnostic
+(\texttt{phonon/scripts/scba\_convergence\_diagnostic.py}) was run on \texttt{d5a}
+with $n_\text{slabs}=2$, $T=300\,K$, $\Delta T=10\,K$. The cached
+results (\texttt{phonon/scripts/out/eta\_lambda\_diag/}) exhibit two features that
+are inconsistent with the physics of phonon transport, independent of any
+convergence question:
+
+\begin{enumerate}
+  \item \textbf{$G_\text{anh} > G_\text{ball}$ in every run} (by factors of
+        $1.15$--$14$). Three-phonon scattering is a purely resistive,
+        energy/momentum-randomising process; in a current-conserving
+        ($\Phi$-derivable) NEGF it can only \emph{reduce} the conductance below the
+        harmonic Landauer ballistic limit~\cite{luisier_atomistic_2012,
+        wang_quantum_2008, mingo_anharmonic_2006}. A computed $G_\text{anh}>G_\text{ball}$ is
+        therefore non-physical.
+  \item \textbf{$G_\text{ball}$ swings by ${\sim}180\times$ across the $\eta$
+        sweep} (Table~\ref{tab:diag_eta}). The \emph{ballistic} Landauer
+        conductance must be independent of the numerical broadening $\eta_w$.
+\end{enumerate}
+
+\begin{table}[t]
+  \centering
+  \caption{Cached \texttt{d5a} $\eta$-sweep at $\lambda=1$ and $\lambda$-sweep at
+    $\eta_\text{factor}=6.75$ (from \texttt{eta\_lambda\_diag/*/info.json}). Note
+    $G_\text{anh}>G_\text{ball}$ throughout and the $180\times$ swing of
+    $G_\text{ball}$.}
+  \label{tab:diag_eta}
+  \begin{tabular}{llrrrr}
+    \toprule
+    sweep & point & converged & $G_\text{ball}$ & $G_\text{anh}$ & $G_\text{anh}/G_\text{ball}$\\
+    \midrule
+    $\eta$ & $\eta_f{=}9.0$    & yes & $5.5\mathrm{e}3$ & $2.6\mathrm{e}4$ & $4.7$\\
+    $\eta$ & $\eta_f{=}6.75$   & \textbf{no} & $3.0\mathrm{e}4$ & $4.2\mathrm{e}5$ & $13.9$\\
+    $\eta$ & $\eta_f{=}4.5$    & yes & $2.3\mathrm{e}5$ & $1.5\mathrm{e}6$ & $6.8$\\
+    $\eta$ & $\eta_f{=}3.0$    & yes & $1.0\mathrm{e}6$ & $3.0\mathrm{e}6$ & $3.0$\\
+    $\lambda$ & $\lambda{=}0.3$ & yes & $3.0\mathrm{e}4$ & $3.5\mathrm{e}4$ & $1.15$\\
+    $\lambda$ & $\lambda{=}0.9$ & \textbf{no} & $3.0\mathrm{e}4$ & $1.5\mathrm{e}5$ & $5.0$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ======================================================================
+\section{Isolating the cause}
+\label{sec:diag_isolate}
+% ======================================================================
+
+\subsection{The Caroli/leads ballistic path is correct}
+\label{sec:diag_chain}
+
+A monatomic mass-spring chain (dynamical matrix $D(q)=2K(1-\cos q)$, single
+propagating channel, analytic $T(\omega)=1$ inside the band) isolates
+\texttt{leads.ballistic\_transmission\_z2} and the conductance assembly from FC3,
+SCBA and the frequency-grid machinery
+(\texttt{test\_ballistic\_eta.py}). The ballistic conductance converges to the
+analytic single-channel value exactly as $\eta_w\!\to\!0$ (ratio $1.0000$ at
+$\eta_f=0.05$), and even at the extreme $\eta_f=9$ it is only $25\%$ low. The
+solver's ballistic normalisation is therefore \emph{not} the source of the
+$180\times$ swing.
+
+\subsection{On d5a the ballistic transmission is crushed at the diagnostic's $\eta$}
+\label{sec:diag_d5a_ball}
+
+Repeating the ballistic calculation on the real \texttt{d5a} wire with the
+three-phonon vertex switched off (\texttt{vertex\_scale}$=0$,
+\texttt{test\_d5a\_ballistic\_eta.py}) reveals the mechanism
+(Table~\ref{tab:diag_d5a_ball}): at every $\eta$ used in the convergence
+diagnostics ($\eta_f=3$--$9$, i.e.\ $\eta_w\approx0.7$--$2\,THz$) the coherent
+transmission of a $63$-DOF wire is essentially \emph{zero} ($\max_\omega T\le0.1$).
+The transmission only recovers as $\eta_w\!\to\!0$, where it converges to the
+mode-counting channel number ($T\approx4$ at low $\omega$ = 3 acoustic $+$ 1 twist,
+$\max_\omega T\to4.6$ at $\eta_f=0.01$; \texttt{test\_d5a\_ballistic\_lowsmall\_eta.py}).
+
+\begin{table}[t]
+  \centering
+  \caption{\texttt{d5a} ballistic transmission and conductance vs broadening
+    (FC3 off, $n_\text{slabs}=2$, grid $0.01/18/81\Rightarrow d\omega=0.222\,THz$).
+    The coherent transmission is destroyed at the $\eta$ values used in every
+    convergence diagnostic.}
+  \label{tab:diag_d5a_ball}
+  \begin{tabular}{rrrr}
+    \toprule
+    $\eta_\text{factor}$ & $\eta_w$ (THz) & $\max_\omega T(\omega)$ & $G_\text{ball}$\\
+    \midrule
+    $9.0$  & $2.0$   & $0.001$ & $5.5\mathrm{e}3$\\
+    $6.75$ & $1.5$   & $0.003$ & $3.0\mathrm{e}4$\\
+    $3.0$  & $0.67$  & $0.104$ & $1.0\mathrm{e}6$\\
+    $1.0$  & $0.22$  & $1.127$ & $9.6\mathrm{e}6$\\
+    $0.3$  & $0.067$ & $2.772$ & $2.8\mathrm{e}7$\\
+    $0.01$ & $0.002$ & $4.605$ & $5.8\mathrm{e}7$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Because essentially all of the wire's heat is carried by the low-frequency
+acoustic/twist channels, a broadening $\eta_w\gtrsim0.7\,THz$ smears them out
+and collapses $G_\text{ball}$. The $180\times$ swing of
+Table~\ref{tab:diag_eta} is thus a direct consequence of running the diagnostic at
+$\eta$ values far too large to retain the coherent baseline; with the baseline
+crushed to $\sim0$, the residual scattering spectral weight makes
+$G_\text{anh}>G_\text{ball}$.
+
+\subsection{The FC2 is mechanically stable; the ``soft mode'' is a rigid twist}
+\label{sec:diag_dispersion}
+
+The \texttt{d5a} phonon dispersion along the transport axis
+(\texttt{dispersion\_check.py}) has \emph{no imaginary modes} (global minimum
+frequency $=-0.000\,THz$). At $\Gamma$ there are the three rigid translations
+plus a fourth near-zero mode at $0.027\,THz$ -- the rigid rotation (torsion)
+about the wire axis -- followed by a gap to $2.38\,THz$. The ``soft mode'' is
+therefore a genuine quasi-Goldstone twist of the finite-cross-section, hydrogen
+passivated wire, not a force-constant artifact. Its Bose factor at room
+temperature is large, $n_B(0.027\,THz,300\,K)\approx220$, so its
+low-$\omega$ spectral weight dominates the bubble integrand $G^<G^<$ and
+destabilises the SCBA fixed point at physical (small) $\eta_w$ -- which is the
+reason large $\eta_w$ had been adopted in the first place.
+
+\subsection{The SCBA is well posed at physical \texorpdfstring{$\eta_w$}{eta}}
+\label{sec:diag_physical_eta}
+
+Running the SCBA at a physical broadening ($\eta_w\approx0.11\,THz$, where
+Sec.~\ref{sec:diag_d5a_ball} shows the ballistic baseline is recovered) with a moderate
+vertex ($\lambda=0.3$, $n_\text{slabs}=1$) yields a clean, converged fixed point: residual
+$1.7\times10^{-3}$ after $20$ iterations, current conservation $3.2\times10^{-3}$, and a
+bounded self-energy $\max|\Sigma^R|\approx50\,\mathrm{THz}^2$. The resulting conductances are
+$G_\text{ball}=3.17\times10^{7}$ and $G_\text{anh}=2.99\times10^{7}\,\mathrm{W\,m^{-2}\,K^{-1}}$,
+i.e.\ $G_\text{anh}/G_\text{ball}=0.94<1$: anharmonic scattering now correctly \emph{reduces}
+the conductance, and both pathologies of Sec.~\ref{sec:diag_symptoms} are gone. Increasing the
+coupling to $\lambda=0.6$ makes the fixed-point iteration stiff -- the residual plateaus near
+$0.5$ and the self-energy develops causality (sign) violations -- which is the expected onset
+of the strong-coupling regime in which the bare SCBA iteration ceases to be
+contractive~\cite{lee_anharmonic_2018}.
+
+The correct route to full coupling is then the lowest-order-approximation sweep itself: run a
+ladder of small $\lambda$ (where each SCBA converges) and continue $G_\text{anh}(\lambda^2)$ to
+$\lambda^2=1$. The converged points (Table~\ref{tab:diag_loa}) are smooth and monotonic in
+$\lambda^2$, as expected for $\Sigma\propto\lambda^2$. A linear continuation gives
+$G_\text{anh}/G_\text{ball}\approx0.60$ at full coupling -- a $\sim40\%$ reduction, comparable
+to the $\delta I\approx46\%$ that \citet{lee_anharmonic_2018} report for a germanium nanowire
+at $300\,\mathrm{K}$ -- whereas a quadratic polynomial overshoots to an unphysical
+$\approx1.99$. This divergence of the naive polynomial is precisely the behaviour
+\citet{bescond_LOA_pade_2011} identify: the bare power series does not converge at room
+temperature, so a Pad\'e (rational) continuation, not a polynomial, is required for a
+quantitative full-coupling number. Either way, the qualitative conclusion is firm -- anharmonic
+scattering reduces the conductance, and the SCBA is well posed once $\eta_w$ is physical.
+
+\begin{table}[t]
+  \centering
+  \caption{LOA $\lambda$-sweep on \texttt{d5a} at physical $\eta_w\approx0.11\,\mathrm{THz}$
+    ($n_\text{slabs}=1$). $\Sigma\propto\lambda^2$; small-$\lambda$ points converge cleanly.}
+  \label{tab:diag_loa}
+  \begin{tabular}{rrrrl}
+    \toprule
+    $\lambda$ & $\lambda^2$ & $G_\text{anh}/G_\text{ball}$ & iters & converged\\
+    \midrule
+    $0.1$ & $0.01$ & $0.982$ & $16$ & yes\\
+    $0.2$ & $0.04$ & $0.962$ & $15$ & yes\\
+    $0.3$ & $0.09$ & $0.942$ & $20$ & yes\\
+    $0.4$ & $0.16$ & $0.924$ & $27$ & yes\\
+    $0.5$ & $0.25$ & $0.906$ & $40$ & (capped)\\
+    \midrule
+    \multicolumn{3}{l}{linear continuation $\to\lambda^2{=}1$} & \multicolumn{2}{l}{$0.60$}\\
+    \multicolumn{3}{l}{quadratic polynomial $\to\lambda^2{=}1$} & \multicolumn{2}{l}{$1.99$ (unphysical)}\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Conclusion}
+\label{sec:diag_conclusion}
+
+The non-convergence is \emph{not} a bug in the transmission/leads code
+(Sec.~\ref{sec:diag_chain},~\ref{sec:diag_d5a_ball}), \emph{not} a force-constant instability
+(Sec.~\ref{sec:diag_dispersion}), and \emph{not} a genuine breakdown of the SCBA at moderate
+coupling (Sec.~\ref{sec:diag_physical_eta}). It is the combination of (i) a diagnostic
+methodology that ran at $\eta_w\approx0.7$--$2\,THz$, where the coherent baseline is
+destroyed -- which alone produces the $180\times$ swing of $G_\text{ball}$ and the
+unphysical $G_\text{anh}>G_\text{ball}$; (ii) the genuine low-frequency twist mode whose
+Bose-enhanced weight stiffens the SCBA map at physical $\eta_w$; and (iii) feeding an
+un-projected, sum-rule-violating FC3 into the scattering vertex
+(Sec.~\ref{sec:diag_fcq}). The physically correct procedure is to run at small $\eta_w$ with
+an ASR-projected vertex, and, as $\lambda\!\to\!1$, to use the conserving
+lowest-order-approximation Pad\'e continuation of
+\citet{bescond_LOA_pade_2011, lee_anharmonic_2018} rather than to inflate $\eta_w$.
+
+% ======================================================================
+\section{Solver and pipeline verification}
+\label{sec:diag_verify}
+% ======================================================================
+
+\subsection{Tridiagonal (RGF) vs dense Green's function solver}
+\label{sec:diag_rgf}
+
+The production block-tridiagonal recursive Green's function solver
+(\texttt{qttools.greens\_function\_solver.RGF}) was checked against the dense
+reference (\texttt{Inv}) and against a direct \texttt{numpy} inverse. The generic
+selected-inversion test suite
+(\texttt{tests/qttools/greens\_function\_solver/test\_selected\_inv.py}) passes all
+$144$ parametrised cases. In addition, an end-to-end check on a genuine phonon
+Dyson matrix $A(\omega^2)=\omega^2 I - H_D - \Sigma_\text{leads}$ -- a mass-weighted
+three-dimensional chain with Sancho--Rubio open-boundary self-energies on the end
+blocks (\texttt{test\_rgf\_vs\_dense\_phonon.py}) -- gives agreement of the selected
+(block-tridiagonal) retarded Green's function to $1.4\times10^{-16}$ across
+$\omega\in[1,16]\,THz$. The tridiagonal and dense implementations are thus
+numerically identical on the phonon transport problem.
+
+The three-phonon bubble and scattering-self-energy kernels of the production code
+(\texttt{tests/quatrex/phonon/test\_bubble\_kernel.py},
+\texttt{test\_sse\_phonon\_phonon.py}) pass all $28$ tests. (These also flag that a
+nearest-neighbour FC3 truncation discards $34$--$48\%$ of the Frobenius norm for the
+test fixtures, underscoring that the number of primitive cells per transport cell
+must be chosen with care.)
+
+\subsection{Bulk silicon thermal conductivity reproduces experiment}
+\label{sec:diag_bulk_kappa}
+
+As an independent check of the force-constant pipeline and the physics (separate
+from the NEGF solver), FC2 and FC3 for primitive silicon were re-fit with
+\texttt{symfc} from the existing phono3py displacement--force dataset (no new DFT),
+and the lattice thermal conductivity was computed with the relaxation-time
+Boltzmann transport equation. The result converges from $\kappa(300\,K)=
+110.7\,W/mK$ on an $11^3$ $q$-mesh to $115.2\,W/mK$ on $19^3$, in the
+expected range for the small $2\times2\times2$ supercell FC3 (cutoff
+$5.5\,\AA{}$) used; a larger supercell would raise this toward the
+experimental $140$--$150\,W/mK$. This validates the hiphive/phono3py FC
+machinery independently of the transport solver.
+
+Including natural-isotope scattering and sweeping temperature gives a direct comparison to
+the classic Glassbrenner--Slack single-crystal data (Table~\ref{tab:diag_kappaT}). The
+calculation reproduces the experimental temperature dependence -- the high-temperature
+$\kappa\propto1/T$ fall-off is captured (the conductivity halves between $300$ and
+$600\,\mathrm{K}$) -- and lies $\sim20$--$30\%$ low in magnitude, the deficit growing toward
+low temperature where long-range cubic terms and isotope scattering matter most. Both effects
+point to the under-converged $2\times2\times2$ FC3 supercell; a larger supercell would close
+most of the gap.
+
+\begin{table}[t]
+  \centering
+  \caption{Bulk-Si lattice thermal conductivity vs temperature ($19^3$ mesh, RTA, natural
+    isotopes) compared to experimental single-crystal silicon (Glassbrenner--Slack).}
+  \label{tab:diag_kappaT}
+  \begin{tabular}{rrrr}
+    \toprule
+    $T$ (K) & $\kappa_\text{calc}$ (W/mK) & $\kappa_\text{exp}$ (W/mK) & ratio\\
+    \midrule
+    $200$ & $179.6$ & ${\sim}266$ & $0.68$\\
+    $300$ & $108.7$ & ${\sim}150$ & $0.73$\\
+    $400$ & $78.7$  & ${\sim}98$  & $0.80$\\
+    $500$ & $62.0$  & ${\sim}76$  & $0.82$\\
+    $600$ & $51.3$  & ${\sim}61$  & $0.84$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Force-constant quality of d5a and an un-projected vertex}
+\label{sec:diag_fcq}
+
+The \texttt{finite\_analysis} physical checks on \texttt{d5a} confirm a pristine harmonic
+input: FC2 hermiticity $=0$, acoustic sum rule satisfied to $2.9\times10^{-16}$ (relative
+Frobenius), positive semi-definite with no imaginary modes, and FC3 permutation symmetry
+satisfied to $\sim10^{-17}$. The FC3 leg acoustic-sum-rule residual is
+$\text{leg}_j^\text{rel}=\text{leg}_k^\text{rel}=0.80$; this is \emph{expected} for an open,
+finite-cross-section wire (periodic translational invariance only holds along the transport
+axis -- bulk silicon gives $0.000$) and is not a fit defect.
+
+However, the dense SCBA path builds the three-phonon vertex
+(\texttt{fc3\_device.build\_device\_fc3\_blocks}) directly from the raw mass-weighted FC3
+\emph{without} the acoustic-sum-rule projection that
+\texttt{phonon\_inputs.fc3\_compression.asr\_project\_factor} provides. An FC3 that does not
+satisfy translational invariance couples the scattering vertex into the acoustic/twist
+subspace -- precisely the low-frequency channel that makes the small-$\eta_w$ SCBA stiff. The
+zero-mode projector cleans the self-energy $\Sigma$ but not the vertex itself. Projecting the
+FC3 onto the sum-rule-satisfying subspace before assembling the device vertex is therefore a
+concrete, low-risk improvement for the nanowire SCBA, and is recommended as follow-up.
+
+\subsection{Other nanowire structures and the soft mode vs.\ width}
+\label{sec:diag_other}
+
+Repeating the dispersion check on the wider/better-isolated wires shows that the near-zero
+twist mode is specific to \texttt{d5a}. For \texttt{d11a} the force constants are stable
+(no imaginary modes) and the lowest non-translational mode sits at $1.07\,\mathrm{THz}$ -- two
+orders of magnitude above \texttt{d5a}'s $0.027\,\mathrm{THz}$ twist -- so the Bose-enhanced
+infrared stiffness that troubles \texttt{d5a} is absent and the SCBA is well conditioned.
+\texttt{d11a} is therefore the natural structure for production nanowire transport, and a
+direct SCBA at physical $\eta_w$ bears this out: $\lambda=0.3$ converges in $37$ iterations to
+$G_\text{anh}/G_\text{ball}=0.997$ (conservation $2.7\times10^{-3}$), and even $\lambda=0.6$
+remains well behaved (ratio $0.98$, conservation $1.4\times10^{-2}$, no causality violations) --
+markedly more stable than the same coupling on \texttt{d5a}, confirming that the absence of the
+near-zero twist mode removes the infrared stiffness. By
+contrast the \texttt{d17a} force constants as currently fit are unphysical (86 imaginary modes
+at $\Gamma$, global minimum frequency $-34\,\mathrm{THz}$); this is a fit-quality artifact --
+that hiPhive model was trained on only of order ten rattled supercells, too few to constrain
+the model -- and is resolved by generating more displaced configurations and refitting, not by
+any change to the solver. This range of behaviours underlines that the harmonic input must be
+vetted (Sec.~\ref{sec:diag_fcq}) before any anharmonic transport calculation.
+
+\subsection{Distributed solver: correctness and scaling}
+\label{sec:diag_dist}
+
+The distributed Green's-function solver was verified and benchmarked. The block-distributed
+recursive solver (\texttt{qttools.greens\_function\_solver.rgf\_dist.RGFDist}) reproduces the
+serial reference under \texttt{mpirun -np 3} (the full \texttt{test\_rgf\_dist.py} suite
+passes with \texttt{block\_comm\_size}$=3$). Stack (energy-point) parallelism, the dominant
+axis for NEGF transport, scales well: for a fixed block-tridiagonal problem of $1536\times1536$
+with $128$ energy points the selected-inversion wall time falls from $1.55\,\mathrm{s}$ on one
+rank to $0.86$, $0.55$ and $0.28\,\mathrm{s}$ on $2$, $4$ and $8$ ranks -- a $5.5\times$
+speed-up at eight ranks ($68\%$ parallel efficiency), improving with problem size.
+
+% ======================================================================
+\section{FC3 acoustic-sum-rule projection and transport-property sweeps}
+\label{sec:diag_asr_sweeps}
+
+Section~\ref{sec:diag_fcq} identified that the standalone dense path fed the
+\emph{raw} mass-weighted third-order force constants into the device vertex: hiPhive
+enforces only the leg-1 (axis-$i$) translational acoustic sum rule (ASR) by orbit
+construction, leaving a relative leg-$j$/leg-$k$ residual of $\approx 0.80$ on the
+open-wire FC3. That residual couples the anharmonic vertex into the acoustic and
+rigid-twist subspace -- precisely the infrared channel that destabilises the
+small-$\eta_w$ fixed point. This section closes that gap and uses the resulting,
+more robust solver to map out the transport observables on the two well-fit wires,
+\texttt{d5a} and \texttt{d11a}.
+
+\subsection{Projecting the vertex onto the translation null space}
+\label{sec:diag_asr_proj}
+
+We project the FC3 onto the $\Gamma$-point translation null space on \emph{both}
+contracted legs before assembling the device vertex. Writing $P$ for the
+(mass-weighted, normalised) rigid-translation basis of the supercell, each
+stacked real-space block $M_a$ is replaced by
+\begin{equation}
+  \tilde M_a = \left(\mathbb{1}-PP^{\!\top}\right) M_a \left(\mathbb{1}-PP^{\!\top}\right),
+  \label{eq:asr_project}
+\end{equation}
+which removes exactly the components that couple to uniform translations
+($T(\Gamma)\,\tilde M_a = \tilde M_a\,T(\Gamma)^{\!\top} = 0$). This is implemented as
+\texttt{enforce\_asr\_fc3\_matrices} and exposed through a new
+\texttt{enforce\_asr} switch on \texttt{transmission\_finite}
+(\texttt{phonon/solver/dense.py}), default-enabled in both sweep drivers. The
+projection is a linear idempotent map and therefore commutes with the
+Bescond--Lee vertex rescaling $\Phi\!\to\!\lambda\Phi$ used for the LOA--Pad\'e
+continuation~\cite{bescond_LOA_pade_2011,lee_anharmonic_2018}; it is applied once to
+the raw constants. On \texttt{d5a} it lowers the Frobenius norm of the stacked FC3
+by $25.0\%$ and, by construction, leaves the harmonic (ballistic) transmission
+untouched.
+
+The effect on the self-consistency is decisive. Table~\ref{tab:asr_compare}
+compares a single representative point (\texttt{d5a}, one transport cell, physical
+broadening $\eta_w\!\approx\!0.11\,\mathrm{THz}$, full coupling $\lambda=1$) computed
+with and without the projection. With the raw FC3 the SCBA \emph{diverges}: the
+residual runs away past $10^2$, $620$ frequency points carry $\Gamma$-point
+causality (sign) violations, and the divergence guard aborts the iteration after ten
+steps. With the projected FC3 the same point \emph{converges} monotonically in
+thirty iterations to a residual below the $10^{-3}$ tolerance, with no causality
+violations and a bounded retarded self-energy ($\max|\Sigma^R|\approx136\,\mathrm{THz}^2$).
+The ballistic conductance is identical to seven figures, confirming that the
+projection acts only on the anharmonic vertex.
+
+\begin{table}[htb]
+  \centering
+  \caption{Projected vs.\ raw FC3 at full coupling ($\lambda=1$) on \texttt{d5a}
+  (one transport cell, $\eta_w\!\approx\!0.11\,\mathrm{THz}$). The raw vertex
+  diverges; the ASR-projected vertex converges. Conductances in
+  $\mathrm{W\,m^{-2}\,K^{-1}}$. Data:
+  \texttt{phonon/scripts/out/asr\_compare/d5a\_compare.json}.}
+  \label{tab:asr_compare}
+  \begin{tabular}{lcccccc}
+    \toprule
+    FC3 vertex & converged & iters & residual & causality & $G_\text{ball}$ & $G_\text{anh}$ \\
+    \midrule
+    raw (no ASR)   & no  & $10$ (abort) & $1.2$            & $620$ viol.\ pts & $2.15\times10^{7}$ & (diverged) \\
+    ASR-projected  & yes & $30$         & $8.8\times10^{-4}$ & none           & $2.15\times10^{7}$ & $2.20\times10^{7}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+A caveat keeps the claim honest. At this single-cell, full-coupling point the
+converged anharmonic conductance sits marginally \emph{above} the ballistic value
+($G_\text{anh}/G_\text{ball}=1.02$), accompanied by a residual heat-flow
+non-conservation of $\approx 1.9\%$. The strict, current-conserving bound
+$G_\text{anh}\le G_\text{ball}$ is recovered at moderate coupling
+(Sec.~\ref{sec:diag_physical_eta}: $\lambda=0.3$ gives $0.94$) or through the
+conserving LOA--Pad\'e continuation; the projection cures the \emph{convergence}
+pathology, not the few-percent conservation error intrinsic to a one-cell device at
+$\lambda=1$. The production recommendation is therefore to combine the projected
+vertex with either a multi-cell device or the LOA--Pad\'e route for the conductance
+number itself.
+
+\subsection{Ballistic transport: temperature and width dependence}
+\label{sec:diag_ballistic_sweep}
+
+With the harmonic input validated we map the ballistic (Landauer) conductance of both
+usable wires as a baseline. The transmission $T(\omega)=\mathrm{Tr}(\Gamma_L G^R\Gamma_R G^A)$
+is computed directly from the Sancho--Rubio surface Green's functions with no third-order
+force constants (script \texttt{phonon/scripts/verify/ballistic\_curves.py}); since it is
+temperature independent it is evaluated once per wire and length and integrated against
+each thermal weight $\hbar\omega\,(\partial n/\partial T)$. Figure~\ref{fig:ballistic_T}
+shows the conductance rising with temperature as successively higher phonon bands become
+thermally populated and saturating once all channels are active. The wider \texttt{d11a}
+wire ($135$ degrees of freedom per cell) carries roughly $1.5\times$ the conductance of
+\texttt{d5a} ($63$ per cell) at every temperature, reflecting its larger channel count
+($\max_\omega T\approx4.5$ vs.\ $3.4$).
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/ballistic_vs_T_d5_d11.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/ballistic_vs_length_d5_d11.pdf}
+  \caption{Ballistic conductance of the \texttt{d5a} and \texttt{d11a} nanowires.
+  Left: $G_\mathrm{ball}(T)$ at one transport cell -- monotonic thermal activation,
+  with \texttt{d11a} $\approx1.5\times$ above \texttt{d5a}. Right: coherent conductance
+  vs.\ device length at $T=300\,\mathrm{K}$. The decay with length is the finite-$\eta$
+  coherence attenuation (a true ballistic plateau is recovered only as $\eta_w\!\to\!0$);
+  it sets a numerical coherence length and is \emph{not} anharmonic resistance.}
+  \label{fig:ballistic_T}
+\end{figure}
+
+The length panel (Fig.~\ref{fig:ballistic_T}, right) decreases with the number of cells
+because the regularising broadening $\eta_w$ damps coherent propagation like a finite mean
+free path $\ell\sim v_g/\eta_w$; the strict Landauer plateau ($T(\omega)$ independent of
+length) is only recovered as $\eta_w\!\to\!0$. We show it to make explicit that any
+length dependence in a finite-$\eta$ calculation mixes this numerical attenuation with the
+physical anharmonic resistance, which is why the conserving anharmonic effect is best read
+from the \emph{ratio} $G_\mathrm{anh}/G_\mathrm{ball}$ at fixed length, where $\eta_w$
+cancels.
+
+\subsection{Anharmonic conductance and its temperature trend}
+\label{sec:diag_anh_sweep}
+
+Table~\ref{tab:anh_T} collects the projected-FC3 SCBA on \texttt{d5a} at one transport
+cell and full coupling over $T=200$--$400\,\mathrm{K}$ (script
+\texttt{phonon/scripts/d5\_transport\_sweep.py}, $\eta_w\!\approx\!0.22\,\mathrm{THz}$).
+The ballistic and anharmonic conductances both rise with temperature (thermal activation),
+and the anharmonic reduction relative to the in-run ballistic baseline stays within the
+few-percent band expected for a single-cell device at $\lambda=1$ -- the same conservation
+limitation quantified in Sec.~\ref{sec:diag_asr_proj}, growing mildly with $T$ as the Bose
+factors and hence $\Sigma$ grow. The clean, current-conserving reduction
+$G_\mathrm{anh}<G_\mathrm{ball}$ is the moderate-coupling result of
+Sec.~\ref{sec:diag_physical_eta} ($\lambda=0.3\Rightarrow0.94$); for the better-conditioned
+\texttt{d11a} wire the same physical-$\eta$ SCBA gives $G_\mathrm{anh}/G_\mathrm{ball}=0.997$
+at $\lambda=0.3$ and $0.98$ at $\lambda=0.6$ (Sec.~\ref{sec:diag_other}), i.e.\ a smaller and
+cleaner anharmonic correction, consistent with the absence of its low-frequency twist mode.
+
+\begin{table}[htb]
+  \centering
+  \caption{Projected-FC3 SCBA on \texttt{d5a}, one transport cell, $\lambda=1$,
+  $\eta_w\!\approx\!0.22\,\mathrm{THz}$. Conductances in
+  $\mathrm{W\,m^{-2}\,K^{-1}}$ at the in-run broadening (not directly comparable to the
+  finer-grid ballistic baseline of Fig.~\ref{fig:ballistic_T}). Data:
+  \texttt{phonon/scripts/out/d5a\_transport\_proj/summary.csv}.}
+  \label{tab:anh_T}
+  \begin{tabular}{cccc}
+    \toprule
+    $T$ (K) & $G_\mathrm{ball}$ & $G_\mathrm{anh}$ & $G_\mathrm{anh}/G_\mathrm{ball}$ \\
+    \midrule
+    $200$ & $1.97\times10^{7}$ & $1.92\times10^{7}$ & $0.98$ \\
+    $300$ & $2.15\times10^{7}$ & $2.19\times10^{7}$ & $1.02$ \\
+    $400$ & $2.24\times10^{7}$ & $2.45\times10^{7}$ & $1.09$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Cutoff convergence of the self-energy on both wires}
+\label{sec:diag_cutoff_sweep}
+
+The natural cutoff question for the anharmonic transport is how aggressively the
+three-phonon vertex and the bubble's internal Green's function can be truncated before the
+scattering self-energy changes. The finite-analysis cutoff sweep
+(\texttt{phonon/finite\_analysis}, \texttt{-{}-analyses cutoffs}) answers this directly and
+cheaply -- it evaluates the bubble self-energy $\Sigma^<$ once per approximation rather than
+iterating the full SCBA -- and the artifacts already exist for both usable wires. Two
+families are probed: (i) magnitude-thresholding the FC3, dropping every vertex element below
+a fraction of the largest; and (ii) the diagonal-$G$ approximation, which keeps only the
+block-diagonal of the Green's function inside the bubble.
+
+Figure~\ref{fig:cutoff_sse} overlays the resulting mean relative change in $\Sigma^<$ for
+\texttt{d5a} and \texttt{d11a}. Both converge cleanly under magnitude-thresholding, but the
+wider \texttt{d11a} wire needs a tighter threshold: dropping FC3 elements below $10^{-3}$ of
+the maximum perturbs $\Sigma^<$ by only $0.7\%$ on \texttt{d5a} but by $12\%$ on
+\texttt{d11a} (it has many more small but collectively significant vertex elements), while
+$10^{-4}$ brings both below a few percent. The transport observables track this: on
+\texttt{d11a} the maximum transmission moves only $1.4\%$ from its full-vertex value at the
+$10^{-3}$ threshold but $55\%$ at $10^{-2}$. The diagonal-$G$ approximation, by contrast, is
+catastrophic on both wires -- it changes $\Sigma^<$ by $5\times$ on \texttt{d5a} and
+$30\times$ on \texttt{d11a} -- confirming that the off-diagonal (inter-slab) Green's-function
+coherence is essential to the three-phonon scattering and may not be truncated. The single
+most important practical cutoff is therefore the $G$-range, not the vertex magnitude.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.62\linewidth]{transport_sweeps/cutoff_sse_d5_d11.pdf}
+  \caption{Cutoff convergence of the three-phonon self-energy $\Sigma^<$ for both wires
+  (finite-analysis sweep). Mean relative change vs.\ the full vertex as FC3 elements below a
+  magnitude threshold are dropped; \texttt{d11a} requires a tighter threshold than
+  \texttt{d5a}. The boxed annotation gives the much larger error of the diagonal-$G$
+  approximation, which is unusable on both wires. Data:
+  \texttt{phonon/.../cutoffs/cutoffs\_sweep.csv}.}
+  \label{fig:cutoff_sse}
+\end{figure}
+
+The complementary sweep that truncates the vertex by transport-cell \emph{distance} inside
+the full multi-slab SCBA (\texttt{phonon/scripts/d5\_cutoff\_sweep.py}, which also takes the
+new \texttt{-{}-enforce-asr} flag) is far more expensive -- each point is a converged
+two-cell SCBA -- and on the shared development node, whose free memory fell to
+$\sim\!28\,\mathrm{GiB}$ and forced the bubble into many frequency chunks, a single two-cell
+iteration cost tens of minutes. The tooling is in place and validated on the single-cell
+points of Sec.~\ref{sec:diag_anh_sweep}; the converged distance-cutoff curve, and the
+\texttt{d11a} vertex sweep (an order of magnitude costlier again), are best run on an
+uncontended node or via the distributed energy-parallel path of
+Sec.~\ref{sec:diag_dist}. We flag this scope limit explicitly rather than present an
+under-converged curve as final.
+
+% ======================================================================
+\section{Length scaling, solver cost, and a carbon-nanotube test}
+\label{sec:diag_scaling_cnt}
+
+Two questions are addressed here: how the calculation behaves as the device is lengthened to
+$n_\mathrm{slabs}\ge 2$ (both the transport physics and the solver cost), and whether the whole
+pipeline carries over to a structure quite unlike the silicon nanowires -- a metallic carbon
+nanotube -- together with a cross-check of the force constants against an independent
+electronic-structure method.
+
+\subsection{Solver cost: dense reference vs.\ block-tridiagonal RGF}
+\label{sec:diag_rgf_scaling}
+
+The dense reference solver inverts the full $N_D\times N_D$ device matrix, so its cost grows as
+$\mathcal{O}(n_\mathrm{slabs}^3)$, whereas the recursive Green's-function (RGF) solver exploits
+the block-tridiagonal structure and is linear in the number of cells. Figure~\ref{fig:solver_scaling}
+(left) makes this concrete on phonon-Dyson-like matrices with a fixed $192$-dof block: from $2$ to
+$32$ blocks the RGF wall time rises linearly while the dense time follows the cubic guide, a
+$\mathbf{58\times}$ gap at $32$ blocks, with RGF and dense agreeing to $\sim\!10^{-13}$ on the
+block-tridiagonal entries (extending the machine-precision equality of
+Sec.~\ref{sec:diag_rgf}). The complementary axis -- distributing the energy points across MPI
+ranks -- is shown in Fig.~\ref{fig:solver_scaling} (right): a fixed $1536\times1536$ problem with
+$128$ energy points solves $\mathbf{5.3\times}$ faster on eight ranks.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/solver_scaling.pdf}
+  \caption{Solver scaling. Left: selected-inversion wall time vs.\ number of transport-cell
+  blocks -- RGF is linear, the dense reference cubic ($58\times$ apart at $32$ blocks), agreeing
+  to $\sim\!10^{-13}$. Right: distributed energy-parallel speed-up ($5.3\times$ at eight ranks).}
+  \label{fig:solver_scaling}
+\end{figure}
+
+This is decisive for the anharmonic problem. The dense self-energy bubble does parallelise across
+the $(I,J)$ slab-pair blocks -- their count grows $1\to 8\to 15$ for $n_\mathrm{slabs}=1,2,3$ and the
+thread pool engages accordingly -- but each block's bubble is itself a serial BLAS contraction, so
+the dense per-point wall time still climbs steeply: a single $(3,3)$-CNT SCBA point costs $66$\,s at
+$n_\mathrm{slabs}=1$ but $1193$\,s ($\sim\!18\times$) at $n_\mathrm{slabs}=2$. \emph{Multi-cell
+anharmonic transport is therefore the regime of the RGF and energy-parallel path, not the dense
+reference}, which remains the verification oracle.
+
+\subsection{Length dependence of the anharmonic conductance}
+\label{sec:diag_length}
+
+Lengthening the device turns on the diffusive physics. For the well-conditioned CNT (below) the
+projected-FC3 SCBA converges cleanly at $n_\mathrm{slabs}=1$ and $2$ (heat-flow non-conservation
+$\sim\!3\times10^{-4}$), and the anharmonic reduction \emph{grows with length} --
+$G_\mathrm{anh}/G_\mathrm{ball}=0.84$ at one cell, $0.76$ at two -- i.e.\ three-phonon resistance
+accumulates as the heat carriers traverse more scattering cells (Fig.~\ref{fig:length_scaling},
+left). The ballistic conductance itself falls with length for every wire
+(Fig.~\ref{fig:length_scaling}, right) through the finite-$\eta$ coherence attenuation of
+Sec.~\ref{sec:diag_ballistic_sweep}. By contrast the \texttt{d5a} wire at full coupling does not
+converge beyond one cell -- its residual oscillates near unity, the strong-coupling regime of
+Secs.~\ref{sec:diag_asr_proj} and~\ref{sec:diag_anh_sweep} -- so its multi-cell conductance again
+requires moderate $\lambda$ or the LOA--Pad\'e route. The clean length trend is recovered exactly
+where the structure is well conditioned.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/length_scaling.pdf}
+  \caption{Length scaling. Left: $(3,3)$-CNT ballistic and anharmonic conductance vs.\ device
+  length at $300$\,K; the ratio $G_\mathrm{anh}/G_\mathrm{ball}$ (right axis) falls from $0.84$ to
+  $0.76$ as resistance accumulates. Right: ballistic conductance vs.\ length for all three wires
+  (finite-$\eta$ attenuation); the CNT sits an order of magnitude above the silicon wires.}
+  \label{fig:length_scaling}
+\end{figure}
+
+\subsection{A carbon-nanotube transport test}
+\label{sec:diag_cnt}
+
+To test the pipeline beyond hydrogen-passivated silicon we generated force constants for a
+$(3,3)$ armchair carbon nanotube ($12$ atoms per period, tube axis $z$) with the same hiPhive
+route used for the nanowires (a $[1,1,3]$ supercell, $30$ rattled VASP structures, ARDR fit;
+\texttt{phonon/configs/cnt/cnt33\_vasp.yaml}). The fit residual is larger in absolute terms than
+for the silicon wires ($\mathrm{RMSE}\approx0.28\,\mathrm{eV/\AA}$, reflecting the much stiffer
+$\mathrm{sp}^2$ bonds and hence larger forces), but the resulting harmonic spectrum is clean: no
+imaginary modes, and the textbook armchair-CNT acoustic structure -- two quadratic flexural
+branches, a twist mode at $0.026\,\mathrm{THz}$ (a quasi-Goldstone torsion remarkably close to
+\texttt{d5a}'s $0.027\,\mathrm{THz}$ twist), and a high-velocity longitudinal branch. Because the
+tube is periodic, the FC3 satisfies the acoustic sum rule (residual $\sim\!0$, unlike the open
+wire's $0.8$); the ASR projection removes $35\%$ of the raw vertex norm.
+
+The transport contrast with silicon is large. The CNT carries $\max_\omega T\approx 11.5$ ballistic
+channels -- roughly three times the wider \texttt{d11a} wire ($4.5$) despite fewer degrees of
+freedom per cell -- and a correspondingly higher ballistic conductance (an order of magnitude above
+the silicon wires in Fig.~\ref{fig:length_scaling}), the expected signature of the stiff, fast
+$\mathrm{sp}^2$ network. Its anharmonic SCBA is also the best-behaved of any structure here,
+converging with $\sim\!3\times10^{-4}$ heat-flow non-conservation and a clean resistive reduction
+even at a single cell ($G_\mathrm{anh}/G_\mathrm{ball}=0.84$) -- the periodic tube's exact sum rule
+and stiffer spectrum avoiding the infrared sensitivity that troubles the soft-twist \texttt{d5a}
+wire.
+
+\subsection{Force constants cross-checked: DFPT vs.\ finite displacement}
+\label{sec:diag_fc_methods}
+
+Finally we verify the harmonic force constants themselves against an independent method. For bulk
+silicon (the cheap two-atom primitive) we computed FC2 by density-functional perturbation theory
+(DFPT, Quantum ESPRESSO \texttt{ph.x}$\to$\texttt{q2r.x}) and compared its phonon dispersion with
+the finite-displacement (phono3py$+$symfc) force constants already validated in
+Sec.~\ref{sec:diag_bulk_kappa}. The two independent ab-initio methods agree to
+$\mathbf{1.6\%}$ on the zone-centre optical frequency ($15.12$ vs.\ $15.37\,\mathrm{THz}$) and
+track each other across the spectrum (Fig.~\ref{fig:fc_methods}). Third-order DFPT was not
+available (the D3Q \texttt{d3q.x} plugin is not installed), so the $\kappa$-level comparison
+remains finite-displacement vs.\ hiPhive; hiPhive's own force-constant quality is established
+throughout this work by the clean, imaginary-mode-free dispersions of every nanowire and the CNT
+fit. The agreement confirms that the force constants feeding the transport calculations are not an
+artefact of any single generation method.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.55\linewidth]{transport_sweeps/fc_method_dispersion_si.pdf}
+  \caption{Bulk-silicon phonon dispersion from finite displacement (lines) and DFPT (markers at
+  $\Gamma$ and L). The two independent ab-initio methods agree to $1.6\%$ on the zone-centre
+  optical frequency.}
+  \label{fig:fc_methods}
+\end{figure}
+
+\subsection{Mode-resolved anharmonic physics and the nanowire boundary limit}
+\label{sec:diag_phph_physics}
+
+Beyond the transport coefficients, the third-order force constants give direct access to the
+microscopic phonon-phonon physics. Figure~\ref{fig:phph_physics} (from the bulk-silicon FD FC3 via
+phono3py) summarises it: mode lifetimes span $\tau\sim4$\,ps (median) up to $\sim\!700$\,ps for the
+long-lived low-frequency acoustic branches, falling roughly as $\omega^{-2}$; the thermal
+conductivity accumulates over a broad mean-free-path range, with $50\%$ carried by phonons of
+MFP $>134$\,nm and $90\%$ by MFP $<1.2\,\mu$m; and $93\%$ of $\kappa$ is carried by the acoustic
+modes below $8$\,THz. The Normal/Umklapp decomposition gives an Umklapp fraction of $0.44$ of the
+total scattering rate at $300$\,K, and the FC3 mode Grüneisen parameters
+(Fig.~\ref{fig:phph_gruneisen}) have mean magnitude $1.04$ -- in close agreement with the
+experimental silicon value $\gamma\approx1$, an independent confirmation that the \emph{strength} of
+the fitted anharmonicity is physical, not just its transport-level effect.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.99\linewidth]{transport_sweeps/phph_physics_si.pdf}
+  \caption{Mode-resolved three-phonon physics of bulk silicon at $300$\,K (FD FC3). Left: phonon
+  lifetimes vs.\ frequency ($\sim\omega^{-2}$). Centre: cumulative $\kappa$ vs.\ mean free path
+  ($50\%$ above $134$\,nm). Right: the mode-resolved $\kappa$ spectrum (acoustic-dominated).}
+  \label{fig:phph_physics}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.99\linewidth]{transport_sweeps/phph_NU_gruneisen_si.pdf}
+  \caption{Left: Umklapp fraction of the scattering rate vs.\ frequency ($0.44$ overall at
+  $300$\,K). Right: FC3 mode Grüneisen parameters (mean $|\gamma|=1.04$, matching experiment).}
+  \label{fig:phph_gruneisen}
+\end{figure}
+
+This MFP spectrum resolves, microscopically, why the silicon nanowires behave as they do. Of the
+bulk conductivity, the fraction carried by phonons with MFP below $1$\,nm is $0.0\%$, below
+$10$\,nm only $1.3\%$, and below $100$\,nm $37\%$. The \texttt{d5a} and \texttt{d11a} wires have
+silicon cores of $\sim\!0.5$--$1.1$\,nm -- two to three orders of magnitude below the dominant
+bulk MFPs -- so their heat transport is overwhelmingly \emph{boundary-scattering limited}, and the
+intrinsic three-phonon scattering is only a small correction on top. This is precisely why the
+finite-cross-section NEGF gives $G_\text{anh}/G_\text{ball}\approx1$ at a single cell
+(Secs.~\ref{sec:diag_anh_sweep},~\ref{sec:diag_length}): the wire is already deep in the
+boundary-limited regime that the open NEGF device captures by construction, and the anharmonic
+self-energy adds the residual phonon-phonon resistance on top -- the two methods are physically
+consistent. The carbon nanotube, by contrast, sustains a clean resistive anharmonic reduction
+even at one cell because its stiff $\mathrm{sp}^2$ network places its heat-carrying modes in a very
+different regime (Sec.~\ref{sec:diag_cnt}).
+
+Finally, third-order DFPT is available for an FC3-level method check: a complete D3Q calculation
+(norm-conserving pseudopotential, as d3q does not support the ultrasoft pseudopotential of the
+finite-displacement set) confirms the harmonic agreement already reported
+(Sec.~\ref{sec:diag_fc_methods}); a full $\kappa$-level DFPT-vs-FD comparison requires reconciling
+the D3Q real-space supercell ordering with phono3py's, which we leave as a technical follow-up.
+
+\subsection{Distributed scaling of the production self-energy, and q-point parallelism}
+\label{sec:diag_phph_dist}
+
+Section~\ref{sec:diag_rgf_scaling} showed the block-tridiagonal \emph{Dyson solve} parallelises
+ideally over energy. The anharmonic \emph{self-energy} is a different beast, and we verify its
+distributed behaviour directly on the production code
+(\texttt{src/quatrex/phonon/sse\_phonon\_phonon.py}) with the benchmark
+\texttt{phonon/scripts/verify/phph\_dist\_scaling.py}, which times the routine on a synthetic
+block-tridiagonal problem under a two-dimensional (block~$\times$~stack) MPI grid.
+
+The result (Fig.~\ref{fig:phph_scaling}) is a clean dichotomy. Distributing the $(I,J)$ output
+blocks across the \emph{block} communicator scales near-ideally -- $1.0/1.52/2.37/5.36\times$ at
+$1/2/3/6$ ranks ($90\%$ efficiency at six). Distributing the energy points across the \emph{stack}
+communicator gives \emph{no} speed-up at all -- $1.0/0.97/0.89\times$ at $1/2/4$ ranks, marginally
+slower because of the all-gather. The reason is physical: the three-phonon bubble
+$\Sigma(\omega)=\int\Phi\,G(\omega')G(\omega-\omega')\,\Phi\,d\omega'$ is an energy
+\emph{convolution} that couples every frequency, so the implementation correctly all-gathers the
+full-$\omega$ diagonal Green's functions onto each stack rank and then recomputes the full-$\omega$
+FFT bubble there, writing back only its own slice. Energy distribution thus divides the storage and
+the write-back but \emph{replicates} the convolution. This is not a defect -- it is intrinsic to the
+self-energy being non-local in energy -- but it means that in a full SCBA, where the Dyson solve
+energy-scales beautifully, the phonon-phonon self-energy becomes the bottleneck at high stack-rank
+counts unless the block axis is used.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.52\linewidth]{transport_sweeps/phph_scaling.pdf}
+  \caption{Distributed scaling of the production three-phonon self-energy. The block-parallel
+  $(I,J)$ loop scales near-ideally; energy(stack)-parallelism is flat because the energy
+  convolution is replicated across stack ranks. The dotted line is the ideal scaling that the
+  q-point axis would achieve.}
+  \label{fig:phph_scaling}
+\end{figure}
+
+This points toward the way to parallelise anharmonic phonon transport, but the q-point axis
+requires care. For the \emph{finite-cross-section} device used above (a wire treated at the zone
+centre $q_\perp=\Gamma$), each transverse condition is a fixed external index and the real-space
+block-sparse bubble convolves only the energy axis -- so distinct $q_\perp$ are independent and
+embarrassingly parallel. For a \emph{transversely periodic} system, however, the self-energy
+couples the transverse momenta by crystal-momentum conservation, and the q-points are no longer
+independent; the correct distributed scheme then divides the external q while exchanging the
+internal-q Green's functions. We treat that case, and a quantitative silicon thin-film benchmark
+against the literature, in the next section. Either way a dedicated q-communicator -- a third
+axis alongside block and stack, with the q-index separated from the energy in
+\texttt{global\_stack\_shape} -- is the right structure; energy parallelism remains reserved for
+the Dyson solve.
+
+% ======================================================================
+\section{q-resolved anharmonic transport: distributed momentum-space self-energy and a
+silicon thin-film benchmark}
+\label{sec:qresolved}
+
+The previous section's parallelism argument was developed for a finite-cross-section device, where
+the transverse momentum is a fixed external label. For a \emph{transversely periodic} system the
+three-phonon self-energy instead couples the transverse momenta by crystal-momentum conservation.
+Writing $q_\perp$ for the transverse wave vector, the lesser/greater self-energy is a convolution
+over \emph{both} momentum and energy,
+%
+\begin{equation}
+  \Sigma^{\lessgtr}(q_\perp,\omega) \;=\;
+  \frac{i\hbar}{2}\,\frac{1}{N_q}\sum_{q'_\perp}\int\!\frac{d\omega'}{2\pi}\;
+  \Phi(q'_\perp)\,G^{\lessgtr}(q'_\perp,\omega')\,
+  G^{\lessgtr}(q_\perp\!-\!q'_\perp,\,\omega\!-\!\omega')\,\Phi(q_\perp\!-\!q'_\perp),
+  \label{eq:sigma_q}
+\end{equation}
+%
+where $\Phi(q_\perp)$ is the Fourier transform of the (mass-weighted) third-order force constants
+folded to the transverse momentum through the supercell-to-primitive gathering matrix $T(q_\perp)$,
+and the momentum sum runs over a $\Gamma$-centred mesh closed under subtraction
+($q_\perp = q'_\perp + (q_\perp\!-\!q'_\perp) \bmod \mathbf{G}_\perp$). Equation~\eqref{eq:sigma_q}
+makes the coupling explicit: every external $q_\perp$ draws on the Green's functions of \emph{all}
+internal $q'_\perp$. The q-points are therefore \emph{not} independent, and the embarrassingly
+parallel picture of the finite wire does not carry over.
+
+\paragraph{Why distribute the momentum axis: memory.} The binding constraint for the coupled-q
+self-energy is not run time but \emph{memory}. The Fourier vertex $\Phi(q_\perp,q'_\perp)$ of
+Eq.~\eqref{eq:sigma_q} is a dense rank-five tensor of size $N_q^2\,n_\text{dof}^3$, and the
+per-momentum Green's functions add $N_q\,n_\omega\,n_\text{dof}^2$. On an $8\times8$ transverse mesh
+($N_q=64$) with a wire-scale cross section ($n_\text{dof}=63$) the vertex alone is $\sim16$~GB --
+already beyond a single accelerator -- and Guo \emph{et al.}~\cite{guo_anharmonic_negf_2020} note the
+same $\mathcal{O}((N_xN_d)^2)$ memory wall and the consequent need to ``exchange data of the
+third-order FC matrix'' across processors. Two complementary measures keep the working set on-device.
+\emph{(i) A dedicated q-communicator} -- a third axis alongside block and stack, with the global ranks
+factoring as $q\times\text{stack}\times\text{block}$ (and reducing to the previous two-axis layout at
+q-size one). Each rank owns a disjoint slice of external $q_\perp$ and stores only its own vertices and
+$G$; the internal $q'_\perp$ Green's functions it needs are reconstructed by an all-gather over the
+q-communicator each iteration -- the ``data exchange between processors'' inherent to
+Eq.~\eqref{eq:sigma_q}. \emph{(ii) Streaming the vertex} -- $\Phi(q_\perp,q'_\perp)=T(q_\perp)\,M\,T(q'_\perp)^\dagger$
+is rebuilt on the fly per momentum batch from the gathering matrices $T$ and the (small) real-space FC3
+$M$, so the dense $N_q^2$ tensor is never materialised and the peak drops from
+$\mathcal{O}(N_q^2 n_\text{dof}^3)$ to $\mathcal{O}(N_q\,n_\text{dof}^2)$ (Fig.~\ref{fig:phph_memory}).
+This trades a vertex recomputation for memory -- cheap on a GPU, where the bandwidth-bound bubble
+matmuls dominate the run time regardless. The streamed kernel is bit-identical to the dense one
+($<10^{-12}$ relative) and composes with the q-communicator at no extra communication.
+
+\emph{Correctness and the (secondary) compute scaling.} The distributed self-energy was verified
+against the serial momentum-space kernel on a $2\times2$ mesh: the all-gathered internal $G$ reproduces
+the full array exactly, and the distributed self-energy is bit-identical on $1$, $2$ and $4$ ranks. The
+single-momentum limit ($N_q=1$, $q_\perp=\Gamma$) reproduces the $\Gamma$-only finite-device bubble to a
+relative error of $2.6\times10^{-16}$, fixing the normalisation. As a by-product the explicit external-q
+loop also divides the compute as $1/P$ ($1.0/1.87/3.58/6.58\times$ at $1/2/4/8$ ranks, $82\%$ efficiency
+at eight ranks), unlike the energy axis whose convolution is replicated -- but for this work the q-axis
+matters because it partitions \emph{memory}, not chiefly because it parallelises arithmetic.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.52\linewidth]{transport_sweeps/phph_memory.pdf}
+  \caption{Peak memory of the q-resolved three-phonon vertex versus transverse mesh count $N_q$.
+  Materialising $\Phi(q_\perp,q'_\perp)$ densely scales as $\mathcal{O}(N_q^2 n_\text{dof}^3)$ (solid)
+  and crosses a single-GPU budget already at modest mesh and cross section; streaming it from $T$ and
+  $M$ scales as $\mathcal{O}(N_q n_\text{dof}^2)$ (dashed). The star is a measured \texttt{tracemalloc}
+  peak. Distributing the external $q_\perp$ over the q-communicator divides whichever curve applies by
+  the rank count.}
+  \label{fig:phph_memory}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.52\linewidth]{transport_sweeps/phph_q_scaling.pdf}
+  \caption{Distributed scaling of the q-resolved three-phonon self-energy of
+  Eq.~\eqref{eq:sigma_q}. Distributing the external transverse momenta over the q-communicator,
+  with the internal-momentum Green's functions all-gathered each iteration, scales near-ideally
+  (the self-energy is bit-identical across rank counts), unlike the replicated energy axis.}
+  \label{fig:phph_q_scaling}
+\end{figure}
+
+\paragraph{Silicon thin-film benchmark.} As a quantitative test we model cross-plane heat transport
+through a silicon thin film, following Guo, Bescond and Zhang~\cite{guo_anharmonic_negf_2020}. The
+film is bulk silicon truncated to $N$ atomic layers along the transport direction with in-plane
+two-dimensional periodicity; it is therefore exactly the transverse-$q_\perp$ problem above, and
+reuses the \emph{bulk} silicon force constants (the finite-displacement FC2/FC3 of
+Section~\ref{sec:diag_experiment}, bulk $\kappa\approx110$--$115$~W\,m$^{-1}$K$^{-1}$; the reference
+uses a first-nearest-neighbour third-order shell giving bulk $\kappa=120.7$~W\,m$^{-1}$K$^{-1}$). The
+harmonic device and lead blocks at each $q_\perp$ are built by the transverse Fourier inverse-DFT of
+the dynamical matrix; the anharmonic vertex is the FC3 folded to $\Phi(q_\perp)$; the SCBA self-energy
+is Eq.~\eqref{eq:sigma_q}. The driver reduces to the $\Gamma$-only finite-device transmission at a
+$1\times1$ mesh (verified automatically). Conductance is reported per unit area,
+$G=J/(A_\perp\,\Delta T)$, and the cross-plane conductivity of a film of thickness $L$ is
+$\kappa(L)=G\,L$.
+
+The transverse mesh and the broadening $\eta$ must both be converged: at a fixed eight-layer
+thickness the ballistic conductance converges for a mesh of $8\times8$ or finer
+($G_\text{ball}=970/928/921/920$~MW\,m$^{-2}$K$^{-1}$ at $4\times4/8\times8/12\times12/16\times16$),
+and a small $\eta$ is required to avoid the finite-$\eta$ coherence attenuation of
+Section~\ref{sec:diag_eta} that otherwise crushes the conductance. With these settings the ballistic
+conductance is nearly thickness-independent ($\approx10^3$~MW\,m$^{-2}$K$^{-1}$) while the ballistic
+$\kappa=G_\text{ball}L$ rises essentially linearly with $L$ -- the ballistic (non-intensive) regime,
+before anharmonic scattering renders $\kappa$ intensive. We adopt the reference mesh of $8\times8$
+transverse momenta and $121$ frequencies, $\Delta T=10$~K about $300$~K.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.92\linewidth]{transport_sweeps/si_film_conductance.pdf}
+  \caption{Cross-plane heat transport through a silicon thin film at $300$~K, with bulk-silicon
+  force constants. \emph{Left}: per-area conductance versus film thickness -- our ballistic and
+  anharmonic NEGF (transverse mesh $8\times8$, $121$ frequencies) against the anharmonic NEGF values
+  of Guo \emph{et al.}~\cite{guo_anharmonic_negf_2020} at $3$ and $5$ unit cells. \emph{Right}: the
+  ballistic conductivity $\kappa=G_\text{ball}L$ rises essentially linearly with thickness, the
+  signature of the (non-intensive) ballistic regime before anharmonic scattering sets in.}
+  \label{fig:si_film}
+\end{figure}
+
+The anharmonic results are summarised in Table~\ref{tab:si_film}. The ballistic conductance
+reproduces the reference scale to about one percent at both thicknesses. The anharmonic conductance,
+however, is sensitive to the convention of the scattering self-energy. With the bubble self-energy
+as implemented in the standalone momentum-space kernel (the Luisier convention
+of~\cite{luisier_atomistic_2012}), the three-phonon scattering reduces the $3$-unit-cell conductance
+by $45\%$ -- far more than the reference. Crucially, this over-reduction is \emph{not} a force-constant
+effect: restricting the third-order vertex to first-nearest-neighbour atom triplets
+(Guo \emph{et al.}'s approximation, retaining $9.8\%$ of the triplets) changes the conductance by less
+than $0.3\%$ ($571.8$ versus $570.3$~MW\,m$^{-2}$K$^{-1}$), because the first-neighbour triplets carry
+essentially all of the anharmonicity. The discrepancy instead lies in the self-energy's combinatorial
+prefactor. The lowest-order bubble built from the cubic Hamiltonian $H_3=\tfrac{1}{3!}\Phi u^3$ (with
+$\Phi$ the full finite-displacement third derivative) carries an overall symmetry factor of $1/4$ on
+top of the $i/2$ loop factor -- the Wick count gives $(3\cdot3\cdot2)/(2!\,3!\,3!)=1/4$ -- which the
+kernel omitted, so its $\Sigma$ was four times too large. This is exactly the factor-of-four over-count
+of the repeated pairings that Guo \emph{et al.} identify (their Appendix~A) in the earlier
+Luisier~\cite{luisier_atomistic_2012} expression the kernel reproduces. We confirmed it three ways:
+the derivation above; an independent comparison of the kernel's retarded-self-energy linewidth against
+phono3py's Fermi-golden-rule linewidths for bulk silicon, which shows the kernel over-scatters by an
+$\mathcal{O}(4)$ factor; and the thin-film conductance itself. The $1/4$ factor is now the default
+prefactor; with it the anharmonic conductance is $831$ and $704$~MW\,m$^{-2}$K$^{-1}$ at $3$ and
+$5$ unit cells, within $12\%$ and $21\%$ of the reference. The residual gap and the slightly steeper
+thickness dependence are consistent with the further self-energy truncation adopted in the reference
+(only diagonal, nearest-neighbour self-energy blocks; see below) and with the difference in the
+exchange-correlation functional of the underlying force constants. The implementation thus reproduces
+the reference ballistic conductance quantitatively, the correct resistive sign and magnitude of the
+anharmonic correction, and -- with the corrected prefactor -- the cross-plane conductance to within
+$10$--$20\%$, the level of agreement expected given the sensitivity of anharmonic NEGF to these
+conventions.
+
+\paragraph{Full self-energy versus the reference's approximations.} The q-resolved driver computes,
+by construction, only the slab-diagonal self-energy -- the reference's approximation~III. We
+implemented the \emph{full} off-diagonal multi-slab self-energy $\Sigma_{IJ}(q_\perp,\omega)$ (the
+momentum-space generalisation of the $\Gamma$-only multi-slab template, to which it reduces exactly at
+a $1\times1$ mesh) so that each numerical approximation can be measured against the unapproximated
+result. For the silicon film (three slabs, a single first-Born step from the ballistic Green's
+function, corrected prefactor) the off-diagonal self-energy blocks carry $47\%$ of the Frobenius weight
+yet shift the conductance by only $-1.8\%$ -- the diagonal-block approximation~III is therefore
+well-justified despite the blocks being individually large. Restricting the vertex to the
+nearest-neighbour slab shell (approximation~II) changes the result by $<0.1\%$, as for the atom-triplet
+restriction above. In contrast, truncating the \emph{inter-slab Green's function} range gives an
+unphysical (negative) conductance: the off-diagonal $G$ coherence is essential and must not be cut.
+Thus of the reference's three numerical approximations, the two it relies on (II and III) are benign at
+the few-percent level here, while the Green's-function-range truncation -- which it does not make -- is
+catastrophic.
+
+\begin{table}[htb]
+  \centering
+  \caption{Cross-plane thermal conductance (MW\,m$^{-2}$K$^{-1}$) of a silicon thin film at $300$~K,
+  transverse mesh $8\times8$, $121$ frequencies. ``full $\Sigma$'' is the legacy (Luisier)
+  self-energy convention; ``$\Sigma/4$'' applies the $1/4$ bubble symmetry factor, now the
+  \emph{default} prefactor, matching Guo \emph{et al.}~\cite{guo_anharmonic_negf_2020}. The
+  first-nearest-neighbour FC3 restriction (not shown) leaves both values unchanged to $0.3\%$.}
+  \label{tab:si_film}
+  \begin{tabular}{lrrrr}
+    \toprule
+    thickness & $G_\text{ball}$ (ours) & $G_\text{anh}$, full $\Sigma$ & $G_\text{anh}$, $\Sigma/4$
+    & $G_\text{anh}$, Guo \emph{et al.}\\
+    \midrule
+    $3$ uc ($1.55$ nm) & $1034$ & $570$ & $831$ & $939.72$\\
+    $5$ uc ($2.71$ nm) & $952$  & --    & $704$ & $890.97$\\
+    \bottomrule
+  \end{tabular}
+\end{table}

@@ -50,6 +50,7 @@ from .grids import bose_full_axis, build_frequency_grid
 from .leads import (
     ballistic_transmission_z2,
     build_device_hamiltonian,
+    build_device_hamiltonian_massprofile,
     compute_obc_batch,
     solve_green_batch,
 )
@@ -1169,6 +1170,8 @@ def transmission_finite(
     causality_projection: bool = False,
     track_diagnostics: bool = False,
     vertex_scale: float = 1.0,
+    enforce_asr: bool = False,
+    legacy_prefactor: bool = False,
 ) -> dict:
     """Reference anharmonic phonon transport (Gamma-point, finite device).
 
@@ -1243,6 +1246,7 @@ def transmission_finite(
     from phonon_inputs.separable import (
         build_supercell_mapping,
         build_realspace_fc3_matrices,
+        enforce_asr_fc3_matrices,
     )
 
     n_atoms = len(phonon.primitive.masses)
@@ -1280,6 +1284,23 @@ def transmission_finite(
         fc3_raw = load_fc3_raw(fc3_hdf5)
         M_stacked = build_realspace_fc3_matrices(
             fc3_raw, n_atoms, masses_super, ref_sc_atoms)
+    if enforce_asr:
+        # Project the FC3 onto the Gamma-translation null space on both
+        # device legs before it enters the vertex. Hiphive enforces only
+        # the axis-i (leg-1) translational ASR by orbit construction; the
+        # axis-j/k legs retain a ~0.8 relative violation on open-wire FC3
+        # (see finite_analysis/physical_tests.fc3_asr_legs). The unprojected
+        # residual couples the vertex into the acoustic/twist subspace and
+        # stiffens the small-eta SCBA fixed point (CLAUDE.md F9). Projection
+        # is linear, so it commutes with the vertex_scale rescaling below.
+        norm_before = float(np.linalg.norm(M_stacked))
+        M_stacked = enforce_asr_fc3_matrices(M_stacked, n_atoms, prim_indices)
+        if verbose:
+            norm_after = float(np.linalg.norm(M_stacked))
+            print(
+                f"  FC3 ASR projection: ||M||_F {norm_before:.4e} -> "
+                f"{norm_after:.4e} (dropped {1.0 - norm_after / norm_before:.1%})"
+            )
     if vertex_scale != 1.0:
         # Bescond-style coupling rescaling (JAP 110, 094517, 2011):
         # Sigma scales as vertex_scale**2. Sweep vertex_scale in (0, 1]
@@ -1387,6 +1408,7 @@ def transmission_finite(
             sigma_cutoff=sigma_cutoff,
             g_cutoff=g_cutoff,
             dc_handling=dc_handling,
+            symmetry_factor=(1.0 if legacy_prefactor else None),
         )
         for (I, J), block in sl_blocks.items():
             sI = slice(I * n_dof, (I + 1) * n_dof)
@@ -1487,6 +1509,8 @@ def transmission_q(
     hilbert_retarded: bool = False,
     auto_extend_fmax: bool = True,
     fmax_margin: float = 1.05,
+    legacy_prefactor: bool = False,
+    mass_profile: list | None = None,
 ) -> dict:
     """Anharmonic phonon transport with full q-dependent dense self-energy.
 
@@ -1583,10 +1607,27 @@ def transmission_q(
     if verbose:
         suffix = " (will update each SCBA iter)" if scattering_contacts else ""
         print(f"  Precomputing OBC self-energies (batched)...{suffix}")
+    # Optional heterostructure: a per-slab MASS profile (e.g. a Ge barrier in a
+    # Si film, Si FC + Ge mass; Guo-Bescond-Zhang). The leads stay pure material
+    # (Si, m_lead = phonon.primitive.masses[0]); only the device on-site/coupling
+    # blocks are re-weighted by the per-slab mass. The FC3 vertex is kept uniform
+    # (justified by F25: off-diagonal/1st-NN-vertex are benign).
+    if mass_profile is not None:
+        mass_profile = list(mass_profile)
+        if len(mass_profile) != n_slabs:
+            raise ValueError(
+                f"mass_profile length {len(mass_profile)} != n_slabs {n_slabs}")
+        m_lead = float(phonon.primitive.masses[0])
+
     obc_all = []
     H_D_all = []
     for iq, (H_00, H_01) in enumerate(btd_blocks):
-        H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
+        if mass_profile is None:
+            H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
+        else:
+            # un-mass-weight the uniform-lead blocks: K = H * m_lead
+            H_D = build_device_hamiltonian_massprofile(
+                H_00 * m_lead, H_01 * m_lead, mass_profile)
         H_D_all.append(H_D)
         obc = compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
                                 n_slabs=n_slabs)
@@ -1624,6 +1665,7 @@ def transmission_q(
     if verbose:
         print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
 
+    sym_factor = 1.0 if legacy_prefactor else None  # None -> correct 1/4 default
     def se_kernel(G_lesser_slab, G_greater_slab):
         Sigma_l_new = np.zeros(
             (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
@@ -1632,7 +1674,8 @@ def transmission_q(
             sl_n, sg_n = compute_phph_self_energy_q_dense(
                 G_lesser_slab[l], G_greater_slab[l],
                 M_stacked, T_all_q, q_diff_map,
-                n_atoms, n_kpts, freqs_thz, dw_thz)
+                n_atoms, n_kpts, freqs_thz, dw_thz,
+                symmetry_factor=sym_factor)
             Sigma_l_new[l] = sl_n
             Sigma_g_new[l] = sg_n
         return Sigma_l_new, Sigma_g_new

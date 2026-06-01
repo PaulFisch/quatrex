@@ -128,6 +128,43 @@ def build_device_hamiltonian(H_00, H_01, n_slabs):
     return H_D
 
 
+def build_device_hamiltonian_massprofile(K_00, K_01, masses):
+    """Block-tridiagonal device dynamical matrix for a per-slab MASS profile.
+
+    For a heterostructure (e.g. a Ge barrier in a Si film, treated as Si force
+    constants + Ge mass, Guo-Bescond-Zhang PRB 102 195412) the bare stiffness
+    blocks ``K_00``/``K_01`` (un-mass-weighted FC2, shared across the device) are
+    re-weighted per slab by that slab's atomic mass:
+        D_00[l]      = K_00 / m_l
+        D_01[l,l+1]  = K_01 / sqrt(m_l m_{l+1})
+    Recover the bare K from the uniform-material dynamical-matrix blocks via
+    ``K = H * m`` (D = M^{-1/2} K M^{-1/2} with a scalar mass per slab).
+
+    Parameters
+    ----------
+    K_00, K_01 : (n_dof, n_dof) complex
+        Un-mass-weighted on-site and coupling FC2 blocks.
+    masses : (n_slabs,) float
+        Per-slab atomic mass (amu); assumes one mass per primitive-cell slab.
+    """
+    n_dof = K_00.shape[0]
+    n_slabs = len(masses)
+    if n_slabs == 1:
+        return K_00 / masses[0]
+    N = n_slabs * n_dof
+    H_D = np.zeros((N, N), dtype=complex)
+    K_10 = K_01.conj().T
+    for l in range(n_slabs):
+        sl = slice(l * n_dof, (l + 1) * n_dof)
+        H_D[sl, sl] = K_00 / masses[l]
+        if l < n_slabs - 1:
+            sl_next = slice((l + 1) * n_dof, (l + 2) * n_dof)
+            w = np.sqrt(masses[l] * masses[l + 1])
+            H_D[sl, sl_next] = K_01 / w
+            H_D[sl_next, sl] = K_10 / w
+    return H_D
+
+
 def compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
                       n_slabs=1, lead_sigma_r_L=None, lead_sigma_r_R=None):
     """Batched OBC self-energies for all frequencies.

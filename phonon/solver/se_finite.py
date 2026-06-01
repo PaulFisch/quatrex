@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from phonon_inputs.constants import HBAR_SI
+from phonon_inputs.constants import HBAR_SI, PHPH_SYMMETRY_FACTOR
 from .bubble import (
     bubble_chunk_peak_bytes_per_w,
     bubble_dense,
@@ -39,7 +39,7 @@ from .bubble import (
 
 
 def compute_phph_self_energy_finite(
-    G_lesser, G_greater, Phi, omega_grid_thz, dw_thz,
+    G_lesser, G_greater, Phi, omega_grid_thz, dw_thz, symmetry_factor=None,
 ):
     """Phonon-phonon self-energy for a single primitive-cell slab.
 
@@ -49,13 +49,19 @@ def compute_phph_self_energy_finite(
     :func:`compute_phph_self_energy_finite_multi_slab` when invoked
     on a one-slab device with ``dc_handling="zero"``.
 
+    ``symmetry_factor`` (see ``constants.PHPH_SYMMETRY_FACTOR``) defaults
+    to the physically-correct ``1/4``; pass ``1.0`` for the legacy
+    (Luisier) convention.
+
     Returns ``(Sigma^<, Sigma^>)`` of shape ``(n_freq, n_dof, n_dof)``.
     """
+    if symmetry_factor is None:
+        symmetry_factor = PHPH_SYMMETRY_FACTOR
     n_freq = len(omega_grid_thz)
     n_fft = 2 * n_freq - 1
     mid = n_freq // 2
     freq_sl = slice(mid, mid + n_freq)
-    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
+    prefactor = symmetry_factor * 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
 
     sig_l = bubble_dense(
         phi_left=Phi, phi_right=Phi,
@@ -207,6 +213,7 @@ def compute_phph_self_energy_finite_multi_slab(
     g_cutoff: int | None = None,
     dc_handling: str = "interpolate",
     n_threads: int | None = None,
+    symmetry_factor: float | None = None,
 ) -> tuple[
     dict[tuple[int, int], np.ndarray],
     dict[tuple[int, int], np.ndarray],
@@ -257,7 +264,9 @@ def compute_phph_self_energy_finite_multi_slab(
     n_fft = 2 * n_freq - 1
     mid = n_freq // 2
     freq_sl = slice(mid, mid + n_freq)
-    prefactor = 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
+    if symmetry_factor is None:
+        symmetry_factor = PHPH_SYMMETRY_FACTOR
+    prefactor = symmetry_factor * 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
 
     gl = _filter_g_blocks(g_lesser_blocks, g_cutoff)
     gg = _filter_g_blocks(g_greater_blocks, g_cutoff)
