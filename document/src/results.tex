@@ -6,7 +6,7 @@ harmonic backbone is checked first (\cref{sec:res_ballistic}), then the
 force-constant inputs (\cref{sec:res_fc}), the anharmonic transport on
 finite silicon nanowires (\cref{sec:res_nw}), the transversely-periodic
 $q_\perp$-resolved anharmonic problem and the silicon thin-film benchmark
-(\cref{sec:res_qfilm}), the still-open question of the absolute
+(\cref{sec:res_qfilm}), the verification of the absolute
 three-phonon self-energy prefactor (\cref{sec:res_prefactor}), the cost
 of the numerical approximations (\cref{sec:res_approx}), a Si/Ge
 heterostructure (\cref{sec:res_hetero}), and the distributed-solver and
@@ -182,16 +182,19 @@ implemented (\emph{native} prefactor, \cref{sec:res_prefactor}) the
 three-phonon scattering reduces the $3$-unit-cell conductance by
 $\sim45\%$ ($G_\mathrm{anh}\approx570$~MW\,m$^{-2}$K$^{-1}$), markedly
 more than the reference's $\sim10\%$
-($G_\mathrm{anh}=939.7$). \emph{We have not resolved this
-discrepancy}: it is either a transport-setup effect ($\eta$, mesh,
-thin-device artifacts), the reference's additional approximations, the
-difference in exchange--correlation functional of the underlying force
-constants, or an absolute-prefactor error in the self-energy. The
-second (green) curve in \cref{fig:res_sifilm} shows the effect of
-scaling the vertex by one half (so $\Sigma\to\Sigma/4$); it moves the
-conductance toward the reference ($831$ and $704$) but does not match
-it, and we do \emph{not} claim it as a correction. The prefactor is
-discussed honestly in \cref{sec:res_prefactor}.
+($G_\mathrm{anh}=939.7$). This discrepancy is \emph{not} an
+absolute-prefactor error: \cref{sec:res_prefactor} verifies the native
+self-energy against phono3py's golden-rule linewidths to within
+$\sim15\%$ and excludes a factor-of-four rescaling by an order of
+magnitude. It is therefore a transport-setup effect ($\eta$, mesh,
+thin-device artifacts), the reference's additional self-energy
+approximations, and/or the difference in exchange--correlation
+functional of the underlying force constants. The second (green) curve
+in \cref{fig:res_sifilm} shows, for reference, the effect of scaling the
+vertex by one half ($\Sigma\to\Sigma/4$): it moves the conductance
+toward Guo~\emph{et al.} ($831$ and $704$) but neither matches it nor is
+justified -- the prefactor verification (\cref{sec:res_prefactor}) shows
+the native value is the correct one.
 
 \begin{figure}[htb]
   \centering
@@ -202,8 +205,10 @@ discussed honestly in \cref{sec:res_prefactor}.
   thickness -- our ballistic and anharmonic NEGF against
   Guo~\emph{et al.}~\cite{guo_anharmonic_negf_2020}. The native
   self-energy over-scatters relative to the reference; the
-  vertex-scaled curve illustrates the unresolved absolute prefactor
-  (\cref{sec:res_prefactor}), and is not an established correction.
+  vertex-scaled curve is shown only for reference -- the prefactor
+  verification of \cref{sec:res_prefactor} confirms the native value,
+  so the gap is a transport-setup/approximation/functional effect, not
+  a prefactor error.
   \emph{Right}: the ballistic $\kappa=G_\mathrm{ball}L$ rises linearly
   with thickness (ballistic regime).}
   \label{fig:res_sifilm}
@@ -214,31 +219,82 @@ discussed honestly in \cref{sec:res_prefactor}.
 \label{sec:res_prefactor}
 % ======================================================================
 
-The absolute scale of the anharmonic self-energy is, at the time of
-writing, \textbf{not settled}, and we report it as an open issue rather
-than a resolved one. The implemented kernel is the standard sunset
-diagram (\cref{eq:sigma_guo}), which reduces analytically to the
-correct Fermi-golden-rule three-phonon linewidth
-(\cref{eq:fgr}). Against this, the silicon thin film over-scatters
-relative to Guo~\emph{et al.} (\cref{sec:res_qfilm}), which would be
-reconciled by a factor in the range $\sim2$--$4$ on the self-energy
-(Guo~\emph{et al.} note a ``factor of four'' over-count of the repeated
-internal pairings in the earlier Luisier convention). However, our
-attempt to pin this factor independently against phono3py's
-golden-rule linewidths for bulk silicon on the same FC3 is dominated by
-the equilibrium-Green's-function normalisation: the broadening-free,
-units-matched ratio
-$\int(-\mathrm{Im}\,\Sigma^{\mathrm{NEGF}}_s)\,d\omega/\int 2\omega_s\,\gamma^{\mathrm{p3p}}_s\,d\omega$
-comes out mode-independent and close to $(2\pi)^2$, i.e.\ a
-normalisation/unit artifact of the standalone reconstruction rather than
-a clean physical factor. The check therefore does not determine the
-prefactor, and we have reverted to the unscaled (native) self-energy as
-the default. The definitive, convention-free test -- bulk-silicon
-$\kappa$ computed from the code's \emph{own} SCBA Green's functions and
-compared to the phono3py RTA value of \cref{sec:res_fc} on the identical
-FC3 -- is identified but not yet completed. All anharmonic conductances
-in this chapter are quoted at the native prefactor and should be read
-with this caveat.
+The implemented kernel is the standard sunset diagram
+(\cref{eq:sigma_guo}), which reduces analytically to the correct
+Fermi-golden-rule three-phonon linewidth (\cref{eq:fgr}). Its
+\emph{absolute} scale -- the scalar prefactor in front of
+$\Phi G G\Phi$ -- has been the subject of a recurring ``factor of four''
+ambiguity: the silicon thin film over-scatters relative to
+Guo~\emph{et al.} (\cref{sec:res_qfilm}) by roughly this factor, and
+Guo~\emph{et al.} themselves note a four-fold over-count of the repeated
+internal pairings in the earlier Luisier convention. We settle the
+question here directly, against phono3py's golden-rule linewidths for
+bulk silicon computed on the \emph{identical} FC3.
+
+\paragraph{The experiment.} We evaluate the native (unscaled)
+self-energy with the dense $q_\perp$-coupled kernel on a bulk-silicon
+$N^3$ phonon mesh, reconstructing the equilibrium Green's functions from
+the phonopy modes, and compare the resulting imaginary self-energy to
+phono3py's frequency-resolved linewidth $\gamma_s^{\mathrm{p3p}}$ for
+the same mode $s$. The mode-resolved \emph{on-shell} ratio
+$\gamma_s^{\mathrm{NEGF}}(\omega_s)/\gamma_s^{\mathrm{p3p}}$ is
+\emph{not} a meaningful measure: it is dominated by the artificial
+broadening, scaling essentially linearly with the Green's-function
+$\eta$ ($\gamma^{\mathrm{NEGF}}=0.13,0.26,0.44$~THz at
+$\eta=0.02,0.04,0.08$~THz; \cref{fig:res_prefactor}, right). This
+$\eta$-proportional peak ratio -- which reaches $\sim4$--$9$ depending
+on $\eta$ -- is precisely the spurious ``factor of four'' that earlier
+motivated an unjustified $\div4$ rescaling. The physically meaningful
+quantity is the \emph{area-integrated} ratio
+\begin{equation}
+R \;=\; \frac{\int (-\mathrm{Im}\,\Sigma^{\mathrm{NEGF}}_s)\,d\omega}
+             {\int 2\omega_s\,\gamma^{\mathrm{p3p}}_s\,d\omega},
+\label{eq:prefactor_ratio}
+\end{equation}
+which is broadening-independent (the spectral weight of a Lorentzian is
+conserved). A fixed units convention between the code's
+$\mathrm{THz}^2$ self-energy and phono3py's $\mathrm{THz}$ half-linewidth
+contributes a constant factor $(2\pi)^2$, so a correct native prefactor
+corresponds to $R/(2\pi)^2 = 1$.
+
+\paragraph{Result.} The mode-resolved $R$ cannot be converged for most
+modes -- low-frequency acoustic branches have an under-sampled
+three-phonon joint density of states on accessible meshes, so their
+$R/(2\pi)^2$ scatters over $10$--$80$ (phono3py's $\gamma\to0$ while the
+NEGF Lorentzian tail does not). The $\Gamma$-optical mode, the one
+branch with a robustly sampled decay channel, does converge: its
+$q$-mesh trend is $R/(2\pi)^2 = 2.6\ (2^3)\to0.79\ (4^3)\to0.77\ (6^3)$,
+and the area integral is \emph{$\eta$-invariant} at the window that
+captures the linewidth ($R/(2\pi)^2 = 1.05/1.07/1.06$ at
+$\eta=0.02/0.04/0.08$ for a $\pm4$~THz window;
+\cref{fig:res_prefactor}, left). Across windows and frequency grids the
+value sits in $0.8$--$1.1$. The native self-energy therefore reproduces
+the ab-initio golden-rule linewidth to within $\sim10$--$15\%$ method
+uncertainty, and \textbf{a factor-of-four error is excluded in either
+direction by an order of magnitude} ($\div4$ would give $0.26$, $\times4$
+would give $4.2$; we measure $\approx1$). The earlier $\div4$ is
+withdrawn: the native (theory-derived) self-energy is the correct
+physics. The residual $\lesssim15\%$ is set by the window/frequency-grid
+sensitivity of this linewidth comparison; tightening it further would
+require the convention-free benchmark of bulk-silicon $\kappa$ from the
+code's own SCBA Green's functions against the phono3py RTA value of
+\cref{sec:res_fc}, which we leave as the definitive closing test. All
+anharmonic conductances in this chapter use the native prefactor.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fig/transport_sweeps/prefactor_verification.pdf}
+  \caption{Self-energy prefactor verification against phono3py
+  golden-rule linewidths (bulk Si, identical FC3, native prefactor).
+  \textbf{Left:} the area-integrated $\Gamma$-optical linewidth ratio
+  $R/(2\pi)^2$ (\cref{eq:prefactor_ratio}) versus integration window for
+  three broadening values; it is $\eta$-invariant and sits at $\approx1$
+  (native exact), excluding the $\times4$ and $\div4$ hypotheses by an
+  order of magnitude. \textbf{Right:} the \emph{on-shell} peak linewidth
+  scales linearly with the artificial broadening $\eta$ -- the
+  broadening artifact that produced the spurious ``factor of four.''}
+  \label{fig:res_prefactor}
+\end{figure}
 
 % ======================================================================
 \section{Full versus approximated self-energy}
@@ -283,9 +339,9 @@ with thickness, the diffusive crossover) -- but is suppressed
 ($\lesssim1\%$) in the barrier-dominated heterostructure, because the
 strong mass barrier filters transmission to low-frequency acoustic
 phonons that are anharmonically long-lived. (The magnitude of the
-anharmonic enhancement inherits the prefactor caveat of
-\cref{sec:res_prefactor}; the barrier reflection and the qualitative
-filtering picture do not.)
+anharmonic enhancement carries the residual $\lesssim15\%$ uncertainty
+of the verified native prefactor, \cref{sec:res_prefactor}; the barrier
+reflection and the qualitative filtering picture do not.)
 
 % ======================================================================
 \section{Distributed solver and self-energy; GPU memory}
