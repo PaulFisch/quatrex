@@ -500,8 +500,21 @@ class QuatrexCommunicator:
         block_comm_config: dict,
         stack_comm_config: dict,
         override: bool = False,
+        q_comm_size: int = 1,
+        q_comm_config: dict | None = None,
     ):
         """Configures the communicator.
+
+        The global ranks factor as ``q x stack x block`` (three
+        independent axes). The block and stack axes are unchanged from
+        the two-axis layout; with the default ``q_comm_size=1`` the q
+        axis is trivial (one rank per q-communicator) and the block and
+        stack communicators are identical to before. A ``q_comm_size>1``
+        carves a third axis out of what was the stack, so that external
+        transverse momenta (q-points) of the q-resolved phonon-phonon
+        self-energy can be distributed over ``comm.q`` while the
+        internal-q Green's functions are exchanged with
+        ``comm.q.all_gather_v``.
 
         Parameters
         ----------
@@ -514,6 +527,12 @@ class QuatrexCommunicator:
         override : bool, optional
             Whether to override a previous configuration. Defaul
             is False.
+        q_comm_size : int, optional
+            The size of the q (transverse-momentum) communicator.
+            Default is 1 (no q distribution).
+        q_comm_config : dict, optional
+            The configuration for the q sub-communicator. Defaults to a
+            copy of ``stack_comm_config`` when not given.
 
 
         Raises
@@ -528,27 +547,46 @@ class QuatrexCommunicator:
         if self._is_configured and not override:
             raise RuntimeError("Communicator is already configured.")
 
-        if global_comm.size % block_comm_size != 0:
-            raise ValueError(
-                f"Total number of ranks must be a multiple of {block_comm_size=}"
-            )
-
         if block_comm_size <= 0:
             raise ValueError("Block communicator size must be greater than 0.")
+
+        if q_comm_size <= 0:
+            raise ValueError("q communicator size must be greater than 0.")
+
+        if global_comm.size % (block_comm_size * q_comm_size) != 0:
+            raise ValueError(
+                "Total number of ranks must be a multiple of "
+                f"{block_comm_size=} * {q_comm_size=}"
+            )
 
         if block_comm_size > global_comm.size:
             raise ValueError(
                 f"Block communicator size {block_comm_size} cannot be greater than the total number of ranks {global_comm.size}."
             )
 
-        color = global_comm.rank // block_comm_size
-        key = global_comm.rank % block_comm_size
+        # Three-axis factorization q x stack x block. Rank layout:
+        #   rank = (q_idx * stack_size + stack_idx) * block_comm_size + block_idx
+        stack_size = global_comm.size // (block_comm_size * q_comm_size)
+        block_idx = global_comm.rank % block_comm_size
+        rest = global_comm.rank // block_comm_size
+        stack_idx = rest % stack_size
+        q_idx = rest // stack_size
 
-        block_comm = global_comm.Split(color=color, key=key)
-        stack_comm = global_comm.Split(color=key, key=color)
+        # block: ranks sharing (q_idx, stack_idx) -> color=rest (unchanged).
+        block_comm = global_comm.Split(color=rest, key=block_idx)
+        # stack: ranks sharing (q_idx, block_idx), varying stack_idx.
+        # With q_comm_size=1 this reduces to the previous color/key.
+        stack_comm = global_comm.Split(
+            color=q_idx * block_comm_size + block_idx, key=stack_idx
+        )
+        # q: ranks sharing (stack_idx, block_idx), varying q_idx.
+        q_comm = global_comm.Split(
+            color=stack_idx * block_comm_size + block_idx, key=q_idx
+        )
 
         self.block = _SubCommunicator(block_comm, block_comm_config)
         self.stack = _SubCommunicator(stack_comm, stack_comm_config)
+        self.q = _SubCommunicator(q_comm, q_comm_config or stack_comm_config)
 
         self._is_configured = True
 
