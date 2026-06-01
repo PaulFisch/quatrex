@@ -1,533 +1,376 @@
 \chapter{Results}
+\label{sec:results}
 
-% ----------------------------------------------------------------------
-\section{Ballistic Phonon NEGF}
-\label{sec:harmonic_validation}
-% ----------------------------------------------------------------------
+This chapter collects the validation and production measurements. The
+harmonic backbone is checked first (\cref{sec:res_ballistic}), then the
+force-constant inputs (\cref{sec:res_fc}), the anharmonic transport on
+finite silicon nanowires (\cref{sec:res_nw}), the transversely-periodic
+$q_\perp$-resolved anharmonic problem and the silicon thin-film benchmark
+(\cref{sec:res_qfilm}), the still-open question of the absolute
+three-phonon self-energy prefactor (\cref{sec:res_prefactor}), the cost
+of the numerical approximations (\cref{sec:res_approx}), a Si/Ge
+heterostructure (\cref{sec:res_hetero}), and the distributed-solver and
+GPU-memory scaling of the implementation
+(\cref{sec:res_scaling}). Implementation mechanisms referenced here are
+described in \cref{ssec:phph_distribution,ssec:phph_qdist}; the dense
+reference solver used for the standalone studies is documented in
+\cref{app:convergence_diagnosis}.
 
-To validate the harmonic transport implementation, the QuaTrEx results
-are compared against simpler reference calculations based on direct
-Sancho--Rubio decimation and the Caroli formula.  A naive
-Sancho--Rubio + Caroli Python code is used as reference.  These
-reference cases serve both as correctness checks for the harmonic
-backbone and as a baseline for interpreting later anharmonic
-corrections. We also compare to Si/Ge transmission results in \citet{guo_anharmonic_2021}.
+% ======================================================================
+\section{Ballistic phonon NEGF validation}
+\label{sec:res_ballistic}
+% ======================================================================
 
-\subsection{Bulk validation}
-\label{sec:bulk_validation}
+The harmonic transport backbone is validated against an independent
+Sancho--Rubio decimation plus Caroli reference on identical harmonic
+inputs, transverse mesh, and frequency grid. For homogeneous bulk
+silicon the two transmissions agree, confirming the phonopy block
+extraction, the block-tridiagonal assembly, and the open-boundary
+treatment.
 
-The simplest test is a homogeneous bulk silicon system.  In this case,
-the extracted harmonic blocks are used both in QuaTrEx and in a
-standalone reference implementation of Sancho--Rubio plus Caroli.  Both
-calculations are run with identical harmonic inputs, the same
-transverse-wavevector mesh, and the same frequency grid.
+As a heterogeneous test we model a ballistic Si/Ge interface in the
+mass-mismatch approximation: bulk-Si force constants throughout, with
+the Si/Ge distinction entering only through the atomic masses
+($m_\mathrm{Si}=28.09$, $m_\mathrm{Ge}=72.64$~amu). At $\Gamma$ the Si
+optical maximum is $15.55$~THz and the Ge mass-clone gives $9.67$~THz,
+consistent with $f_\mathrm{Ge}=f_\mathrm{Si}\sqrt{m_\mathrm{Si}/m_\mathrm{Ge}}$.
+On a $20\times20$ transverse mesh the interfacial conductance at
+$300$~K is $G=196$~MW\,m$^{-2}$K$^{-1}$, within $\sim7\%$ of the
+literature values ($210$, Latour 2017; $209$, Tian 2012); the
+remaining gap is consistent with the coarse transverse mesh and the
+minimal FC2 calculation.
 
-Agreement between the two transmission curves confirms that:
-\begin{itemize}
-  \item the block extraction from phonopy is correct,
-  \item the BTD assembly from unit-cell blocks is consistent,
-  \item the open-boundary-condition treatment in QuaTrEx matches the
-        reference implementation.
-\end{itemize}
+% ======================================================================
+\section{Force constants: methods, quality, and compression}
+\label{sec:res_fc}
+% ======================================================================
 
-\subsection{Si/Ge interface}
-\label{sec:sige}
+\paragraph{Method cross-check.} Bulk-silicon harmonic force constants
+computed by density-functional perturbation theory (QE \texttt{ph.x}
+$\to$ \texttt{q2r.x}) and by finite displacement (phono3py + symfc) on
+the same primitive cell agree to $1.6\%$ on the zone-centre optical
+frequency ($15.12$ vs $15.37$~THz; \cref{fig:res_fcmethod}). The two
+\emph{ab-initio} routes are therefore mutually consistent at the
+harmonic level. (DFPT third-order constants via \texttt{d3q} require a
+norm-conserving pseudopotential and were not used for transport here.)
 
 \begin{figure}[htb]
   \centering
-  \includegraphics[width=\textwidth]{fig/reference/si_ge_quatrex_comparison.png}
-  \caption{Ballistic phonon transmission on a $20\times20$ transverse
-    $k$-mesh with 101 frequency points.
-    \textbf{Left:} Homogeneous bulk Si.
-    \textbf{Right:} Si/Ge interface in the mass-mismatch approximation.}
-  \label{fig:quatrex_comparison}
+  \includegraphics[width=0.6\linewidth]{transport_sweeps/fc_method_dispersion_si.pdf}
+  \caption{Bulk-silicon phonon dispersion from DFPT versus
+  finite-displacement force constants. The two \emph{ab-initio} methods
+  agree to $1.6\%$ on the $\Gamma$ optical frequency.}
+  \label{fig:res_fcmethod}
 \end{figure}
 
-As a more realistic reference problem, a ballistic Si/Ge interface is
-constructed using a mass-mismatch model.  In this approximation, the
-harmonic force constants are taken from bulk Si throughout, and the
-distinction between Si and Ge enters only through the atomic masses,
-\begin{equation}
-  m_\mathrm{Si} = 28.09\;\mathrm{amu},
-  \qquad
-  m_\mathrm{Ge} = 72.64\;\mathrm{amu}.
-\end{equation}
-This is justified by the similarity of the Si and Ge interatomic force
-constants together with their substantial mass difference.
+\paragraph{Bulk-$\kappa$ anchor.} The finite-displacement FC3, fed to a
+phono3py RTA-BTE calculation (natural isotopes), gives bulk-silicon
+$\kappa(300\,\mathrm{K})=110.7$~W\,m$^{-1}$K$^{-1}$ on an $11^3$ mesh,
+rising to $115.2$ on $19^3$. This is $\sim20$--$30\%$ below the
+experimental $\sim150$, the known underestimate of a $2\times2\times2$
+FC3 supercell (cutoff $5.5$~\AA); a larger supercell would close most of
+the gap. This bulk $\kappa$ is the reference against which the
+anharmonic self-energy prefactor should ultimately be benchmarked
+(\cref{sec:res_prefactor}).
 
-The heterogeneous system is partitioned into three regions:
-\begin{itemize}
-  \item \textbf{Left lead:} Si force constants with Si masses,
-  \item \textbf{Device:} Si force constants with mixed Si/Ge masses,
-  \item \textbf{Right lead:} Si force constants with Ge masses.
-\end{itemize}
-Atoms with fractional coordinate $z<0.5$ are
-assigned Si mass in the device cell and the remainder Ge mass.  The
-coupling between left lead and device is taken from the Si lead, while
-the coupling between device and right lead is taken from the Ge lead.
+\paragraph{FC3 compression.} The decomposition machinery of
+\cref{sec:fc3_compression} was applied to the $3\times3\times3$ silicon
+FC3. The transport observable converges far faster than the Frobenius
+residual: targeting a $1\%$ relative conductance error is reached by an
+INDSCAL fit at rank $8$ ($117\times$ compression) while its Frobenius
+residual is still $\sim17\%$, and the spectral heat-current curves are
+visually indistinguishable from the dense reference by rank $16$. The
+practical lesson is that the relevant fitting target for phonon NEGF is
+a transport residual, not the Frobenius norm the fitters minimise.
 
-For the harmonic inputs, the Si force constants are obtained from a DFT
-calculation at the equilibrium lattice constant $a = \qty{5.466}{\angstrom}$.
-The calculation uses the conventional 8-atom diamond cell and a
-$2\times2\times2$ supercell. The DFT parameters are summarized in
-\cref{tab:si-dft-parameters}. Because of diamond symmetry, this setup
-reduces to a single displaced calculation in the harmonic
-finite-displacement workflow.
+% ======================================================================
+\section{Anharmonic transport in silicon nanowires}
+\label{sec:res_nw}
+% ======================================================================
 
-\begin{table}[tb]
+We study two hydrogen-passivated [100] silicon nanowires: \texttt{d5a}
+($\mathrm{Si}_9\mathrm{H}_{12}$ per cell, $63$ DOF) and the wider
+\texttt{d11a} ($135$ DOF). Their harmonic transport is clean
+(\cref{fig:res_ballistic_curves}): the ballistic conductance rises with
+temperature (thermal activation, saturating) and \texttt{d11a} carries
+$\sim1.5\times$ the conductance of \texttt{d5a} (more channels). The
+apparent decrease of $G$ with device length at finite broadening is the
+$\eta$-induced coherence attenuation ($\ell\sim v_g/\eta_w$), not
+diffusive resistance; the true Landauer plateau requires $\eta\to0$.
+
+\begin{figure}[htb]
   \centering
-  \caption{DFT parameters used to compute the harmonic Si force
-  constants.}
-  \label{tab:si-dft-parameters}
-  \begin{tabular}{ll}
-    \toprule
-    Parameter & Value \\
-    \midrule
-    Plane-wave cutoff      & \qty{60}{\rydberg} \\
-    Charge-density cutoff  & \qty{480}{\rydberg} \\
-    Supercell $k$-mesh     & $4\times4\times4$ \\
-    SCF threshold          & \qty{1e-10}{\rydberg} \\
-    Smearing               & Gaussian, \qty{0.01}{\rydberg} \\
-    Exchange--correlation  & PBE \\
-    Pseudopotential        & \path|Si.pbe-n-rrkjus_psl.1.0.0.UPF| \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-The corresponding phonopy calculation is performed with the native QE
-interface. On loading, the lattice vectors and harmonic force constants
-are converted from \unit{\bohr} and
-\unit{\rydberg\per\bohr\squared} to \unit{\angstrom} and
-\unit{\electronvolt\per\angstrom\squared}, respectively, as described
-in \cref{sec:phonopy_units}. The Ge and interface models are obtained
-by cloning the Si harmonic model and substituting the atomic masses.
-
-The transport parameters used for the Si/Ge interface calculation are
-listed in \cref{tab:sige-transport-parameters}.
-
-\begin{table}[tb]
-  \centering
-  \caption{Transport parameters used for the Si/Ge interface
-  calculation.}
-  \label{tab:sige-transport-parameters}
-  \begin{tabular}{ll}
-    \toprule
-    Parameter & Value \\
-    \midrule
-    Transverse $k$-mesh
-      & $20\times20$ \\
-    Frequency range
-      & \qtyrange{0.01}{16.0}{\tera\hertz}, 101 points \\
-    Transport direction
-      & $z$ (001) \\
-    Transport cells, $n_L/n_D/n_R$
-      & $5$, $2/1/2$ \\
-    Broadening $\eta$
-      & $\tfrac12\Delta\omega^2
-         \approx \qty{5.05e23}{\radian\squared\per\second\squared}$ \\
-    Reservoir temperatures, $T_L/T_R$
-      & \qty{301}{\kelvin} / \qty{299}{\kelvin} \\
-    OBC algorithm
-      & Sancho--Rubio \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-At the $\Gamma$ point, the maximum optical frequency of the Si model is
-15.55\,THz, consistent with reference values.  The Ge mass-mismatch
-clone gives 9.67\,THz, in agreement with the simple mass-scaling
-relation
-\begin{equation}
-  f_\mathrm{Ge}
-  = f_\mathrm{Si}\sqrt{\frac{m_\mathrm{Si}}{m_\mathrm{Ge}}}.
-\end{equation}
-
-The resulting interfacial thermal conductance at 300\,K is
-\begin{equation}
-  G = 196\;\mathrm{MW/(m^2\,K)}.
-\end{equation}
-This may be compared with the literature values
-\begin{center}
-\begin{tabular}{ll}
-  \toprule
-  Reference & $G$ [MW/(m$^2$\,K)] \\
-  \midrule
-  Latour et al.\ (2017) & 210 \\
-  Tian et al.\ (2012) & 209 \\
-  Present calculation & 196 \\
-  \bottomrule
-\end{tabular}
-\end{center}
-The remaining $\sim 7\%$ deviation is likely due to the coarser
-transverse-wavevector mesh and the very coarse DFT and FC2 calculation.
-
-% ----------------------------------------------------------------------
-\section{FC3 Compression}
-\label{sec:fc3_compression}
-% ----------------------------------------------------------------------
-
-% ----------------------------------------------------------------------
-\subsection{Numerical comparison on silicon FC3}
-\label{sub:fc3_results}
-% ----------------------------------------------------------------------
-
-We fit the four currently working compression approaches of \cref{sub:fc3_matsvd,sub:fc3_tucker,sub:fc3_cp,sub:fc3_indscal}
-to the mass-weighted FC3 tensor
-$\Phi\in\mathbb{R}^{(3 \nprim)\times \ndof \times \ndof}$ produced by finite-displacement
-DFT in a $3{\times}3{\times}3$ supercell of silicon. The working are
-$\nprim=2$, $\ndof=3\nprim \Ncell^3 = 162$, so the dense tensor has
-\begin{equation}\label{eq:fc3_full_entries}
-  N_{\mathrm{full}}
-  = \nprim\cdot 3\cdot (\ndof)^{2}
-  = 6\cdot 162^{2}
-  = 157\,464
-\end{equation}
-double-precision entries.
-
-All transport numbers are obtained by feeding the reconstructed $\tilde\Phi$ back into the same
-SCBA + NEGF pipeline used for the dense reference: a single device slab, a $4{\times}4$
-transverse $\qp$-mesh, $400$ positive frequency bins in $[0,22]$~THz, $T=300$~K and
-$\Delta T=10$~K, Anderson mixing of depth~$5$, SCBA tolerance $10^{-10}$, and at most $500$
-SCBA iterations. We compute the anharmonic thermal conducatance
-$G_{\mathrm{anh}}$ per area (MW\,m$^{-2}$\,K$^{-1}$).
-Errors on both axes are relative to the dense reference, computed once with the raw FC3.
-
-\paragraph{Fit protocol.} All fits are measured by the relative Frobenius error
-\begin{equation}\label{eq:fc3_rel_err}
-  \varepsilon(\tilde\Phi)
-  = \frac{\|\Phi - \tilde\Phi\|_F}{\|\Phi\|_F}
-\end{equation}
-with respect to the dense tensor. The mSVD and HOSVD are computed in closed form from
-LAPACK SVDs of the relevant matricisations. HOSVD is followed by $8$ steps of HOOI refinement.
-The CP and INDSCAL fits combine a CP-ALS initialisation (from the \texttt{tensorly} package) with
-progressive warm-starts from the previous rank, followed by $400$--$600$ L-BFGS iterations with
-a strong-Wolfe line search on the full factor set. $3$--$4$ random restarts are taken per rank
-and the best-of-restarts fit is kept. Each ansatz is fitted in two variants: an unconstrained
-``plain'' variant and an ``ASR'' variant in which the factor matrices are iteratively projected
-onto the acoustic-sum-rule null space during optimisation.
-
-The Waring / symmetric-CP fitter of
-\cref{sub:fc3_symcp} does not yet converge reliably on this reference tensor and is therefore
-omitted from the numerical results below. The present implementation combines shifted
-symmetric higher-order power-method (SS-HOPM) initialisation \cite{kolda_shifted_2011} with an
-L-BFGS refinement of a single shared factor matrix. On ranks $R\ge 16$ we observe the
-classical symptoms of the non-closed rank-$R$ set \cite{stegeman_degeneracy_2006,
-de_silva_tensor_2008}: the loss decreases slowly while the factor norms $\|v_r\|$ grow
-unboundedly and near-cancelling rank-one terms appear, so that stopping at any finite
-iteration count gives a residual that depends sensitively on the random seed and is often
-worse than the INDSCAL fit at the same rank. Norm penalties, trust-region L-BFGS, and
-degeneracy-aware line searches \cite{stegeman_degeneracy_2006, kolda_numerical_2015} were trued
-but did not work to improve the sweep.
-
-\paragraph{Frobenius convergence.} \Cref{fig:fc3_frob_and_ganh}~(a) plots $\varepsilon$ versus
-parameter count for the four working compressions. The transport axis in
-\cref{fig:fc3_frob_and_ganh}~(b) and the left panel of \cref{fig:fc3_kappa_and_spectral}
-converge dramatically faster than the Frobenius residual. Already at rank $R=8$ the relative
-conductance error $\varepsilon_G = |G - G_{\mathrm{dense}}|/G_{\mathrm{dense}}$ is
-$0.78\%$ (mSVD, $\varepsilon=12.8\%$), $0.71\%$ (CP, $\varepsilon=16.4\%$) and $0.33\%$
-(INDSCAL, $\varepsilon=16.6\%$). By $R=16$--$32$ all methods sit below $0.5\%$ in transport
-while their Frobenius residuals are still in the range $5$--$11\%$.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{fig/fc3_prim_vasp/frob_and_ganh_vs_params.pdf}
-  \caption{FC3 compression on the $3{\times}3{\times}3$ silicon primitive-row tensor
-    ($\ndof=162$).
-    (a)~Relative Frobenius error \eqref{eq:fc3_rel_err} versus parameter count on log--log
-    axes. (b)~Absolute anharmonic conductance $G_{\mathrm{anh}}$ (MW\,m$^{-2}$\,K$^{-1}$)
-    versus parameter count on a semi-log $x$ axis. The dashed horizontal line marks the dense
-    reference $G_{\mathrm{anh}}^{\mathrm{dense}}=757.46$~MW\,m$^{-2}$\,K$^{-1}$. The dotted vertical line marks $N_{\mathrm{nnz}}$, the
-    non-zeros in the full matrix.}
-  \label{fig:fc3_frob_and_ganh}
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/ballistic_vs_T_d5_d11.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/ballistic_vs_length_d5_d11.pdf}
+  \caption{Ballistic conductance of the \texttt{d5a} and \texttt{d11a}
+  silicon nanowires. Left: $G(T)$; right: $G$ versus device length (the
+  decrease is finite-$\eta$ coherence attenuation).}
+  \label{fig:res_ballistic_curves}
 \end{figure}
 
-In particular, the spectral heat current curves in
-\cref{fig:fc3_kappa_and_spectral}~(b) are visually indistinguishable from the dense reference
-already at INDSCAL $R=16$--$24$ or mSVD $R=16$, while the corresponding Frobenius residuals are
-$10\%$ or more. only at $R\le 4$ does the spectral current show visible distortion. The practical consequence is that on this system the relevant quality metric for phonon NEGF is
-some observable transport residual $\varepsilon_G$ (or the spectral current residual), not the Frobenius
-norm that the fitters themselves minimise. Targeting $\varepsilon_G\le 1\%$ is already achieved
-by INDSCAL at $R=8$ ($1\,344$ parameters, $117\times$ compression) and mSVD at $R=8$ ($9\,080$
-parameters, $17\times$ compression). Reaching $\varepsilon_G\le 0.1\%$ costs INDSCAL $R=32$
-($29\times$), HOSVD $(6,32)$ ($19\times$) or mSVD $R=32$ ($4.3\times$).
+\paragraph{Mode-resolved anharmonic physics.} A phono3py analysis of the
+bulk-silicon FC3 (\cref{fig:res_modephysics}) gives the context for the
+nanowire results: phonon lifetimes have a median of $4.2$~ps with a
+$\tau\!\propto\!\omega^{-2}$ envelope; $50\%$ of $\kappa$ is carried by
+phonons with mean free path $>134$~nm and $93\%$ by acoustic modes;
+Umklapp accounts for $0.44$ of the scattering at $300$~K; and the mode
+Gr\"uneisen parameters have mean $|\gamma|=1.04$, matching the
+experimental Si value and independently validating the FC3
+\emph{anharmonicity strength}. Crucially, only $1.3\%$ of bulk
+$\kappa$ comes from phonons with mean free path below $10$~nm. The
+$\sim1$~nm nanowire cores therefore sit far below the bulk
+phonon-MFP spectrum: they are \emph{boundary-scattering limited} and
+retain almost none of the bulk anharmonic-limited $\kappa$. This is
+why, at a single transport cell, the anharmonic correction to the
+nanowire conductance is a small perturbation
+($G_\mathrm{anh}/G_\mathrm{ball}\approx1$), and it is consistent across
+the BTE-RTA and NEGF pictures.
 
-\begin{figure}[t]
+\begin{figure}[htb]
   \centering
-  \includegraphics[width=\linewidth]{fig/fc3_prim_vasp/kappa_err_and_spectral.pdf}
-  \caption{(a)~Relative thermal-conductance error
-    $|G-G_{\mathrm{dense}}|/G_{\mathrm{dense}}$ versus parameter count on log--log axes;
-    dotted vertical line: $N_{\mathrm{nnz}}$ reference.
-    (b)~Spectral heat current $J(\omega)$ for representative fits against the dense reference
-    (red) and the purely ballistic current (dotted grey). The compressed curves overlay the
-    dense reference visibly at INDSCAL $R\ge 16$ and mSVD $R\ge 16$.}
-  \label{fig:fc3_kappa_and_spectral}
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_physics_si.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_NU_gruneisen_si.pdf}
+  \caption{Bulk-silicon mode-resolved anharmonic physics (phono3py,
+  FD FC3). Left: lifetimes, $\kappa$-accumulation versus mean free path,
+  and the acoustic-mode $\kappa$ fraction. Right: Normal/Umklapp split
+  and the mode Gr\"uneisen distribution (mean $|\gamma|=1.04$).}
+  \label{fig:res_modephysics}
 \end{figure}
 
-\paragraph{Conservation of heat current.} The heat-flow conservation residual
-$|J_L-J_R|/(|J_L|+|J_R|)$ remains below $0.2\%$ across the entire sweep. The dense reference
-sits at $0.01\%$. All compressed fits stay within a factor $\sim 20$ of that floor,
-with the largest deviations --- $1.66\%$ for CP $R=4$ and $1.29\%$ for INDSCAL $R=2$
---- at the very lowest ranks where $\varepsilon$ is $60$--$80\%$. Once $R\ge 8$ the conservation
-residual falls back to $0.01$--$0.15\%$ for every method, and shows no systematic trend with
-rank. The ASR-projected variants do not improve this floor in any measurable way.
-\todo[inline]{compare with sparse, discuss sparse decompositions}
+At physical broadening and moderate vertex strength the SCBA converges
+cleanly and gives the physical $G_\mathrm{anh}<G_\mathrm{ball}$; the
+soft-mode (\texttt{d5a} $0.027$~THz twist) and strong-coupling
+behaviour, and the diagnosis that the original $\eta/\lambda$ sweep was
+run at an unphysically large $\eta$, are documented in
+\cref{app:convergence_diagnosis}.
 
-\section{Finite-Structure Validation}
-\label{sec:finite_validation}
+% ======================================================================
+\section{q-resolved anharmonic transport: silicon thin film}
+\label{sec:res_qfilm}
+% ======================================================================
 
-\paragraph{Motivation.} Before tackling the full $q_\perp$-resolved anharmonic
-problem, we validate the harmonic and cubic force-constant inputs and the
-resulting phonon-phonon self-energy machinery on a family of \emph{finite}
-structures (no transverse periodicity, ``$\Gamma$-only'' devices). Each
-system is processed by a uniform analysis driver
-(\path{phonon/input_calc/finite_analysis/}) that produces a fixed report of
-quality, sparsity, decomposition, physical-invariant, and self-energy
-diagnostics. The analyses below are reported for the H-passivated SiNW(100)
-of Sec.~\ref{sec:fc3_compression}\todo{cross-ref correct subsection} and a
-finite Si chain (8 atoms, the smallest test fixture); additional structures
-(SiNW family at varying diameter, Ge/SiGe NW, finite CNT(3,3) segment) are
-scaffolded under the same driver and will be filled in once the cluster
-reaps land.
+For a transversely-periodic system the three-phonon self-energy couples
+the transverse momenta by crystal-momentum conservation
+(\cref{eq:sigma_q_dist}). As a quantitative benchmark we model
+cross-plane heat transport through a silicon thin film following
+Guo, Bescond and Zhang~\cite{guo_anharmonic_negf_2020}: the film is
+bulk silicon truncated to $N$ layers along the transport direction with
+in-plane two-dimensional periodicity, so it is exactly the
+transverse-$q_\perp$ problem and reuses the \emph{bulk} silicon force
+constants. The driver reduces to the $\Gamma$-only finite-device
+transmission at a $1\times1$ mesh (checked automatically). Conductance
+is reported per unit area, $G=J/(A_\perp\Delta T)$, and the cross-plane
+conductivity of a film of thickness $L$ is $\kappa(L)=G\,L$.
 
-\subsection{System set}
-\label{sec:fv_systems}
+\paragraph{Ballistic baseline.} The transverse mesh and broadening must
+both be converged: at a fixed eight-layer thickness the ballistic
+conductance converges for $8\times8$ or finer
+($G_\mathrm{ball}=970/928/921/920$~MW\,m$^{-2}$K$^{-1}$ at
+$4\times4/8\times8/12\times12/16\times16$), and a small $\eta$ is needed
+to avoid the coherence attenuation of \cref{sec:res_nw} that otherwise
+crushes the conductance. With these settings $G_\mathrm{ball}$ is nearly
+thickness-independent ($\approx10^{3}$~MW\,m$^{-2}$K$^{-1}$) and the
+ballistic $\kappa=G_\mathrm{ball}L$ rises essentially linearly with $L$
+(\cref{fig:res_sifilm}, right) -- the non-intensive ballistic regime.
+This ballistic conductance matches the scale of
+Guo~\emph{et al.} to within a few percent.
 
-\todo[inline]{Table summarising n\_atoms, supercell, FC source (hiphive
-vs FD vs DFPT), reaped FC2 and FC3 max magnitudes, slab decomposition,
-and reference for each structure. Generated by
-\texttt{finite\_analysis} \texttt{summary.tex} \texttt{\textbackslash{}input}.}
+\paragraph{Anharmonic conductance.} \Cref{fig:res_sifilm} (left)
+compares our cross-plane conductance to the anharmonic-NEGF values of
+Guo~\emph{et al.} at $3$ and $5$ unit cells. With the self-energy as
+implemented (\emph{native} prefactor, \cref{sec:res_prefactor}) the
+three-phonon scattering reduces the $3$-unit-cell conductance by
+$\sim45\%$ ($G_\mathrm{anh}\approx570$~MW\,m$^{-2}$K$^{-1}$), markedly
+more than the reference's $\sim10\%$
+($G_\mathrm{anh}=939.7$). \emph{We have not resolved this
+discrepancy}: it is either a transport-setup effect ($\eta$, mesh,
+thin-device artifacts), the reference's additional approximations, the
+difference in exchange--correlation functional of the underlying force
+constants, or an absolute-prefactor error in the self-energy. The
+second (green) curve in \cref{fig:res_sifilm} shows the effect of
+scaling the vertex by one half (so $\Sigma\to\Sigma/4$); it moves the
+conductance toward the reference ($831$ and $704$) but does not match
+it, and we do \emph{not} claim it as a correction. The prefactor is
+discussed honestly in \cref{sec:res_prefactor}.
 
-\subsection{FC2/FC3 quality and convergence}
-\label{sec:fv_quality}
-
-For the H-passivated SiNW(100) on a $[1,1,4]$ supercell
-($\nsuper{=}84$ atoms, $\ndof{=}252$, $L_z = \qty{21.88}{\angstrom}$)
-the hiphive fit lands at $r_\mathrm{cut}^{(2)} =
-\qty{7.88}{\angstrom}$ for FC2 and $r_\mathrm{cut}^{(3)} =
-\qty{4.0}{\angstrom}$ for FC3. The FC2 cutoff is within the
-0.8\,$L_z/2 = \qty{8.72}{\angstrom}$ warning band by
-$\qty{0.84}{\angstrom}$ (cf.\ \cref{ap:fa_modules,parameter\_validation.py}),
-which is also visible in the FC2 atomic-block heatmap
-(\cref{fig:fv_sparsity_sinw}): the upper-left and lower-right corner
-blocks are non-zero, corresponding to atoms near $z=0$ coupling to
-atoms near $z=L_z$ through the periodic image. The FC3 distance
-plot collapses onto four discrete bins at
-$d \in \{0.2, 1.5, 2.4, 3.3\}\,\text{\AA}$ because the
-$\qty{4}{\angstrom}$ cutoff allows only the four shortest triplet
-diameters in this primitive cell; a histogram annotation marks the
-cutoff position.
-
-The $d_9$ variant ($\mathrm{Si}_{21}\mathrm{H}_{16}$, core diameter
-$\sim\!\qty{0.86}{\nano\metre}$) was originally configured with an
-$\qty{11.36}{\angstrom}$ FC2 cutoff covering the entire cross
-section, but hiphive rejects it on a $[1,1,4]$ supercell
-($r_\mathrm{cut}^{(2)} > L_z/2 = \qty{10.94}{\angstrom}$). We
-reap the $d_9$ structure with a reduced
-$r_\mathrm{cut}^{(2)} = \qty{9.5}{\angstrom}$ and rely on the
-already-fast distance decay of $\|\Phi_2\|_F$ (one decade by
-$\qty{7}{\angstrom}$ on the $d_5$ result) to argue that the
-remaining FC2 weight beyond $\qty{9.5}{\angstrom}$ is small. A
-matching $d_9$ reap on a $[1,1,8]$ supercell that restores the
-$\qty{11.36}{\angstrom}$ cutoff is left for follow-on work.
-
-\todo[inline]{Per-system: distance-binned mean $\|\Phi_{2,ij}\|_F$ and
-$\|\Phi_{3,ijk}\|_F$ on log axis, plus the $\Gamma\to Z$ phonon dispersion.
-Where multiple reaps exist (different supercell sizes, displacement
-amplitudes, hiphive cutoffs), overlay the dispersions to expose the
-slowest-converging modes.}
-
-\begin{figure}[h]
+\begin{figure}[htb]
   \centering
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/fc_quality_fc2_distance.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/fc_quality_fc3_distance.pdf}
-  \caption{FC magnitude decay with interatomic separation for the
-  53-atom SiNW(100). Left: FC2 atomic-block Frobenius norm vs distance
-  (hiphive $r_\mathrm{cut}^{(2)} = 5.0$\,\AA{} truncation). Right: FC3
-  triplet-Frobenius norm vs triplet diameter
-  ($r_\mathrm{cut}^{(3)} = 4.0$\,\AA{}). Both axes are logarithmic.}
-  \label{fig:fv_quality_sinw}
+  \includegraphics[width=0.92\linewidth]{transport_sweeps/si_film_conductance.pdf}
+  \caption{Cross-plane heat transport through a silicon thin film at
+  $300$~K with bulk-silicon force constants (transverse mesh $8\times8$,
+  $121$ frequencies). \emph{Left}: per-area conductance versus
+  thickness -- our ballistic and anharmonic NEGF against
+  Guo~\emph{et al.}~\cite{guo_anharmonic_negf_2020}. The native
+  self-energy over-scatters relative to the reference; the
+  vertex-scaled curve illustrates the unresolved absolute prefactor
+  (\cref{sec:res_prefactor}), and is not an established correction.
+  \emph{Right}: the ballistic $\kappa=G_\mathrm{ball}L$ rises linearly
+  with thickness (ballistic regime).}
+  \label{fig:res_sifilm}
 \end{figure}
 
-\subsection{Force-constant sparsity structure}
-\label{sec:fv_sparsity}
+% ======================================================================
+\section{The three-phonon self-energy prefactor (open)}
+\label{sec:res_prefactor}
+% ======================================================================
 
-\todo[inline]{Per-system: FC2 atomic-block-Frobenius heatmap (atoms
-$z$-sorted), FC3 1D decay (same data as above, kept here for the
-sparsity narrative), and the 3D scatter of FC3 nonzero indices coloured
-by $\log_{10}|\Phi_3|$. The 3D plot makes the sparsity pattern
-visually obvious; add a small inset showing the nnz table at
-$\varepsilon \in \{10^{-2}, 10^{-3}, 10^{-4}, 10^{-5}\}$.}
+The absolute scale of the anharmonic self-energy is, at the time of
+writing, \textbf{not settled}, and we report it as an open issue rather
+than a resolved one. The implemented kernel is the standard sunset
+diagram (\cref{eq:sigma_guo}), which reduces analytically to the
+correct Fermi-golden-rule three-phonon linewidth
+(\cref{eq:fgr}). Against this, the silicon thin film over-scatters
+relative to Guo~\emph{et al.} (\cref{sec:res_qfilm}), which would be
+reconciled by a factor in the range $\sim2$--$4$ on the self-energy
+(Guo~\emph{et al.} note a ``factor of four'' over-count of the repeated
+internal pairings in the earlier Luisier convention). However, our
+attempt to pin this factor independently against phono3py's
+golden-rule linewidths for bulk silicon on the same FC3 is dominated by
+the equilibrium-Green's-function normalisation: the broadening-free,
+units-matched ratio
+$\int(-\mathrm{Im}\,\Sigma^{\mathrm{NEGF}}_s)\,d\omega/\int 2\omega_s\,\gamma^{\mathrm{p3p}}_s\,d\omega$
+comes out mode-independent and close to $(2\pi)^2$, i.e.\ a
+normalisation/unit artifact of the standalone reconstruction rather than
+a clean physical factor. The check therefore does not determine the
+prefactor, and we have reverted to the unscaled (native) self-energy as
+the default. The definitive, convention-free test -- bulk-silicon
+$\kappa$ computed from the code's \emph{own} SCBA Green's functions and
+compared to the phono3py RTA value of \cref{sec:res_fc} on the identical
+FC3 -- is identified but not yet completed. All anharmonic conductances
+in this chapter are quoted at the native prefactor and should be read
+with this caveat.
 
-\begin{figure}[h]
+% ======================================================================
+\section{Full versus approximated self-energy}
+\label{sec:res_approx}
+% ======================================================================
+
+The $q_\perp$-resolved transport driver computes, by construction, only
+the slab-diagonal self-energy (the reference's ``diagonal-block''
+approximation). We implemented the \emph{full} off-diagonal multi-slab
+self-energy $\Sigma_{IJ}(q_\perp,\omega)$ -- which reduces exactly
+(relative error $0$) to the $\Gamma$-only multi-slab self-energy at a
+$1\times1$ mesh -- to measure each numerical approximation against the
+unapproximated result. These ratios are prefactor-independent. For a
+three-slab silicon film (first-Born step from the ballistic Green's
+function): the off-diagonal self-energy blocks carry $47\%$ of the
+Frobenius weight yet change the conductance by only $-1.8\%$, so the
+diagonal-block approximation is well justified despite the blocks being
+individually large; restricting the third-order vertex to the
+nearest-neighbour slab shell changes the result by $<0.1\%$ (the
+long-range FC3 is negligible, echoing the FC3-quality analysis); but
+truncating the inter-slab \emph{Green's function} range gives an
+unphysical (negative) conductance -- the off-diagonal $G$ coherence is
+essential and must not be cut. Of the reference's numerical
+approximations, the two it makes are benign at the few-percent level
+here, while the Green's-function-range truncation, which it does
+\emph{not} make, would be catastrophic.
+
+% ======================================================================
+\section{Silicon/germanium heterostructure}
+\label{sec:res_hetero}
+% ======================================================================
+
+A Ge-layer barrier embedded in a silicon film (Si force constants,
+Ge mass; Si contacts) is built with a per-slab mass profile threaded
+through the $q_\perp$-resolved driver (an all-Si profile reproduces the
+homogeneous driver to machine precision). The mass-mismatch barrier
+raises the \emph{ballistic} thermal resistance by $+340$--$370\%$
+(harmonic interface reflection). The phonon-phonon enhancement of the
+resistance is present in the pure silicon film -- $+32\%$ at $2.3$~nm
+growing to $+51\%$ at $5.4$~nm (the anharmonic resistance accumulates
+with thickness, the diffusive crossover) -- but is suppressed
+($\lesssim1\%$) in the barrier-dominated heterostructure, because the
+strong mass barrier filters transmission to low-frequency acoustic
+phonons that are anharmonically long-lived. (The magnitude of the
+anharmonic enhancement inherits the prefactor caveat of
+\cref{sec:res_prefactor}; the barrier reflection and the qualitative
+filtering picture do not.)
+
+% ======================================================================
+\section{Distributed solver and self-energy; GPU memory}
+\label{sec:res_scaling}
+% ======================================================================
+
+\paragraph{Dyson solve.} The block-tridiagonal recursive Green's
+function (RGF) solve is linear in the number of transport cells while
+the dense reference is cubic ($57\times$ apart at $32$ blocks, agreeing
+to $\sim10^{-13}$; \cref{fig:res_solver}, left). Distributing the energy
+points across MPI ranks gives $5.3\times$ at eight ranks
+(\cref{fig:res_solver}, right) -- the Dyson solve is
+energy-embarrassingly-parallel.
+
+\begin{figure}[htb]
   \centering
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/sparsity_fc2_heatmap.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/fc_quality/sparsity_fc3_scatter_3d.pdf}
-  \caption{Sparsity structure of the SiNW(100) force constants.
-  Left: FC2 atomic-block Frobenius heatmap on a logarithmic colour scale,
-  with atoms sorted along the wire axis. Right: 3D scatter of FC3 nonzero
-  triplets above a $10^{-3}$ relative threshold; colour encodes
-  $\log_{10}\|\Phi_{3,ijk}\|_F$.}
-  \label{fig:fv_sparsity_sinw}
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/solver_scaling.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_scaling.pdf}
+  \caption{Left: solver scaling -- RGF (linear) versus dense
+  selected-inversion (cubic), and the energy-parallel speed-up
+  ($5.3\times$ at eight ranks). Right: distributed scaling of the
+  production three-phonon self-energy -- the spatial-block
+  $(I,J)$ axis is near-ideal while the energy axis is flat because the
+  energy convolution is replicated (\cref{ssec:phph_distribution}).}
+  \label{fig:res_solver}
 \end{figure}
 
-\subsection{FC3 tensor decompositions on finite structures}
-\label{sec:fv_decomp}
+\paragraph{Self-energy.} The production phonon-phonon self-energy
+parallelises near-ideally over the spatial-block axis ($1.0/1.52/2.37/5.36\times$
+at $1/2/3/6$ ranks) but is flat over the energy axis: the bubble is an
+energy convolution that couples all frequencies, so each stack rank
+recomputes the full-frequency FFT and writes only its slice
+(\cref{fig:res_solver}, right).
 
-The five decomposition methods of \cref{sec:fc3_compression} (PCP is
-disabled by default; cf.\ \cref{ap:fa_modules}) are run on the
-SiNW(100) supercell FC3 tensor at ranks $R\in\{2,4,8,16\}$.  Two
-findings dominate the result and shape the plot design:
+\paragraph{Transverse-momentum axis.} The dedicated $q$-communicator of
+\cref{ssec:phph_qdist} -- distributing the external $q_\perp$ and
+all-gathering the internal-momentum Green's functions -- scales
+near-ideally: $1.0/1.87/3.58/6.58\times$ at $1/2/4/8$ ranks
+($82\%$ efficiency), with the self-energy bit-identical across rank
+counts (\cref{fig:res_qscaling}, left). This is the scalable axis for
+the periodic anharmonic problem, in contrast to the replicated energy
+axis.
 
-\begin{itemize}
-\item \emph{Best-rank Frobenius residuals are large}. mSVD reaches
-  $\varepsilon = 0.25$ at $R=16$, HOSVD/CP/INDSCAL $\varepsilon
-  \approx 0.30$--$0.32$. The 252-DOF supercell tensor is too high-
-  dimensional for the ranks reachable here in reasonable time.
-\item \emph{The transport observable collapses to ballistic
-  ($G_\mathrm{anh} \to G_\mathrm{ball}$) for 15 of 20 fits.}
-  When the reconstruction has $\varepsilon \gtrsim 0.6$ the
-  reconstructed FC3 is close to zero in Frobenius norm; the
-  phonon-phonon self-energy bubble is then negligible, the SCBA
-  reaches its fixed point in two iterations at $\Sigma \approx 0$,
-  and the device transports ballistically. In the
-  $G_\mathrm{anh}$-vs.-parameter plot
-  (\cref{fig:fv_transport_quality_sinw}, panel a) we flag these
-  fits with an open red marker and draw both the dense
-  $G_\mathrm{anh}$ and the dense $G_\mathrm{ball}$ reference lines.
-  Only Waring at $R=16$ (and to a lesser extent CP/INDSCAL at the
-  same rank) sit between the two — i.e., produce a non-trivial
-  bubble at all.
-\end{itemize}
+\paragraph{GPU memory.} For the periodic problem the binding constraint
+is memory: the dense Fourier vertex $\tilde\Phi(q_\perp,q_\perp')$ scales
+as $\cO(N_q^2\,\ndof^3)$ (16~GB already at an $8\times8$ mesh and
+wire-scale cross section). Streaming it from the gathering matrices and
+the real-space FC3 (\cref{ssec:phph_qdist}) drops the peak to
+$\cO(N_q\,\ndof^2)$ (\cref{fig:res_qscaling}, right), bit-identical to
+the dense path, and composes with the $q$-communicator at no extra
+communication.
 
-The Waring fitter is currently unreliable below $R=8$: at $R\in\{2,4\}$
-it returns the zero tensor (Frobenius residual $\approx 1$,
-reconstruction nnz $= 0$). These rows are excluded from the
-nnz-vs-parameter plot (\cref{fig:fv_decomp_sinw}, panel b) to avoid a
-spurious vertical jump from the rank-4 zero to the rank-16
-$\sim\!1.5\times 10^{5}$ entries; the failures are listed in the
-figure's footnote.
-
-\todo[inline]{The same six-method sweep as Sec.~\ref{sec:fc3_compression}
-but on the finite-structure FC3. Two figures: (i) Frobenius error vs
-parameter count on log--log axes, (ii) reconstruction nnz at
-$\varepsilon = 10^{-3}$ vs parameter count, with the dense-thresholded
-sparse FC3 baseline drawn as a horizontal reference. The second panel
-answers whether each decomposition genuinely \emph{saves} nonzeros for a
-target accuracy.}
-
-\begin{figure}[h]
+\begin{figure}[htb]
   \centering
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/decomp_frob_vs_params.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/decomp_nnz_vs_eps.pdf}
-  \caption{FC3 tensor-decomposition trade-offs on the SiNW(100).
-  Left: relative Frobenius error vs parameter count for mSVD, HOSVD, CP,
-  INDSCAL, Waring, PCP. Right: reconstructed-tensor nonzero count at
-  $\varepsilon = 10^{-3}$; the dashed horizontal line is the
-  sparse-thresholded dense FC3 baseline.}
-  \label{fig:fv_decomp_sinw}
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_q_scaling.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_memory.pdf}
+  \caption{Left: distributed scaling of the $q_\perp$-resolved
+  three-phonon self-energy over the $q$-communicator (near-ideal;
+  self-energy bit-identical across ranks). Right: peak memory of the
+  momentum-space vertex -- dense $\cO(N_q^2\ndof^3)$ versus streamed
+  $\cO(N_q\ndof^2)$ (the star is a measured value).}
+  \label{fig:res_qscaling}
 \end{figure}
 
-\subsection{Physical invariants}
-\label{sec:fv_physical}
+% ======================================================================
+\section{Cutoff hierarchy and transport sensitivity}
+\label{sec:res_cutoffs}
+% ======================================================================
 
-\todo[inline]{Report the four invariant residuals (FC2 Hermiticity,
-FC2 ASR, FC3 permutational symmetry on the $S_3$-lift, FC3 ASR on legs
-$j$ and $k$) as a single per-system table. The lifted FC3 is
-$S_3$-symmetric \emph{by construction} (cf.\ Sec.~\ref{sec:fc3_compression}),
-so its permutational residuals are at machine precision. The FC3 ASR
-residuals expose whether the fit (hiphive least-squares vs phono3py
-finite-difference vs DFPT) enforces the sum rule. For the
-hiphive-fit SiNW(100) the FC3 ASR residual is large ($\sim 60\%$
-relative); this should propagate through to a finite Drude weight at
-$\omega = 0$ in the SSE.}
+A self-energy-level cutoff sweep on the \texttt{d5a} and \texttt{d11a}
+nanowires (\cref{fig:res_cutoffs}) quantifies the truncations: the FC3
+magnitude threshold converges quickly for \texttt{d5a}
+($10^{-3}\to0.7\%$ relative change in $\Sigma^<$) but the wider
+\texttt{d11a} needs a tighter threshold (it has more small-but-relevant
+vertex elements), whereas a diagonal-$G$ approximation inside the bubble
+is catastrophic ($5\times$ for \texttt{d5a}, $30\times$ for
+\texttt{d11a}). The dominant cutoff is the Green's-function range, not
+the vertex magnitude -- consistent with the q-resolved finding of
+\cref{sec:res_approx} that the inter-slab $G$ coherence must be kept.
 
-\begin{figure}[h]
+\begin{figure}[htb]
   \centering
-  \includegraphics[width=0.6\linewidth]{fig/finite_analysis/sinw100/fc_quality/fc_quality_dispersion.pdf}
-  \caption{Phonon dispersion sanity check for the SiNW(100) along the
-  periodic axis. Imaginary modes (negative branches) indicate FC2
-  instabilities — typically incomplete relaxation or hiphive's
-  least-squares fit returning a slightly indefinite dynamical matrix.}
-  \label{fig:fv_dispersion_sinw}
+  \includegraphics[width=0.6\linewidth]{transport_sweeps/cutoff_sse_d5_d11.pdf}
+  \caption{Self-energy sensitivity to the FC3 magnitude cutoff and to a
+  diagonal-$G$ approximation for the \texttt{d5a} and \texttt{d11a}
+  nanowires. The off-diagonal Green's-function content dominates.}
+  \label{fig:res_cutoffs}
 \end{figure}
-
-\subsection{Phonon-phonon self-energy sparsity}
-\label{sec:fv_sse}
-
-The block-resolved heatmap of $\|\Sigma^<_{IJ}\|_F$
-(\cref{fig:fv_sse_sinw}, left) is organised by transport slabs
-(16 slabs of 5--6 atoms each for the $d_5$ supercell, in $z$-sorted
-order). The visible blockiness — diagonal slabs are systematically
-brighter than off-diagonal ones — is a real feature of the
-short-range bubble: $\Sigma_{IJ}$ is driven by triplet diagrams
-$\Phi^{(I,K,K')}\,G\,G\,\Phi^{(J,K',K)}$ that are non-zero only when
-both $\Phi$ vertices share atoms with the on-block atoms, so
-$|I-J|=0$ has more contributing triplets than $|I-J|=1$.
-
-To rule out a spurious diagonal-aggregation bug we also report a
-per-atom-pair Frobenius heatmap
-(\path{sse_sigma_atomic_heatmap_synth.pdf}): reshape each
-$(n_\omega,3 n_A,3 n_B)$ block into $(n_\omega,n_A,3,n_B,3)$ and
-reduce the Frobenius norm over the $(\omega,3,3)$ axes. In this
-atomic-resolution view the bright diagonals continue smoothly across
-the slab boundaries (the dashed white grid), confirming that
-neighbouring atoms across a slab boundary couple as strongly as
-diametrically-opposite atoms within the same slab. The slab-binned
-appearance is purely an aggregation artefact: a $(I,I)$ slab pair
-sums $\sim n_A^2$ atomic Frobenius contributions whereas
-$(I,I\pm 1)$ sums only the $\sim 2 n_A$ atom pairs that lie within
-$r_\mathrm{cut}^{(3)}$ of the slab boundary.
-
-\todo[inline]{Two routes to the SSE on a representative Green's function:
-\textbf{(i)} a synthetic eigenmode-resolved $G^{<,>}$ built from the
-mass-weighted FC2 spectrum (Lorentzian-broadened, see
-\path{finite_analysis/synthetic_gf.py}) — fast, deterministic, ideal
-for parametric sweeps; \textbf{(ii)} an actual short SCBA run via the
-quatrex solver with $\mathbf{k}_\perp = (1,1,1)$. Compare the
-per-$(I,J)$ Frobenius norms of $\Sigma^{<,>}$; the residual rel-difference
-is dominated by the retarded-reconstruction choice (\texttt{half} vs
-\texttt{fft} Hilbert) and by SCBA mixing.}
-
-\begin{figure}[h]
-  \centering
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/sse_sigma_heatmap_synth.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/sse_sigma_heatmap_quatrex.pdf}
-  \caption{Block Frobenius norms of $\Sigma^<(\omega)$ on the
-  block-tridiagonal grid for the SiNW(100): synthetic-GF prediction
-  (left) vs short SCBA from the quatrex solver (right).}
-  \label{fig:fv_sse_sinw}
-\end{figure}
-
-\subsection{Cutoff hierarchy and transport sensitivity}
-\label{sec:fv_cutoffs}
-
-\todo[inline]{Sweep the four cutoff knobs of
-\path{finite_analysis/sse_cutoffs.py}: (a) diagonal-$G$ inside the SE
-bubble, (b) diagonal-$G$ everywhere, (c) FC3 nearest-neighbour-only
-($|I-J|, |I-K|, |J-K| \le 1$), and (d) FC3 magnitude threshold
-$\varepsilon \in \{10^{-2}, 10^{-3}, 10^{-4}\}$ relative to
-$\max|\Phi_3|$. Report
-$\|\Sigma - \Sigma_\mathrm{baseline}\|_F / \|\Sigma_\mathrm{baseline}\|_F$
-(block-summed and as a heatmap) plus the corresponding change in
-ballistic transmission and Landauer heat current.}
-
-\begin{figure}[h]
-  \centering
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/cutoffs_sigma_frob_vs_cutoff.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{fig/finite_analysis/sinw100/transport_vs_cutoff.pdf}
-  \caption{Cutoff sensitivity for the SiNW(100). Left: relative
-  Frobenius change of $\Sigma^<$ for each cutoff configuration.
-  Right: corresponding change in transmission $T(\omega)$ and the
-  integrated heat current.}
-  \label{fig:fv_cutoffs_sinw}
-\end{figure}
-
-\subsection{Summary}
-\label{sec:fv_summary}
-
-\todo[inline]{One paragraph distilling the headline findings: the
-recommended FC3 magnitude/distance cutoff that costs $\le X\%$ in
-transport, the recommended decomposition method-and-rank for a target
-$\varepsilon_G$, and any structure-specific caveats (e.g.\ SiNW
-hiphive-fit FC3 violates ASR by $\sim 60\%$ — should we ASR-project
-post-fit?).}
