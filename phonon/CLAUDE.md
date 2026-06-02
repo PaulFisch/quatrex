@@ -655,3 +655,36 @@ physics would be verified mode-by-mode).
   mode-projected M_stacked V3 (no energy-conservation δ, no BZ sum → isolates the FC3/vertex normalization
   exactly); (b) **bulk-Si κ from the code's own SCBA in the diffusive limit** vs phono3py RTA 110 (uses the
   code's conventions end-to-end). These, not the linewidth ratio, are how to pin native to better than ~2×.
+
+### F29 — High-quality large-supercell (5x5x5) hiphive FC3 for bulk Si + thin-film scaling
+Built a long-range, high-quality bulk-Si FC3 to replace the under-converged 2x2x2 phono3py FC3 as the
+thin-Si transport input. Config `configs/si_primitive/hiphive_big.yaml`; reaps `reaps/si_big_hiphive/`.
+- **DFT/fit:** 5x5x5 PRIMITIVE supercell = **250 atoms** (> 4^3), VASP-6.3.2 PBE (np=128, ENCUT 450,
+  2x2x2 k), 24 mc-rattled structures. hiphive **ardr** fit: **103 params, RMSE train 0.0203 / test
+  0.0203 eV/A** (train==test, no overfit; ~14x tighter than the CNT), rotational + FC2/FC3 ASR satisfied.
+  FC3 cutoff **5.0 A (~4th NN)** vs the old 2x2x2's 3.0 A (~1st NN). Dispersion CLEAN (no imaginary
+  modes; Gamma-optical 15.15 THz, slightly softer than QE-PBE 15.37 -> VASP-vs-QE PBE).
+- **Adapter** `/tmp/claude/si_big_adapt.py` -> `reaps/si_big_hiphive/{phono3py.yaml, fc2.hdf5
+  (force_constants), fc3.hdf5 (fc3)}`, load_bulk_si-compatible; smoke (1,1)==finite PASSES. (NB: the
+  dense 250^3 fc3 is 3.4 GB in RAM; on disk use the gzip-compressed 5.2 MB file from the reap, not a
+  re-dumped uncompressed copy.)
+- **Bulk kappa validation (phono3py RTA):** new FC3 = 102.8 (11^3) -> **116.4 (19^3) +isotope**, 123.4
+  (19^3 pure anharmonic). The old 2x2x2 QE FC3 gave 115.2 at 19^3 -> **the two AGREE to ~1% at the
+  converged mesh** (the 11^3 gap 102.8 vs 110.7 was mesh under-convergence). So the new FC3 reproduces
+  the converged bulk kappa while being much higher quality (4th-NN range, RMSE 0.02, clean dispersion).
+- **Thin-Si cross-plane scaling** (`si_film_kappa.py --fc3-subdir reaps/si_big_hiphive`, nk=8, 121 freq,
+  eta_factor 0.1, native prefactor; `scripts/out/si_film/si_film_kappa_bigfc3.json`; heat-flow
+  conservation 5-8e-4 all thicknesses):
+  | thickness | G_ball | G_anh | G_anh/G_ball |
+  |---|---|---|---|
+  | 3 L (1.16 nm) | 907 | 470 | 0.519 |
+  | 5 L (1.93 nm) | 849 | 378 | 0.445 |
+  | 8 L (3.09 nm) | 775 | 296 | 0.381 |
+  Reduction GROWS with thickness (diffusive crossover, correct); G_ball matches Guo's scale (~940).
+  The reduction (48-62%) is LARGER than the old 2x2x2 FC3 (G_anh 570 -> now 296-470) because the
+  longer-range FC3 adds inter-slab anharmonic scattering, and much larger than Guo's ~10%. This is NOT
+  a prefactor issue (F28: native verified to ~15%); the Guo gap is the documented open question
+  (their diagonal-Sigma/1st-NN approximations + their eta/setup + LDA-vs-PBE). Open physical tension
+  worth a look: 50-62% reduction at 1-3 nm vs Si's long bulk MFP (mid-freq modes with gamma~0.03 THz
+  have MFP~13 nm, so DO scatter in 3 nm; the long-MFP acoustic modes that dominate bulk kappa do not).
+  Figure `document/fig/transport_sweeps/si_film_bigfc3.pdf`.

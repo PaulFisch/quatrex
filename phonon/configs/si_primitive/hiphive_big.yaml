@@ -1,0 +1,64 @@
+## Bulk Si FCC primitive (2 atoms) -- LARGE-supercell hiPhive FC2+FC3.
+## Goal: a high-quality, long-range FC3 (cutoff ~4th NN) from a 5x5x5 primitive
+## supercell (250 atoms, > 4^3), to replace the under-converged 2x2x2 phono3py FC3
+## (kappa=110 vs Guo 1st/2nd/3rd-NN 120/136/147) as the input for the thin-Si
+## cross-plane scaling. VASP (parallel) -- serial QE is infeasible at 250 atoms.
+##
+## Usage (from phonon/):
+##   python -m phonon_inputs fc3-hiphive-sow  --config configs/si_primitive/hiphive_big.yaml --from-yaml
+##   python -m phonon_inputs fc3-hiphive-run  --config configs/si_primitive/hiphive_big.yaml
+##   python -m phonon_inputs fc3-hiphive-reap --config configs/si_primitive/hiphive_big.yaml
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:                          # VASP-PBE Si a=5.468 A (a/2 = 2.734)
+    - [0.0,    2.734,  2.734]
+    - [2.734,  0.0,    2.734]
+    - [2.734,  2.734,  0.0]
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Si: Si
+  encut: 450
+  ediff: 1.0e-08
+  ismear: 0
+  sigma: 0.01
+  prec: Accurate
+  lreal: Auto                       # 250-atom supercell -> real-space projection
+  lwave: false
+  lcharg: false
+  ncore: 8
+  kpar: 4
+  kpoints_scf: [2, 2, 2]            # 250-atom supercell -> sparse k is sufficient
+  vasp_command: ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1;
+    mpirun -np 128 --bind-to core --map-by socket:PE=1 /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std
+
+hiphive:
+  supercell: [5, 5, 5]              # 250 atoms; min-image ~9.6 A -> cutoffs below are safe
+  n_structures: 24                  # bulk Si is high-symmetry; all-atom rattle is info-rich
+  rattle_method: mc
+  rattle_std: 0.03
+  rattle_d_min: 1.8                 # Si-Si bond ~2.35 A
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [7.0, 5.0]               # [FC2, FC3] A: FC3 to ~4th NN (3rd NN 4.50, 4th 5.43)
+  fit_method: ardr
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  convergence:
+    sizes: [12, 18, 24]
+    pool_size: 24
+    test_fraction: 0.2
+    seed: 0
+    fit_methods: [ardr, rfe]
+    dispersion_q_mesh: [8, 8, 8]
+  calculator: vasp
+  work_dir: ./fc3_hiphive_si_big
+  pw_timeout: 7200
