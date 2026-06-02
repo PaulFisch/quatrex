@@ -1,7 +1,0 @@
-label,T_max,Q_W
-baseline,1.310717e-01,4.986624e-11
-diag_G_in_se,1.581563e-02,3.600722e-12
-diag_G_everywhere,1.581563e-02,3.600722e-12
-mag_thresh_1e-2,1.290639e-01,4.188401e-11
-mag_thresh_1e-3,1.323543e-01,5.002015e-11
-mag_thresh_1e-4,1.310717e-01,4.986624e-11

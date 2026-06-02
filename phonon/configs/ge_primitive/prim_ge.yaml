@@ -1,0 +1,46 @@
+## phonon_inputs configuration: Ge FCC primitive cell (2 atoms, diamond)
+## Literature PBE Ge lattice constant a ~ 5.66-5.68 A (vc-relax refines it).
+## Same diamond structure as Si; new material for the anharmonic-NEGF literature comparison.
+## Ge USPP (GBRV ge_pbe_v1.4, Z=14 with 3d semicore -> higher cutoffs than Si).
+##
+## Usage:
+##   python -m phonon_inputs pipeline  --config configs/ge_primitive/prim_ge.yaml      # relax -> FC2+FC3
+##   python -m phonon_inputs fc3-sow/fc3-run/fc3-reap --config ...                       # staged
+
+structure:
+  source: inline
+  symbols: [Ge, Ge]
+  lattice:
+    - [0.0,    2.83,   2.83]   # a1 = a/2 * (0,1,1), a=5.66
+    - [2.83,   0.0,    2.83]   # a2 = a/2 * (1,0,1)
+    - [2.83,   2.83,   0.0]    # a3 = a/2 * (1,1,0)
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: /usr/scratch/mont-fort11/pfischill/pseudo
+  pseudopotentials:
+    Ge: ge_pbe_v1.4.uspp.F.UPF
+  ecutwfc: 60                  # USPP with 3d semicore (raised from 50)
+  ecutrho_factor: 12           # USPP density cutoff (ecutrho = 720 Ry)
+  kpoints_scf: [4, 4, 4]       # DENSER for near-metallic PBE Ge (2x2x2 gave 30% soft phonons)
+  kpoints_relax: [12, 12, 12]  # unit cell relaxation (2 atoms)
+  conv_thr: 1.0e-8             # 1e-10 stalls on this node (F20)
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/pw.x"   # SERIAL (np>1 deadlocks)
+
+relax:
+  calculation: vc-relax
+  forc_conv_thr: 1.0e-4        # Ry/bohr
+  press_conv_thr: 0.5          # kbar
+  work_dir: ./relax
+
+thirdorder:
+  supercell: [2, 2, 2]
+  cutoff_pair_distance: 5.5     # ~2nd NN distance (Angstrom)
+  displacement_distance: 0.03   # phono3py standard
+  fc_calculator: symfc
+  work_dir: ./fc3_ge_dense
+  pw_timeout: 3600

@@ -938,21 +938,25 @@ def reap(
     print(f"Reading forces from {n_disp} {calculator.upper()} outputs...")
     force_sets = []
 
+    # phono3py may mark symmetry-redundant supercells as None in
+    # supercells_with_displacements (sow then skips emitting their input). Those
+    # displacements still carry forces that the symfc fit needs, so they must be
+    # generated and run explicitly (see scripts that regenerate the None
+    # supercells from ph3.displacements). produce_fc3 indexes the force array by
+    # the GLOBAL 1-based displacement index, so every disp-NNNNN.out must exist.
     if calculator == "qe":
         for i in range(n_disp):
             out_file = work_dir / f"disp-{i+1:05d}.out"
             if not out_file.exists():
                 raise FileNotFoundError(f"Missing: {out_file}")
-            forces = _parse_qe_forces(out_file, n_super)
-            force_sets.append(forces)
+            force_sets.append(_parse_qe_forces(out_file, n_super))
 
     elif calculator == "vasp":
         for i in range(n_disp):
             disp_dir = work_dir / f"disp-{i+1:05d}"
             if not disp_dir.exists():
                 raise FileNotFoundError(f"Missing: {disp_dir}")
-            forces = _parse_vasp_forces(disp_dir, n_super)
-            force_sets.append(forces)
+            force_sets.append(_parse_vasp_forces(disp_dir, n_super))
     else:
         raise ValueError(f"Unknown calculator: {calculator!r}")
 

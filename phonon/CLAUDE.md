@@ -3,6 +3,10 @@
 > Working log. **Substantive write-up + figures go to LaTeX in `document/`** (per user
 > request). This file is the running log: hypotheses, commands, run IDs, results, verdicts.
 
+> **Commit policy (user request, 2026-06-02):** git commits are authored by the user
+> (`pfischill`). Do **not** add `Co-Authored-By: Claude …` trailers, nor any "Generated with
+> Claude Code" line, to commit messages. Plain messages only. Commit/push only when asked.
+
 ## Goal (user request, 2026-05-29)
 (a) Determine whether the d5a SiNW SCBA non-convergence / "soft mode" in the η/λ sweep is
 genuine anharmonicity (SCBA breakdown) or a code / hiphive-FC bug.
