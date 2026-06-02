@@ -214,8 +214,44 @@ the native value is the correct one.
   \label{fig:res_sifilm}
 \end{figure}
 
+\paragraph{A high-quality long-range force constant.} The thin-film
+results above use the bulk force constants from a small
+$2\times2\times2$ supercell (third-order cutoff $\sim$first-neighbour).
+To test their robustness we generated a substantially higher-quality
+force constant: a hiphive cluster expansion on a $5\times5\times5$
+primitive supercell ($250$ atoms, $>4^3$) from $24$ rattled
+VASP-PBE configurations, with a third-order cutoff extended to
+$\sim$fourth-neighbour ($5.0$~\AA). The fit is excellent (automatic
+relevance determination, $103$ parameters, train/test RMSE both
+$0.020$~eV\,\AA$^{-1}$), the rotational and acoustic sum rules are
+satisfied, and the dispersion is clean. It \emph{validates} the bulk
+thermal conductivity -- $116.4$~W\,m$^{-1}$K$^{-1}$ on a $19^3$ mesh
+with isotope scattering, within $1\%$ of the $2\times2\times2$ value of
+\cref{sec:res_fc} -- while being far better converged. On this force
+constant the cross-plane scaling (\cref{fig:res_sifilm_big}) gives
+$G_\mathrm{anh}/G_\mathrm{ball}=0.52,0.45,0.38$ at $1.16,1.93,3.09$~nm:
+the anharmonic reduction grows with thickness (the diffusive crossover),
+and is \emph{larger} than with the short-cutoff force constant because
+the longer-range third-order terms add inter-slab scattering. The
+over-reduction relative to Guo~\emph{et al.} therefore persists and, as
+\cref{sec:res_prefactor} establishes, is not a prefactor artifact; it is
+attributable to their additional self-energy approximations, the
+broadening/transport setup, and the exchange--correlation difference.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.72\linewidth]{fig/transport_sweeps/si_film_bigfc3.pdf}
+  \caption{Cross-plane silicon thin-film conductance from the
+  high-quality $5\times5\times5$ ($\sim$fourth-neighbour) force constant
+  (native prefactor, $nk=8$, $121$ frequencies). The anharmonic
+  reduction $G_\mathrm{anh}/G_\mathrm{ball}$ (annotated) grows with
+  thickness and exceeds both the short-cutoff force constant and
+  Guo~\emph{et al.}; the ballistic conductance matches their scale.}
+  \label{fig:res_sifilm_big}
+\end{figure}
+
 % ======================================================================
-\section{The three-phonon self-energy prefactor (open)}
+\section{The three-phonon self-energy prefactor (verified)}
 \label{sec:res_prefactor}
 % ======================================================================
 
@@ -244,8 +280,18 @@ $\eta$ ($\gamma^{\mathrm{NEGF}}=0.13,0.26,0.44$~THz at
 $\eta=0.02,0.04,0.08$~THz; \cref{fig:res_prefactor}, right). This
 $\eta$-proportional peak ratio -- which reaches $\sim4$--$9$ depending
 on $\eta$ -- is precisely the spurious ``factor of four'' that earlier
-motivated an unjustified $\div4$ rescaling. The physically meaningful
-quantity is the \emph{area-integrated} ratio
+motivated an unjustified $\div4$ rescaling. Pushing to smaller $\eta$ and
+finer meshes does \emph{not} rescue the on-shell value: it has no
+accessible plateau, because resolving the true linewidth would require
+$\eta$ below the intrinsic width ($\sim0.03$~THz) \emph{and}
+simultaneously a $q$-mesh whose joint-density-of-states level spacing is
+finer than $\eta$ -- conditions that, for silicon, lie far beyond a
+$12^3$ mesh. Below that, the discrete energy-conservation surface is
+under-sampled and the on-shell linewidth becomes erratic and
+mesh-dependent (e.g.\ at $\eta=0.005$~THz it jumps from $0.035$ to
+$1.4$~THz between a $6^3$ and a $10^3$ mesh as a single $q'$ point grazes
+the resonance). The physically meaningful quantity is instead the
+\emph{area-integrated} ratio
 \begin{equation}
 R \;=\; \frac{\int (-\mathrm{Im}\,\Sigma^{\mathrm{NEGF}}_s)\,d\omega}
              {\int 2\omega_s\,\gamma^{\mathrm{p3p}}_s\,d\omega},
