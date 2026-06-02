@@ -38,17 +38,17 @@ def run_one() -> None:
     _ = transmission_finite(
         bundle.phonon,
         fc3_hdf5=str(fc3_hdf5),
-        freq_range_thz=(0.01, 18.0, 21),
+        freq_range_thz=(0.01, 25.0, 100),
         transport_direction="z",
         eta_factor=0.05,
         temperature=300.0,
         delta_T=10.0,
-        max_scba_iter=3,
-        scba_tol=1e-3,
+        max_scba_iter=8,
+        scba_tol=1e-5,
         conservation_tol=1e-3,
         mixing=0.5,
-        anderson_mixing=False,
-        n_slabs=1,
+        anderson_mixing=True,
+        n_slabs=2,
         verbose=True,
     )
     print(f"  Total wall: {time.time() - t0:.1f} s", flush=True)

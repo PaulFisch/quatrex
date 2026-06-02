@@ -185,6 +185,7 @@ def _run_one(
     zero_mode_projection: bool,
     gate_on_conservation: bool,
     divergence_guard: bool,
+    enforce_asr: bool,
     verbose: bool,
 ) -> dict[str, Any]:
     t_start = time.time()
@@ -213,6 +214,7 @@ def _run_one(
         vertex_cutoff=key.vertex_cutoff_value,
         g_cutoff=key.g_cutoff_value,
         dc_handling=key.dc_handling,
+        enforce_asr=enforce_asr,
     )
     wall = time.time() - t_start
 
@@ -224,6 +226,7 @@ def _run_one(
         out["re_sigma_frobenius_norm"] = float(np.linalg.norm(sigma_R.real))
         out["im_sigma_frobenius_norm"] = float(np.linalg.norm(sigma_R.imag))
     out["wall_time_seconds"] = wall
+    out["enforce_asr"] = bool(enforce_asr)
     return out
 
 
@@ -294,7 +297,8 @@ def sweep_cutoffs(
     out_dir: Path,
     args,
 ) -> list[dict[str, Any]]:
-    ck_dir = out_dir / "checkpoints" / "cutoff"
+    ck_dir = out_dir / "checkpoints" / (
+        "cutoff_asr" if args.enforce_asr else "cutoff_raw")
     ck_dir.mkdir(parents=True, exist_ok=True)
 
     sigma_axis = _resolve_axis(args.sigma_cutoffs, args.default_sigma)
@@ -338,6 +342,7 @@ def sweep_cutoffs(
                 zero_mode_projection=args.zero_mode_projection,
                 gate_on_conservation=args.gate_on_conservation,
                 divergence_guard=args.divergence_guard,
+                enforce_asr=args.enforce_asr,
                 verbose=args.verbose,
             )
 
@@ -600,6 +605,7 @@ def write_summary(
             "g_cutoff": "Inf" if key.g_cutoff == _NONE_SENTINEL
             else key.g_cutoff,
             "dc_handling": key.dc_handling,
+            "enforce_asr": bool(r.get("enforce_asr", False)),
             "G_ball": float(r["thermal_conductance_ballistic"]),
             "G_anh": float(r["thermal_conductance_anharmonic"]),
             "J_anh_pW": float(r["heat_current"]) * 1e12,
@@ -710,6 +716,15 @@ def parse_args() -> argparse.Namespace:
         "--divergence-guard", action=argparse.BooleanOptionalAction,
         default=True,
         help="Abort early on residual blow-up (default on).",
+    )
+    p.add_argument(
+        "--enforce-asr", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="ASR-project the FC3 onto the Gamma-translation null space "
+             "(both legs) before building the device vertex (default on). "
+             "Removes the ~0.8 leg-j/k ASR residual of open-wire FC3 that "
+             "stiffens the small-eta SCBA fixed point. Cached separately "
+             "from --no-enforce-asr runs.",
     )
 
     # Cutoff axes ----------------------------------------------------------

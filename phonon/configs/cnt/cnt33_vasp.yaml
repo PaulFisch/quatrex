@@ -17,6 +17,8 @@
 ##   python -m phonon_inputs fc3-run   --config config_cnt33_vasp.yaml
 ##   python -m phonon_inputs fc3-reap  --config config_cnt33_vasp.yaml
 
+fc_method: hiphive   # rattle + sparse fit (like the SiNW configs); full FD infeasible
+
 structure:
   source: inline
   symbols: [C, C, C, C, C, C, C, C, C, C, C, C]
@@ -61,11 +63,18 @@ relax:
   calculator: vasp
   work_dir: ./relax_cnt33_vasp
 
-thirdorder:
-  supercell: [1, 1, 3]            # 36 atoms - small, captures up to ~3.7 A along tube
-  cutoff_pair_distance: 3.5       # Angstrom - covers C-C up to 3rd neighbors along the tube
-  displacement_distance: 0.02     # Angstrom - balances FD noise vs anharmonicity
-  fc_calculator: symfc            # symmetry-adapted fitting (few displacements needed)
+hiphive:
+  supercell: [1, 1, 3]            # 36 atoms (7.38 A along z); cutoff < L/2 = 3.69 A
+  n_structures: 30                # high-symmetry stiff C-C wire -> fewer than the SiNWs (44/90)
+  rattle_method: mc
+  rattle_std: 0.03                # Angstrom
+  rattle_d_min: 1.2               # min C-C separation during MC rattle (bond is 1.42 A)
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [3.5, 2.5]             # [FC2, FC3] Angstrom; 3.5 < L/2 captures up to 3rd C-C neighbor
+  fit_method: ardr                # sparse Bayesian regression (good for small high-symmetry cells)
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
   calculator: vasp
-  work_dir: ./fc3_cnt33_vasp
-  pw_timeout: 3600                # 1 hour per displacement (CNT supercell is mostly vacuum)
+  work_dir: ./fc3_hiphive_cnt33_vasp
+  pw_timeout: 3600                # 1 hour per rattled run (CNT supercell is mostly vacuum)
