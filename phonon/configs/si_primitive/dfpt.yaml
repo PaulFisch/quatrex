@@ -22,7 +22,7 @@ structure:
     - [0.25, 0.25, 0.25]
 
 qe:
-  pseudo_dir: ./pseudo
+  pseudo_dir: /usr/scratch/mont-fort11/pfischill/quatrex/phonon/configs/si_primitive/pseudo
   pseudopotentials:
     Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
   ecutwfc: 60
@@ -31,7 +31,7 @@ qe:
   conv_thr: 1.0e-10
   smearing: gaussian
   degauss: 0.01
-  pw_command: "mpirun -np 4 pw.x"
+  pw_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/pw.x"
 
 relax:
   calculation: vc-relax
@@ -45,12 +45,12 @@ dfpt:
   q_mesh: [2, 2, 2]               # q-grid for ph.x and d3q (= effective supercell)
   kpoints: [8, 8, 8]              # SCF k-mesh for unit cell
   tr2_ph: 1.0e-14                 # ph.x self-consistency threshold
-  ph_command: "mpirun -np 4 ph.x"
-  q2r_command: "q2r.x"
-  d3q_command: "mpirun -np 4 d3q.x"
-  d3_qq2rr_command: "d3_qq2rr.x"
-  d3_asr_command: "d3_asr.x"
-  d3_sparse_command: "d3_sparse.x"
+  ph_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/ph.x"
+  q2r_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/q2r.x"
+  d3q_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/d3q.x"
+  d3_qq2rr_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/d3_qq2rr.x"
+  d3_asr_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/d3_asr3.x"
+  d3_sparse_command: "/usr/scratch/mont-fort11/pfischill/qe-7.5-git/build/bin/d3_sparse.x"
   asr: simple                      # acoustic sum rule: "simple", "crystal", or "no"
   sparse_thr: 1.0e-5               # FC3 sparsification threshold (Ry/bohr^3); null to skip
   work_dir: ./dfpt

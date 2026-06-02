@@ -179,3 +179,22 @@ hostfile
 
 # Phonon data
 disp-*.in
+# --- Environment / tooling dotfiles (not part of the project) ---
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.ripgreprc
+.mcp.json
+.claude/
+.vscode
+
+# --- Stray top-level QE / phono3py runtime outputs ---
+input_tmp.in
+kappa-m*.hdf5
+
+# --- Large local backups (regenerable / not for version control) ---
+phonon_old/
+phonon/reaps_old/

@@ -33,3 +33,25 @@ configs/genw/genw100_d*_auto.yaml
 configs/sigenw/sigenw100_fge*_auto.yaml
 configs/cnt/cnt33_finite_n*_auto.yaml
 configs/chain/si_chain_n*_auto.yaml
+
+# --- DFT working directories under configs/ (relax + rattled hiphive/phono3py runs, pseudos) ---
+configs/**/relax*/
+configs/**/fc3_*/
+configs/**/dfpt/
+configs/**/pseudo/
+configs/**/reaps/
+
+# --- Reap data: regenerable DFT outputs (fc2/fc3/kappa regenerable from configs) ---
+reaps/**/reference/
+reaps/**/*.pdf
+reaps/**/*.png
+reaps/**/*.csv
+reaps/**/*.hdf5
+reaps/**/*.json
+reaps/ge_primitive_work/
+reaps/si_big_hiphive/
+reaps/hiphive_sinw100_d17a_vasp/
+
+# --- Analysis run outputs + profiles ---
+scripts/out/
+scripts/*.prof

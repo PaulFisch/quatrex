@@ -1,0 +1,55 @@
+## phonon_inputs configuration: Si FCC primitive cell (2 atoms) — hiPhive pathway
+## Same structure / QE settings as prim.yaml (FD) and dfpt.yaml (DFPT) so the
+## three FC-generation methods can be compared apples-to-apples.
+## hiphive cutoff is bounded by the 2x2x2 supercell min-image (~3.86 A).
+##
+## Usage:
+##   python -m phonon_inputs fc3-hiphive-all --config hiphive.yaml --from-yaml
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,       2.7331, 2.7331]   # a1 = a/2 * (0,1,1)
+    - [2.7331,    0.0,    2.7331]   # a2 = a/2 * (1,0,1)
+    - [2.7331,    2.7331, 0.0]      # a3 = a/2 * (1,1,0)
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: /usr/scratch/mont-fort11/pfischill/quatrex/phonon/configs/si_primitive/pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 60
+  ecutrho_factor: 8
+  kpoints_scf: [2, 2, 2]       # for the 2x2x2 supercell (16 atoms)
+  kpoints_relax: [8, 8, 8]
+  conv_thr: 1.0e-8     # 1e-10 caused charge-sloshing stall on this node
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "pw.x"   # serial: the perl-wrapped pw.x deadlocks at np>1 on this node
+
+relax:
+  calculation: vc-relax
+  forc_conv_thr: 1.0e-4
+  press_conv_thr: 0.5
+  work_dir: ./relax
+
+hiphive:
+  supercell: [2, 2, 2]            # 16 atoms (7.73 A); cutoff < L/2 = 3.86 A
+  n_structures: 16                # bulk Si is simple/high-symmetry -> few needed
+  rattle_method: mc
+  rattle_std: 0.03
+  rattle_d_min: 1.8              # Si-Si bond ~2.35 A
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [3.8, 3.0]            # [FC2, FC3] A; 3.8 < min-image 3.86 (1st-2nd NN)
+  fit_method: ardr
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: qe
+  work_dir: ./fc3_hiphive_prim
+  pw_timeout: 3600

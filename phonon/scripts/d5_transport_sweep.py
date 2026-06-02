@@ -186,6 +186,7 @@ def _run_one(
     anderson_mixing: bool,
     anderson_depth: int,
     ballistic_only: bool,
+    enforce_asr: bool,
     verbose: bool,
 ) -> dict[str, Any]:
     """Execute one ``transmission_finite`` call.
@@ -213,12 +214,14 @@ def _run_one(
         anderson_depth=anderson_depth,
         n_slabs=n_slabs,
         verbose=verbose,
+        enforce_asr=enforce_asr,
     )
 
     out = {k: res[k] for k in _CHECKPOINT_FIELDS if k in res}
     out["t_mean"] = temperature
     out["n_slabs"] = n_slabs
     out["ballistic_only"] = ballistic_only
+    out["enforce_asr"] = bool(enforce_asr)
     return out
 
 
@@ -367,6 +370,7 @@ def sweep_temperature(
                 anderson_mixing=args.anderson_mixing,
                 anderson_depth=args.anderson_depth,
                 ballistic_only=k.ballistic_only,
+                enforce_asr=args.enforce_asr,
                 verbose=args.verbose,
             )
 
@@ -410,6 +414,7 @@ def sweep_length(
                 anderson_mixing=args.anderson_mixing,
                 anderson_depth=args.anderson_depth,
                 ballistic_only=k.ballistic_only,
+                enforce_asr=args.enforce_asr,
                 verbose=args.verbose,
             )
 
@@ -732,6 +737,7 @@ def write_summary(
             "heat_flow_conservation": float(r.get("heat_flow_conservation", 0.0)),
             "n_scba_iterations": int(r.get("n_scba_iterations", 0)),
             "ballistic_only": bool(r.get("ballistic_only", False)),
+            "enforce_asr": bool(r.get("enforce_asr", False)),
         }
 
     rows = [row(r, "temperature") for r in results_T]
@@ -832,6 +838,12 @@ def parse_args() -> argparse.Namespace:
              "converges 2-3× faster on the cubic-anharmonic SCBA.",
     )
     p.add_argument("--anderson-depth", type=int, default=5)
+    p.add_argument(
+        "--enforce-asr", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="ASR-project the FC3 (both legs) before the device vertex "
+             "(default on); --no-enforce-asr restores the raw-FC3 path.",
+    )
 
     # Modes ----------------------------------------------------------------
     p.add_argument(
