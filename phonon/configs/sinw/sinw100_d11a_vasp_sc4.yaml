@@ -79,7 +79,7 @@ relax:
   work_dir: ./relax_sinw100_d11a_vasp
 hiphive:
   supercell: [1, 1, 4]
-  n_structures: 6
+  n_structures: 90
   rattle_method: mc
   rattle_std: 0.03
   rattle_d_min: 1.4
