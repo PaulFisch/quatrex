@@ -1,17 +1,15 @@
 """Opt-in cutoff policies for the dense phonon solver.
 
-The unified solver defaults to **no approximation**: full off-diagonal G
+The solver defaults to no approximation: full off-diagonal G
 blocks inside the bubble, full FC3 vertex, no magnitude or distance
 threshold. The four knobs below can be flipped individually for
-cutoff-sensitivity studies (cf. ``phonon/finite_analysis/sse_cutoffs.py``
-and the ``run_cutoffs`` analysis):
+cutoff-sensitivity studies:
 
-  * ``diag_G_in_se`` — restrict the inner G dict in the bubble integrand
+  * ``diag_G_in_se`` - restrict the inner G dict in the bubble integrand
     to the diagonal (K₁ = K₁', K₂ = K₂') blocks. Recovers the original
     block-tridiagonal NEGF approximation when ``True``.
-  * ``fc3_nn_only`` — drop FC3 block triplets with ``|I-J| > 1``,
-    ``|I-K| > 1`` or ``|J-K| > 1`` (already the default of
-    ``quatrex.phonon.fc3_loader.fc3_to_phi_blocks``).
+  * ``fc3_nn_only`` - drop FC3 block triplets with ``|I-J| > 1``,
+    ``|I-K| > 1`` or ``|J-K| > 1``
   * ``fc3_distance_cutoff`` — drop FC3 entries whose triplet diameter
     (max of three pairwise atomic distances) exceeds the cutoff in Å.
   * ``fc3_magnitude_threshold`` — drop FC3 entries whose magnitude is

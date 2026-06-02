@@ -1,8 +1,7 @@
 """q-dependent dense phonon-phonon self-energy driver.
 
-Computes the FC3 Fourier transform Φ(q, q', q'') on a Γ-centered q-mesh
-and contracts with the q-resolved Green's functions. Parallelisable over
-external q-points via ``ThreadPoolExecutor`` or a ``forkserver`` pool.
+Computes the FC3 Fourier transform Φ(q, q', q'') on a Gamma-centered q-mesh
+and contracts with the q-resolved Green's functions.
 """
 
 from __future__ import annotations
@@ -133,8 +132,7 @@ def compute_phph_self_energy_q_dense(
     T_arr_H = T_arr.conj().transpose(0, 2, 1).copy()
     if stream_phi:
         # Stream the vertex: keep only TM (n_kpts, nd, nd, dim_t) and T_arr_H,
-        # building Phi(q1,q2) per batch in the worker. Peak memory drops from
-        # O(n_kpts^2 nd^3) to O(qp_batch nd^3) -- the GPU-memory path.
+        # building Phi(q1,q2) per batch in the worker.
         Phi_all = ("stream", TM, T_arr_H)
         del T_arr, M_blocks
     else:
@@ -235,8 +233,7 @@ def compute_phph_self_energy_q_dense_multi_slab(
     coupling the transverse momenta by conservation q_ext=q'+(q_ext-q'). The slab
     structure mirrors the Gamma-only template
     :func:`se_finite.compute_phph_self_energy_finite_multi_slab`; the q-fold and the
-    internal-momentum sum are added on top. Reduces EXACTLY to that Gamma-only
-    multi-slab self-energy at a 1x1 mesh.
+    internal-momentum sum are added on top.
 
     G blocks: dicts ``{(K,K'): (n_kpts, n_freq, n_dof, n_dof)}``.
     Returns ``({(I,J): Sigma^<(n_kpts,n_freq,n_dof,n_dof)}, {(I,J): Sigma^>...})``.

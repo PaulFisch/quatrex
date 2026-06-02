@@ -8,16 +8,11 @@ The bubble integrand is
         * phi_right_{J,d,f}
 
 evaluated as a frequency convolution via zero-padded FFTs along the
-omega axis. The prefactor is supplied by the caller (typically
-``0.5j * hbar * d_omega / (2 * pi)``).
+omega axis.
 
 This file holds the canonical implementation for the dense reference
 solver (``phonon.solver.dense``) and any local script importing
-``solver.bubble``. The installed production package keeps an
-independent copy at :mod:`quatrex.phonon.bubble` so the block-sparse
-SCBA driver does not depend on the local ``phonon/`` directory being on
-``sys.path``. The two implementations are byte-identical; agreement is
-locked by :mod:`tests.quatrex.phonon.test_bubble_kernel`.
+``solver.bubble``.
 """
 
 from __future__ import annotations
@@ -67,8 +62,7 @@ def precompute_g_fft(G, *, n_fft, zero_freq_idx=None, dc_handling="zero",
 
 def _bubble_contract_chunk(phi_left, phi_right, G_a_fft, G_b_fft):
     """Three-matmul kernel over a single contiguous block of the
-    frequency axis. See :func:`_bubble_contract_batched_matmul` for
-    the index convention; this is the un-chunked inner kernel.
+    frequency axis.
     """
     nI = phi_left.shape[0]
     nJ = phi_right.shape[0]
@@ -120,19 +114,11 @@ def _bubble_contract_batched_matmul(phi_left, phi_right,
     """Three-matmul kernel for ``S[w,a,J] = phi_L[ace] * G_b[wed] *
     G_a[wcb] * phi_R[Jdb]``.
 
-    Profiling on the 4-operand fused ``opt_einsum.contract`` showed
-    that the chosen path falls back to ``c_einsum`` (slow Python
-    walker) for the contractions that share the ``w`` batch axis
-    between ``G_a`` and ``G_b`` — ``tensordot`` cannot handle shared
-    broadcast indices. The kernel below does the same arithmetic but
-    routes everything through BLAS ``matmul`` (with explicit
-    reshapes), ~5-10x faster on d5a sizes.
-
     ``max_bytes`` bounds the transient memory: the frequency axis is
-    a perfect batch dimension (each ``w`` is independent), so when
+    used as batch dimension (each ``w`` is independent), so when
     the full contraction would exceed ``max_bytes`` the kernel slices
     the ``w`` axis into chunks that each fit. ``None`` (default)
-    disables chunking — the whole axis is contracted at once.
+    disables chunking.
     """
     nI = phi_left.shape[0]
     nJ = phi_right.shape[0]
@@ -226,47 +212,32 @@ def bubble_dense(
         indices ``(J, d, b)``.
     G_a
         Green's function on the c-f link, shape ``(ne, bK1, bK1')``.
-        ``bK1' == bK1`` when ``G_a`` is a diagonal block (the production
-        sparse path and the dense reference both pass diagonal G blocks
-        by default); off-diagonal blocks with ``bK1' != bK1`` are
-        supported by the cutoff-sweep audit.
+        ``bK1' == bK1`` when ``G_a`` is a diagonal block;
+         off-diagonal blocks with ``bK1' != bK1`` are supported
     G_b
         Green's function on the e-d link, shape ``(ne, bK2, bK2')``.
-        ``bK2' == bK2`` for diagonal G blocks. The dense reference
-        passes ``G_b is G_a``.
+        ``bK2' == bK2`` for diagonal G blocks.
     n_fft
-        FFT length along the omega axis. Use ``2 * ne - 1`` for a
-        non-aliased linear convolution.
+        FFT length along the omega axis.
     prefactor
-        Multiplied into the output (encodes the SSE prefactor
-        ``i hbar d_omega / (4 pi)`` in the caller's units).
+        Multiplied into the output
     out_slice
         Slice applied to the IFFT result. Default ``slice(0, ne)``
-        matches the production solver (positive-only frequency
-        convention). The dense reference passes
-        ``slice(ne // 2, ne // 2 + ne)`` for its symmetric grid.
     zero_freq_idx
         Location of the omega = 0 sample in the input grid. When this
-        is ``None``, the input is treated as positive-only (no DC
-        sample to worry about) and ``dc_handling`` is a no-op. When
-        not ``None``, the value of ``dc_handling`` decides how the DC
+        is ``None``, the input is treated as positive-only
+        and ``dc_handling`` is a no-op. When not ``None``,
+        the value of ``dc_handling`` decides how the DC
         sample of G is treated before the FFT — see below.
     dc_handling
         How to regularise the omega = 0 sample of G before the FFT.
         Only consulted when ``zero_freq_idx`` is not ``None``.
 
-          * ``"zero"`` (default; legacy dense-reference behaviour) —
-            sets ``G[zero_freq_idx] = 0`` to suppress the singular
-            Bose occupation at omega = 0. Drops the genuine DC
-            contribution from G as a side effect.
+          * ``"zero"`` sets ``G[zero_freq_idx] = 0`` to suppress the singular
+            Bose occupation at omega = 0.
           * ``"interpolate"`` — replaces ``G[zero_freq_idx]`` by the
-            midpoint of its two omega neighbours. Captures the linear
-            behaviour of G near DC without amplifying the singular
-            Bose factor (Bose-weighted lesser/greater G already vanish
-            at omega = 0 in the broadened propagator).
-          * ``"keep"`` — leaves ``G[zero_freq_idx]`` untouched. Closest
-            to the strict SCBA expression; relies on finite ``eta``
-            broadening to suppress the DC pole.
+            midpoint of its two omega neighbours.
+          * ``"keep"`` — leaves ``G[zero_freq_idx]`` untouched.
     xp
         Array module (``numpy`` or ``cupy``). Defaults to ``numpy``.
 
@@ -278,9 +249,6 @@ def bubble_dense(
     if xp is None:
         xp = np
 
-    # Sizes from the *G arrays*, not from phi_left. Off-diagonal G(K,K')
-    # blocks have bK != bK' on the trailing axis; clipping the pad shape
-    # to bK from phi_left would silently truncate those.
     ne, bK1, bK1p = G_a.shape
     _, bK2, bK2p = G_b.shape
     if out_slice is None:
