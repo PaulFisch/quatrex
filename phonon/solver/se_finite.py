@@ -298,11 +298,6 @@ def compute_phph_self_energy_finite_multi_slab(
         phi_dev_blocks, g_keys, n_slabs, sigma_cutoff=sigma_cutoff,
     )
 
-    # Flatten to one task per bubble call (one (I, J, K1, K2, K1p,
-    # K2p, kind) tuple = one bubble_dense_from_fft invocation). This
-    # gives ~|pair_index| * |quadruples| * 2 tasks instead of just
-    # |pair_index|, so threading scales beyond the n_slabs^2 limit of
-    # the outer-only parallelisation.
     tasks: list[tuple] = []
     for (I, J), pairs in pair_index.items():
         for K1, K2, K1p, K2p, phi_left, phi_right in pairs:
@@ -314,14 +309,6 @@ def compute_phph_self_energy_finite_multi_slab(
             )
 
     # --- memory budgeting -------------------------------------------
-    # The bubble's transient peak is O(n_fft * n_dof^3); naively
-    # running N workers in parallel would need N * peak bytes. We
-    # (a) cap the worker count and (b) hand each worker a per-worker
-    # byte budget so the bubble kernel chunks the frequency axis to
-    # fit. Nothing here ever exceeds the budget, so the run cannot
-    # OOM — at worst it serialises the omega axis one sample at a
-    # time. ``per_worker_max_bytes`` is None (no chunking) when there
-    # is plenty of headroom.
     n_workers_requested = max(
         1, n_threads if n_threads is not None else _default_n_threads()
     )

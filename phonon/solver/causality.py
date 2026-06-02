@@ -2,27 +2,8 @@
 SCBA solver.
 
 The retarded self-energy ``Sigma^R(omega)`` is causal iff the
-"scattering rate" matrix ``Gamma_Sigma(omega) = i(Sigma^R - Sigma^A)``
-is positive semi-definite for every ``omega > 0`` (and negative
-semi-definite for ``omega < 0``). The bare Migdal bubble produces a
-causal ``Sigma^R`` by construction; once discretised and stuffed into
-a self-consistent loop, however, the retarded reconstruction
-(Hilbert transform via zero-padded FFT) and the per-iteration
-projection / symmetrisation can leak negative eigenvalues into
-``Gamma_Sigma``. The loop then feeds an acausal ``G^R`` (poles in the
-upper half-plane) back into the next bubble, the violations grow, and
-the iterate eventually catapults to nonsense -- the failure mode
-documented for d5a above ``2*omega_max`` (after the fmax aliasing
-has been removed) and for nanowire devices in
-\\href{https://doi.org/10.1109/iwce.2010.5677923}{Pourfath et al.\\
-(2010)}.
-
-The remedy used by causal-NEGF implementations is to project
-``Gamma_Sigma`` onto the PSD cone at every iteration: take the
-eigendecomposition of the hermitised ``Gamma_Sigma(omega)``, clip
-negative eigenvalues to zero, and rebuild ``Sigma^R`` from the clean
-``Gamma_Sigma``. This module supplies that projector and the
-companion diagnostic.
+matrix ``Gamma_Sigma(omega) = i(Sigma^R - Sigma^A)``
+is positive semi-definite for every ``omega > 0``
 """
 
 from __future__ import annotations

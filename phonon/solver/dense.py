@@ -182,27 +182,14 @@ def _anderson_mix(x_in, x_out, x_hist, f_hist, prev_fnorm, *,
                   depth, beta, reg=1e-3, step_cap=2.0):
     """Stabilized Anderson (Pulay/DIIS) mixing step.
 
-    The plain Anderson scheme diverges on strongly anharmonic systems
-    where the lowest-order self-energy is comparable to the device
-    Hamiltonian (the d5a SiNW has ``|Sigma| ~ |H|``): the residual
-    oscillates, stale history pollutes the least-squares, and an
-    ill-conditioned normal-equation system produces an over-shooting
-    step. This variant adds three standard safeguards:
+     This variant adds three safeguards:
 
-      1. **restart** -- the history is cleared whenever the residual
-         norm grows, so only a locally contracting stretch of iterates
-         feeds the extrapolation;
-      2. **regularization** -- the normal equations are damped at a
-         relative ``reg`` level (1e-3, vs the 1e-8 of the bare scheme);
-      3. **step cap** -- an Anderson step that overshoots the damped
+      1. restart -- the history is cleared whenever the residual norm grows
+      2. regularization -- the normal equations are damped at a
+         relative ``reg``
+      3. step cap -- an Anderson step that overshoots the damped
          linear step by more than ``step_cap`` is rejected in favour of
          that linear step.
-
-    On the d5a SiNW this converges the SCBA in ~47 iterations where the
-    bare Anderson diverges (heat-flow conservation blows up to 100 %)
-    and linear mixing needs ~65. ``x_hist`` / ``f_hist`` are mutated in
-    place. Returns ``(x_mixed, fnorm)``; feed ``fnorm`` back as
-    ``prev_fnorm`` on the next call.
     """
     f_k = x_out - x_in
     fnorm = float(np.linalg.norm(f_k))
@@ -244,7 +231,6 @@ def _anderson_mix(x_in, x_out, x_hist, f_hist, prev_fnorm, *,
 # ---------------------------------------------------------------------------
 # Safeguarded Anderson acceleration
 # ---------------------------------------------------------------------------
-
 
 def _block_weight_vector(sig_l, sig_g, n_slabs, n_dof, *, floor_rel=1e-6):
     """Per-entry weights placing every (I, J) slab-pair block on an
@@ -288,9 +274,7 @@ class _AndersonAccelerator:
     Fixes the failure mode of :func:`_anderson_mix`, which cleared its
     entire history on *any* residual uptick: on a noisy residual (the
     d5a multi-slab SCBA near 1e-4) that collapses Anderson to a bare
-    linear step every iteration, which then diverges. The safeguards
-    here follow the literature-standard recipe (Walker & Ni, SIAM JNA
-    49 (2011); Toth & Kelley, SIAM JNA 53 (2015)):
+    linear step every iteration, which then diverges:
 
       * history is *kept* across residual upticks -- Anderson is
         allowed to be non-monotone;
@@ -388,9 +372,7 @@ def _run_jfnk(x0_l, x0_g, scba_step, scba_tol, max_iter, verbose):
     """Jacobian-free Newton-Krylov solve of the SCBA fixed point.
 
     Wraps ``residual(x) = scba_step(x) - x`` and hands it to
-    :func:`scipy.optimize.newton_krylov`. Robust even when plain
-    fixed-point iteration is linearly unstable. Complex self-energies
-    are packed into a real vector for the solve.
+    :func:`scipy.optimize.newton_krylov`.
 
     Returns ``(sig_l, sig_g, residual)``; ``residual`` is ``None`` when
     SciPy is unavailable.
@@ -1302,10 +1284,6 @@ def transmission_finite(
                 f"{norm_after:.4e} (dropped {1.0 - norm_after / norm_before:.1%})"
             )
     if vertex_scale != 1.0:
-        # Bescond-style coupling rescaling (JAP 110, 094517, 2011):
-        # Sigma scales as vertex_scale**2. Sweep vertex_scale in (0, 1]
-        # and fit Pade in vertex_scale**2 to extrapolate the SCBA
-        # answer at vertex_scale=1 without iterating the loop.
         M_stacked = M_stacked * float(vertex_scale)
 
     # Build the device-resolved FC3 vertex dict (multi-slab).
@@ -1607,11 +1585,6 @@ def transmission_q(
     if verbose:
         suffix = " (will update each SCBA iter)" if scattering_contacts else ""
         print(f"  Precomputing OBC self-energies (batched)...{suffix}")
-    # Optional heterostructure: a per-slab MASS profile (e.g. a Ge barrier in a
-    # Si film, Si FC + Ge mass; Guo-Bescond-Zhang). The leads stay pure material
-    # (Si, m_lead = phonon.primitive.masses[0]); only the device on-site/coupling
-    # blocks are re-weighted by the per-slab mass. The FC3 vertex is kept uniform
-    # (justified by F25: off-diagonal/1st-NN-vertex are benign).
     if mass_profile is not None:
         mass_profile = list(mass_profile)
         if len(mass_profile) != n_slabs:
