@@ -60,6 +60,10 @@ from .fc3_device import build_device_fc3_blocks
 from .retarded import build_retarded
 from .se_finite import compute_phph_self_energy
 from .se_q import _build_folded_vertices
+from .static_se import (
+    build_static_self_energy_hook,
+    device_fc3_mass_weighted,
+)
 from .causality import (
     causality_diagnostic,
     dynamical_stability_diagnostic,
@@ -450,6 +454,12 @@ def scba_loop(
     masses_primitive=None,
     causality_projection=False,
     track_diagnostics=False,
+    static_se_hook=None,
+    static_mixing=None,
+    loop_propagator="loop_only",
+    stage_loop_first=False,
+    stage_max_iter=20,
+    stage_tol=1e-3,
 ):
     """SCBA fixed-point with device-storage self-energies.
 
@@ -492,6 +502,23 @@ def scba_loop(
     masses_primitive : (n_atoms,) array, optional
         Per-atom primitive-cell masses; required when
         ``zero_mode_projection`` is set.
+    static_se_hook : callable, optional
+        ``hook(G_less_dev_q, Sigma_static, H_D_list) -> Sigma_static_new``
+        (shape ``(n_kpts, N_D, N_D)``): the static, real, Hermitian loop +
+        tadpole self-energy built from the current device ``G^<`` (see
+        :func:`phonon.solver.static_se.build_static_self_energy_hook`). When
+        set, the dynamical matrix used in the Dyson solve becomes
+        ``Phi_eff = H_D + Sigma_static`` (re-Hermitized, ASR-projected), and
+        ``Sigma_static`` is updated from ``G^<`` each iteration -- the single
+        SCP + bubble self-consistency loop. Supported with ``solver='linear'``
+        only (the bubble fixed-point accelerators do not see the static state).
+    static_mixing : float, optional
+        Under-relaxation for the ``Sigma_static`` update (defaults to ``mixing``).
+    stage_loop_first : bool
+        Converge the loop/tadpole-only sub-problem (bubble off) before enabling
+        the bubble, so the bubble is built on a stable ``Phi_eff`` (brief §3.5).
+    stage_max_iter, stage_tol : int, float
+        Iteration cap / relative tolerance for the loop-only staging pre-loop.
     """
     if solver is None:
         solver = "anderson" if anderson_mixing else "linear"
@@ -535,12 +562,58 @@ def scba_loop(
             Q_trans = build_translation_projector(
                 masses_primitive, n_slabs, n_cart=n_dof // n_atoms_prim)
 
+    # Static (loop + tadpole) self-energy: an FC2-like renormalisation
+    # Phi_eff = H_D + Sigma_static, recomputed from G^< each iteration.
+    Sigma_static = None
+    static_resid = 0.0
+    if static_se_hook is not None:
+        if solver != "linear":
+            raise NotImplementedError(
+                "static_se_hook (loop/tadpole) is supported with "
+                "solver='linear' only; the bubble accelerators do not carry "
+                f"the static self-energy state (got solver={solver!r}).")
+        Sigma_static = np.zeros((n_kpts, N_D, N_D), dtype=complex)
+        if loop_propagator not in ("loop_only", "full_G"):
+            raise ValueError(
+                "loop_propagator must be 'loop_only' or 'full_G', got "
+                f"{loop_propagator!r}")
+    static_mix = mixing if static_mixing is None else static_mixing
+
+    def _apply_static_asr(sig):
+        """Hermitize + ASR-project the static self-energy (per q)."""
+        sig = 0.5 * (sig + np.conj(np.swapaxes(sig, -1, -2)))
+        if Q_trans is not None:
+            sig = Q_trans @ sig @ Q_trans
+        return sig
+
     # Buffers reused by every _scba_step call.
     G_less_dev_q = np.zeros(shape, dtype=complex)
     G_great_dev_q = np.zeros_like(G_less_dev_q)
     G_ret_dev_q = np.zeros_like(G_less_dev_q)
+    _G_less_loop_only = (np.zeros(shape, dtype=complex)
+                         if static_se_hook is not None else None)
     _spec_L = np.zeros(nfreq)
     _spec_R = np.zeros(nfreq)
+
+    def _loop_only_glesser():
+        """Device ``G^<`` with the bubble off (only the static Phi_eff + leads).
+
+        Feeds the loop/tadpole ``<uu>`` for the standard SCP-then-bubble scheme
+        (``loop_propagator='loop_only'``), excluding the bubble broadening.
+        """
+        zero_se = np.zeros((nfreq, N_D, N_D), dtype=complex)
+        for iq in range(n_kpts):
+            _, g_less, _ = solve_green_batch(
+                z2_arr, H_D_list[iq] + Sigma_static[iq], obc_list[iq],
+                zero_se, zero_se, zero_se)
+            _G_less_loop_only[iq] = g_less
+        return _G_less_loop_only
+
+    def _g_for_static():
+        """The propagator feeding the static self-energy's ``<uu>``."""
+        if loop_propagator == "full_G":
+            return G_less_dev_q
+        return _loop_only_glesser()
 
     def _scba_step(sig_l, sig_g):
         """One SCBA pass: input ``Sigma^{<,>}`` -> bubble of the
@@ -564,8 +637,10 @@ def scba_loop(
         _spec_R[:] = 0.0
 
         for iq in range(n_kpts):
+            H_eff_iq = (H_D_list[iq] if Sigma_static is None
+                        else H_D_list[iq] + Sigma_static[iq])
             G_ret, G_less, G_great = solve_green_batch(
-                z2_arr, H_D_list[iq], obc_list[iq],
+                z2_arr, H_eff_iq, obc_list[iq],
                 Sig_R[iq], sig_l[iq], sig_g[iq])
             G_less_dev_q[iq] = G_less
             G_great_dev_q[iq] = G_great
@@ -648,6 +723,24 @@ def scba_loop(
 
     convergence_history = []
 
+    # --- loop/tadpole-only staging: converge Phi_eff with the bubble off so
+    #     the bubble is later built on a stable (stiffened) reference. -------
+    if static_se_hook is not None and stage_loop_first:
+        for stage_iter in range(stage_max_iter):
+            sig_new = _apply_static_asr(
+                static_se_hook(_loop_only_glesser(), Sigma_static, H_D_list))
+            num = float(np.linalg.norm(sig_new - Sigma_static))
+            den = float(np.linalg.norm(Sigma_static)) + 1e-300
+            Sigma_static[:] = ((1 - static_mix) * Sigma_static
+                               + static_mix * sig_new)
+            srel = num / den
+            if verbose:
+                print(f"    loop-only stage iter {stage_iter + 1}: "
+                      f"||dSigma_static||/||Sigma_static|| = {srel:.4e}, "
+                      f"max|Sigma_static| = {np.max(np.abs(Sigma_static)):.3e}")
+            if srel < stage_tol:
+                break
+
     # --- iteration 0: lowest-order Born (Sigma = 0 -> bare G -> bubble) -
     Sigma_l, Sigma_g, info = _scba_step(
         np.zeros(shape, dtype=complex), np.zeros(shape, dtype=complex))
@@ -694,6 +787,17 @@ def scba_loop(
                 _update_scattering_obc(info["Sigma_R"])
 
             Sigma_l_out, Sigma_g_out, info = _scba_step(Sigma_l, Sigma_g)
+
+            # Update the static (loop + tadpole) self-energy from the G^< just
+            # computed, with under-relaxation; folded into the stop test below.
+            if static_se_hook is not None:
+                sig_new = _apply_static_asr(
+                    static_se_hook(_g_for_static(), Sigma_static, H_D_list))
+                _num = float(np.linalg.norm(sig_new - Sigma_static))
+                _den = float(np.linalg.norm(Sigma_static)) + 1e-300
+                static_resid = _num / _den
+                Sigma_static[:] = ((1 - static_mix) * Sigma_static
+                                   + static_mix * sig_new)
 
             x_in = np.concatenate([Sigma_l.ravel(), Sigma_g.ravel()])
             x_out = np.concatenate([Sigma_l_out.ravel(), Sigma_g_out.ravel()])
@@ -763,7 +867,8 @@ def scba_loop(
                     msg += f"  [Gamma sign viol: {viol} pts, max {vmax:.2e}]"
                 print(msg)
 
-            numerically_converged = resid < scba_tol
+            numerically_converged = resid < scba_tol and (
+                static_se_hook is None or static_resid < scba_tol)
             conserving = conservation_err < conservation_tol
             if numerically_converged and (
                     conserving or not gate_on_conservation):
@@ -835,6 +940,9 @@ def scba_loop(
         "diagnostics_history": diagnostics_history,
         "converged": converged,
         "scba_residual": best_resid,
+        "Sigma_static": (None if Sigma_static is None
+                         else Sigma_static.copy()),
+        "static_residual": static_resid,
     }
 
 
@@ -947,6 +1055,41 @@ def _load_mass_weighted_fc3(phonon, fc3_hdf5, M_stacked_override,
     if vertex_scale != 1.0:
         M_stacked = M_stacked * float(vertex_scale)
     return M_stacked, mapping, fc3_raw
+
+
+def _load_device_fc4_mass_weighted(
+    fc4_hdf5, prim_indices, slab_indices, n_atoms, n_slabs, masses_super,
+    *, vertex_cutoff=None,
+):
+    """Device FC4 tensor ``Phi4_dev[A,B,C,D]`` in loop mass-weighting.
+
+    Reads the compact-reference sparse FC4 written by the hiPhive reap
+    (datasets ``fc4_atoms`` ``(M, 4)`` supercell atom indices with leg-1 a
+    reference atom, and ``fc4_values`` ``(M, 3, 3, 3, 3)`` in eV/Angstrom^4),
+    then folds it onto the device with
+    :func:`phonon.solver.fc4_device.build_device_fc4_tensor` (mass-weighted by
+    ``1/sqrt(m)`` per leg, NO THz conversion -- the loop applies
+    ``CONVERSION_THZ2``). The supercell atom indexing must match the solver's
+    supercell mapping (same phonopy supercell ordering as the FC3 path).
+    """
+    import h5py
+
+    from .fc4_device import build_device_fc4_tensor
+
+    with h5py.File(fc4_hdf5, "r") as f:
+        if "fc4_atoms" not in f or "fc4_values" not in f:
+            raise KeyError(
+                f"{fc4_hdf5!r} has no compact-reference FC4 (expected datasets "
+                "'fc4_atoms' (M,4) and 'fc4_values' (M,3,3,3,3) from the "
+                "hiPhive FC4 reap).")
+        atoms = np.asarray(f["fc4_atoms"][:], dtype=int)
+        values = np.asarray(f["fc4_values"][:], dtype=float)
+
+    fc4_sparse = {tuple(int(a) for a in atoms[m]): values[m]
+                  for m in range(atoms.shape[0])}
+    return build_device_fc4_tensor(
+        fc4_sparse, prim_indices, slab_indices, masses_super,
+        n_atoms, n_slabs, vertex_cutoff=vertex_cutoff)
 
 
 def _setup_devices(phonon, q_points, transport_direction, n_slabs,
@@ -1070,6 +1213,12 @@ def transmission(
     enforce_asr: bool = False,
     legacy_prefactor: bool = False,
     mass_profile: list | None = None,
+    loop: bool = False,
+    tadpole: bool = False,
+    fc4_hdf5: str | None = None,
+    loop_propagator: str = "loop_only",
+    stage_loop_first: bool = False,
+    static_mixing: float | None = None,
 ) -> dict:
     """Reference anharmonic phonon transport (NEGF + SCBA, dense).
 
@@ -1211,6 +1360,34 @@ def transmission(
         _scatter_blocks(sig_g, sg_b, n_dof)
         return sig_l, sig_g
 
+    # Static loop/tadpole self-energy (renormalises Phi_eff = Phi + Sigma_L +
+    # Sigma_T inside the same SCBA loop). Gamma device (n_kpts=1) only for now.
+    static_se_hook = None
+    if loop or tadpole:
+        if n_kpts != 1:
+            raise NotImplementedError(
+                "loop/tadpole self-energies are implemented for the Gamma "
+                f"device (q_mesh=(1,1)) only; got n_kpts={n_kpts}.")
+        fc4_dev_mw = None
+        if loop:
+            if fc4_hdf5 is None:
+                raise ValueError("loop=True requires fc4_hdf5")
+            fc4_dev_mw = _load_device_fc4_mass_weighted(
+                fc4_hdf5, prim_indices, slab_indices, n_atoms, n_slabs,
+                phonon.supercell.masses, vertex_cutoff=vertex_cutoff)
+        fc3_dev_mw = device_fc3_mass_weighted(vertices[(0, 0)], n_slabs, n_dof)
+        optical_projector = build_dynamical_zero_mode_projector(
+            H_00_g, H_01_g, n_slabs)
+        static_se_hook = build_static_self_energy_hook(
+            dw_thz=dw_thz, n_dof=n_dof, n_slabs=n_slabs,
+            fc3_dev_mw=fc3_dev_mw, fc4_dev_mw=fc4_dev_mw,
+            use_loop=loop, use_tadpole=tadpole,
+            optical_projector=optical_projector)
+        if verbose:
+            print(f"  Static self-energy: loop={loop}, tadpole={tadpole}, "
+                  f"propagator={loop_propagator}, "
+                  f"stage_loop_first={stage_loop_first}")
+
     scba_result = scba_loop(
         z2_arr=z2_arr, freqs_thz=freqs_thz, dw_thz=dw_thz,
         omega_rad=omega_rad, pos_mask=pos_mask,
@@ -1229,6 +1406,10 @@ def transmission(
         masses_primitive=phonon.primitive.masses,
         causality_projection=causality_projection,
         track_diagnostics=track_diagnostics,
+        static_se_hook=static_se_hook,
+        static_mixing=static_mixing,
+        loop_propagator=loop_propagator,
+        stage_loop_first=stage_loop_first,
     )
 
     spectral_J_L = scba_result["spectral_J_L"]
@@ -1281,6 +1462,16 @@ def transmission(
         "self_energy_lesser": se_l,
         "self_energy_greater": se_g,
     }
+
+    if static_se_hook is not None:
+        # Converged static (loop+tadpole) self-energy [THz^2] and the effective
+        # dynamical matrix Phi_eff = Phi + Sigma_static (Gamma device).
+        sig_static = scba_result.get("Sigma_static")
+        result["sigma_static"] = None if sig_static is None else sig_static[0]
+        result["phi_eff"] = (None if sig_static is None
+                             else (H_D_all[0] + sig_static[0]))
+        result["static_residual"] = scba_result.get(
+            "static_residual", float("nan"))
 
     if n_kpts == 1 and verbose:
         _check_q11_vs_finite(result)
