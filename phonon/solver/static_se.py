@@ -279,11 +279,32 @@ def device_fc3_mass_weighted(phi_blocks, n_slabs, n_dof):
     return assemble_device_fc3_tensor(phi_blocks, n_slabs, n_dof) / CONVERSION_FC3_THZ
 
 
+def bulk_equilibrium_uu(dq_stack, temperature, *, eps_thz2=1e-12):
+    """Equilibrium ``<w_a w_b>`` [amu*A^2] from the BULK BZ phonon mode sum.
+
+    Averages :func:`equilibrium_uu_modesum` over a stack of dynamical matrices
+    ``dq_stack`` (shape ``(n_q, N, N)`` [THz^2]) sampled on a Brillouin-zone
+    mesh. This is the physically-correct displacement variance for a *bulk*
+    static self-energy: unlike the equal-time ``<uu>`` read off an open
+    single-cell transport device ``G^<`` (which has the wrong low-omega acoustic
+    DOS and over-counts ``<uu>`` by ~order-of-magnitude), the BZ sum reproduces
+    the harmonic Debye-Waller factor. For symmetric crystals it is isotropic, so
+    the cubic tadpole source ``Phi3 : <uu>`` vanishes by site symmetry as it
+    must. ``N`` is the primitive ``3*n_atoms`` (= the Gamma device DOFs).
+    """
+    dq = np.asarray(dq_stack)
+    acc = None
+    for d in dq:
+        uu = equilibrium_uu_modesum(d, temperature, eps_thz2=eps_thz2)
+        acc = uu if acc is None else acc + uu
+    return acc / dq.shape[0]
+
+
 def build_static_self_energy_hook(
     *, dw_thz, n_dof, n_slabs,
     fc3_dev_mw=None, fc4_dev_mw=None,
     use_loop=False, use_tadpole=False,
-    optical_projector=None,
+    optical_projector=None, fixed_uu=None,
 ):
     """Build the per-iteration static self-energy hook for the SCBA loop.
 
@@ -320,7 +341,14 @@ def build_static_self_energy_hook(
                 "static self-energy (loop/tadpole) is implemented for the "
                 "Gamma device (n_kpts=1) only; got "
                 f"n_kpts={g_less_dev_q.shape[0]}")
-        uu = equal_time_uu(g_less_dev_q[0], dw_thz)        # (N_D, N_D)
+        if fixed_uu is not None:
+            # Bulk BZ-summed equilibrium <uu> (Debye-Waller-correct, symmetric).
+            # Preferred for a bulk static self-energy: the open single-cell
+            # device G^< over-counts the low-omega <uu> and spuriously breaks the
+            # tadpole's symmetry-zero (see scripts/verify/tadpole_diag.py).
+            uu = np.asarray(fixed_uu)
+        else:
+            uu = equal_time_uu(g_less_dev_q[0], dw_thz)    # (N_D, N_D)
         sig = np.zeros((N_D, N_D), dtype=float)
         if use_loop:
             sig = sig + sigma_loop(fc4_dev_mw, uu)
