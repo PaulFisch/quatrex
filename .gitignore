@@ -223,3 +223,9 @@ document/**/*.vrb
 # --- Generated structure-figure binaries (tracked report figures live in
 #     document/fig/; document/src/fig/ holds regenerable structure plots) ---
 document/src/fig/
+
+# Claude lab-notebook / assistant files (kept local, not tracked)
+CLAUDE.md
+**/CLAUDE.md
+CLAUDE.local.md
+**/CLAUDE.local.md
