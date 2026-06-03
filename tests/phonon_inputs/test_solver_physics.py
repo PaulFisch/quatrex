@@ -349,5 +349,146 @@ def test_scba_loop_runs_and_converges():
                                atol=0)
 
 
+def _diatomic_device(n_slabs=3, freq_range=(0.01, 20.0, 40), eta_factor=1.0):
+    """Shared toy diatomic-chain finite device for the static-SE tests."""
+    from solver.leads import build_device_hamiltonian, compute_obc_batch
+
+    toy = diatomic_chain()
+    n_dof = toy.n_dof
+    N_D = n_slabs * n_dof
+    freqs, dw, eta_w, z2, pos_mask, mid = build_frequency_grid(
+        freq_range, eta_factor=eta_factor)
+    h00 = toy.h00.astype(complex)
+    h01 = toy.h01.astype(complex)
+    h_d = build_device_hamiltonian(h00, h01, n_slabs)
+    t_l, t_r = 310.0, 290.0
+    obc = compute_obc_batch(z2, h00, h01, freqs, t_l, t_r, n_slabs=n_slabs)
+    return dict(toy=toy, n_slabs=n_slabs, n_dof=n_dof, N_D=N_D, freqs=freqs,
+                dw=dw, z2=z2, pos_mask=pos_mask, h00=h00, h01=h01, h_d=h_d,
+                t_l=t_l, t_r=t_r, obc=obc)
+
+
+def _zero_bubble_kernel(nfreq, N_D):
+    def se_kernel(g_less_dev_q, g_great_dev_q):
+        z = np.zeros((1, nfreq, N_D, N_D), dtype=complex)
+        return z, z.copy()
+    return se_kernel
+
+
+def _run_scba(dev, se_kernel, **kw):
+    from solver.dense import scba_loop
+
+    return scba_loop(
+        z2_arr=dev["z2"], freqs_thz=dev["freqs"], dw_thz=dev["dw"],
+        omega_rad=dev["freqs"] * THZ_TO_RAD, pos_mask=dev["pos_mask"],
+        n_slabs=dev["n_slabs"], n_dof=dev["n_dof"], N_D=dev["N_D"],
+        H_D_list=[dev["h_d"]], obc_list=[dev["obc"]],
+        btd_blocks_list=[(dev["h00"], dev["h01"])],
+        n_kpts=1, se_kernel=se_kernel, T_L=dev["t_l"], T_R=dev["t_r"],
+        scba_tol=1e-3, conservation_tol=1e-2, mixing=0.5,
+        anderson_mixing=False, anderson_depth=5, scattering_contacts=False,
+        retarded="fft", verbose=False, masses_primitive=dev["toy"].masses, **kw)
+
+
+def test_static_hook_zero_fc_matches_baseline():
+    """A loop/tadpole hook with zero force constants must not perturb the
+    default SCBA path (Sigma_static stays 0 -> identical G/Sigma)."""
+    from solver.bubble import bubble_dense  # noqa: F401 (ensure import path)
+    from solver.static_se import build_static_self_energy_hook
+
+    dev = _diatomic_device()
+    nfreq = len(dev["freqs"])
+    se = _zero_bubble_kernel(nfreq, dev["N_D"])
+
+    base = _run_scba(dev, se, max_scba_iter=10)
+
+    fc3_zero = np.zeros((dev["N_D"],) * 3)
+    fc4_zero = np.zeros((dev["N_D"],) * 4)
+    hook = build_static_self_energy_hook(
+        dw_thz=dev["dw"], n_dof=dev["n_dof"], n_slabs=dev["n_slabs"],
+        fc3_dev_mw=fc3_zero, fc4_dev_mw=fc4_zero,
+        use_loop=True, use_tadpole=True)
+    withhook = _run_scba(dev, se, max_scba_iter=10, static_se_hook=hook,
+                         stage_loop_first=True)
+
+    assert withhook["Sigma_static"] is not None
+    assert np.max(np.abs(withhook["Sigma_static"])) < 1e-12
+    np.testing.assert_allclose(withhook["Sigma_R"], base["Sigma_R"],
+                               rtol=1e-10, atol=1e-12)
+
+
+def test_static_loop_stiffens_phi_eff():
+    """A positive on-site quartic loop raises every dynamical-matrix
+    eigenvalue (frequency stiffening), with a real symmetric Sigma_static."""
+    from solver.static_se import build_static_self_energy_hook
+
+    dev = _diatomic_device()
+    nfreq = len(dev["freqs"])
+    se = _zero_bubble_kernel(nfreq, dev["N_D"])
+
+    g4 = 30.0
+    fc4 = np.zeros((dev["N_D"],) * 4)
+    idx = np.arange(dev["N_D"])
+    fc4[idx, idx, idx, idx] = g4                      # on-site positive quartic
+    hook = build_static_self_energy_hook(
+        dw_thz=dev["dw"], n_dof=dev["n_dof"], n_slabs=dev["n_slabs"],
+        fc4_dev_mw=fc4, use_loop=True, use_tadpole=False)
+
+    res = _run_scba(dev, se, max_scba_iter=60, static_se_hook=hook,
+                    stage_loop_first=True, loop_propagator="loop_only")
+
+    sig = res["Sigma_static"][0]
+    assert np.allclose(sig, sig.conj().T)             # Hermitian
+    assert np.max(np.abs(sig.imag)) < 1e-8            # real
+    ev_bare = np.linalg.eigvalsh(dev["h_d"])
+    ev_eff = np.linalg.eigvalsh(dev["h_d"] + sig)
+    # every mode stiffens (positive-definite loop shift)
+    assert np.all(ev_eff > ev_bare - 1e-9)
+    assert ev_eff.min() > ev_bare.min() + 1e-6
+    assert np.trace(sig.real) > 0
+
+
+def test_spectral_bands_from_scba_static_se():
+    """End-to-end: a loop Sigma_static from the SCBA renormalises the band
+    structure (postproc.spectral) -- every branch stiffens at every q."""
+    from postproc.spectral import decomposition_bands, spectral_function_qw
+    from solver.static_se import build_static_self_energy_hook
+
+    dev = _diatomic_device(n_slabs=1)            # one cell: N_D = n_dof = 2
+    nfreq = len(dev["freqs"])
+    se = _zero_bubble_kernel(nfreq, dev["N_D"])
+
+    fc4 = np.zeros((dev["N_D"],) * 4)
+    idx = np.arange(dev["N_D"])
+    fc4[idx, idx, idx, idx] = 40.0               # on-site positive quartic
+    hook = build_static_self_energy_hook(
+        dw_thz=dev["dw"], n_dof=dev["n_dof"], n_slabs=1,
+        fc4_dev_mw=fc4, use_loop=True, use_tadpole=False)
+    res = _run_scba(dev, se, max_scba_iter=60, static_se_hook=hook,
+                    stage_loop_first=True)
+    sigma_static = res["Sigma_static"][0].real    # (2, 2) on-site loop shift
+
+    # periodic diatomic-chain bands D(q) = h00 + h01 e^{iq} + h01^dag e^{-iq}
+    qs = np.linspace(0.05, np.pi, 12)
+    h00, h01 = dev["h00"], dev["h01"]
+    D_q = np.stack([h00 + h01 * np.exp(1j * q) + h01.conj().T * np.exp(-1j * q)
+                    for q in qs])
+
+    bands = decomposition_bands(D_q, sigma_loop=sigma_static)
+    assert set(bands) == {"bare", "loop"}
+    # the loop stiffens every branch at every q-point
+    assert np.all(bands["loop"] >= bands["bare"] - 1e-9)
+    assert bands["loop"].max() > bands["bare"].max() + 1e-6
+
+    # spectral function with the static shift peaks at the renormalised bands
+    grid = np.linspace(0.1, 40.0, 3000)
+    A = spectral_function_qw(D_q, grid, eta_w_thz=0.05,
+                             sigma_static=sigma_static)
+    assert np.all(A >= -1e-9)
+    iq = len(qs) // 2
+    peak = grid[np.argmax(A[iq])]
+    assert np.min(np.abs(peak - bands["loop"][iq])) < 0.15
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

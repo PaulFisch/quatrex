@@ -1,0 +1,61 @@
+## Bulk Si FCC primitive (2 atoms) -- hiPhive FC2 + FC3 + FC4 (quartic loop).
+## Small 2x2x2 supercell (16 atoms) so the DENSE FC4 export is cheap
+## (16^4 * 81 * 8 B ~ 0.34 GiB, well under the reap's 8 GiB guard); FC4 is
+## short-ranged, so a 1st-NN quartic cutoff is sufficient. More rattled
+## structures than the FC3-only fit (FC4 adds many parameters -> needs better
+## conditioning; ardr keeps it sparse). The reap writes fc4_atoms / fc4_values
+## into fc3.hdf5 (consumed by the solver loop self-energy).
+##
+## Usage (from phonon/):
+##   python -m phonon_inputs fc3-hiphive-sow  --config configs/si_primitive/hiphive_fc4.yaml --from-yaml
+##   python -m phonon_inputs fc3-hiphive-run  --config configs/si_primitive/hiphive_fc4.yaml
+##   python -m phonon_inputs fc3-hiphive-reap --config configs/si_primitive/hiphive_fc4.yaml
+## (or fc3-hiphive-all to do all three in one.)
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:
+    - [0.0,       2.7331, 2.7331]   # a1 = a/2 * (0,1,1)
+    - [2.7331,    0.0,    2.7331]   # a2 = a/2 * (1,0,1)
+    - [2.7331,    2.7331, 0.0]      # a3 = a/2 * (1,1,0)
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+qe:
+  pseudo_dir: /usr/scratch/mont-fort11/pfischill/quatrex/phonon/configs/si_primitive/pseudo
+  pseudopotentials:
+    Si: Si.pbe-n-rrkjus_psl.1.0.0.UPF
+  ecutwfc: 60
+  ecutrho_factor: 8
+  kpoints_scf: [2, 2, 2]       # 2x2x2 supercell (16 atoms)
+  kpoints_relax: [8, 8, 8]
+  conv_thr: 1.0e-8
+  smearing: gaussian
+  degauss: 0.01
+  pw_command: "pw.x"
+
+relax:
+  calculation: vc-relax
+  forc_conv_thr: 1.0e-4
+  press_conv_thr: 0.5
+  work_dir: ./relax
+
+hiphive:
+  supercell: [2, 2, 2]            # 16 atoms (7.73 A); cutoff < L/2 = 3.86 A
+  n_structures: 48                # FC4 adds many params -> more configs than FC3-only
+  rattle_method: mc
+  rattle_std: 0.03                # > harmonic ~0.01 A: excites the quartic response
+  rattle_d_min: 1.8
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [3.8, 3.0, 3.0]        # [FC2, FC3, FC4] A; FC4 to ~1st NN (< min-image 3.86)
+  fit_method: ardr                # sparse -> good conditioning for the high-order fit
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: qe
+  work_dir: ./fc3_hiphive_si_fc4
+  pw_timeout: 3600

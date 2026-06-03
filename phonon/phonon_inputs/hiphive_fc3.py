@@ -840,6 +840,28 @@ def bootstrap_reap(
     )
 
 
+def _reference_supercell_atoms(primitive, supercell):
+    """Slab-0 reference supercell atom for each primitive atom.
+
+    The hiPhive/phonopy supercell contains the primitive cell at the origin, so
+    the reference image of primitive atom ``p`` is the supercell atom at the
+    same cartesian position. Matched by nearest position (origin-cell atoms sit
+    exactly on the primitive positions). Used to anchor the compact-reference
+    FC4 export; must be consistent with the solver's supercell mapping (origin
+    cell = transport slab 0).
+    """
+    def _pos(obj):
+        return np.asarray(obj.get_positions() if hasattr(obj, "get_positions")
+                          else obj.positions, dtype=float)
+
+    prim_pos = _pos(primitive)
+    sc_pos = _pos(supercell)
+    ref = []
+    for p in prim_pos:
+        ref.append(int(np.argmin(np.linalg.norm(sc_pos - p[None, :], axis=1))))
+    return np.asarray(ref, dtype=int)
+
+
 def reap(
     work_dir: Path,
     hh_config: HiphiveConfig | None = None,
@@ -1015,6 +1037,47 @@ def reap(
         f.create_dataset("fc3", data=fc3, compression="gzip")
         f.create_dataset("fc2", data=fc2, compression="gzip")
     print(f"  Saved: {fc3_path} ({fc3_path.stat().st_size / 1e6:.1f} MB)")
+
+    # --- FC4 (quartic loop self-energy): only when a 4th-order cutoff is set.
+    #     Stored as a compact-reference sparse tensor (datasets fc4_atoms /
+    #     fc4_values) the solver's loop adapter consumes. The dense slice route
+    #     is feasible only for a short-ranged FC4 on a small supercell. ----------
+    if len(cutoffs) >= 3:
+        for order in (4,):
+            try:
+                fcs.assert_acoustic_sum_rules(order=order, tol=1e-3)
+                asr_residuals[order] = 0.0
+                print(f"  FC{order} ASR residual within tol (<= 1e-3).")
+            except AssertionError as exc:
+                import re
+                m = re.search(r"([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)",
+                              str(exc))
+                asr_residuals[order] = float(m.group(1)) if m else float("nan")
+                print(f"  FC{order} ASR residual = {asr_residuals[order]:.3e}.")
+
+        max_bytes = 8 * (1 << 30)
+        need = n_super ** 4 * 81 * 8
+        if need > max_bytes:
+            print(f"  WARNING: dense FC4 would need {need / (1 << 30):.1f} GiB "
+                  f"(n_super={n_super}); skipping FC4 export. Use a smaller "
+                  "supercell / shorter c4 (FC4 is short-ranged), or the sparse "
+                  "get_fc_dict unfold route (not yet implemented).")
+        else:
+            from solver.fc4_device import build_compact_reference_fc4_from_dense
+
+            fc4 = fcs.get_fc_array(order=4)
+            ref_sc = _reference_supercell_atoms(primitive, atoms_ideal)
+            compact = build_compact_reference_fc4_from_dense(fc4, ref_sc)
+            print(f"  FC4 shape: {fc4.shape}, max: {np.max(np.abs(fc4)):.4e} "
+                  f"eV/A^4; {len(compact)} compact-reference quadruples")
+            atoms_arr = np.array(list(compact.keys()), dtype=np.int64)
+            vals_arr = np.array(list(compact.values()), dtype=np.float64)
+            with h5py.File(fc3_path, "a") as f:
+                f.create_dataset("fc4_atoms", data=atoms_arr)
+                f.create_dataset("fc4_values", data=vals_arr,
+                                 compression="gzip")
+                f.attrs["fc4_n_super"] = n_super
+            print(f"  Saved FC4 (compact-reference) into {fc3_path.name}")
 
     # Persist the fit summary alongside the FC file for later inspection.
     summary = {
