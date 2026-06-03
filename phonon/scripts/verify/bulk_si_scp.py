@@ -97,6 +97,14 @@ def main():
     ap.add_argument("--max-iter", type=int, default=60)
     ap.add_argument("--no-loop", action="store_true", help="tadpole only")
     ap.add_argument("--no-tadpole", action="store_true", help="loop only")
+    ap.add_argument("--device-uu", action="store_true",
+                    help="Source <uu> from the open device G^< (the original, "
+                         "physically wrong for bulk: over-counts low-omega <uu> "
+                         "~14x and breaks the tadpole symmetry-zero). Default: "
+                         "the bulk BZ-summed equilibrium <uu> (Debye-Waller).")
+    ap.add_argument("--uu-mesh", type=int, default=8,
+                    help="BZ mesh (N^3) for the bulk equilibrium <uu> "
+                         "(ignored with --device-uu).")
     ap.add_argument("--n-qpath", type=int, default=40)
     ap.add_argument("--out", default="/tmp/claude/si_scp")
     args = ap.parse_args()
@@ -118,12 +126,31 @@ def main():
         print("  WARNING: no fc4 in the reap -> loop disabled (tadpole only). "
               "Run the FC4 reap first (see module docstring).")
 
+    # Bulk equilibrium <uu> for the static self-energy (Debye-Waller-correct,
+    # symmetric -> the cubic tadpole vanishes by site symmetry as it must). The
+    # open single-cell device G^< over-counts the low-omega <uu> ~14x and gives a
+    # spurious tadpole (see scripts/verify/tadpole_diag.py); --device-uu reverts.
+    static_uu = None
+    if not args.device_uu:
+        import itertools
+        from solver.static_se import bulk_equilibrium_uu
+        from postproc.spectral import dynamical_matrix_qpath as _dqp
+        N = args.uu_mesh
+        qmesh = np.array([[i / N, j / N, k / N]
+                          for i, j, k in itertools.product(range(N), repeat=3)])
+        dq = _dqp(phonon, qmesh)
+        static_uu = bulk_equilibrium_uu(dq, args.temperature)
+        w2 = np.diag(static_uu)
+        print(f"  bulk <uu>: BZ {N}^3 mesh, <w^2>/dir = {np.mean(w2):.4f} amu*A^2 "
+              f"(u^2 ~ {np.mean(w2) / 28.09:.5f} A^2; Si Debye-Waller ~0.0057)")
+
     common = dict(
-        fc3_hdf5=fc_path, q_mesh=(1, 1),
+        fc3_hdf5=fc_path,
         transport_direction=args.transport_direction,
         freq_range_thz=tuple(args.freq_range), eta_factor=args.eta_factor,
         temperature=args.temperature, delta_T=args.delta_t,
-        max_scba_iter=args.max_iter, verbose=True,
+        max_scba_iter=args.max_iter, static_uu=static_uu,
+        enforce_asr=True, verbose=True,
     )
 
     print("== baseline (harmonic + bubble) ==")

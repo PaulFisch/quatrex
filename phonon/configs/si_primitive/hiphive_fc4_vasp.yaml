@@ -1,0 +1,58 @@
+## Bulk Si FCC primitive (2 atoms) -- hiPhive FC2 + FC3 + FC4 (quartic loop), VASP.
+## Same intent as hiphive_fc4.yaml but VASP (much faster than the perl-wrapped
+## serial QE on this box). Small 2x2x2 supercell (16 atoms) -> dense FC4 export
+## is 0.04 GiB (16^4*81*8 B), trivially under the reap's 8 GiB guard, and all of
+## FC2/FC3/FC4 are self-consistent on the same supercell. FC4 is short-ranged so
+## a 1st-NN quartic cutoff on a small cell is appropriate. The premium long-range
+## FC2/FC3 for transport stays the 5x5x5 si_big reap; this provides the quartic
+## FC4 for the SCP loop + tadpole self-energies.
+##
+## Usage (from phonon/):
+##   python -m phonon_inputs fc3-hiphive-sow  --config configs/si_primitive/hiphive_fc4_vasp.yaml --from-yaml
+##   python -m phonon_inputs fc3-hiphive-run  --config configs/si_primitive/hiphive_fc4_vasp.yaml
+##   python -m phonon_inputs fc3-hiphive-reap --config configs/si_primitive/hiphive_fc4_vasp.yaml
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Si, Si]
+  lattice:                          # VASP-PBE Si a=5.468 A (a/2 = 2.734)
+    - [0.0,    2.734,  2.734]
+    - [2.734,  0.0,    2.734]
+    - [2.734,  2.734,  0.0]
+  scaled_positions:
+    - [0.00, 0.00, 0.00]
+    - [0.25, 0.25, 0.25]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Si: Si
+  encut: 450
+  ediff: 1.0e-08
+  ismear: 0
+  sigma: 0.01
+  prec: Accurate
+  lreal: false                      # 16-atom bulk cell -> reciprocal projection (accurate forces)
+  lwave: false
+  lcharg: false
+  ncore: 4
+  kpar: 2
+  kpoints_scf: [4, 4, 4]            # 2x2x2 supercell (16 atoms)
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+hiphive:
+  supercell: [2, 2, 2]            # 16 atoms (7.73 A); cutoff < L/2 = 3.86 A
+  n_structures: 48                # FC4 adds many params -> more configs than FC3-only
+  rattle_method: mc
+  rattle_std: 0.03                # > harmonic ~0.01 A: excites the quartic response
+  rattle_d_min: 1.8
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [3.8, 3.0, 3.0]        # [FC2, FC3, FC4] A; FC4 to ~1st NN (< min-image 3.86)
+  fit_method: ardr
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: vasp
+  work_dir: ./fc3_hiphive_si_fc4_vasp

@@ -778,3 +778,40 @@ the prior eta/lambda work) (`scripts/out/d5a_tempsweep`, L=1):
 - The full d5a high-T (200/300 K) and a d11a (45-atom, 135-DOF) low-T sweep were SKIPPED as
   cost-prohibitive (d11a ~30 h dense; d5a 300 K is the documented non-converger). d5a's 4 points + the
   CNT cover the cross-structure story.
+
+### F32 — Bulk-Si FC4 (VASP) + SCP loop/tadpole spectral function: the tadpole-consistency bug, debugged
+Merged the FC4/SCP/spectral machinery (the "unify dense solver" branch) and computed a bulk-Si FC4 to
+run the self-consistent-phonon (SCP) spectral function with/without the cubic tadpole.
+- **FC4 via VASP, parallelized.** QE was too slow (perl-wrapped serial `pw.x`); switched to VASP
+  (`configs/si_primitive/hiphive_fc4_vasp.yaml`, 2x2x2/16-atom, 48 rattled, cutoffs [3.8,3.0,3.0]).
+  Ran the 48 jobs **8-wide in parallel** (np=16 each, `--bind-to none`; the `fc3-hiphive-run` driver has
+  no parallel flag, so a manual xargs -P 8 pool over the sown disp dirs, then reap). ardr fit: 9 params,
+  RMSE 0.078, FC4 ASR ok, **58 compact-reference quadruples** -> `fc4_atoms/fc4_values` in fc3.hdf5.
+  (Reusing the 5x5x5 si_big displacements for FC4 was rejected: the fit would work but the dense FC4
+  export is 250^4 = 2.36 TiB; would need a sparse exporter.)
+- **The tadpole-consistency check FAILED at first: ||Sigma_T||=33** (should be ~0 for symmetric diamond
+  Si). Debugged via `scripts/verify/tadpole_diag.py`. Physics first: the cubic tadpole is the thermal
+  force <F_a>=1/2 Phi3:<uu>; by the Td SITE symmetry of diamond Si a site vector is symmetry-forbidden,
+  so <F>=0 -> Sigma_T=0 (no internal sublattice relaxation, only volume expansion). So it SHOULD be ~0.
+- **Two compounding bugs (neither the FC4 index mapping, nor non-eq physics):**
+  1. **<uu> source.** It was read from the OPEN 1-cell transport device G^< (`equal_time_uu`), which
+     over-counts the low-omega acoustic displacement variance **~14x** (<w^2>=2.23 vs the
+     Debye-Waller-correct 0.154 amu*A^2; verified isotropic, so NOT a transport-direction anisotropy).
+     A single transport cell has the wrong phonon DOS for a bulk property. Fix: source <uu> from the
+     **bulk BZ-summed equilibrium mode sum** (new `static_se.bulk_equilibrium_uu`; reproduces the Si
+     Debye-Waller u^2=0.0055 A^2 exactly, mesh-converged at 8^3).
+  2. **`enforce_asr=False`** (transmission's default, which the SCP driver was inheriting). The
+     Gamma-summed device FC3 then carries a large translation-non-invariant artifact; its symmetry-trace
+     `sum_c Phi3[a,c,c]` = +-0.096 (∝[-1,1,1], opposite on the two inversion-paired atoms) breaks the
+     Td-zero. `enforce_asr=True` removes it (trace -> 1e-17, ||Phi3|| 1.28 -> 0.335).
+- **Result: ||Sigma_T|| 33 -> 0.355 (93x), now ~0** (0.15% of the optical omega^2). The spectral A(q,w)
+  with vs without the tadpole now COINCIDE (as physics demands); only the small physical SCP loop shift
+  remains. Magnitudes at 300 K: dynamic **bubble** max|Sigma^R|~254 THz^2 (mostly linewidth) >> **loop**
+  Sigma_L~5 (real SCP renormalization, ~1%) >> **tadpole** Sigma_T~0.35 (~0). Residual 0.355 = the fitted
+  FC3's tiny leftover off-diagonal point-group asymmetry (trace channel now exact); a tighter/symmetrized
+  FC3 would zero it.
+- **SCP scheme:** it is NOT frozen-SCP-then-bubble -- after a loop-only pre-stage, the loop+tadpole are
+  recomputed every SCBA iteration from the current G^< (`loop_propagator='loop_only'`).
+- Code: `static_se.bulk_equilibrium_uu` + `fixed_uu` hook arg; `dense.transmission(static_uu=...)`;
+  `bulk_si_scp.py` now defaults to bulk <uu> + enforce_asr (with `--device-uu` to revert);
+  `scripts/verify/tadpole_diag.py`. Figure `/tmp/claude/si_scp_asr/spectral.pdf`.
