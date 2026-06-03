@@ -1,4 +1,4 @@
-"""Shared FFT bubble kernel for the 3-phonon scattering self-energy.
+"""FFT bubble kernel for the 3-phonon scattering self-energy.
 
 The bubble integrand is
 
@@ -6,13 +6,6 @@ The bubble integrand is
         phi_left_{I,c,e}
         * G^{x}_{e,d}(omega) * G^{x}_{c,f}(omega)
         * phi_right_{J,d,f}
-
-evaluated as a frequency convolution via zero-padded FFTs along the
-omega axis.
-
-This file holds the canonical implementation for the dense reference
-solver (``phonon.solver.dense``) and any local script importing
-``solver.bubble``.
 """
 
 from __future__ import annotations
@@ -22,15 +15,13 @@ import numpy as np
 
 def precompute_g_fft(G, *, n_fft, zero_freq_idx=None, dc_handling="zero",
                      xp=None):
-    """Return the zero-padded FFT of one G block, ready for ``bubble_dense``.
+    """Return the zero-padded FFT of one G block.
 
-    The dense reference and the multi-slab driver both call
-    :func:`bubble_dense` many times per SCBA iteration with the same
-    G(K,K') blocks; precomputing the FFT here lets callers amortise
-    that cost across every bubble it appears in. The ``zero_freq_idx``
-    + ``dc_handling`` regularisation is applied here (with the same
-    semantics as inside ``bubble_dense``) so the returned tensor
-    represents the actual G fed into the convolution.
+    The dense reference driver calls bubble_dense many times per SCBA
+    iteration with the same G(K,K') blocks; precomputing the FFT here
+    lets callers amortise that cost across every bubble it appears in.
+
+    The zero_freq_idx + dc_handling regularisation is applied here.
 
     Returns a complex ``(n_fft, ne_K, ne_Kp)`` array.
     """
@@ -99,9 +90,9 @@ def bubble_chunk_peak_bytes_per_w(
 ) -> int:
     """Transient bytes the matmul kernel holds per frequency sample.
 
-    The chunked kernel processes ``w_chunk`` frequencies at a time;
+    The chunked kernel processes w_chunk frequencies at a time;
     multiply this by the chunk length to bound a chunk's peak. The
-    four ``(n_w, n_dof^3)``-shaped intermediates dominate.
+    four (n_w, n_dof^3)-shaped intermediates dominate.
     """
     big = nI * max(bK1, bK2p) * max(bK1p, bK2p) * itemsize
     small = nI * nJ * itemsize
@@ -111,14 +102,11 @@ def bubble_chunk_peak_bytes_per_w(
 def _bubble_contract_batched_matmul(phi_left, phi_right,
                                     G_a_fft, G_b_fft, xp=np,
                                     max_bytes: int | None = None):
-    """Three-matmul kernel for ``S[w,a,J] = phi_L[ace] * G_b[wed] *
-    G_a[wcb] * phi_R[Jdb]``.
+    """kernel for S[w,a,J] = phi_L[ace] * G_b[wed] * G_a[wcb] * phi_R[Jdb].
 
-    ``max_bytes`` bounds the transient memory: the frequency axis is
-    used as batch dimension (each ``w`` is independent), so when
-    the full contraction would exceed ``max_bytes`` the kernel slices
-    the ``w`` axis into chunks that each fit. ``None`` (default)
-    disables chunking.
+    max_bytes bounds the transient memory: the frequency axis is
+    used as batch dimension, so when the full contraction would exceed max_bytes, the kernel slices
+    the w axis into chunks that each fit.
     """
     nI = phi_left.shape[0]
     nJ = phi_right.shape[0]
@@ -162,7 +150,7 @@ def bubble_dense_from_fft(
     """Bubble integrand from pre-FFT'd G blocks.
 
     Skips the input zero-pad + forward FFT (the caller is expected to
-    have done that once via :func:`precompute_g_fft`) and runs only
+    have done that once via precompute_g_fft) and runs only
     the fused contraction + inverse FFT. Used by the multi-slab driver
     in :mod:`phonon.solver.se_finite` to amortise the FFT cost across
     every bubble that touches the same G block.
@@ -228,16 +216,16 @@ def bubble_dense(
         is ``None``, the input is treated as positive-only
         and ``dc_handling`` is a no-op. When not ``None``,
         the value of ``dc_handling`` decides how the DC
-        sample of G is treated before the FFT — see below.
+        sample of G is treated before the FFT -- see below.
     dc_handling
         How to regularise the omega = 0 sample of G before the FFT.
         Only consulted when ``zero_freq_idx`` is not ``None``.
 
           * ``"zero"`` sets ``G[zero_freq_idx] = 0`` to suppress the singular
             Bose occupation at omega = 0.
-          * ``"interpolate"`` — replaces ``G[zero_freq_idx]`` by the
+          * ``"interpolate"`` -- replaces ``G[zero_freq_idx]`` by the
             midpoint of its two omega neighbours.
-          * ``"keep"`` — leaves ``G[zero_freq_idx]`` untouched.
+          * ``"keep"`` -- leaves ``G[zero_freq_idx]`` untouched.
     xp
         Array module (``numpy`` or ``cupy``). Defaults to ``numpy``.
 

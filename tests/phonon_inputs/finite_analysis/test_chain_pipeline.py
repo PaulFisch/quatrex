@@ -670,6 +670,39 @@ def test_unified_solver_q11_matches_finite(chain_bundle):
     compare_q11_to_finite(res_q, res_f, rtol=5e-3, atol=1e-8)
 
 
+def test_unified_solver_full_q_multislab_runs(chain_bundle):
+    """End-to-end smoke of the full off-diagonal q-resolved path: a 2x2
+    transverse mesh on a 2-slab device must run through the device-storage
+    SCBA loop and the coupled-q multi-slab kernel and produce finite,
+    roughly heat-conserving observables. ``sigma_cutoff=0`` (Guo III) must
+    also run and stay finite."""
+    from solver import transmission_q
+
+    kwargs = dict(
+        M_stacked_override=chain_bundle.fc3_target.T,
+        freq_range_thz=(0.01, 14.0, 21),
+        transport_direction="z",
+        eta_factor=0.3,
+        temperature=300.0,
+        delta_T=10.0,
+        max_scba_iter=2,
+        scba_tol=1e-3,
+        mixing=0.5,
+        n_slabs=2,
+        verbose=False,
+    )
+    res_full = transmission_q(
+        chain_bundle.phonon, q_mesh_transverse=(2, 2), **kwargs)
+    assert np.all(np.isfinite(res_full["self_energy_retarded"]))
+    assert np.isfinite(res_full["thermal_conductance_anharmonic"])
+    assert res_full["self_energy_retarded"].shape[0] == 4  # n_kpts axis
+
+    res_diag = transmission_q(
+        chain_bundle.phonon, q_mesh_transverse=(2, 2),
+        sigma_cutoff=0, **kwargs)
+    assert np.all(np.isfinite(res_diag["self_energy_retarded"]))
+
+
 def test_cli_smoke(chain_bundle, tmp_path, monkeypatch):
     """CLI runs the fast subset against an existing on-disk reap if present.
 

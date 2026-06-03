@@ -1,11 +1,11 @@
 """Frequency grid and Bose distribution for the dense phonon solver.
 
-These helpers establish the symmetric ω-grid used by every kernel under
+These helpers establish the symmetric omega-grid used by every kernel under
 :mod:`phonon.solver`:
 
-  freqs_thz = [-fmax, ..., -Δω, 0, Δω, ..., fmax]
+  freqs_thz = [-fmax, ..., -Deltaomega, 0, Deltaomega, ..., fmax]
 
-with grid spacing Δω = fmax / nfreq_pos. The ω = 0 sample sits at
+with grid spacing Deltaomega = fmax / nfreq_pos. The omega = 0 sample sits at
 ``mid = nfreq_pos`` and is included for FFT index arithmetic; it is
 excluded from every physical integral via ``pos_mask`` and zeroed out
 of the bubble integrand at the caller level.
@@ -24,21 +24,21 @@ def build_frequency_grid(freq_range_thz, eta_w_thz=None, eta_factor=0.05):
     Parameters
     ----------
     freq_range_thz : (fmin, fmax, nfreq_pos)
-        ``fmin`` is advisory (Δω is set to ``fmax / nfreq_pos``).
+        ``fmin`` is advisory (Deltaomega is set to ``fmax / nfreq_pos``).
         ``fmax`` is the upper edge of the positive axis. ``nfreq_pos`` is
         the number of positive-frequency bins (excluding 0).
     eta_w_thz, eta_factor
-        Lorentzian half-width applied to ω² inside ``z2_arr``. If
-        ``eta_w_thz`` is ``None`` it defaults to ``eta_factor * Δω``.
+        Lorentzian half-width applied to omega^2 inside ``z2_arr``. If
+        ``eta_w_thz`` is ``None`` it defaults to ``eta_factor * Deltaomega``.
 
     Returns
     -------
     freqs_thz : (2*nfreq_pos + 1,) ndarray
     dw_thz : float
     eta_w_thz : float
-    z2_arr : complex ndarray — ``(ω + i η_w)²``
-    pos_mask : bool ndarray — ``True`` for ω > 0 (excludes 0)
-    mid : int — index of the ω = 0 sample
+    z2_arr : complex ndarray -- ``(omega + i eta_w)^2``
+    pos_mask : bool ndarray -- ``True`` for omega > 0 (excludes 0)
+    mid : int -- index of the omega = 0 sample
     """
     _fmin, fmax, nfreq_pos = freq_range_thz
     nfreq_pos = int(nfreq_pos)
@@ -59,9 +59,9 @@ def build_frequency_grid(freq_range_thz, eta_w_thz=None, eta_factor=0.05):
 
 
 def bose_full_axis(freqs_thz, T):
-    """Bose–Einstein occupation on the full symmetric axis.
+    """Bose-Einstein occupation on the full symmetric axis.
 
-    Returns 0 at ω = 0 as a placeholder; the ω = 0 sample is excluded
+    Returns 0 at omega = 0 as a placeholder; the omega = 0 sample is excluded
     from all physical integrals via ``pos_mask``.
     """
     x = HBAR_SI * freqs_thz * THZ_TO_RAD / (KB_SI * T)
@@ -78,11 +78,11 @@ def bose_full_axis(freqs_thz, T):
 
 
 def boson_contact_self_energies_from_gamma(Gamma, freqs_thz, T):
-    """Build contact ``Σ^<``, ``Σ^>`` from broadening ``Γ``.
+    """Build contact ``Sigma^<``, ``Sigma^>`` from broadening ``Gamma``.
 
-    Σ^< = −i n_B Γ,  Σ^> = −i (n_B + 1) Γ.
+    Sigma^< = -i n_B Gamma,  Sigma^> = -i (n_B + 1) Gamma.
 
-    The ω = 0 sample is handled via the ``n_B(0) = 0`` placeholder; it is
+    The omega = 0 sample is handled via the ``n_B(0) = 0`` placeholder; it is
     never included in physical integrals.
     """
     n = bose_full_axis(freqs_thz, T)

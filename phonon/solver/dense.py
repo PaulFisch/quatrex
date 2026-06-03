@@ -2,35 +2,36 @@
 
 Public entry points:
 
-  * :func:`transmission_finite` — Γ-only one-shot or SCBA driver
-    (formerly ``phonon_inputs.anharmonic.anharmonic_transmission_finite``).
-  * :func:`transmission_q` — q-resolved SCBA driver
-    (formerly ``phonon_inputs.anharmonic.anharmonic_transmission_q``).
-  * :func:`scba_loop` — the shared SCBA fixed-point loop (callable for
+  * :func:`transmission` -- the single SCBA driver. Solves a finite
+    n_slabs-cell device with an optional Gamma-centered transverse q-mesh;
+    q_mesh=(1,1) is the Gamma-only finite device, larger meshes are the
+    transversely-periodic problem. Computes the full off-diagonal
+    self-energy by default, with cutoff knobs for the approximations.
+  * :func:`transmission_finite` -- wrapper for q_mesh=(1,1).
+  * :func:`transmission_q` -- wrapper for a transverse q-mesh (keeps the
+    historical q-path defaults retarded="half", no zero-mode projection).
+  * :func:`scba_loop` -- the shared SCBA fixed-point loop (callable for
     custom drivers that supply their own self-energy kernel and OBC).
-  * :func:`gamma_project_M_blocks` — direct Γ-only supercell→primitive
+  * :func:`gamma_project_M_blocks` -- Gamma-only supercell-to-primitive
     projection of the FC3 vertex.
-  * :func:`compare_q11_to_finite` — regression check ensuring
-    ``transmission_q(q_mesh=(1,1))`` reproduces :func:`transmission_finite`.
+  * :func:`compare_q11_to_finite` -- regression check ensuring
+    transmission_q(q_mesh=(1,1)) reproduces transmission_finite.
 
-Implements the self-consistent Born approximation for 3-phonon
-scattering following Guo *et al.*, Phys. Rev. B **102**, 195412 (2020).
-The bubble integrand (Guo Eq. 8, diagonal block) is
+Implements the self-consistent Born approximation for 3-phonon scattering
+following Guo et al., Phys. Rev. B 102, 195412 (2020). The bubble integrand
+(diagonal block) is
 
-    Σ^{<}(ω) = (i ℏ / 2) Σ_{c,d,e,f} Φ_{a c d}
-        ∫ dω'/(2π) G^<_{cf}(ω') G^<_{de}(ω−ω') Φ_{b e f}.
+    Sigma^<(w) = (i hbar / 2) sum_{c,d,e,f} Phi_{a c d}
+        integral dw'/(2 pi) G^<_{cf}(w') G^<_{de}(w - w') Phi_{b e f}.
 
-Internal units: THz² for dynamical matrices and self-energies.
-Self-energies always carry a q-axis (shape
-``(n_slabs, n_kpts, nfreq, n_dof, n_dof)``), even when ``n_kpts == 1``.
+Internal units: THz^2 for dynamical matrices and self-energies. The SCBA loop
+stores self-energies as device matrices (n_kpts, nfreq, N_D, N_D), so
+off-diagonal slab blocks are represented directly.
 
-Σ^R reconstruction
-------------------
-``retarded`` controls how Σ^R is built from Σ^{<,>}:
-  - ``"half"`` — Σ^R = ½ (Σ^> − Σ^<) (no Kramers–Kronig).
-  - ``"pv"``  — singularity-subtracted principal-value integral (O(nfreq²)).
-  - ``"fft"`` — FFT Hilbert transform (O(nfreq log nfreq)).
-Both entry points default to ``"half"`` so q=(1,1) reproduces finite.
+Sigma^R reconstruction (the ``retarded`` argument):
+  - "half" -- Sigma^R = (Sigma^> - Sigma^<) / 2 (no Kramers-Kronig).
+  - "pv"   -- singularity-subtracted principal-value integral (O(nfreq^2)).
+  - "fft"  -- FFT Hilbert transform (O(nfreq log nfreq)).
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ import warnings
 import numpy as np
 
 from phonon_inputs.constants import CONVERSION_THZ2, HBAR_SI, THZ_TO_RAD
+from phonon_inputs.convention import get_btd_blocks
 
 from .diagnostics import (
     check_broadening_sign,
@@ -56,11 +58,8 @@ from .leads import (
 )
 from .fc3_device import build_device_fc3_blocks
 from .retarded import build_retarded
-from .se_finite import (
-    compute_phph_self_energy_finite,
-    compute_phph_self_energy_finite_multi_slab,
-)
-from .se_q import compute_phph_self_energy_q_dense
+from .se_finite import compute_phph_self_energy
+from .se_q import _build_folded_vertices
 from .causality import (
     causality_diagnostic,
     dynamical_stability_diagnostic,
@@ -441,245 +440,6 @@ def scba_loop(
     scattering_contacts,
     retarded,
     verbose,
-):
-    """Shared SCBA loop for both q-dense and finite paths.
-
-    Self-energies always have shape
-    ``(n_slabs, n_kpts, nfreq, n_dof, n_dof)``, even when ``n_kpts == 1``.
-
-    Parameters
-    ----------
-    se_kernel : callable(G_lesser_slab, G_greater_slab)
-        Must return ``(Σ_l, Σ_g)``, each of shape
-        ``(n_slabs, n_kpts, nfreq, n_dof, n_dof)``.
-    retarded : {"pv", "fft", "half"}
-        Method for rebuilding Σ^R from the mixed Σ^{<,>}.
-    """
-    nfreq = len(freqs_thz)
-
-    Sigma_R = np.zeros((n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
-    Sigma_l = np.zeros_like(Sigma_R)
-    Sigma_g = np.zeros_like(Sigma_R)
-
-    convergence_history = []
-    J_total_prev = 0.0
-    rel_change = float('inf')
-    sig_change = float('inf')
-    conservation_err = 1.0
-    _anderson_x_hist = []
-    _anderson_f_hist = []
-    _anderson_prev_fnorm = float('inf')
-
-    spectral_J_L = np.zeros(nfreq)
-    spectral_J_R = np.zeros(nfreq)
-
-    sl0 = slice(0, n_dof)
-    sl_last = slice((n_slabs - 1) * n_dof, n_slabs * n_dof)
-
-    for scba_iter in range(max_scba_iter):
-        if scattering_contacts and scba_iter > 0:
-            for iq, (H_00_iq, H_01_iq) in enumerate(btd_blocks_list):
-                lead_L = Sigma_R[0, iq]
-                lead_R = Sigma_R[-1, iq]
-                try:
-                    obc_try = compute_obc_batch(
-                        z2_arr, H_00_iq, H_01_iq, freqs_thz, T_L, T_R,
-                        n_slabs=n_slabs,
-                        lead_sigma_r_L=lead_L, lead_sigma_r_R=lead_R)
-                    if not np.any(np.isnan(obc_try["Sigma_L_R"])):
-                        obc_list[iq] = obc_try
-                    elif verbose:
-                        print(f"    WARNING: scattering-contact OBC "
-                              f"diverged for iq={iq}, keeping previous")
-                except RuntimeError:
-                    if verbose:
-                        print(f"    WARNING: scattering-contact OBC "
-                              f"failed for iq={iq}, keeping previous")
-
-        G_lesser_slab = np.zeros(
-            (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
-        G_greater_slab = np.zeros_like(G_lesser_slab)
-        G_R_slab = np.zeros_like(G_lesser_slab)
-        spectral_J_L[:] = 0.0
-        spectral_J_R[:] = 0.0
-
-        for iq in range(n_kpts):
-            H_D = H_D_list[iq]
-            obc = obc_list[iq]
-
-            Sig_R_dev = np.zeros((nfreq, N_D, N_D), dtype=complex)
-            Sig_l_dev = np.zeros_like(Sig_R_dev)
-            Sig_g_dev = np.zeros_like(Sig_R_dev)
-            for l in range(n_slabs):
-                sl = slice(l * n_dof, (l + 1) * n_dof)
-                Sig_R_dev[:, sl, sl] = Sigma_R[l, iq]
-                Sig_l_dev[:, sl, sl] = Sigma_l[l, iq]
-                Sig_g_dev[:, sl, sl] = Sigma_g[l, iq]
-
-            G_ret, G_less, G_great = solve_green_batch(
-                z2_arr, H_D, obc, Sig_R_dev, Sig_l_dev, Sig_g_dev)
-
-            for l in range(n_slabs):
-                sl = slice(l * n_dof, (l + 1) * n_dof)
-                G_lesser_slab[l, iq] = G_less[:, sl, sl]
-                G_greater_slab[l, iq] = G_great[:, sl, sl]
-                G_R_slab[l, iq] = G_ret[:, sl, sl]
-
-            SLg_Gl = obc["Sigma_L_greater"][:, sl0, sl0] @ G_less[:, sl0, sl0]
-            SLl_Gg = obc["Sigma_L_lesser"][:, sl0, sl0] @ G_great[:, sl0, sl0]
-            spectral_J_L += HBAR_SI * omega_rad * np.real(
-                np.trace(SLg_Gl - SLl_Gg, axis1=-2, axis2=-1))
-
-            SRl_Gg = obc["Sigma_R_lesser"][:, sl_last, sl_last] @ G_great[:, sl_last, sl_last]
-            SRg_Gl = obc["Sigma_R_greater"][:, sl_last, sl_last] @ G_less[:, sl_last, sl_last]
-            spectral_J_R += HBAR_SI * omega_rad * np.real(
-                np.trace(SRl_Gg - SRg_Gl, axis1=-2, axis2=-1))
-
-        spectral_J_L /= n_kpts
-        spectral_J_R /= n_kpts
-
-        J_L_total = np.sum(spectral_J_L[pos_mask]) * dw_thz * 1e12
-        J_R_total = np.sum(spectral_J_R[pos_mask]) * dw_thz * 1e12
-        J_total = 0.5 * (J_L_total + J_R_total)
-        J_denom = abs(J_L_total) + abs(J_R_total)
-        conservation_err = (abs(J_L_total - J_R_total) / J_denom
-                            if J_denom > 0 else 0.0)
-
-        if verbose and scba_iter <= 2:
-            max_l_err = 0.0
-            max_r_err = 0.0
-            for l in range(n_slabs):
-                for iq in range(n_kpts):
-                    le, re = check_full_axis_symmetry(
-                        G_R_slab[l, iq], G_lesser_slab[l, iq],
-                        G_greater_slab[l, iq], freqs_thz)
-                    max_l_err = max(max_l_err, le)
-                    max_r_err = max(max_r_err, re)
-            if max_l_err > 1e-3 or max_r_err > 1e-3:
-                print(f"    Symmetry: |G^<+G^>(-)|={max_l_err:.2e}, "
-                      f"|G^R-G^R(-)*|={max_r_err:.2e}")
-
-        Sigma_l_new, Sigma_g_new = se_kernel(
-            G_lesser_slab, G_greater_slab)
-
-        symmetrize_lesser_greater(Sigma_l_new, Sigma_g_new)
-
-        sig_r_norm = np.max(np.abs(Sigma_l_new)) + np.max(np.abs(Sigma_g_new))
-
-        if verbose and scba_iter == 0:
-            gl_max = np.max(np.abs(G_lesser_slab))
-            print(f"    G diagnostic: max|G^<| = {gl_max:.4e}")
-            print(f"    Self-energy: max|Σ^R| = {sig_r_norm:.4e} THz²")
-
-        _Sigma_prev = np.concatenate([
-            Sigma_l.ravel(), Sigma_g.ravel()])
-
-        if scba_iter == 0:
-            Sigma_l = Sigma_l_new.copy()
-            Sigma_g = Sigma_g_new.copy()
-        elif anderson_mixing:
-            x_in = np.concatenate([Sigma_l.ravel(), Sigma_g.ravel()])
-            x_out = np.concatenate([
-                Sigma_l_new.ravel(), Sigma_g_new.ravel()])
-            x_mixed, _anderson_prev_fnorm = _anderson_mix(
-                x_in, x_out, _anderson_x_hist, _anderson_f_hist,
-                _anderson_prev_fnorm, depth=anderson_depth, beta=mixing)
-            sz = Sigma_l.size
-            Sigma_l = x_mixed[:sz].reshape(Sigma_l.shape)
-            Sigma_g = x_mixed[sz:].reshape(Sigma_g.shape)
-        else:
-            alpha = mixing
-            Sigma_l = (1 - alpha) * Sigma_l + alpha * Sigma_l_new
-            Sigma_g = (1 - alpha) * Sigma_g + alpha * Sigma_g_new
-
-        Sigma_R = build_retarded(
-            Sigma_l, Sigma_g, freqs_thz, method=retarded)
-
-        total_viol = 0
-        total_max = 0.0
-        for l in range(n_slabs):
-            for iq in range(n_kpts):
-                nv, mv = check_broadening_sign(
-                    Sigma_R[l, iq], freqs_thz, "SCBA", tol=1e-8)
-                total_viol += nv
-                total_max = max(total_max, mv)
-        if total_viol > 0 and verbose:
-            print(f"    WARNING: Γ sign violations: {total_viol} points, "
-                  f"max = {total_max:.2e}")
-
-        if scba_iter > 0:
-            rel_change = abs(J_total - J_total_prev) / (abs(J_total_prev) + 1e-30)
-            _Sigma_now = np.concatenate([
-                Sigma_l.ravel(), Sigma_g.ravel()])
-            sig_norm = np.linalg.norm(_Sigma_now)
-            sig_change = (np.linalg.norm(_Sigma_now - _Sigma_prev)
-                          / (sig_norm + 1e-30) if sig_norm > 0 else 0.0)
-            convergence_history.append(rel_change)
-            if verbose:
-                print(f"    SCBA iter {scba_iter + 1}: "
-                      f"J = {J_total:.4e} W, "
-                      f"conservation = {conservation_err:.4e}, "
-                      f"dJ/J = {rel_change:.4e}, "
-                      f"dΣ/Σ = {sig_change:.4e}, "
-                      f"max|Σ^R| = {np.max(np.abs(Sigma_R)):.2e} THz²")
-            numerically_converged = (sig_change < scba_tol
-                                      and rel_change < scba_tol)
-            conserving = conservation_err < conservation_tol
-
-            if numerically_converged and conserving:
-                if verbose:
-                    print(f"    Converged after {scba_iter + 1} iterations "
-                          f"(dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
-                          f"conservation={conservation_err:.2e})")
-                break
-
-            if numerically_converged and not conserving:
-                if verbose:
-                    print(f"    Numerically converged but conservation "
-                          f"NOT satisfied ({conservation_err:.2e} > "
-                          f"{conservation_tol:.2e}), continuing...")
-        else:
-            if verbose:
-                print(f"    SCBA iter 1: "
-                      f"J_L = {J_L_total:.4e} W, J_R = {J_R_total:.4e} W")
-
-        J_total_prev = J_total
-
-    else:
-        if verbose:
-            print(f"  WARNING: SCBA did not converge after {max_scba_iter} "
-                  f"iterations (dJ/J={rel_change:.2e}, dΣ/Σ={sig_change:.2e}, "
-                  f"conservation={conservation_err:.2e})")
-
-    return {
-        "spectral_J_L": spectral_J_L,
-        "spectral_J_R": spectral_J_R,
-        "Sigma_R": Sigma_R,
-        "Sigma_l": Sigma_l,
-        "Sigma_g": Sigma_g,
-        "conservation_err": conservation_err,
-        "convergence_history": convergence_history,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Device-storage SCBA loop for the multi-slab finite path
-# ---------------------------------------------------------------------------
-
-
-def scba_loop_dev(
-    *,
-    z2_arr, freqs_thz, dw_thz, omega_rad, pos_mask,
-    n_slabs, n_dof, N_D,
-    H_D_list, obc_list, btd_blocks_list,
-    n_kpts,
-    se_kernel,
-    T_L, T_R,
-    max_scba_iter, scba_tol, conservation_tol,
-    mixing, anderson_mixing, anderson_depth,
-    scattering_contacts,
-    retarded,
-    verbose,
     solver=None,
     anderson_safeguard=True,
     zero_mode_projection=True,
@@ -693,10 +453,9 @@ def scba_loop_dev(
 ):
     """SCBA fixed-point with device-storage self-energies.
 
-    Mirrors :func:`scba_loop` but stores ``Sigma^{<,>,R}`` as
-    ``(n_kpts, nfreq, N_D, N_D)`` device-matrix buffers so the
-    multi-slab driver can populate off-diagonal blocks ``Sigma_{IJ}``
-    produced by :func:`compute_phph_self_energy_finite_multi_slab`.
+    Stores ``Sigma^{<,>,R}`` as ``(n_kpts, nfreq, N_D, N_D)`` device-matrix
+    buffers so the self-energy can carry off-diagonal blocks ``Sigma_{IJ}``,
+    for both the Gamma-only (n_kpts=1) and q-resolved (n_kpts>1) paths.
 
     The per-iteration map ``Sigma -> G -> Sigma`` is isolated in the
     nested ``_scba_step``; the outer driver applies one of several
@@ -1080,22 +839,22 @@ def scba_loop_dev(
 
 
 # ---------------------------------------------------------------------------
-# Γ-only supercell→primitive projection of the FC3 vertex
+# Gamma-only supercell->primitive projection of the FC3 vertex
 # ---------------------------------------------------------------------------
 
 
 def gamma_project_M_blocks(
     M_blocks: np.ndarray, prim_indices: np.ndarray, n_atoms: int,
 ) -> np.ndarray:
-    """Project ``M_blocks`` onto the primitive cell at q=Γ.
+    """Project ``M_blocks`` onto the primitive cell at q=Gamma.
 
     Equivalent to ``np.einsum('ci,aij,dj->acd', T0, M_blocks, T0.conj())``
-    where ``T0 = build_gathering_matrix(..., q=(0, 0), ...)`` — at Γ the
+    where ``T0 = build_gathering_matrix(..., q=(0, 0), ...)`` -- at Gamma the
     matrix is real, integer-valued (each column has exactly one nonzero
     equal to 1), so the einsum reduces to summing supercell-image
     rows/cols grouped by ``prim_indices``. We do that fold directly with
     two ``np.add.at`` reductions, avoiding the ``(n_dof, dim_sc)`` dense
-    ``T0`` (~99 % zeros at Γ).
+    ``T0`` (~99 % zeros at Gamma).
     """
     n_super = len(prim_indices)
     n_dof = 3 * n_atoms
@@ -1116,11 +875,168 @@ def gamma_project_M_blocks(
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
+#
+# A single driver, transmission(), computes anharmonic phonon transport on a
+# finite n_slabs-cell device with an optional transverse q-mesh. The two named
+# wrappers select the historical defaults:
+#
+#   * transmission_finite -> q_mesh=(1,1)            (Gamma-only device)
+#   * transmission_q      -> q_mesh=q_mesh_transverse (transversely periodic)
+#
+# Both compute the FULL off-diagonal self-energy by default; the cutoff knobs
+# (sigma_cutoff / vertex_cutoff / g_cutoff) turn on the documented
+# approximations (sigma_cutoff=0 is Guo's diagonal-block approximation III).
 
 
-def transmission_finite(
+def _build_q_points(q_mesh):
+    """Gamma-centered transverse q-mesh and its difference map.
+
+    Returns ``(q_points, q_diff_map, n_kpts)``. ``q_mesh=(1,1)`` gives the
+    single Gamma point, reducing the q-resolved path to the finite device.
+    """
+    from phonon_inputs.separable import build_q_diff_map
+    nkx, nky = q_mesh
+    q_1d_x = [i / nkx for i in range(nkx)]
+    q_1d_y = [j / nky for j in range(nky)]
+    q_points = [(qx, qy) for qx in q_1d_x for qy in q_1d_y]
+    q_diff_map = build_q_diff_map(nkx, nky)
+    return q_points, q_diff_map, len(q_points)
+
+
+def _load_mass_weighted_fc3(phonon, fc3_hdf5, M_stacked_override,
+                            transport_direction, *, enforce_asr, vertex_scale,
+                            verbose):
+    """Mass-weighted real-space FC3 plus the supercell mapping.
+
+    Applies the Gamma-translation ASR projection (``enforce_asr``) and the
+    vertex rescaling (``vertex_scale``). Returns
+    ``(M_stacked, mapping, fc3_raw)`` where ``mapping`` is
+    ``(prim_indices, cell_frac, slab_indices, ref_sc_atoms)``.
+    """
+    from phonon_inputs.separable import (
+        build_supercell_mapping,
+        build_realspace_fc3_matrices,
+        enforce_asr_fc3_matrices,
+    )
+    n_atoms = len(phonon.primitive.masses)
+    mapping = build_supercell_mapping(phonon, transport_direction)
+    prim_indices, _cell_frac, _slab_indices, ref_sc_atoms = mapping
+
+    if M_stacked_override is not None:
+        M_stacked = M_stacked_override
+        fc3_raw = None
+    else:
+        fc3_raw = load_fc3_raw(fc3_hdf5)
+        M_stacked = build_realspace_fc3_matrices(
+            fc3_raw, n_atoms, phonon.supercell.masses, ref_sc_atoms)
+
+    if enforce_asr:
+        # Project the FC3 onto the Gamma-translation null space on both device
+        # legs before it enters the vertex. Hiphive enforces only the leg-1
+        # translational ASR by construction; the leg-j/k legs keep a ~0.8
+        # relative violation on open-wire FC3, which couples the vertex into
+        # the acoustic/twist subspace and stiffens the small-eta SCBA fixed
+        # point. Projection is linear, so it commutes with vertex_scale.
+        norm_before = float(np.linalg.norm(M_stacked))
+        M_stacked = enforce_asr_fc3_matrices(M_stacked, n_atoms, prim_indices)
+        if verbose:
+            norm_after = float(np.linalg.norm(M_stacked))
+            print(f"  FC3 ASR projection: ||M||_F {norm_before:.4e} -> "
+                  f"{norm_after:.4e} (dropped "
+                  f"{1.0 - norm_after / norm_before:.1%})")
+    if vertex_scale != 1.0:
+        M_stacked = M_stacked * float(vertex_scale)
+    return M_stacked, mapping, fc3_raw
+
+
+def _setup_devices(phonon, q_points, transport_direction, n_slabs,
+                   z2_arr, freqs_thz, T_L, T_R, mass_profile):
+    """Per-q device Hamiltonian, btd blocks, and OBC self-energies.
+
+    With ``mass_profile`` set, each slab carries its own mass (Si force
+    constants + per-slab mass, leads stay pure lead-material) via
+    :func:`build_device_hamiltonian_massprofile`.
+    """
+    m_lead = None
+    if mass_profile is not None:
+        mass_profile = list(mass_profile)
+        if len(mass_profile) != n_slabs:
+            raise ValueError(
+                f"mass_profile length {len(mass_profile)} != n_slabs {n_slabs}")
+        m_lead = float(phonon.primitive.masses[0])
+
+    btd_blocks, H_D_all, obc_all = [], [], []
+    for qx, qy in q_points:
+        H_00, H_01 = get_btd_blocks(
+            phonon, (qx, qy), transport_direction=transport_direction,
+            conversion_factor=CONVERSION_THZ2)
+        btd_blocks.append((H_00, H_01))
+        if mass_profile is None:
+            H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
+        else:
+            # un-mass-weight the uniform-lead blocks (K = H * m_lead) then
+            # re-weight per slab inside build_device_hamiltonian_massprofile.
+            H_D = build_device_hamiltonian_massprofile(
+                H_00 * m_lead, H_01 * m_lead, mass_profile)
+        H_D_all.append(H_D)
+        obc_all.append(compute_obc_batch(
+            z2_arr, H_00, H_01, freqs_thz, T_L, T_R, n_slabs=n_slabs))
+    return btd_blocks, H_D_all, obc_all
+
+
+def _ballistic_transmission(z2_arr, btd_blocks, H_D_all, n_dof, N_D):
+    """q-averaged ballistic (Caroli) transmission on the frequency grid."""
+    trans = np.zeros(len(z2_arr))
+    for (H_00, H_01), H_D in zip(btd_blocks, H_D_all):
+        H_LD = np.zeros((n_dof, N_D), dtype=complex)
+        H_LD[:, :n_dof] = H_01
+        H_DR = np.zeros((N_D, n_dof), dtype=complex)
+        H_DR[-n_dof:, :] = H_01
+        for iw, z2 in enumerate(z2_arr):
+            trans[iw] += ballistic_transmission_z2(
+                z2, H_D, H_00, H_01, H_LD, H_DR)
+    trans /= len(btd_blocks)
+    return trans
+
+
+def _cross_section_area(phonon, transport_direction):
+    """Transverse cell area in m^2 (for per-area conductance)."""
+    lattice = phonon.primitive.cell
+    tidx = "xyz".index(transport_direction)
+    perp = [i for i in range(3) if i != tidx]
+    a1, a2 = lattice[perp[0]], lattice[perp[1]]
+    return np.linalg.norm(np.cross(a1, a2)) * 1e-20
+
+
+def _device_g_blocks(g_dev, n_slabs, n_dof, max_offset, *, has_q_axis=True):
+    """Slice device G ``(n_kpts, nfreq, N_D, N_D)`` into ``{(K, K'): block}``
+    within ``|K - K'| <= max_offset`` (each block keeps the leading q axis)."""
+    out = {}
+    for K in range(n_slabs):
+        sK = slice(K * n_dof, (K + 1) * n_dof)
+        for Kp in range(n_slabs):
+            if max_offset is not None and abs(K - Kp) > max_offset:
+                continue
+            sKp = slice(Kp * n_dof, (Kp + 1) * n_dof)
+            out[(K, Kp)] = (g_dev[:, :, sK, sKp] if has_q_axis
+                            else g_dev[:, sK, sKp])
+    return out
+
+
+def _scatter_blocks(dst, blocks, n_dof):
+    """Place ``{(I, J): block}`` into the device matrix ``dst[..., I, J]``."""
+    for (I, J), blk in blocks.items():
+        sI = slice(I * n_dof, (I + 1) * n_dof)
+        sJ = slice(J * n_dof, (J + 1) * n_dof)
+        dst[..., sI, sJ] = blk
+
+
+def transmission(
     phonon,
     fc3_hdf5=None,
+    *,
+    q_mesh: tuple[int, int] = (1, 1),
+    n_slabs: int = 1,
     freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 101),
     transport_direction: str = "x",
     eta_factor: float = 1.0,
@@ -1132,7 +1048,6 @@ def transmission_finite(
     mixing: float = 0.3,
     anderson_mixing: bool = False,
     anderson_depth: int = 8,
-    n_slabs: int = 1,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
     retarded: str = "fft",
@@ -1154,267 +1069,160 @@ def transmission_finite(
     vertex_scale: float = 1.0,
     enforce_asr: bool = False,
     legacy_prefactor: bool = False,
+    mass_profile: list | None = None,
 ) -> dict:
-    """Reference anharmonic phonon transport (Gamma-point, finite device).
+    """Reference anharmonic phonon transport (NEGF + SCBA, dense).
 
-    Computes the full multi-slab 3-phonon self-energy on a finite
-    ``n_slabs``-cell device. By default every approximation against
-    the strict SCBA expression is disabled (see ``sigma_cutoff``,
-    ``vertex_cutoff``, ``g_cutoff``, ``dc_handling`` below); the
-    remaining approximation in the dense path is the non-self-consistent
-    lead self-energy (controlled by ``scattering_contacts``).
+    Solves the self-consistent Born approximation for 3-phonon scattering on a
+    finite ``n_slabs``-cell device with an optional Gamma-centered transverse
+    q-mesh. ``q_mesh=(1,1)`` is the finite (Gamma-only) device; larger meshes
+    are the transversely-periodic problem with crystal-momentum conservation in
+    the bubble. The FULL off-diagonal self-energy is computed by default.
 
-    Parameters
-    ----------
+    Approximation knobs (all off by default):
+
+    sigma_cutoff
+        Maximum ``|I - J|`` for produced Sigma blocks. ``None`` keeps every
+        block; ``0`` is Guo's diagonal-block approximation (III).
+    vertex_cutoff
+        Maximum slab-distance retained in the FC3 vertex (approximation II).
+    g_cutoff
+        Maximum ``|K - K'|`` for G blocks used in the inner bubble sum.
+    dc_handling
+        Treatment of the omega = 0 sample of G before the bubble FFT
+        (``"interpolate"`` default, ``"zero"`` legacy, ``"keep"``).
+
+    Numerics:
+
     retarded : {"fft", "pv", "half"}
-        Method for reconstructing Sigma^R from the mixed Sigma^{<,>}.
-        Default ``"fft"`` retains the level shift via the FFT-Hilbert
-        transform; ``"half"`` reproduces the historical broadening-only
-        approximation; ``"pv"`` does the singularity-subtracted PV
-        integral (slowest).
-    hilbert_retarded : bool
-        Legacy flag.  If ``True``, overrides ``retarded`` to ``"fft"``.
-    sigma_cutoff : int or None
-        Maximum ``|I - J|`` for produced Sigma blocks. ``None``
-        (default) imposes no truncation; pass ``0`` to recover the
-        BTD-diagonal-only behaviour of the legacy solver.
-    vertex_cutoff : int or None
-        Maximum slab-distance retained in the FC3 vertex blocks
-        ``Phi_{I, K, K'}``. ``None`` (default) keeps every triplet
-        supported by the supercell FC3.
-    g_cutoff : int or None
-        Maximum ``|K - K'|`` for G blocks used in the inner bubble
-        sum. ``None`` (default) keeps every available block; pass
-        ``0`` to restrict to diagonal G.
-    dc_handling : {"interpolate", "zero", "keep"}
-        How to treat the omega = 0 sample of G before the bubble FFT
-        (see :func:`phonon.solver.bubble.bubble_dense`). The legacy
-        behaviour is ``"zero"``; the new default ``"interpolate"``
-        replaces ``G[0]`` by the midpoint of its neighbours.
+        How Sigma^R is rebuilt from the mixed Sigma^{<,>} (FFT Hilbert,
+        principal value, or anti-Hermitian half).
     solver : {None, "linear", "anderson", "jfnk", "anderson+jfnk"}
-        Fixed-point accelerator for the SCBA loop. ``None`` (default)
-        derives it from ``anderson_mixing`` for back-compatibility
-        (``"anderson"`` if set, else ``"linear"``). ``"anderson+jfnk"``
-        falls back to a Jacobian-free Newton-Krylov solve if Anderson
-        stalls.
-    anderson_safeguard : bool
-        ``True`` (default) uses the safeguarded Anderson accelerator;
-        ``False`` keeps the legacy hard-restart scheme.
-    zero_mode_projection : bool
-        ``True`` (default) projects the rigid-translation component out
-        of the bubble self-energy each iteration (a discrete acoustic
-        sum rule that removes the soft-mode instability).
-    gate_on_conservation : bool
-        ``True`` reproduces the legacy stop test (SCF residual AND
-        heat-flow conservation); ``False`` (default) stops on the SCF
-        residual alone and reports conservation as a diagnostic.
-    divergence_guard : bool
-        ``True`` (default) aborts early -- returning the best iterate --
-        when the residual blows up.
+        SCBA fixed-point accelerator; ``None`` derives it from
+        ``anderson_mixing``.
+    zero_mode_projection, gate_on_conservation, divergence_guard,
+    anderson_safeguard, causality_projection
+        See :func:`scba_loop`.
+    enforce_asr
+        Project the FC3 onto the Gamma-translation null space before the
+        vertex (stabilises the small-eta SCBA on soft-mode wires).
+    legacy_prefactor
+        ``True`` restores the 4x-too-large Luisier self-energy prefactor.
+    mass_profile : list of float, optional
+        Per-slab mass (length ``n_slabs``) for mass-mismatch heterostructures;
+        leads stay pure lead-material.
 
-    Notes
-    -----
-    The ``eta_factor`` default is ``1.0`` (``eta ~ d_omega``): the
-    ``0.05`` of earlier revisions under-resolves the propagator on the
-    frequency grid (see ``verify_discretization``). Recover the
-    physical ``eta -> 0`` limit by extrapolating a few ``eta_factor``
-    values rather than running at ``eta ~ 0``.
+    Returns a dict of spectral / integrated heat currents, ballistic and
+    anharmonic conductances, convergence diagnostics, and the converged
+    self-energies. The ``eta_factor`` default ``1.0`` (eta ~ d_omega) keeps the
+    propagator resolved on the grid; recover eta -> 0 by extrapolating a few
+    ``eta_factor`` values rather than running at eta ~ 0.
     """
     if hilbert_retarded:
         retarded = "fft"
     if solver is None:
         solver = "anderson" if anderson_mixing else "linear"
-    from phonon_inputs.convention import get_btd_blocks
-    from phonon_inputs.separable import (
-        build_supercell_mapping,
-        build_realspace_fc3_matrices,
-        enforce_asr_fc3_matrices,
-    )
 
     n_atoms = len(phonon.primitive.masses)
     n_dof = 3 * n_atoms
     N_D = n_slabs * n_dof
 
-    # Auto-extend fmax if it is below 2*omega_max of the device. The
-    # 3-phonon bubble's frequency-convolution support is
-    # [-2*omega_max, 2*omega_max]; with fmax < 2*omega_max the convolution
-    # is truncated/aliased and the bubble picks up huge spurious
-    # contributions -- a fake "strong coupling" regime that destabilises
-    # SCBA (the dominant cause of divergence on H-terminated wires).
-    H_00, H_01 = get_btd_blocks(
+    q_points, q_diff_map, n_kpts = _build_q_points(q_mesh)
+
+    # Auto-extend fmax to cover the 3-phonon convolution support
+    # [-2*omega_max, 2*omega_max]; a too-small fmax aliases the bubble and
+    # destabilises SCBA. Sized off the Gamma-point dynamical matrix.
+    H_00_g, H_01_g = get_btd_blocks(
         phonon, (0.0, 0.0), transport_direction=transport_direction,
         conversion_factor=CONVERSION_THZ2)
-    H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
+    name = "transmission_finite" if n_kpts == 1 else "transmission_q"
     freq_range_thz = _ensure_fmax(
-        freq_range_thz, H_00, H_01, name="transmission_finite",
+        freq_range_thz, H_00_g, H_01_g, name=name,
         auto_extend=auto_extend_fmax, margin=fmax_margin, verbose=verbose)
-
     freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
         freq_range_thz, eta_factor=eta_factor)
     nfreq = len(freqs_thz)
 
-    prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
-        phonon, transport_direction)
-    masses_super = phonon.supercell.masses
-    n_super = len(masses_super)
-    dim_sc = n_super * 3
-
-    if M_stacked_override is not None:
-        M_stacked = M_stacked_override
-        fc3_raw = None
-    else:
-        fc3_raw = load_fc3_raw(fc3_hdf5)
-        M_stacked = build_realspace_fc3_matrices(
-            fc3_raw, n_atoms, masses_super, ref_sc_atoms)
-    if enforce_asr:
-        # Project the FC3 onto the Gamma-translation null space on both
-        # device legs before it enters the vertex. Hiphive enforces only
-        # the axis-i (leg-1) translational ASR by orbit construction; the
-        # axis-j/k legs retain a ~0.8 relative violation on open-wire FC3
-        # (see finite_analysis/physical_tests.fc3_asr_legs). The unprojected
-        # residual couples the vertex into the acoustic/twist subspace and
-        # stiffens the small-eta SCBA fixed point (CLAUDE.md F9). Projection
-        # is linear, so it commutes with the vertex_scale rescaling below.
-        norm_before = float(np.linalg.norm(M_stacked))
-        M_stacked = enforce_asr_fc3_matrices(M_stacked, n_atoms, prim_indices)
-        if verbose:
-            norm_after = float(np.linalg.norm(M_stacked))
-            print(
-                f"  FC3 ASR projection: ||M||_F {norm_before:.4e} -> "
-                f"{norm_after:.4e} (dropped {1.0 - norm_after / norm_before:.1%})"
-            )
-    if vertex_scale != 1.0:
-        M_stacked = M_stacked * float(vertex_scale)
-
-    # Build the device-resolved FC3 vertex dict (multi-slab).
-    phi_dev_blocks = build_device_fc3_blocks(
-        M_stacked, prim_indices, slab_indices,
-        n_atoms, n_slabs, vertex_cutoff=vertex_cutoff,
-    )
-
-    if verbose:
-        if M_stacked_override is None:
-            print(f"  FC3 raw shape: {fc3_raw.shape}")
-        print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
-        print(f"  M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
-        print(f"  Phi device blocks: {len(phi_dev_blocks)} "
-              f"(vertex_cutoff={vertex_cutoff})")
-        print(f"  Device: {n_slabs} slab(s), {N_D} DOFs (finite, Gamma only)")
-        print(f"  Cutoffs: sigma={sigma_cutoff}, vertex={vertex_cutoff}, "
-              f"g={g_cutoff}; dc_handling={dc_handling}")
+    M_stacked, mapping, fc3_raw = _load_mass_weighted_fc3(
+        phonon, fc3_hdf5, M_stacked_override, transport_direction,
+        enforce_asr=enforce_asr, vertex_scale=vertex_scale, verbose=verbose)
+    prim_indices, cell_frac, slab_indices, _ref = mapping
 
     T_L = temperature + delta_T / 2.0
     T_R = temperature - delta_T / 2.0
 
-    if verbose:
-        print(f"  Frequency grid: {nfreq} points, "
-              f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
-        print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
-        print(f"  eta_w = {eta_w:.4e} THz  (eta/d_omega = "
-              f"{eta_w / dw_thz:.2f})")
-        sg = " safeguarded" if (anderson_safeguard
-                                and solver in ("anderson", "anderson+jfnk")
-                                ) else ""
-        print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
-              f"mix={mixing}, solver={solver}{sg}")
-        print(f"  Options: zero_mode_projection={zero_mode_projection}, "
-              f"gate_on_conservation={gate_on_conservation}, "
-              f"divergence_guard={divergence_guard}")
-        print(f"  Retarded SE: {retarded}")
+    btd_blocks, H_D_all, obc_all = _setup_devices(
+        phonon, q_points, transport_direction, n_slabs,
+        z2_arr, freqs_thz, T_L, T_R, mass_profile)
 
-    if verbose:
-        suffix = " (will update each SCBA iter)" if scattering_contacts else ""
-        print(f"  Precomputing OBC self-energies (batched)...{suffix}")
-    obc = compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
-                            n_slabs=n_slabs)
-
-    H_LD = np.zeros((n_dof, N_D), dtype=complex)
-    H_LD[:, :n_dof] = H_01
-    H_DR = np.zeros((N_D, n_dof), dtype=complex)
-    H_DR[-n_dof:, :] = H_01
-
-    trans_ballistic = np.zeros(nfreq)
-    for iw, z2 in enumerate(z2_arr):
-        trans_ballistic[iw] = ballistic_transmission_z2(
-            z2, H_D, H_00, H_01, H_LD, H_DR)
-
-    if verbose:
-        print(f"  Ballistic max T: {trans_ballistic.max():.4f}")
-
-    lattice = phonon.primitive.cell
-    tidx = "xyz".index(transport_direction)
-    perp_idx = [i for i in range(3) if i != tidx]
-    a1 = lattice[perp_idx[0]]
-    a2 = lattice[perp_idx[1]]
-    A_c = np.linalg.norm(np.cross(a1, a2)) * 1e-20
+    trans_ballistic = _ballistic_transmission(
+        z2_arr, btd_blocks, H_D_all, n_dof, N_D)
+    A_c = _cross_section_area(phonon, transport_direction)
 
     omega_rad = freqs_thz * THZ_TO_RAD
     n_bose_L = bose_full_axis(freqs_thz, T_L)
     n_bose_R = bose_full_axis(freqs_thz, T_R)
-    spectral_J_ball = HBAR_SI * omega_rad * (n_bose_L - n_bose_R) * trans_ballistic
+    spectral_J_ball = (HBAR_SI * omega_rad * (n_bose_L - n_bose_R)
+                       * trans_ballistic)
     J_ball_total = np.sum(spectral_J_ball[pos_mask]) * dw_thz * 1e12
     G_ball = J_ball_total / (A_c * delta_T) if delta_T != 0 else 0.0
 
     if verbose:
-        print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
+        print(f"  Device: {n_slabs} slab(s), {N_D} DOFs, q-mesh "
+              f"{q_mesh[0]}x{q_mesh[1]} = {n_kpts} point(s)")
+        print(f"  Frequency grid: {nfreq} points, {freqs_thz[0]:.2f} to "
+              f"{freqs_thz[-1]:.2f} THz; eta_w = {eta_w:.4e} THz "
+              f"(eta/d_omega = {eta_w / dw_thz:.2f})")
+        print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
+        print(f"  Cutoffs: sigma={sigma_cutoff}, vertex={vertex_cutoff}, "
+              f"g={g_cutoff}; dc_handling={dc_handling}; retarded={retarded}")
+        print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
+              f"mix={mixing}, solver={solver}")
+        print(f"  Ballistic max T: {trans_ballistic.max():.4f}; "
+              f"G_ball = {G_ball:.2f} W/(m^2 K)")
 
-    def _g_dict_from_dense(g_dense, *, max_offset):
-        """Build {(K, K'): block} dict from a dense (nfreq, N_D, N_D) G.
+    sym = 1.0 if legacy_prefactor else None  # None -> correct 1/4 default
 
-        ``max_offset = None`` includes every (K, K') pair; otherwise
-        keeps only ``|K - K'| <= max_offset``.
-        """
-        out: dict[tuple[int, int], np.ndarray] = {}
-        for K in range(n_slabs):
-            sK = slice(K * n_dof, (K + 1) * n_dof)
-            for Kp in range(n_slabs):
-                if max_offset is not None and abs(K - Kp) > max_offset:
-                    continue
-                sKp = slice(Kp * n_dof, (Kp + 1) * n_dof)
-                out[(K, Kp)] = g_dense[:, sK, sKp]
-        return out
+    # Build the device vertex once (it does not depend on G, so it is reused
+    # across SCBA iterations). Gamma uses the real device blocks; a transverse
+    # mesh uses the q-folded blocks for every (iq1, iq2) the bubble couples.
+    if n_kpts == 1:
+        vertices = {(0, 0): build_device_fc3_blocks(
+            M_stacked, prim_indices, slab_indices, n_atoms, n_slabs,
+            vertex_cutoff=vertex_cutoff)}
+    else:
+        vertices = _build_folded_vertices(
+            M_stacked, prim_indices, cell_frac, slab_indices, n_atoms, n_slabs,
+            n_kpts, q_points, q_diff_map, transport_direction,
+            vertex_cutoff=vertex_cutoff)
 
     def se_kernel(G_less_dev_q, G_great_dev_q):
-        Sigma_l_new = np.zeros((1, nfreq, N_D, N_D), dtype=complex)
-        Sigma_g_new = np.zeros_like(Sigma_l_new)
+        sig_l = np.zeros((n_kpts, nfreq, N_D, N_D), dtype=complex)
+        sig_g = np.zeros_like(sig_l)
+        gl = _device_g_blocks(G_less_dev_q, n_slabs, n_dof, g_cutoff,
+                              has_q_axis=True)
+        gg = _device_g_blocks(G_great_dev_q, n_slabs, n_dof, g_cutoff,
+                              has_q_axis=True)
+        sl_b, sg_b = compute_phph_self_energy(
+            gl, gg, vertices, n_slabs, n_kpts, q_diff_map, freqs_thz, dw_thz,
+            sigma_cutoff=sigma_cutoff, g_cutoff=g_cutoff,
+            dc_handling=dc_handling, symmetry_factor=sym)
+        _scatter_blocks(sig_l, sl_b, n_dof)
+        _scatter_blocks(sig_g, sg_b, n_dof)
+        return sig_l, sig_g
 
-        gl = _g_dict_from_dense(G_less_dev_q[0], max_offset=g_cutoff)
-        gg = _g_dict_from_dense(G_great_dev_q[0], max_offset=g_cutoff)
-        sl_blocks, sg_blocks = compute_phph_self_energy_finite_multi_slab(
-            gl, gg, phi_dev_blocks, n_slabs,
-            freqs_thz, dw_thz,
-            sigma_cutoff=sigma_cutoff,
-            g_cutoff=g_cutoff,
-            dc_handling=dc_handling,
-            symmetry_factor=(1.0 if legacy_prefactor else None),
-        )
-        for (I, J), block in sl_blocks.items():
-            sI = slice(I * n_dof, (I + 1) * n_dof)
-            sJ = slice(J * n_dof, (J + 1) * n_dof)
-            Sigma_l_new[0, :, sI, sJ] = block
-        for (I, J), block in sg_blocks.items():
-            sI = slice(I * n_dof, (I + 1) * n_dof)
-            sJ = slice(J * n_dof, (J + 1) * n_dof)
-            Sigma_g_new[0, :, sI, sJ] = block
-        return Sigma_l_new, Sigma_g_new
-
-    scba_result = scba_loop_dev(
+    scba_result = scba_loop(
         z2_arr=z2_arr, freqs_thz=freqs_thz, dw_thz=dw_thz,
         omega_rad=omega_rad, pos_mask=pos_mask,
         n_slabs=n_slabs, n_dof=n_dof, N_D=N_D,
-        H_D_list=[H_D], obc_list=[obc], btd_blocks_list=[(H_00, H_01)],
-        n_kpts=1,
-        se_kernel=se_kernel,
-        T_L=T_L, T_R=T_R,
+        H_D_list=H_D_all, obc_list=obc_all, btd_blocks_list=btd_blocks,
+        n_kpts=n_kpts, se_kernel=se_kernel, T_L=T_L, T_R=T_R,
         max_scba_iter=max_scba_iter, scba_tol=scba_tol,
         conservation_tol=conservation_tol,
         mixing=mixing, anderson_mixing=anderson_mixing,
         anderson_depth=anderson_depth,
-        scattering_contacts=scattering_contacts,
-        retarded=retarded,
-        verbose=verbose,
-        solver=solver,
-        anderson_safeguard=anderson_safeguard,
+        scattering_contacts=scattering_contacts, retarded=retarded,
+        verbose=verbose, solver=solver, anderson_safeguard=anderson_safeguard,
         zero_mode_projection=zero_mode_projection,
         gate_on_conservation=gate_on_conservation,
         divergence_guard=divergence_guard,
@@ -1436,10 +1244,21 @@ def transmission_finite(
     G_anh = J_anh_total / (A_c * delta_T) if delta_T != 0 else 0.0
 
     if verbose:
-        print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
-        print(f"  Heat flow conservation: {conservation_err:.4e}")
+        print(f"  Anharmonic conductance: {G_anh:.2f} W/(m^2 K); "
+              f"heat-flow conservation: {conservation_err:.4e}")
 
-    return {
+    # Finite path keeps its historical self-energy shape (no q axis); the
+    # q-resolved path carries the leading q axis.
+    if n_kpts == 1:
+        se_r = Sigma_R[0, pos_mask]
+        se_l = Sigma_l[0, pos_mask]
+        se_g = Sigma_g[0, pos_mask]
+    else:
+        se_r = Sigma_R[:, pos_mask]
+        se_l = Sigma_l[:, pos_mask]
+        se_g = Sigma_g[:, pos_mask]
+
+    result = {
         "freqs_thz": freqs_thz[pos_mask],
         "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
         "transmission_ballistic": trans_ballistic[pos_mask],
@@ -1458,258 +1277,41 @@ def transmission_finite(
         "scba_converged": scba_result.get("converged", True),
         "scba_residual": scba_result.get("scba_residual", float("nan")),
         "diagnostics_history": scba_result.get("diagnostics_history", []),
-        "self_energy_retarded": Sigma_R[0, pos_mask],
-        "self_energy_lesser": Sigma_l[0, pos_mask],
-        "self_energy_greater": Sigma_g[0, pos_mask],
+        "self_energy_retarded": se_r,
+        "self_energy_lesser": se_l,
+        "self_energy_greater": se_g,
     }
+
+    if n_kpts == 1 and verbose:
+        _check_q11_vs_finite(result)
+    return result
+
+
+def transmission_finite(phonon, fc3_hdf5=None, **kwargs) -> dict:
+    """Gamma-only finite device: :func:`transmission` with ``q_mesh=(1,1)``."""
+    return transmission(phonon, fc3_hdf5=fc3_hdf5, q_mesh=(1, 1), **kwargs)
 
 
 def transmission_q(
     phonon,
     fc3_hdf5=None,
     q_mesh_transverse: tuple[int, int] = (4, 4),
-    freq_range_thz: tuple[float, float, int] = (0.01, 16.0, 101),
-    transport_direction: str = "x",
-    eta_factor: float = 1.0,
-    temperature: float = 300.0,
-    delta_T: float = 10.0,
-    max_scba_iter: int = 80,
-    scba_tol: float = 1e-3,
-    conservation_tol: float = 1e-3,
-    mixing: float = 0.3,
-    anderson_mixing: bool = False,
-    anderson_depth: int = 8,
-    n_slabs: int = 1,
-    verbose: bool = True,
-    M_stacked_override: np.ndarray = None,
+    *,
     retarded: str = "half",
-    scattering_contacts: bool = False,
-    hilbert_retarded: bool = False,
-    auto_extend_fmax: bool = True,
-    fmax_margin: float = 1.05,
-    legacy_prefactor: bool = False,
-    mass_profile: list | None = None,
+    zero_mode_projection: bool = False,
+    **kwargs,
 ) -> dict:
-    """Anharmonic phonon transport with full q-dependent dense self-energy.
+    """Transversely-periodic device: :func:`transmission` on ``q_mesh``.
 
-    Uses a Γ-centered q-mesh ``[0, 1/N, ..., (N-1)/N]`` for closure under
-    subtraction (required for q-convolution).
-
-    When ``q_mesh=(1,1)``, must reproduce :func:`transmission_finite`
-    exactly. A regression check is run automatically in that case.
+    Keeps the historical q-path defaults (``retarded="half"``, no zero-mode
+    projection). ``q_mesh_transverse=(1,1)`` reproduces
+    :func:`transmission_finite`; pass ``sigma_cutoff=0`` for Guo's cheap
+    slab-diagonal approximation (III).
     """
-    if hilbert_retarded:
-        retarded = "pv"
-
-    from phonon_inputs.convention import get_btd_blocks
-    from phonon_inputs.separable import (
-        build_supercell_mapping,
-        build_realspace_fc3_matrices,
-        build_gathering_matrix,
-        build_q_diff_map,
-    )
-
-    n_atoms = len(phonon.primitive.masses)
-    n_dof = 3 * n_atoms
-    N_D = n_slabs * n_dof
-
-    # Ensure fmax >= 2*omega_max before sizing the frequency grid; see
-    # _ensure_fmax / transmission_finite docstring for the rationale.
-    _h00g, _h01g = get_btd_blocks(
-        phonon, (0.0, 0.0), transport_direction=transport_direction,
-        conversion_factor=CONVERSION_THZ2)
-    freq_range_thz = _ensure_fmax(
-        freq_range_thz, _h00g, _h01g, name="transmission_q",
-        auto_extend=auto_extend_fmax, margin=fmax_margin, verbose=verbose)
-
-    freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
-        freq_range_thz, eta_factor=eta_factor)
-    nfreq = len(freqs_thz)
-
-    prim_indices, cell_frac, slab_indices, ref_sc_atoms = build_supercell_mapping(
-        phonon, transport_direction)
-    masses_super = phonon.supercell.masses
-    n_super = len(masses_super)
-    dim_sc = n_super * 3
-
-    if M_stacked_override is not None:
-        M_stacked = M_stacked_override
-        fc3_raw = None
-    else:
-        fc3_raw = load_fc3_raw(fc3_hdf5)
-        M_stacked = build_realspace_fc3_matrices(
-            fc3_raw, n_atoms, masses_super, ref_sc_atoms)
-
-    if verbose:
-        if M_stacked_override is None:
-            print(f"  FC3 raw shape: {fc3_raw.shape}")
-        print(f"  Supercell atoms: {n_super}, dim_sc: {dim_sc}")
-        print(f"  M_stacked norm: {np.linalg.norm(M_stacked):.4e}")
-        print(f"  Device: {n_slabs} slab(s), {N_D} DOFs per q-point")
-
-    nkx, nky = q_mesh_transverse
-    q_1d_x = [i / nkx for i in range(nkx)]
-    q_1d_y = [j / nky for j in range(nky)]
-    q_points = [(qx, qy) for qx in q_1d_x for qy in q_1d_y]
-    n_kpts = len(q_points)
-    q_diff_map = build_q_diff_map(nkx, nky)
-
-    T_all_q = []
-    for qx, qy in q_points:
-        T = build_gathering_matrix(
-            prim_indices, cell_frac, (qx, qy), n_atoms, transport_direction)
-        T_all_q.append(T)
-
-    T_L = temperature + delta_T / 2.0
-    T_R = temperature - delta_T / 2.0
-
-    if verbose:
-        print(f"  q-mesh: {nkx}x{nky} = {n_kpts} (Gamma-centered)")
-        print(f"  Frequency grid: {nfreq} points, "
-              f"{freqs_thz[0]:.2f} to {freqs_thz[-1]:.2f} THz")
-        print(f"  Temperature: {temperature} K, delta_T: {delta_T} K")
-        print(f"  eta_w = {eta_w:.4e} THz")
-        mix_str = (f"Anderson(depth={anderson_depth})" if anderson_mixing
-                   else "linear")
-        print(f"  SCBA: max {max_scba_iter} iter, tol={scba_tol}, "
-              f"mix={mixing}, method={mix_str}")
-        print(f"  Retarded SE: {retarded}")
-
-    btd_blocks = []
-    for qx, qy in q_points:
-        H_00, H_01 = get_btd_blocks(
-            phonon, (qx, qy), transport_direction=transport_direction,
-            conversion_factor=CONVERSION_THZ2)
-        btd_blocks.append((H_00, H_01))
-
-    if verbose:
-        suffix = " (will update each SCBA iter)" if scattering_contacts else ""
-        print(f"  Precomputing OBC self-energies (batched)...{suffix}")
-    if mass_profile is not None:
-        mass_profile = list(mass_profile)
-        if len(mass_profile) != n_slabs:
-            raise ValueError(
-                f"mass_profile length {len(mass_profile)} != n_slabs {n_slabs}")
-        m_lead = float(phonon.primitive.masses[0])
-
-    obc_all = []
-    H_D_all = []
-    for iq, (H_00, H_01) in enumerate(btd_blocks):
-        if mass_profile is None:
-            H_D = build_device_hamiltonian(H_00, H_01, n_slabs)
-        else:
-            # un-mass-weight the uniform-lead blocks: K = H * m_lead
-            H_D = build_device_hamiltonian_massprofile(
-                H_00 * m_lead, H_01 * m_lead, mass_profile)
-        H_D_all.append(H_D)
-        obc = compute_obc_batch(z2_arr, H_00, H_01, freqs_thz, T_L, T_R,
-                                n_slabs=n_slabs)
-        obc_all.append(obc)
-
-    trans_ballistic = np.zeros(nfreq)
-    for iq, (H_00, H_01) in enumerate(btd_blocks):
-        H_D = H_D_all[iq]
-        H_LD = np.zeros((n_dof, N_D), dtype=complex)
-        H_LD[:, :n_dof] = H_01
-        H_DR = np.zeros((N_D, n_dof), dtype=complex)
-        H_DR[-n_dof:, :] = H_01
-        for iw, z2 in enumerate(z2_arr):
-            trans_ballistic[iw] += ballistic_transmission_z2(
-                z2, H_D, H_00, H_01, H_LD, H_DR)
-    trans_ballistic /= n_kpts
-
-    if verbose:
-        print(f"  Ballistic max T: {trans_ballistic.max():.4f}")
-
-    lattice = phonon.primitive.cell
-    tidx = "xyz".index(transport_direction)
-    perp_idx = [i for i in range(3) if i != tidx]
-    a1 = lattice[perp_idx[0]]
-    a2 = lattice[perp_idx[1]]
-    A_c = np.linalg.norm(np.cross(a1, a2)) * 1e-20
-
-    omega_rad = freqs_thz * THZ_TO_RAD
-    n_bose_L = bose_full_axis(freqs_thz, T_L)
-    n_bose_R = bose_full_axis(freqs_thz, T_R)
-    spectral_J_ball = HBAR_SI * omega_rad * (n_bose_L - n_bose_R) * trans_ballistic
-    J_ball_total = np.sum(spectral_J_ball[pos_mask]) * dw_thz * 1e12
-    G_ball = J_ball_total / (A_c * delta_T) if delta_T != 0 else 0.0
-
-    if verbose:
-        print(f"  Ballistic thermal conductance: {G_ball:.2f} W/(m^2 K)")
-
-    sym_factor = 1.0 if legacy_prefactor else None  # None -> correct 1/4 default
-    def se_kernel(G_lesser_slab, G_greater_slab):
-        Sigma_l_new = np.zeros(
-            (n_slabs, n_kpts, nfreq, n_dof, n_dof), dtype=complex)
-        Sigma_g_new = np.zeros_like(Sigma_l_new)
-        for l in range(n_slabs):
-            sl_n, sg_n = compute_phph_self_energy_q_dense(
-                G_lesser_slab[l], G_greater_slab[l],
-                M_stacked, T_all_q, q_diff_map,
-                n_atoms, n_kpts, freqs_thz, dw_thz,
-                symmetry_factor=sym_factor)
-            Sigma_l_new[l] = sl_n
-            Sigma_g_new[l] = sg_n
-        return Sigma_l_new, Sigma_g_new
-
-    scba_result = scba_loop(
-        z2_arr=z2_arr, freqs_thz=freqs_thz, dw_thz=dw_thz,
-        omega_rad=omega_rad, pos_mask=pos_mask,
-        n_slabs=n_slabs, n_dof=n_dof, N_D=N_D,
-        H_D_list=H_D_all, obc_list=obc_all, btd_blocks_list=btd_blocks,
-        n_kpts=n_kpts,
-        se_kernel=se_kernel,
-        T_L=T_L, T_R=T_R,
-        max_scba_iter=max_scba_iter, scba_tol=scba_tol,
-        conservation_tol=conservation_tol,
-        mixing=mixing, anderson_mixing=anderson_mixing,
-        anderson_depth=anderson_depth,
-        scattering_contacts=scattering_contacts,
-        retarded=retarded,
-        verbose=verbose,
-    )
-
-    spectral_J_L = scba_result["spectral_J_L"]
-    spectral_J_R = scba_result["spectral_J_R"]
-    Sigma_R_q = scba_result["Sigma_R"]
-    Sigma_l_q = scba_result["Sigma_l"]
-    Sigma_g_q = scba_result["Sigma_g"]
-    conservation_err = scba_result["conservation_err"]
-    convergence_history = scba_result["convergence_history"]
-
-    spectral_J_anh = 0.5 * (spectral_J_L + spectral_J_R)
-    J_anh_total = np.sum(spectral_J_anh[pos_mask]) * dw_thz * 1e12
-    G_anh = J_anh_total / (A_c * delta_T) if delta_T != 0 else 0.0
-
-    if verbose:
-        print(f"  Anharmonic thermal conductance: {G_anh:.2f} W/(m^2 K)")
-        print(f"  Heat flow conservation: {conservation_err:.4e}")
-
-    result = {
-        "freqs_thz": freqs_thz[pos_mask],
-        "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
-        "transmission_ballistic": trans_ballistic[pos_mask],
-        "spectral_heat_current_ballistic": spectral_J_ball[pos_mask],
-        "spectral_heat_current": spectral_J_anh[pos_mask],
-        "spectral_heat_current_L": spectral_J_L[pos_mask].copy(),
-        "spectral_heat_current_R": spectral_J_R[pos_mask].copy(),
-        "heat_current_ballistic": J_ball_total,
-        "heat_current": J_anh_total,
-        "thermal_conductance_ballistic": G_ball,
-        "thermal_conductance_anharmonic": G_anh,
-        "heat_flow_conservation": conservation_err,
-        "delta_T": delta_T,
-        "n_scba_iterations": len(convergence_history) + 1,
-        "convergence_history": convergence_history,
-        "self_energy_retarded": Sigma_R_q[:, :, pos_mask],
-        "self_energy_lesser": Sigma_l_q[:, :, pos_mask],
-        "self_energy_greater": Sigma_g_q[:, :, pos_mask],
-    }
-
-    if n_kpts == 1 and verbose:
-        _check_q11_vs_finite(result)
-    return result
+    return transmission(
+        phonon, fc3_hdf5=fc3_hdf5, q_mesh=q_mesh_transverse,
+        retarded=retarded, zero_mode_projection=zero_mode_projection,
+        **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -1721,7 +1323,7 @@ def _check_q11_vs_finite(res_q, rtol=5e-3, atol=1e-8):
     """Warn if q=(1,1) output is internally inconsistent.
 
     This checks the q-path result against itself (ballistic should match
-    the analytic Γ-only result). For a full q-vs-finite check, run both
+    the analytic Gamma-only result). For a full q-vs-finite check, run both
     entry points and call :func:`compare_q11_to_finite`.
     """
     G_ball = res_q["thermal_conductance_ballistic"]
@@ -1733,7 +1335,7 @@ def _check_q11_vs_finite(res_q, rtol=5e-3, atol=1e-8):
 
 
 def compare_q11_to_finite(res_q, res_f, rtol=5e-3, atol=1e-8):
-    """Verify that ``q=(1,1)`` matches the finite (Γ-only) solver.
+    """Verify that ``q=(1,1)`` matches the finite (Gamma-only) solver.
 
     Raises ``AssertionError`` on mismatch.
     """

@@ -1,27 +1,22 @@
-"""Unified dense NEGF/SSE solver for phonon transport.
-
-This is the canonical home for the dense reference solver. The
-production block-sparse / MPI variant lives at
-:mod:`quatrex.phonon.sse_phonon_phonon` and imports the same bubble
-kernel from :mod:`quatrex.phonon.bubble` (re-exported here as
-:func:`bubble_dense`).
+""" Dense NEGF/SSE solver for (anharmonic) phonon transport.
 
 Public API
 ----------
 
-* :func:`transmission_finite` — Γ-only SCBA driver.
-* :func:`transmission_q`       — q-resolved SCBA driver.
-* :func:`scba_loop`            — shared fixed-point loop.
-* :func:`gamma_project_M_blocks` — Γ-only supercell→primitive
+* :func:`transmission`         -- unified SCBA driver (q-mesh + n_slabs).
+* :func:`transmission_finite`  -- wrapper: q_mesh=(1,1) (Gamma-only device).
+* :func:`transmission_q`       -- wrapper: transversely-periodic q-mesh.
+* :func:`scba_loop`            -- shared fixed-point loop.
+* :func:`gamma_project_M_blocks` -- Gamma-only supercell->primitive
   projection of the FC3 vertex.
-* :func:`compare_q11_to_finite` — regression check.
-* :func:`bubble_dense`         — FFT 3-phonon bubble kernel.
-* :func:`build_retarded`       — Σ^R reconstruction (``half|pv|fft``).
+* :func:`compare_q11_to_finite` -- regression check.
+* :func:`bubble_dense`         -- FFT 3-phonon bubble kernel.
+* :func:`build_retarded`       -- Sigma^R reconstruction (``half|pv|fft``).
 * :func:`sancho_rubio`,
   :func:`sancho_rubio_batch`,
-  :func:`compute_obc_batch`    — lead self-energy helpers.
+  :func:`compute_obc_batch`    -- lead self-energy helpers.
 * :func:`build_frequency_grid`,
-  :func:`bose_full_axis`       — frequency-axis utilities.
+  :func:`bose_full_axis`       -- frequency-axis utilities.
 """
 
 from .bubble import bubble_dense
@@ -31,6 +26,7 @@ from .dense import (
     gamma_project_M_blocks,
     load_fc3_raw,
     scba_loop,
+    transmission,
     transmission_finite,
     transmission_q,
 )
@@ -54,8 +50,11 @@ from .leads import (
     solve_green_functions,
 )
 from .retarded import build_retarded, hilbert_transform_axis
-from .se_finite import compute_phph_self_energy_finite
-from .se_q import compute_phph_self_energy_q_dense
+from .se_finite import (
+    compute_phph_self_energy,
+    compute_phph_self_energy_finite_multi_slab,
+)
+from .se_q import compute_phph_self_energy_q_dense_multi_slab
 from .zero_modes import (
     build_dynamical_zero_mode_projector,
     build_translation_projector,
@@ -66,6 +65,7 @@ from .zero_modes import (
 
 __all__ = [
     # Public entry points
+    "transmission",
     "transmission_finite",
     "transmission_q",
     "scba_loop",
@@ -97,9 +97,10 @@ __all__ = [
     "check_broadening_sign",
     "check_full_axis_symmetry",
     "symmetrize_lesser_greater",
-    # Self-energy drivers
-    "compute_phph_self_energy_finite",
-    "compute_phph_self_energy_q_dense",
+    # Self-energy kernel (unified) + back-compat wrappers
+    "compute_phph_self_energy",
+    "compute_phph_self_energy_finite_multi_slab",
+    "compute_phph_self_energy_q_dense_multi_slab",
     # Zero-mode (rigid-translation) handling
     "build_translation_projector",
     "build_dynamical_zero_mode_projector",

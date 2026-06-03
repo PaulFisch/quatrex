@@ -30,7 +30,7 @@ import numpy as np
 from phonon.phonon_inputs.separable import (
     build_supercell_mapping, build_realspace_fc3_matrices)
 from phonon.phonon_inputs.constants import CONVERSION_FC3_THZ  # noqa: F401 (used via builder)
-from phonon.solver.se_q import compute_phph_self_energy_q_dense
+from reference_kernels import compute_phph_self_energy_q_dense
 from phonon.solver.retarded import build_retarded
 from phonon.solver.grids import bose_full_axis
 from phonon.scripts.verify.si_film_kappa import load_bulk_si
