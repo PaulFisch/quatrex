@@ -378,6 +378,7 @@ def _zero_bubble_kernel(nfreq, N_D):
 def _run_scba(dev, se_kernel, **kw):
     from solver.dense import scba_loop
 
+    mixing = kw.pop("mixing", 0.5)
     return scba_loop(
         z2_arr=dev["z2"], freqs_thz=dev["freqs"], dw_thz=dev["dw"],
         omega_rad=dev["freqs"] * THZ_TO_RAD, pos_mask=dev["pos_mask"],
@@ -385,7 +386,7 @@ def _run_scba(dev, se_kernel, **kw):
         H_D_list=[dev["h_d"]], obc_list=[dev["obc"]],
         btd_blocks_list=[(dev["h00"], dev["h01"])],
         n_kpts=1, se_kernel=se_kernel, T_L=dev["t_l"], T_R=dev["t_r"],
-        scba_tol=1e-3, conservation_tol=1e-2, mixing=0.5,
+        scba_tol=1e-3, conservation_tol=1e-2, mixing=mixing,
         anderson_mixing=False, anderson_depth=5, scattering_contacts=False,
         retarded="fft", verbose=False, masses_primitive=dev["toy"].masses, **kw)
 
@@ -446,6 +447,77 @@ def test_static_loop_stiffens_phi_eff():
     assert np.all(ev_eff > ev_bare - 1e-9)
     assert ev_eff.min() > ev_bare.min() + 1e-6
     assert np.trace(sig.real) > 0
+
+
+def _bubble_kernel(dev, n_slabs):
+    """Real toy-cubic bubble se_kernel for the device (for the SCBA loop)."""
+    nfreq = len(dev["freqs"])
+    n_dof = dev["n_dof"]
+    N_D = n_slabs * n_dof
+    phi_dev = {(i, i, i): dev["toy"].phi.astype(complex)
+               for i in range(n_slabs)}
+
+    def se_kernel(gl, gg):
+        sig_l = np.zeros((1, nfreq, N_D, N_D), dtype=complex)
+        sig_g = np.zeros_like(sig_l)
+
+        def gd(dense):
+            return {(k, kp): dense[:, k * n_dof:(k + 1) * n_dof,
+                                   kp * n_dof:(kp + 1) * n_dof]
+                    for k in range(n_slabs) for kp in range(n_slabs)}
+
+        sl_b, sg_b = compute_phph_self_energy_finite_multi_slab(
+            gd(gl[0]), gd(gg[0]), phi_dev, n_slabs, dev["freqs"], dev["dw"],
+            dc_handling="interpolate", n_threads=1)
+        for (i, j), b in sl_b.items():
+            sig_l[0, :, i * n_dof:(i + 1) * n_dof,
+                  j * n_dof:(j + 1) * n_dof] = b
+        for (i, j), b in sg_b.items():
+            sig_g[0, :, i * n_dof:(i + 1) * n_dof,
+                  j * n_dof:(j + 1) * n_dof] = b
+        return sig_l, sig_g
+
+    return se_kernel
+
+
+def test_static_loop_anderson_matches_linear():
+    """The loop+tadpole static self-energy is now carried in the fixed-point
+    vector, so Anderson drives it jointly with the bubble: it must reach the
+    SAME converged Sigma_static as linear mixing, in no more iterations."""
+    from solver.static_se import build_static_self_energy_hook
+
+    n_slabs = 2
+    dev = _diatomic_device(n_slabs=n_slabs)
+    se = _bubble_kernel(dev, n_slabs)
+    N_D = dev["N_D"]
+    fc4 = np.zeros((N_D,) * 4)
+    idx = np.arange(N_D)
+    fc4[idx, idx, idx, idx] = 20.0
+    hook_kw = dict(dw_thz=dev["dw"], n_dof=dev["n_dof"], n_slabs=n_slabs,
+                   fc4_dev_mw=fc4, use_loop=True)
+
+    # No staging + low mixing: Sigma_static must converge in the main loop,
+    # where linear mixing is slow -> a fair linear-vs-Anderson comparison.
+    res_lin = _run_scba(dev, se, max_scba_iter=300, mixing=0.15,
+                        static_se_hook=build_static_self_energy_hook(**hook_kw),
+                        stage_loop_first=False, solver="linear")
+    res_and = _run_scba(dev, se, max_scba_iter=300, mixing=0.15,
+                        static_se_hook=build_static_self_energy_hook(**hook_kw),
+                        stage_loop_first=False, solver="anderson")
+
+    n_lin = len(res_lin["convergence_history"])
+    n_and = len(res_and["convergence_history"])
+    print(f"\n  linear: {n_lin} iters (resid {res_lin['scba_residual']:.2e}); "
+          f"anderson: {n_and} iters (resid {res_and['scba_residual']:.2e})")
+    assert res_lin["converged"] and res_and["converged"]
+    # same fixed point (Sigma_static) regardless of accelerator
+    np.testing.assert_allclose(res_and["Sigma_static"][0],
+                               res_lin["Sigma_static"][0], atol=1e-3, rtol=1e-3)
+    # Anderson (with the loosened static step cap) is much faster than linear:
+    # it carries Sigma_static in the fixed-point vector and accelerates the
+    # slow static mode (toy: ~35 linear -> a few Anderson).
+    assert n_and < n_lin
+    assert n_and <= max(5, n_lin // 3)
 
 
 def test_spectral_bands_from_scba_static_se():

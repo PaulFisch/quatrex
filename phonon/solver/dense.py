@@ -371,36 +371,48 @@ class _AndersonAccelerator:
         return x_mixed, fnorm
 
 
-def _run_jfnk(x0_l, x0_g, scba_step, scba_tol, max_iter, verbose):
+def _run_jfnk(x0_l, x0_g, x0_s, scba_step, scba_tol, max_iter, verbose):
     """Jacobian-free Newton-Krylov solve of the SCBA fixed point.
 
-    Wraps ``residual(x) = scba_step(x) - x`` and hands it to
-    :func:`scipy.optimize.newton_krylov`.
+    Wraps ``residual(x) = scba_step(x) - x`` (with ``x`` the augmented vector
+    ``[Sigma^<, Sigma^>, Sigma_static]``; ``x0_s=None`` reduces it to the bare
+    bubble pair) and hands it to :func:`scipy.optimize.newton_krylov`.
 
-    Returns ``(sig_l, sig_g, residual)``; ``residual`` is ``None`` when
-    SciPy is unavailable.
+    Returns ``(sig_l, sig_g, sig_static, residual)``; ``residual`` is ``None``
+    when SciPy is unavailable.
     """
     try:
         from scipy.optimize import newton_krylov
     except ImportError:
         if verbose:
             print("    JFNK requested but SciPy is unavailable; skipping")
-        return x0_l, x0_g, None
+        return x0_l, x0_g, x0_s, None
 
     shape = x0_l.shape
     sz = x0_l.size
+    static_on = x0_s is not None
+    s_shape = x0_s.shape if static_on else None
 
     def _unpack(xc):
-        return xc[:sz].reshape(shape), xc[sz:].reshape(shape)
+        sl = xc[:sz].reshape(shape)
+        sg = xc[sz:2 * sz].reshape(shape)
+        ss = xc[2 * sz:].reshape(s_shape) if static_on else None
+        return sl, sg, ss
+
+    def _pack(sl, sg, ss):
+        parts = [sl.ravel(), sg.ravel()]
+        if static_on:
+            parts.append(ss.ravel())
+        return np.concatenate(parts)
 
     def residual_real(xr):
         xc = np.ascontiguousarray(xr).view(np.complex128)
-        sl, sg = _unpack(xc)
-        sl_n, sg_n, _ = scba_step(sl, sg)
-        res = np.concatenate([sl_n.ravel(), sg_n.ravel()]) - xc
+        sl, sg, ss = _unpack(xc)
+        sl_n, sg_n, ss_n, _ = scba_step(sl, sg, ss)
+        res = _pack(sl_n, sg_n, ss_n) - xc
         return np.ascontiguousarray(res).view(np.float64)
 
-    x0c = np.concatenate([x0_l.ravel(), x0_g.ravel()])
+    x0c = _pack(x0_l, x0_g, x0_s)
     x0r = np.ascontiguousarray(x0c).view(np.float64)
     f_tol = max(scba_tol * (float(np.linalg.norm(x0c)) + 1e-300), 1e-300)
     newton_iter = min(int(max_iter), 40)
@@ -418,12 +430,12 @@ def _run_jfnk(x0_l, x0_g, scba_step, scba_tol, max_iter, verbose):
             print("    JFNK: newton_krylov did not meet f_tol; "
                   "using best iterate")
 
-    sl, sg = _unpack(sol_c)
+    sl, sg, ss = _unpack(sol_c)
     fr = residual_real(np.ascontiguousarray(
-        np.concatenate([sl.ravel(), sg.ravel()])).view(np.float64))
+        _pack(sl, sg, ss)).view(np.float64))
     fc = np.ascontiguousarray(fr).view(np.complex128)
     resid = float(np.linalg.norm(fc) / (np.linalg.norm(sol_c) + 1e-300))
-    return sl, sg, resid
+    return sl, sg, ss, resid
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +453,7 @@ def scba_loop(
     T_L, T_R,
     max_scba_iter, scba_tol, conservation_tol,
     mixing, anderson_mixing, anderson_depth,
+    anderson_step_cap=None,
     scattering_contacts,
     retarded,
     verbose,
@@ -510,10 +523,20 @@ def scba_loop(
         set, the dynamical matrix used in the Dyson solve becomes
         ``Phi_eff = H_D + Sigma_static`` (re-Hermitized, ASR-projected), and
         ``Sigma_static`` is updated from ``G^<`` each iteration -- the single
-        SCP + bubble self-consistency loop. Supported with ``solver='linear'``
-        only (the bubble fixed-point accelerators do not see the static state).
+        SCP + bubble self-consistency loop. ``Sigma_static`` is carried inside
+        the fixed-point vector ``[Sigma^<, Sigma^>, Sigma_static]``, so it is
+        accelerated jointly with the bubble by whichever ``solver`` is selected
+        (``linear``, ``anderson``, ``jfnk``, ``anderson+jfnk``).
     static_mixing : float, optional
-        Under-relaxation for the ``Sigma_static`` update (defaults to ``mixing``).
+        Under-relaxation for the loop-only *staging* pre-loop (defaults to
+        ``mixing``); the main loop mixes the whole augmented vector.
+    anderson_step_cap : float, optional
+        Cap on the Anderson extrapolation length (multiples of the linear
+        step). ``None`` -> ``8.0`` (the value that converges the slow,
+        large-magnitude loop/tadpole mode in a few iterations; the
+        easily-converged bubble is insensitive to it in the available tests).
+        Pass a tighter value (e.g. the historical ``2.0``) for a strongly
+        coupled bubble near the SCBA breakdown that needs a conservative step.
     stage_loop_first : bool
         Converge the loop/tadpole-only sub-problem (bubble off) before enabling
         the bubble, so the bubble is built on a stable ``Phi_eff`` (brief §3.5).
@@ -563,21 +586,36 @@ def scba_loop(
                 masses_primitive, n_slabs, n_cart=n_dof // n_atoms_prim)
 
     # Static (loop + tadpole) self-energy: an FC2-like renormalisation
-    # Phi_eff = H_D + Sigma_static, recomputed from G^< each iteration.
-    Sigma_static = None
+    # Phi_eff = H_D + Sigma_static, carried as part of the fixed-point vector
+    # x = [Sigma^<, Sigma^>, Sigma_static] so the bubble accelerators
+    # (safeguarded Anderson / JFNK) drive it JOINTLY with the bubble -- the
+    # conserving SCP + bubble scheme -- instead of slow linear mixing. The map
+    # stays stationary because Sigma_static is recomputed from the current
+    # iterate's G inside the step (not lagged side-state).
+    static_on = static_se_hook is not None
     static_resid = 0.0
-    if static_se_hook is not None:
-        if solver != "linear":
-            raise NotImplementedError(
-                "static_se_hook (loop/tadpole) is supported with "
-                "solver='linear' only; the bubble accelerators do not carry "
-                f"the static self-energy state (got solver={solver!r}).")
-        Sigma_static = np.zeros((n_kpts, N_D, N_D), dtype=complex)
-        if loop_propagator not in ("loop_only", "full_G"):
-            raise ValueError(
-                "loop_propagator must be 'loop_only' or 'full_G', got "
-                f"{loop_propagator!r}")
+    Sigma_static = (np.zeros((n_kpts, N_D, N_D), dtype=complex)
+                    if static_on else None)
+    if static_on and loop_propagator not in ("loop_only", "full_G"):
+        raise ValueError(
+            "loop_propagator must be 'loop_only' or 'full_G', got "
+            f"{loop_propagator!r}")
     static_mix = mixing if static_mixing is None else static_mixing
+    _sz_lg = n_kpts * nfreq * N_D * N_D            # size of one Sigma^{<,>} half
+    _sz_s = n_kpts * N_D * N_D if static_on else 0
+
+    def _pack(sl, sg, ss):
+        parts = [sl.ravel(), sg.ravel()]
+        if static_on:
+            parts.append(ss.ravel())
+        return np.concatenate(parts)
+
+    def _unpack(x):
+        sl = x[:_sz_lg].reshape(shape)
+        sg = x[_sz_lg:2 * _sz_lg].reshape(shape)
+        ss = (x[2 * _sz_lg:].reshape((n_kpts, N_D, N_D))
+              if static_on else None)
+        return sl, sg, ss
 
     def _apply_static_asr(sig):
         """Hermitize + ASR-project the static self-energy (per q)."""
@@ -591,12 +629,13 @@ def scba_loop(
     G_great_dev_q = np.zeros_like(G_less_dev_q)
     G_ret_dev_q = np.zeros_like(G_less_dev_q)
     _G_less_loop_only = (np.zeros(shape, dtype=complex)
-                         if static_se_hook is not None else None)
+                         if static_on else None)
     _spec_L = np.zeros(nfreq)
     _spec_R = np.zeros(nfreq)
 
-    def _loop_only_glesser():
-        """Device ``G^<`` with the bubble off (only the static Phi_eff + leads).
+    def _loop_only_glesser(sig_static):
+        """Device ``G^<`` with the bubble off (only ``Phi_eff = H_D +
+        sig_static`` + leads).
 
         Feeds the loop/tadpole ``<uu>`` for the standard SCP-then-bubble scheme
         (``loop_propagator='loop_only'``), excluding the bubble broadening.
@@ -604,21 +643,26 @@ def scba_loop(
         zero_se = np.zeros((nfreq, N_D, N_D), dtype=complex)
         for iq in range(n_kpts):
             _, g_less, _ = solve_green_batch(
-                z2_arr, H_D_list[iq] + Sigma_static[iq], obc_list[iq],
+                z2_arr, H_D_list[iq] + sig_static[iq], obc_list[iq],
                 zero_se, zero_se, zero_se)
             _G_less_loop_only[iq] = g_less
         return _G_less_loop_only
 
-    def _g_for_static():
+    def _g_for_static(sig_static):
         """The propagator feeding the static self-energy's ``<uu>``."""
         if loop_propagator == "full_G":
             return G_less_dev_q
-        return _loop_only_glesser()
+        return _loop_only_glesser(sig_static)
 
-    def _scba_step(sig_l, sig_g):
-        """One SCBA pass: input ``Sigma^{<,>}`` -> bubble of the
-        resulting ``G``. Pure map; ``sig_l``/``sig_g`` are not mutated.
-        Returns ``(sig_l_new, sig_g_new, info)``.
+    def _scba_step(sig_l, sig_g, sig_static=None):
+        """One SCBA pass: input ``[Sigma^{<,>}, Sigma_static]`` -> the
+        bubble + static self-energy of the resulting ``G``. Pure map; the
+        inputs are not mutated. ``Phi_eff = H_D + sig_static`` enters the
+        Dyson solve, and ``sig_static_new`` is recomputed from the current
+        ``G`` (Hermitized + ASR-projected) so the whole map is a stationary
+        fixed point the accelerators can drive. Returns
+        ``(sig_l_new, sig_g_new, sig_static_new, info)`` (``sig_static_new``
+        is ``None`` when no static hook is set).
         """
         Sig_R = build_retarded(sig_l, sig_g, freqs_thz, method=retarded)
         if causality_projection:
@@ -637,8 +681,8 @@ def scba_loop(
         _spec_R[:] = 0.0
 
         for iq in range(n_kpts):
-            H_eff_iq = (H_D_list[iq] if Sigma_static is None
-                        else H_D_list[iq] + Sigma_static[iq])
+            H_eff_iq = (H_D_list[iq] if sig_static is None
+                        else H_D_list[iq] + sig_static[iq])
             G_ret, G_less, G_great = solve_green_batch(
                 z2_arr, H_eff_iq, obc_list[iq],
                 Sig_R[iq], sig_l[iq], sig_g[iq])
@@ -674,6 +718,14 @@ def scba_loop(
             sig_l_new = project_self_energy(sig_l_new, Q_trans)
             sig_g_new = project_self_energy(sig_g_new, Q_trans)
 
+        sig_static_new = None
+        if static_on:
+            # Static loop + tadpole self-energy from the current G (Hermitized,
+            # ASR-projected). loop_only feeds it the bubble-free G.
+            sig_static_new = _apply_static_asr(
+                static_se_hook(_g_for_static(sig_static), sig_static,
+                               H_D_list))
+
         info = {
             "Sigma_R": Sig_R,
             "spectral_J_L": spec_L,
@@ -687,7 +739,7 @@ def scba_loop(
             info["causality"] = causality_diagnostic(Sig_R, freqs_thz)
             info["stability"] = dynamical_stability_diagnostic(
                 H_D_list[0], Sig_R, freqs_thz)
-        return sig_l_new, sig_g_new, info
+        return sig_l_new, sig_g_new, sig_static_new, info
 
     def _update_scattering_obc(Sig_R):
         """Refresh the lead OBC self-energies from the current Sigma^R."""
@@ -725,10 +777,10 @@ def scba_loop(
 
     # --- loop/tadpole-only staging: converge Phi_eff with the bubble off so
     #     the bubble is later built on a stable (stiffened) reference. -------
-    if static_se_hook is not None and stage_loop_first:
+    if static_on and stage_loop_first:
         for stage_iter in range(stage_max_iter):
-            sig_new = _apply_static_asr(
-                static_se_hook(_loop_only_glesser(), Sigma_static, H_D_list))
+            sig_new = _apply_static_asr(static_se_hook(
+                _loop_only_glesser(Sigma_static), Sigma_static, H_D_list))
             num = float(np.linalg.norm(sig_new - Sigma_static))
             den = float(np.linalg.norm(Sigma_static)) + 1e-300
             Sigma_static[:] = ((1 - static_mix) * Sigma_static
@@ -742,8 +794,9 @@ def scba_loop(
                 break
 
     # --- iteration 0: lowest-order Born (Sigma = 0 -> bare G -> bubble) -
-    Sigma_l, Sigma_g, info = _scba_step(
-        np.zeros(shape, dtype=complex), np.zeros(shape, dtype=complex))
+    Sigma_l, Sigma_g, Sigma_static, info = _scba_step(
+        np.zeros(shape, dtype=complex), np.zeros(shape, dtype=complex),
+        Sigma_static)
     if verbose:
         gl_max = np.max(np.abs(G_less_dev_q))
         sig0 = np.max(np.abs(Sigma_l)) + np.max(np.abs(Sigma_g))
@@ -757,12 +810,30 @@ def scba_loop(
     accel = None
     if use_anderson and anderson_safeguard:
         weights = _block_weight_vector(Sigma_l, Sigma_g, n_slabs, n_dof)
-        accel = _AndersonAccelerator(anderson_depth, mixing, weights=weights)
+        if static_on:
+            # Put Sigma_static on a comparable footing in the least-squares;
+            # floor relative to the bubble magnitude so a (near-)zero static
+            # block does not get a blown-up weight.
+            lg_scale = float(np.linalg.norm(Sigma_l) + np.linalg.norm(Sigma_g))
+            s_scale = float(np.linalg.norm(Sigma_static))
+            w_s = 1.0 / np.sqrt(s_scale + 1e-6 * lg_scale + 1e-300)
+            weights = np.concatenate([weights, np.full(_sz_s, w_s)])
+        # Anderson step-length cap (multiples of the linear step). The slow,
+        # large-magnitude loop/tadpole mode needs steps many times the linear
+        # step (~1/(1-rate)); an 8x cap converges it in a few iterations
+        # (toy: 35 -> 3 iters) and leaves the (easily-converged) bubble
+        # unaffected in the tests/sweeps available. Default 8x for both paths;
+        # pass a tighter cap (e.g. the historical 2x) for a strongly-coupled
+        # bubble near the SCBA breakdown if it needs a more conservative step.
+        step_cap = 8.0 if anderson_step_cap is None else anderson_step_cap
+        accel = _AndersonAccelerator(anderson_depth, mixing, weights=weights,
+                                     step_cap=step_cap)
     _ax_hist, _af_hist, _aprev = [], [], float("inf")
 
     best_resid = float("inf")
     best_l = Sigma_l.copy()
     best_g = Sigma_g.copy()
+    best_s = Sigma_static.copy() if static_on else None
     converged = False
     diagnostics_history = []
     if track_diagnostics:
@@ -786,24 +857,18 @@ def scba_loop(
             if scattering_contacts:
                 _update_scattering_obc(info["Sigma_R"])
 
-            Sigma_l_out, Sigma_g_out, info = _scba_step(Sigma_l, Sigma_g)
+            Sigma_l_out, Sigma_g_out, Sigma_s_out, info = _scba_step(
+                Sigma_l, Sigma_g, Sigma_static)
 
-            # Update the static (loop + tadpole) self-energy from the G^< just
-            # computed, with under-relaxation; folded into the stop test below.
-            if static_se_hook is not None:
-                sig_new = _apply_static_asr(
-                    static_se_hook(_g_for_static(), Sigma_static, H_D_list))
-                _num = float(np.linalg.norm(sig_new - Sigma_static))
-                _den = float(np.linalg.norm(Sigma_static)) + 1e-300
-                static_resid = _num / _den
-                Sigma_static[:] = ((1 - static_mix) * Sigma_static
-                                   + static_mix * sig_new)
-
-            x_in = np.concatenate([Sigma_l.ravel(), Sigma_g.ravel()])
-            x_out = np.concatenate([Sigma_l_out.ravel(), Sigma_g_out.ravel()])
+            x_in = _pack(Sigma_l, Sigma_g, Sigma_static)
+            x_out = _pack(Sigma_l_out, Sigma_g_out, Sigma_s_out)
             f = x_out - x_in
             resid = float(np.linalg.norm(f)
                           / (np.linalg.norm(x_in) + 1e-300))
+            if static_on:
+                static_resid = (
+                    float(np.linalg.norm(Sigma_s_out - Sigma_static))
+                    / (float(np.linalg.norm(Sigma_static)) + 1e-300))
             convergence_history.append(resid)
             if track_diagnostics:
                 diagnostics_history.append({
@@ -842,9 +907,7 @@ def scba_loop(
                     x_in, x_out, _ax_hist, _af_hist, _aprev,
                     depth=anderson_depth, beta=mixing)
 
-            sz = Sigma_l.size
-            Sigma_l = x_mixed[:sz].reshape(shape)
-            Sigma_g = x_mixed[sz:].reshape(shape)
+            Sigma_l, Sigma_g, Sigma_static = _unpack(x_mixed)
 
             J_total = info["J_total"]
             conservation_err = info["conservation_err"]
@@ -856,6 +919,8 @@ def scba_loop(
                 best_resid = resid
                 best_l = Sigma_l.copy()
                 best_g = Sigma_g.copy()
+                if static_on:
+                    best_s = Sigma_static.copy()
 
             if verbose:
                 viol, vmax = _broadening_report(info["Sigma_R"])
@@ -867,8 +932,7 @@ def scba_loop(
                     msg += f"  [Gamma sign viol: {viol} pts, max {vmax:.2e}]"
                 print(msg)
 
-            numerically_converged = resid < scba_tol and (
-                static_se_hook is None or static_resid < scba_tol)
+            numerically_converged = resid < scba_tol
             conserving = conservation_err < conservation_tol
             if numerically_converged and (
                     conserving or not gate_on_conservation):
@@ -905,6 +969,7 @@ def scba_loop(
     else:
         # Pure JFNK: seed from the lowest-order Born iterate.
         best_l, best_g = Sigma_l.copy(), Sigma_g.copy()
+        best_s = Sigma_static.copy() if static_on else None
 
     # --- JFNK (pure, or fallback when Anderson did not converge) --------
     if solver in ("jfnk", "anderson+jfnk") and not converged:
@@ -913,20 +978,21 @@ def scba_loop(
                    else f"Anderson stalled (best resid {best_resid:.2e}); "
                         f"JFNK fallback")
             print(f"    {why}")
-        jl, jg, jresid = _run_jfnk(
-            best_l, best_g, _scba_step, scba_tol, max_scba_iter, verbose)
+        jl, jg, js, jresid = _run_jfnk(
+            best_l, best_g, best_s, _scba_step, scba_tol, max_scba_iter,
+            verbose)
         if jresid is not None:
             convergence_history.append(jresid)
             if jresid <= best_resid:
-                best_l, best_g, best_resid = jl, jg, jresid
+                best_l, best_g, best_s, best_resid = jl, jg, js, jresid
             converged = best_resid < scba_tol
             if verbose:
                 print(f"    JFNK final resid = {jresid:.4e} "
                       f"({'converged' if converged else 'not converged'})")
 
     # --- consistent final evaluation for the returned self-energy ------
-    Sigma_l, Sigma_g = best_l, best_g
-    _, _, info = _scba_step(Sigma_l, Sigma_g)
+    Sigma_l, Sigma_g, Sigma_static = best_l, best_g, best_s
+    _, _, _, info = _scba_step(Sigma_l, Sigma_g, Sigma_static)
     Sigma_R = info["Sigma_R"]
 
     return {
@@ -1191,6 +1257,7 @@ def transmission(
     mixing: float = 0.3,
     anderson_mixing: bool = False,
     anderson_depth: int = 8,
+    anderson_step_cap: float | None = None,
     verbose: bool = True,
     M_stacked_override: np.ndarray = None,
     retarded: str = "fft",
@@ -1383,10 +1450,16 @@ def transmission(
             fc3_dev_mw=fc3_dev_mw, fc4_dev_mw=fc4_dev_mw,
             use_loop=loop, use_tadpole=tadpole,
             optical_projector=optical_projector)
+        # The static loop/tadpole self-energy is carried in the fixed-point
+        # vector; linear mixing converges it slowly, so default to the
+        # safeguarded Anderson accelerator (with the loosened static step cap)
+        # unless the caller chose a solver explicitly.
+        if solver is None and not anderson_mixing:
+            solver = "anderson"
         if verbose:
             print(f"  Static self-energy: loop={loop}, tadpole={tadpole}, "
                   f"propagator={loop_propagator}, "
-                  f"stage_loop_first={stage_loop_first}")
+                  f"stage_loop_first={stage_loop_first}, solver={solver}")
 
     scba_result = scba_loop(
         z2_arr=z2_arr, freqs_thz=freqs_thz, dw_thz=dw_thz,
@@ -1397,7 +1470,7 @@ def transmission(
         max_scba_iter=max_scba_iter, scba_tol=scba_tol,
         conservation_tol=conservation_tol,
         mixing=mixing, anderson_mixing=anderson_mixing,
-        anderson_depth=anderson_depth,
+        anderson_depth=anderson_depth, anderson_step_cap=anderson_step_cap,
         scattering_contacts=scattering_contacts, retarded=retarded,
         verbose=verbose, solver=solver, anderson_safeguard=anderson_safeguard,
         zero_mode_projection=zero_mode_projection,
