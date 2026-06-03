@@ -611,9 +611,109 @@ freedom per cell -- and a correspondingly higher ballistic conductance (an order
 the silicon wires in Fig.~\ref{fig:length_scaling}), the expected signature of the stiff, fast
 $\mathrm{sp}^2$ network. Its anharmonic SCBA is also the best-behaved of any structure here,
 converging with $\sim\!3\times10^{-4}$ heat-flow non-conservation and a clean resistive reduction
-even at a single cell ($G_\mathrm{anh}/G_\mathrm{ball}=0.84$) -- the periodic tube's exact sum rule
-and stiffer spectrum avoiding the infrared sensitivity that troubles the soft-twist \texttt{d5a}
-wire.
+even at a single cell ($G_\mathrm{anh}/G_\mathrm{ball}=0.84$ at the coarse broadening of that first
+scan; the converged value is $0.81$, Sec.~\ref{sec:diag_cnt_converged}) -- the periodic tube's exact
+sum rule and stiffer spectrum avoiding the infrared sensitivity that troubles the soft-twist
+\texttt{d5a} wire.
+
+\subsection{Converging the carbon-nanotube current: length, temperature, and the approximation
+hierarchy}
+\label{sec:diag_cnt_converged}
+
+The first CNT scan above had excellent heat-flow conservation but an \emph{under-converged} self-energy
+(the SCBA was stopped at a $15$-iteration cap with the residual still falling). We therefore re-ran the
+self-consistency to a tight tolerance to confirm the fixed point is genuine rather than an artefact of
+early stopping. At one cell the residual reaches $\|\Delta\Sigma\|/\|\Sigma\|=\mathbf{9.6\times10^{-10}}$
+after $188$ safeguarded-Anderson iterations, and the converged $G_\mathrm{anh}$ is identical to the
+loose ($1.5\times10^{-3}$) result -- the carbon-nanotube SCBA has a single, well-conditioned fixed
+point. Re-confirming the force constants, the $(3,3)$ tube is in fact the cleanest of every structure
+studied here: FC2 acoustic-sum-rule and Hermiticity residuals at machine precision
+($\sim\!10^{-16}$), FC3 permutation symmetry exactly zero, FC3 ASR-leg residual $\sim\!10^{-16}$, a
+positive-definite dynamical matrix, and no imaginary modes -- the dividend of the periodic tube's exact
+translational symmetry.
+
+The converged length ladder (Fig.~\ref{fig:cnt_transport}, left) is a clean ballistic-to-diffusive
+reduction,
+\[
+  G_\mathrm{anh}/G_\mathrm{ball} = 0.810,\ 0.702,\ 0.694 \quad (L=1,2,3\ \text{cells}),
+\]
+each point converged to $\le\!10^{-5}$ with $\lesssim\!3\times10^{-4}$ heat-flow non-conservation; the
+anharmonic resistance accumulates from one to two cells and then nearly saturates. (The three-cell
+point -- $108$ degrees of freedom, $15$ dense self-energy blocks -- costs $6.8$\,h: the dense reference
+is at its practical ceiling here, as anticipated by the solver-scaling analysis of
+Sec.~\ref{sec:diag_length}.)
+
+\paragraph{Temperature dependence and channel freezing.} Sweeping the temperature at one cell on a
+fine frequency grid (needed because at low $T$ only the low-frequency acoustic channels are thermally
+populated) exposes the expected physics directly (Fig.~\ref{fig:cnt_transport}, centre and right). The
+anharmonic ratio rises \emph{monotonically toward unity} as the temperature falls,
+\[
+  G_\mathrm{anh}/G_\mathrm{ball} = 0.709,\,0.737,\,0.762,\,0.805,\,0.880,\,0.919
+  \quad (T = 300,200,150,100,50,30\,\mathrm{K}),
+\]
+while the conductance itself freezes out ($G_\mathrm{ball}$ drops from $7.7\times10^{8}$ to
+$5.5\times10^{7}\,\mathrm{W\,m^{-2}K^{-1}}$). With fewer phonons populated the three-phonon bubble
+weakens, the scattering depopulates, and transport reverts toward the ballistic limit -- and the SCBA
+correspondingly converges in fewer iterations. The conductance is monotone in $T$ at a single cell (no
+backscattering-driven current peak; that is a longer-device effect).
+
+\paragraph{Approximation hierarchy.} Sweeping the three self-energy locality cutoffs at two cells
+(diagonal-only vs.\ full for each of the self-energy block range, the FC3 vertex range, and the
+Green's-function range; Fig.~\ref{fig:cnt_cutoff}) shows the carbon nanotube to be \emph{robust} to all
+of them: the converged $G_\mathrm{anh}$ spans only $\pm10\%$ across all eight corners, and in
+particular the diagonal-Green's-function approximation -- the one that is catastrophic for the silicon
+thin film (Sec.~\ref{sec:res_approx}) -- is here only $\sim\!2\%$ below the full result. The
+exact periodic acoustic sum rule is again the reason. For the practical block-tridiagonal solver this
+means that for clean periodic structures the default banded approximations are safe, in contrast to the
+open or soft silicon wires.
+
+\paragraph{A second tube: the (8,0) zigzag of the electron-transport example.} The electron NEGF$+$GW
+example shipped with the code (\texttt{examples/w90/carbon-nanotube}) transports through an $(8,0)$
+zigzag tube ($32$ atoms per cell, $\sim\!6.3$\,\AA\ diameter, semiconducting) but represents the phonons
+only phenomenologically (a single $50$\,meV Einstein ``pseudo-scattering'' mode, no force constants). We
+built the genuine phonon counterpart: a fresh VASP$+$hiPhive FC3 for the same tube
+(\texttt{configs/cnt/cnt80\_vasp.yaml}, a $[1,1,3]$/$96$-atom supercell, $40$ rattled structures). The
+fit is excellent (test $\mathrm{RMSE}=0.151\,\mathrm{eV/\AA}$, about half the $(3,3)$ value thanks to
+the larger cell), the dispersion clean (no imaginary modes, a soft $0.0014\,\mathrm{THz}$ twist as
+befits the larger diameter), and the force-constant quality identical to the $(3,3)$ at machine
+precision. The anharmonic transport runs and converges: at one cell $G_\mathrm{anh}/G_\mathrm{ball} =
+\mathbf{0.775}$ (Fig.~\ref{fig:cnt_transport}, left), slightly below the $(3,3)$'s $0.810$ -- the larger
+semiconducting tube has more channels and more three-phonon phase space, a stronger reduction at equal
+length. The multi-cell ladder for this tube ($192$ degrees of freedom at two cells) exceeds the dense
+reference solver's reach -- a single bubble evaluation grows to hours -- and is left to the
+block-tridiagonal/distributed path, consistent with the scaling analysis.
+
+\paragraph{Does low temperature rescue the soft wire?} Running the same low-temperature sweep on the
+soft-twist \texttt{d5a} nanowire -- which does \emph{not} converge at $300$\,K -- answers the natural
+question in the affirmative: at $30$--$150$\,K the \texttt{d5a} SCBA does reach the tight tolerance
+(the weaker, depopulated bubble brings the fixed point within reach). Its anharmonic ratio, however,
+stays roughly flat at $0.82$--$0.86$ with a stubborn $1$--$2\%$ heat-flow non-conservation
+(Fig.~\ref{fig:cnt_transport}, right, green) -- the soft-mode causality defect is a separate error that
+persists independently of whether the iteration converges, in clear contrast to the carbon nanotube's
+clean monotone trend at $\sim\!10^{-4}$ conservation.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.99\linewidth]{transport_sweeps/cnt_transport.pdf}
+  \caption{Converged carbon-nanotube anharmonic transport. \textbf{Left:} the $(3,3)$ length ladder
+  $G_\mathrm{anh}/G_\mathrm{ball}$ (resistive, saturating) with the $(8,0)$ single-cell point.
+  \textbf{Centre:} $(3,3)$ ballistic and anharmonic conductance vs.\ temperature (both freeze out as
+  $T\to0$). \textbf{Right:} the anharmonic ratio vs.\ temperature -- the $(3,3)$ rises monotonically
+  toward the ballistic limit as the scattering channels depopulate (channel freezing), while the
+  soft-mode \texttt{d5a} wire stays flat (its conservation defect dominates).}
+  \label{fig:cnt_transport}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.72\linewidth]{transport_sweeps/cnt_cutoff.pdf}
+  \caption{Self-energy approximation hierarchy for the $(3,3)$ tube at two cells: converged
+  $G_\mathrm{anh}$ for diagonal-vs-full truncation of the self-energy block range ($\Sigma$), the FC3
+  vertex range (v), and the Green's-function range (G). The whole spread is $\pm10\%$ about the full
+  reference (dashed); the diagonal-Green's-function cases (red) are only $\sim\!2\%$ low -- the tube is
+  robust to truncations that are catastrophic for the silicon thin film.}
+  \label{fig:cnt_cutoff}
+\end{figure}
 
 \subsection{Force constants cross-checked: DFPT vs.\ finite displacement}
 \label{sec:diag_fc_methods}

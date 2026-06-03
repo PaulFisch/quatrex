@@ -692,3 +692,89 @@ thin-Si transport input. Config `configs/si_primitive/hiphive_big.yaml`; reaps `
   worth a look: 50-62% reduction at 1-3 nm vs Si's long bulk MFP (mid-freq modes with gamma~0.03 THz
   have MFP~13 nm, so DO scatter in 3 nm; the long-MFP acoustic modes that dominate bulk kappa do not).
   Figure `document/fig/transport_sweeps/si_film_bigfc3.pdf`.
+
+### F30 — CNT(3,3) converged deep-dive: length ladder, temperature/low-T channel-freezing, cutoff hierarchy
+Pivoted to carbon nanotubes (user request, 2026-06-02). The earlier cnt33 run (F20) had excellent
+heat-flow conservation but an UNDER-converged current (15-iter cap, residual stuck ~8e-3). Re-ran with
+tight tolerances + many iters; the current converges cleanly and the loose answer was NOT a wrong point.
+- **FC re-validation** (`finite_analysis fc_quality,physical`, `scripts/out/cnt33_fcq`): the (3,3) FC is
+  the **cleanest of any structure** — FC2 ASR rel 1.5e-16, FC3 perm-sym exactly 0, FC3 ASR-legs 1.1e-16,
+  FC2 PSD 0 negative eigenvalues, 0 imaginary modes (3 acoustic + twist 0.0265 THz). The periodic tube's
+  exact ASR (vs open SiNW) is why it is so well conditioned.
+- **Length sweep, tight tol** (`scripts/out/cnt33_converge`, eta_factor 0.7 -> eta_w 0.206 THz, anderson):
+  L=1 converged to resid **9.6e-10** (188 iters), L=2 to **9.9e-6** (84 it), L=3 to **9.7e-6** (95 it).
+  L=1 at 1e-9 gives the SAME G_anh as the loose 1.5e-3 run -> the fixed point is genuine/unique.
+  | L | G_ball | G_anh | G_anh/G_ball | conserv |
+  |---|---|---|---|---|
+  | 1 | 7.16e8 | 5.80e8 | **0.810** | 3.0e-5 |
+  | 2 | 6.38e8 | 4.48e8 | **0.702** | 2.3e-4 |
+  | 3 | 5.73e8 | 3.98e8 | **0.694** | 3.0e-4 |
+  Clean resistive ladder (ballistic->diffusive), reduction grows L1->L2 then ~saturates by L3. NB L=3
+  (108 DOF, 15 dense blocks) took 6.8 h -> dense multi-slab is expensive (cf. F19: multi-cell is the
+  RGF/distributed regime).
+- **Temperature / low-T sweep** at L=1 on a FINE grid (d_omega 0.10, eta_w 0.050 THz, needed because at
+  low T only low-freq acoustic channels are populated) (`scripts/out/cnt33_tempsweep`):
+  | T (K) | G_ball | G_anh | G_anh/G_ball | iters |
+  |---|---|---|---|---|
+  | 30 | 5.49e7 | 5.04e7 | **0.919** | 40 |
+  | 50 | 9.38e7 | 8.25e7 | 0.880 | 36 |
+  | 100 | 2.14e8 | 1.72e8 | 0.805 | 46 |
+  | 150 | 3.60e8 | 2.74e8 | 0.762 | 44 |
+  | 200 | 5.06e8 | 3.73e8 | 0.737 | 46 |
+  | 300 | 7.73e8 | 5.48e8 | **0.709** | 46 |
+  **Channel-freezing confirmed:** G_anh/G_ball -> 1 monotonically as T->0 (0.709->0.919): fewer phonons
+  populated -> weaker 3-phonon bubble -> transport reverts toward ballistic. G_ball itself freezes out
+  (7.7e8->5.5e7). Convergence is marginally easier at low T (36-40 vs 44-46 it). G(T) monotone at L=1
+  (no Luisier ~200 K current peak -- expected only for longer backscattering-dominated wires).
+- **Cutoff hierarchy** at n_slabs=2 (`scripts/out/cnt33_cutoff`, diagonal "0" vs full "None" for each of
+  sigma/vertex/G; G_ball const 6.38e8; full ref G_anh~4.48e8):
+  G_anh spans only **~4.09-4.96e8 (+-10%)** across all 8 corners -- the CNT is ROBUST to all truncations,
+  NOT the catastrophe Si shows for G-range (F25). In particular **diagonal-G alone is only ~2% off**
+  (sInf_vInf_g0 4.39 vs full 4.48). The exact periodic ASR is again why. Useful for the quatrex-solver
+  approximation decisions: for clean periodic structures the production diagonal-G default is far less
+  harmful than for the open/soft SiNW or the Si film.
+
+### F31 — (8,0) zigzag CNT: new VASP+hiPhive FC3 + anharmonic phph = the phonon analog of the GW electron example
+The electron-GW transport example (`examples/w90/carbon-nanotube`) runs electron NEGF + GW screening on an
+**(8,0) zigzag** CNT (32-atom cell, period 4.276 A = 3*a_cc, ~6.26 A diameter, semiconducting) with only a
+phenomenological "pseudo-scattering" phonon (50 meV Einstein mode, no force constants). Built the real
+phonon counterpart: a full FC3 for the same tube and ran anharmonic phph transport on it.
+- **Config** `configs/cnt/cnt80_vasp.yaml` (geometry via `ase.build.nanotube(8,0,length=1,bond=1.42)`,
+  tube along z, centered in a 17 A vacuum box). VASP-PBE (jiacao build, np=28, ENCUT 400), relax ISIF=2,
+  hiPhive supercell [1,1,3] = **96 atoms**, cutoffs [5.0, 3.5], 40 mc-rattled, ardr. Pipeline ran
+  end-to-end in ~3.5 h.
+- **Fit/validation:** ardr **1021 params, RMSE train 0.149 / test 0.151 eV/A** (test~train, ~2x tighter
+  than the (3,3)'s 0.28 thanks to the bigger cell/40 configs); rotational sum rules 150 -> 7.5e-5; FC2/FC3
+  ASR < 1e-3. Dispersion **0 imaginary modes**, soft twist 0.0014 THz (softer than (3,3)'s 0.026 -> larger
+  diameter), highest optical 47.4 THz. `finite_analysis`: FC2 ASR 1.4e-16, FC3 perm-sym 4.5e-17,
+  ASR-legs 1.0e-16, 0 negative PSD -> production-clean, same quality as (3,3).
+- **Ballistic baseline** (`scripts/out/cnt80_ballistic`): G_ball(L) = 6.58 / 5.43 / 4.56 / 3.88 e8 for
+  L=1-4.
+- **Anharmonic L=1** (`scripts/out/cnt80_transport`, eta 0.7, tol 1e-5, 30 iters, conserv 1.3e-3):
+  G_ball=6.58e8, G_anh=5.10e8 -> **G_anh/G_ball = 0.775**. G_ball matches the ballistic baseline exactly.
+  **(3,3)-vs-(8,0) at L=1, 300 K:** (3,3) 0.810 vs (8,0) 0.775 -- the larger semiconducting zigzag has
+  lower per-area G_ball AND slightly stronger anharmonic reduction (more atoms/channels -> more 3-phonon
+  phase space). Physically sensible.
+- **(8,0) L=2 (192 DOF) is INFEASIBLE in the dense solver** -- one bubble eval grew to ~hours and it
+  stalled after iter 13 (killed at 6 h). This is the F19 lesson: multi-cell anharmonic transport for the
+  bigger tube needs the RGF/distributed regime, not the dense reference. The (3,3) (36 DOF) is small
+  enough that L=2,3 dense were feasible; (8,0) is not. So the (8,0) length ladder is deferred to RGF.
+
+### F30b — SiNW low-T cross-structure check (d5a): does low T rescue the soft-mode non-converger?
+Ran the same fine-grid low-T sweep on the d5a SiNW (the soft-mode wire that did NOT converge at 300 K in
+the prior eta/lambda work) (`scripts/out/d5a_tempsweep`, L=1):
+| T (K) | G_ball | G_anh | G_anh/G_ball | iters | conserv |
+|---|---|---|---|---|---|
+| 30 | 1.36e7 | 1.17e7 | 0.860 | 44 | 3.9e-3 |
+| 50 | 1.86e7 | 1.52e7 | 0.817 | 87 | 1.7e-2 |
+| 100 | 2.59e7 | 2.11e7 | 0.815 | 83 | 1.4e-2 |
+| 150 | 3.08e7 | 2.54e7 | 0.825 | -- | -- |
+- **Low T DOES rescue convergence:** d5a converges to resid <1e-5 at 30-150 K (it failed at 300 K) --
+  fewer populated channels -> weaker bubble -> reachable fixed point. Confirms the user's intuition for
+  the hard case.
+- BUT unlike the CNT, d5a's **heat-flow conservation stays poor (~1-2%)** and its ratio is ~flat
+  (0.82-0.86, not monotone) -- the soft-mode causality defect is a SEPARATE, T-growing error on top of
+  the convergence behavior. Contrast: the CNT held conservation ~1e-4 and a clean monotone ratio.
+- The full d5a high-T (200/300 K) and a d11a (45-atom, 135-DOF) low-T sweep were SKIPPED as
+  cost-prohibitive (d11a ~30 h dense; d5a 300 K is the documented non-converger). d5a's 4 points + the
+  CNT cover the cross-structure story.
