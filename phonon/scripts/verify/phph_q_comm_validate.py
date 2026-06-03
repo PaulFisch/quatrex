@@ -37,8 +37,8 @@ from phonon.phonon_inputs.separable import (
     build_gathering_matrix, build_q_diff_map,
 )
 from phonon.solver.dense import load_fc3_raw
-from phonon.solver import se_q
-from phonon.solver.se_q import compute_phph_self_energy_q_dense
+import reference_kernels as se_q
+from reference_kernels import compute_phph_self_energy_q_dense
 from phonon_inputs.constants import HBAR_SI
 
 # --- common inputs (identical on every rank) ---

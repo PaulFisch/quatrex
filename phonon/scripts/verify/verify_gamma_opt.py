@@ -6,7 +6,7 @@ import sys, warnings; warnings.filterwarnings("ignore")
 sys.path.insert(0,"phonon"); sys.path.insert(0,".")
 import numpy as np, h5py, phono3py
 from phonon.phonon_inputs.separable import build_supercell_mapping, build_realspace_fc3_matrices
-from phonon.solver.se_q import compute_phph_self_energy_q_dense
+from reference_kernels import compute_phph_self_energy_q_dense
 from phonon.solver.retarded import build_retarded
 from phonon.solver.grids import bose_full_axis
 from phonon.scripts.verify.si_film_kappa import load_bulk_si

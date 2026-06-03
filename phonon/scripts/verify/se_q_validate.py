@@ -24,8 +24,10 @@ from phonon.phonon_inputs.separable import (
     build_supercell_mapping, build_realspace_fc3_matrices,
     build_gathering_matrix, build_q_diff_map,
 )
-from phonon.solver.se_q import compute_phph_self_energy_q_dense
-from phonon.solver.se_finite import compute_phph_self_energy_finite
+from reference_kernels import (
+    compute_phph_self_energy_finite,
+    compute_phph_self_energy_q_dense,
+)
 
 cfg = _REPO / "phonon/configs/sinw/sinw100_d5a_vasp_sc4.yaml"
 b = load_system(cfg, validate=False, transport_axis=2)

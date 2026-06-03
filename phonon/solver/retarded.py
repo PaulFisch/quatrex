@@ -1,22 +1,22 @@
-"""Retarded self-energy reconstruction from the Σ^{<,>} pair.
+"""Retarded self-energy reconstruction from the Sigma^{<,>} pair.
 
 Three reconstruction methods are supported:
 
-  * ``"half"`` — Σ^R = ½(Σ^> − Σ^<). Drops the Hilbert transform.
+  * ``"half"`` -- Sigma^R = 1/2(Sigma^> - Sigma^<). Drops the Hilbert transform.
     Useful when only the broadening (imaginary part) is needed.
-  * ``"pv"``   — singularity-subtracted principal-value integral.
-    Captures both Im Σ^R and Re Σ^R; O(nfreq²) per matrix entry.
-  * ``"fft"``  — zero-padded FFT Hilbert transform along the frequency
+  * ``"pv"``   -- singularity-subtracted principal-value integral.
+    Captures both Im Sigma^R and Re Sigma^R; O(nfreq^2) per matrix entry.
+  * ``"fft"``  -- zero-padded FFT Hilbert transform along the frequency
     axis. O(nfreq log nfreq); preferred for large grids. The padding is
     essential: the bare sign-multiplier FFT computes the *periodic*
     Hilbert transform, which carries a resolution-independent ~1 %
-    error for the finite-support Σ^{<,>} fed here (the periodic wrap
+    error for the finite-support Sigma^{<,>} fed here (the periodic wrap
     injects a spurious discontinuity). See :func:`hilbert_transform_axis`.
 
 The factor multiplying the (n_B / n_B+1) sum in the eigenmode expansion
-is ``-2j`` (no extra π); see ``document/src/theory.tex`` lines 873–874.
-The Lorentzian broadening absorbs the ``1/π`` from Im G^R = -π Σ_n …
-into ``L_η(ω - ω_n) = (η/π) / (ω² + η²)``, cancelling the explicit π.
+is ``-2j`` (no extra pi); see ``document/src/theory.tex`` lines 873-874.
+The Lorentzian broadening absorbs the ``1/pi`` from Im G^R = -pi Sigma_n ...
+into ``L_eta(omega - omega_n) = (eta/pi) / (omega^2 + eta^2)``, cancelling the explicit pi.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ def hilbert_transform_axis(f, axis=1, pad_factor=8):
     """Hilbert transform along *axis* via the zero-padded FFT.
 
     The bare sign-multiplier FFT computes the *circular* (periodic)
-    Hilbert transform. For a finite-support signal — such as the
-    self-energy difference Σ^> − Σ^< — the periodic wrap injects a
+    Hilbert transform. For a finite-support signal -- such as the
+    self-energy difference Sigma^> - Sigma^< -- the periodic wrap injects a
     spurious discontinuity at the grid boundary and the result carries
     a ~1 % error that does **not** shrink as the grid is refined.
 
@@ -37,7 +37,7 @@ def hilbert_transform_axis(f, axis=1, pad_factor=8):
     circular convolution into a (truncated) linear convolution over the
     original window, so the result converges to the aperiodic
     (infinite-range) Hilbert transform. ``pad_factor=8`` brings the
-    interior error to ~1e-5, matching the O(nfreq²) ``"pv"`` reference;
+    interior error to ~1e-5, matching the O(nfreq^2) ``"pv"`` reference;
     ``pad_factor=1`` recovers the legacy periodic behaviour.
 
     Parameters
@@ -80,27 +80,27 @@ def hilbert_transform_axis(f, axis=1, pad_factor=8):
 
 
 def retarded_from_lesser_greater(delta, omega_grid_thz):
-    """Build Σ^R from Δ = Σ^> − Σ^< via Kramers-Kronig.
+    """Build Sigma^R from Delta = Sigma^> - Sigma^< via Kramers-Kronig.
 
-    Σ^R(ω) = ½ Δ(ω) + (i/2π) PV∫ Δ(ω') / (ω − ω') dω'
+    Sigma^R(omega) = 1/2 Delta(omega) + (i/2pi) PVintegral Delta(omega') / (omega - omega') domega'
 
     Singularity subtraction:
 
-        PV∫ Δ(ω')/(ω−ω') dω'
-          = ∫ [Δ(ω') − Δ(ω)]/(ω−ω') dω' + Δ(ω) · PV∫ 1/(ω−ω') dω'
+        PVintegral Delta(omega')/(omega-omega') domega'
+          = integral [Delta(omega') - Delta(omega)]/(omega-omega') domega' + Delta(omega) . PVintegral 1/(omega-omega') domega'
 
     The first integral is regular and is evaluated with trapezoid
     quadrature, filling the diagonal sample with the finite-difference
-    derivative −Δ'(ω). The second term uses the analytic PV integral
+    derivative -Delta'(omega). The second term uses the analytic PV integral
 
-        PV∫_{ω_min}^{ω_max} dω'/(ω − ω') = ln|(ω − ω_min)/(ω − ω_max)|
+        PVintegral_{omega_min}^{omega_max} domega'/(omega - omega') = ln|(omega - omega_min)/(omega - omega_max)|
 
-    falling back to the discrete sum at the endpoints ω_min, ω_max where
+    falling back to the discrete sum at the endpoints omega_min, omega_max where
     the analytic form diverges logarithmically.
 
     Parameters
     ----------
-    delta : (n_freq, nd, nd) — Σ^> − Σ^<
+    delta : (n_freq, nd, nd) -- Sigma^> - Sigma^<
     omega_grid_thz : (n_freq,)
     """
     n_freq = len(omega_grid_thz)
@@ -141,7 +141,7 @@ def retarded_from_lesser_greater(delta, omega_grid_thz):
 
 
 def build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
-    """Build Σ^R from Σ^< and Σ^> using the specified method.
+    """Build Sigma^R from Sigma^< and Sigma^> using the specified method.
 
     Parameters
     ----------

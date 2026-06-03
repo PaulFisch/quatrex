@@ -39,14 +39,32 @@ from pathlib import Path
 
 import numpy as np
 
-from solver.se_finite import (
-    compute_phph_self_energy_finite as _compute_phph_self_energy_finite,
+from solver.bubble import bubble_dense
+from phonon_inputs.constants import (
+    HBAR_SI, KB_SI, PHPH_SYMMETRY_FACTOR, THZ_TO_RAD,
 )
-from phonon_inputs.constants import HBAR_SI, KB_SI, THZ_TO_RAD
 
 from ._utils import expand_atom_perm_to_dofs, project_dense_to_blocks
 from .loader import SystemBundle
 from .synthetic_gf import dynamical_matrix, synthetic_gf_dense, gf_to_block_dict
+
+
+def _compute_phph_self_energy_finite(G_lesser, G_greater, Phi, freqs, dw):
+    """Local dense single-block bubble (the simplest Sigma reference) used to
+    cross-check the block-sparse quatrex self-energy. Two bubble_dense calls on
+    the full device Phi/G; returns ``(Sigma^<, Sigma^>)``."""
+    n_freq = len(freqs)
+    n_fft = 2 * n_freq - 1
+    mid = n_freq // 2
+    freq_sl = slice(mid, mid + n_freq)
+    prefactor = PHPH_SYMMETRY_FACTOR * 0.5j * HBAR_SI * dw / (2 * np.pi)
+    sig_l = bubble_dense(phi_left=Phi, phi_right=Phi, G_a=G_lesser, G_b=G_lesser,
+                         n_fft=n_fft, prefactor=prefactor, out_slice=freq_sl,
+                         zero_freq_idx=mid, dc_handling="zero")
+    sig_g = bubble_dense(phi_left=Phi, phi_right=Phi, G_a=G_greater, G_b=G_greater,
+                         n_fft=n_fft, prefactor=prefactor, out_slice=freq_sl,
+                         zero_freq_idx=mid, dc_handling="zero")
+    return sig_l, sig_g
 
 
 def run_dense_scba_crosscheck(

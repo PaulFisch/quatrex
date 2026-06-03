@@ -2,16 +2,16 @@
 
 Provides:
 
-  * :func:`sancho_rubio` / :func:`sancho_rubio_batch` — surface Green's
+  * :func:`sancho_rubio` / :func:`sancho_rubio_batch` -- surface Green's
     function via iterative decimation; the residual is checked against a
     relative tolerance and a fallback to scalar iteration is offered.
-  * :func:`build_device_hamiltonian` — block-tridiagonal device H for
+  * :func:`build_device_hamiltonian` -- block-tridiagonal device H for
     ``n_slabs`` identical slabs.
-  * :func:`compute_obc_batch` — assembles Σ^R_L, Σ^R_R, Σ^<_{L,R},
-    Σ^>_{L,R}, Γ_L, Γ_R on a frequency batch.
-  * :func:`solve_green_functions` / :func:`solve_green_batch` —
+  * :func:`compute_obc_batch` -- assembles Sigma^R_L, Sigma^R_R, Sigma^<_{L,R},
+    Sigma^>_{L,R}, Gamma_L, Gamma_R on a frequency batch.
+  * :func:`solve_green_functions` / :func:`solve_green_batch` --
     G^R, G^<, G^> from the total self-energy.
-  * :func:`ballistic_transmission_z2` — T(ω²) = Tr(Γ_L G^R Γ_R G^A).
+  * :func:`ballistic_transmission_z2` -- T(omega^2) = Tr(Gamma_L G^R Gamma_R G^A).
 
 The retarded scattering self-energy may optionally dress the leads via
 ``lead_sigma_r_L`` / ``lead_sigma_r_R``; if Sancho-Rubio fails for the
@@ -282,7 +282,7 @@ def solve_green_batch(z2_arr, H_D, obc_batch,
 
 
 def ballistic_transmission_z2(z2, H_D, H_00, H_01, H_LD, H_DR):
-    """Ballistic transmission: T = Tr(Γ_L G^R Γ_R G^A)."""
+    """Ballistic transmission: T = Tr(Gamma_L G^R Gamma_R G^A)."""
     g_L = sancho_rubio(z2, H_00, H_01)
     g_R = sancho_rubio(z2, H_00, H_01.conj().T)
 

@@ -11,14 +11,15 @@ kernel:
     Phi_{I, K, K'} = Phi_{0, K-I, K'-I}
 
 The shift is read out via minimum-image lookup against the supercell of
-width ``N_super_z``: atoms ``|δ| > N_super_z // 2`` slabs apart are not
+width ``N_super_z``: atoms ``|delta| > N_super_z // 2`` slabs apart are not
 representable in the supercell FC3, so those triplets are silently zero
 (consistent with the finite-device interpretation; the supercell PBC is
 NOT replicated onto the device).
 
-Used by :mod:`phonon.solver.dense.transmission_finite` to feed the
-multi-slab self-energy driver
-:func:`phonon.solver.se_block.compute_sigma_from_blocks`.
+Used by :func:`phonon.solver.dense.transmission` to feed the multi-slab
+self-energy kernels
+:func:`phonon.solver.se_finite.compute_phph_self_energy_finite_multi_slab`
+and :func:`phonon.solver.se_q.compute_phph_self_energy_q_dense_multi_slab`.
 """
 
 from __future__ import annotations

@@ -1,20 +1,22 @@
-"""Phonon-phonon self-energy drivers for a finite Gamma-only device.
+"""Unified multi-slab 3-phonon self-energy kernel.
 
-Two entry points live here:
+The single production kernel is :func:`compute_phph_self_energy`. It computes
+Sigma^{<,>}_{IJ}(q, omega) for every (I, J) slab pair allowed by the cutoffs,
+summing over every inner (K1, K2, K1', K2') block quadruple the FC3 support and
+``g_cutoff`` permit, and -- when ``n_kpts > 1`` -- over the internal transverse
+momentum (the coupled-q convolution). It takes a pre-built vertex map, so the
+Gamma-only (``n_kpts == 1``) and the transversely-periodic paths share one body.
 
-* :func:`compute_phph_self_energy_finite` — legacy single-slab driver
-  used by :func:`phonon.solver.dense.transmission_finite` when the
-  caller leaves all cutoffs at their legacy values
-  (``sigma_cutoff=0, vertex_cutoff=0, g_cutoff=0``).
-* :func:`compute_phph_self_energy_finite_multi_slab` — full multi-slab
-  driver. Computes ``Sigma^{<,>}_{IJ}`` for every supported ``(I, J)``
-  pair within the supplied cutoffs, accumulating contributions from
-  every ``(K1, K2, K1', K2')`` inner block quadruple compatible with
-  the FC3 support and ``g_cutoff``. ``bubble_dense`` supports
-  off-diagonal G already so no kernel rewrite is needed.
+:func:`compute_phph_self_energy_finite_multi_slab` is a thin Gamma-only wrapper
+(single q-point) kept for direct callers. The q-resolved wrapper that builds the
+q-folded vertices lives in :mod:`phonon.solver.se_q`.
 
-Both routines feed Sigma^{<,>} only; Sigma^R is rebuilt from the mixed
-pair in the SCBA loop via :func:`phonon.solver.retarded.build_retarded`.
+The heavy bubble loop (memory budgeting + thread pool + block accumulation)
+lives in :func:`_run_bubble_tasks`. The kernel returns Sigma^{<,>} only; Sigma^R
+is rebuilt from the mixed pair in the SCBA loop via
+:func:`phonon.solver.retarded.build_retarded`. Independent reference
+implementations used only for validation live in
+``phonon/scripts/verify/reference_kernels.py``.
 """
 
 from __future__ import annotations
@@ -27,69 +29,30 @@ import numpy as np
 from phonon_inputs.constants import HBAR_SI, PHPH_SYMMETRY_FACTOR
 from .bubble import (
     bubble_chunk_peak_bytes_per_w,
-    bubble_dense,
     bubble_dense_from_fft,
     precompute_g_fft,
 )
 
 
-# ---------------------------------------------------------------------------
-# Legacy single-slab driver
-# ---------------------------------------------------------------------------
+def bubble_prefactor(dw_thz, n_kpts=1, symmetry_factor=None):
+    """Common bubble prefactor i/2 * hbar * dw / (2 pi) / n_kpts.
 
-
-def compute_phph_self_energy_finite(
-    G_lesser, G_greater, Phi, omega_grid_thz, dw_thz, symmetry_factor=None,
-):
-    """Phonon-phonon self-energy for a single primitive-cell slab.
-
-    Uses the Gamma-projected vertex ``Phi`` on the slab block; treats
-    the slab as fully isolated (no inter-slab coupling). Reproduced
-    exactly by
-    :func:`compute_phph_self_energy_finite_multi_slab` when invoked
-    on a one-slab device with ``dc_handling="zero"``.
-
-    ``symmetry_factor`` (see ``constants.PHPH_SYMMETRY_FACTOR``) defaults
-    to the physically-correct ``1/4``; pass ``1.0`` for the legacy
-    (Luisier) convention.
-
-    Returns ``(Sigma^<, Sigma^>)`` of shape ``(n_freq, n_dof, n_dof)``.
+    ``symmetry_factor`` (see ``constants.PHPH_SYMMETRY_FACTOR``) defaults to
+    the physically-correct value; pass ``1.0`` for the legacy (Luisier,
+    4x-too-large) convention.
     """
     if symmetry_factor is None:
         symmetry_factor = PHPH_SYMMETRY_FACTOR
-    n_freq = len(omega_grid_thz)
-    n_fft = 2 * n_freq - 1
-    mid = n_freq // 2
-    freq_sl = slice(mid, mid + n_freq)
-    prefactor = symmetry_factor * 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
-
-    sig_l = bubble_dense(
-        phi_left=Phi, phi_right=Phi,
-        G_a=G_lesser, G_b=G_lesser,
-        n_fft=n_fft, prefactor=prefactor,
-        out_slice=freq_sl, zero_freq_idx=mid,
-        dc_handling="zero",
-    )
-    sig_g = bubble_dense(
-        phi_left=Phi, phi_right=Phi,
-        G_a=G_greater, G_b=G_greater,
-        n_fft=n_fft, prefactor=prefactor,
-        out_slice=freq_sl, zero_freq_idx=mid,
-        dc_handling="zero",
-    )
-    return sig_l, sig_g
+    return symmetry_factor * 0.5j * HBAR_SI * dw_thz / (2 * np.pi) / n_kpts
 
 
 # ---------------------------------------------------------------------------
-# Multi-slab driver
+# Block bookkeeping
 # ---------------------------------------------------------------------------
 
 
-def _filter_g_blocks(
-    g_blocks: dict[tuple[int, int], np.ndarray],
-    g_cutoff: int | None,
-) -> dict[tuple[int, int], np.ndarray]:
-    """Drop G blocks with ``|K - K'| > g_cutoff``."""
+def _filter_g_blocks(g_blocks, g_cutoff):
+    """Drop G blocks with ``|K - K'| > g_cutoff`` (no-op when None)."""
     if g_cutoff is None:
         return g_blocks
     return {
@@ -98,19 +61,13 @@ def _filter_g_blocks(
     }
 
 
-def _build_pair_index(
-    phi_blocks: dict[tuple[int, int, int], np.ndarray],
-    g_keys: set[tuple[int, int]],
-    n_slabs: int,
-    *,
-    sigma_cutoff: int | None,
-) -> dict[tuple[int, int], list]:
-    """Enumerate (I, J) → [(K1, K2, K1', K2', phi_left, phi_right), ...].
+def _build_pair_index(phi_blocks, g_keys, n_slabs, *, sigma_cutoff):
+    """Enumerate (I, J) -> [(K1, K2, K1', K2', phi_left, phi_right), ...].
 
     For each ``phi_left = phi_blocks[(I, K1, K2)]`` and
     ``phi_right = phi_blocks[(J, K2', K1')]``, the bubble integrand
-    contributes only when both ``(K1, K1')`` and ``(K2, K2')`` are
-    present in the G dict.
+    contributes only when both ``(K1, K1')`` and ``(K2, K2')`` are present
+    in the G dict. ``sigma_cutoff`` bounds the produced ``|I - J|``.
     """
     d_sigma = (n_slabs - 1) if sigma_cutoff is None else int(sigma_cutoff)
 
@@ -134,15 +91,18 @@ def _build_pair_index(
     return pair_index
 
 
-def _default_n_threads() -> int:
-    """How many worker threads to use for the (I, J) loop.
+# ---------------------------------------------------------------------------
+# Memory budgeting helpers
+# ---------------------------------------------------------------------------
 
-    Honours ``QUATREX_PHPH_THREADS`` first. Otherwise auto-detects
-    via ``os.cpu_count()`` and uses every visible core. The bubble
-    kernel releases the GIL during BLAS matmul/FFT, so the workers
-    can run in parallel; cap BLAS threads to 1 per worker (via
-    ``OMP_NUM_THREADS=1`` / ``OPENBLAS_NUM_THREADS=1``) to avoid
-    oversubscription on many-core hosts.
+
+def _default_n_threads():
+    """Worker-thread count for the bubble loop.
+
+    Honours ``QUATREX_PHPH_THREADS`` first, else uses every visible core.
+    The bubble kernel releases the GIL during BLAS matmul / FFT, so workers
+    run in parallel; cap BLAS to 1 thread per worker (``OMP_NUM_THREADS=1``
+    / ``OPENBLAS_NUM_THREADS=1``) to avoid oversubscription.
     """
     env = os.environ.get("QUATREX_PHPH_THREADS")
     if env is not None:
@@ -150,15 +110,11 @@ def _default_n_threads() -> int:
     return max(1, os.cpu_count() or 1)
 
 
-def _available_memory_bytes() -> int:
-    """Best-effort estimate of the per-process available RAM.
+def _available_memory_bytes():
+    """Best-effort per-process available RAM.
 
-    Resolution order:
-
-    1. ``QUATREX_PHPH_MEMORY_GB`` env var (in GiB).
-    2. :mod:`psutil`'s ``virtual_memory().available`` if installed.
-    3. ``/proc/meminfo``'s ``MemAvailable`` field on Linux.
-    4. Conservative 8 GiB fallback.
+    Resolution order: ``QUATREX_PHPH_MEMORY_GB`` env var, then :mod:`psutil`,
+    then ``/proc/meminfo``'s ``MemAvailable``, then a 8 GiB fallback.
     """
     env = os.environ.get("QUATREX_PHPH_MEMORY_GB")
     if env is not None:
@@ -180,258 +136,310 @@ def _available_memory_bytes() -> int:
 
 
 def _bubble_peak_bytes_per_worker(
-    *, n_fft: int, nI: int, nJ: int,
-    bK1: int, bK1p: int, bK2: int, bK2p: int,
-    itemsize: int = 16,
-) -> int:
-    """Conservative upper bound on the transient memory a single
-    bubble call holds at its peak.
+    *, n_fft, nI, nJ, bK1, bK1p, bK2, bK2p, itemsize=16,
+):
+    """Upper bound on the transient memory one un-chunked bubble holds.
 
-    The matmul kernel allocates ``T1``, ``T1_t`` (reshape-forced copy
-    after transpose), ``T2``, ``T2_r`` (reshape after transpose), the
-    matmul output ``S_hat``, and the inverse-FFT result. ``T1`` and
-    ``T2`` dominate; we count the four ``(n_fft, n_dof^3)``-sized
-    intermediates as alive simultaneously plus a small slack for
-    ``S_hat`` and the IFFT output.
+    The matmul kernel allocates a handful of ``(n_fft, n_dof^3)``-sized
+    intermediates; the two largest dominate. Count four of them as live
+    simultaneously plus the small output, with 25% slack.
     """
     big = n_fft * nI * max(bK1, bK2p) * max(bK1p, bK2p) * itemsize
-    small = n_fft * nI * nJ * itemsize  # S_hat + ifft result
-    # Four live big tensors + 2 small outputs + ~25 % slack for
-    # transient temporaries inside BLAS / numpy.
-    return int(4 * big + 2 * small + 0.25 * (4 * big + 2 * small))
+    small = n_fft * nI * nJ * itemsize
+    return int(1.25 * (4 * big + 2 * small))
 
 
-def compute_phph_self_energy_finite_multi_slab(
-    g_lesser_blocks: dict[tuple[int, int], np.ndarray],
-    g_greater_blocks: dict[tuple[int, int], np.ndarray],
-    phi_dev_blocks: dict[tuple[int, int, int], np.ndarray],
-    n_slabs: int,
-    omega_grid_thz: np.ndarray,
-    dw_thz: float,
+class _NoThreadLimit:
+    """Context manager used when threadpoolctl is unavailable."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _blas_thread_limit():
+    """Limit BLAS to one thread inside the parallel region, if possible."""
+    try:
+        from threadpoolctl import threadpool_limits
+        return threadpool_limits(limits=1, user_api="blas")
+    except ImportError:
+        return _NoThreadLimit()
+
+
+# ---------------------------------------------------------------------------
+# Shared bubble task runner
+# ---------------------------------------------------------------------------
+
+
+def _run_bubble_tasks(
+    tasks, compute_one, *,
+    n_fft, nI, nJ, bK1, bK1p, bK2, bK2p,
+    fixed_bytes, n_threads=None, label="phph",
+):
+    """Run bubble ``tasks`` on a memory-budgeted thread pool.
+
+    ``compute_one(task, max_bytes) -> (key, block)`` computes one bubble;
+    ``max_bytes`` bounds its transient memory by chunking the frequency
+    axis (``None`` disables chunking). Blocks returned with the same
+    ``key`` are summed. Returns ``{key: block}``.
+
+    The budget logic: take 70% of available RAM, subtract the resident
+    ``fixed_bytes`` (pre-FFT'd G blocks, vertices, output buffers), then pick
+    the largest worker count for which each worker still gets at least one
+    one-frequency chunk. If even that does not fit, raise ``MemoryError``.
+    Shared by the Gamma-only and q-resolved multi-slab kernels.
+    """
+    out: dict = {}
+
+    def _accumulate(key_block):
+        key, blk = key_block
+        existing = out.get(key)
+        out[key] = blk if existing is None else existing + blk
+
+    if not tasks:
+        return out
+
+    full_peak = _bubble_peak_bytes_per_worker(
+        n_fft=n_fft, nI=nI, nJ=nJ, bK1=bK1, bK1p=bK1p, bK2=bK2, bK2p=bK2p,
+    )
+    # Transient of a single one-frequency chunk, with the same 25% slack.
+    per_w_peak = int(1.25 * bubble_chunk_peak_bytes_per_w(
+        nI=nI, nJ=nJ, bK1=bK1, bK1p=bK1p, bK2=bK2, bK2p=bK2p,
+    ))
+
+    total_budget = int(0.7 * _available_memory_bytes())
+    worker_budget = total_budget - fixed_bytes
+    if worker_budget < per_w_peak:
+        raise MemoryError(
+            f"[{label}] fixed G/phi storage is "
+            f"{fixed_bytes / (1 << 30):.2f} GiB and a single frequency chunk "
+            f"needs {per_w_peak / (1 << 30):.3f} GiB, but only "
+            f"{total_budget / (1 << 30):.2f} GiB is available. Reduce "
+            "n_slabs / vertex_cutoff / g_cutoff, or raise "
+            "QUATREX_PHPH_MEMORY_GB."
+        )
+
+    n_workers_requested = max(
+        1, n_threads if n_threads is not None else _default_n_threads())
+    n_workers_by_memory = max(1, worker_budget // per_w_peak)
+    n_workers = min(n_workers_requested, len(tasks), n_workers_by_memory)
+
+    per_worker_share = worker_budget // n_workers
+    if per_worker_share >= full_peak:
+        per_worker_max_bytes = None  # plenty of headroom, no chunking
+    else:
+        per_worker_max_bytes = int(per_worker_share)
+        n_chunks_est = -(-full_peak // max(per_worker_max_bytes, 1))
+        print(
+            f"  [{label}] memory cap: budget="
+            f"{total_budget / (1 << 30):.1f} GiB, fixed="
+            f"{fixed_bytes / (1 << 30):.2f} GiB, workers={n_workers} "
+            f"(requested={n_workers_requested}), per-worker="
+            f"{per_worker_share / (1 << 30):.2f} GiB; omega-chunking each "
+            f"bubble into ~{n_chunks_est} chunk(s)",
+            flush=True,
+        )
+
+    if n_workers == 1 or len(tasks) <= 1:
+        for task in tasks:
+            _accumulate(compute_one(task, per_worker_max_bytes))
+    else:
+        with _blas_thread_limit(), ThreadPoolExecutor(
+                max_workers=n_workers) as pool:
+            for key_block in pool.map(
+                    lambda t: compute_one(t, per_worker_max_bytes), tasks):
+                _accumulate(key_block)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Multi-slab kernel
+# ---------------------------------------------------------------------------
+
+
+def compute_phph_self_energy(
+    g_lesser_blocks_q,
+    g_greater_blocks_q,
+    vertices,
+    n_slabs,
+    n_kpts,
+    q_diff_map,
+    omega_grid_thz,
+    dw_thz,
     *,
-    sigma_cutoff: int | None = None,
-    g_cutoff: int | None = None,
-    dc_handling: str = "interpolate",
-    n_threads: int | None = None,
-    symmetry_factor: float | None = None,
-) -> tuple[
-    dict[tuple[int, int], np.ndarray],
-    dict[tuple[int, int], np.ndarray],
-]:
-    """Full multi-slab 3-phonon self-energy on a Gamma-only finite device.
+    sigma_cutoff=None,
+    g_cutoff=None,
+    dc_handling="interpolate",
+    n_threads=None,
+    symmetry_factor=None,
+):
+    """Unified multi-slab 3-phonon self-energy (Gamma or q-resolved).
 
-    Computes ``Sigma^{<,>}_{IJ}(omega)`` over the symmetric omega grid
-    used by the dense reference solver. The cubic-vertex support is
-    set by ``phi_dev_blocks``; the inner block-quadruple is set by
-    that support intersected with ``g_lesser_blocks``/``g_greater_blocks``;
-    output ``(I, J)`` pairs are restricted to ``|I - J| <= sigma_cutoff``.
+    Computes ``Sigma^{<,>}_{IJ}(q_ext, omega)`` for every (I, J) slab pair the
+    cutoffs allow, summing the inner (K1, K2, K1', K2') block quadruple and, for
+    ``n_kpts > 1``, the internal transverse momentum q' with
+    ``q2 = q_ext - q'`` (the coupled-q convolution).
 
     Parameters
     ----------
-    g_lesser_blocks, g_greater_blocks
-        Device-resolved G blocks ``{(K, K'): G^x[(n_freq, nK, nKp)]}``.
-        Must be in the same z-sorted DOF ordering as ``phi_dev_blocks``.
-    phi_dev_blocks
-        Device-resolved FC3 vertex ``{(I, K, K'): Phi[n_dof, n_dof, n_dof]}``
-        — produced by :func:`phonon.solver.fc3_device.build_device_fc3_blocks`.
-    n_slabs
-        Number of transport cells in the device.
-    omega_grid_thz
-        Symmetric ``(-fmax, ..., fmax)`` frequency axis (THz).
-    dw_thz
-        Grid spacing (THz).
+    g_lesser_blocks_q, g_greater_blocks_q
+        Device G blocks ``{(K, K'): G^x[n_kpts, n_freq, n_dof, n_dof]}``. The
+        leading q axis has length 1 for a Gamma-only device.
+    vertices
+        Pre-built device vertex per transverse-momentum pair,
+        ``{(iq1, iq2): {(I, K, K'): Phi[n_dof, n_dof, n_dof]}}``. The q=Gamma
+        entry must be keyed ``(0, 0)`` (used for the (I, J) pair index). For a
+        finite device pass ``{(0, 0): device_vertex}`` and ``q_diff_map=[[0]]``.
+        Build these once (they do not depend on G) via
+        :func:`phonon.solver.fc3_device.build_device_fc3_blocks` (Gamma) or
+        :func:`phonon.solver.se_q._build_folded_vertices` (q-resolved).
+    n_slabs, n_kpts
+        Number of transport cells and transverse q-points.
+    q_diff_map
+        ``q_diff_map[iq_ext, iq'] = index of (q_ext - q')`` on the mesh.
+    omega_grid_thz, dw_thz
+        Symmetric ``(-fmax, ..., fmax)`` frequency axis and its spacing (THz).
     sigma_cutoff
-        Maximum ``|I - J|`` for produced Sigma blocks. ``None`` = no
-        truncation (every ``(I, J)`` reachable through the FC3 + G
-        support is computed).
+        Maximum ``|I - J|`` for produced Sigma blocks. ``None`` = full; ``0``
+        keeps only the slab-diagonal blocks (Guo approximation III).
     g_cutoff
         Maximum ``|K - K'|`` for G blocks used in the inner sum.
-        ``None`` = use every block present in the dict.
     dc_handling
-        Forwarded to :func:`bubble_dense` to control the omega = 0
-        sample of G. ``"interpolate"`` (default) replaces it with the
-        midpoint of its neighbours; ``"zero"`` reproduces the legacy
-        behaviour; ``"keep"`` leaves it untouched.
+        Treatment of the omega = 0 sample of G before the bubble FFT.
 
     Returns
     -------
     sigma_lesser, sigma_greater
-        ``{(I, J): Sigma^x[n_freq, n_I, n_J]}`` dicts. Only entries
-        with nonzero contribution are present; the SCBA driver
-        scatters them into the full device-sized Sigma buffers.
+        ``{(I, J): Sigma^x[n_kpts, n_freq, n_I, n_J]}`` dicts (allocated for
+        every reachable (I, J); pairs with no contribution stay zero).
     """
     n_freq = len(omega_grid_thz)
     n_fft = 2 * n_freq - 1
     mid = n_freq // 2
     freq_sl = slice(mid, mid + n_freq)
-    if symmetry_factor is None:
-        symmetry_factor = PHPH_SYMMETRY_FACTOR
-    prefactor = symmetry_factor * 0.5j * HBAR_SI * dw_thz / (2 * np.pi)
+    prefactor = bubble_prefactor(dw_thz, n_kpts=n_kpts,
+                                 symmetry_factor=symmetry_factor)
 
-    gl = _filter_g_blocks(g_lesser_blocks, g_cutoff)
-    gg = _filter_g_blocks(g_greater_blocks, g_cutoff)
+    gl = _filter_g_blocks(g_lesser_blocks_q, g_cutoff)
+    gg = _filter_g_blocks(g_greater_blocks_q, g_cutoff)
     g_keys = set(gl.keys())
     if set(gg.keys()) != g_keys:
         raise ValueError(
-            "g_lesser_blocks and g_greater_blocks must share the same "
-            f"(K, K') keys; lesser-only={g_keys - set(gg.keys())}, "
+            "g_lesser and g_greater blocks must share the same (K, K') keys; "
+            f"lesser-only={g_keys - set(gg.keys())}, "
             f"greater-only={set(gg.keys()) - g_keys}"
         )
 
-    # Pre-FFT every distinct G block once: every (I, J) inner loop
-    # touches the same handful of G blocks many times, so this saves
-    # O(n_pairs) redundant FFTs per SCBA iter.
-    gl_fft = {
-        key: precompute_g_fft(
-            blk, n_fft=n_fft, zero_freq_idx=mid, dc_handling=dc_handling,
-        )
-        for key, blk in gl.items()
-    }
-    gg_fft = {
-        key: precompute_g_fft(
-            blk, n_fft=n_fft, zero_freq_idx=mid, dc_handling=dc_handling,
-        )
-        for key, blk in gg.items()
-    }
-
     pair_index = _build_pair_index(
-        phi_dev_blocks, g_keys, n_slabs, sigma_cutoff=sigma_cutoff,
-    )
+        vertices[(0, 0)], g_keys, n_slabs, sigma_cutoff=sigma_cutoff)
+    if not g_keys or not pair_index:
+        return {}, {}
 
-    tasks: list[tuple] = []
-    for (I, J), pairs in pair_index.items():
-        for K1, K2, K1p, K2p, phi_left, phi_right in pairs:
-            tasks.append(
-                (I, J, K1, K2, K1p, K2p, phi_left, phi_right, "lesser"),
-            )
-            tasks.append(
-                (I, J, K1, K2, K1p, K2p, phi_left, phi_right, "greater"),
-            )
+    n_dof = next(iter(gl.values())).shape[-1]
 
-    # --- memory budgeting -------------------------------------------
-    n_workers_requested = max(
-        1, n_threads if n_threads is not None else _default_n_threads()
-    )
-    n_workers_by_tasks = max(1, len(tasks))
-    per_worker_max_bytes: int | None = None
+    # Pre-FFT each (q, block) once; every bubble at that q reuses it.
+    def _fft_all(gblk):
+        return {
+            (K, Kp): [precompute_g_fft(arr[iq], n_fft=n_fft, zero_freq_idx=mid,
+                                       dc_handling=dc_handling)
+                      for iq in range(n_kpts)]
+            for (K, Kp), arr in gblk.items()
+        }
+    gl_fft = _fft_all(gl)
+    gg_fft = _fft_all(gg)
 
-    if tasks:
-        # Uniform-DOF transport cells: every phi/G block has the same
-        # shape, so one representative sample fixes the sizing.
-        sample_phi_left = next(iter(phi_dev_blocks.values()))
-        sample_G = next(iter(gl_fft.values()))
-        nI_s, bK1_s, bK2_s = sample_phi_left.shape
-        nJ_s = sample_phi_left.shape[0]
-        bK1p_s = sample_G.shape[2]
-        bK2p_s = bK2_s
+    # One task per (external q, internal q', I, J, inner quadruple, kind). The
+    # internal-q' sum and the (K1, K2, K1', K2') sum both fold into the
+    # accumulation by key (I, J, iq_ext, kind).
+    tasks = []
+    for iq_ext in range(n_kpts):
+        for iqp in range(n_kpts):
+            iq2 = int(q_diff_map[iq_ext, iqp])
+            phiL = vertices[(iqp, iq2)]        # legs (q', q_ext - q')
+            phiR = vertices[(iq2, iqp)]        # legs (q_ext - q', q')
+            for (I, J), quads in pair_index.items():
+                for (K1, K2, K1p, K2p, _pl, _pr) in quads:
+                    pl = phiL.get((I, K1, K2))
+                    pr = phiR.get((J, K2p, K1p))
+                    if pl is None or pr is None:
+                        continue
+                    tasks.append(
+                        (I, J, iq_ext, iqp, iq2, K1, K2, K1p, K2p, pl, pr))
 
-        itemsize = 16  # complex128
-        full_peak = _bubble_peak_bytes_per_worker(
-            n_fft=n_fft, nI=nI_s, nJ=nJ_s,
-            bK1=bK1_s, bK1p=bK1p_s, bK2=bK2_s, bK2p=bK2p_s,
-        )
-        per_w = bubble_chunk_peak_bytes_per_w(
-            nI=nI_s, nJ=nJ_s,
-            bK1=bK1_s, bK1p=bK1p_s, bK2=bK2_s, bK2p=bK2p_s,
-        )
-        # Account for the four big transients held per chunk, with
-        # the same 25 % slack as the full-peak estimate.
-        per_w_peak = int(1.25 * per_w)
+    sl_out = {(I, J): np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
+              for (I, J) in pair_index}
+    sg_out = {(I, J): np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
+              for (I, J) in pair_index}
+    if not tasks:
+        return sl_out, sg_out
 
-        fixed_bytes = (
-            sum(g.nbytes for g in gl_fft.values())
-            + sum(g.nbytes for g in gg_fft.values())
-            + sum(p.nbytes for p in {id(p): p
-                                     for p in phi_dev_blocks.values()}.values())
-            + 2 * len(pair_index) * n_freq * nI_s * nJ_s * itemsize
-        )
-
-        total_budget = int(0.7 * _available_memory_bytes())
-        worker_budget = total_budget - fixed_bytes
-
-        if worker_budget < per_w_peak:
-            # Even a single one-frequency chunk does not fit alongside
-            # the fixed G/phi storage. This is unrecoverable without
-            # also chunking the shared dicts — surface a clear error.
-            raise MemoryError(
-                f"Multi-slab bubble: fixed G/phi storage is "
-                f"{fixed_bytes / (1 << 30):.2f} GiB and a single "
-                f"frequency chunk needs {per_w_peak / (1 << 30):.3f} GiB, "
-                f"but only {total_budget / (1 << 30):.2f} GiB is "
-                "available. Reduce n_slabs / vertex_cutoff / g_cutoff, "
-                "or set QUATREX_PHPH_MEMORY_GB higher."
-            )
-
-        # Largest worker count for which each worker still gets at
-        # least a one-frequency chunk.
-        n_workers_by_memory = max(1, worker_budget // per_w_peak)
-        n_workers = min(
-            n_workers_requested, n_workers_by_tasks, n_workers_by_memory,
-        )
-
-        per_worker_share = worker_budget // n_workers
-        if per_worker_share >= full_peak:
-            per_worker_max_bytes = None  # plenty of headroom, no chunking
-        else:
-            per_worker_max_bytes = int(per_worker_share)
-            n_chunks_est = -(-full_peak // max(per_worker_max_bytes, 1))
-            print(
-                f"  [phph] memory cap: budget="
-                f"{total_budget / (1 << 30):.1f} GiB, fixed="
-                f"{fixed_bytes / (1 << 30):.2f} GiB, "
-                f"workers={n_workers} (requested={n_workers_requested}), "
-                f"per-worker={per_worker_share / (1 << 30):.2f} GiB; "
-                f"omega-chunking each bubble into ~{n_chunks_est} "
-                f"chunk(s)",
-                flush=True,
-            )
-    else:
-        n_workers = 1
-
-    def _compute_one_bubble(task):
-        I, J, K1, K2, K1p, K2p, phi_left, phi_right, kind = task
+    def compute_one(kind_task, max_bytes):
+        kind, task = kind_task
+        I, J, iq_ext, iqp, iq2, K1, K2, K1p, K2p, pl, pr = task
         gx_fft = gl_fft if kind == "lesser" else gg_fft
         blk = bubble_dense_from_fft(
-            phi_left=phi_left, phi_right=phi_right,
-            G_a_fft=gx_fft[(K1, K1p)],
-            G_b_fft=gx_fft[(K2, K2p)],
-            ne=n_freq, prefactor=prefactor,
-            out_slice=freq_sl,
-            max_bytes=per_worker_max_bytes,
+            phi_left=pl, phi_right=pr,
+            G_a_fft=gx_fft[(K1, K1p)][iqp], G_b_fft=gx_fft[(K2, K2p)][iq2],
+            ne=n_freq, prefactor=prefactor, out_slice=freq_sl,
+            max_bytes=max_bytes,
         )
-        return (I, J, kind), blk
+        return (I, J, iq_ext, kind), blk
 
-    sl_out: dict[tuple[int, int], np.ndarray] = {}
-    sg_out: dict[tuple[int, int], np.ndarray] = {}
+    itemsize = 16  # complex128
+    unique_phi = {id(p): p for d in vertices.values() for p in d.values()}
+    fixed_bytes = (
+        sum(g.nbytes for blk in gl_fft.values() for g in blk)
+        + sum(g.nbytes for blk in gg_fft.values() for g in blk)
+        + sum(p.nbytes for p in unique_phi.values())
+        + 2 * len(pair_index) * n_kpts * n_freq * n_dof * n_dof * itemsize
+    )
 
-    def _accumulate(key_block):
-        (I, J, kind), blk = key_block
-        target = sl_out if kind == "lesser" else sg_out
-        existing = target.get((I, J))
-        target[(I, J)] = blk if existing is None else existing + blk
+    accumulated = _run_bubble_tasks(
+        [("lesser", t) for t in tasks] + [("greater", t) for t in tasks],
+        compute_one,
+        n_fft=n_fft, nI=n_dof, nJ=n_dof,
+        bK1=n_dof, bK1p=n_dof, bK2=n_dof, bK2p=n_dof,
+        fixed_bytes=fixed_bytes, n_threads=n_threads, label="phph",
+    )
 
-    if n_workers == 1 or len(tasks) <= 1:
-        for t in tasks:
-            _accumulate(_compute_one_bubble(t))
-    else:
-        # threadpoolctl caps BLAS threads inside the parallel region
-        # so we don't over-subscribe the host (each worker still
-        # benefits from BLAS-level parallelism for the matmuls, but
-        # only with as many threads as we have unused cores).
-        try:
-            from threadpoolctl import threadpool_limits
-            cm = threadpool_limits(limits=1, user_api="blas")
-        except ImportError:
-            class _Noop:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-            cm = _Noop()
-        with cm, ThreadPoolExecutor(max_workers=n_workers) as pool:
-            for kb in pool.map(_compute_one_bubble, tasks):
-                _accumulate(kb)
-
+    for (I, J, iq_ext, kind), blk in accumulated.items():
+        out = sl_out if kind == "lesser" else sg_out
+        out[(I, J)][iq_ext] = blk
     return sl_out, sg_out
+
+
+def compute_phph_self_energy_finite_multi_slab(
+    g_lesser_blocks,
+    g_greater_blocks,
+    phi_dev_blocks,
+    n_slabs,
+    omega_grid_thz,
+    dw_thz,
+    *,
+    sigma_cutoff=None,
+    g_cutoff=None,
+    dc_handling="interpolate",
+    n_threads=None,
+    symmetry_factor=None,
+):
+    """Gamma-only multi-slab self-energy: thin wrapper over
+    :func:`compute_phph_self_energy` with a single (Gamma) q-point.
+
+    ``g_*_blocks`` are ``{(K, K'): G^x[n_freq, n_dof, n_dof]}`` (no q axis);
+    ``phi_dev_blocks`` is ``{(I, K, K'): Phi}`` from
+    :func:`phonon.solver.fc3_device.build_device_fc3_blocks`. Returns
+    ``{(I, J): Sigma^x[n_freq, n_I, n_J]}`` (no q axis).
+    """
+    gl_q = {k: v[np.newaxis] for k, v in g_lesser_blocks.items()}
+    gg_q = {k: v[np.newaxis] for k, v in g_greater_blocks.items()}
+    sl, sg = compute_phph_self_energy(
+        gl_q, gg_q, {(0, 0): phi_dev_blocks}, n_slabs, 1,
+        np.array([[0]]), omega_grid_thz, dw_thz,
+        sigma_cutoff=sigma_cutoff, g_cutoff=g_cutoff,
+        dc_handling=dc_handling, n_threads=n_threads,
+        symmetry_factor=symmetry_factor,
+    )
+    return ({k: v[0] for k, v in sl.items()},
+            {k: v[0] for k, v in sg.items()})

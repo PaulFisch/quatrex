@@ -6,14 +6,14 @@ threshold. The four knobs below can be flipped individually for
 cutoff-sensitivity studies:
 
   * ``diag_G_in_se`` - restrict the inner G dict in the bubble integrand
-    to the diagonal (K₁ = K₁', K₂ = K₂') blocks. Recovers the original
+    to the diagonal (K1 = K1', K2 = K2') blocks. Recovers the original
     block-tridiagonal NEGF approximation when ``True``.
   * ``fc3_nn_only`` - drop FC3 block triplets with ``|I-J| > 1``,
     ``|I-K| > 1`` or ``|J-K| > 1``
-  * ``fc3_distance_cutoff`` — drop FC3 entries whose triplet diameter
-    (max of three pairwise atomic distances) exceeds the cutoff in Å.
-  * ``fc3_magnitude_threshold`` — drop FC3 entries whose magnitude is
-    below ``threshold × max|Φ|``.
+  * ``fc3_distance_cutoff`` -- drop FC3 entries whose triplet diameter
+    (max of three pairwise atomic distances) exceeds the cutoff in A.
+  * ``fc3_magnitude_threshold`` -- drop FC3 entries whose magnitude is
+    below ``threshold x max|Phi|``.
 
 The historical ``diag_G_everywhere`` knob (which strips off-diagonals
 globally before any computation) is intentionally NOT preserved: it only
@@ -114,7 +114,7 @@ def diagonalise_g_blocks(
 
     Used to opt into the ``diag_G_in_se`` cutoff: with the inner G
     restricted to its block-diagonal, the bubble integrand recovers the
-    original quatrex ``SigmaPhononPhonon._bubble_block`` (K₁ = K₁',
-    K₂ = K₂') behaviour.
+    original quatrex ``SigmaPhononPhonon._bubble_block`` (K1 = K1',
+    K2 = K2') behaviour.
     """
     return {(I, J): block for (I, J), block in g_blocks.items() if I == J}
