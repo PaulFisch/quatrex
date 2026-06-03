@@ -55,3 +55,15 @@ reaps/hiphive_sinw100_d17a_vasp/
 # --- Analysis run outputs + profiles ---
 scripts/out/
 scripts/*.prof
+
+# --- Symlinks to cluster FC3 DFT outputs (the cluster/ tree is ignored at the
+#     repo root; the tracked si_fc3/fc3_*.yaml configs are unaffected) ---
+configs/sinw/fc3_hiphive_*_vasp
+
+# --- Pseudopotential directories (downloadable; not for version control) ---
+pseudo/
+
+# --- DFT working directories under reaps/ (regenerable from configs) ---
+reaps/dfpt/
+reaps/hiphive_prim/
+reaps/relax/

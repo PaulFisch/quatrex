@@ -1,0 +1,290 @@
+% ======================================================================
+% Anharmonic (3-phonon) scattering self-energy in QuaTrEx — formulation.
+%
+% Companion document to the implementation under
+%   src/quatrex/phonon/sse_phonon_phonon.py
+%   src/quatrex/phonon/fc3_loader.py
+%   src/quatrex/phonon/polarization.py
+%
+% Style mirrors phonon/input_calc/main-doc.tex.
+% ======================================================================
+
+\chapter{Anharmonic phonon-phonon scattering self-energy}
+\label{ch:anharmonic_phph}
+
+% ======================================================================
+\section{Overview and scope}
+\label{sec:phph_overview}
+% ======================================================================
+
+This chapter documents the addition of cubic ($3$-phonon) scattering to
+the QuaTrEx phonon NEGF solver. The cubic vertex
+$\Phi^{(0)}_{i\alpha,j\beta,k\gamma}$ is supplied by the existing
+\texttt{phonon\_inputs} pipeline (phono3py / hiphive / DFPT). The
+self-energy is built in real space without transverse periodicity (no
+$\mathbf q$-mesh), respecting the existing block-tridiagonal device
+layout: $N_{\rm slabs}$ transport cells, with one or several primitive
+cells per transport cell, and nearest-neighbour coupling between
+transport cells.
+
+The same energy-convolution + Hilbert-transform machinery already used for
+the dynamical Coulomb-screening self-energy is reused, so the only new
+mathematical content beyond \S\ref{sec:phonopy_units} is the cubic
+vertex contraction and its block-sparsity pattern.
+
+% ======================================================================
+\section{Cubic anharmonic Hamiltonian}
+\label{sec:phph_hamiltonian}
+% ======================================================================
+
+Let $u_a$ denote a Cartesian displacement, with composite index
+$a = (i,\alpha)$ ($i$ atom, $\alpha\in\{x,y,z\}$). In the
+mass-weighted basis
+\begin{equation}
+  \tilde u_a \;=\; \sqrt{m_i}\,u_a,
+\end{equation}
+the harmonic + cubic lattice Hamiltonian reads
+\begin{equation}\label{eq:phph_hamiltonian}
+  H \;=\; \tfrac12\sum_{ab}\Phi^{(2)}_{ab}\,\tilde u_a \tilde u_b
+        \;+\; \tfrac{1}{3!}\sum_{abc}\Phi_{abc}\,
+              \tilde u_a \tilde u_b \tilde u_c
+        \;+\; \mathcal O(\tilde u^4),
+\end{equation}
+where the mass-weighted vertex is
+\begin{equation}\label{eq:phi_mass_weighted}
+  \Phi_{abc}
+  \;=\;
+  \frac{\Phi^{(0)}_{i\alpha,\,j\beta,\,k\gamma}}
+       {\sqrt{m_i\,m_j\,m_k}},
+\end{equation}
+with $\Phi^{(0)}$ the bare third-order force-constant tensor produced by
+phono3py / symfc / hiphive / DFPT and stored as
+\texttt{fc3.hdf5}. The vertex is fully symmetric,
+$\Phi_{abc} = \Phi_{\sigma(abc)}$ for any permutation $\sigma$.
+
+% ======================================================================
+\section{Three-phonon self-energy (Migdal bubble)}
+\label{sec:phph_bubble}
+% ======================================================================
+
+Let $G^{\lessgtr}_{ab}(\omega)$ denote the lesser/greater
+displacement-displacement Keldysh component (the phonon Green's function
+solved by \texttt{PhononSolver}). The leading $3$-phonon scattering
+self-energy is the Migdal-like bubble
+(Guo \emph{et al.}, Phys.\ Rev.\ B 102, 195412 (2020), Eq.\ 8):
+\begin{empheq}[box=\fbox]{equation}\label{eq:Sigma_pp}
+  \Sigma^{\lessgtr}_{ab}(\omega)
+  \;=\;
+  \frac{i\hbar}{2}\sum_{c,d,e,f}
+  \Phi_{acd}\,
+  \bigl[G^{\lessgtr}\!*\!G^{\lessgtr}\bigr]_{cf,\,de}(\omega)\,
+  \Phi_{bef},
+\end{empheq}
+with the $\omega$-convolution
+\begin{equation}\label{eq:G_conv_G}
+  \bigl[G^{\lessgtr}\!*\!G^{\lessgtr}\bigr]_{cf,\,de}(\omega)
+  \;=\;
+  \int\!\frac{d\omega'}{2\pi}\;
+  G^{\lessgtr}_{cf}(\omega')\,
+  G^{\lessgtr}_{de}(\omega-\omega').
+\end{equation}
+Equation~\eqref{eq:Sigma_pp} is the SCBA-level closure: it is the unique
+diagram with two $\Phi$ vertices and two internal phonon lines. Higher
+orders (vertex corrections, $\Phi^4$ tadpole, etc.) are neglected at this
+level, consistent with all reference NEGF phonon-phonon transport
+implementations.
+
+% ----------------------------------------------------------------------
+\subsection{Retarded reconstruction via Hilbert transform}
+\label{sec:phph_retarded}
+% ----------------------------------------------------------------------
+
+The retarded self-energy is reconstructed from the lesser/greater pair by
+the Kramers--Kronig relation
+\begin{equation}\label{eq:phph_KK}
+  \Sigma^{R}(\omega)
+  \;=\;
+  \tfrac12\bigl[\Sigma^{>}(\omega) - \Sigma^{<}(\omega)\bigr]
+  \;+\;
+  \tfrac{i}{2}\,\mathcal H\!\bigl[\Sigma^{>} - \Sigma^{<}\bigr](\omega),
+\end{equation}
+where $\mathcal H$ is the Hilbert transform along the $\omega$-axis. We
+reuse \emph{verbatim} the FFT Hilbert kernel implemented in
+\texttt{coulomb\_screening/polarization.py}
+(\texttt{hilbert\_transform()}), now relocated into the shared helper
+\texttt{src/quatrex/core/fft\_utils.py}. The standalone reference
+implementation of \S\ref{sec:phph_reference} also offers a singular
+principal-value path; this is dropped in production for parity with the
+Coulomb-screening side and to avoid an $\mathcal O(n_\omega^{\,2})$
+reconstruction.
+
+% ----------------------------------------------------------------------
+\subsection{Symmetries enforced after each SCBA update}
+\label{sec:phph_symmetries}
+% ----------------------------------------------------------------------
+
+The phonon-phonon self-energy obeys the bosonic Keldysh symmetries
+\begin{align}
+  \Sigma^{<}_{ab}(\omega)   &= -\bigl[\Sigma^{>}_{ba}(-\omega)\bigr]^{*},
+  \label{eq:phph_bose_full_axis}\\
+  \Sigma^{R}_{ab}(\omega)   &= \bigl[\Sigma^{R}_{ba}(-\omega)\bigr]^{*},
+  \\
+  \Sigma^{<,>}_{ab}(\omega) &= -\bigl[\Sigma^{<,>}_{ba}(\omega)\bigr]^{*}.
+\end{align}
+Equation~\eqref{eq:phph_bose_full_axis} is the bosonic
+\emph{full-axis} symmetry; it is enforced after every SCBA update via
+\texttt{DSDBSparse.symmetrize}, exactly mirroring the standalone
+implementation
+\texttt{anharmonic.py:\_symmetrize\_lesser\_greater}.
+
+% ======================================================================
+\section{Block-sparsity and storage of \texorpdfstring{$\Phi$}{Phi}}
+\label{sec:phph_block_sparsity}
+% ======================================================================
+
+Two distinct sparsity questions arise: the sparsity of $\Phi$ itself, and
+the sparsity of the resulting $\Sigma_{\rm pp}$.
+
+\paragraph{Sparsity of $\Phi$ (block-sparse storage).}
+A dense storage of $\Phi$ is
+$\mathcal O(N_{\rm dof}^{3})$ in memory, which is prohibitive for the
+sizes targeted by QuaTrEx (e.g.\ a $54$-atom Si transport cell already
+gives $162^{3}\approx 4.3$\,M complex entries). Physically, $\Phi$ is
+strictly local in real space — non-zero only when atoms $a$, $b$, $c$ all
+fall within a short-range cutoff. We therefore store $\Phi$ as a
+\emph{block-sparse triplet container} keyed by transport-cell triplets:
+\begin{equation}\label{eq:phi_blocks}
+  \Phi
+  \;\equiv\;
+  \bigl\{\,(I,J,K)\;\mapsto\;
+          \Phi^{(I,J,K)}\in\mathbb C^{b_I\times b_J\times b_K}\,\bigr\},
+\end{equation}
+with $|I-J|,|I-K|,|J-K|\le 1$ enforced at build time. Here $b_I$ is the
+DOF size of transport cell $I$. The contraction
+\eqref{eq:Sigma_pp} loops only over present keys and never materialises a
+dense tensor. The same dictionary is the on-disk format produced by
+the (planned) sparse FC3 writer in \texttt{phonon\_inputs}.
+
+\paragraph{Sparsity of $\Sigma_{\rm pp}$ (block-tridiagonal).}
+The 3-phonon bubble can in principle populate up to $|I-J|\le 2$ for
+nearest-neighbour-supported $\Phi$. The user's transport-cell
+construction allows this to be controlled: by enlarging the
+\emph{primitive-cells-per-transport-cell} factor, all relevant $\Phi$
+triplets fall inside a single transport cell, and the resulting
+$\Sigma_{\rm pp}$ is naturally block-tridiagonal — matching the existing
+QuaTrEx sparsity pattern. We project
+$\Sigma_{\rm pp}$ onto the existing
+\texttt{DSDBSparse} sparsity pattern and emit a one-time warning if the
+projection drops more than $1\%$ of the Frobenius norm.
+
+% ======================================================================
+\section{Energy-convolution algorithm}
+\label{sec:phph_algorithm}
+% ======================================================================
+
+The convolution \eqref{eq:G_conv_G} is computed via FFT along the
+$\omega$-axis, zero-padded to length
+$n_{\rm fft}=2n_\omega-1$ to suppress wrap-around. The cubic vertex is
+$\omega$-independent, so the contraction is performed in the FFT domain
+in a single sweep — porting the layout of
+\texttt{anharmonic.py:\_compute\_phph\_self\_energy\_finite}:
+\begin{align}
+  \tilde G^{\lessgtr}(\omega)
+    &\;=\; \mathrm{FFT}_\omega\bigl[G^{\lessgtr}\bigr]
+        \quad\text{(zero-padded)},
+        \label{eq:phph_step_FFT}\\
+  A_{a c d}(\omega)
+    &\;=\; \sum_{e}\;\Phi^{(I)}_{a c e}\;\tilde G^{\lessgtr}_{e d}(\omega),
+        \label{eq:phph_step_A}\\
+  B_{a b d}(\omega)
+    &\;=\; \sum_{c}\;A_{a c d}(\omega)\;\tilde G^{\lessgtr}_{c b}(\omega),
+        \label{eq:phph_step_B}\\
+  \widehat\Sigma^{\lessgtr}_{a b}(\omega)
+    &\;=\; \frac{i\hbar}{2}\;
+           \sum_{d}\;B_{a b d}(\omega)\;\Phi^{(J)}_{b\,\cdot\,d},
+        \label{eq:phph_step_S}\\
+  \Sigma^{\lessgtr}(\omega)
+    &\;=\; \mathrm{IFFT}_\omega\bigl[\widehat\Sigma^{\lessgtr}\bigr]
+           \cdot \frac{d\omega}{2\pi}\,.
+        \label{eq:phph_step_IFFT}
+\end{align}
+The outer loop is over the keys $(I,J,K)$ of the
+$\Phi$-block dictionary; \eqref{eq:phph_step_A}--\eqref{eq:phph_step_S}
+are dense per block-triplet but small. The implementation reuses
+\texttt{qttools.fft.fft\_convolve} (already imported by
+\texttt{coulomb\_screening/polarization.py}).
+
+% ======================================================================
+\section{Units and prefactor}
+\label{sec:phph_units}
+% ======================================================================
+
+The standalone reference \texttt{anharmonic.py} works in
+$\mathrm{THz}^{2}$. The QuaTrEx solver loads dynamical matrices in
+$(\mathrm{rad}/\mathrm{s})^{2}$ via
+\texttt{quatrex\_writer.py}, but the energy axis on the
+\texttt{PhononSolver} side is conventionally in eV (i.e.\
+$\hbar\omega$). We therefore adopt one consistent
+internal unit system: $\omega$ in eV, $\Phi$ pre-converted to
+$\mathrm{eV}^{2}$, and the prefactor in
+\eqref{eq:Sigma_pp} reads
+\begin{equation}\label{eq:phph_prefactor}
+  \frac{i\hbar}{2}\;\frac{d\omega}{2\pi}
+  \;\xrightarrow[\text{natural units, }\hbar=1]{}\;
+  \frac{i}{4\pi}\,d\omega.
+\end{equation}
+The conversion table from $\mathrm{THz}^{2}$ to $\mathrm{eV}^{2}$ is
+already present in \texttt{phonon\_inputs/constants.py} and is reused at
+FC3 load time; a unit test pins the round-trip against
+\texttt{anharmonic\_transmission\_finite} on a small toy.
+
+% ======================================================================
+\section{Integration into the SCBA loop}
+\label{sec:phph_scba}
+% ======================================================================
+
+The SCBA driver \texttt{src/quatrex/core/scba.py} already iterates
+\begin{equation*}
+  G^{\lessgtr,R}\;\xrightarrow{\text{Dyson}}\;
+  \Sigma^{\lessgtr,R}_{\text{int}}\;\xrightarrow{\text{mix}}\;G^{\lessgtr,R},
+\end{equation*}
+sequentially calling each interaction's
+\texttt{ScatteringSelfEnergy.compute()}. The new
+\texttt{SigmaPhononPhonon.compute(g\_lesser, g\_greater, out=(...))}
+plugs into the empty hook
+\texttt{\_compute\_phonon\_phonon\_interaction()} (currently
+\texttt{pass}) and produces an additive contribution to the
+\texttt{(sigma\_lesser, sigma\_greater, sigma\_retarded)} buffers. The
+\texttt{PhononSolver.solve(...)} side is unchanged: it consumes
+$\Sigma^{\lessgtr,R}$ verbatim.
+
+The trigger is the existing knob
+\texttt{config.phonon.model = "negf"} (currently raises
+\texttt{NotImplementedError}); enabling it requires \texttt{fc3\_path} to
+point at a valid \texttt{fc3.hdf5}.
+
+% ======================================================================
+\section{Verification and reference parity}
+\label{sec:phph_reference}
+% ======================================================================
+
+The standalone implementation
+\texttt{phonon/input\_calc/phonon\_inputs/anharmonic.py:643--691}
+(\texttt{\_compute\_phph\_self\_energy\_finite}) serves as the numerical
+reference. We pin parity at the level of $\Sigma^{\lessgtr,R}$ in a
+unit test
+\texttt{tests/quatrex/phonon/test\_sse\_phonon\_phonon.py}, requiring
+\begin{equation*}
+  \frac{\bigl\|\Sigma^{<}_{\text{quatrex}}-\Sigma^{<}_{\text{ref}}\bigr\|_{\infty}}
+       {\bigl\|\Sigma^{<}_{\text{ref}}\bigr\|_{\infty}}
+  \;<\;10^{-6}
+\end{equation*}
+on a 4-atom toy with FC3 generated by
+\texttt{phonon\_inputs/dfpt.py}. Energy conservation
+$|J_L - J_R| / (|J_L|+|J_R|) < 10^{-2}$ and the bosonic
+symmetry~\eqref{eq:phph_bose_full_axis} are checked at every SCBA
+iteration.
+
+% ======================================================================
+% End of chapter.
+% ======================================================================
