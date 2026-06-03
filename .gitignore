@@ -198,3 +198,28 @@ kappa-m*.hdf5
 # --- Large local backups (regenerable / not for version control) ---
 phonon_old/
 phonon/reaps_old/
+
+# --- Large local copies pulled from the compute cluster (regenerable DFT
+#     outputs, diagnostic runs, plots); not for version control ---
+cluster/
+
+# --- LaTeX build artifacts under document/ (regenerable by the TeX build) ---
+document/**/*.aux
+document/**/*.bcf
+document/**/*.bbl
+document/**/*.blg
+document/**/*.fls
+document/**/*.fdb_latexmk
+document/**/*.synctex.gz
+document/**/*.toc
+document/**/*.out
+document/**/*.lof
+document/**/*.lot
+document/**/*.run.xml
+document/**/*.nav
+document/**/*.snm
+document/**/*.vrb
+
+# --- Generated structure-figure binaries (tracked report figures live in
+#     document/fig/; document/src/fig/ holds regenerable structure plots) ---
+document/src/fig/
