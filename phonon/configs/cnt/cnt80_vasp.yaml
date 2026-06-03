@@ -1,0 +1,99 @@
+## phonon_inputs configuration: (8,0) zigzag carbon nanotube — VASP
+## The geometry used by the electron-GW transport example
+## (examples/w90/carbon-nanotube): 32-atom (8,0) zigzag cell, period
+## T = 3 * 1.42 = 4.26 A, diameter ~6.26 A. Semiconducting tube (the gap is
+## why it was chosen for the electron transport demo). This config builds the
+## phonon analog: FC2+FC3 so we can run anharmonic phonon-phonon transport on
+## the same tube as the GW electron run.
+##
+## Geometry generated with ase.build.nanotube(8, 0, length=1, bond=1.42),
+## tube axis along z, centered in a 17 A vacuum box in x,y (~10.7 A gap to the
+## periodic image; box > FC2 cutoff + tube diameter).
+##
+## Usage (from phonon/):
+##   python -m phonon_inputs pipeline   --config configs/cnt/cnt80_vasp.yaml
+##   python -m phonon_inputs fc3-sow    --config configs/cnt/cnt80_vasp.yaml
+##   python -m phonon_inputs fc3-run    --config configs/cnt/cnt80_vasp.yaml
+##   python -m phonon_inputs fc3-reap   --config configs/cnt/cnt80_vasp.yaml
+
+fc_method: hiphive   # rattle + sparse fit (same pathway as cnt33 / the SiNWs)
+
+structure:
+  source: inline
+  symbols: [C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C]
+  lattice:
+    - [17.0000, 0.0000, 0.0000]   # vacuum direction (a)
+    - [0.0000, 17.0000, 0.0000]   # vacuum direction (b)
+    - [0.0000,  0.0000, 4.2600]   # tube axis (c) = 3 * 1.42 A
+  scaled_positions:
+    - [0.684209, 0.500000, 0.000000]
+    - [0.670187, 0.570494, 0.833333]
+    - [0.670187, 0.570494, 0.500000]
+    - [0.630255, 0.630255, 0.333333]
+    - [0.630255, 0.630255, 0.000000]
+    - [0.570494, 0.670187, 0.833333]
+    - [0.570494, 0.670187, 0.500000]
+    - [0.500000, 0.684209, 0.333333]
+    - [0.500000, 0.684209, 0.000000]
+    - [0.429506, 0.670187, 0.833333]
+    - [0.429506, 0.670187, 0.500000]
+    - [0.369745, 0.630255, 0.333333]
+    - [0.369745, 0.630255, 0.000000]
+    - [0.329813, 0.570494, 0.833333]
+    - [0.329813, 0.570494, 0.500000]
+    - [0.315791, 0.500000, 0.333333]
+    - [0.315791, 0.500000, 0.000000]
+    - [0.329813, 0.429506, 0.833333]
+    - [0.329813, 0.429506, 0.500000]
+    - [0.369745, 0.369745, 0.333333]
+    - [0.369745, 0.369745, 0.000000]
+    - [0.429506, 0.329813, 0.833333]
+    - [0.429506, 0.329813, 0.500000]
+    - [0.500000, 0.315791, 0.333333]
+    - [0.500000, 0.315791, 0.000000]
+    - [0.570494, 0.329813, 0.833333]
+    - [0.570494, 0.329813, 0.500000]
+    - [0.630255, 0.369745, 0.333333]
+    - [0.630255, 0.369745, 0.000000]
+    - [0.670187, 0.429506, 0.833333]
+    - [0.670187, 0.429506, 0.500000]
+    - [0.684209, 0.500000, 0.333333]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    C: C                          # uses potpaw_PBE/C/POTCAR
+  encut: 400                      # eV - matches C ENMAX; enough for forces
+  ediff: 1.0e-6                   # eV - tight enough for accurate forces, fast SCF
+  ismear: 0                       # Gaussian smearing (semiconducting tube; small sigma)
+  sigma: 0.05                     # eV
+  prec: Accurate
+  lreal: Auto                     # real-space projectors -> faster on the 96-atom supercell
+  lwave: false
+  lcharg: false
+  ncore: 4
+  kpar: 2
+  kpoints_scf: [1, 1, 4]          # 1x1x3 supercell -> 4 z-kpts ~ 12 in primitive units
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: relax              # ISIF=2: atoms only -> keeps tube length & vacuum fixed
+  forc_conv_thr: 0.005            # eV/A
+  calculator: vasp
+  work_dir: ./relax_cnt80_vasp
+
+hiphive:
+  supercell: [1, 1, 3]            # 96 atoms (12.78 A along z); cutoff < L/2 = 6.39 A
+  n_structures: 40                # bigger cell than (3,3) -> more rattled configs for the fit
+  rattle_method: mc
+  rattle_std: 0.03                # Angstrom
+  rattle_d_min: 1.2               # min C-C separation during MC rattle (bond is 1.42 A)
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [5.0, 3.5]             # [FC2, FC3] A; both < L/2 = 6.39; FC3 to ~3rd C-C neighbor
+  fit_method: ardr                # sparse Bayesian regression
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: vasp
+  work_dir: ./fc3_hiphive_cnt80_vasp
+  pw_timeout: 5400                # 1.5 h per rattled run (96-atom supercell, mostly vacuum)
