@@ -28,6 +28,7 @@ from postproc.spectral import dynamical_matrix_at_q
 CFGS = {
     "cnt33": ("phonon/configs/cnt/cnt33_vasp.yaml", 18.0),
     "d5a": ("phonon/configs/sinw/sinw100_d5a_vasp_sc4_fc4.yaml", 16.0),
+    "d11a": ("phonon/configs/sinw/sinw100_d11a_vasp_sc4.yaml", 16.0),
 }
 
 ap = argparse.ArgumentParser()
