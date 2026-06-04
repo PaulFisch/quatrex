@@ -1286,7 +1286,6 @@ def transmission(
     loop_propagator: str = "loop_only",
     stage_loop_first: bool = False,
     static_mixing: float | None = None,
-    static_uu: np.ndarray | None = None,
 ) -> dict:
     """Reference anharmonic phonon transport (NEGF + SCBA, dense).
 
@@ -1450,7 +1449,7 @@ def transmission(
             dw_thz=dw_thz, n_dof=n_dof, n_slabs=n_slabs,
             fc3_dev_mw=fc3_dev_mw, fc4_dev_mw=fc4_dev_mw,
             use_loop=loop, use_tadpole=tadpole,
-            optical_projector=optical_projector, fixed_uu=static_uu)
+            optical_projector=optical_projector)
         # The static loop/tadpole self-energy is carried in the fixed-point
         # vector; linear mixing converges it slowly, so default to the
         # safeguarded Anderson accelerator (with the loosened static step cap)

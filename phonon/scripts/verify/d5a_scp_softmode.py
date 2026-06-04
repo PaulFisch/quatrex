@@ -19,8 +19,6 @@ import warnings; warnings.filterwarnings("ignore")
 
 from phonon.finite_analysis.loader import load_system
 from solver.dense import transmission_finite
-from solver import static_se
-from postproc.spectral import dynamical_matrix_qpath
 
 CFG = str(_REPO / "phonon/configs/sinw/sinw100_d5a_vasp_sc4.yaml")
 T = 300.0
@@ -30,15 +28,9 @@ ph = bundle.phonon
 fc3 = str(Path(bundle.meta["fc3_path"]).expanduser().resolve())
 print(f"d5a loaded; fc3={fc3}")
 
-# wire-equilibrium <uu> from the 1D q_z phonon mode sum (the physical, symmetric
-# displacement variance -- NOT the over-counted open-device G^<).
-N = 24
-qz = np.array([[0.0, 0.0, k / N] for k in range(N)])
-dq = dynamical_matrix_qpath(ph, qz)
-uu_wire = static_se.bulk_equilibrium_uu(dq, T)
-print(f"wire <w^2>/dir (mean over DOF) = {np.mean(np.diag(uu_wire)):.4f} amu*A^2 "
-      f"(||uu||={np.linalg.norm(uu_wire):.3f})")
-
+# The tadpole <uu> is sourced self-consistently from the device G^< every SCBA
+# iteration (a fixed/frozen <uu> is non-self-consistent and physically wrong --
+# it gives a runaway tadpole on the soft twist; removed).
 common = dict(
     fc3_hdf5=fc3, transport_direction="z",
     freq_range_thz=(0.01, 18.0, 61), eta_factor=0.5,
@@ -65,5 +57,7 @@ def run(label, **kw):
 print("\n== d5a SCBA convergence + soft-mode tests (n_slabs=1, 300 K) ==")
 run("baseline (retarded=fft)")
 run("retarded=half (KK variant)", retarded="half")
-run("+tadpole (wire <uu>)", tadpole=True, static_uu=uu_wire)
-run("+tadpole, retarded=half", tadpole=True, static_uu=uu_wire, retarded="half")
+run("+tadpole (self-consistent)", tadpole=True, stage_loop_first=True,
+    static_mixing=0.1)
+run("+tadpole, retarded=half", tadpole=True, stage_loop_first=True,
+    static_mixing=0.1, retarded="half")

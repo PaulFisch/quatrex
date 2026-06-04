@@ -304,7 +304,7 @@ def build_static_self_energy_hook(
     *, dw_thz, n_dof, n_slabs,
     fc3_dev_mw=None, fc4_dev_mw=None,
     use_loop=False, use_tadpole=False,
-    optical_projector=None, fixed_uu=None,
+    optical_projector=None,
 ):
     """Build the per-iteration static self-energy hook for the SCBA loop.
 
@@ -341,14 +341,13 @@ def build_static_self_energy_hook(
                 "static self-energy (loop/tadpole) is implemented for the "
                 "Gamma device (n_kpts=1) only; got "
                 f"n_kpts={g_less_dev_q.shape[0]}")
-        if fixed_uu is not None:
-            # Bulk BZ-summed equilibrium <uu> (Debye-Waller-correct, symmetric).
-            # Preferred for a bulk static self-energy: the open single-cell
-            # device G^< over-counts the low-omega <uu> and spuriously breaks the
-            # tadpole's symmetry-zero (see scripts/verify/tadpole_diag.py).
-            uu = np.asarray(fixed_uu)
-        else:
-            uu = equal_time_uu(g_less_dev_q[0], dw_thz)    # (N_D, N_D)
+        # Self-consistent equal-time <uu> from the current device G^<. This is
+        # the physical displacement correlation of the open (possibly
+        # non-equilibrium) device; the static loop/tadpole MUST be built from it,
+        # recomputed every SCBA iteration so the soft mode self-limits. (A fixed
+        # bulk-equilibrium <uu> injected here would be non-self-consistent and is
+        # physically wrong for the device -- removed.)
+        uu = equal_time_uu(g_less_dev_q[0], dw_thz)        # (N_D, N_D)
         sig = np.zeros((N_D, N_D), dtype=float)
         if use_loop:
             sig = sig + sigma_loop(fc4_dev_mw, uu)
