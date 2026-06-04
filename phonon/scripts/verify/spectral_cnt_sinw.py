@@ -30,30 +30,42 @@ STRUCTS = [
 OUT = _REPO / "document/fig/transport_sweeps"
 OUT.mkdir(parents=True, exist_ok=True)
 
-fig, axes = plt.subplots(1, len(STRUCTS), figsize=(11, 4.4))
-for ax, (name, cfg, fmax) in zip(np.atleast_1d(axes), STRUCTS):
+# two columns (full range + low-omega zoom) per structure so the soft twist
+# (0.0075-0.0265 THz, otherwise buried at the origin) is actually resolved.
+fig, axes = plt.subplots(2, len(STRUCTS), figsize=(11, 8))
+for col, (name, cfg, fmax) in enumerate(STRUCTS):
     bundle = load_system(str(_REPO / cfg), validate=False, transport_axis=2)
     ph = bundle.phonon
     nq = 81
     qz = np.linspace(0.0, 0.5, nq)
     q_path = np.column_stack([np.zeros(nq), np.zeros(nq), qz])
     D_q = dynamical_matrix_qpath(ph, q_path)
-    grid = np.linspace(0.02, fmax, 700)
-    eta_w = 0.5 * (fmax / 700) * 6          # a few grid spacings
-    A = spectral_function_qw(D_q, grid, eta_w)        # (nq, nw)
     bands = frequencies_from_dynamical(D_q)           # (nq, N) signed THz
     qd = qz * 2.0                                     # in units of pi/a (0..1)
-    im = ax.pcolormesh(qd, grid, np.log10(A.T + 1e-3), cmap="magma",
-                       shading="auto", rasterized=True)
-    for n in range(bands.shape[1]):
-        ax.plot(qd, np.abs(bands[:, n]), color="cyan", lw=0.35, alpha=0.5)
     soft = float(np.min(np.abs(bands[0])[np.abs(bands[0]) > 1e-4]))
-    ax.set_title(f"{name}  (soft mode {soft:.4f} THz)")
-    ax.set_xlabel(r"$q_z\ [\pi/a]$")
-    ax.set_ylabel(r"$\omega$ [THz]")
-    ax.set_ylim(0, fmax)
-    fig.colorbar(im, ax=ax, label=r"$\log_{10} A(q_z,\omega)$")
-    print(f"{name}: nq={nq}, soft mode {soft:.4f} THz, "
+
+    # (top) full range -- coarse grid + eta a few grid spacings.
+    # (bottom) 0-1.2 THz zoom -- fine grid + tiny eta to resolve the twist.
+    for row, (wlo, whi, nw, eta_w) in enumerate([
+            (0.02, fmax, 700, 0.5 * (fmax / 700) * 6),
+            (0.001, 1.2, 600, 0.004)]):
+        ax = axes[row, col]
+        grid = np.linspace(wlo, whi, nw)
+        A = spectral_function_qw(D_q, grid, eta_w)
+        im = ax.pcolormesh(qd, grid, np.log10(A.T + 1e-3), cmap="magma",
+                           shading="auto", rasterized=True)
+        for n in range(bands.shape[1]):
+            ax.plot(qd, np.abs(bands[:, n]), color="cyan", lw=0.35, alpha=0.5)
+        ax.set_xlabel(r"$q_z\ [\pi/a]$")
+        ax.set_ylabel(r"$\omega$ [THz]")
+        ax.set_ylim(wlo if row else 0, whi)
+        if row == 1:
+            ax.axhline(soft, color="lime", ls=":", lw=1.0)
+            ax.set_title(f"{name}  zoom: twist at {soft:.4f} THz (green)")
+        else:
+            ax.set_title(f"{name}  (full range)")
+        fig.colorbar(im, ax=ax, label=r"$\log_{10} A(q_z,\omega)$")
+    print(f"{name}: nq={nq}, soft/twist {soft:.4f} THz, "
           f"max band {np.abs(bands).max():.2f} THz")
 
 fig.tight_layout()
