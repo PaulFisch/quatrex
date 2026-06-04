@@ -27,6 +27,7 @@ across the two FC3 backends.
 """
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -1055,13 +1056,17 @@ def reap(
                 asr_residuals[order] = float(m.group(1)) if m else float("nan")
                 print(f"  FC{order} ASR residual = {asr_residuals[order]:.3e}.")
 
-        max_bytes = 8 * (1 << 30)
+        # The dense FC4 export materialises n_super^4 * 81 * 8 bytes. The cap is
+        # configurable (QUATREX_FC4_MAX_GIB, default 8) so a roomy node can build
+        # a larger dense FC4 in RAM (e.g. d5a's 84-atom cell = 30 GiB).
+        max_bytes = int(float(os.environ.get("QUATREX_FC4_MAX_GIB", "8"))
+                        * (1 << 30))
         need = n_super ** 4 * 81 * 8
         if need > max_bytes:
             print(f"  WARNING: dense FC4 would need {need / (1 << 30):.1f} GiB "
-                  f"(n_super={n_super}); skipping FC4 export. Use a smaller "
-                  "supercell / shorter c4 (FC4 is short-ranged), or the sparse "
-                  "get_fc_dict unfold route (not yet implemented).")
+                  f"(n_super={n_super}) > cap {max_bytes / (1 << 30):.0f} GiB; "
+                  "skipping FC4 export. Raise QUATREX_FC4_MAX_GIB, use a smaller "
+                  "supercell / shorter c4, or the sparse get_fc_dict route.")
         else:
             from solver.fc4_device import build_compact_reference_fc4_from_dense
 
