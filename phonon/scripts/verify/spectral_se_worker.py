@@ -34,10 +34,16 @@ CFGS = {
 ap = argparse.ArgumentParser()
 ap.add_argument("--struct", required=True, choices=list(CFGS))
 ap.add_argument("--temp", type=float, required=True)
-ap.add_argument("--mode", required=True, choices=["bubble_half", "bubble_fft", "scp_fft"])
+ap.add_argument("--mode", required=True,
+                choices=["bubble_half", "bubble_fft", "scp_fft",
+                         "loop_fft", "loop_tadpole_fft"])
 ap.add_argument("--nfreq", type=int, default=81)
 ap.add_argument("--eta", type=float, default=0.5)
 ap.add_argument("--max-iter", type=int, default=80)
+ap.add_argument("--solver", default=None,
+                help="force a fixed-point solver, e.g. 'linear' (the soft-mode "
+                     "wires diverge under Anderson -- use linear)")
+ap.add_argument("--mixing", type=float, default=0.3)
 ap.add_argument("--out", required=True)
 args = ap.parse_args()
 
@@ -56,9 +62,17 @@ if args.mode == "bubble_half":
     kw.update(retarded="half")
 elif args.mode == "bubble_fft":
     kw.update(retarded="fft")
-else:  # scp_fft
+elif args.mode == "scp_fft":
     kw.update(retarded="fft", tadpole=True, stage_loop_first=True,
               static_mixing=0.1)
+elif args.mode == "loop_fft":
+    kw.update(retarded="fft", loop=True, fc4_hdf5=fc3,
+              stage_loop_first=True, static_mixing=0.1)
+else:  # loop_tadpole_fft
+    kw.update(retarded="fft", loop=True, tadpole=True, fc4_hdf5=fc3,
+              stage_loop_first=True, static_mixing=0.05)
+if args.solver is not None:
+    kw.update(solver=args.solver, mixing=args.mixing)
 
 try:
     r = transmission_finite(ph, **kw)

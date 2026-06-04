@@ -209,26 +209,48 @@ def mean_force(fc3_mw, uu, masses_dof, f0_ev_per_a=None):
     return f
 
 
-def mean_displacement(fc3_mw, uu, phi_eff, *, optical_projector=None):
-    """Static mean displacement ``<w> = -CONVERSION_THZ2 Phi_eff^{-1} s`` (mass-weighted).
+def mean_displacement(fc3_mw, uu, phi_eff, *, optical_projector=None,
+                      omega2_floor_rel=1e-3, omega2_floor_abs=None):
+    """Static mean displacement ``<w> = -CONVERSION_THZ2 Phi_eff^{+} s`` (mass-weighted).
 
-    Solves the anharmonic force balance ``Phi_eff <w> = -CONVERSION_THZ2 s`` with
-    ``s = tadpole_source`` and ``Phi_eff`` the (THz^2) effective dynamical
-    matrix. Only the **optical** intermediate may enter as a self-energy; the
-    acoustic / rigid-translation (``T_A``) part is singular and must be handled
-    by cell relaxation, so it is projected out via ``optical_projector`` (the
-    ``Q = I - T T^T`` from :func:`phonon.solver.zero_modes.build_translation_projector`,
-    or the dynamical zero-mode projector). Returns ``<w>`` in ``sqrt(amu)*Angstrom``.
+    Solves the anharmonic force balance ``Phi_eff <w> = -CONVERSION_THZ2 s`` for
+    the finite-T relaxation of the *internal* coordinates, with ``s =
+    tadpole_source`` and ``Phi_eff`` the (THz^2) effective dynamical matrix.
+
+    Per Paulatto, Errea & Calandra (PRB 91, 054304, 2015), the cubic tadpole
+    ``T_O`` includes **only the optical phonons** and "accounts for the
+    relaxation of internal coordinates" -- it vanishes for symmetry-determined
+    coordinates. The rigid translations and, for a 1-D wire, the near-rotational
+    soft *twist* quasi-Goldstone are NOT internal-coordinate relaxations: they
+    relax by rigid motion / symmetry, so they must be excluded. A plain
+    ``Phi_eff^{-1}`` instead amplifies any residual force along the ~0 twist
+    eigenvalue by ~1/omega^2 (~1e4 for the d5a wire) and diverges.
+
+    We therefore use the **regularised pseudo-inverse on Phi_eff's own
+    spectrum**: diagonalise ``Phi_eff`` and invert only the eigenvalues above a
+    floor ``max(omega2_floor_rel * max|eig|, omega2_floor_abs)`` (dropping the
+    rigid-body / soft / any unstable negative modes). This is robust as Phi_eff
+    drifts across SCBA iterations -- unlike applying a *bare*-D projector to the
+    rhs of a full solve, whose near-zero eigenvector no longer matches the
+    iterated Phi_eff and leaks through the 1/omega^2 amplification (the NaN bug).
+    ``optical_projector`` (if given) is additionally applied to remove the
+    symmetry-defined components. Returns ``<w>`` in ``sqrt(amu)*Angstrom``.
     """
     s = tadpole_source(fc3_mw, uu)               # (N,)
     rhs = -CONVERSION_THZ2 * s
     if optical_projector is not None:
         rhs = optical_projector @ rhs
-    d = 0.5 * (np.asarray(phi_eff) + np.asarray(phi_eff).conj().T)
-    w_mean = np.linalg.solve(d, rhs)
+    d = 0.5 * (np.asarray(phi_eff) + np.asarray(phi_eff).conj().T).real
+    evals, evecs = np.linalg.eigh(d)
+    scale = float(np.max(np.abs(evals))) + 1e-300
+    cutoff = float(omega2_floor_rel) * scale
+    if omega2_floor_abs is not None:
+        cutoff = max(cutoff, float(omega2_floor_abs))
+    inv = np.where(evals > cutoff, 1.0 / evals, 0.0)   # keep stiff optical modes
+    w_mean = evecs @ (inv * (evecs.conj().T @ rhs))
     if optical_projector is not None:
         w_mean = optical_projector @ w_mean
-    return w_mean
+    return w_mean.real
 
 
 def sigma_tadpole(fc3_mw, w_mean):
