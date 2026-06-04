@@ -296,16 +296,25 @@ class _AndersonAccelerator:
     """
 
     def __init__(self, depth, beta, *, weights=None, cond_max=1e8,
-                 step_cap=2.0, stagnation=5):
+                 step_cap=2.0, stagnation=5, revert_factor=0.0):
         self.depth = int(depth)
         self.beta = float(beta)
         self.weights = weights
         self.cond_max = float(cond_max)
         self.step_cap = float(step_cap)
         self.stagnation = int(stagnation)
+        # Revert-to-best safeguard: if the residual exceeds revert_factor x the
+        # best seen, the recent secants are poisoning the least-squares (a
+        # strongly nonlinear / soft-mode map). Discard the history AND revert the
+        # iterate to the best one (so the map is re-evaluated there), instead of
+        # marching on from the diverged point. This restores the guarantee that
+        # safeguarded Anderson is never worse than damped linear. revert_factor
+        # <= 0 disables it (legacy keep-history behaviour).
+        self.revert_factor = float(revert_factor)
         self.x_hist: list = []
         self.f_hist: list = []
         self.best_fnorm = float("inf")
+        self.best_x = None
         self.n_since_best = 0
 
     def fnorm(self, f):
@@ -324,9 +333,20 @@ class _AndersonAccelerator:
 
         if fnorm < self.best_fnorm:
             self.best_fnorm = fnorm
+            self.best_x = np.array(x_in, copy=True)
             self.n_since_best = 0
         else:
             self.n_since_best += 1
+            # Revert-to-best on a genuine uptick: the extrapolation has diverged,
+            # so discard the poisoned history and hand back the best iterate (the
+            # map is re-evaluated there next iteration, then a fresh damped step
+            # is taken). This is the guarantee-preserving safeguard.
+            if (self.revert_factor > 0.0 and self.best_x is not None
+                    and fnorm > self.revert_factor * self.best_fnorm):
+                self.x_hist.clear()
+                self.f_hist.clear()
+                self.n_since_best = 0
+                return np.array(self.best_x, copy=True), fnorm
         # Stagnation-only restart: NOT triggered by a single uptick.
         if self.n_since_best >= self.stagnation:
             self.x_hist.clear()
