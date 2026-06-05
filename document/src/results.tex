@@ -476,3 +476,96 @@ the vertex magnitude -- consistent with the q-resolved finding of
   nanowires. The off-diagonal Green's-function content dominates.}
   \label{fig:res_cutoffs}
 \end{figure}
+
+% ======================================================================
+\section{Static self-consistent-phonon corrections: loop, tadpole, and the soft mode}
+\label{sec:res_scp}
+% ======================================================================
+
+Beyond the dynamic three-phonon bubble $\Sigma_B(\omega)$ (the only term
+with an imaginary part, hence the linewidth), the lowest-order
+self-consistent-phonon (SCP) theory adds two \emph{static}, real,
+Hermitian self-energies: the quartic \emph{loop}
+$\Sigma_L=\tfrac12\,\Phi_4\!:\!\langle uu\rangle$ (Debye--Waller
+stiffening, needs FC4) and the cubic \emph{tadpole}
+$\Sigma_T=\Phi_3\!:\!\langle u\rangle$ with
+$\langle u\rangle=-\Phi_\mathrm{eff}^{-1}\,\tfrac12\Phi_3\!:\!\langle
+uu\rangle$ (internal-coordinate relaxation, needs FC3). We computed all
+three contributions across temperature for the soft-mode
+\texttt{d5a} nanowire and the stiff (3,3) carbon nanotube
+(\cref{fig:res_scp_mag}); the CNT FC4 was obtained from the existing
+rattled set with a short ($2.0$~\AA) quartic cutoff (the longer cutoff
+overfits the $30$ structures), the \texttt{d5a} FC4 from the \texttt{rfe}
+refit of \cref{sec:res_fc}.
+
+\paragraph{Magnitudes and a hierarchy that flips with stiffness.}
+For the stiff CNT the dynamic bubble dominates,
+$\max|\mathrm{Re}\,\Sigma_B|:\|\Sigma_L\|:\|\Sigma_T\|\approx 8:1:0.5$
+at $300$~K, all growing with $T$ as $\langle uu\rangle$ grows. For the
+soft \texttt{d5a} wire the ordering \emph{inverts}: the bubble is weak
+($\max|\mathrm{Re}\,\Sigma_B|\!\approx\!670$~THz$^2$ at $300$~K) while the
+loop is the largest correction
+($\|\Sigma_L\|\!\approx\!1045$~THz$^2$), because the near-zero twist mode
+inflates the static $\langle uu\rangle$. In both structures the loop
+exceeds the tadpole at every temperature: the quartic mean-field
+stiffening dominates the cubic thermal-force shift.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/static_se_study.pdf}
+  \caption{Static-correction magnitudes (top) and heat-flow conservation
+  per correction (bottom) versus temperature, for the stiff CNT (left)
+  and the soft-mode \texttt{d5a} nanowire (right). The bubble dominates
+  for the CNT; the loop dominates for \texttt{d5a}. Loop $>$ tadpole
+  throughout.}
+  \label{fig:res_scp_mag}
+\end{figure}
+
+\paragraph{Is the loop necessary? Structure-dependent.} For the CNT the
+loop is a $\sim10\%$ renormalisation that does not improve the (already
+$10^{-4}$) conservation, so it is unnecessary. For \texttt{d5a} it earns
+its place on three counts: it is the dominant static term; it
+\emph{rescues} the high-temperature SCBA (the $600$~K bubble alone fails
+to converge, whereas bubble$+$loop converges); and it improves the
+heat-flow conservation (halving it from $2.98\%$ to $1.34\%$ at $30$~K,
+and reaching $0.45\%$ at $100$~K with the loop$+$tadpole). The loop is the
+physical cure for a soft mode: stiffening it lifts the propagator out of
+the near-singular region.
+
+\paragraph{The tadpole breaks down --- and the breakdown is diagnostic.}
+The tadpole behaves badly at high temperature: for \texttt{d5a} it drives
+the lowest mode imaginary at $300$ and $600$~K (renormalised
+$\omega^2<0$) and the SCBA stops converging, with the heat-flow
+conservation \emph{increasing} (\cref{fig:res_scp_tadpole}). This is
+physically expected, not a code error. As emphasised by
+Paulatto~\emph{et al.}~\cite{paulatto_anharmonic_2015}, the optical
+tadpole $T_O$ is the gradient that relaxes the internal coordinates and
+\emph{vanishes at the relaxed structure} --- it contains the
+$\sum_{q_1\mu_1}\phi_{\mu_1\mu_1\mu_2}(-q_1,q_1,0)$ term, ``which vanishes
+if the quantum statistical average of the forces is zero.'' Used instead
+as a perturbative self-energy added to the unrelaxed dynamical matrix it
+is valid only while $\|\Sigma_T\|\ll\omega^2$; once
+$\|\Sigma_T\|\gtrsim\omega^2$ the perturbative expansion breaks down (the
+$|\Pi|\gtrsim\omega$ criterion of Ref.~\cite{paulatto_anharmonic_2015}),
+the effective dynamical matrix acquires an imaginary mode, and the
+ill-conditioned propagator no longer conserves current. The rising
+conservation error is therefore the \emph{signature} of perturbative
+breakdown. The physically correct treatment is structural: relax the
+centroid positions until $\langle F\rangle=0$ and recompute the force
+constants there (the SCHA/SSCHA route~\cite{tadano_first_2018}), at which
+point $\Sigma_T\to0$ by construction --- not to add a large perturbative
+$\Sigma_T$ to the harmonic reference. The loop, having no
+$\Phi_\mathrm{eff}^{-1}$ and being a positive Debye--Waller stiffening, is
+far better behaved.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/static_se_tadpole_breakdown.pdf}
+  \caption{Tadpole breakdown. The static loop and tadpole magnitudes grow
+  with temperature; circled points mark where the tadpole drives an
+  imaginary renormalised mode and the SCBA ceases to converge. The
+  perturbative tadpole-as-self-energy is valid only for small
+  $\langle u\rangle$; at high temperature it exceeds its regime, as
+  predicted by self-consistent-phonon theory.}
+  \label{fig:res_scp_tadpole}
+\end{figure}
