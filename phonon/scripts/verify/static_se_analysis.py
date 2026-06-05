@@ -30,7 +30,7 @@ for p in (_REPO, _REPO / "phonon"):
         sys.path.insert(0, str(p))
 from postproc.spectral import spectral_function_qw, frequencies_from_dynamical
 
-SRC = Path("/tmp/claude/se_study")
+SRC = Path(__file__).resolve().parents[2] / "scripts/out/snapshots"
 OUT = _REPO / "document/fig/transport_sweeps"
 MODES = ["bubble", "loop", "tadpole", "loop_tadpole"]
 MCOL = {"bubble": "k", "loop": "tab:blue", "tadpole": "tab:red",
