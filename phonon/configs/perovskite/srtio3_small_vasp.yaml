@@ -40,21 +40,21 @@ relax:
   calculation: relax              # cubic Pm-3m: all atoms at special positions ->
   forc_conv_thr: 0.01             # relaxation is symmetry-trivial (kept for the pipeline)
   calculator: vasp
-  work_dir: ./relax_srtio3_vasp
+  work_dir: ./relax_srtio3_small_vasp
 fc3:
   calculator: vasp
 hiphive:
   supercell: [2, 2, 2]            # 40 atoms (7.81 A); cutoffs < L/2 = 3.9 A
   n_structures: 60
   rattle_method: mc
-  rattle_std: 0.08                # Angstrom -- larger to sample the soft-mode anharmonicity
+  rattle_std: 0.025                # Angstrom -- larger to sample the soft-mode anharmonicity
   rattle_d_min: 1.4               # min separation during MC rattle
   rattle_n_iter: 2
-  rattle_seed: 101
+  rattle_seed: 202
   cutoffs: [3.7, 3.3, 3.0]        # [FC2, FC3, FC4] Angstrom
   fit_method: rfe                 # recovers the quartic (ardr prunes it)
   fit_kwargs: {}
   rotational_sum_rule: post_fit
   calculator: vasp
-  work_dir: ./fc3_hiphive_srtio3_vasp
+  work_dir: ./fc3_hiphive_srtio3_small_vasp
   pw_timeout: 3600
