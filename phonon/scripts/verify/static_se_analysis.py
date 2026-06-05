@@ -119,6 +119,10 @@ def main():
                     a.set_axis_off(); continue
                 D = np.asarray(zb["device_D"]); freqs = np.asarray(zb["freqs"])
                 eta_w = 1.5 * (freqs[1] - freqs[0])
+                # band edge for a sensible x-limit (grid extends to the full
+                # bubble-convolution range, ~2x the band)
+                wmax = 1.08 * float(np.sqrt(np.abs(np.linalg.eigvalsh(
+                    0.5 * (D + D.T)).max())))
                 if kind == "J" and has(zb, "J_ball"):
                     a.plot(freqs, np.asarray(zb["J_ball"]), "0.6", lw=1.2, label="ballistic")
                 for m in MODES:
@@ -137,7 +141,7 @@ def main():
                             continue
                         a.plot(freqs, np.asarray(z["J_anh"]), color=MCOL[m], lw=0.9, label=m); any_plot = True
                 a.set_title(f"{s}, T={T:.0f} K"); a.set_xlabel(r"$\omega$ [THz]")
-                a.set_ylabel(ylab); a.legend(fontsize=6)
+                a.set_ylabel(ylab); a.legend(fontsize=6); a.set_xlim(0, wmax)
         if any_plot:
             fig.tight_layout(); fig.savefig(OUT / f"{fname}.pdf", dpi=140, bbox_inches="tight")
             fig.savefig(OUT / f"{fname}.png", dpi=130, bbox_inches="tight")
