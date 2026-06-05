@@ -336,9 +336,10 @@ def build_static_self_energy_hook(
     ``Sigma_L (+ Sigma_T)`` to be added to the dynamical matrix. Hermitization +
     ASR projection are applied by the caller (``scba_loop``).
 
-    Restricted to the Gamma device (``n_kpts == 1``) for now; the q-resolved
-    static self-energy (folding ``<uu>(q)`` with the transverse Bloch phases) is
-    future work and raises if ``G_less_dev_q`` carries more than one q-point.
+    Handles both the Gamma device (``n_kpts == 1``) and the q-resolved path
+    (``n_kpts > 1``, e.g. a transversely-periodic Si thin film): since the static
+    loop/tadpole are q-independent on-site renormalisations, the BZ-averaged
+    ``<uu>`` is used and the resulting ``Sigma_static`` is broadcast to all q.
 
     Parameters
     ----------
@@ -358,18 +359,18 @@ def build_static_self_energy_hook(
     N_D = n_slabs * n_dof
 
     def hook(g_less_dev_q, sigma_static_current, h_d_list):
-        if g_less_dev_q.shape[0] != 1:
-            raise NotImplementedError(
-                "static self-energy (loop/tadpole) is implemented for the "
-                "Gamma device (n_kpts=1) only; got "
-                f"n_kpts={g_less_dev_q.shape[0]}")
-        # Self-consistent equal-time <uu> from the current device G^<. This is
-        # the physical displacement correlation of the open (possibly
-        # non-equilibrium) device; the static loop/tadpole MUST be built from it,
-        # recomputed every SCBA iteration so the soft mode self-limits. (A fixed
-        # bulk-equilibrium <uu> injected here would be non-self-consistent and is
-        # physically wrong for the device -- removed.)
+        # Self-consistent equal-time <uu> from the current device G^<, recomputed
+        # every SCBA iteration so the soft mode self-limits. For the q-resolved
+        # path (n_kpts>1, e.g. a Si thin film) the static loop/tadpole are
+        # q-INDEPENDENT real-space (on-site) renormalisations, so the relevant
+        # correlation is the BZ average <uu> = (1/n_q) sum_q <uu>(q) and the
+        # resulting Sigma_static is broadcast to every q. (A fixed bulk <uu>
+        # injected here would be non-self-consistent and is physically wrong.)
+        n_kpts = g_less_dev_q.shape[0]
         uu = equal_time_uu(g_less_dev_q[0], dw_thz)        # (N_D, N_D)
+        for iq in range(1, n_kpts):
+            uu = uu + equal_time_uu(g_less_dev_q[iq], dw_thz)
+        uu = uu / n_kpts
         sig = np.zeros((N_D, N_D), dtype=float)
         if use_loop:
             sig = sig + sigma_loop(fc4_dev_mw, uu)
@@ -378,6 +379,9 @@ def build_static_self_energy_hook(
             w_mean = mean_displacement(
                 fc3_dev_mw, uu, phi_eff, optical_projector=optical_projector)
             sig = sig + sigma_tadpole(fc3_dev_mw, w_mean)
-        return sig[np.newaxis].astype(complex)             # (1, N_D, N_D)
+        sig = sig[np.newaxis].astype(complex)              # (1, N_D, N_D)
+        if n_kpts == 1:
+            return sig
+        return np.broadcast_to(sig, (n_kpts, N_D, N_D)).copy()
 
     return hook

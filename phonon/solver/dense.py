@@ -1448,13 +1448,13 @@ def transmission(
         return sig_l, sig_g
 
     # Static loop/tadpole self-energy (renormalises Phi_eff = Phi + Sigma_L +
-    # Sigma_T inside the same SCBA loop). Gamma device (n_kpts=1) only for now.
+    # Sigma_T inside the same SCBA loop). The device FC3/FC4 and the zero-mode
+    # projector are q-independent (Gamma-folded, real-space) on-site quantities,
+    # and the hook BZ-averages <uu> over the transverse mesh, so this works for
+    # both the Gamma device (n_kpts=1) and the q-resolved path (n_kpts>1, e.g. a
+    # Si thin film).
     static_se_hook = None
     if loop or tadpole:
-        if n_kpts != 1:
-            raise NotImplementedError(
-                "loop/tadpole self-energies are implemented for the Gamma "
-                f"device (q_mesh=(1,1)) only; got n_kpts={n_kpts}.")
         fc4_dev_mw = None
         if loop:
             if fc4_hdf5 is None:
