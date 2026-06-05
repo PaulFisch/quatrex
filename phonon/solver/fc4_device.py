@@ -140,3 +140,45 @@ def build_compact_reference_fc4_from_dense(fc4_dense, ref_sc_atoms, *, tol=1e-8)
         for s2, s3, s4 in np.argwhere(mag > tol):
             out[(int(s1), int(s2), int(s3), int(s4))] = sub[s2, s3, s4]
     return out
+
+
+def build_compact_reference_fc4_sparse(fcs, ref_sc_atoms, supercell_atoms,
+                                       cutoff, *, tol=1e-8):
+    """Compact-reference FC4 WITHOUT materialising the dense ``n_super^4`` tensor.
+
+    For a large supercell (e.g. a 5x5x5 / 250-atom bulk-Si cell, whose dense FC4
+    is ~2.4 TiB) the dense route :func:`build_compact_reference_fc4_from_dense`
+    is infeasible. Instead we query the hiPhive ``ForceConstants`` per atom-quad
+    (``fcs[s1, s2, s3, s4]``, which unfolds the orbits/permutations internally)
+    only for ``s1`` in the reference rows and ``(s2, s3, s4)`` drawn from the
+    atoms within ``cutoff`` of ``s1`` -- the FC4 vanishes outside that ball
+    because all four cluster atoms must be mutually within the FC4 cutoff. The
+    result is identical (validated to machine precision on the small 2x2x2 cell)
+    to the dense route, at ``n_super``-independent cost.
+
+    Parameters
+    ----------
+    fcs : hiphive.ForceConstants
+        Supercell force constants (supports ``fcs[i, j, k, l]`` indexing).
+    ref_sc_atoms : (n_atoms,) int
+        Slab-0 reference supercell atom for each primitive atom.
+    supercell_atoms : ase.Atoms
+        The ideal supercell (for the neighbour list).
+    cutoff : float
+        FC4 cluster cutoff [Angstrom] (the value passed to the ClusterSpace).
+    """
+    import itertools
+    from ase.neighborlist import neighbor_list
+    n = len(supercell_atoms)
+    i_idx, j_idx = neighbor_list("ij", supercell_atoms, float(cutoff))
+    nbr = {a: {a} for a in range(n)}
+    for a, b in zip(i_idx, j_idx):
+        nbr[int(a)].add(int(b))
+    out = {}
+    for s1 in (int(a) for a in np.asarray(ref_sc_atoms, dtype=int)):
+        cand = sorted(nbr[s1])
+        for s2, s3, s4 in itertools.product(cand, repeat=3):
+            T = np.asarray(fcs[s1, s2, s3, s4])
+            if np.max(np.abs(T)) > tol:
+                out[(s1, s2, s3, s4)] = T
+    return out
