@@ -1535,6 +1535,7 @@ def transmission(
     result = {
         "freqs_thz": freqs_thz[pos_mask],
         "omega_rad": freqs_thz[pos_mask] * THZ_TO_RAD,
+        "device_D": H_D_all[0],   # bare device dynamical matrix [THz^2] (slab 0)
         "transmission_ballistic": trans_ballistic[pos_mask],
         "spectral_heat_current_ballistic": spectral_J_ball[pos_mask],
         "spectral_heat_current": spectral_J_anh[pos_mask],
