@@ -587,3 +587,112 @@ not a self-energy.
   $\|\Sigma_T\|\!\approx\!1$--$7$~THz$^2$ by symmetry.}
   \label{fig:res_scp_tadpole}
 \end{figure}
+
+% ======================================================================
+\section{Strong anharmonicity: SrTiO\textsubscript{3}, and the rattle-amplitude $=$ renormalisation equivalence}
+\label{sec:res_strong}
+% ======================================================================
+
+The static corrections of \cref{sec:res_scp} are a small perturbation for the
+weakly anharmonic silicon systems. To probe the opposite, strongly anharmonic
+regime --- where the harmonic approximation itself fails --- we computed
+FC2/FC3/FC4 for cubic \emph{cubic} SrTiO$_3$, the canonical
+self-consistent-phonon (SCP) test case~\cite{tadano_first_2018}. This places our
+three systems on an anharmonicity ladder: bulk Si (weak; bubble dominant, static
+$\sim0.3\%$), the Si nanosheet (boundary-limited; \cref{sec:res_qfilm}), and
+SrTiO$_3$ (strong; static dominant).
+
+\paragraph{The harmonic soft mode and benchmark.} Cubic SrTiO$_3$ has
+\emph{unstable} harmonic phonons: a ferroelectric (FE) mode at $\Gamma$ and an
+antiferrodistortive (AFD) octahedral-rotation mode at
+$R=(\tfrac12,\tfrac12,\tfrac12)$~\cite{tadano_first_2018}. Fitting FC2 to
+small-amplitude ($0.025$~\AA) rattled displacements in the same $2\times2\times2$
+($40$-atom) cell used by Tadano \& Tsuneyuki recovers the AFD instability:
+$\omega_R = 55i$--$92i$~cm$^{-1}$ (converging upward with the number of training
+structures --- a genuine instability that \emph{strengthens} as the fit
+converges, the opposite of fitting noise). This brackets their PBEsol value of
+$76i$~cm$^{-1}$ (HSE $25i$)~\cite{tadano_first_2018}; given that we use PBE at the
+experimental lattice constant rather than PBEsol, the agreement confirms the
+instability is physical, not an artefact. The static loop$+$tadpole magnitude is
+$\|\Sigma_\mathrm{static}\|\approx39$~THz$^2$ at $300$~K, $\sim6\times$ the bulk-Si
+value --- the static diagrams are dominant here. (The $\Gamma$ FE mode, a polar
+TO mode, requires the long-range dipole interaction; our force-constant model
+carries no Born effective charges / non-analytic correction, so the FE
+instability is not captured, whereas the non-polar AFD mode is.)
+
+\paragraph{The rattle amplitude is a renormalisation (temperature).} Fitting the
+\emph{same} cell to a \emph{larger} ($0.08$~\AA) rattle amplitude
+\emph{stabilises} the AFD mode ($\omega_R = +90$~cm$^{-1}$,
+\cref{fig:res_srtio3}). This is not a fitting error but the central identity of
+the effective-potential methods: a finite-amplitude fit returns the
+\emph{effective}, thermally renormalised FC2 at the temperature where
+$\langle u^2\rangle^{1/2}$ matches the rattle amplitude. Fitting at the thermal
+amplitude is exactly what the temperature-dependent effective potential
+(TDEP)~\cite{hellman_tdep_2013} and the stochastic self-consistent harmonic
+approximation (SSCHA)~\cite{errea_sscha_2014} do --- and the difference between
+the bare and effective FC2 \emph{is} the static loop self-energy
+$\tfrac12\Phi_4\!:\!\langle uu\rangle$. The bare $\to$ effective stiffening of an
+unstable mode into a stable one is precisely the SCP renormalisation of an
+instability mode~\cite{monacelli_sscha_transitions_2017}, here exhibited simply
+by varying the rattle amplitude.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.7\linewidth]{transport_sweeps/srtio3_rattle_renorm.pdf}
+  \caption{SrTiO$_3$ phonon dispersion: FC2 fitted to a small ($0.025$~\AA, red)
+  versus large ($0.08$~\AA, blue) rattle amplitude. The bare (small-amplitude)
+  AFD branch is imaginary (plotted below zero) between $M$ and $R$; the
+  large-amplitude fit returns the effective, thermally renormalised FC2 with the
+  mode stabilised. The rattle amplitude acts as a temperature: this stiffening
+  \emph{is} the static loop renormalisation.}
+  \label{fig:res_srtio3}
+\end{figure}
+
+\paragraph{Consequence: the loop is one of two equivalent routes.} The
+renormalised phonons can be obtained \emph{either} from the bare FC2 plus an
+explicit quartic loop (the deterministic SCP of \cref{sec:res_scp}, requiring
+FC4) \emph{or} directly by fitting the effective FC2 at the thermal amplitude
+(TDEP/SSCHA, no FC4 needed)~\cite{hellman_tdep_2013,errea_sscha_2014}. They are
+the same physics: in the perturbative limit the SSCHA reproduces the loop and
+tadpole diagrams~\cite{paulatto_anharmonic_2015}. The explicit loop is preferred
+when an analytic temperature dependence from a single FC4 is wanted, or when
+consistency (polar modes, polarisation mixing) matters; the effective-fit route
+is preferred when FC4 is too costly. In \emph{both} routes the cubic FC3 (bubble)
+is still required for the linewidth and transport. For the weakly anharmonic
+silicon systems neither matters (effective $\approx$ bare FC2); for SrTiO$_3$ one
+must use one route or the other.
+
+\paragraph{Commensurability, not size, converges a zone-boundary mode.} A natural
+attempt to converge the AFD frequency by enlarging the cell to $3\times3\times3$
+($135$ atoms, longer FC2 cutoff) instead \emph{stabilises} $R$ spuriously
+($+90$~cm$^{-1}$). The reason is that the AFD mode sits at
+$R=(\tfrac12,\tfrac12,\tfrac12)$, which is commensurate only with \emph{even}
+supercells: a $2\times2\times2$ samples $R$ exactly (it folds to $\Gamma$),
+whereas an odd $3\times3\times3$ does not have $R$ on its commensurate $q$-grid,
+so $R$ is obtained by Fourier interpolation of the real-space FC2 and is
+artificially smoothed. The $2\times2\times2$ result is therefore the correct one
+(and matches Tadano~\cite{tadano_first_2018}); converging the magnitude requires
+the next \emph{even} cell ($4\times4\times4$), not merely a larger one. This is
+why SCP studies converge a zone-boundary soft mode through the interpolation
+$q$-mesh rather than the real-space supercell~\cite{tadano_first_2018}.
+
+\paragraph{Soft by symmetry versus soft by anharmonicity.} The rattle-amplitude
+sweep cleanly distinguishes two kinds of soft mode. Repeating it for the
+\texttt{d5a} nanowire, whose $0.0075$~THz twist drives the convergence behaviour
+of \cref{sec:res_nw}, the twist frequency stays \emph{real and stable}
+($0.5$--$1.0$~THz at $q_z=0.02$) at \emph{every} amplitude ($0.015$--$0.08$~\AA),
+with only fit-noise scatter --- never imaginary. The \texttt{d5a} twist is thus a
+robust \emph{rotational quasi-Goldstone} (a near-symmetry of the wire), not an
+anharmonic instability: its renormalisation is a minor correction, in contrast to
+SrTiO$_3$'s AFD mode, which is bare-unstable and only stabilised by the
+renormalisation. Reassuringly, this means the \texttt{d5a} soft-twist physics is
+a genuine structural feature, not an artefact of the fitting amplitude.
+
+\paragraph{FC3 decomposability tracks symmetry, not anharmonicity.} A tensor
+rank-sweep of the device FC3 (truncated-SVD / HOSVD / CP) shows SrTiO$_3$ is
+markedly \emph{more} compressible than \texttt{d5a} --- a truncated SVD reaches a
+$7.6\%$ Frobenius error at rank $16$ for SrTiO$_3$ versus $18\%$ for \texttt{d5a}.
+The high-symmetry $5$-atom perovskite has few symmetry-independent FC3 components
+and compresses cleanly despite its strong anharmonicity; the low-symmetry
+$21$-atom nanowire does not. Tensor complexity is therefore governed by
+structural symmetry, and is separable from anharmonicity strength.
