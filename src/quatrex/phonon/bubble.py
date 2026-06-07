@@ -101,14 +101,39 @@ def bubble_dense(
     Ga_fft = xp.fft.fft(Ga_pad, axis=0)
     Gb_fft = xp.fft.fft(Gb_pad, axis=0)
 
-    # Three-matmul kernel — same arithmetic as the four-operand
-    # einsum but routes everything through BLAS by reshaping
-    # ``(a, c)`` and ``(a, d)`` so the shared ``w`` axis is a clean
-    # batch dimension that batched matmul can handle. opt_einsum
-    # falls back to slow ``c_einsum`` for the shared-w step.
-    nI = phi_left.shape[0]
+    S_hat = ring_contract(phi_left, phi_right, Ga_fft, Gb_fft, xp=xp)
+
+    return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]
+
+
+def ring_contract(phi_left, phi_right, Ga_fft, Gb_fft, *, xp=None):
+    """The per-frequency 3-phonon ring contraction (no FFT/IFFT).
+
+    Operates on already-transformed Green's functions ``Ga_fft`` on the
+    ``(c, b) = (K1, K1')`` link and ``Gb_fft`` on the
+    ``(e, d) = (K2, K2')`` link, each shaped ``(w, bK, bK')`` with ``w``
+    the leading (frequency/τ) batch axis. Returns ``S_hat`` shaped
+    ``(w, nI, nJ)`` — the contraction
+    ``Σ_{c,d,e,f} φ_L[a,c,e] Ga[w,c,b] Gb[w,e,d] φ_R[J,d,b]`` evaluated
+    pointwise in ``w``.
+
+    Factored out of :func:`bubble_dense` so the distributed FFT-first
+    pipeline can FFT in ``nnz`` distribution, call this per τ-slice in
+    ``stack`` distribution, and IFFT back — without re-running the FFT
+    inside the contraction. ``bubble_dense`` is exactly
+    ``pad+FFT → ring_contract → prefactor·IFFT[out_slice]``.
+
+    Three matmuls route everything through BLAS by reshaping ``(a, c)``
+    and ``(a, d)`` so the shared ``w`` axis is a clean batch dimension.
+    """
+    if xp is None:
+        xp = np
+
+    nI, bK1, bK2 = phi_left.shape
     nJ = phi_right.shape[0]
     n_w = Ga_fft.shape[0]
+    bK1p = Ga_fft.shape[2]
+    bK2p = Gb_fft.shape[2]
 
     phi_L_r = phi_left.reshape(nI * bK1, bK2)
     T1 = phi_L_r @ Gb_fft  # (w, a*c, d)
@@ -121,6 +146,4 @@ def bubble_dense(
 
     T2_r = T2.reshape(n_w, nI, bK2p * bK1p)
     phi_R_r = phi_right.reshape(nJ, bK2p * bK1p)
-    S_hat = T2_r @ phi_R_r.T  # (w, a, J)
-
-    return prefactor * xp.fft.ifft(S_hat, axis=0)[out_slice]
+    return T2_r @ phi_R_r.T  # (w, a, J)
