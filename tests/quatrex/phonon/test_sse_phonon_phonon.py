@@ -150,12 +150,39 @@ def test_fc3_to_phi_blocks_keys_in_nn_band() -> None:
         assert abs(I - J) <= 1 and abs(I - K) <= 1 and abs(J - K) <= 1
 
 
+def _ref_quad(phi_left, phi_right, G_a, G_b, dw_thz):
+    """Independent positive-only bubble for one ring quad (off-diagonal
+    G supported). Mirrors the dense ``bubble_dense`` arithmetic via an
+    explicit einsum so it is an independent oracle."""
+    ne = G_a.shape[0]
+    n_fft = 2 * ne - 1
+    prefactor = bubble_prefactor_thz(dw_thz)
+
+    def _fft(G):
+        pad = np.concatenate(
+            [G, np.zeros((n_fft - ne, *G.shape[1:]), dtype=complex)], axis=0
+        )
+        return np.fft.fft(pad, axis=0)
+
+    S = np.einsum(
+        "wabd,Jdb->waJ",
+        np.einsum(
+            "wacd,wcb->wabd",
+            np.einsum("ace,wed->wacd", phi_left, _fft(G_b)),
+            _fft(G_a),
+        ),
+        phi_right,
+    )
+    return prefactor * np.fft.ifft(S, axis=0)[:ne]
+
+
 def _ref_compute_multiblock(
     phi_blocks: dict[tuple[int, int, int], np.ndarray],
-    g_lesser_diag: list[np.ndarray],
-    g_greater_diag: list[np.ndarray],
+    gl_band: dict[tuple[int, int], np.ndarray],
+    gg_band: dict[tuple[int, int], np.ndarray],
     block_sizes: np.ndarray,
     dw_thz: float,
+    g_band: int = 1,
 ) -> tuple[
     dict[tuple[int, int], np.ndarray],
     dict[tuple[int, int], np.ndarray],
@@ -163,92 +190,39 @@ def _ref_compute_multiblock(
 ]:
     """Independent multi-block dense reference for Sigma^{<,>,R}.
 
-    Mirrors the iteration that SigmaPhononPhonon.compute does
-    internally, but assembled from first principles in the test so
-    that any change to the production iteration is caught.
+    Full off-diagonal ring (NOT diagonal-G): each quad uses
+    ``G_a = G_{K1,K1'}`` and ``G_b = G_{K2,K2'}`` from the band dict.
+    Assembled from first principles so any change to the production
+    iteration is caught.
     """
     n_blocks = len(block_sizes)
-    ne = g_lesser_diag[0].shape[0]
-    n_fft = 2 * ne - 1
-    prefactor = bubble_prefactor_thz(dw_thz)
+    ne = next(iter(gl_band.values())).shape[0]
     freqs = np.linspace(0.0, dw_thz * (ne - 1), ne)
 
-    pair_index: dict[tuple[int, int], list[tuple[int, int, np.ndarray, np.ndarray]]] = {}
+    pair_index: dict[
+        tuple[int, int],
+        list[tuple[int, int, int, int, np.ndarray, np.ndarray]],
+    ] = {}
     for (I, K1, K2), phi_left in phi_blocks.items():
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
-            phi_right = phi_blocks.get((J, K2, K1))
-            if phi_right is None:
-                continue
-            pair_index.setdefault((I, J), []).append(
-                (K1, K2, phi_left, phi_right)
-            )
+            for K1p in range(max(0, K1 - g_band), min(n_blocks, K1 + g_band + 1)):
+                for K2p in range(max(0, K2 - g_band), min(n_blocks, K2 + g_band + 1)):
+                    phi_right = phi_blocks.get((J, K2p, K1p))
+                    if phi_right is None:
+                        continue
+                    pair_index.setdefault((I, J), []).append(
+                        (K1, K2, K1p, K2p, phi_left, phi_right)
+                    )
 
     sl_full: dict[tuple[int, int], np.ndarray] = {}
     sg_full: dict[tuple[int, int], np.ndarray] = {}
     for (I, J), pairs in pair_index.items():
-        for K1, K2, phi_left, phi_right in pairs:
-            G_a_l, G_b_l = g_lesser_diag[K1], g_lesser_diag[K2]
-            G_a_g, G_b_g = g_greater_diag[K1], g_greater_diag[K2]
-            sl = bubble_prefactor_thz(dw_thz) * np.fft.ifft(
-                np.einsum(
-                    "wabd,Jdb->waJ",
-                    np.einsum(
-                        "wacd,wcb->wabd",
-                        np.einsum(
-                            "ace,wed->wacd",
-                            phi_left,
-                            np.fft.fft(
-                                np.concatenate(
-                                    [G_b_l, np.zeros((n_fft - ne, *G_b_l.shape[1:]),
-                                                     dtype=complex)],
-                                    axis=0,
-                                ),
-                                axis=0,
-                            ),
-                        ),
-                        np.fft.fft(
-                            np.concatenate(
-                                [G_a_l, np.zeros((n_fft - ne, *G_a_l.shape[1:]),
-                                                 dtype=complex)],
-                                axis=0,
-                            ),
-                            axis=0,
-                        ),
-                    ),
-                    phi_right,
-                ),
-                axis=0,
-            )[:ne] / prefactor * prefactor  # noqa - exact mirror of bubble_dense
-            sg = bubble_prefactor_thz(dw_thz) * np.fft.ifft(
-                np.einsum(
-                    "wabd,Jdb->waJ",
-                    np.einsum(
-                        "wacd,wcb->wabd",
-                        np.einsum(
-                            "ace,wed->wacd",
-                            phi_left,
-                            np.fft.fft(
-                                np.concatenate(
-                                    [G_b_g, np.zeros((n_fft - ne, *G_b_g.shape[1:]),
-                                                     dtype=complex)],
-                                    axis=0,
-                                ),
-                                axis=0,
-                            ),
-                        ),
-                        np.fft.fft(
-                            np.concatenate(
-                                [G_a_g, np.zeros((n_fft - ne, *G_a_g.shape[1:]),
-                                                 dtype=complex)],
-                                axis=0,
-                            ),
-                            axis=0,
-                        ),
-                    ),
-                    phi_right,
-                ),
-                axis=0,
-            )[:ne] / prefactor * prefactor
+        for K1, K2, K1p, K2p, phi_left, phi_right in pairs:
+            la, lb = (K1, K1p), (K2, K2p)
+            if la not in gl_band or lb not in gl_band:
+                continue
+            sl = _ref_quad(phi_left, phi_right, gl_band[la], gl_band[lb], dw_thz)
+            sg = _ref_quad(phi_left, phi_right, gg_band[la], gg_band[lb], dw_thz)
             sl_full[(I, J)] = sl_full.get((I, J), 0) + sl
             sg_full[(I, J)] = sg_full.get((I, J), 0) + sg
 
@@ -297,19 +271,21 @@ def test_compute_multiblock_matches_reference() -> None:
                        + 1j * rng.standard_normal((nbs, nbs, nbs)))
                 phi_blocks[(I, K1, K2)] = phi
 
-    # Random diagonal G_lesser, G_greater per transport-cell block.
-    g_l_diag = [
-        rng.standard_normal((ne, nbs, nbs)) + 1j * rng.standard_normal((ne, nbs, nbs))
-        for _ in range(n_blocks)
-    ]
-    g_g_diag = [
-        rng.standard_normal((ne, nbs, nbs)) + 1j * rng.standard_normal((ne, nbs, nbs))
-        for _ in range(n_blocks)
-    ]
+    # Random G_lesser, G_greater on the full block-tridiagonal BAND
+    # (|K-K'| <= 1) — the off-diagonal blocks the upstream RGF actually
+    # produces and that the full ring contracts (NOT diagonal-only).
+    gl_band: dict[tuple[int, int], np.ndarray] = {}
+    gg_band: dict[tuple[int, int], np.ndarray] = {}
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+            gl_band[(K, Kp)] = (rng.standard_normal((ne, nbs, nbs))
+                                + 1j * rng.standard_normal((ne, nbs, nbs)))
+            gg_band[(K, Kp)] = (rng.standard_normal((ne, nbs, nbs))
+                                + 1j * rng.standard_normal((ne, nbs, nbs)))
 
-    # Build the DSDBSparse buffers. Sparsity pattern carries only the
-    # BT-band block positions; the bubble only reads diagonal blocks
-    # of G so off-diagonal entries are inconsequential.
+    # Build the DSDBSparse buffers. Sparsity pattern carries the full
+    # BT-band block positions; the band off-diagonal G entries are now
+    # read by the contraction.
     pattern_rows: list[int] = []
     pattern_cols: list[int] = []
     block_offsets = np.concatenate(([0], np.cumsum(block_sizes)))
@@ -333,12 +309,13 @@ def test_compute_multiblock_matches_reference() -> None:
     for m in (g_lesser, g_greater, sigma_lesser, sigma_greater, sigma_retarded):
         m.data[:] = 0.0
 
-    # Write the diagonal G blocks into g_lesser/greater.
+    # Write the band G blocks (diagonal + first off-diagonal) into
+    # g_lesser/greater.
     gl_view = g_lesser.stack[...]
     gg_view = g_greater.stack[...]
-    for K in range(n_blocks):
-        gl_view.blocks[K, K] = g_l_diag[K]
-        gg_view.blocks[K, K] = g_g_diag[K]
+    for (K, Kp) in gl_band:
+        gl_view.blocks[K, Kp] = gl_band[(K, Kp)]
+        gg_view.blocks[K, Kp] = gg_band[(K, Kp)]
 
     # Run the production routine.
     cfg = _make_cfg("fft")
@@ -353,9 +330,10 @@ def test_compute_multiblock_matches_reference() -> None:
         out=(sigma_lesser, sigma_greater, sigma_retarded),
     )
 
-    # Reference: independently-written multi-block dense bubble.
+    # Reference: independently-written multi-block dense bubble (full
+    # off-diagonal ring).
     sl_ref, sg_ref, sr_ref = _ref_compute_multiblock(
-        phi_blocks, g_l_diag, g_g_diag, block_sizes, dw_thz,
+        phi_blocks, gl_band, gg_band, block_sizes, dw_thz,
     )
 
     # Compare each (I, J) BTD block.
