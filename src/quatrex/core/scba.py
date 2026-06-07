@@ -599,7 +599,14 @@ class SCBA:
         mw = xp.asarray(mw)
         w = xp.abs(xp.asarray(solver.local_frequencies)).reshape(
             (-1,) + (1,) * (mw.ndim - 1))
-        local_heat = get_host(xp.real(xp.sum(w * mw, axis=0)))    # per interface
+        heat_e = xp.real(xp.sum(w * mw, axis=0))    # (*nk, interface)
+        # Sum over any transverse-q axes: under 3-phonon scattering the
+        # PER-q heat current is not conserved (the momentum convolution
+        # exchanges energy between q), only the q-summed energy current is.
+        # The q-axis is local (not stack-partitioned), so this sum is exact.
+        while heat_e.ndim > 1:
+            heat_e = xp.sum(heat_e, axis=0)
+        local_heat = get_host(heat_e)               # per interface
         heat = np.array(local_heat, copy=True)
         if comm.stack.size > 1:
             recv = np.empty_like(heat)

@@ -726,6 +726,17 @@ class PhononConfig(BaseModel):
     extend this to consume an on-disk block-sparse Phi.
     """
 
+    qfold_path: Path | None = None
+    """Path to the q-folded device vertices for transversely-periodic
+    (``kpoint_grid`` with k>1) anharmonic transport.
+
+    A ``.npz`` written by :func:`quatrex.phonon.qfold.save_qfold`
+    (built offline from the real-space FC3 + transverse Bloch phases via
+    ``phonon.solver.se_q``). Holds ``{(iq1, iq2): {(I,K,Kp): Phi}}`` plus
+    the ``q_diff_map``. Required when any ``kpoint_grid`` entry is > 1 and
+    ``model == "negf"``; ignored for the Gamma-only (k==1) device.
+    """
+
     retarded_method: Literal["half", "fft"] = "fft"
     """How to reconstruct ``Sigma^R`` from ``Sigma^{<,>}``.
 

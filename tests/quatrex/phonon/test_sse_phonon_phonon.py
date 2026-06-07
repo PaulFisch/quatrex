@@ -519,3 +519,134 @@ def test_fc3_writer_roundtrip(tmp_path) -> None:
     assert set(phi_in) == set(phi_out)
     for key, block in phi_in.items():
         assert np.allclose(phi_out[key], block, atol=0, rtol=0)
+
+
+def _ref_quad_scaled(phi_left, phi_right, G_a, G_b, dw_thz, scale):
+    """``_ref_quad`` with an extra scalar (the coupled-q 1/N_q factor)."""
+    return scale * _ref_quad(phi_left, phi_right, G_a, G_b, dw_thz)
+
+
+def test_compute_coupled_q_matches_reference() -> None:
+    """Transverse-q (k>1) coupled-momentum SSE parity vs an independent
+    einsum oracle.
+
+    Pins the production ``SigmaPhononPhonon.compute()`` k>1 path (the
+    Phi-tilde(q,q') momentum convolution) against a hand-written
+    reference: for each external q_ext, Sigma(q_ext) = (1/N_q) sum_{q'}
+    ring[ Phi(q',q2), Phi(q2,q'), G(q')_{K1K1'}, G(q2)_{K2K2'} ] with
+    q2 = q_ext - q'. Random per-(iq1,iq2) vertices + a q_diff_map
+    exercise the q-indexing, the ring contraction and the 1/N_q prefactor
+    exactly; the (0,0) vertex defines the block-pair index.
+    """
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+    rng = np.random.default_rng(7)
+    n_blocks, nbs, ne, nq = 3, 3, 13, 2
+    block_sizes = np.array([nbs] * n_blocks)
+    N = int(block_sizes.sum())
+    dw_thz = 16.0 / (ne - 1)
+    q_diff_map = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+
+    keys = [
+        (I, K1, K2)
+        for I in range(n_blocks)
+        for K1 in range(max(0, I - 1), min(n_blocks, I + 2))
+        for K2 in range(max(0, I - 1), min(n_blocks, I + 2))
+        if abs(K1 - K2) <= 1
+    ]
+
+    def _phi():
+        return {
+            k: rng.standard_normal((nbs, nbs, nbs))
+            + 1j * rng.standard_normal((nbs, nbs, nbs))
+            for k in keys
+        }
+
+    qvertices = {(a, b): _phi() for a in range(nq) for b in range(nq)}
+
+    gl_band, gg_band = {}, {}
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+            gl_band[(K, Kp)] = rng.standard_normal(
+                (ne, nq, nbs, nbs)
+            ) + 1j * rng.standard_normal((ne, nq, nbs, nbs))
+            gg_band[(K, Kp)] = rng.standard_normal(
+                (ne, nq, nbs, nbs)
+            ) + 1j * rng.standard_normal((ne, nq, nbs, nbs))
+
+    rows, cols = [], []
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for i in range(block_sizes[I]):
+                for j in range(block_sizes[J]):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = csr_matrix(
+        (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
+        shape=(N, N),
+    )
+    mk = lambda: DSDBCOO.from_sparray(
+        pattern, block_sizes, global_stack_shape=(ne, nq)
+    )
+    g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+    for m in (g_l, g_g, s_l, s_g, s_r):
+        m.data[:] = 0.0
+    glv, ggv = g_l.stack[...], g_g.stack[...]
+    for (K, Kp) in gl_band:
+        glv.blocks[K, Kp] = gl_band[(K, Kp)]
+        ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+
+    cfg = _make_cfg("half")
+    ssp = SigmaPhononPhonon(
+        cfg,
+        phonon_frequencies=np.linspace(0.0, 16.0, ne),
+        block_sizes=block_sizes,
+        qfold=(qvertices, q_diff_map, nq),
+    )
+    ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+
+    pair_index = {}
+    for (I, K1, K2) in qvertices[(0, 0)]:
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for K1p in range(max(0, K1 - 1), min(n_blocks, K1 + 2)):
+                for K2p in range(max(0, K2 - 1), min(n_blocks, K2 + 2)):
+                    if (J, K2p, K1p) in qvertices[(0, 0)]:
+                        pair_index.setdefault((I, J), []).append(
+                            (K1, K2, K1p, K2p)
+                        )
+
+    ref_l = {ij: np.zeros((ne, nq, nbs, nbs), complex) for ij in pair_index}
+    ref_g = {ij: np.zeros((ne, nq, nbs, nbs), complex) for ij in pair_index}
+    for (I, J), quads in pair_index.items():
+        for iq_ext in range(nq):
+            for iqp in range(nq):
+                iq2 = int(q_diff_map[iq_ext, iqp])
+                phiL, phiR = qvertices[(iqp, iq2)], qvertices[(iq2, iqp)]
+                for (K1, K2, K1p, K2p) in quads:
+                    pl, pr = phiL.get((I, K1, K2)), phiR.get((J, K2p, K1p))
+                    if pl is None or pr is None:
+                        continue
+                    la, lb = (K1, K1p), (K2, K2p)
+                    ref_l[(I, J)][:, iq_ext] += _ref_quad_scaled(
+                        pl, pr, gl_band[la][:, iqp], gl_band[lb][:, iq2],
+                        dw_thz, 1.0 / nq,
+                    )
+                    ref_g[(I, J)][:, iq_ext] += _ref_quad_scaled(
+                        pl, pr, gg_band[la][:, iqp], gg_band[lb][:, iq2],
+                        dw_thz, 1.0 / nq,
+                    )
+
+    slv, sgv = s_l.stack[...], s_g.stack[...]
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            np.testing.assert_allclose(
+                slv.blocks[I, J], ref_l.get((I, J), 0), atol=0, rtol=1e-9,
+                err_msg=f"coupled-q Sigma^< mismatch at {(I, J)}",
+            )
+            np.testing.assert_allclose(
+                sgv.blocks[I, J], ref_g.get((I, J), 0), atol=0, rtol=1e-9,
+                err_msg=f"coupled-q Sigma^> mismatch at {(I, J)}",
+            )
