@@ -309,6 +309,7 @@ class SCBA:
                 depth=self.config.scba.anderson_depth,
                 beta=self.mixing_factor,
                 step_cap=self.config.scba.anderson_step_cap,
+                revert_factor=self.config.scba.anderson_revert,
             )
 
         # ----- Particles ----------------------------------------------

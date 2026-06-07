@@ -86,6 +86,14 @@ class SCBAConfig(BaseModel):
     "anderson"``. Larger resolves more of the oscillation but costs more
     least-squares conditioning."""
 
+    anderson_revert: NonNegativeFloat = 2.0
+    """Revert-to-best safeguard for Anderson. If the residual exceeds
+    ``anderson_revert`` x the best seen, the (poisoned) history is cleared
+    and the iterate reverted to the best one -- the "never worse than
+    linear" guarantee. Set to 0 to DISABLE (keep-history, aggressive: needed
+    to break a strong oscillation, but then not guaranteed monotone). The
+    dense reference converges the soft-mode CNT/SiNW with 0."""
+
     anderson_step_cap: PositiveFloat = 3.0
     """Max ratio of the Anderson extrapolation step to the damped-linear
     step; an over-long step is replaced by the linear one for that
