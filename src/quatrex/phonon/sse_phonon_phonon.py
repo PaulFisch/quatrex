@@ -99,6 +99,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         block_sizes: NDArray,
         phi_blocks: PhiBlocks | None = None,
         dynamical_matrix: "DSDBSparse | None" = None,
+        qfold: "tuple | None" = None,
     ) -> None:
         # Local energy slice; the full axis is gathered in compute().
         self.local_frequencies = np.asarray(phonon_frequencies)
@@ -114,6 +115,31 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "use 'half' or 'fft'."
             )
         self.retarded_method = retarded_method
+
+        # Transversely-periodic (k>1) coupled-q vertices. When present, the
+        # 3-phonon bubble couples the transverse momenta (crystal-momentum
+        # conservation); the Gamma vertex ``vertices[(0,0)]`` defines the
+        # block-pair index (consistent with the dense reference, which also
+        # takes the pair index from the (0,0) entry) AND serves as the device
+        # FC3 (so ``fc3_path`` is not separately required). Built offline (no
+        # G dependence) and loaded as arrays only. See quatrex.phonon.qfold.
+        self._qvertices: dict | None = None
+        self._q_diff_map: NDArray | None = None
+        self._n_kpts: int = 1
+        if qfold is None:
+            qfold_path = getattr(config.phonon, "qfold_path", None)
+            if qfold_path is not None:
+                from quatrex.phonon.qfold import load_qfold
+
+                vertices, q_diff_map, nk_shape = load_qfold(Path(qfold_path))
+                qfold = (vertices, q_diff_map, int(np.prod(nk_shape)))
+        if qfold is not None:
+            vertices, q_diff_map, n_kpts = qfold
+            self._qvertices = vertices
+            self._q_diff_map = np.asarray(q_diff_map, dtype=int)
+            self._n_kpts = int(n_kpts)
+            if phi_blocks is None:
+                phi_blocks = vertices[(0, 0)]
 
         if phi_blocks is None:
             fc3_path = getattr(config.phonon, "fc3_path", None)
@@ -416,15 +442,36 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         """The FFT-first contraction; all output buffers in nnz on entry."""
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
-        if any(k > 1 for k in nk):
+        nq = int(np.prod(nk)) if len(nk) else 1
+        if nq > 1 and self._qvertices is None:
+            raise ValueError(
+                f"Transverse-q device (mesh {nk}, n_kpts={nq}) requires the "
+                "q-folded vertices; set config.phonon.qfold_path (see "
+                "quatrex.phonon.qfold)."
+            )
+        if nq > 1 and self._n_kpts != nq:
+            raise ValueError(
+                f"q-folded vertices are for n_kpts={self._n_kpts} but the "
+                f"Green's function has {nq} transverse momenta {nk}."
+            )
+        if nq > 1 and ranks.block.size > 1:
+            # The transverse-q axis is local in the stack, so q distributes
+            # over comm.stack (energy) for free; only the comm.block band
+            # halo would need to carry the q-axis. Distribute the film over
+            # energy (and/or comm.q), keeping block_comm_size == 1.
             raise NotImplementedError(
-                "Transverse-q (k>1) phonon-phonon SSE (the Φ̃(q,q') "
-                "momentum convolution) is not implemented in this finite "
-                "block-tridiagonal path."
+                "Transverse-q (k>1) with comm.block.size > 1 is not "
+                "supported (the band halo is not q-aware); run the periodic "
+                "device with block_comm_size == 1 and distribute over the "
+                "energy/stack axis."
             )
         n_fft = 2 * ne_full - 1
         full_freqs = self._full_frequencies(ne_full)
         prefactor = bubble_prefactor_thz(float(full_freqs[1] - full_freqs[0]))
+        # Coupled-q convolution carries the 1/N_q mesh-average (matches the
+        # dense reference's ``bubble_prefactor(..., n_kpts=N_q)``).
+        if nq > 1:
+            prefactor = prefactor / nq
 
         gtl, gtg, stl, stg = self._ensure_tau_buffers(g_lesser, n_fft)
 
@@ -476,31 +523,100 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 gl_blk[(K, Kp)] = halo_l[(K, Kp)]
                 gg_blk[(K, Kp)] = halo_g[(K, Kp)]
 
-        for (I, J) in owned:
-            acc_l = None
-            acc_g = None
-            for K1, K2, K1p, K2p, phi_left, phi_right in self._phi_pair_index[(I, J)]:
-                sl = ring_contract(
-                    phi_left, phi_right,
-                    gl_blk[(K1, K1p)], gl_blk[(K2, K2p)], xp=xp,
-                )
-                sg = ring_contract(
-                    phi_left, phi_right,
-                    gg_blk[(K1, K1p)], gg_blk[(K2, K2p)], xp=xp,
-                )
-                acc_l = sl if acc_l is None else acc_l + sl
-                acc_g = sg if acc_g is None else acc_g + sg
-            if acc_l is not None:
-                if self._zero_mode_Q is not None:
-                    # Two-sided rigid-mode projection on every band block
-                    # (τ-independent ⇒ commutes with the IFFT; preserves
-                    # Σ^<,> Hermiticity and the band sparsity). Q is real
-                    # n_dof×n_dof; broadcasts over the leading τ axis.
-                    Q = xp.asarray(self._zero_mode_Q)
-                    acc_l = Q @ acc_l @ Q
-                    acc_g = Q @ acc_g @ Q
-                stlv.blocks[I - start, J - start] = acc_l
-                stgv.blocks[I - start, J - start] = acc_g
+        Qproj = (
+            xp.asarray(self._zero_mode_Q)
+            if self._zero_mode_Q is not None
+            else None
+        )
+        if nq == 1:
+            for (I, J) in owned:
+                acc_l = None
+                acc_g = None
+                for K1, K2, K1p, K2p, phi_left, phi_right in self._phi_pair_index[(I, J)]:
+                    sl = ring_contract(
+                        phi_left, phi_right,
+                        gl_blk[(K1, K1p)], gl_blk[(K2, K2p)], xp=xp,
+                    )
+                    sg = ring_contract(
+                        phi_left, phi_right,
+                        gg_blk[(K1, K1p)], gg_blk[(K2, K2p)], xp=xp,
+                    )
+                    acc_l = sl if acc_l is None else acc_l + sl
+                    acc_g = sg if acc_g is None else acc_g + sg
+                if acc_l is not None:
+                    if Qproj is not None:
+                        # Two-sided rigid-mode projection on every band block
+                        # (τ-independent ⇒ commutes with the IFFT; preserves
+                        # Σ^<,> Hermiticity and the band sparsity). Q is real
+                        # n_dof×n_dof; broadcasts over the leading τ axis.
+                        acc_l = Qproj @ acc_l @ Qproj
+                        acc_g = Qproj @ acc_g @ Qproj
+                    stlv.blocks[I - start, J - start] = acc_l
+                    stgv.blocks[I - start, J - start] = acc_g
+        else:
+            # Coupled-q convolution. The transverse-momentum axis rides as a
+            # LOCAL batch dimension of the stack (only ω is split across
+            # comm.stack), so the whole q-sum is local — no q communication.
+            # For each external q_ext: Σ(q_ext) = Σ_{q'} ring[ Φ̃(q',q2),
+            # Φ̃(q2,q'), G(q')_{K1K1'}, G(q2)_{K2K2'} ] with q2 = q_ext − q'.
+            qdm = self._q_diff_map
+            qv = self._qvertices
+
+            def _qflat(d):
+                # (τ, *nk, b, b) → (τ, N_q, b, b); the q-axis is contiguous
+                # in the same C-order as global_stack_shape[1:].
+                return {
+                    kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
+                    for kk, v in d.items()
+                }
+
+            gl_q = _qflat(gl_blk)
+            gg_q = _qflat(gg_blk)
+            n_tau = next(iter(gl_q.values())).shape[0]
+            dtype = next(iter(gl_q.values())).dtype
+            for (I, J) in owned:
+                bs_I = int(self.block_sizes[I])
+                bs_J = int(self.block_sizes[J])
+                out_l = xp.zeros((n_tau, nq, bs_I, bs_J), dtype=dtype)
+                out_g = xp.zeros((n_tau, nq, bs_I, bs_J), dtype=dtype)
+                wrote = False
+                for iq_ext in range(nq):
+                    acc_l = None
+                    acc_g = None
+                    for iqp in range(nq):
+                        iq2 = int(qdm[iq_ext, iqp])
+                        phiL = qv.get((iqp, iq2))   # legs (q', q_ext−q')
+                        phiR = qv.get((iq2, iqp))   # legs (q_ext−q', q')
+                        if phiL is None or phiR is None:
+                            continue
+                        for K1, K2, K1p, K2p, _pl, _pr in self._phi_pair_index[(I, J)]:
+                            pl = phiL.get((I, K1, K2))
+                            pr = phiR.get((J, K2p, K1p))
+                            if pl is None or pr is None:
+                                continue
+                            sl = ring_contract(
+                                pl, pr,
+                                gl_q[(K1, K1p)][:, iqp], gl_q[(K2, K2p)][:, iq2],
+                                xp=xp,
+                            )
+                            sg = ring_contract(
+                                pl, pr,
+                                gg_q[(K1, K1p)][:, iqp], gg_q[(K2, K2p)][:, iq2],
+                                xp=xp,
+                            )
+                            acc_l = sl if acc_l is None else acc_l + sl
+                            acc_g = sg if acc_g is None else acc_g + sg
+                    if acc_l is not None:
+                        if Qproj is not None:
+                            acc_l = Qproj @ acc_l @ Qproj
+                            acc_g = Qproj @ acc_g @ Qproj
+                        out_l[:, iq_ext] = acc_l
+                        out_g[:, iq_ext] = acc_g
+                        wrote = True
+                if wrote:
+                    blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
+                    stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
+                    stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
         # (4) σ(τ) stack→nnz: each (I,J) full-τ on exactly one rank.
         stl.dtranspose()
