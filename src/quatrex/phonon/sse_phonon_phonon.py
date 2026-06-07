@@ -13,6 +13,7 @@ The cubic vertex Phi is supplied as a block-sparse dict
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +38,39 @@ from quatrex.phonon.fc3_loader import (
 from quatrex.phonon.units import bubble_prefactor_thz
 
 profiler = Profiler()
+
+
+def _build_cell_zero_mode_projector(h00, h01, *, floor_thz=0.1):
+    """Cell-level rigid-mode projector ``Q = I - V Vᵀ`` (n_dof×n_dof).
+
+    Removes the cell's q=0 rigid-body modes -- the 3 Cartesian
+    translations plus any near-zero rotational quasi-Goldstone (e.g. a
+    1-D wire's axial twist). A mode is rigid if its frequency is below
+    ``floor_thz`` (eigenvalue of the cell Gamma-matrix
+    ``h00 + h01 + h01^dagger`` below ``floor_thz**2``; blocks in THz²).
+    The floor is ABSOLUTE so a stiff transport-irrelevant mode (e.g. a
+    Si-H stretch) cannot inflate the cutoff and over-project real low-ω
+    heat carriers. Applied two-sided per device band block it is
+    band-local (no cross-slab fill), unlike the dense global projector
+    in ``phonon/solver/zero_modes.py``.
+
+    Returns ``(Q, projected_freqs_thz)``.
+    """
+    h00 = np.asarray(h00)
+    h01 = np.asarray(h01)
+    n_dof = h00.shape[0]
+    dyn = h00 + h01 + h01.conj().T
+    dyn = 0.5 * (dyn + dyn.conj().T)
+    eigvals, eigvecs = np.linalg.eigh(dyn)
+    idx = np.where(eigvals.real < float(floor_thz) ** 2)[0]
+    if idx.size == 0:
+        return np.eye(n_dof), np.array([])
+    V = eigvecs[:, idx]
+    Q = np.eye(n_dof, dtype=V.dtype) - V @ V.conj().T
+    if np.allclose(Q.imag, 0.0):
+        Q = Q.real
+    projected_freqs = np.sqrt(np.clip(eigvals[idx].real, 0.0, None))
+    return Q, projected_freqs
 
 
 class SigmaPhononPhonon(ScatteringSelfEnergy):
@@ -64,6 +98,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         phonon_frequencies: NDArray,
         block_sizes: NDArray,
         phi_blocks: PhiBlocks | None = None,
+        dynamical_matrix: "DSDBSparse | None" = None,
     ) -> None:
         # Local energy slice; the full axis is gathered in compute().
         self.local_frequencies = np.asarray(phonon_frequencies)
@@ -143,6 +178,62 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # n_fft). Allocated on first compute() from G's sparsity.
         self._tau_cache: tuple | None = None
         self._full_freqs: NDArray | None = None
+
+        # Optional rigid-body (q=0) zero-mode projector Q_cell (cell-level,
+        # n_dof×n_dof), applied two-sided to every band block of Σ^{<,>}.
+        # Band-local ⇒ preserves the production block sparsity. Built from
+        # the cell dynamical-matrix blocks; requires uniform block sizes
+        # (one cell per block). See config.phonon.zero_mode_projection.
+        self._zero_mode_Q: NDArray | None = None
+        if getattr(config.phonon, "zero_mode_projection", False):
+            self._build_zero_mode_projector(config, dynamical_matrix)
+
+    def _build_zero_mode_projector(self, config, dynamical_matrix) -> None:
+        """Build the cell rigid-mode projector ``Q_cell`` from the cell
+        dynamical-matrix blocks (H00, H01) and store it on
+        ``self._zero_mode_Q``. No-op (with a warning) if the inputs are
+        unavailable or the block sizes are non-uniform."""
+        if dynamical_matrix is None:
+            warnings.warn(
+                "zero_mode_projection requested but no dynamical_matrix was "
+                "passed to SigmaPhononPhonon; projection DISABLED.",
+                stacklevel=2,
+            )
+            return
+        if not np.all(self.block_sizes == self.block_sizes[0]):
+            warnings.warn(
+                "zero_mode_projection requires uniform block sizes "
+                f"(got {self.block_sizes.tolist()}); projection DISABLED.",
+                stacklevel=2,
+            )
+            return
+        # Cell on-site / forward-coupling blocks (THz²), ω-independent ⇒
+        # take the first stack slice. blocks[0,1] is H01 (cell 0 → cell 1).
+        h00 = np.asarray(dynamical_matrix.blocks[0, 0])
+        h01 = np.asarray(dynamical_matrix.blocks[0, 1])
+        if h00.ndim == 3:
+            h00 = h00[0]
+        if h01.ndim == 3:
+            h01 = h01[0]
+        floor = float(getattr(config.phonon, "zero_mode_floor_thz", 0.1))
+        Q, projected = _build_cell_zero_mode_projector(h00, h01, floor_thz=floor)
+        if projected.size == 0:
+            warnings.warn(
+                f"zero_mode_projection ON but no cell mode below "
+                f"{floor} THz; projector is identity (no-op).",
+                stacklevel=2,
+            )
+            self._zero_mode_Q = None
+            return
+        self._zero_mode_Q = np.ascontiguousarray(Q)
+        if comm.rank == 0:
+            freqs = ", ".join(f"{f:.4f}" for f in np.sort(projected))
+            print(
+                f"[SigmaPhononPhonon] zero-mode projection ON: projecting "
+                f"{projected.size} cell mode(s) below {floor} THz "
+                f"[{freqs}] THz out of Σ^<,>.",
+                flush=True,
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -297,6 +388,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 acc_l = sl if acc_l is None else acc_l + sl
                 acc_g = sg if acc_g is None else acc_g + sg
             if acc_l is not None:
+                if self._zero_mode_Q is not None:
+                    # Two-sided rigid-mode projection on every band block
+                    # (τ-independent ⇒ commutes with the IFFT; preserves
+                    # Σ^<,> Hermiticity and the band sparsity). Q is real
+                    # n_dof×n_dof; broadcasts over the leading τ axis.
+                    Q = xp.asarray(self._zero_mode_Q)
+                    acc_l = Q @ acc_l @ Q
+                    acc_g = Q @ acc_g @ Q
                 stlv.blocks[I - start, J - start] = acc_l
                 stgv.blocks[I - start, J - start] = acc_g
 

@@ -123,7 +123,8 @@ def build_supercell_mapping(phonon, transport_direction="x"):
 
 
 def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
-                                 ref_sc_atoms):
+                                 ref_sc_atoms, *, enforce_asr=False,
+                                 prim_indices=None):
     """Build mass-weighted FC3 matrices in real space.
 
     For each DOF a = (i_prim, alpha), builds M_a of shape (dim_sc, dim_sc)
@@ -136,6 +137,20 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
     nat_prim : int
     masses_super : ndarray, shape (n_super,)
     ref_sc_atoms : ndarray, shape (nat_prim,)
+    enforce_asr : bool, optional
+        If True, project the assembled ``M_stacked`` onto the
+        translational-acoustic-sum-rule manifold via
+        :func:`enforce_asr_fc3_matrices` before returning. The exact FC3
+        annihilates the uniform-translation vector on every leg (rigid
+        translation of the whole structure is an exact symmetry); a
+        cluster-expansion / finite-cutoff fit leaves a residual that
+        injects spurious low-omega weight into the 3-phonon bubble. This
+        removes only that non-translation-invariant fitted component
+        (minimum-norm projection); the harmonic baseline is untouched.
+        Default ``False`` (raw fitted vertex). Requires ``prim_indices``.
+    prim_indices : ndarray, shape (n_super,), optional
+        Supercell-atom -> primitive-atom map (from
+        :func:`build_supercell_mapping`). Required when ``enforce_asr``.
 
     Returns
     -------
@@ -163,6 +178,15 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
             mat = mat / (np.sqrt(m_i) * m_all[:, None] * m_all[None, :])
             mat *= CONVERSION_FC3_THZ
             M_stacked[a * dim_sc:(a + 1) * dim_sc, :] = mat
+
+    if enforce_asr:
+        if prim_indices is None:
+            raise ValueError(
+                "build_realspace_fc3_matrices(enforce_asr=True) requires "
+                "prim_indices (the supercell->primitive map from "
+                "build_supercell_mapping)."
+            )
+        M_stacked = enforce_asr_fc3_matrices(M_stacked, nat_prim, prim_indices)
 
     return M_stacked
 

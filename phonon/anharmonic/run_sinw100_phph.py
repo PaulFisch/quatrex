@@ -112,10 +112,20 @@ def main() -> int:
     )
     masses_super = phonon.supercell.masses
 
-    print("  Building real-space FC3 matrices ...")
+    # Optional acoustic-sum-rule projection of the (open-wire) FC3 vertex.
+    # Default OFF (raw fitted vertex, preserving prior outputs); recommended
+    # ON for open nanowires, where the finite-cutoff fit leaves a large
+    # translation-non-invariant residual that injects spurious low-omega
+    # weight into the 3-phonon bubble. Opt in with QUATREX_FC3_ASR=1.
+    import os
+    enforce_fc3_asr = os.environ.get("QUATREX_FC3_ASR", "0") == "1"
+
+    print("  Building real-space FC3 matrices "
+          f"(ASR projection {'ON' if enforce_fc3_asr else 'OFF'}) ...")
     t0 = time.perf_counter()
     M_stacked = build_realspace_fc3_matrices(
-        fc3_raw, n_prim, masses_super, ref_sc_atoms
+        fc3_raw, n_prim, masses_super, ref_sc_atoms,
+        enforce_asr=enforce_fc3_asr, prim_indices=prim_indices,
     )
     dim_sc = n_sc * 3
     M_blocks = M_stacked.reshape(n_dof, dim_sc, dim_sc)
