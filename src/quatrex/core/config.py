@@ -739,6 +739,17 @@ class PhononConfig(BaseModel):
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
     warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
 
+    heat_flow_conservation_tol: PositiveFloat = 1e-2
+    """Convergence tolerance for the anharmonic phonon SCBA: the relative
+    spread of the (hbar-omega-weighted) Meir-Wingreen HEAT current across
+    the device interfaces. This is the physically-correct criterion
+    (Guo-Bescond-Zhang 2020 / Luisier): the 3-phonon processes do NOT
+    conserve phonon NUMBER (1<->2 splitting/merging), so only the ENERGY
+    current is conserved, and SCBA convergence means the heat flow is the
+    same across all interfaces (~1%). The Sigma residual oscillates on
+    soft-mode structures and must NOT be used. The most-conserved (best)
+    iterate's heat current is captured even if the iteration later drifts."""
+
     zero_mode_projection: bool = False
     """Optional rigid-body (q=0) zero-mode projection of the 3-phonon
     self-energy (``model == "negf"``).

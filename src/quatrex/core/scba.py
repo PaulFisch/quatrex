@@ -312,6 +312,13 @@ class SCBA:
                 revert_factor=self.config.scba.anderson_revert,
             )
 
+        # Anharmonic-phonon convergence by HEAT-FLOW conservation (Guo/Luisier),
+        # with best-iterate capture (the Sigma residual is non-monotone on
+        # soft-mode structures, so we keep the most-conserved heat current).
+        self._scba_iteration = 0
+        self._best_heat_conservation = float("inf")
+        self._best_heat_current = None
+
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
 
@@ -555,7 +562,52 @@ class SCBA:
             print(f"Current Conservation abs: {current_conservation_abs}", flush=True)
             print(f"Current Conservation rel: {current_conservation_rel}", flush=True)
 
-        return False  # TODO: :-)
+        self._scba_iteration += 1
+
+        # Anharmonic phonon: converge on HEAT-FLOW conservation (Guo/Luisier),
+        # NOT the Sigma residual (which is non-monotone on soft-mode structures)
+        # and NOT current_conservation above (the NUMBER-current G-R balance,
+        # which 3-phonon processes violate by design). Capture the best
+        # (most heat-flow-conserving) iterate.
+        if (self.config.scba.phonon
+                and getattr(self.config.phonon, "model", "") == "negf"):
+            heat, spread = self._phonon_heat_flow_conservation()
+            if heat is not None:
+                if spread < self._best_heat_conservation:
+                    self._best_heat_conservation = spread
+                    self._best_heat_current = heat.copy()
+                if comm.rank == 0:
+                    print(f"Phonon heat-flow conservation (rel spread): "
+                          f"{spread:.4e} (best {self._best_heat_conservation:.4e})",
+                          flush=True)
+                if (self._scba_iteration >= self.config.scba.min_iterations
+                        and spread < self.config.phonon.heat_flow_conservation_tol):
+                    return True
+
+        return False
+
+    def _phonon_heat_flow_conservation(self):
+        """Heat-flow conservation of the anharmonic phonon SCBA: the relative
+        spread of the (hbar-omega-weighted) Meir-Wingreen HEAT current across
+        the device interfaces. Returns ``(heat_per_interface, rel_spread)`` or
+        ``(None, inf)`` if the current is unavailable. All-reduced over the
+        energy (stack) partition."""
+        solver = self.subsystems.get("phonon")
+        mw = getattr(solver, "meir_wingreen_current", None)
+        if mw is None:
+            return None, float("inf")
+        mw = xp.asarray(mw)
+        w = xp.abs(xp.asarray(solver.local_frequencies)).reshape(
+            (-1,) + (1,) * (mw.ndim - 1))
+        local_heat = get_host(xp.real(xp.sum(w * mw, axis=0)))    # per interface
+        heat = np.array(local_heat, copy=True)
+        if comm.stack.size > 1:
+            recv = np.empty_like(heat)
+            comm.stack.all_reduce(np.ascontiguousarray(local_heat), recv, op="sum")
+            heat = recv
+        denom = abs(float(heat.mean())) + 1e-300
+        spread = float((heat.max() - heat.min()) / denom)
+        return heat, spread
 
     @profiler.profile(label="SCBA: Interactions", level="default", comm=comm)
     def _compute_interactions(self) -> None:
