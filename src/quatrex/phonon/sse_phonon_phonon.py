@@ -241,11 +241,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             return
         # Cell on-site / forward-coupling blocks (THz²), ω-independent ⇒
         # take the first stack slice. blocks[0,1] is H01 (cell 0 → cell 1).
+        # The stack is (energy, *k_transverse); reducing every leading axis
+        # to 0 selects the Gamma-transverse (q⊥=0) cell matrix — the right
+        # reference for the rigid/soft modes (handles both the Γ-only k==1
+        # device and the transversely-periodic k>1 film).
         h00 = np.asarray(dynamical_matrix.blocks[0, 0])
         h01 = np.asarray(dynamical_matrix.blocks[0, 1])
-        if h00.ndim == 3:
+        while h00.ndim > 2:
             h00 = h00[0]
-        if h01.ndim == 3:
+        while h01.ndim > 2:
             h01 = h01[0]
         floor = float(getattr(config.phonon, "zero_mode_floor_thz", 0.1))
         Q, projected = _build_cell_zero_mode_projector(h00, h01, floor_thz=floor)
