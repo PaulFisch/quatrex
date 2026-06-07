@@ -704,6 +704,32 @@ class PhononConfig(BaseModel):
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
     warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
 
+    zero_mode_projection: bool = False
+    """Optional rigid-body (q=0) zero-mode projection of the 3-phonon
+    self-energy (``model == "negf"``).
+
+    When True, the per-cell rigid modes -- the 3 Cartesian translations
+    plus any near-zero rotational quasi-Goldstone (e.g. the axial twist
+    of a 1-D wire) -- are projected out of *every* band block of
+    ``Sigma^{<,>}`` (two-sided, ``Q Sigma Q``) each iteration. These q=0
+    modes carry no heat (they are global rigid-body symmetries), but
+    their divergent Bose occupation ``2n+1 ~ 2 kT / (hbar omega)`` as
+    ``omega -> 0`` injects an IR singularity into the bubble that
+    destabilises the SCBA on soft structures (e.g. the d5a SiNW twist).
+    The finite-q heat carriers are orthogonal to the uniform projected
+    subspace and are untouched, so transport physics is preserved.
+    Default OFF. Cf. ``phonon/solver/zero_modes.py`` and
+    ``build_cell_zero_mode_projector``."""
+
+    zero_mode_floor_thz: NonNegativeFloat = 0.1  # THz
+    """Absolute frequency floor for ``zero_mode_projection``: cell modes
+    with frequency below this (i.e. eigenvalue of the cell Gamma-matrix
+    below ``zero_mode_floor_thz**2``) are treated as rigid and projected
+    out. The floor is ABSOLUTE (not relative to the stiffest mode) so a
+    high-frequency mode like a Si-H stretch cannot inflate the cutoff and
+    over-project real low-omega heat carriers. Every projected mode's
+    frequency is logged at solver init."""
+
     @model_validator(mode="after")
     def check_phonon_energy_or_deformation_potential(self):
         """Validate model-specific required parameters."""

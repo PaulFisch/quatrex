@@ -18,6 +18,66 @@ from qttools.comm import comm as _qtt_comm
 from quatrex.phonon.fc3_loader import fc3_to_phi_blocks
 from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 from quatrex.phonon.units import bubble_prefactor_thz
+from quatrex.phonon.sse_phonon_phonon import _build_cell_zero_mode_projector
+
+
+def test_cell_zero_mode_projector_invariance() -> None:
+    """The optional rigid-mode projector must remove ONLY the q=0 rigid
+    modes and leave every heat-carrying (finite-frequency) mode's
+    self-energy exactly invariant -- the load-bearing correctness claim
+    for ``config.phonon.zero_mode_projection``.
+    """
+    rng = np.random.RandomState(0)
+    n_dof = 9
+    # A cell dynamical matrix with exactly 3 zero (translation) modes and
+    # the rest stiff: build from random optical eigenpairs + a translation
+    # null space. H00 carries it; H01 = 0 keeps the Gamma-matrix = H00.
+    A = rng.randn(n_dof, n_dof)
+    sym = A + A.T
+    evals, evecs = np.linalg.eigh(sym)
+    evals = np.abs(evals) + 4.0          # all stiff (>= 4 THz^2)
+    evals[:3] = 0.0                      # 3 exact zero (translation) modes
+    H00 = (evecs * evals) @ evecs.T      # THz^2, symmetric
+    H01 = np.zeros((n_dof, n_dof))
+
+    Q, projected = _build_cell_zero_mode_projector(H00, H01, floor_thz=0.1)
+    # exactly the 3 zero modes are projected (numerically ~0 THz)
+    assert projected.size == 3
+    assert np.all(projected < 1e-4)
+    # idempotent, symmetric, rank n_dof - 3
+    assert np.allclose(Q @ Q, Q, atol=1e-12)
+    assert np.allclose(Q, Q.T, atol=1e-12)
+    assert round(float(np.trace(Q))) == n_dof - 3
+
+    rigid = evecs[:, :3]
+    heat = evecs[:, 3:]
+    B = rng.randn(n_dof, n_dof) + 1j * rng.randn(n_dof, n_dof)
+    sigma = B + B.conj().T               # Hermitian self-energy block
+    QSQ = Q @ sigma @ Q
+    # heat-carrying modes: e^H Sigma e EXACTLY invariant under Q Sigma Q
+    before = np.array([heat[:, k].conj() @ sigma @ heat[:, k] for k in range(heat.shape[1])])
+    after = np.array([heat[:, k].conj() @ QSQ @ heat[:, k] for k in range(heat.shape[1])])
+    assert np.allclose(before, after, atol=1e-12)
+    # rigid modes: removed from Q Sigma Q
+    rig = np.array([rigid[:, k].conj() @ QSQ @ rigid[:, k] for k in range(3)])
+    assert np.allclose(rig, 0.0, atol=1e-12)
+
+
+def test_cell_zero_mode_projector_absolute_floor() -> None:
+    """The floor is ABSOLUTE: a stiff (high-frequency) mode must not
+    inflate the cutoff and over-project real low-frequency modes."""
+    n_dof = 6
+    # one stiff mode at 60 THz, one real low mode at 0.3 THz, rest mid.
+    freqs2 = np.array([0.0, 0.0, 0.3**2, 5.0, 25.0, 60.0**2])
+    evecs = np.linalg.qr(np.random.RandomState(1).randn(n_dof, n_dof))[0]
+    H00 = (evecs * freqs2) @ evecs.T
+    Q, projected = _build_cell_zero_mode_projector(
+        H00, np.zeros((n_dof, n_dof)), floor_thz=0.1
+    )
+    # only the two exact zero modes are caught; the 0.3 THz heat carrier
+    # survives despite the 60 THz stiff mode (no relative-threshold inflation)
+    assert projected.size == 2
+    assert np.all(projected < 0.1)
 
 
 def _configure_serial_comm() -> None:
