@@ -7,9 +7,10 @@ import csv
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 
 _REPO = Path("/usr/scratch/mont-fort11/pfischill/quatrex")
 CSV = _REPO / "phonon/scripts/out/ballistic_curves/ballistic.csv"
@@ -42,11 +43,8 @@ for wire, st in STYLE.items():
                  key=lambda r: r["T"])
     ax.plot([r["T"] for r in pts], [r["G_ball"] / 1e6 for r in pts], **st)
 ax.set_xlabel("temperature (K)")
-ax.set_ylabel(r"$G_\mathrm{ball}$  (MW m$^{-2}$ K$^{-1}$)")
-ax.set_title("Ballistic conductance vs temperature (one transport cell)")
+ax.set_ylabel(r"$G_\mathrm{ball}\ (\mathrm{MW\,m^{-2}\,K^{-1}})$")
 ax.legend(fontsize=9)
-ax.grid(alpha=0.3)
-fig.tight_layout()
 save(fig, "ballistic_vs_T_d5_d11.pdf")
 
 # G_ball vs length at T=300 (finite-eta coherence attenuation).
@@ -56,12 +54,8 @@ for wire, st in STYLE.items():
                  key=lambda r: r["n_slabs"])
     ax.plot([r["n_slabs"] for r in pts], [r["G_ball"] / 1e6 for r in pts], **st)
 ax.set_xlabel("device length (transport cells)")
-ax.set_ylabel(r"$G_\mathrm{ball}$  (MW m$^{-2}$ K$^{-1}$)")
-ax.set_title(r"Coherent conductance vs length at $T=300$ K"
-             "\n(finite-$\\eta$ attenuation)")
+ax.set_ylabel(r"$G_\mathrm{ball}\ (\mathrm{MW\,m^{-2}\,K^{-1}})$")
 ax.legend(fontsize=9)
-ax.grid(alpha=0.3)
-fig.tight_layout()
 save(fig, "ballistic_vs_length_d5_d11.pdf")
 
 print(f"[plot] wrote ballistic figures to {OUTS[0]} and {OUTS[1]}", flush=True)

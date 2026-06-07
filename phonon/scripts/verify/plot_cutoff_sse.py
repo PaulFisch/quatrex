@@ -5,11 +5,13 @@ Reads the ``cutoffs_sweep.csv`` produced by the finite-analysis cutoff study
 diagonal-G approximation) for d5a and d11a and overlays them.
 """
 import csv
+import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 
 _REPO = Path("/usr/scratch/mont-fort11/pfischill/quatrex")
 SRC = {
@@ -36,7 +38,6 @@ for wire, path in SRC.items():
     diag[wire] = rows.get("diag_G_in_se", float("nan"))
 ax.set_xlabel("FC3 magnitude-threshold (fraction of max)")
 ax.set_ylabel(r"$\langle|\Delta\Sigma^<|\rangle$ rel.\ to full vertex")
-ax.set_title("FC3 vertex magnitude-cutoff convergence")
 ax.legend(fontsize=9)
 ax.grid(alpha=0.3, which="both")
 # annotate the catastrophic diagonal-G approximation

@@ -18,9 +18,11 @@ for p in (_W.parent, _W):
 warnings.filterwarnings("ignore")
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 
 OUTS = [_W / "scripts/out/si_film",
         Path("/usr/scratch/mont-fort11/pfischill/quatrex/document/fig/transport_sweeps")]
@@ -68,7 +70,6 @@ if peak_dense:
 ax.set_yscale("log")
 ax.set_xlabel("transverse q-mesh count $N_q$")
 ax.set_ylabel("peak vertex memory (GB)")
-ax.set_title("q-resolved 3-phonon vertex: dense $O(N_q^2 n_{dof}^3)$ vs streamed $O(N_q n_{dof}^2)$")
 ax.legend(fontsize=8, ncol=2)
 ax.grid(alpha=0.3, which="both")
 fig.tight_layout()

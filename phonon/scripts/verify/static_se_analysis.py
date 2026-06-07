@@ -21,9 +21,11 @@ from __future__ import annotations
 import sys, glob
 from pathlib import Path
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 _REPO = Path(__file__).resolve().parents[3]
 for p in (_REPO, _REPO / "phonon"):
     if str(p) not in sys.path:
@@ -74,7 +76,6 @@ def main():
                 a.scatter([T], [float(z["sigma_static_norm"])], s=160,
                           facecolors="none", edgecolors="red", linewidths=2,
                           zorder=5)
-        a.set_title(f"{s}: tadpole breakdown\n(circled = imaginary mode / not conv.)")
         a.set_xlabel("T [K]"); a.set_ylabel(r"magnitude [THz$^2$]")
         a.legend(fontsize=8); a.grid(alpha=0.3)
     fig.tight_layout(); fig.savefig(OUT / "static_se_tadpole_breakdown.pdf", dpi=140, bbox_inches="tight")
@@ -95,9 +96,8 @@ def main():
                 if not cv:
                     ax[0][c].scatter([T], [g], marker="x", color=MCOL[m], s=70, zorder=5)
         ax[0][c].axhline(1.0, color="0.6", lw=0.6)
-        ax[0][c].set_title(f"{s}: $G_{{anh}}/G_{{ball}}$ (x = not conv.)")
         ax[0][c].set_xlabel("T [K]"); ax[0][c].set_ylabel(r"$G_{anh}/G_{ball}$"); ax[0][c].legend(fontsize=7); ax[0][c].grid(alpha=0.3)
-        ax[1][c].set_title(f"{s}: heat-flow conservation"); ax[1][c].set_xlabel("T [K]")
+        ax[1][c].set_xlabel("T [K]")
         ax[1][c].set_ylabel("conservation err"); ax[1][c].legend(fontsize=7); ax[1][c].grid(alpha=0.3)
     fig.tight_layout(); fig.savefig(OUT / "static_se_transport.pdf", dpi=140, bbox_inches="tight")
     fig.savefig(OUT / "static_se_transport.png", dpi=130, bbox_inches="tight"); plt.close(fig)
@@ -140,7 +140,7 @@ def main():
                         if not has(z, "J_anh"):
                             continue
                         a.plot(freqs, np.asarray(z["J_anh"]), color=MCOL[m], lw=0.9, label=m); any_plot = True
-                a.set_title(f"{s}, T={T:.0f} K"); a.set_xlabel(r"$\omega$ [THz]")
+                a.set_xlabel(r"$\omega$ [THz]")
                 a.set_ylabel(ylab); a.legend(fontsize=6); a.set_xlim(0, wmax)
         if any_plot:
             fig.tight_layout(); fig.savefig(OUT / f"{fname}.pdf", dpi=140, bbox_inches="tight")
@@ -161,7 +161,6 @@ def main():
             trIm = np.array([np.trace(sb[i].imag) for i in range(sb.shape[0])])
             a.plot(fr, trRe, "-", label=f"Re, {T:.0f}K")
             a.plot(fr, trIm, "--", label=f"Im, {T:.0f}K")
-        a.set_title(f"{s}: bubble Tr$\\,\\Sigma_B(\\omega)$")
         a.set_xlabel(r"$\omega$ [THz]"); a.set_ylabel(r"Tr$\,\Sigma_B$ [THz$^2$]")
         a.legend(fontsize=7); a.grid(alpha=0.3)
     fig.tight_layout(); fig.savefig(OUT / "static_se_bubble_shape.pdf", dpi=140, bbox_inches="tight")

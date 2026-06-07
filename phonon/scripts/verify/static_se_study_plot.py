@@ -8,9 +8,11 @@ from __future__ import annotations
 import sys, glob
 from pathlib import Path
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 _REPO = Path(__file__).resolve().parents[3]
 SRC = Path("/tmp/claude/se_study")
 OUT = _REPO / "document/fig/transport_sweeps"
@@ -58,7 +60,6 @@ def main():
         ax.semilogy(Ts, series("tadpole", "sigma_static_norm"), "s-", label=r"$\|\Sigma_T\|$ (tadpole)")
         ax.semilogy(Ts, series("bubble", "reB"), "^-", label=r"max$|{\rm Re}\,\Sigma_B|$ (shift)")
         ax.semilogy(Ts, series("bubble", "imB"), "v-", label=r"max$|{\rm Im}\,\Sigma_B|$ (linewidth)")
-        ax.set_title(f"{s}: correction magnitudes [THz$^2$]")
         ax.set_xlabel("T [K]"); ax.set_ylabel(r"magnitude [THz$^2$]")
         ax.legend(fontsize=7); ax.grid(alpha=0.3)
         # conservation per mode
@@ -66,7 +67,6 @@ def main():
         for m, mk in [("bubble", "o-"), ("loop", "s-"), ("tadpole", "^-"),
                       ("loop_tadpole", "v-")]:
             ax2.semilogy(Ts, series(m, "conservation"), mk, label=m)
-        ax2.set_title(f"{s}: heat-flow conservation vs mode")
         ax2.set_xlabel("T [K]"); ax2.set_ylabel("conservation error")
         ax2.legend(fontsize=7); ax2.grid(alpha=0.3)
     fig.tight_layout()

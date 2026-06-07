@@ -11,9 +11,11 @@ from pathlib import Path
 
 import numpy as np
 import h5py
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 import phonopy  # noqa: E402
 from phonopy.structure.atoms import PhonopyAtoms  # noqa: E402
 
@@ -89,7 +91,6 @@ ax.plot([xG0] * len(dfpt_gamma), dfpt_gamma, "o", color="#d62728", ms=5,
         label="DFPT (ph.x)")
 ax.plot([xL] * len(dfpt_L), dfpt_L, "o", color="#d62728", ms=5)
 ax.set_ylabel("frequency (THz)")
-ax.set_title("Bulk-Si dispersion: FD bands vs DFPT ($\\Gamma$, L)")
 ax.set_xticks([xG0, xL])
 ax.set_xticklabels(["$\\Gamma$", "L"])
 ax.grid(alpha=0.3)
