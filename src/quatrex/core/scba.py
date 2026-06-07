@@ -478,6 +478,14 @@ class SCBA:
         prev = (self.data.sigma_lesser_prev, self.data.sigma_greater_prev,
                 self.data.sigma_retarded_prev)
         to_host = (lambda a: a.get()) if xp.__name__ == "cupy" else (lambda a: a)
+        # On the first Anderson step, build the per-block residual weights
+        # (1/sqrt(||block||)) from the fresh bubble output and hold them fixed:
+        # they put every (I,J) self-energy block on an equal footing so the
+        # large diagonal blocks do not dominate the least squares and
+        # over-extrapolate the small off-diagonal ones (the dense-reference
+        # safeguard, essential for the soft-mode SCBA).
+        if self._anderson_mixer.weights is None:
+            self._anderson_mixer.weights = self._anderson_block_weights(cur, to_host)
         shapes = [m.data.shape for m in cur]
         sizes = [m.data.size for m in cur]
         x_in = np.concatenate([to_host(m.data).ravel() for m in prev])
@@ -487,6 +495,32 @@ class SCBA:
         for m, shp, sz in zip(cur, shapes, sizes):
             m.data[:] = xp.asarray(x_mixed[off:off + sz].reshape(shp))
             off += sz
+
+    def _anderson_block_weights(self, cur, to_host):
+        """Per-entry weights ``1/sqrt(||block(I,J)||)`` for the concatenated
+        ``[Sigma^<, Sigma^>, Sigma^R]`` Anderson state (the dense
+        ``_block_weight_vector``). Block norms use ``|Sigma^<|+|Sigma^>|``,
+        globally reduced over the energy x block partition; the three halves
+        share the weights (same sparsity)."""
+        sl, sg, _sr = cur
+        mag = np.abs(to_host(sl.data)) + np.abs(to_host(sg.data))   # (*stack, nnz)
+        nnz = mag.shape[-1]
+        mag2_per_nnz = (mag ** 2).reshape(-1, nnz).sum(axis=0)      # per nnz
+        rows = np.asarray(to_host(sl.rows)) + int(sl.global_block_offset)
+        cols = np.asarray(to_host(sl.cols)) + int(sl.global_block_offset)
+        boff = np.asarray(sl.block_offsets)
+        n_blocks = len(boff) - 1
+        rblk = np.clip(np.searchsorted(boff, rows, side="right") - 1, 0, n_blocks - 1)
+        cblk = np.clip(np.searchsorted(boff, cols, side="right") - 1, 0, n_blocks - 1)
+        block_mag2 = np.zeros((n_blocks, n_blocks))
+        np.add.at(block_mag2, (rblk, cblk), mag2_per_nnz)
+        global_comm.Allreduce(MPI.IN_PLACE, block_mag2, op=MPI.SUM)
+        block_norm = np.sqrt(block_mag2)
+        floor = 1e-6 * (block_norm.max() + 1e-300) + 1e-300
+        w_per_nnz = 1.0 / np.sqrt(block_norm[rblk, cblk] + floor)
+        n_stack = int(np.prod(mag.shape[:-1])) if mag.ndim > 1 else 1
+        w_flat = np.tile(w_per_nnz, n_stack)                        # matches (*stack,nnz) ravel
+        return np.concatenate([w_flat, w_flat, w_flat])
 
     @profiler.profile(label="SCBA: Convergence test", level="default", comm=comm)
     def _has_converged(self) -> bool:

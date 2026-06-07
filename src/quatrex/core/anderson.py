@@ -54,6 +54,10 @@ class AndersonMixer:
         self.step_cap = float(step_cap)
         self.stagnation = int(stagnation)
         self.revert_factor = float(revert_factor)
+        # Per-entry residual weights (block re-scaling); set by the caller after
+        # the first step. None => unit weights. Used in BOTH the norm and the
+        # least-squares fit.
+        self.weights = None
         self.x_hist: list = []
         self.f_hist: list = []
         self.best_fnorm = float("inf")
@@ -71,7 +75,8 @@ class AndersonMixer:
         return self._gsum(np.vdot(a, b))
 
     def fnorm(self, f):
-        return float(np.sqrt(max(self._gdot(f, f).real, 0.0)))
+        g = f if self.weights is None else self.weights * f
+        return float(np.sqrt(max(self._gdot(g, g).real, 0.0)))
 
     def _truncate(self):
         while len(self.x_hist) > self.depth + 2:
@@ -116,23 +121,29 @@ class AndersonMixer:
             self.x_hist[-n_use + j] - self.x_hist[-n_use + j - 1]
             for j in range(n_use)])
 
-        # Least squares min ||dF gamma - f||.
+        # Block-weighted least squares min ||W(dF gamma - f)||: the weights
+        # (1/sqrt(||block||) per (I,J) self-energy block) put every block on an
+        # equal footing so the large diagonal blocks do not dominate the fit and
+        # over-extrapolate the small off-diagonal ones. ESSENTIAL for the
+        # soft-mode SCBA (the dense reference relies on it). The weights enter
+        # only the fit; the step is applied to the unweighted dX, dF.
+        if self.weights is not None:
+            dF_w = dF * self.weights[:, None]
+            f_w = f_k * self.weights
+        else:
+            dF_w, f_w = dF, f_k
         try:
             if self._comm is None or self._comm.size == 1:
-                # Serial: the dense reference's direct truncated-SVD lstsq on dF
-                # -- best conditioned, so it does not over-extrapolate (and so
-                # destabilise) a convergent map the way the squared-conditioning
-                # normal equations can.
-                gamma, *_ = np.linalg.lstsq(dF, f_k, rcond=1.0 / self.cond_max)
+                # Serial: the dense reference's direct truncated-SVD lstsq.
+                gamma, *_ = np.linalg.lstsq(dF_w, f_w, rcond=1.0 / self.cond_max)
             else:
                 # Distributed: the same least squares via the GLOBAL normal
-                # equations (dF^H dF) gamma = dF^H f from all-reduced local
-                # contractions, solved by a truncated pseudo-inverse of the
-                # Hermitian Gram (its eigenvalues are the squared singular
-                # values of dF). A small per-step communication; the squared
-                # conditioning is the price of avoiding a distributed SVD.
-                gram = self._gsum(dF.conj().T @ dF)
-                rhs = self._gsum(dF.conj().T @ f_k)
+                # equations (dF_w^H dF_w) gamma = dF_w^H f_w from all-reduced
+                # local contractions, solved by a truncated pseudo-inverse of
+                # the Hermitian Gram (its eigenvalues are the squared singular
+                # values of dF_w). A small per-step communication.
+                gram = self._gsum(dF_w.conj().T @ dF_w)
+                rhs = self._gsum(dF_w.conj().T @ f_w)
                 evals, evecs = np.linalg.eigh(0.5 * (gram + gram.conj().T))
                 keep = evals > (evals.max() / self.cond_max if evals.size else 0.0)
                 if not np.any(keep):
