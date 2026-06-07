@@ -309,11 +309,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
         sigma_lesser.data[:] = sigma_lesser.data + sl_data
         sigma_greater.data[:] = sigma_greater.data + sg_data
-        delta = sg_data - sl_data
-        sr_data = 0.5 * delta
+        # Σ^R contribution: only the DISPERSIVE (Hilbert) part. The
+        # anti-Hermitian part ½(Σ^>−Σ^<) is added once by the SCBA loop
+        # after all interactions (the GW convention,
+        # cf. electron/sse_coulomb_screening); adding it here too would
+        # double-count it and break heat-flow conservation.
         if self.retarded_method == "fft":
-            sr_data = sr_data + 0.5j * hilbert_transform(delta, full_freqs)
-        sigma_retarded.data[:] = sigma_retarded.data + sr_data
+            delta = sg_data - sl_data
+            sigma_retarded.data[:] = (
+                sigma_retarded.data + 0.5j * hilbert_transform(delta, full_freqs)
+            )
 
     @staticmethod
     def _fft_pad(data: NDArray, n_fft: int) -> NDArray:
