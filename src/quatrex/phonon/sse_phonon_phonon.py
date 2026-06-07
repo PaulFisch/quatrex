@@ -188,6 +188,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if getattr(config.phonon, "zero_mode_projection", False):
             self._build_zero_mode_projector(config, dynamical_matrix)
 
+        # Optional self-consistent SCP cubic-tadpole static self-energy.
+        self._scp_tadpole = bool(getattr(config.phonon, "scp_tadpole", False))
+        self._sigma_static: NDArray | None = None
+        if self._scp_tadpole:
+            self._setup_scp_tadpole(config, dynamical_matrix)
+
     def _build_zero_mode_projector(self, config, dynamical_matrix) -> None:
         """Build the cell rigid-mode projector ``Q_cell`` from the cell
         dynamical-matrix blocks (H00, H01) and store it on
@@ -234,6 +240,103 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 f"[{freqs}] THz out of Σ^<,>.",
                 flush=True,
             )
+
+    def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
+        """Prepare the self-consistent SCP cubic-tadpole static self-energy:
+        the dense device FC3 + dynamical matrix, the mixing/floor, and the
+        zeroed running ``Sigma_static``. No-op (warning) if prerequisites
+        are missing or the layout is unsupported (non-uniform blocks, or a
+        block-distributed run — the soft-mode regime is single/few-cell)."""
+        from quatrex.phonon.static_self_energy import device_fc3_mass_weighted
+
+        if dynamical_matrix is None:
+            warnings.warn(
+                "scp_tadpole requested but no dynamical_matrix passed to "
+                "SigmaPhononPhonon; SCP tadpole DISABLED.", stacklevel=2)
+            self._scp_tadpole = False
+            return
+        if not np.all(self.block_sizes == self.block_sizes[0]):
+            warnings.warn(
+                "scp_tadpole requires uniform block sizes; DISABLED.",
+                stacklevel=2)
+            self._scp_tadpole = False
+            return
+        if ranks.block.size > 1:
+            warnings.warn(
+                "scp_tadpole is not yet implemented for block-distributed "
+                "runs (comm.block.size>1); SCP tadpole DISABLED. Use a single "
+                "block rank (the soft-mode regime is single/few-cell).",
+                stacklevel=2)
+            self._scp_tadpole = False
+            return
+
+        n_dof = int(self.block_sizes[0])
+        n_blocks = self.n_blocks
+        N_D = n_blocks * n_dof
+        # Dense device FC3 in the tadpole mass-weighting (bubble blocks / C_FC3).
+        self._fc3_dev_mw = device_fc3_mass_weighted(
+            self.phi_blocks, n_blocks, n_dof)
+        # Dense device dynamical matrix D (THz²), ω-independent.
+        D = np.zeros((N_D, N_D), dtype=float)
+        for I in range(n_blocks):
+            for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+                blk = np.asarray(dynamical_matrix.blocks[I, J])
+                if blk.ndim == 3:
+                    blk = blk[0]
+                D[I * n_dof:(I + 1) * n_dof, J * n_dof:(J + 1) * n_dof] = blk.real
+        self._scp_D = 0.5 * (D + D.T)
+        self._sigma_static = np.zeros((N_D, N_D), dtype=float)
+        self._scp_mix = float(getattr(config.phonon, "scp_static_mixing", 0.1))
+        self._scp_floor2 = float(getattr(config.phonon, "scp_floor_thz", 0.5)) ** 2
+        if comm.rank == 0:
+            print(
+                f"[SigmaPhononPhonon] SCP tadpole ON: N_D={N_D}, "
+                f"mixing={self._scp_mix}, Phi_eff floor="
+                f"{getattr(config.phonon, 'scp_floor_thz', 0.5)} THz.",
+                flush=True,
+            )
+
+    def _apply_scp_tadpole(self, g_lesser, sigma_retarded) -> None:
+        """Self-consistent cubic tadpole, in the nnz state.
+
+        Forms ``<uu>`` from the ω-integral of the device ``G^<`` (full ω
+        local per nnz slice), solves the regularised ``mean_displacement``
+        against ``Phi_eff = D + Sigma_static``, mixes the resulting static
+        ``Sigma_T``, and broadcasts it into ``Sigma^R`` at every frequency
+        (≡ stiffening the dynamical matrix). Reuses the bubble's ``G^<`` --
+        no recomputation.
+        """
+        from quatrex.phonon.static_self_energy import (
+            equal_time_uu_from_sum, mean_displacement, sigma_tadpole)
+
+        N_D = self._sigma_static.shape[0]
+        # ω-integral of G^< (nnz: all ω local). Sum over every stack axis.
+        ax = tuple(range(g_lesser.data.ndim - 1))
+        g_sum_local = g_lesser.data.sum(axis=ax)             # (local_nnz,)
+        rows = np.asarray(g_lesser.rows) + int(g_lesser.global_block_offset)
+        cols = np.asarray(g_lesser.cols) + int(g_lesser.global_block_offset)
+        g_sum = np.zeros((N_D, N_D), dtype=g_sum_local.dtype)
+        g_sum[rows, cols] = np.asarray(g_sum_local)
+        # nnz is split over comm.stack (full ω local, spatial elements split).
+        if ranks.stack.size > 1:
+            recv = xp.zeros_like(g_sum)
+            ranks.stack.all_reduce(g_sum, recv, op="sum")
+            g_sum = recv
+        dw = float(self.local_frequencies[1] - self.local_frequencies[0])
+        uu = equal_time_uu_from_sum(g_sum, dw)
+        phi_eff = self._scp_D + self._sigma_static
+        w_mean = mean_displacement(
+            self._fc3_dev_mw, uu, phi_eff,
+            omega2_floor_abs=self._scp_floor2)
+        sig_new = sigma_tadpole(self._fc3_dev_mw, w_mean)
+        self._sigma_static = (
+            (1.0 - self._scp_mix) * self._sigma_static + self._scp_mix * sig_new)
+        if getattr(self, "_scp_verbose", False) and comm.rank == 0:
+            print(f"[SigmaPhononPhonon] ||Sigma_static||={np.linalg.norm(self._sigma_static):.3f} "
+                  f"||Sigma_T(new)||={np.linalg.norm(sig_new):.3f} THz^2", flush=True)
+        # Broadcast the static self-energy into Σ^R at every frequency.
+        sr_static = self._sigma_static[rows, cols].astype(sigma_retarded.data.dtype)
+        sigma_retarded.data[:] = sigma_retarded.data + sr_static
 
     # ------------------------------------------------------------------
     # Public API
@@ -418,6 +521,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             sigma_retarded.data[:] = (
                 sigma_retarded.data + 0.5j * hilbert_transform(delta, full_freqs)
             )
+
+        # Self-consistent SCP cubic-tadpole static self-energy (stiffens the
+        # soft mode; added into Σ^R at every frequency). Uses the same G^<.
+        if self._scp_tadpole and self._sigma_static is not None:
+            self._apply_scp_tadpole(g_lesser, sigma_retarded)
 
     @staticmethod
     def _fft_pad(data: NDArray, n_fft: int) -> NDArray:

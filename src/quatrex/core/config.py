@@ -730,6 +730,39 @@ class PhononConfig(BaseModel):
     over-project real low-omega heat carriers. Every projected mode's
     frequency is logged at solver init."""
 
+    scp_tadpole: bool = False
+    """Optional self-consistent-phonon (SCP) cubic tadpole static
+    self-energy (``model == "negf"``).
+
+    The dynamic 3-phonon bubble destabilises the SCBA on soft-mode
+    structures (the Bose-enhanced ``G^<`` IR singularity). The cubic
+    tadpole ``Sigma_T = Phi3 : <u>`` is a STATIC real self-energy that
+    *stiffens* the soft mode (raises its frequency) -- the physically
+    correct finite-T renormalisation (SCP / SSCHA; Paulatto-Errea-Calandra
+    2015) -- so the bubble becomes stable. It is recomputed every SCBA
+    iteration from the current device ``G^<`` (hence self-consistent and
+    self-limiting) and added to the dynamical matrix via ``Sigma^R``.
+    Needs only FC3 (the quartic loop, which would need FC4, is omitted).
+    Default OFF. Cf. ``quatrex/phonon/static_self_energy.py``.
+
+    NOTE: the current implementation assembles dense device-level arrays
+    (FC3 tensor + Phi_eff eigensolve); intended for single / few-cell
+    devices (the soft-mode regime). Large multi-cell / distributed use
+    needs the band-sparse variant (Phi_eff solve via the RGF)."""
+
+    scp_static_mixing: PositiveFloat = 0.1
+    """Linear mixing factor for the self-consistent static (tadpole)
+    self-energy across SCBA iterations. Gentler than the dynamic-Sigma
+    mixing (the static SE drives the soft-mode stiffening and overshoots
+    if mixed too fast). Only used when ``scp_tadpole``."""
+
+    scp_floor_thz: NonNegativeFloat = 0.5  # THz
+    """Absolute frequency floor (THz) for the regularised ``Phi_eff``
+    pseudo-inverse in the tadpole ``mean_displacement`` solve: modes below
+    this are dropped from the inverse (only the stiff optical modes relax),
+    preventing the soft mode's ~1/omega^2 amplification from blowing the
+    solve up. Only used when ``scp_tadpole``."""
+
     @model_validator(mode="after")
     def check_phonon_energy_or_deformation_potential(self):
         """Validate model-specific required parameters."""
