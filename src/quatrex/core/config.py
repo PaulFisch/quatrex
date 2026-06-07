@@ -65,6 +65,33 @@ class SCBAConfig(BaseModel):
 
     mixing_factor: PositiveFloat = Field(default=0.1, le=1.0)
 
+    mixing_method: Literal["linear", "anderson"] = "linear"
+    """Self-energy fixed-point mixer. ``"linear"`` (default) is the bare
+    damped mixing ``Sigma <- (1-a) Sigma_prev + a Sigma_new``. ``"anderson"``
+    is safeguarded Anderson/Pulay (DIIS) acceleration that uses a short
+    residual history to extrapolate the fixed point; it accelerates a
+    WELL-CONDITIONED SCBA and, with the revert-to-best safeguard, is not
+    worse than damped linear. ``mixing_factor`` is the Anderson relaxation
+    ``beta``. Cf. ``quatrex/core/anderson.py``.
+
+    NOTE: Anderson is NOT a cure for a marginal / non-existent fixed point.
+    On the strong-coupling soft-mode SCBA (e.g. the d5a SiNW at full
+    coupling, whose omega->0 modes make the fixed point ill-defined) no
+    mixer converges -- that regime needs the LOA-Pade analytic continuation
+    from moderate coupling (a separate technique), not acceleration. There
+    Anderson reverts to its best iterate (>= linear, but not convergent)."""
+
+    anderson_depth: PositiveInt = 8
+    """History depth (number of residual secants) for ``mixing_method =
+    "anderson"``. Larger resolves more of the oscillation but costs more
+    least-squares conditioning."""
+
+    anderson_step_cap: PositiveFloat = 3.0
+    """Max ratio of the Anderson extrapolation step to the damped-linear
+    step; an over-long step is replaced by the linear one for that
+    iteration (overshoot safeguard). Looser (larger) helps a strongly
+    oscillating fixed point but risks instability."""
+
     output_interval: PositiveInt = 1
 
     coulomb_screening: bool = False
