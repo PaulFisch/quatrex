@@ -459,14 +459,16 @@ class SCBA:
         max_diff = np.empty_like(local_max_diff)
         global_comm.Allreduce(local_max_diff, max_diff, op=MPI.MAX)
 
-        meir_wingreen_current = self.observables.electron_current.get(
-            "meir-wingreen", [0, 0]
-        )
-        i_left = xp.real(meir_wingreen_current[..., 0])
-        i_right = xp.real(meir_wingreen_current[..., -1])
+        current_diff = 0.0
+        if "electron" in self.subsystems:
+            meir_wingreen_current = self.observables.electron_current.get(
+                "meir-wingreen", [0, 0]
+            )
+            i_left = xp.real(meir_wingreen_current[..., 0])
+            i_right = xp.real(meir_wingreen_current[..., -1])
 
-        dE = self.energies[1] - self.energies[0]
-        current_diff = xp.abs(xp.sum(i_left) * dE - xp.sum(i_right) * dE)
+            dE = self.energies[1] - self.energies[0]
+            current_diff = xp.abs(xp.sum(i_left) * dE - xp.sum(i_right) * dE)
 
         current_conservation_abs, current_conservation_rel = current_conservation(
             self.data.g_lesser,
@@ -586,7 +588,7 @@ class SCBA:
         if self.config.outputs.hole_density:
             outputs[f"hole_density_{iteration}.npy"] = self.observables.hole_density
 
-        if self.config.outputs.device_currents:
+        if self.config.outputs.device_currents and "electron" in self.subsystems:
             outputs[f"device_current_{iteration}.npy"] = (
                 self.observables.electron_current["device"]
             )
@@ -647,7 +649,10 @@ class SCBA:
                         self.data.sigma_retarded,
                         out=(self.data.g_lesser, self.data.g_greater, self.data.g_retarded),
                     )
-                self._compute_electron_observables()
+                # Electron-specific observables; phonon transport reads the
+                # heat current from PhononSolver.meir_wingreen_current instead.
+                if "electron" in self.subsystems:
+                    self._compute_electron_observables()
 
                 # Stash current into previous self-energy buffer.
                 self._stash_sigma()

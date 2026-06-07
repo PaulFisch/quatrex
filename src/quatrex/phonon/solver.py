@@ -121,9 +121,13 @@ class PhononSolver(SubsystemSolver):
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
-        # TODO units here in eV expected
-        local_omega_rad = np.sqrt(np.abs(self.local_frequencies))
-        hbar_omega_eV = 6.582119569e-16 * local_omega_rad
+        # THz convention (consistent with SigmaPhononPhonon and the dense
+        # reference solver): ``frequencies`` are the LINEAR angular-frequency
+        # grid in THz (uniform spacing, as the bubble FFT requires). The Bose
+        # occupation uses hbar*omega with omega = 2*pi*1e12 * f[THz].
+        hbar_omega_eV = 6.582119569e-16 * (2 * np.pi * 1e12) * np.abs(
+            self.local_frequencies
+        )
         self.left_occupancies = bose_einstein(hbar_omega_eV, self.left_temperature)
         self.right_occupancies = bose_einstein(hbar_omega_eV, self.right_temperature)
 
@@ -230,11 +234,14 @@ class PhononSolver(SubsystemSolver):
         self.system_matrix.allocate_data()
         self.system_matrix.data = 0.0
 
-        # Omega * I
+        # (omega + i*eta)^2 * I  (THz^2). The phonon Dyson equation is
+        # [ (omega+i eta)^2 - D - Sigma ] G = I, with D the dynamical matrix
+        # and Sigma the scattering self-energy, all in THz^2 (consistent with
+        # the dense reference and SigmaPhononPhonon).
         self.system_matrix.fill_diagonal(1.0)
         scale_stack(
             self.system_matrix.data,
-            self.local_frequencies + 1j * self.eta
+            (self.local_frequencies + 1j * self.eta) ** 2,
         )
 
         _btd_subtract(self.system_matrix, sse_retarded)

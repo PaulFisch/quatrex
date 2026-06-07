@@ -233,7 +233,9 @@ def _ref_compute_multiblock(
         sl = sl_full.get(key, 0)
         sg = sg_full.get(key, 0)
         delta = sg - sl
-        sr_full[key] = 0.5 * delta + 0.5j * hilbert_transform(delta, freqs)
+        # The production SSE adds only the dispersive (Hilbert) part of
+        # Σ^R; the SCBA loop adds the anti-Hermitian ½(Σ^>−Σ^<) itself.
+        sr_full[key] = 0.5j * hilbert_transform(delta, freqs)
 
     return sl_full, sg_full, sr_full
 
