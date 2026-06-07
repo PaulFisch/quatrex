@@ -299,6 +299,18 @@ class SCBA:
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
+        # Optional Anderson/Pulay acceleration of the self-energy fixed point
+        # (breaks the period-2 oscillation linear mixing cannot damp on the
+        # strong-coupling soft-mode SCBA). Default "linear" -> bare mixing.
+        self._anderson_mixer = None
+        if self.config.scba.mixing_method == "anderson":
+            from quatrex.core.anderson import AndersonMixer
+            self._anderson_mixer = AndersonMixer(
+                depth=self.config.scba.anderson_depth,
+                beta=self.mixing_factor,
+                step_cap=self.config.scba.anderson_step_cap,
+            )
+
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
 
@@ -437,7 +449,10 @@ class SCBA:
 
     @profiler.profile(label="SCBA: Update Sigma", level="default", comm=comm)
     def _update_sigma(self) -> None:
-        """Updates the self-energy with a mixing factor."""
+        """Updates the self-energy: damped linear, or safeguarded Anderson."""
+        if self._anderson_mixer is not None:
+            self._update_sigma_anderson()
+            return
         self.data.sigma_lesser.data[:] = (
             (1 - self.mixing_factor) * self.data.sigma_lesser_prev.data
             + self.mixing_factor * self.data.sigma_lesser.data
@@ -450,6 +465,27 @@ class SCBA:
             (1 - self.mixing_factor) * self.data.sigma_retarded_prev.data
             + self.mixing_factor * self.data.sigma_retarded.data
         )
+
+    def _update_sigma_anderson(self) -> None:
+        """Anderson/Pulay mix of the augmented [Sigma^<, Sigma^>, Sigma^R]
+        state. ``sigma_*`` hold the freshly computed map output; ``*_prev``
+        the previous iterate. The mixer's inner products are global
+        (all-reduced over the energy x block ranks), so each rank passes its
+        local slice. cupy buffers are moved host-side for the (numpy) mixer."""
+        cur = (self.data.sigma_lesser, self.data.sigma_greater,
+               self.data.sigma_retarded)
+        prev = (self.data.sigma_lesser_prev, self.data.sigma_greater_prev,
+                self.data.sigma_retarded_prev)
+        to_host = (lambda a: a.get()) if xp.__name__ == "cupy" else (lambda a: a)
+        shapes = [m.data.shape for m in cur]
+        sizes = [m.data.size for m in cur]
+        x_in = np.concatenate([to_host(m.data).ravel() for m in prev])
+        x_out = np.concatenate([to_host(m.data).ravel() for m in cur])
+        x_mixed, _ = self._anderson_mixer.step(x_in, x_out)
+        off = 0
+        for m, shp, sz in zip(cur, shapes, sizes):
+            m.data[:] = xp.asarray(x_mixed[off:off + sz].reshape(shp))
+            off += sz
 
     @profiler.profile(label="SCBA: Convergence test", level="default", comm=comm)
     def _has_converged(self) -> bool:
