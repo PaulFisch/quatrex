@@ -233,8 +233,9 @@ As an independent check of the force-constant pipeline and the physics (separate
 from the NEGF solver), FC2 and FC3 for primitive silicon were re-fit with
 \texttt{symfc} from the existing phono3py displacement--force dataset (no new DFT),
 and the lattice thermal conductivity was computed with the relaxation-time
-Boltzmann transport equation. The result converges from $\kappa(300\,K)=
-110.7\,W/mK$ on an $11^3$ $q$-mesh to $115.2\,W/mK$ on $19^3$, in the
+Boltzmann transport equation. The result is essentially mesh-converged,
+$\kappa(300\,K)=110.7\,W/mK$ on an $11^3$ $q$-mesh and $108.7\,W/mK$ on
+$19^3$, in the
 expected range for the small $2\times2\times2$ supercell FC3 (cutoff
 $5.5\,\AA{}$) used; a larger supercell would raise this toward the
 experimental $140$--$150\,W/mK$. This validates the hiphive/phono3py FC
@@ -299,7 +300,8 @@ infrared stiffness that troubles \texttt{d5a} is absent and the SCBA is well con
 \texttt{d11a} is therefore the natural structure for production nanowire transport, and a
 direct SCBA at physical $\eta_w$ bears this out: $\lambda=0.3$ converges in $37$ iterations to
 $G_\text{anh}/G_\text{ball}=0.997$ (conservation $2.7\times10^{-3}$), and even $\lambda=0.6$
-remains well behaved (ratio $0.98$, conservation $1.4\times10^{-2}$, no causality violations) --
+shows no causality violations and a stable ratio $\approx0.98$ (conservation
+$1.4\times10^{-2}$), though it does not reach the $10^{-3}$ tolerance within the iteration cap --
 markedly more stable than the same coupling on \texttt{d5a}, confirming that the absence of the
 near-zero twist mode removes the infrared stiffness. By
 contrast the \texttt{d17a} force constants as currently fit are unphysical (86 imaginary modes

@@ -8,9 +8,11 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 import phono3py  # noqa: E402
 
 _REPO = Path("/usr/scratch/mont-fort11/pfischill/quatrex")
@@ -60,12 +62,10 @@ fig, ax = plt.subplots(1, 2, figsize=(9.4, 4.0))
 ax[0].scatter(freq[m], (gU/g_tot)[m], s=5, alpha=0.3, color="#d62728")
 ax[0].set_xlabel("frequency (THz)")
 ax[0].set_ylabel("Umklapp fraction of scattering")
-ax[0].set_title(f"Normal vs Umklapp (Si 300 K, U={u_frac:.0%})")
 ax[0].set_ylim(-0.05, 1.05); ax[0].grid(alpha=0.3)
 ax[1].scatter(fr_g, gam, s=8, alpha=0.5, color="#1f77b4")
 ax[1].set_xlabel("frequency (THz)")
 ax[1].set_ylabel("mode Grueneisen $\\gamma$")
-ax[1].set_title("Mode Grueneisen (anharmonicity strength)")
 ax[1].grid(alpha=0.3)
 fig.tight_layout()
 for o in OUTS:

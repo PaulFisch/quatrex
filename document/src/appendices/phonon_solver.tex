@@ -13,8 +13,8 @@ simultaneously:
         \texttt{quatrex.phonon.sse\_phonon\_phonon} is benchmarked.
         Both solvers share the same bubble kernel
         (\texttt{bubble.py}); cross-agreement is locked by a unit
-        test that asserts byte-identical output on a small synthetic
-        Green's function.
+        test that asserts agreement to $\sim\!10^{-12}$ (absolute
+        tolerance) on a small synthetic Green's function.
   \item It is the driver behind the cutoff-sensitivity and
         FC3-compression-vs-transport sweeps that produce the
         results-section figures.  The cell that exposes those
@@ -439,9 +439,14 @@ from phonon.solver import (
 The companion production solver
 \texttt{quatrex.phonon.sse\_phonon\_phonon} is the MPI-distributed
 block-sparse variant and consumes the same bubble kernel through its
-own installed copy at \texttt{quatrex.phonon.bubble}.  The dense
-solver of this appendix is the reference implementation: it is the
-arbiter of correctness for the production stack.
+own installed copy at \texttt{quatrex.phonon.bubble}.  It realises the
+full off-diagonal ring through the FFT-first energy pipeline and the
+1-D spatial halo whose cost model is derived in
+\cref{ssec:phph_dist_impl}, and is pinned \emph{bit-identical} to this
+dense reference both serially and across \texttt{comm.stack} /
+\texttt{comm.block} factorisations (\cref{tab:phph_dist}).  The dense
+solver of this appendix remains the arbiter of correctness for the
+production stack.
 
 % ======================================================================
 \section{Physics verification of the dense solver}

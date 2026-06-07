@@ -9,9 +9,11 @@ Data measured by phph_dist_scaling.py (NBLK=6, BS=16, NE=96):
 from pathlib import Path
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 
 _REPO = Path("/usr/scratch/mont-fort11/pfischill/quatrex")
 OUTS = [_REPO / "phonon/scripts/out/phph_physics",
@@ -32,7 +34,6 @@ rr = np.array([1, 2, 3, 4, 6])
 ax.plot(rr, rr, "k:", lw=1.0, label="ideal (= q-point axis, projected)")
 ax.set_xlabel("MPI ranks")
 ax.set_ylabel("phph self-energy speed-up")
-ax.set_title("Distributed scaling of the quatrex 3-phonon self-energy")
 ax.set_xticks([1, 2, 3, 4, 6])
 ax.legend(fontsize=9)
 ax.grid(alpha=0.3)

@@ -10,9 +10,11 @@ from pathlib import Path
 
 import numpy as np
 import h5py
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+import sys as _sys
+_sys.path.insert(0, "/usr/scratch/mont-fort11/pfischill/quatrex/phonon")
+from finite_analysis.plot_style import set_publication_style  # noqa: E402
+set_publication_style()
 
 _REPO = Path("/usr/scratch/mont-fort11/pfischill/quatrex")
 OUTS = [_REPO / "phonon/scripts/out/phph_physics",
@@ -65,7 +67,6 @@ fig, ax = plt.subplots(1, 3, figsize=(13.5, 4.0))
 ax[0].scatter(fr_v, tau_v, s=4, alpha=0.3, color="#1f77b4")
 ax[0].set_yscale("log")
 ax[0].set_xlabel("frequency (THz)"); ax[0].set_ylabel(r"lifetime $\tau$ (ps)")
-ax[0].set_title("Phonon lifetimes, bulk Si 300 K")
 # guide ~ omega^-2
 ff = np.linspace(2, 15, 50)
 ax[0].plot(ff, 2e2 * ff**-2.0, "k--", lw=0.8, alpha=0.6, label=r"$\propto\omega^{-2}$")
@@ -75,12 +76,10 @@ ax[1].semilogx(mfp_sorted, kcum, color="#d62728")
 ax[1].axhline(0.5, color="k", lw=0.6, ls=":"); ax[1].axhline(0.9, color="k", lw=0.6, ls=":")
 ax[1].set_xlabel("phonon mean free path (nm)")
 ax[1].set_ylabel(r"cumulative $\kappa/\kappa_\mathrm{tot}$")
-ax[1].set_title(f"$\\kappa$ accumulation (50%@{mfp50:.0f}nm, 90%@{mfp90:.0f}nm)")
 ax[1].grid(alpha=0.3, which="both")
 
 ax[2].scatter(fr_v, mk_v, s=4, alpha=0.3, color="#2ca02c")
 ax[2].set_xlabel("frequency (THz)"); ax[2].set_ylabel(r"mode $\kappa$ (W m$^{-1}$K$^{-1}$)")
-ax[2].set_title("Mode-resolved $\\kappa$ spectrum")
 ax[2].grid(alpha=0.3)
 fig.tight_layout()
 for o in OUTS:

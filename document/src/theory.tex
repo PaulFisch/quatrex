@@ -2076,17 +2076,22 @@ array) only when
 The block-pair index
 \begin{equation}\label{eq:phph_pair_index}
   \mathcal{P}(I,J)
-  = \bigl\{(K_1,K_2) :
-      \Phi^{(3)}_{I,K_1,K_2}\;\text{and}\;
-      \Phi^{(3)}_{J,K_2,K_1}\;\text{both present}\bigr\},
+  = \bigl\{(K_1,K_2,K_1',K_2') :
+      \Phi^{(3)}_{I,K_1,K_2},\;
+      \Phi^{(3)}_{J,K_2',K_1'}\;\text{present},\;
+      g_{K_1K_1'},\,g_{K_2K_2'}\;\text{in band}\bigr\},
 \end{equation}
-encodes which inner block-pairs contribute to a given output
-block-pair $(I,J)$. From \cref{eq:fc3_block_support} together with
-the BT-band requirement on the output ($|I-J|\le 1$), the cardinality
-of $\mathcal{P}(I,J)$ is bounded by
-$|\mathcal{P}(I,J)| = \cO(N_\mathrm{c,x}^{2})$, with the proportionality
-constant set by the lattice geometry. For a cubic lattice and
-$N_\mathrm{c,x}=3$, $|\mathcal{P}(I,J)|\le 49$ in the worst case.
+encodes which inner block-quadruples contribute to a given output
+block-pair $(I,J)$: the ring carries the \emph{full off-diagonal}
+propagators $g_{K_1K_1'},g_{K_2K_2'}$ (with $|K_i-K_i'|\le r_c$), not
+only the diagonal $g_{K_iK_i}$, so the inter-slab coherence is
+retained. From \cref{eq:fc3_block_support}, the $G$-band, and the
+output BT-band ($|I-J|\le 1$), the cardinality is bounded by
+$|\mathcal{P}(I,J)| = \cO(N_\mathrm{c,x}^{2}\,r_c^{2})$; the pair-index
+gate $\Phi^{(3)}_{J,K_2',K_1'}$ exist ties $K_i'$ to the
+nearest-neighbour shell of $J$, keeping the count $\cO(1)$ at
+$N_\mathrm{c,x},r_c=\cO(1)$ (a few tens of quadruples for a cubic
+lattice with $N_\mathrm{c,x}=3$).
 The partial Fourier transform $\Phi^{(3)} \to \tilde\Phi^{(3)}(\qp,\qp')$
 over the transverse cells preserves block-sparsity along the transport direction unchanged.
 
@@ -2130,8 +2135,9 @@ throughput.
 
 Combining \cref{eq:cic_block_dense} with the q-space cost
 \cref{eq:cost_q} and the $\mathcal{P}$-cardinality bound
-$|\mathcal{P}(I,J)|=\cO(N_\mathrm{c,x}^{2})$, the total q-space SSE
-cost reduces to
+$|\mathcal{P}(I,J)|=\cO(N_\mathrm{c,x}^{2}r_c^{2})$ (the $r_c^{2}$ from
+the full off-diagonal ring, $\cO(1)$ at $r_c=\cO(1)$), the total
+q-space SSE cost reduces to
 \begin{equation}\label{eq:cost_phph_total}
   \mathcal{W}_\mathrm{phph}
   = \cO\!\bigl(N_\tau\,N_q^{2}\,\NB\,N_\mathrm{c,x}^{2}\,
@@ -2283,7 +2289,11 @@ clearly superior choice.
 
 \paragraph{Per-pair kernel.} With the FFT-first ordering, the
 balanced-tree (or, equivalently for one-rank evaluation, outside-in)
-contraction at fixed $(I,J,K_1,K_2)\in\mathcal{P}$ takes the form
+contraction at fixed $(I,J,K_1,K_2,K_1',K_2')\in\mathcal{P}$ -- with
+$\Phi_L\equiv\Phi^{(3)}_{I,K_1,K_2}$, $\Phi_R\equiv\Phi^{(3)}_{J,K_2',K_1'}$,
+and the (generally off-diagonal) link propagators
+$g_a\equiv g_{K_1K_1'}(\tau)$, $g_b\equiv g_{K_2K_2'}(\tau)$ -- takes the
+form
 \begin{align}
   A_{w,a,c,d}
     &= \sum_{e}(\Phi_L)_{a,c,e}\,(g_b)_{w,e,d},
@@ -2436,17 +2446,22 @@ computation scale as
 \end{equation}
 
 \paragraph{Spatial decomposition and halo.} When $P_S>1$ ranks
-partition the transport-direction blocks, the FC3 cut-off implies
-that for any output block $I\in\mathcal{I}_p$, only $g_{KK'}$ blocks
-with $|K-I|, |K'-I|\le N_\mathrm{c,x}$ enter Stage~2. Each $P_S$
-rank therefore needs only its assigned range $\mathcal{I}_p$ plus a
-halo of width $N_\mathrm{c,x}$ blocks. The halo traffic per
-$(P_E,P_S)$ rank is
+partition the transport-direction blocks, the FC3 cut-off and the
+$G$-band imply that an output block $I\in\mathcal{I}_p$ couples only
+to band links $g_{KK'}$ within a shell of width
+$N_h=N_\mathrm{c,x}+r_c$ of $\mathcal{I}_p$ (the pair-index
+constraint that $\Phi_{J,K_2',K_1'}$ exist often tightens this to the
+vertex reach $N_\mathrm{c,x}$). Outputs are assigned by the
+$\min(I,J)$ rule so the owner can both compute and store $\Sigma_{IJ}$
+(\cref{rem:arrow}); each rank then needs only its assigned range
+$\mathcal{I}_p$ plus a width-$N_h$ halo fetched from its two
+immediate neighbours. The halo traffic per $(P_E,P_S)$ rank is
 \begin{equation}\label{eq:halo_volume}
   V_\mathrm{halo}^\mathrm{rank}
-  = \cO\!\Bigl(\frac{N_\tau\,N_\mathrm{c,x}\,\NBS^{2}}{P_E}\Bigr),
+  = \cO\!\Bigl(\frac{N_\tau\,N_h\,\NBS^{2}}{P_E}\Bigr),
 \end{equation}
-independent of $\NB$.
+independent of $\NB$ (a surface term), plus $\cO(\alpha)$ latency for
+the $\cO(1)$ neighbour messages per iteration.
 
 \paragraph{Aggregate per-rank cost.} The dominant cost contributions
 balance across stages and ranks, giving
@@ -2516,117 +2531,190 @@ regime that fits a single HBM device.
 
 The current quatrex production implementation
 (\texttt{quatrex.phonon.sse\_phonon\_phonon.SigmaPhononPhonon})
-realises the dense-block kernel of \cref{eq:cic_block_dense} on
-top of the distribution scheme of \cref{ssec:phph_distribution}.
-It uses no FC3 decomposition (\cref{sec:phph_decomp} remains a
-future optimisation), and it deliberately runs the contraction in
-the \texttt{stack} distribution rather than the \texttt{nnz}
-distribution used by the GW polarisation
-\cite{vetsch_ab-initio_2025}: the phonon bubble couples block
-triples through $\mathcal{P}(I,J)$ and so does not admit the same
-per-nnz locality that makes the GW polarisation embarrassingly
-parallel in \texttt{nnz}. The distribution exposes two levers:
-\begin{itemize}
-  \item ``\textbf{Frequency} $P_E$ via \texttt{comm.stack}.'' Each
-        rank holds an $\omega$-slice of every BT-band $G$ and
-        $\Sigma$ block. Inside the bubble, the diagonal blocks
-        $g_{KK}(\omega)$ are all-gathered along $\omega$ across
-        \texttt{comm.stack} into a full-axis tensor of shape
-        $(N_\omega, \NBS, \NBS)$. Only diagonal blocks enter the
-        contraction (\cref{eq:phph_pair_index} restricts to
-        $G_{K_1K_1}\,G_{K_2K_2}$), so off-diagonal BT-band $G$
-        blocks are never communicated.
-  \item ``\textbf{Spatial} $P_S$ via \texttt{comm.block}.'' Each
-        rank owns a contiguous global-block range
-        $[I_\mathrm{lo}, I_\mathrm{hi})$ determined by
-        \texttt{block\_section\_offsets}. The outer
-        $(I,J)\in\mathcal{P}$ loop is filtered to $I\in
-        [I_\mathrm{lo}, I_\mathrm{hi})$ so each rank contributes
-        only the output blocks it owns; cross-rank diagonal blocks
-        are made available through an additional
-        \texttt{comm.block.all\_gather} of the locally-owned
-        diagonals (requires uniform block sizes, which
-        \texttt{SCBAData} enforces by default).
-\end{itemize}
+realises the dense-block kernel of \cref{eq:cic_block_dense} as a
+\emph{full off-diagonal ring}: every band link $g_{KK'}^{\gtrless}$
+with $|K-K'|\le r_c$ enters Stage~2 -- not merely the diagonal
+$g_{KK}$ -- so the inter-slab coherence that a diagonal-$G$
+approximation discards is retained, while the output band stays
+$|I-J|\le 1$. It uses no FC3 decomposition
+(\cref{sec:phph_decomp} remains a future optimisation) and follows
+the FFT-first pipeline of \cref{ssec:phph_distribution} verbatim,
+distributing over the frequency ($P_E$, \texttt{comm.stack}) and
+transport-block ($P_S$, \texttt{comm.block}) axes.
 
-\paragraph{Pipeline.} A single SCBA iteration invokes the
-implemented routine in three phases, all stack-resident:
+\paragraph{FFT-first pipeline.} A single SCBA iteration runs the
+six steps of \cref{ssec:phph_distribution}, reusing the GW
+solver's \texttt{dtranspose} machinery
+\cite{vetsch_ab-initio_2025} for the four redistributions:
 \begin{enumerate}[label=(\roman*)]
-  \item \emph{State restoration contract.} On entry the routine
-        records each buffer's incoming distribution state and, if
-        necessary, dtranspose's everything to \texttt{stack}. On
-        exit (\texttt{finally} block) the incoming state is
-        restored on every buffer. This makes the routine composable
-        with the SCBA loop's \texttt{stack}$\to$\texttt{nnz}
-        dtranspose: the GW polarisation runs in \texttt{nnz} and
-        the phph SSE returns control with everything still in
-        \texttt{nnz}, exactly as the surrounding driver expects.
-  \item \emph{Diagonal-only gather.} For each local block $K$, the
-        $\omega$-axis of $g_{KK}^{<,>}$ is all-gathered across
-        \texttt{comm.stack} into a full-axis array. When
-        $P_S>1$ a subsequent \texttt{comm.block.all\_gather} of the
-        stacked local diagonals produces, on every rank, the full
-        global $\{g_{KK}\}_{K=0}^{N_B-1}$ dictionary at full
-        $\omega$.
-  \item \emph{Per-rank bubble + write-back.} For each
-        $(I,J)\in\mathcal{P}$ with $I\in[I_\mathrm{lo},
-        I_\mathrm{hi})$ and $|I-J|\le 1$, the rank walks the
-        precomputed block-pair index
-        $\mathcal{P}(I,J)$, accumulates
-        $\Sigma^{<,>}_{IJ}(\omega)$ via the dense
-        \texttt{bubble\_dense} kernel (three \texttt{einsum}s on
-        dense $\NBS$-shaped tensors plus an FFT along $\omega$),
-        forms $\Sigma^R$ from the bosonic Hilbert transform
-        $\Sigma^R = \tfrac{1}{2}(\Sigma^>{-}\Sigma^<)
-        + \tfrac{i}{2}\mathcal{H}\{\Sigma^>{-}\Sigma^<\}$, and
-        writes the $[e_\mathrm{lo}{:}e_\mathrm{hi}]$
-        $\omega$-slice -- where
-        $e_\mathrm{lo}=\sum_{r<\mathtt{stack.rank}}
-        \mathtt{stack\_section\_sizes}_r$ -- into the
-        local-block-indexed output buffer
-        $\Sigma_{\bullet}.\mathtt{blocks}[I_\mathrm{loc},
-        J_\mathrm{loc}]$.
+  \item \emph{State-restoration contract.} The incoming
+        distribution state of every buffer is recorded on entry and
+        restored in a \texttt{finally} block, so the routine
+        composes with the surrounding SCBA loop (which hands the
+        Green's functions over in \texttt{nnz}).
+  \item \emph{Forward FFT in \texttt{nnz}.} With $G^{\gtrless}$ in
+        \texttt{nnz} (full $\omega$ local, non-zeros partitioned
+        over $P$), the padded forward transform
+        $g^{\gtrless}(\tau)=\mathcal{F}\{G^{\gtrless}(\omega)\}$ is
+        a local operation into cached length-$N_\tau$ buffers that
+        share $G$'s exact non-zero ordering; the FFT work and this
+        storage divide over $P$.
+  \item \emph{Redistribute $g(\tau)$ to \texttt{stack}.} Each
+        \texttt{comm.stack} rank now owns a $\tau$-slice of the full
+        band, block-addressable; the spatial halo (below) supplies
+        the off-window neighbour blocks.
+  \item \emph{Ring contraction per $\tau$ (Stage~2), in
+        \texttt{stack}.} For each owned output $(I,J)$ the rank sums
+        $\mathcal{P}(I,J)$ of
+        $\Phi\,g_{K_1K_1'}(\tau)\,g_{K_2K_2'}(\tau)\,\Phi$ at its
+        $\tau$-slice (the three-\texttt{einsum} \texttt{ring\_contract}
+        kernel), streaming $\Phi$ from the block dictionary.
+  \item \emph{Redistribute $\sigma(\tau)$ to \texttt{nnz}.} A
+        \emph{partition}, not a broadcast: each $(I,J)$ full-$\tau$
+        lands on exactly one rank, which is what prevents a
+        $P_E$-fold double count.
+  \item \emph{Inverse FFT in \texttt{nnz}.}
+        $\Sigma^{\gtrless}(\omega)=\tfrac{i\hbar}{2}\,
+        \mathcal{F}^{-1}\{\sigma^{\gtrless}(\tau)\}|_{[0:N_\omega]}$
+        added into the outputs; the retarded part follows from the
+        bosonic Hilbert transform
+        $\Sigma^R=\tfrac{1}{2}(\Sigma^>{-}\Sigma^<)
+        +\tfrac{i}{2}\mathcal{H}\{\Sigma^>{-}\Sigma^<\}$, evaluated
+        along the (locally complete) $\omega$ axis.
 \end{enumerate}
+Because the contraction is in $\tau$-space and partitioned over
+$P_E$, the full-$\omega$ band is never replicated on every rank --
+the memory bottleneck of the earlier diagonal-gather design.
 
-\paragraph{Per-rank cost.} The dominant arithmetic is the dense
-ring of \cref{eq:cic_block_dense} summed over the rank's owned
-outputs, giving
+\paragraph{Spatial halo and addressing.} Under $P_S>1$ the output
+$(I,J)$ is assigned to the rank owning block $\min(I,J)$; arrow
+partitioning (\cref{rem:arrow}) guarantees that this rank stores
+$\Sigma_{IJ}$ and can write it through the block indexer. The
+ring needs band blocks $g_{KK'}(\tau)$ that may lie one shell
+outside the rank's window; those are fetched from the immediate
+\texttt{comm.block} neighbours by a width-$N_h$ ($N_h=N_\mathrm{c,x}+r_c$)
+halo. Each rank sends a neighbour exactly the links that
+neighbour's outputs need and which fall in its own window, and
+receives the symmetric set; the send/receive lists follow from the
+global pair index and block ranges, so both ends enumerate them in
+the same order and the non-overtaking \texttt{Isend}/\texttt{Irecv}
+match per \texttt{(source, tag)} (the bidirectional exchange of
+\texttt{qttools.datastructures.routines.arrow\_partition\_halo\_comm},
+reused by the recursive Green's-function solver). The halo blocks
+are read transparently alongside local blocks during the
+contraction.
+
+\paragraph{Per-rank cost.} The arithmetic is the FFT plus the
+dense ring summed over the rank's owned outputs and $\tau$-slice,
+both divided over the full $P=P_EP_S$:
 \begin{equation}\label{eq:cost_phph_impl}
   W^\mathrm{rank}_{\mathrm{phph,impl}}
   = \cO\!\Bigl(
-      \frac{N_\omega\,\log N_\omega \cdot \NB\,N_\mathrm{c,x}^{2}\,\NBS^{4}}{P_S}
-    \Bigr),
+      \frac{N_\tau\log N_\tau\,\NB\,r_c\,\NBS^{2}}{P}
+    \Bigr)
+  + \cO\!\Bigl(
+      \frac{N_\tau\,\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}
+    \Bigr).
 \end{equation}
-where the $P_E$ factor does \emph{not} appear because each
-\texttt{comm.stack} rank still computes the bubble at full
-$\omega$ on its assigned $(I,J)$ outputs (this is the cost of not
-distributing along $\omega$; recovering it would require a
-distributed 1-D FFT, deferred). Communication is dominated by the
-diagonal-block gather:
+Communication is the four energy redistributions plus the spatial
+halo,
 \begin{equation}\label{eq:vol_phph_impl}
   V^\mathrm{rank}_{\mathrm{phph,impl}}
-  = \cO\!\Bigl(\frac{N_\omega\,\NB\,\NBS^{2}}{P}\Bigr),
+  = \underbrace{\cO\!\Bigl(\frac{N_\omega\,\NB\,r_c\,\NBS^{2}}{P}\Bigr)}_{\text{4 \texttt{dtranspose}}}
+  + \underbrace{\cO\!\Bigl(\frac{N_\tau\,N_h\,\NBS^{2}}{P_E}\Bigr)}_{\text{halo, \cref{eq:halo_volume}}}
+  + \cO(\alpha),
 \end{equation}
-i.e.\ the per-$\omega$ payload of $N_B$ diagonal blocks of size
-$\NBS\times\NBS$, divided across the $P=P_EP_S$ ranks. The FC3
-dictionary is partitioned along $I$ across $P_S$ only:
+with $\alpha$ the per-message latency of the $\cO(1)$ neighbour
+exchanges. The halo term is independent of $\NB$ (surface, not
+volume). Memory divides over $P$ for the frequency-resident data,
+over $P_S$ for the $\omega$-independent FC3 dictionary, plus a
+transient halo buffer:
 \begin{equation}\label{eq:mem_phph_impl}
   M^\mathrm{rank}_{\mathrm{phph,impl}}
-  = \cO\!\Bigl(\frac{N_\omega\,\NB\,\NBS^{2}}{P}\Bigr)
-  + \cO\!\Bigl(\frac{\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P_S}\Bigr).
+  = \cO\!\Bigl(\frac{N_\tau\,\NB\,r_c\,\NBS^{2}}{P}\Bigr)
+  + \cO\!\Bigl(\frac{\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P_S}\Bigr)
+  + \cO\!\Bigl(\frac{N_\tau\,N_h\,\NBS^{2}}{P_E}\Bigr).
 \end{equation}
+Every intrinsic-data term thus divides over the full rank count;
+the only residual overheads are the two \emph{irreducible}
+couplings -- the energy all-to-all (the convolution couples all
+frequencies) and the spatial halo (the operator is banded) -- both
+$\cO(\text{surface})$. This is the communication-optimal point for
+the finite block-tridiagonal device.
 
-\paragraph{Validation.} The implementation is pinned against the
-single-block dense reference of
-\texttt{phonon.solver.dense.compute\_phph\_self\_energy\_finite}
-(see \texttt{tests/quatrex/phonon/test\_sse\_phonon\_phonon.py})
-in two regimes: (i) one transport cell, where the production
-\texttt{\_bubble\_block} reproduces the dense reference to
-$<10^{-10}$ relative Frobenius; (ii) multi-block ($N_B\ge 3$),
-where an independently written reference assembles the BTD
-$\Sigma_{IJ}$ output from the same FC3 dictionary and the same
-diagonal $G$ blocks, again matching to $<10^{-10}$. A second test
-pins the state-restoration contract.
+\begin{lemma}[Arrow partitioning resolves the boundary block]\label{rem:arrow}
+The distributed container partitions the block-sparse non-zeros
+\emph{arrow-wise} (\texttt{dsdbcoo.py}): rank $r$, owning the global
+element window $[s_r,e_r)$, stores every entry whose row and column
+both lie at or beyond $s_r$ and at least one of which lies before
+$e_r$. Consequently each band block $g_{KK'}$ is stored on, and
+addressable by, the rank owning block $\min(K,K')$. The boundary
+block $g_{I_\mathrm{lo},I_\mathrm{lo}-1}$ that a rank cannot index
+in its own frame (the column lies below its window) is exactly the
+block its lower neighbour holds in the down-arm of its arrow -- so
+no raw-data access is needed, only the nearest-neighbour halo above.
+\end{lemma}
+
+\paragraph{Distribution-algorithm comparison.}
+\Cref{tab:phph_dist} contrasts the per-rank bounds of the retired
+diagonal-gather design, the implemented FFT-first $\times$ spatial-halo
+algorithm, and the $q$-resolved variants (\cref{ssec:phph_qspace}).
+The implemented algorithm is preferred whenever
+$\NB/P_S \gg N_h$ (so the halo surface is negligible against the
+owned volume); a band-replication variant ($P_S=1$, no halo) is
+simpler but does not divide the band over the spatial axis and is
+therefore confined to short devices.
+\begin{table}[htb]
+  \centering
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    algorithm & work $W^\mathrm{rank}$ & comm.\ $V^\mathrm{rank}$ & memory $M^\mathrm{rank}$ \\
+    \midrule
+    diagonal gather (retired)
+      & $\dfrac{N_\omega\log N_\omega\,\NB N_\mathrm{c,x}^{2}\NBS^{4}}{P_S}$
+      & $\dfrac{N_\omega\NB\NBS^{2}}{P}$
+      & $\dfrac{N_\omega\NB\NBS^{2}}{P}+\dfrac{\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P_S}$ \\[1.4ex]
+    FFT-first $\times$ halo (\emph{impl.})
+      & $\dfrac{N_\tau\,\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P}$
+      & $\dfrac{N_\omega\NB r_c\NBS^{2}}{P}+\dfrac{N_\tau N_h\NBS^{2}}{P_E}$
+      & $\dfrac{N_\tau\NB r_c\NBS^{2}}{P}+\dfrac{\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P_S}$ \\[1.4ex]
+    $q$-dense vertex
+      & $\dfrac{N_q^{2}N_\tau N_{AO}N_\mathrm{c,x}^{2}\NBS^{3}}{P}$
+      & + dense $\tilde\Phi$: $\cO(N_q^{2}\NBS^{3})$
+      & $+\,\cO(N_q^{2}\NBS^{3})$ \\[1.0ex]
+    $q$-streamed (real-space)
+      & $\dfrac{N_q\,N_T^{\mathrm{eff}}N_\tau\,\cdots}{P}$
+      & no dense vertex
+      & $\cO(N_q\NBS^{2})$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Per-rank cost of the candidate self-energy distribution
+  algorithms. The implemented FFT-first $\times$ spatial-halo scheme
+  divides every intrinsic-data term over $P=P_EP_S$, leaving only the
+  two irreducible $\cO(\text{surface})$ couplings (the energy
+  all-to-all and the nearest-neighbour halo). For the transverse-periodic
+  problem the real-space-streamed vertex replaces the dense
+  $\cO(N_q^{2}\NBS^{3})$ Fourier vertex once $N_D N_T^{\mathrm{eff}}<N_q^{2}$
+  (\cref{ssec:phph_qspace}).}
+  \label{tab:phph_dist}
+\end{table}
+
+\paragraph{Validation.} The implementation is pinned bit-for-bit
+against an independent dense oracle in
+\texttt{tests/quatrex/phonon/test\_sse\_phonon\_phonon.py}: single
+transport cell, off-diagonal output, and multi-block ($N_B\ge 3$)
+with genuine off-diagonal vertices, all to $<10^{-10}$ relative.
+The full off-diagonal ring is further checked on \emph{real}
+bulk-silicon multi-cell force constants
+(\texttt{phonon/scripts/verify/phph\_real\_fc3\_parity.py}) and the
+self-energy is verified \emph{bit-identical across rank counts}:
+under \texttt{comm.stack} ($P_E=1,2,3,4$) and under
+\texttt{comm.block}$\times$\texttt{comm.stack} factorisations
+($2{\times}2$, $3{\times}2$ with $N_B\ge 4$, so the boundary outputs
+exercise the halo), to $\sim10^{-15}$
+(\texttt{phph\_block\_parallel\_check.py}). A separate test pins the
+state-restoration contract.
 
 \paragraph{Composition with the Interaction registry.}
 The implemented bubble is registered as
