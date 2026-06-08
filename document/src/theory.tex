@@ -2022,42 +2022,30 @@ sampling.
 \label{ssec:phph_sparsity}
 % ----------------------------------------------------------------------
 
-Three block-level sparsity patterns reduce the dense ring cost
+Four sparsity patterns reduce the dense ring cost
 \cref{eq:cic_cost} by several orders of magnitude before any further
-approximation is introduced. These mirror the sparsity exploitations
-of the GW solver
+approximation is introduced. These mirror the sparsity
+exploitations of the GW solver
 \cite{vetsch_ab-initio_2025, deuschle_electron-electron_2025} and
 follow from the same physical assumption -- a real-space cut-off on
 inter-atomic interactions -- applied to the harmonic and cubic
-parts of the lattice Hamiltonian. The cut-offs act at the granularity
-of \emph{transport-cell blocks}: a block is either present in full
-(stored as a dense $\NBS\times\NBS$ or $\NBS\times\NBS\times\NBS$
-array) or absent. Within a present block the implementation uses
-dense BLAS/einsum throughout
-(\cref{ssec:phph_distribution,ssec:phph_dist_impl}); intra-block
-atom-pair sparsity is \emph{not} exploited at compute time. CRS/COO
-representations exist in the storage layer
-(\texttt{DSDBSparse} in \cite{vetsch_ab-initio_2025}) only to (i)
-record which block pairs are non-zero in the BT band and (ii) carry
-the \texttt{stack}/\texttt{nnz} redistribution traffic; the inner
-linear algebra always operates on the dense block view.
+parts of the lattice Hamiltonian.
 
 We denote by $r_{\mathrm{cut}}$ the physical real-space cut-off
 radius applied to both IFC2 and IFC3 (in \AA), by $r_c$ the
 corresponding bandwidth on the block-tridiagonal representation of
 $G^{\gtrless}$ (the number of primitive blocks within $r_{\mathrm{cut}}$
-along the transport direction), and by $N_\mathrm{c,x}$ the FC3
-cut-off in transport-cell units along the transport direction
-($N_\mathrm{c,x}\le 3$ typically). The transport-cell size $\NBS$
-absorbs all the intra-cell degrees of freedom.
+along the transport direction), by $N_\mathrm{c,x}$ the FC3 cut-off
+in transport-cell units along the transport direction
+($N_\mathrm{c,x}\le 3$ typically), and by $C_a$ the number of atoms
+within $r_{\mathrm{cut}}$ of any reference atom.
 
 \paragraph{(a)~BT-band cut-off on $G^{\gtrless}$.} As in the
 electronic GW problem, applying $r_{\mathrm{cut}}$ to the harmonic
 dynamical matrix gives $G^{\gtrless}$ a block-banded structure of
 width $r_c$ along the transport direction. Block entries $G_{KK'}$
-are non-zero only for $|K-K'|\le r_c$, and each non-zero block is
-stored densely as an $\NBS\times\NBS$ matrix. The total entry count
-of $G$ per frequency is
+are non-zero only for $|K-K'|\le r_c$. The total non-zero count of
+$G$ per frequency, before any intra-block sparsity, is
 \begin{equation}\label{eq:G_bb_nnz}
   \mathrm{nnz}(G)_\mathrm{BB}
   = \cO\!\bigl(\NB\,r_c\,\NBS^{2}\bigr)
@@ -2068,38 +2056,31 @@ of $G$ per frequency is
 constants with pair distance (\cref{sub:fc3_compression}) admits the
 same real-space cut-off $r_{\mathrm{cut}}$ on $\Phi^{(3)}$. For
 transport-cell labels $(I,K_1,K_2)$, $\tilde\Phi^{(3)}_{I,K_1,K_2}$
-is non-zero (and stored as a dense $\NBS\times\NBS\times\NBS$
-array) only when
+is non-zero only when
 \begin{equation}\label{eq:fc3_block_support}
   |I-K_1|, \quad |I-K_2|, \quad |K_1-K_2| \le N_\mathrm{c,x}.
 \end{equation}
 The block-pair index
 \begin{equation}\label{eq:phph_pair_index}
   \mathcal{P}(I,J)
-  = \bigl\{(K_1,K_2,K_1',K_2') :
-      \Phi^{(3)}_{I,K_1,K_2},\;
-      \Phi^{(3)}_{J,K_2',K_1'}\;\text{present},\;
-      g_{K_1K_1'},\,g_{K_2K_2'}\;\text{in band}\bigr\},
+  = \bigl\{(K_1,K_2) :
+      \Phi^{(3)}_{I,K_1,K_2}\;\text{and}\;
+      \Phi^{(3)}_{J,K_2,K_1}\;\text{both present}\bigr\},
 \end{equation}
-encodes which inner block-quadruples contribute to a given output
-block-pair $(I,J)$: the ring carries the \emph{full off-diagonal}
-propagators $g_{K_1K_1'},g_{K_2K_2'}$ (with $|K_i-K_i'|\le r_c$), not
-only the diagonal $g_{K_iK_i}$, so the inter-slab coherence is
-retained. From \cref{eq:fc3_block_support}, the $G$-band, and the
-output BT-band ($|I-J|\le 1$), the cardinality is bounded by
-$|\mathcal{P}(I,J)| = \cO(N_\mathrm{c,x}^{2}\,r_c^{2})$; the pair-index
-gate $\Phi^{(3)}_{J,K_2',K_1'}$ exist ties $K_i'$ to the
-nearest-neighbour shell of $J$, keeping the count $\cO(1)$ at
-$N_\mathrm{c,x},r_c=\cO(1)$ (a few tens of quadruples for a cubic
-lattice with $N_\mathrm{c,x}=3$).
+encodes which inner block-pairs contribute to a given output
+block-pair $(I,J)$. From \cref{eq:fc3_block_support} together with
+the BT-band requirement on the output ($|I-J|\le 1$), the cardinality
+of $\mathcal{P}(I,J)$ is bounded by
+$|\mathcal{P}(I,J)| = \cO(N_\mathrm{c,x}^{2})$, with the proportionality
+constant set by the lattice geometry. For a cubic lattice and
+$N_\mathrm{c,x}=3$, $|\mathcal{P}(I,J)|\le 49$ in the worst case.
 The partial Fourier transform $\Phi^{(3)} \to \tilde\Phi^{(3)}(\qp,\qp')$
 over the transverse cells preserves block-sparsity along the transport direction unchanged.
 
 \paragraph{(c)~Output BT band.} $\Sigma$ inherits the BT structure of
 the upstream SCBA solver: only $(I,J)$ with $|I-J|\le 1$ are
-retained, and each retained block is stored densely. The number of
-distinct output block-pairs is $\cO(\NB)$, and the bubble decomposes
-into a finite sum
+retained. The number of distinct output block-pairs is therefore
+$\cO(\NB)$, and the bubble decomposes into a finite sum
 \begin{equation}\label{eq:sigma_block_sum}
   \Sigma_{IJ}(\omega;\qp)
   = \frac{i\hbar}{2}
@@ -2109,63 +2090,59 @@ into a finite sum
 This output truncation is consistent with the input truncation (a)
 on $G$.
 
-\paragraph{Per-pair kernel cost.} For each surviving block triple
-$(I, K_1, K_2)$ and its conjugate $(J, K_2, K_1)$, the per-frequency
-ring contraction
-\cref{eq:phph_step_A,eq:phph_step_B,eq:phph_step_S} is evaluated as
-three dense \texttt{einsum} contractions on dense
-$\NBS^{3}$- and $\NBS^{2}$-shaped tensors. The intermediates
-$A\in\mathbb{C}^{N_\tau\times\NBS\times\NBS\times\NBS}$ and
-$B\in\mathbb{C}^{N_\tau\times\NBS\times\NBS\times\NBS}$ both have
-$\cO(N_\tau\,\NBS^{3})$ entries; the dominant arithmetic is the
-$B$-build at $\cO(N_\tau\,\NBS^{4})$ flops per pair (per $\tau$,
-$\cO(\NBS^{4})$). The per-pair ring cost is therefore
-\begin{equation}\label{eq:cic_block_dense}
-  \mathcal{C}_\mathrm{ic}^\mathrm{block}
-  = \cO\!\bigl(\NBS^{4}\bigr).
+\paragraph{(d)~Intra-block atom-pair sparsity.} Within a single
+transport cell of size $\NBS = 3 N_a N_U$ ($N_a$ atoms per primitive
+cell, $N_U$ primitive cells per transport cell), the same cut-off
+$r_{\mathrm{cut}}$ acts at the atomic level. Each atom couples to only
+$C_a$ neighbours within $r_{\mathrm{cut}}$, so each row of an
+intra-block matrix carries $\cO(C_a)$ non-zero atom pairs
+(times $3\times 3 = 9$ Cartesian-direction entries each, absorbed
+into the constant). The block-level non-zero counts are therefore
+\begin{equation}\label{eq:phph_intra_block_nnz}
+  \mathrm{nnz}\bigl(G^{\gtrless}_{KK'}\bigr) = \cO(\NBS\,C_a),
+  \qquad
+  \mathrm{nnz}\bigl(\Phi^{(3)}_{I,K_1,K_2}\bigr) = \cO(\NBS\,C_a^{2}).
 \end{equation}
-This coincides with the dense-ring estimate \cref{eq:cic_cost} on a
-single transport cell because there is no intra-block sparsity to
-exploit; the savings relative to the naive global ring (which would
-scan all of $\ndof = N_\mathrm{AO}$) come entirely from the
-block-level cut-offs (a)--(c), not from intra-block sparsity. With
-GPU-resident dense BLAS this kernel is compute-bound for
-$\NBS\gtrsim 10^{2}$ and saturates the device's FP64 (or FP32)
-throughput.
 
-Combining \cref{eq:cic_block_dense} with the q-space cost
+\paragraph{Sparsity propagation through the kernel.} The sparsity
+patterns above are not lost by the half-tree contractions in
+\cref{eq:balanced_tree,eq:balanced_pair}. They propagate
+through the pipeline in the same way that they do in
+sparse--sparse matrix multiplication. We make this precise for the
+half-tree $T_1(x)_{y_2y_4} = \sum_{y_1}\Phi_{x,y_1,y_2}g_{y_1,y_4}$.
+
+For fixed transport-cell labels $(I,K_1,K_2)$ within FC3 support, the
+non-zero entries of $\Phi^{(3)}_{I,K_1,K_2}$ at the atomic level
+correspond to triples $(\mu,\nu_1,\nu_2)$ where atoms $\mu,\nu_1,\nu_2$
+are mutually within $r_{\mathrm{cut}}$ of one another. For each such
+$(\mu,\nu_1)$, $g_{\nu_1,\nu_4}$ is non-zero only for $\nu_4$ within
+$r_{\mathrm{cut}}$ of $\nu_1$. The contraction therefore scans
+$\mathrm{nnz}(\Phi)\cdot C_a = \cO(\NBS\,C_a^{3})$ entries to
+produce $T_1$ at fixed $(I,K_1,K_2)$, and $T_1$ itself has support
+on $(I,K_1,K_2)$ atoms-within-cut-off triples, with non-zero count
+$\cO(\NBS\,C_a^{2})$. The second half-tree has the same shape; the
+final ring-closing contraction over the shared $(\nu_2,\nu_4)$
+indices runs over the joint support, again $\cO(\NBS\,C_a^{3})$ per
+working point. The per-pair ring cost reduces from $\NBS^{4}$ to
+\begin{equation}\label{eq:cic_sparse}
+  \mathcal{C}_\mathrm{ic}^\mathrm{sparse}
+  = \cO\!\bigl(\NBS\,C_a^{3}\bigr),
+\end{equation}
+a saving of $(\NBS/C_a)^{3} = (N_a/C_a)^{3}$ over the dense kernel.
+For Si nanoribbons with $N_a/C_a\sim 25$, this is roughly $1.5\times
+10^{4}$.
+
+Combining \cref{eq:cic_sparse} with the q-space cost
 \cref{eq:cost_q} and the $\mathcal{P}$-cardinality bound
-$|\mathcal{P}(I,J)|=\cO(N_\mathrm{c,x}^{2}r_c^{2})$ (the $r_c^{2}$ from
-the full off-diagonal ring, $\cO(1)$ at $r_c=\cO(1)$), the total
-q-space SSE cost reduces to
+$|\mathcal{P}(I,J)|=\cO(N_\mathrm{c,x}^{2})$, the total q-space SSE
+cost reduces to
 \begin{equation}\label{eq:cost_phph_total}
   \mathcal{W}_\mathrm{phph}
   = \cO\!\bigl(N_\tau\,N_q^{2}\,\NB\,N_\mathrm{c,x}^{2}\,
-               \NBS^{4}\bigr)
+               \NBS\,C_a^{3}\bigr)
   = \cO\!\bigl(N_\tau\,N_q^{2}\,N_{AO}\,N_\mathrm{c,x}^{2}\,
-               \NBS^{3}\bigr).
+               C_a^{3}\bigr).
 \end{equation}
-The $\NBS^{3}$ scaling sets a hard upper bound on the
-transport-cell size that can be handled at fixed compute budget and
-motivates the FC3 decomposition of \cref{sec:phph_decomp}, which
-replaces $\NBS^{3}$ by $R\,\NBS$ in the per-pair kernel.
-
-\paragraph{Notation: intra-block dimension $C_a$ in later sections.}
-The separable kernel of \cref{ssec:phph_separable} and the full
-decomposition derivations of \cref{sec:phph_decomp} are written in
-terms of a generic intra-block dimension $C_a$ -- the number of
-atoms within $r_\mathrm{cut}$ of any reference atom, which would
-control the per-block density if intra-block sparsity were
-exploited by the inner kernel. The present quatrex implementation
-runs dense BLAS within each block, so the effective value is
-$C_a=\NBS$ and all cost comparisons in those sections collapse to
-the block-dense baseline \cref{eq:cic_block_dense,eq:cost_phph_total}.
-Retaining $C_a$ symbolically keeps the decomposition derivations
-forward-compatible with a future implementation that exploits
-intra-block sparsity (e.g.\ via block-CSR BLAS or atom-pair-sparse
-einsum kernels); the operation counts in that hypothetical regime
-would become $\NBS\to\NBS$, $\NBS^{2}\to\NBS\,C_a$,
-$\NBS^{3}\to\NBS\,C_a^{2}$, $\NBS^{4}\to\NBS\,C_a^{3}$.
 
 % ----------------------------------------------------------------------
 \subsection{Separable FC3 approximation}

@@ -9,17 +9,10 @@ A transversely-periodic film couples the transverse momenta in the
                       Phi(q2, q')          with q2 = q_ext - q'.
 
 The q-folded device vertex ``Phi(q1, q2)`` (transverse Bloch phases on
-the two contracted legs) does NOT depend on G, so it is built once,
+the two contracted legs) does not depend on G, so it is built once,
 offline, by the input builder (reusing ``phonon.solver.se_q``) and
-stored here. The production self-energy then only *reads* arrays — no
-dependency on the standalone science code.
+stored here. The production self-energy then only reads arrays
 
-File layout (a single ``.npz``):
-* ``q_diff_map``  : int ``(N_q, N_q)`` -- ``q_diff_map[iq_ext, iq'] =``
-  index of ``q_ext - q'`` on the flattened transverse mesh.
-* ``nk_shape``    : int ``(n_perp,)`` -- the transverse mesh shape, in
-  the SAME C-order as ``global_stack_shape[1:]`` (the production stack).
-* one ``v|iq1|iq2|I|K|Kp`` entry per folded vertex block.
 """
 
 from __future__ import annotations

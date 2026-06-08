@@ -7,8 +7,8 @@ Implements
         * [ G^{<,>}_{cf} * G^{<,>}_{de} ](omega)
         * Phi_{b e f}
 
-The cubic vertex Phi is supplied as a block-sparse dict
-(see quatrex.phonon.fc3_loader). Internal units are THz / THz^2
+The cubic vertex Phi is supplied as a block-sparse dict.
+Internal units are THz / THz^2
 """
 
 from __future__ import annotations
@@ -41,20 +41,15 @@ profiler = Profiler()
 
 
 def _build_cell_zero_mode_projector(h00, h01, *, floor_thz=0.1):
-    """Cell-level rigid-mode projector ``Q = I - V Vᵀ`` (n_dof×n_dof).
+    """Cell-level rigid-mode projector ``Q = I - V Vᵀ`` (n_dof*n_dof).
 
     Removes the cell's q=0 rigid-body modes -- the 3 Cartesian
     translations plus any near-zero rotational quasi-Goldstone (e.g. a
-    1-D wire's axial twist). A mode is rigid if its frequency is below
-    ``floor_thz`` (eigenvalue of the cell Gamma-matrix
-    ``h00 + h01 + h01^dagger`` below ``floor_thz**2``; blocks in THz²).
-    The floor is ABSOLUTE so a stiff transport-irrelevant mode (e.g. a
-    Si-H stretch) cannot inflate the cutoff and over-project real low-ω
-    heat carriers. Applied two-sided per device band block it is
-    band-local (no cross-slab fill), unlike the dense global projector
-    in ``phonon/solver/zero_modes.py``.
+    1-D wire's axial twist for the small SiNW).
+    A mode is rigid if its frequency is below
+    floor_thz.
 
-    Returns ``(Q, projected_freqs_thz)``.
+    Returns (Q, projected_freqs_thz).
     """
     h00 = np.asarray(h00)
     h01 = np.asarray(h01)
@@ -79,17 +74,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     Parameters
     ----------
     config : QuatrexConfig
-        Quatrex configuration object. Reads ``config.phonon.fc3_path``
-        and ``config.phonon.retarded_method``.
+        Quatrex configuration object. Reads config.phonon.fc3_path
+        and config.phonon.retarded_method.
     phonon_frequencies : NDArray
-        The phonon frequency grid in **THz** (uniform). Local slice for
-        the calling rank — the full axis is recovered via
-        ``comm.stack.all_gather_v`` inside :meth:`compute`.
+        The phonon frequency grid in THz. Local slice for
+        the calling rank
     block_sizes : NDArray
-        Transport-cell DOF sizes ``(N_blocks,)``.
+        Transport-cell DOF sizes (N_blocks,).
     phi_blocks : PhiBlocks, optional
         Pre-built block-sparse Phi dict in THz^2. If not provided, the
-        loader is invoked on ``config.phonon.fc3_path``.
+        loader is invoked on config.phonon.fc3_path.
     """
 
     def __init__(
@@ -101,7 +95,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         dynamical_matrix: "DSDBSparse | None" = None,
         qfold: "tuple | None" = None,
     ) -> None:
-        # Local energy slice; the full axis is gathered in compute().
         self.local_frequencies = np.asarray(phonon_frequencies)
 
         self.block_sizes = np.asarray(block_sizes, dtype=int)
@@ -116,13 +109,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             )
         self.retarded_method = retarded_method
 
-        # Transversely-periodic (k>1) coupled-q vertices. When present, the
-        # 3-phonon bubble couples the transverse momenta (crystal-momentum
-        # conservation); the Gamma vertex ``vertices[(0,0)]`` defines the
-        # block-pair index (consistent with the dense reference, which also
-        # takes the pair index from the (0,0) entry) AND serves as the device
-        # FC3 (so ``fc3_path`` is not separately required). Built offline (no
-        # G dependence) and loaded as arrays only. See quatrex.phonon.qfold.
+        # Transversely-periodic (k>1) coupled-q vertices
         self._qvertices: dict | None = None
         self._q_diff_map: NDArray | None = None
         self._n_kpts: int = 1
@@ -155,12 +142,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self.phi_blocks = phi_blocks
 
         # Inner Green's-function band kept in the contraction. The
-        # upstream RGF selected-inversion produces the block-tridiagonal
+        # RGF selected-inversion produces the block-tridiagonal
         # G (diagonal + first off-diagonal, |K-K'| <= 1), so the full
-        # off-diagonal ring keeps exactly that band — NOT a diagonal-G
-        # approximation. Quads that would require |K-K'| > g_band are
-        # never generated, which automatically satisfies the dense
-        # reference's g_keys membership gate (se_finite.py:81-84).
+        # off-diagonal ring keeps exactly that band
         self.g_band = 1
 
         # Precompute the full off-diagonal pair index: for each output
@@ -168,8 +152,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         #   (K1, K2, K1', K2', phi_left, phi_right)
         # with phi_left = Phi[(I, K1, K2)], phi_right = Phi[(J, K2', K1')]
         # and the inner G links (K1, K1'), (K2, K2') inside the band.
-        # This mirrors the dense reference _build_pair_index exactly;
-        # the contraction uses G_a = G_{K1 K1'}, G_b = G_{K2 K2'}.
         self._phi_pair_index: dict[
             tuple[int, int],
             list[tuple[int, int, int, int, NDArray, NDArray]],
@@ -191,25 +173,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             (K1, K2, K1p, K2p, phi_left, phi_right)
                         )
 
-        # Distinct inner G band blocks (K, K') referenced by any quad —
-        # the exact set that must be gathered to full omega.
+        # Distinct inner G band blocks (K, K') referenced by any quad,
+        # that must be gathered to full omega.
         self._g_band_keys: set[tuple[int, int]] = set()
         for quads in self._phi_pair_index.values():
             for K1, K2, K1p, K2p, _pl, _pr in quads:
                 self._g_band_keys.add((K1, K1p))
                 self._g_band_keys.add((K2, K2p))
 
-        # Lazily-built, cached intermediate τ-domain buffers (length
-        # n_fft) for the FFT-first pipeline; keyed by (buffer class,
-        # n_fft). Allocated on first compute() from G's sparsity.
+        # Cached intermediate tau-domain buffers (length
+        # n_fft) for FFTd G
         self._tau_cache: tuple | None = None
         self._full_freqs: NDArray | None = None
 
-        # Optional rigid-body (q=0) zero-mode projector Q_cell (cell-level,
-        # n_dof×n_dof), applied two-sided to every band block of Σ^{<,>}.
-        # Band-local ⇒ preserves the production block sparsity. Built from
-        # the cell dynamical-matrix blocks; requires uniform block sizes
-        # (one cell per block). See config.phonon.zero_mode_projection.
+        # Optional zero-mode projector Q_cell, applied two-sided to every band block of Sigma^{<,>}.
         self._zero_mode_Q: NDArray | None = None
         if getattr(config.phonon, "zero_mode_projection", False):
             self._build_zero_mode_projector(config, dynamical_matrix)
@@ -221,30 +198,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._setup_scp_tadpole(config, dynamical_matrix)
 
     def _build_zero_mode_projector(self, config, dynamical_matrix) -> None:
-        """Build the cell rigid-mode projector ``Q_cell`` from the cell
-        dynamical-matrix blocks (H00, H01) and store it on
-        ``self._zero_mode_Q``. No-op (with a warning) if the inputs are
-        unavailable or the block sizes are non-uniform."""
+        """Build the cell rigid-mode projector Q_cell from the cell
+        dynamical-matrix blocks (H00, H01) and store it on self._zero_mode_Q"""
         if dynamical_matrix is None:
             warnings.warn(
                 "zero_mode_projection requested but no dynamical_matrix was "
-                "passed to SigmaPhononPhonon; projection DISABLED.",
+                "passed to SigmaPhononPhonon; projection disabled.",
                 stacklevel=2,
             )
             return
         if not np.all(self.block_sizes == self.block_sizes[0]):
             warnings.warn(
                 "zero_mode_projection requires uniform block sizes "
-                f"(got {self.block_sizes.tolist()}); projection DISABLED.",
+                f"(got {self.block_sizes.tolist()}); projection disabled.",
                 stacklevel=2,
             )
             return
-        # Cell on-site / forward-coupling blocks (THz²), ω-independent ⇒
-        # take the first stack slice. blocks[0,1] is H01 (cell 0 → cell 1).
-        # The stack is (energy, *k_transverse); reducing every leading axis
-        # to 0 selects the Gamma-transverse (q⊥=0) cell matrix — the right
-        # reference for the rigid/soft modes (handles both the Γ-only k==1
-        # device and the transversely-periodic k>1 film).
         h00 = np.asarray(dynamical_matrix.blocks[0, 0])
         h01 = np.asarray(dynamical_matrix.blocks[0, 1])
         while h00.ndim > 2:
@@ -255,7 +224,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         Q, projected = _build_cell_zero_mode_projector(h00, h01, floor_thz=floor)
         if projected.size == 0:
             warnings.warn(
-                f"zero_mode_projection ON but no cell mode below "
+                f"zero_mode_projection on but no cell mode below "
                 f"{floor} THz; projector is identity (no-op).",
                 stacklevel=2,
             )
@@ -265,18 +234,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if comm.rank == 0:
             freqs = ", ".join(f"{f:.4f}" for f in np.sort(projected))
             print(
-                f"[SigmaPhononPhonon] zero-mode projection ON: projecting "
+                f"[SigmaPhononPhonon] zero-mode projection on: projecting "
                 f"{projected.size} cell mode(s) below {floor} THz "
-                f"[{freqs}] THz out of Σ^<,>.",
+                f"[{freqs}] THz out of Sigma^<,>.",
                 flush=True,
             )
 
     def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
         """Prepare the self-consistent SCP cubic-tadpole static self-energy:
         the dense device FC3 + dynamical matrix, the mixing/floor, and the
-        zeroed running ``Sigma_static``. No-op (warning) if prerequisites
-        are missing or the layout is unsupported (non-uniform blocks, or a
-        block-distributed run — the soft-mode regime is single/few-cell)."""
+        zeroed running Sigma_static."""
         from quatrex.phonon.static_self_energy import device_fc3_mass_weighted
 
         if dynamical_matrix is None:
