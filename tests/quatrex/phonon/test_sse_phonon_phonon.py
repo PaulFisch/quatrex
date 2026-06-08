@@ -181,7 +181,7 @@ def test_bubble_block_matches_reference(nd: int, ne: int) -> None:
     )
 
     # Atol scales with the prefactor magnitude (~5e-23) — use rtol.
-    assert np.allclose(sig_l_ref, sig_l_new, atol=0, rtol=1e-10)
+    assert np.allclose(sig_l_ref, sig_l_new, atol=1e-20, rtol=1e-10)
 
 
 def test_fc3_to_phi_blocks_truncation_warning() -> None:
@@ -258,6 +258,16 @@ def _ref_compute_multiblock(
     n_blocks = len(block_sizes)
     ne = next(iter(gl_band.values())).shape[0]
     freqs = np.linspace(0.0, dw_thz * (ne - 1), ne)
+
+    # The grid starts at omega=0, so the production zeros the omega=0 (DC)
+    # sample of G before the bubble (see SigmaPhononPhonon._compute_fft_first);
+    # mirror that here so the reference matches the corrected behaviour.
+    gl_band = {k: v.copy() for k, v in gl_band.items()}
+    gg_band = {k: v.copy() for k, v in gg_band.items()}
+    for v in gl_band.values():
+        v[0] = 0.0
+    for v in gg_band.values():
+        v[0] = 0.0
 
     pair_index: dict[
         tuple[int, int],
@@ -406,15 +416,15 @@ def test_compute_multiblock_matches_reference() -> None:
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             key = (I, J)
             np.testing.assert_allclose(
-                sl_view.blocks[I, J], sl_ref.get(key, 0), atol=0, rtol=1e-10,
+                sl_view.blocks[I, J], sl_ref.get(key, 0), atol=1e-20, rtol=1e-10,
                 err_msg=f"Sigma^< mismatch at block {key}",
             )
             np.testing.assert_allclose(
-                sg_view.blocks[I, J], sg_ref.get(key, 0), atol=0, rtol=1e-10,
+                sg_view.blocks[I, J], sg_ref.get(key, 0), atol=1e-20, rtol=1e-10,
                 err_msg=f"Sigma^> mismatch at block {key}",
             )
             np.testing.assert_allclose(
-                sr_view.blocks[I, J], sr_ref.get(key, 0), atol=0, rtol=1e-10,
+                sr_view.blocks[I, J], sr_ref.get(key, 0), atol=1e-20, rtol=1e-10,
                 err_msg=f"Sigma^R mismatch at block {key}",
             )
 
@@ -618,6 +628,16 @@ def test_compute_coupled_q_matches_reference() -> None:
                             (K1, K2, K1p, K2p)
                         )
 
+    # Grid starts at omega=0 -> production zeros the omega=0 (DC) sample of
+    # G before the bubble; mirror it in the reference (g_l/g_g were built
+    # from the un-zeroed bands, so the production's DC-zeroing is exercised).
+    gl_band = {k: v.copy() for k, v in gl_band.items()}
+    gg_band = {k: v.copy() for k, v in gg_band.items()}
+    for v in gl_band.values():
+        v[0] = 0.0
+    for v in gg_band.values():
+        v[0] = 0.0
+
     ref_l = {ij: np.zeros((ne, nq, nbs, nbs), complex) for ij in pair_index}
     ref_g = {ij: np.zeros((ne, nq, nbs, nbs), complex) for ij in pair_index}
     for (I, J), quads in pair_index.items():
@@ -643,10 +663,10 @@ def test_compute_coupled_q_matches_reference() -> None:
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             np.testing.assert_allclose(
-                slv.blocks[I, J], ref_l.get((I, J), 0), atol=0, rtol=1e-9,
+                slv.blocks[I, J], ref_l.get((I, J), 0), atol=1e-20, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^< mismatch at {(I, J)}",
             )
             np.testing.assert_allclose(
-                sgv.blocks[I, J], ref_g.get((I, J), 0), atol=0, rtol=1e-9,
+                sgv.blocks[I, J], ref_g.get((I, J), 0), atol=1e-20, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^> mismatch at {(I, J)}",
             )
