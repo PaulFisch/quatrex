@@ -29,22 +29,32 @@ def load_rows(name):
 
 # 5x5x5 (long-range VASP-hiPhive) -- ballistic + anharmonic
 big = load_rows("si_film_kappa_bigfc3.json")
-# 2x2x2 (QE-FD) anharmonic curve (preferred: has ball+anh); else ballistic-only
-two = load_rows("si_film_kappa_2x2x2_curve.json")
+# 2x2x2 (QE-FD): matched ballistic curve (3 thicknesses) + the single
+# CONVERGED anharmonic point (the short-cutoff FC3 diverges the small-eta
+# SCBA at other thicknesses; the long-range 5x5x5 FC3 is more robust).
 two_ball = load_rows("si_film_2x2x2_ballistic.json")
+# All CONVERGED 2x2x2 anharmonic points: the n_slabs=4 reference point plus
+# any thicknesses the (re)run converges (filter the diverged garbage --
+# the short-cutoff FC3 destabilises the small-eta SCBA at some thicknesses).
+_anh = load_rows("si_film_kappa_nk8_guo.json") + load_rows("si_film_kappa_2x2x2_curve.json")
+two_anh = sorted({round(r["L_nm"], 2): r for r in _anh
+                  if r.get("G_anh", 0) > 0
+                  and r.get("conservation", 1.0) < 0.05}.values(),
+                 key=lambda r: r["L_nm"])
 # Guo 2020 anharmonic (verified from full text)
 guo = {1.62: 939.72, 2.70: 890.97}   # 3uc, 5uc
 
 fig, ax = plt.subplots(figsize=(6.2, 4.6))
 
 # 2x2x2
-if two:
-    L = [r["L_nm"] for r in two]
-    ax.plot(L, [r["G_ball"] / 1e6 for r in two], "o-", color="C0", label=r"2$\times$2$\times$2 FC, ballistic")
-    ax.plot(L, [r["G_anh"] / 1e6 for r in two], "s--", color="C0", label=r"2$\times$2$\times$2 FC, anharmonic")
-elif two_ball:
+if two_ball:
     L = [r["L_nm"] for r in two_ball]
-    ax.plot(L, [r["G_ball"] / 1e6 for r in two_ball], "o-", color="C0", label=r"2$\times$2$\times$2 FC, ballistic")
+    ax.plot(L, [r["G_ball"] / 1e6 for r in two_ball], "o-", color="C0",
+            label=r"2$\times$2$\times$2 FC, ballistic")
+if two_anh:
+    ax.plot([r["L_nm"] for r in two_anh], [r["G_anh"] / 1e6 for r in two_anh],
+            "s--", color="C0", ms=8, label=r"2$\times$2$\times$2 FC, anharmonic")
+two = two_anh
 
 # 5x5x5
 if big:
