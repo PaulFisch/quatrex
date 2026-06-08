@@ -75,9 +75,6 @@ def bubble_dense(
     if xp is None:
         xp = np
 
-    # Sizes from the *G arrays*, not from phi_left. Off-diagonal G(K,K')
-    # blocks have bK != bK' on the trailing axis; clipping the pad shape
-    # to bK from phi_left would silently truncate those.
     ne, bK1, bK1p = G_a.shape
     _, bK2, bK2p = G_b.shape
     if out_slice is None:
@@ -107,24 +104,15 @@ def bubble_dense(
 
 
 def ring_contract(phi_left, phi_right, Ga_fft, Gb_fft, *, xp=None):
-    """The per-frequency 3-phonon ring contraction (no FFT/IFFT).
+    """The per-frequency 3-phonon ring contraction
 
-    Operates on already-transformed Green's functions ``Ga_fft`` on the
-    ``(c, b) = (K1, K1')`` link and ``Gb_fft`` on the
-    ``(e, d) = (K2, K2')`` link, each shaped ``(w, bK, bK')`` with ``w``
+    Operates on already-transformed Green's functions Ga_fft on the
+    (c, b) = (K1, K1') link and Gb_fft on the
+    (e, d) = (K2, K2') link, each shaped (w, bK, bK') with w
     the leading (frequency/τ) batch axis. Returns ``S_hat`` shaped
-    ``(w, nI, nJ)`` — the contraction
-    ``Σ_{c,d,e,f} φ_L[a,c,e] Ga[w,c,b] Gb[w,e,d] φ_R[J,d,b]`` evaluated
-    pointwise in ``w``.
-
-    Factored out of :func:`bubble_dense` so the distributed FFT-first
-    pipeline can FFT in ``nnz`` distribution, call this per τ-slice in
-    ``stack`` distribution, and IFFT back — without re-running the FFT
-    inside the contraction. ``bubble_dense`` is exactly
-    ``pad+FFT → ring_contract → prefactor·IFFT[out_slice]``.
-
-    Three matmuls route everything through BLAS by reshaping ``(a, c)``
-    and ``(a, d)`` so the shared ``w`` axis is a clean batch dimension.
+    (w, nI, nJ) - the contraction
+    sigma_{c,d,e,f} phi_L[a,c,e] Ga[w,c,b] Gb[w,e,d] phi_R[J,d,b] evaluated
+    pointwise in w.
     """
     if xp is None:
         xp = np
