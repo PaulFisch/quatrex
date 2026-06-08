@@ -181,7 +181,7 @@ def test_bubble_block_matches_reference(nd: int, ne: int) -> None:
     )
 
     # Atol scales with the prefactor magnitude (~5e-23) — use rtol.
-    assert np.allclose(sig_l_ref, sig_l_new, atol=1e-20, rtol=1e-10)
+    assert np.allclose(sig_l_ref, sig_l_new, atol=1e-40, rtol=1e-10)
 
 
 def test_fc3_to_phi_blocks_truncation_warning() -> None:
@@ -210,30 +210,46 @@ def test_fc3_to_phi_blocks_keys_in_nn_band() -> None:
         assert abs(I - J) <= 1 and abs(I - K) <= 1 and abs(J - K) <= 1
 
 
-def _ref_quad(phi_left, phi_right, G_a, G_b, dw_thz):
-    """Independent positive-only bubble for one ring quad (off-diagonal
-    G supported). Mirrors the dense ``bubble_dense`` arithmetic via an
-    explicit einsum so it is an independent oracle."""
-    ne = G_a.shape[0]
-    n_fft = 2 * ne - 1
-    prefactor = bubble_prefactor_thz(dw_thz)
+def _ref_fft(G, n_fft):
+    pad = np.concatenate(
+        [G, np.zeros((n_fft - G.shape[0], *G.shape[1:]), dtype=complex)], axis=0)
+    return np.fft.fft(pad, axis=0)
 
-    def _fft(G):
-        pad = np.concatenate(
-            [G, np.zeros((n_fft - ne, *G.shape[1:]), dtype=complex)], axis=0
-        )
-        return np.fft.fft(pad, axis=0)
 
+def _ref_rev(X):
+    """DFT index-reversal X[(-l) mod N] for the (non-conjugating) correlation."""
+    return np.concatenate([X[:1], X[:0:-1]], axis=0)
+
+
+def _ref_bubble_F(phi_left, phi_right, Fa, Fb, ne, prefactor):
+    """One ring quad from pre-FFT'd legs Fa, Fb."""
     S = np.einsum(
         "wabd,Jdb->waJ",
-        np.einsum(
-            "wacd,wcb->wabd",
-            np.einsum("ace,wed->wacd", phi_left, _fft(G_b)),
-            _fft(G_a),
-        ),
+        np.einsum("wacd,wcb->wabd",
+                  np.einsum("ace,wed->wacd", phi_left, Fb), Fa),
         phi_right,
     )
     return prefactor * np.fft.ifft(S, axis=0)[:ne]
+
+
+def _ref_quad(phi_left, phi_right, G_a, G_b, dw_thz):
+    """One-sided (decay-only) bubble for one ring quad -- the convolution
+    of two equal-Keldysh G legs. Kept for the single-block test."""
+    ne = G_a.shape[0]
+    return _ref_bubble_F(phi_left, phi_right, _ref_fft(G_a, 2 * ne - 1),
+                         _ref_fft(G_b, 2 * ne - 1), ne, bubble_prefactor_thz(dw_thz))
+
+
+def _ref_quad_lesser(phi_left, phi_right, Gla, Gga, Glb, Ggb, dw_thz):
+    """Full Σ^< for one ring quad: decay + the two absorption (negative-ω')
+    correlations folded in via G^<(-ω)=G^>(ω) -- what the production now
+    computes. Σ^< = ring(g^<_a,g^<_b)+ring(g^<_a,rev g^>_b)+ring(rev g^>_a,g^<_b)."""
+    ne = Gla.shape[0]; n_fft = 2 * ne - 1; pre = bubble_prefactor_thz(dw_thz)
+    Fla, Fga = _ref_fft(Gla, n_fft), _ref_fft(Gga, n_fft)
+    Flb, Fgb = _ref_fft(Glb, n_fft), _ref_fft(Ggb, n_fft)
+    return (_ref_bubble_F(phi_left, phi_right, Fla, Flb, ne, pre)
+            + _ref_bubble_F(phi_left, phi_right, Fla, _ref_rev(Fgb), ne, pre)
+            + _ref_bubble_F(phi_left, phi_right, _ref_rev(Fga), Flb, ne, pre))
 
 
 def _ref_compute_multiblock(
@@ -291,8 +307,11 @@ def _ref_compute_multiblock(
             la, lb = (K1, K1p), (K2, K2p)
             if la not in gl_band or lb not in gl_band:
                 continue
-            sl = _ref_quad(phi_left, phi_right, gl_band[la], gl_band[lb], dw_thz)
-            sg = _ref_quad(phi_left, phi_right, gg_band[la], gg_band[lb], dw_thz)
+            sl = _ref_quad_lesser(phi_left, phi_right,
+                                  gl_band[la], gg_band[la], gl_band[lb], gg_band[lb], dw_thz)
+            # Σ^> is the same folded form with G^< and G^> swapped.
+            sg = _ref_quad_lesser(phi_left, phi_right,
+                                  gg_band[la], gl_band[la], gg_band[lb], gl_band[lb], dw_thz)
             sl_full[(I, J)] = sl_full.get((I, J), 0) + sl
             sg_full[(I, J)] = sg_full.get((I, J), 0) + sg
 
@@ -416,15 +435,15 @@ def test_compute_multiblock_matches_reference() -> None:
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             key = (I, J)
             np.testing.assert_allclose(
-                sl_view.blocks[I, J], sl_ref.get(key, 0), atol=1e-20, rtol=1e-10,
+                sl_view.blocks[I, J], sl_ref.get(key, 0), atol=1e-40, rtol=1e-9,
                 err_msg=f"Sigma^< mismatch at block {key}",
             )
             np.testing.assert_allclose(
-                sg_view.blocks[I, J], sg_ref.get(key, 0), atol=1e-20, rtol=1e-10,
+                sg_view.blocks[I, J], sg_ref.get(key, 0), atol=1e-40, rtol=1e-10,
                 err_msg=f"Sigma^> mismatch at block {key}",
             )
             np.testing.assert_allclose(
-                sr_view.blocks[I, J], sr_ref.get(key, 0), atol=1e-20, rtol=1e-10,
+                sr_view.blocks[I, J], sr_ref.get(key, 0), atol=1e-40, rtol=1e-10,
                 err_msg=f"Sigma^R mismatch at block {key}",
             )
 
@@ -650,23 +669,27 @@ def test_compute_coupled_q_matches_reference() -> None:
                     if pl is None or pr is None:
                         continue
                     la, lb = (K1, K1p), (K2, K2p)
-                    ref_l[(I, J)][:, iq_ext] += _ref_quad_scaled(
-                        pl, pr, gl_band[la][:, iqp], gl_band[lb][:, iq2],
-                        dw_thz, 1.0 / nq,
+                    # Folded Σ^<,Σ^> (absorption is a frequency fold, per fixed
+                    # internal q-slice); the 1/N_q is the coupled-q mesh average.
+                    ref_l[(I, J)][:, iq_ext] += (1.0 / nq) * _ref_quad_lesser(
+                        pl, pr,
+                        gl_band[la][:, iqp], gg_band[la][:, iqp],
+                        gl_band[lb][:, iq2], gg_band[lb][:, iq2], dw_thz,
                     )
-                    ref_g[(I, J)][:, iq_ext] += _ref_quad_scaled(
-                        pl, pr, gg_band[la][:, iqp], gg_band[lb][:, iq2],
-                        dw_thz, 1.0 / nq,
+                    ref_g[(I, J)][:, iq_ext] += (1.0 / nq) * _ref_quad_lesser(
+                        pl, pr,
+                        gg_band[la][:, iqp], gl_band[la][:, iqp],
+                        gg_band[lb][:, iq2], gl_band[lb][:, iq2], dw_thz,
                     )
 
     slv, sgv = s_l.stack[...], s_g.stack[...]
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             np.testing.assert_allclose(
-                slv.blocks[I, J], ref_l.get((I, J), 0), atol=1e-20, rtol=1e-9,
+                slv.blocks[I, J], ref_l.get((I, J), 0), atol=1e-40, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^< mismatch at {(I, J)}",
             )
             np.testing.assert_allclose(
-                sgv.blocks[I, J], ref_g.get((I, J), 0), atol=1e-20, rtol=1e-9,
+                sgv.blocks[I, J], ref_g.get((I, J), 0), atol=1e-40, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^> mismatch at {(I, J)}",
             )

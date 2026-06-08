@@ -477,12 +477,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if nq > 1:
             prefactor = prefactor / nq
 
-        gtl, gtg, stl, stg = self._ensure_tau_buffers(g_lesser, n_fft)
+        gtl, gtg, stl, stg, gtlr, gtgr = self._ensure_tau_buffers(g_lesser, n_fft)
 
         # (1) FFT G(ω)→g(τ) in nnz. The τ-buffers share G's exact nnz
         # ordering (asserted at allocation), so the raw-data assignment
         # is index-consistent.
-        for m in (gtl, gtg, stl, stg):
+        for m in (gtl, gtg, stl, stg, gtlr, gtgr):
             if m.distribution_state != "nnz":
                 m.dtranspose(discard=True)
         gl_in, gg_in = g_lesser.data, g_greater.data
@@ -501,10 +501,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             gg_in = gg_in.copy(); gg_in[0] = 0.0
         gtl.data[:] = self._fft_pad(gl_in, n_fft)
         gtg.data[:] = self._fft_pad(gg_in, n_fft)
+        # DFT index-reversal rev(X)[l]=X[(-l) mod n_fft] of the FFT'd G, for
+        # the absorption (negative-ω') terms folded in via the bosonic
+        # symmetry G^<(-ω)=G^>(ω): a true (non-conjugating) correlation is
+        # corr(a,b)=IFFT[F(a)·rev(F(b))]. Formed in nnz (full-τ local) since
+        # the reversal mixes the whole τ axis; transposed to stack with the
+        # forward buffers below.
+        gtlr.data[0] = gtl.data[0]
+        gtlr.data[1:] = gtl.data[:0:-1]
+        gtgr.data[0] = gtg.data[0]
+        gtgr.data[1:] = gtg.data[:0:-1]
 
         # (2) g(τ) nnz→stack: τ-slice of the full band per stack rank.
         gtl.dtranspose()
         gtg.dtranspose()
+        gtlr.dtranspose()
+        gtgr.dtranspose()
         if stl.distribution_state != "stack":
             stl.dtranspose(discard=True)
         if stg.distribution_state != "stack":
@@ -513,6 +525,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         stg.data[:] = 0.0
 
         gtlv, gtgv = gtl.stack[...], gtg.stack[...]
+        gtlrv, gtgrv = gtlr.stack[...], gtgr.stack[...]
         stlv, stgv = stl.stack[...], stg.stack[...]
 
         # (3) Ring contraction per τ-slice in stack. Under a comm.block
@@ -526,20 +539,48 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         if ranks.block.size > 1:
             halo_l, halo_g = self._exchange_band_halo(gtlv, gtgv, gtl, start, end)
+            halo_lr, halo_gr = self._exchange_band_halo(
+                gtlrv, gtgrv, gtlr, start, end)
         else:
-            halo_l = halo_g = {}
+            halo_l = halo_g = halo_lr = halo_gr = {}
 
         # Materialise each distinct band link once (a link recurs across
         # many quads; the block indexer otherwise re-gathers it each time).
+        # The reversed blocks glr/ggr carry rev(F(G^<)), rev(F(G^>)) for the
+        # absorption correlation terms.
         gl_blk: dict[tuple[int, int], NDArray] = {}
         gg_blk: dict[tuple[int, int], NDArray] = {}
+        glr_blk: dict[tuple[int, int], NDArray] = {}
+        ggr_blk: dict[tuple[int, int], NDArray] = {}
         for (K, Kp) in self._links_for_range(start, end):
             if start <= min(K, Kp) < end:
                 gl_blk[(K, Kp)] = gtlv.blocks[K - start, Kp - start]
                 gg_blk[(K, Kp)] = gtgv.blocks[K - start, Kp - start]
+                glr_blk[(K, Kp)] = gtlrv.blocks[K - start, Kp - start]
+                ggr_blk[(K, Kp)] = gtgrv.blocks[K - start, Kp - start]
             else:
                 gl_blk[(K, Kp)] = halo_l[(K, Kp)]
                 gg_blk[(K, Kp)] = halo_g[(K, Kp)]
+                glr_blk[(K, Kp)] = halo_lr[(K, Kp)]
+                ggr_blk[(K, Kp)] = halo_gr[(K, Kp)]
+
+        # The full bubble folds the negative-ω' (absorption) contribution
+        # into the one-sided grid via G^<(-ω)=G^>(ω): for each ring quad
+        #   Σ^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
+        #   Σ^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
+        # (decay + the two absorption correlations). Omitting the last two
+        # terms -- the one-sided convolution -- drops the dominant absorption
+        # channel and badly under-scatters (the dense solver gets these from
+        # its symmetric ±ω grid).
+        def _fold_l(pl, pr, gla, glb, ggra, ggrb):
+            return (ring_contract(pl, pr, gla, glb, xp=xp)
+                    + ring_contract(pl, pr, gla, ggrb, xp=xp)
+                    + ring_contract(pl, pr, ggra, glb, xp=xp))
+
+        def _fold_g(pl, pr, gga, ggb, glra, glrb):
+            return (ring_contract(pl, pr, gga, ggb, xp=xp)
+                    + ring_contract(pl, pr, gga, glrb, xp=xp)
+                    + ring_contract(pl, pr, glra, ggb, xp=xp))
 
         Qproj = (
             xp.asarray(self._zero_mode_Q)
@@ -551,13 +592,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 acc_l = None
                 acc_g = None
                 for K1, K2, K1p, K2p, phi_left, phi_right in self._phi_pair_index[(I, J)]:
-                    sl = ring_contract(
+                    sl = _fold_l(
                         phi_left, phi_right,
-                        gl_blk[(K1, K1p)], gl_blk[(K2, K2p)], xp=xp,
+                        gl_blk[(K1, K1p)], gl_blk[(K2, K2p)],
+                        ggr_blk[(K1, K1p)], ggr_blk[(K2, K2p)],
                     )
-                    sg = ring_contract(
+                    sg = _fold_g(
                         phi_left, phi_right,
-                        gg_blk[(K1, K1p)], gg_blk[(K2, K2p)], xp=xp,
+                        gg_blk[(K1, K1p)], gg_blk[(K2, K2p)],
+                        glr_blk[(K1, K1p)], glr_blk[(K2, K2p)],
                     )
                     acc_l = sl if acc_l is None else acc_l + sl
                     acc_g = sg if acc_g is None else acc_g + sg
@@ -590,6 +633,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
             gl_q = _qflat(gl_blk)
             gg_q = _qflat(gg_blk)
+            glr_q = _qflat(glr_blk)
+            ggr_q = _qflat(ggr_blk)
             n_tau = next(iter(gl_q.values())).shape[0]
             dtype = next(iter(gl_q.values())).dtype
             for (I, J) in owned:
@@ -612,15 +657,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             pr = phiR.get((J, K2p, K1p))
                             if pl is None or pr is None:
                                 continue
-                            sl = ring_contract(
+                            sl = _fold_l(
                                 pl, pr,
                                 gl_q[(K1, K1p)][:, iqp], gl_q[(K2, K2p)][:, iq2],
-                                xp=xp,
+                                ggr_q[(K1, K1p)][:, iqp], ggr_q[(K2, K2p)][:, iq2],
                             )
-                            sg = ring_contract(
+                            sg = _fold_g(
                                 pl, pr,
                                 gg_q[(K1, K1p)][:, iqp], gg_q[(K2, K2p)][:, iq2],
-                                xp=xp,
+                                glr_q[(K1, K1p)][:, iqp], glr_q[(K2, K2p)][:, iq2],
                             )
                             acc_l = sl if acc_l is None else acc_l + sl
                             acc_g = sg if acc_g is None else acc_g + sg
@@ -801,7 +846,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             cls.from_sparray(
                 pattern, self.block_sizes, global_stack_shape=(n_fft,) + nk
             )
-            for _ in range(4)
+            for _ in range(6)
         )
         # The raw-data FFT path requires the τ-buffers to carry G's exact
         # internal nnz ordering. from_sparray is deterministic for a given
