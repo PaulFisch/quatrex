@@ -3,21 +3,9 @@
 
 The 3-phonon vertex Phi_{a,b,c} is local in real space (set by the FC3
 cutoff). For a block-tridiagonal device with transport cells indexed by
-``I``, all non-zero entries land in block-triplets ``(I, J, K)`` with
-``|I-J|, |I-K|, |J-K| <= 1`` (assuming the user keeps the FC3 support
-inside one nearest-neighbour shell, see §2.4 of
-``docs/anharmonic_phph.tex``). Storing those blocks in a dict avoids
-the dense ``O(N_dof^3)`` cost.
-
-Two entry points are exposed:
-
-* :func:`fc3_to_phi_blocks` — dense → block-sparse projection (used by
-  tests; emits a Frobenius truncation warning).
-* :func:`load_device_fc3` — HDF5 streaming reader. The expected schema
-  is the one produced by
-  :func:`phonon_inputs.quatrex_writer.write_fc3_blocks`. A legacy
-  fallback path still accepts a dense ``(N_dof, N_dof, N_dof)``
-  device-sized FC3 stored under ``/fc3``.
+I, all non-zero entries land in block-triplets (I, J, K) with
+|I-J|, |I-K|, |J-K| <= 1 (assuming the user keeps the FC3 support
+inside one nearest-neighbour shell).
 """
 
 from __future__ import annotations
@@ -99,14 +87,12 @@ def load_device_fc3(
 ) -> PhiBlocks:
     """Load a block-sparse, mass-weighted Phi dict from disk.
 
-    Two HDF5 schemas are accepted, in order of preference:
+    Two HDF5 schemas are accepted:
 
     1. The block-sparse layout written by
-       :func:`phonon_inputs.quatrex_writer.write_fc3_blocks`
-       (``/fc3_blocks/I_J_K``). This is the canonical production path.
-    2. Legacy: a dense ``(N_dof, N_dof, N_dof)`` array under ``/fc3``;
-       projected onto the block-tridiagonal pattern via
-       :func:`fc3_to_phi_blocks`.
+       phonon_inputs.quatrex_writer.write_fc3_blocks
+    2.  a dense (N_dof, N_dof, N_dof) array under /fc3;
+       projected onto the block-tridiagonal pattern
     """
     import h5py
 
