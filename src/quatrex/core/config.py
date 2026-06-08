@@ -761,6 +761,22 @@ class PhononConfig(BaseModel):
     soft-mode structures and must NOT be used. The most-conserved (best)
     iterate's heat current is captured even if the iteration later drifts."""
 
+    current_stability_tol: PositiveFloat = 5e-3
+    """Lead-current (conductance) stability tolerance for the anharmonic
+    phonon SCBA, applied IN ADDITION to ``heat_flow_conservation_tol``.
+
+    Heat-flow conservation is necessary but not sufficient for convergence:
+    at large broadening ``eta`` the heat flow conserves (its elastic part
+    dominates) several iterations before the scattering self-energy reaches
+    self-consistency, so the lead current -- the conductance observable -- is
+    still drifting. Without this check the SCBA stops prematurely with an
+    under-scattered ``G_anh`` (e.g. ratio ~0.9 instead of the converged ~0.6
+    on the CNT). Convergence therefore also requires the relative change of
+    the lead heat current between iterations, ``|J_n - J_{n-1}| / |J_n|``, to
+    fall below this tolerance. On soft-mode structures where the lead current
+    oscillates it never trips and the run falls back to the best-iterate
+    capture at ``max_iterations`` (no regression)."""
+
     zero_mode_projection: bool = False
     """Optional rigid-body (q=0) zero-mode projection of the 3-phonon
     self-energy (``model == "negf"``).

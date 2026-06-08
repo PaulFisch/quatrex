@@ -259,13 +259,20 @@ class PhononSolver(SubsystemSolver):
     ) -> None:
         """Perform selected solve for the phonon Green's function."""
         if comm.block.size > 1:
-            self.solver_dist.selected_solve(
+            # NOTE: mirror the single-block branch -- the distributed RGF
+            # also returns the (block-all-reduced) lead heat current when
+            # asked. Without this the block-parallel path leaves
+            # ``meir_wingreen_current`` unset, so the heat-flow convergence
+            # criterion (the only valid one for the anharmonic phonon SCBA)
+            # never fires and no conductance can be extracted.
+            self.meir_wingreen_current = self.solver_dist.selected_solve(
                 a=self.system_matrix,
                 sigma_lesser=sse_lesser,
                 sigma_greater=sse_greater,
                 obc_blocks=self.obc_blocks,
                 out=out,
                 return_retarded=True,
+                return_current=self.compute_meir_wingreen_current,
             )
         else:
             self.meir_wingreen_current = self.solver.selected_solve(
