@@ -1,8 +1,8 @@
 \chapter{Results}
 \label{sec:results}
 
-This chapter collects the validation and production measurements. The
-harmonic backbone is checked first (\cref{sec:res_ballistic}), then the
+This chapter collects the quantum transport calculations. Ballistic phonon-phonon
+calcluations are shown first (\cref{sec:res_ballistic}), then the
 force-constant inputs (\cref{sec:res_fc}), the anharmonic transport on
 finite silicon nanowires (\cref{sec:res_nw}) and carbon nanotubes
 (\cref{sec:res_cnt}), the transversely-periodic
@@ -11,90 +11,75 @@ $q_\perp$-resolved anharmonic problem and the silicon thin-film benchmark
 of the numerical approximations (\cref{sec:res_approx}), a Si/Ge
 heterostructure (\cref{sec:res_hetero}), and the distributed-solver and
 GPU-memory scaling of the implementation
-(\cref{sec:res_scaling}). Implementation mechanisms referenced here are
-described in \cref{ssec:phph_distribution,ssec:phph_qdist}; the dense
-reference solver used for the standalone studies is documented in
-\cref{app:convergence_diagnosis}.
+(\cref{sec:res_scaling}).
+
+% Implementation mechanisms referenced here are
+% described in \cref{ssec:phph_distribution,ssec:phph_qdist}; the dense
+% reference solver used for the standalone studies is documented in
+% \cref{app:convergence_diagnosis}.
 
 % ======================================================================
-\section{Ballistic phonon NEGF validation}
+\section{Ballistic Phonon NEGF}
 \label{sec:res_ballistic}
 % ======================================================================
 
-The harmonic transport backbone is validated against an independent
-Sancho--Rubio decimation plus Caroli reference on identical harmonic
-inputs, transverse mesh, and frequency grid. For homogeneous bulk
-silicon the two transmissions agree, confirming the phonopy block
-extraction, the block-tridiagonal assembly, and the open-boundary
-treatment.
-
-As a heterogeneous test we model a ballistic Si/Ge interface in the
-mass-mismatch approximation: bulk-Si force constants throughout, with
+As a heterogeneous test, we model a ballistic Si/Ge interface in the
+mass-mismatch approximation, as done in \cite{latour_ab_2017, tian_enhancing_2012, guo_quantum_2020}: bulk-Si force constants in the whole device, with
 the Si/Ge distinction entering only through the atomic masses
-($m_\mathrm{Si}=28.09$, $m_\mathrm{Ge}=72.64$~amu). At $\Gamma$ the Si
+($m_\mathrm{Si}=28.09$, $m_\mathrm{Ge}=72.64$~amu). At $\Gamma$, the Si
 optical maximum is $15.55$~THz and the Ge mass-clone gives $9.67$~THz,
 consistent with $f_\mathrm{Ge}=f_\mathrm{Si}\sqrt{m_\mathrm{Si}/m_\mathrm{Ge}}$.
-On a $20\times20$ transverse mesh the interfacial conductance at
+On a $20\times20$ transverse mesh, the interfacial conductance at
 $300$~K is $G=196$~MW\,m$^{-2}$K$^{-1}$, within $\sim7\%$ of the
-literature values ($210$, Latour 2017; $209$, Tian 2012); the
-remaining gap is consistent with the coarse transverse mesh and the
-minimal FC2 calculation.
+literature values ($210$, Latour 2017; $209$, Tian 2012). the
+remaining gap is consistent with the coarser transverse mesh and DFT calculations.
 
 % ======================================================================
-\section{Force constants: methods, quality, and compression}
+\section{Force Constants}
 \label{sec:res_fc}
 % ======================================================================
 
-\paragraph{Method cross-check.} Bulk-silicon harmonic force constants
+\paragraph{Method cross-check.} Bulk Silicon harmonic force constants
 computed by density-functional perturbation theory (QE \texttt{ph.x}
 $\to$ \texttt{q2r.x}) and by finite displacement (phono3py + symfc) on
 the same primitive cell agree to $1.6\%$ on the zone-centre optical
-frequency ($15.12$ vs $15.37$~THz; \cref{fig:res_fcmethod}). The two
-\emph{ab-initio} routes are therefore mutually consistent at the
-harmonic level. (DFPT third-order constants via \texttt{d3q} require a
-norm-conserving pseudopotential and were not used for transport here.)
+frequency ($15.12$ vs $15.37$~THz; \cref{fig:res_fcmethod}). DFPT third-order
+constants via \texttt{d3q} require a norm-conserving pseudopotential, and can hence
+not be calculated to the same accuracy as with finite-displacement methods.
 
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.6\linewidth]{transport_sweeps/fc_method_dispersion_si.pdf}
   \caption{Bulk-silicon phonon dispersion from DFPT versus
-  finite-displacement force constants. The two \emph{ab-initio} methods
-  agree to $1.6\%$ on the $\Gamma$ optical frequency.}
+  finite-displacement force constants.}
   \label{fig:res_fcmethod}
 \end{figure}
 
-\paragraph{Bulk-$\kappa$ anchor.} The finite-displacement FC3, fed to a
-phono3py RTA-BTE calculation (natural isotopes), gives bulk-silicon
+\paragraph{Bulk Si $\kappa$.} The finite-displacement FC3 as input to a
+phono3py RTA-BTE calculation gives bulk-silicon
 $\kappa(300\,\mathrm{K})=110.7$~W\,m$^{-1}$K$^{-1}$ on an $11^3$ mesh and
-$108.7$ on $19^3$ (the mesh is essentially converged). This is
-$\sim25\%$ below the experimental $\sim150$, the known underestimate of
-a $2\times2\times2$
-FC3 supercell (cutoff $5.5$~\AA); a larger supercell would close most of
-the gap. This bulk $\kappa$ from the BTE is the natural reference for the
-anharmonic NEGF results that follow.
+$108.7$ on $19^3$. This is
+$\sim25\%$ below the experimental $\sim150$, likely due to the coarse $2\times2\times2$
+FC3 supercell (cutoff $5.5$~\AA). \todo[inline]{Rerun this with the better Si FC3}
 
-\paragraph{FC3 compression.} The tensor-decomposition machinery of
-\cref{sec:fc3_compression} was applied to the device FC3 of the
+\paragraph{FC3 compression.} The tensor-decomposition methods of
+\cref{sec:fc3_compression} are applied to the device FC3 of the
 \texttt{d11a} nanowire ($39.4\times10^6$ dense parameters) and the
 compressed tensors fed back through the full anharmonic transport solve
-(\cref{fig:res_decomp}). Two lessons emerge. First, the transport
+(\cref{fig:res_decomp}). We observe that, first, transport
 observable converges faster than the Frobenius residual the fitters
 minimise: the symmetric ans\"atze (INDSCAL, Waring) reach a $\sim15\%$
 conductance error at rank $16$ ($\sim3600$--$4500\times$ fewer
 parameters) while their Frobenius residual is still $52$--$67\%$. The
 relevant fitting target for phonon NEGF is therefore a transport
-residual, not the tensor norm. Second --- and this is invisible to a
-Frobenius score --- compression has distinct \emph{failure modes}: the
+residual, not the tensor norm. Second, the current compression approach
+has distinct failure modes: the
 matricised SVD is both far denser (its factor count is $10$--$100\times$
-the symmetric methods') and \emph{unphysical} at higher rank, with its
+the symmetric methods') and unphysical at higher rank, with its
 rank-8 fit violating heat-flow conservation and its rank-16 fit giving a
-negative $G_\mathrm{anh}$ (a ballistic collapse, marked $\times$ in
-\cref{fig:res_decomp}); conversely the Tucker (HOSVD) and INDSCAL fits at
-the lowest ranks collapse to the bare ballistic value (open symbols),
-scattering nothing. Only the symmetric INDSCAL/Waring families degrade
-gracefully. The dense reference itself
-($G_\mathrm{anh}=52.6$~MW\,m$^{-2}$K$^{-1}$,
-$G_\mathrm{anh}/G_\mathrm{ball}=0.64$) converges in $8$ SCBA iterations.
+negative $G_\mathrm{anh}$. Conversely, the Tucker (HOSVD) and INDSCAL fits at
+the lowest ranks collapse to the bare ballistic value. Only the symmetric INDSCAL/Waring families degrade
+gracefully
 
 \begin{figure}[htb]
   \centering
@@ -103,12 +88,7 @@ $G_\mathrm{anh}/G_\mathrm{ball}=0.64$) converges in $8$ SCBA iterations.
   \caption{FC3 tensor-decomposition transport quality on the \texttt{d11a}
   nanowire: anharmonic conductance (left) and heat-flow conservation
   residual (right) versus FC3 parameter count, for five decomposition
-  families against the dense reference. Filled symbols are physical fits;
-  open symbols collapsed to the ballistic value (no scattering);
-  $\times$ marks fits that violate heat-flow conservation (the matricised
-  SVD, which is also by far the densest). The symmetric INDSCAL and Waring
-  families converge toward the dense $G_\mathrm{anh}$ with the fewest
-  parameters.}
+  families against the dense reference.}
   \label{fig:res_decomp}
 \end{figure}
 
@@ -119,41 +99,31 @@ $G_\mathrm{anh}/G_\mathrm{ball}=0.64$) converges in $8$ SCBA iterations.
 
 We study two hydrogen-passivated [100] silicon nanowires: \texttt{d5a}
 ($\mathrm{Si}_9\mathrm{H}_{12}$ per cell, $63$ DOF) and the wider
-\texttt{d11a} ($135$ DOF). Their harmonic transport is clean
-(\cref{fig:res_ballistic_curves}): the ballistic conductance rises with
-temperature (thermal activation, saturating) and \texttt{d11a} carries
-$\sim1.5\times$ the conductance of \texttt{d5a} (more channels). The
-apparent decrease of $G$ with device length at finite broadening is the
-$\eta$-induced coherence attenuation ($\ell\sim v_g/\eta_w$), not
-diffusive resistance; the true Landauer plateau requires $\eta\to0$.
+\texttt{d11a} ($135$ DOF). Their harmonic transport is physical
+(\cref{fig:res_ballistic_curves})\todo[inline]{Remove from the plot the cnt or fold the cnt}: the ballistic conductance rises with
+temperature, and \texttt{d11a} carries
+$\sim1.5\times$ the conductance of \texttt{d5a}.
 
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.48\linewidth]{transport_sweeps/ballistic_vs_T_d5_d11.pdf}\hfill
   \includegraphics[width=0.48\linewidth]{transport_sweeps/ballistic_vs_length_d5_d11.pdf}
   \caption{Ballistic conductance of the \texttt{d5a} and \texttt{d11a}
-  silicon nanowires. Left: $G(T)$; right: $G$ versus device length (the
-  decrease is finite-$\eta$ coherence attenuation).}
+  silicon nanowires. Left: $G(T)$; right: $G$ versus device length.}
   \label{fig:res_ballistic_curves}
 \end{figure}
 
 \paragraph{Mode-resolved anharmonic physics.} A phono3py analysis of the
-bulk-silicon FC3 (\cref{fig:res_modephysics}) gives the context for the
-nanowire results: phonon lifetimes have a median of $4.2$~ps with a
-$\tau\!\propto\!\omega^{-2}$ envelope; $50\%$ of $\kappa$ is carried by
-phonons with mean free path $>134$~nm and $93\%$ by acoustic modes;
-Umklapp accounts for $0.44$ of the scattering at $300$~K; and the mode
-Gr\"uneisen parameters have mean $|\gamma|=1.04$, matching the
-experimental Si value and independently validating the FC3
-\emph{anharmonicity strength}. Crucially, only $1.3\%$ of bulk
-$\kappa$ comes from phonons with mean free path below $10$~nm. The
+bulk-silicon FC3 (\cref{fig:res_modephysics}) is performed: phonon lifetimes
+have a median of $4.2$~ps with a $\tau\!\propto\!\omega^{-2}$ envelope.
+$50\%$ of $\kappa$ is carried by phonons with mean free path $>134$~nm
+and $93\%$ by acoustic modes. Umklapp accounts for $0.44$ of the scattering at $300$~K,
+and the mode Gr\"uneisen parameters have mean $|\gamma|=1.04$, matching the
+experimental Si value and validating the FC3 anharmonicity strength.
+Only $1.3\%$ of bulk $\kappa$ comes from phonons with mean free path below $10$~nm. The
 $\sim1$~nm nanowire cores therefore sit far below the bulk
-phonon-MFP spectrum: they are \emph{boundary-scattering limited} and
-retain almost none of the bulk anharmonic-limited $\kappa$. This is
-why, at a single transport cell, the anharmonic correction to the
-nanowire conductance is a small perturbation
-($G_\mathrm{anh}/G_\mathrm{ball}\approx1$), and it is consistent across
-the BTE-RTA and NEGF pictures.
+phonon-MFP spectrum: they are mostly performing boundary scattering and
+retain almost none of the bulk anharmonic-limited $\kappa$.
 
 \begin{figure}[htb]
   \centering
@@ -167,340 +137,16 @@ the BTE-RTA and NEGF pictures.
 \end{figure}
 
 At physical broadening and moderate vertex strength the SCBA converges
-cleanly and gives the physical $G_\mathrm{anh}<G_\mathrm{ball}$; the
-soft-mode (\texttt{d5a} $0.027$~THz twist) and strong-coupling
-behaviour, and the diagnosis that the original $\eta/\lambda$ sweep was
-run at an unphysically large $\eta$, are documented in
-\cref{app:convergence_diagnosis}.
-
-% ======================================================================
-\section{Carbon nanotubes: converged anharmonic transport}
-\label{sec:res_cnt}
-
-The silicon nanowires are boundary-limited, so their anharmonic
-correction is small and the SCBA is only mildly stressed. The armchair
-$(3,3)$ carbon nanotube is the complementary test: a stiff, defect-free
-$sp^2$ tube ($36$ DOF per cell, $\sim4$~\AA\ diameter) whose force
-constants fit cleanly (train/test RMSE $0.020$~eV\,\AA$^{-1}$, no
-imaginary modes) and whose periodic acoustic sum rule is exact. It
-carries $\sim11$ ballistic channels at low frequency (versus $\sim4.5$
-for \texttt{d11a}), and the SCBA converges to a tight fixed point
-(residual $<10^{-5}$, heat-flow conservation $10^{-5}$--$10^{-4}$) ---
-the best-behaved anharmonic transport in this work.
-
-\paragraph{Temperature.} \Cref{fig:res_cnt_T} shows the converged
-conductance from $30$ to $300$~K at a single transport cell. Both the
-ballistic and the anharmonic conductance rise with temperature as
-channels populate; the anharmonic ratio $G_\mathrm{anh}/G_\mathrm{ball}$
-falls monotonically from $0.92$ at $30$~K to $0.71$ at $300$~K, the
-signature of three-phonon scattering switching on with the Bose-weighted
-phase space and freezing out as $T\to0$.
-
-\paragraph{Length.} At fixed $300$~K the anharmonic ratio decreases with
-device length --- $G_\mathrm{anh}/G_\mathrm{ball}=0.81,0.70,0.69$ at one,
-two and three cells --- i.e.\ resistance accumulates and begins to
-saturate, the expected approach to the diffusive regime. Beyond three cells the
-dense reference solver is prohibitive; the recursive/distributed solver
-of \cref{sec:res_scaling} is the regime for longer tubes.
-
-\paragraph{Cutoff robustness.} The tube's exact periodic ASR makes the
-self-energy markedly more cutoff-robust than the open wires. Across all
-eight corners of the (FC3-magnitude, vertex-range, Green's-function-range)
-cutoff cube the converged $G_\mathrm{anh}$ varies by only $\pm10\%$ about
-the full-coupling value (\cref{fig:res_cnt_cutoff}); and --- in sharp
-contrast to the open nanowires, where a diagonal-$G$ approximation is
-catastrophic (\cref{sec:res_cutoffs}) --- truncating the
-Green's-function range here costs at most $\sim10\%$. The periodic
-backbone spreads the inter-slab coherence that the open wire concentrates
-in a few off-diagonal blocks.
-
-\paragraph{The $(8,0)$ zigzag.} As a second, larger tube we built a fresh
-VASP$+$hiPhive force constant for the semiconducting $(8,0)$ zigzag
-nanotube ($32$ atoms per cell, the geometry of the electron-transport
-example). The fit is clean and the \emph{ballistic} conductance behaves
-as expected --- it decreases with length through finite-$\eta$ coherence
-attenuation, and the larger tube carries more channels at lower per-area
-conductance. A fully converged anharmonic SCBA for the $(8,0)$ tube lies
-beyond the dense reference solver past $\sim2$ cells and is left to the
-distributed solver; we report it here as a ballistic cross-check only.
-
-\begin{figure}[htb]
-  \centering
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_g.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_ratio.pdf}
-  \caption{Converged anharmonic transport of the $(3,3)$ carbon nanotube
-  versus temperature (single transport cell). \emph{Left}: ballistic and
-  anharmonic per-area conductance. \emph{Right}: the ratio
-  $G_\mathrm{anh}/G_\mathrm{ball}$ rises toward unity as $T\to0$
-  (three-phonon scattering freezing out).}
-  \label{fig:res_cnt_T}
-\end{figure}
-
-\begin{figure}[htb]
-  \centering
-  \includegraphics[width=0.62\linewidth]{transport_sweeps/cnt33_cutoff.pdf}
-  \caption{$(3,3)$ carbon nanotube: converged $G_\mathrm{anh}$ across the
-  eight corners of the self-energy cutoff cube (FC3 magnitude $\sigma$,
-  vertex range $v$, Green's-function range $g$; $0$/$\infty$ = off/on).
-  All corners lie within $\pm10\%$ of the full-coupling value (dashed),
-  and the diagonal-$G$ truncation that is catastrophic for the open wires
-  costs at most $\sim10\%$ here.}
-  \label{fig:res_cnt_cutoff}
-\end{figure}
-
-% ======================================================================
-\section{q-resolved anharmonic transport: silicon thin film}
-\label{sec:res_qfilm}
-% ======================================================================
-
-For a transversely-periodic system the three-phonon self-energy couples
-the transverse momenta by crystal-momentum conservation
-(\cref{eq:sigma_q_dist}). As a quantitative benchmark we model
-cross-plane heat transport through a silicon thin film following
-Guo, Bescond and Zhang~\cite{guo_anharmonic_negf_2020}: the film is
-bulk silicon truncated to $N$ layers along the transport direction with
-in-plane two-dimensional periodicity, so it is exactly the
-transverse-$q_\perp$ problem and reuses the \emph{bulk} silicon force
-constants. The driver reduces to the $\Gamma$-only finite-device
-transmission at a $1\times1$ mesh (checked automatically). Conductance
-is reported per unit area, $G=J/(A_\perp\Delta T)$, and the cross-plane
-conductivity of a film of thickness $L$ is $\kappa(L)=G\,L$.
-
-\paragraph{Ballistic baseline.} The transverse mesh and broadening must
-both be converged: at a fixed eight-layer thickness the ballistic
-conductance converges for $8\times8$ or finer
-($G_\mathrm{ball}=970/928/921/920$~MW\,m$^{-2}$K$^{-1}$ at
-$4\times4/8\times8/12\times12/16\times16$), and a small $\eta$ is needed
-to avoid the coherence attenuation of \cref{sec:res_nw} that otherwise
-crushes the conductance. With these settings $G_\mathrm{ball}$ is nearly
-thickness-independent ($\approx10^{3}$~MW\,m$^{-2}$K$^{-1}$) and the
-ballistic $\kappa=G_\mathrm{ball}L$ rises essentially linearly with $L$
-(\cref{fig:res_sifilm}, right) -- the non-intensive ballistic regime.
-This ballistic conductance matches the scale of
-Guo~\emph{et al.} to within a few percent.
-
-\paragraph{Anharmonic conductance.} \Cref{fig:res_sifilm} (left)
-compares our cross-plane conductance to the anharmonic-NEGF values of
-Guo~\emph{et al.} at $3$ and $5$ unit cells. The three-phonon scattering
-reduces the $3$-unit-cell conductance by $\sim45\%$
-($G_\mathrm{anh}\approx570$~MW\,m$^{-2}$K$^{-1}$), markedly more than the
-reference's $\sim10\%$ ($G_\mathrm{anh}=939.7$). We do not treat the
-absolute anharmonic conductance as quantitatively converged against the
-reference: the over-reduction is consistent with the reference's
-additional self-energy approximations (the diagonal-block self-energy
-and the nearest-neighbour FC3 truncation quantified in
-\cref{sec:res_approx}), with the broadening and thin-device transport
-setup, and with the exchange--correlation functional of the underlying
-force constants (PBE here). The ballistic conductance, by contrast,
-matches their scale to within a few percent, so the harmonic backbone
-and the per-area normalisation are sound.
-
-\begin{figure}[htb]
-  \centering
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_a.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_b.pdf}
-  \caption{Cross-plane heat transport through a silicon thin film at
-  $300$~K with bulk-silicon force constants (transverse mesh $8\times8$,
-  $121$ frequencies). \emph{Left}: per-area conductance --
-  our ballistic and anharmonic NEGF against
-  Guo~\emph{et al.}~\cite{guo_anharmonic_negf_2020}. The ballistic
-  conductance matches the reference to within a few percent; the
-  anharmonic NEGF over-scatters, consistent with the reference's
-  additional self-energy approximations, the transport setup, and the
-  exchange--correlation functional (\cref{sec:res_approx}).
-  \emph{Right}: the ballistic $\kappa=G_\mathrm{ball}L$ rises linearly
-  with thickness (ballistic regime).}
-  \label{fig:res_sifilm}
-\end{figure}
-
-\paragraph{A high-quality long-range force constant.} The thin-film
-results above use the bulk force constants from a small
-$2\times2\times2$ supercell (third-order cutoff $\sim$first-neighbour).
-To test their robustness we generated a substantially higher-quality
-force constant: a hiphive cluster expansion on a $5\times5\times5$
-primitive supercell ($250$ atoms, $>4^3$) from $24$ rattled
-VASP-PBE configurations, with a third-order cutoff extended to
-$\sim$fourth-neighbour ($5.0$~\AA). The fit is excellent (automatic
-relevance determination, $103$ parameters, train/test RMSE both
-$0.020$~eV\,\AA$^{-1}$), the rotational and acoustic sum rules are
-satisfied, and the dispersion is clean --- a far better converged
-third-order constant than the $2\times2\times2$ cell of
-\cref{sec:res_fc}. On this force
-constant the cross-plane scaling gives
-$G_\mathrm{anh}/G_\mathrm{ball}=0.52,0.45,0.38$ at $1.16,1.93,3.09$~nm:
-the anharmonic reduction grows with thickness (the diffusive crossover),
-and is \emph{larger} than with the short-cutoff force constant because
-the longer-range third-order terms add inter-slab scattering. The
-over-reduction relative to Guo~\emph{et al.} therefore persists with the
-better-converged force constant, reinforcing that it stems from the
-reference's additional self-energy approximations, the
-broadening/transport setup, and the exchange--correlation difference
-rather than from the force-constant quality.
-
-\paragraph{The ballistic backbone is force-constant sensitive at the
-$\sim15\%$ level.} The two harmonic force constants do \emph{not} give
-the same ballistic conductance. At matched settings ($8\times8$ mesh,
-$\eta_\mathrm{factor}=0.1$, $121$ frequencies) the higher-quality
-$5\times5\times5$ VASP--PBE force constant gives a ballistic conductance
-$\sim15\%$ \emph{below} the $2\times2\times2$ QE--PBE one, consistently
-across thickness ($G_\mathrm{ball}=906/849/775$ vs.\ $1064/1005/928$~MW
-\,m$^{-2}$K$^{-1}$ at $1.16/1.93/3.09$~nm; ratio $0.85/0.84/0.84$). This
-is a purely \emph{harmonic} difference -- the ballistic conductance is
-unaffected by the three-phonon self-energy -- and traces to the slightly
-softer $5\times5\times5$ dispersion ($\Gamma$-optical $15.15$ vs.\
-$15.37$~THz). The consequence (\cref{fig:res_sifilm_consol}) is that the
-short-cutoff $2\times2\times2$ ballistic sits at the scale of
-Guo~\emph{et al.}'s anharmonic value, whereas the long-range
-$5\times5\times5$ ballistic ($\sim906$) already falls \emph{below} their
-anharmonic $3$-uc number ($939.7$). The earlier statement that ``the
-ballistic matches the reference'' holds only for the $2\times2\times2$
-QE force constant, comparable to the reference's own QE--LDA harmonic
-input; it is not a force-constant-independent agreement. Since Guo's
-ballistic is reported only as a Boltzmann-transport dashed line and not
-as a single number, only their anharmonic points are plotted.
-
-\begin{figure}[htb]
-  \centering
-  \includegraphics[width=0.72\linewidth]{transport_sweeps/si_film_vs_guo.pdf}
-  \caption{Consolidated cross-plane silicon thin-film conductance vs.\
-  thickness at $300$~K ($8\times8$ mesh, $121$ frequencies): our
-  ballistic and anharmonic NEGF with the $2\times2\times2$ (QE--FD) and
-  the high-quality $5\times5\times5$ ($\sim$fourth-neighbour, VASP)
-  force constants, against the anharmonic values of
-  Guo~\emph{et al.}~\cite{guo_anharmonic_negf_2020} ($939.7$ at $3$~uc,
-  $890.97$ at $5$~uc). The $2\times2\times2$ ballistic matches the
-  reference's scale; the $5\times5\times5$ ballistic is $\sim15\%$ lower
-  (a harmonic force-constant difference); and both anharmonic curves lie
-  well below the reference, the documented over-reduction
-  (\cref{sec:res_approx}).}
-  \label{fig:res_sifilm_consol}
-\end{figure}
-
-% ======================================================================
-\section{Full versus approximated self-energy}
-\label{sec:res_approx}
-% ======================================================================
-
-The $q_\perp$-resolved transport driver computes, by construction, only
-the slab-diagonal self-energy (the reference's ``diagonal-block''
-approximation). We implemented the \emph{full} off-diagonal multi-slab
-self-energy $\Sigma_{IJ}(q_\perp,\omega)$ -- which reduces exactly
-(relative error $0$) to the $\Gamma$-only multi-slab self-energy at a
-$1\times1$ mesh -- to measure each numerical approximation against the
-unapproximated result. These ratios are prefactor-independent. For a
-three-slab silicon film (first-Born step from the ballistic Green's
-function): the off-diagonal self-energy blocks carry $47\%$ of the
-Frobenius weight yet change the conductance by only $-1.8\%$, so the
-diagonal-block approximation is well justified despite the blocks being
-individually large; restricting the third-order vertex to the
-nearest-neighbour slab shell changes the result by $<0.1\%$ (the
-long-range FC3 is negligible, echoing the FC3-quality analysis); but
-truncating the inter-slab \emph{Green's function} range gives an
-unphysical (negative) conductance -- the off-diagonal $G$ coherence is
-essential and must not be cut. Of the reference's numerical
-approximations, the two it makes are benign at the few-percent level
-here, while the Green's-function-range truncation, which it does
-\emph{not} make, would be catastrophic.
-
-% ======================================================================
-\section{Silicon/germanium heterostructure}
-\label{sec:res_hetero}
-% ======================================================================
-
-A Ge-layer barrier embedded in a silicon film (Si force constants,
-Ge mass; Si contacts) is built with a per-slab mass profile threaded
-through the $q_\perp$-resolved driver (an all-Si profile reproduces the
-homogeneous driver to machine precision). The mass-mismatch barrier
-raises the \emph{ballistic} thermal resistance by $+340$--$370\%$
-(harmonic interface reflection). The phonon-phonon enhancement of the
-resistance is present in the pure silicon film -- $+32\%$ at $2.3$~nm
-growing to $+51\%$ at $5.4$~nm (the anharmonic resistance accumulates
-with thickness, the diffusive crossover) -- but is suppressed
-($\lesssim1\%$) in the barrier-dominated heterostructure, because the
-strong mass barrier filters transmission to low-frequency acoustic
-phonons that are anharmonically long-lived. (The absolute magnitude of
-the anharmonic enhancement inherits the convergence caveats of the
-silicon-film benchmark in \cref{sec:res_qfilm}; the barrier reflection
-and the qualitative filtering picture do not.)
-
-% ======================================================================
-\section{Distributed solver and self-energy; GPU memory}
-\label{sec:res_scaling}
-% ======================================================================
-
-\paragraph{Dyson solve.} The block-tridiagonal recursive Green's
-function (RGF) solve is linear in the number of transport cells while
-the dense reference is cubic ($57\times$ apart at $32$ blocks, agreeing
-to $\sim10^{-13}$; \cref{fig:res_solver}, left). Distributing the energy
-points across MPI ranks gives $5.3\times$ at eight ranks
-(\cref{fig:res_solver}, right) -- the Dyson solve is
-energy-embarrassingly-parallel.
-
-\begin{figure}[htb]
-  \centering
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/solver_scaling.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_scaling.pdf}
-  \caption{Left: solver scaling -- RGF (linear) versus dense
-  selected-inversion (cubic), and the energy-parallel speed-up
-  ($5.3\times$ at eight ranks). Right: distributed scaling of the
-  production three-phonon self-energy -- the spatial-block
-  $(I,J)$ axis is near-ideal while the energy axis is flat because the
-  energy convolution is replicated (\cref{ssec:phph_distribution}).}
-  \label{fig:res_solver}
-\end{figure}
-
-\paragraph{Self-energy.} The production phonon-phonon self-energy
-parallelises near-ideally over the spatial-block axis ($1.0/1.52/2.37/5.36\times$
-at $1/2/3/6$ ranks) but is flat over the energy axis: the bubble is an
-energy convolution that couples all frequencies, so each stack rank
-recomputes the full-frequency FFT and writes only its slice
-(\cref{fig:res_solver}, right).
-
-\paragraph{Transverse-momentum axis.} The dedicated $q$-communicator of
-\cref{ssec:phph_qdist} -- distributing the external $q_\perp$ and
-all-gathering the internal-momentum Green's functions -- scales
-near-ideally: $1.0/1.87/3.58/6.58\times$ at $1/2/4/8$ ranks
-($82\%$ efficiency), with the self-energy bit-identical across rank
-counts (\cref{fig:res_qscaling}, left). This is the scalable axis for
-the periodic anharmonic problem, in contrast to the replicated energy
-axis.
-
-\paragraph{GPU memory.} For the periodic problem the binding constraint
-is memory: the dense Fourier vertex $\tilde\Phi(q_\perp,q_\perp')$ scales
-as $\cO(N_q^2\,\ndof^3)$ (16~GB already at an $8\times8$ mesh and
-wire-scale cross section). Streaming it from the gathering matrices and
-the real-space FC3 (\cref{ssec:phph_qdist}) drops the peak to
-$\cO(N_q\,\ndof^2)$ (\cref{fig:res_qscaling}, right), bit-identical to
-the dense path, and composes with the $q$-communicator at no extra
-communication.
-
-\begin{figure}[htb]
-  \centering
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_q_scaling.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/phph_memory.pdf}
-  \caption{Left: distributed scaling of the $q_\perp$-resolved
-  three-phonon self-energy over the $q$-communicator (near-ideal;
-  self-energy bit-identical across ranks). Right: peak memory of the
-  momentum-space vertex -- dense $\cO(N_q^2\ndof^3)$ versus streamed
-  $\cO(N_q\ndof^2)$ (the star is a measured value).}
-  \label{fig:res_qscaling}
-\end{figure}
-
-% ======================================================================
-\section{Cutoff hierarchy and transport sensitivity}
-\label{sec:res_cutoffs}
-% ======================================================================
+cleanly and gives the physical $G_\mathrm{anh}<G_\mathrm{ball}$.
 
 A self-energy-level cutoff sweep on the \texttt{d5a} and \texttt{d11a}
 nanowires (\cref{fig:res_cutoffs}) quantifies the truncations: the FC3
 magnitude threshold converges quickly for \texttt{d5a}
 ($10^{-3}\to0.7\%$ relative change in $\Sigma^<$) but the wider
-\texttt{d11a} needs a tighter threshold (it has more small-but-relevant
-vertex elements), whereas a diagonal-$G$ approximation inside the bubble
-is catastrophic ($5\times$ for \texttt{d5a}, $30\times$ for
+\texttt{d11a} needs a tighter threshold. A diagonal-$G$ approximation inside the
+bubble is catastrophic ($5\times$ for \texttt{d5a}, $30\times$ for
 \texttt{d11a}). The dominant cutoff is the Green's-function range, not
-the vertex magnitude -- consistent with the q-resolved finding of
-\cref{sec:res_approx} that the inter-slab $G$ coherence must be kept.
+the vertex magnitude.
 
 \begin{figure}[htb]
   \centering
@@ -511,281 +157,282 @@ the vertex magnitude -- consistent with the q-resolved finding of
   \label{fig:res_cutoffs}
 \end{figure}
 
+Perofrming a rattle-amplitude sweep for the
+\texttt{d5a} nanowire, the twist frequency stays real and stable
+($0.5$--$1.0$~THz at $q_z=0.02$) at every amplitude ($0.015$--$0.08$~\AA),
+with only fit-noise scatter --- never imaginary. The \texttt{d5a} twist is thus
+robust.
+
 % ======================================================================
-\section{Static self-consistent-phonon corrections: loop, tadpole, and the soft mode}
+\section{Carbon nanotubes}
+\label{sec:res_cnt}
+% ======================================================================
+
+An armchair $(3,3)$ carbon nanotube is tested: a stiff, defect-free
+$sp^2$ tube ($36$ DOF per cell, $\sim4$~\AA\ diameter) whose force
+constants fit cleanly (train/test RMSE $0.020$~eV\,\AA$^{-1}$, no
+imaginary modes) and whose periodic acoustic sum rule is exact. It
+carries $\sim11$ ballistic channels at low frequency (versus $\sim4.5$
+for \texttt{d11a}), and the SCBA converges to a tight fixed point
+(residual $<10^{-5}$, heat-flow conservation $10^{-5}$--$10^{-4}$).
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_g.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_ratio.pdf}
+  \caption{Anharmonic transport of the $(3,3)$ carbon nanotube
+  versus temperature (single transport cell). \emph{Left}: ballistic and
+  anharmonic per-area conductance. \emph{Right}: the ratio
+  $G_\mathrm{anh}/G_\mathrm{ball}$ rises toward unity as $T\to0$.}
+  \label{fig:res_cnt_T}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.62\linewidth]{transport_sweeps/cnt33_cutoff.pdf}
+  \caption{$(3,3)$ carbon nanotube with two transport cells: $G_\mathrm{anh}$ across the
+   self-energy combinations (FC3 magnitude $\sigma$,
+   vertex range $v$, Green's-function range $g$).
+  All lie within $\pm10\%$ of the full-coupling value (dashed).}
+  \label{fig:res_cnt_cutoff}
+\end{figure}
+
+\paragraph{Temperature.} \Cref{fig:res_cnt_T} shows the converged
+conductance from $30$ to $300$~K at a single transport cell. Both the
+ballistic and the anharmonic conductance rise with temperature as
+channels populate; the anharmonic ratio $G_\mathrm{anh}/G_\mathrm{ball}$
+falls monotonically from $0.92$ at $30$~K to $0.71$ at $300$~K, the
+signature of three-phonon scattering switching on with the Bose-weighted
+phase space and freezing out as $T\to0$.
+
+\paragraph{Length.} At fixed $300$~K the anharmonic ratio decreases with
+device length: $G_\mathrm{anh}/G_\mathrm{ball}=0.81,0.70,0.69$ at one,
+two and three cells. Beyond three cells, the
+dense reference solver is too expensive.
+
+\paragraph{Cutoff robustness.}  Across all eight corners of the
+(FC3-magnitude, vertex-range, Green's-function-range) cutoff cube,
+the converged $G_\mathrm{anh}$ varies by $\pm10\%$ about
+the full-coupling value (\cref{fig:res_cnt_cutoff}). This is in contrast to the open
+nanowires, where a diagonal-$G$ approximation is
+catastrophic (\cref{sec:res_cutoffs}).
+
+\paragraph{The $(8,0)$ zigzag.} As a second, larger tube, we tested
+the semiconducting $(8,0)$ zigzag nanotube ($32$ atoms per cell,
+the geometry of the electron-transport quatrex example). The fit is clean and
+the ballistic conductance behaves
+as expected --- it decreases with length through finite-$\eta$ coherence
+attenuation, and the larger tube carries more channels at lower per-area
+conductance. \todo[inline]{Add results with quatrex}
+
+% ======================================================================
+\section{Silicon thin film}
+\label{sec:res_qfilm}
+% ======================================================================
+
+For a transversely-periodic system, the three-phonon self-energy couples
+the transverse momenta by crystal-momentum conservation
+(\cref{eq:sigma_guo}). As a quantitative benchmark, we model
+cross-plane heat transport through a silicon thin film following~\citet{guo_quantum_2020}:
+the film is bulk silicon truncated to $N$ layers along the transport direction with
+in-plane two-dimensional periodicity. Conductance
+is reported per unit area, $G=J/(A_\perp\Delta T)$, and the cross-plane
+conductivity of a film of thickness $L$ is $\kappa(L)=G\,L$.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_a.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_b.pdf}
+  \caption{Cross-plane heat transport through a silicon thin film at
+  $300$~K with bulk-silicon force constants (transverse mesh $8\times8$,
+  $121$ frequencies). \emph{Left}: per-area conductance --
+  our ballistic and anharmonic NEGF against \citet{guo_quantum_2020}.
+  \emph{Right}: the ballistic $\kappa=G_\mathrm{ball}L$ rises linearly
+  with thickness.}
+  \label{fig:res_sifilm}
+\end{figure}
+
+\paragraph{Ballistic baseline.} The transverse mesh and broadening must
+both be converged: at a fixed eight-layer thickness the ballistic
+conductance converges for $8\times8$ or finer
+($G_\mathrm{ball}=970/928/921/920$~MW\,m$^{-2}$K$^{-1}$ at
+$4\times4/8\times8/12\times12/16\times16$), and a small $\eta$ is needed \todo[inline]{Add some benchmark here and fix the plot}.
+
+\paragraph{Anharmonic conductance.} \Cref{fig:res_sifilm} (left)
+compares our cross-plane conductance to the anharmonic-NEGF values of
+Guo~\emph{et al.} at $3$ and $5$ unit cells. The three-phonon scattering
+reduces the $3$-unit-cell conductance by $\sim45\%$
+($G_\mathrm{anh}\approx570$~MW\,m$^{-2}$K$^{-1}$), significantly more than the
+reference's $\sim10\%$ ($G_\mathrm{anh}=939.7$). This might be due to the reference's
+additional self-energy approximations (the diagonal-block self-energy
+and the nearest-neighbour FC3 truncation quantified in
+\cref{sec:res_approx}), with the broadening and thin-device transport
+setup, and with the exchange--correlation functional of the underlying
+force constants (PBE here). The ballistic conductance, by contrast,
+matches their numbers.
+
+\paragraph{long-range force constant.} The thin-film
+results above use the bulk force constants from a small
+$2\times2\times2$ supercell with FD. To test convergence, we generated a substantially
+higher-quality force constant using hiphive on a $5\times5\times5$
+primitive supercell ($250$ atoms) from $24$ rattled
+VASP-PBE configurations, with a third-order cutoff extended to
+$\sim$fourth-neighbour ($5.0$~\AA). The fit is good (automatic
+relevance determination, $103$ parameters, train/test RMSE both
+$0.020$~eV\,\AA$^{-1}$), the rotational and acoustic sum rules are
+satisfied, and the dispersion looks correct. On this force
+constant, the cross-plane scaling (\cref{fig:res_sifilm_big}) gives
+$G_\mathrm{anh}/G_\mathrm{ball}=0.52,0.45,0.38$ at $1.16,1.93,3.09$~nm:
+the anharmonic reduction grows with thickness,
+and is larger than with the short-cutoff force constant because
+the longer-range third-order terms add inter-slab scattering. The
+over-reduction relative to \citet{guo_quantum_2020} therefore persists with the
+better-converged force constant.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.72\linewidth]{fig/transport_sweeps/si_film_bigfc3.pdf}
+  \caption{Cross-plane silicon thin-film conductance from the
+  high-quality $5\times5\times5$ (fourth-neighbour) force constant
+  ($nk=8$, $121$ frequencies). The anharmonic
+  reduction $G_\mathrm{anh}/G_\mathrm{ball}$ (annotated) grows with
+  thickness and exceeds both the short-cutoff force constant.}
+  \label{fig:res_sifilm_big}
+\end{figure}
+
+% ======================================================================
+\section{Silicon/germanium heterostructure}
+\label{sec:res_hetero}
+% ======================================================================
+
+A Ge-layer barrier embedded in a silicon film (Si force constants,
+Ge mass; Si contacts) is built with a per-slab mass profile threaded
+through the $q_\perp$-resolved driver (an all-Si profile reproduces the
+homogeneous driver to machine precision). The mass-mismatch barrier
+raises the ballistic thermal resistance by $+340$--$370\%$.
+The phonon-phonon enhancement of the resistance is present in the pure
+silicon film -- $+32\%$ at $2.3$~nm growing to $+51\%$ at $5.4$~nm -- but is suppressed
+($\lesssim1\%$) in the heterostructure.
+
+
+% ======================================================================
+\section{Loop and Tadpole}
 \label{sec:res_scp}
 % ======================================================================
 
 Beyond the dynamic three-phonon bubble $\Sigma_B(\omega)$ (the only term
-with an imaginary part, hence the linewidth), the lowest-order
-self-consistent-phonon (SCP) theory adds two \emph{static}, real,
-Hermitian self-energies: the quartic \emph{loop}
-$\Sigma_L=\tfrac12\,\Phi_4\!:\!\langle uu\rangle$ (Debye--Waller
-stiffening, needs FC4) and the cubic \emph{tadpole}
+with an imaginary part, hence the linewidth), the lowest-order diagrammatic expansion
+adds two static, real, Hermitian self-energies: the quartic loop
+$\Sigma_L=\tfrac12\,\Phi_4\!:\!\langle uu\rangle$ (needs FC4) and the cubic tadpole
 $\Sigma_T=\Phi_3\!:\!\langle u\rangle$ with
 $\langle u\rangle=-\Phi_\mathrm{eff}^{-1}\,\tfrac12\Phi_3\!:\!\langle
 uu\rangle$ (internal-coordinate relaxation, needs FC3). We computed all
 three contributions across temperature for the soft-mode
 \texttt{d5a} nanowire and the stiff (3,3) carbon nanotube
-(\cref{fig:res_scp_mag}); the CNT FC4 was obtained from the existing
-rattled set with a short ($2.0$~\AA) quartic cutoff (the longer cutoff
-overfits the $30$ structures), the \texttt{d5a} FC4 from the \texttt{rfe}
-refit of \cref{sec:res_fc}.
+(\cref{fig:res_scp_mag}). The CNT FC4 was obtained from the existing
+rattled set with a short ($2.0$~\AA) quartic cutoff,
+the \texttt{d5a} FC4 from the \texttt{rfe} refit of \cref{sec:res_fc}.
 
-\paragraph{Magnitudes and a hierarchy that flips with stiffness.}
-For the stiff CNT the dynamic bubble dominates,
+For the CNT, the dynamic bubble dominates,
 $\max|\mathrm{Re}\,\Sigma_B|:\|\Sigma_L\|:\|\Sigma_T\|\approx 8:1:0.5$
 at $300$~K, all growing with $T$ as $\langle uu\rangle$ grows. For the
-soft \texttt{d5a} wire the ordering \emph{inverts}: the bubble is weak
-($\max|\mathrm{Re}\,\Sigma_B|\!\approx\!670$~THz$^2$ at $300$~K) while the
+\texttt{d5a} wire, the ordering inverts: the bubble is weak
+($\max|\mathrm{Re}\,\Sigma_B|\!\approx\!670$~THz$^2$ at $300$~K), while the
 loop is the largest correction
-($\|\Sigma_L\|\!\approx\!1045$~THz$^2$), because the near-zero twist mode
-inflates the static $\langle uu\rangle$. In both structures the loop
-exceeds the tadpole at every temperature: the quartic mean-field
-stiffening dominates the cubic thermal-force shift.
+($\|\Sigma_L\|\!\approx\!1045$~THz$^2$). In both structures, the loop
+exceeds the tadpole at every temperature.
 
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.95\linewidth]{transport_sweeps/static_se_study.pdf}
   \caption{Static-correction magnitudes (top) and heat-flow conservation
-  per correction (bottom) versus temperature, for the stiff CNT (left)
-  and the soft-mode \texttt{d5a} nanowire (right). The bubble dominates
-  for the CNT; the loop dominates for \texttt{d5a}. Loop $>$ tadpole
-  throughout.}
+  per correction (bottom) versus temperature, for the CNT (left)
+  and the \texttt{d5a} nanowire (right)}
   \label{fig:res_scp_mag}
 \end{figure}
 
-\paragraph{Is the loop necessary? Structure-dependent.} For the CNT the
-loop is a $\sim10\%$ renormalisation that does not improve the (already
-$10^{-4}$) conservation, so it is unnecessary. For \texttt{d5a} it earns
-its place on three counts: it is the dominant static term; it
-\emph{rescues} the high-temperature SCBA (the $600$~K bubble alone fails
-to converge, whereas bubble$+$loop converges); and it improves the
+For the CNT, the loop is a $\sim10\%$ renormalisation that does not improve the
+($10^{-4}$) conservation, so it is unnecessary. For \texttt{d5a}, it is the
+dominant static term. It makes the high-temperature SCBA converge, and it improves the
 heat-flow conservation (halving it from $2.98\%$ to $1.34\%$ at $30$~K,
 and reaching $0.45\%$ at $100$~K with the loop$+$tadpole). The loop is the
 physical cure for a soft mode: stiffening it lifts the propagator out of
 the near-singular region.
 
-\paragraph{The tadpole must be coupled to the loop.} Run in isolation the
-tadpole misbehaves: for \texttt{d5a} the tadpole-only self-energy reaches
-$\|\Sigma_T\|=1298$~THz$^2$ at $300$~K and drives the lowest mode
-imaginary ($\omega^2=-2.10$), with the SCBA failing and the heat-flow
-conservation \emph{increasing}. This is \emph{not} a code error but the
-known structure of self-consistent-phonon theory. The optical tadpole
+Run in isolation, the tadpole diverges: for \texttt{d5a} the
+tadpole-only self-energy reaches $\|\Sigma_T\|=1298$~THz$^2$ at $300$~K and drives the lowest mode imaginary ($\omega^2=-2.10$), with the SCBA failing and the heat-flow
+conservation increasing. The optical tadpole
 $T_O$ is the gradient that relaxes the internal coordinates and
-\emph{vanishes at the relaxed structure}~\cite{paulatto_anharmonic_2015}
---- it contains the $\sum\phi(-q_1,q_1,0)$ term, ``which vanishes if the
-quantum statistical average of the forces is zero.'' Computed alone, on
-the un-stiffened reference, the mean displacement
-$\langle u\rangle=-\Phi_\mathrm{eff}^{-1}\tfrac12\Phi_3\!:\!\langle
-uu\rangle$ overshoots because $\langle uu\rangle$ is too large.
-
-The cure is the proper coupled self-consistency: the quartic loop
+vanishes at the relaxed structure~\cite{paulatto_anharmonic_2013}.
+With coupled self-consistency, the quartic loop
 stiffens the modes, which lowers $\langle uu\rangle$, which shrinks
 $\langle u\rangle$ and hence $\Sigma_T$. Running loop and tadpole together
-(as the SSCHA does~\cite{tadano_first_2018}) the same $300$~K point gives
-$\|\Sigma_T\|=284$~THz$^2$ ($4.6\times$ smaller) and a \emph{stable}
-lowest mode ($0.765$~THz); this is precisely why the loop$+$tadpole SCBA
-converges where the tadpole-only one fails. The bulk-silicon control
-confirms the mechanism from the symmetry side: where the $T_d$ site
-symmetry forbids internal relaxation, $\|\Sigma_T\|$ stays at $1$--$7$~THz$^2$
+(as SSCHA does~\cite{tadano_first-principles_2018}) the same $300$~K point gives
+$\|\Sigma_T\|=284$~THz$^2$ ($4.6\times$ smaller) and a stable
+lowest mode ($0.765$~THz). On bulk silicon, $\|\Sigma_T\|$ stays at $1$--$7$~THz$^2$
 (a few percent of the optical $\omega^2$) across $100$--$600$~K and never
-destabilises --- only the low-symmetry wire, with free internal
-coordinates and a soft mode amplifying $\langle u\rangle$, explodes.
-
-\paragraph{Residual limit: the first-order centroid truncation.} The
-implemented tadpole shifts the FC2 by the first-order centroid response
-$\Phi_2(R{+}\langle u\rangle)\!\approx\!\Phi_2{+}\Phi_3\!:\!\langle
-u\rangle$, omitting the second-order $\tfrac12\Phi_4\!:\!\langle
-u\rangle\langle u\rangle$. We tested its size directly: at \texttt{d5a}
-$300$~K (with the loop) $\langle u\rangle$ is small and the second-order
-term is negligible ($11.7$ versus $\|\Sigma_T\|=284$~THz$^2$), so the
-mode is unchanged ($0.765\!\to\!0.755$~THz) --- the truncation is
-harmless. It only bites at large $\langle u\rangle$: at CNT $600$~K
-$\langle u\rangle=2.5$ and the second-order term ($4948$) exceeds the
-first ($1206$~THz$^2$), driving modes to $-58$~THz$^2$ even at second
-order --- a genuine instability (here partly inflated by the overfit CNT
-FC4). The clean message: the lowest-order static SCP is valid while the
-loop keeps $\langle u\rangle$ small; a genuinely large $\langle u\rangle$
-signals soft-mode condensation and demands a full structural relaxation,
-not a self-energy.
+destabilises.
 
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.95\linewidth]{transport_sweeps/static_se_tadpole_breakdown.pdf}
   \caption{Tadpole magnitudes versus temperature for the CNT and
   \texttt{d5a}. Circled points mark where the tadpole-only self-energy
-  drives an imaginary renormalised mode and the SCBA ceases to converge.
-  Coupling the loop self-consistently lowers $\langle uu\rangle$ and keeps
-  the tadpole well-behaved; the bulk-silicon control (not shown) stays at
-  $\|\Sigma_T\|\!\approx\!1$--$7$~THz$^2$ by symmetry.}
+  drives an imaginary renormalised mode and the SCBA does not converge.}
   \label{fig:res_scp_tadpole}
 \end{figure}
 
 % ======================================================================
-\section{Strong anharmonicity: SrTiO\textsubscript{3}, and the rattle-amplitude $=$ renormalisation equivalence}
+\section{Strong anharmonicity: SrTiO\textsubscript{3}}
 \label{sec:res_strong}
 % ======================================================================
 
 The static corrections of \cref{sec:res_scp} are a small perturbation for the
-weakly anharmonic silicon systems. To probe the opposite, strongly anharmonic
-regime --- where the harmonic approximation itself fails --- we computed
-FC2/FC3/FC4 for cubic \emph{cubic} SrTiO$_3$, the canonical
-self-consistent-phonon (SCP) test case~\cite{tadano_first_2018}. This places our
-three systems on an anharmonicity ladder: bulk Si (weak; bubble dominant, static
-$\sim0.3\%$), the Si nanosheet (boundary-limited; \cref{sec:res_qfilm}), and
-SrTiO$_3$ (strong; static dominant).
+weakly anharmonic silicon systems. To test the opposite, strongly anharmonic
+regime, where the harmonic approximation fails, we computed
+FC2/FC3/FC4 for cubic SrTiO$_3$, the canonical
+self-consistent-phonon (SCP) test case from~\cite{tadano_first-principles_2018}.
 
-\paragraph{The harmonic soft mode and benchmark.} Cubic SrTiO$_3$ has
-\emph{unstable} harmonic phonons: a ferroelectric (FE) mode at $\Gamma$ and an
+Cubic SrTiO$_3$ has unstable harmonic phonons: a ferroelectric (FE) mode at $\Gamma$ and an
 antiferrodistortive (AFD) octahedral-rotation mode at
-$R=(\tfrac12,\tfrac12,\tfrac12)$~\cite{tadano_first_2018}. Fitting FC2 to
+$R=(\tfrac12,\tfrac12,\tfrac12)$~\cite{tadano_first-principles_2018}. Fitting FC2 to
 small-amplitude ($0.025$~\AA) rattled displacements in the same $2\times2\times2$
 ($40$-atom) cell used by Tadano \& Tsuneyuki recovers the AFD instability:
 $\omega_R = 55i$--$92i$~cm$^{-1}$ (converging upward with the number of training
-structures --- a genuine instability that \emph{strengthens} as the fit
-converges, the opposite of fitting noise). This brackets their PBEsol value of
-$76i$~cm$^{-1}$ (HSE $25i$)~\cite{tadano_first_2018}; given that we use PBE at the
-experimental lattice constant rather than PBEsol, the agreement confirms the
-instability is physical, not an artefact. The static loop$+$tadpole magnitude is
+structures, an instability that strengthens as the fit
+converges). Their PBEsol value is $76i$~cm$^{-1}$. The static loop$+$tadpole magnitude is
 $\|\Sigma_\mathrm{static}\|\approx39$~THz$^2$ at $300$~K, $\sim6\times$ the bulk-Si
-value --- the static diagrams are dominant here. (The $\Gamma$ FE mode, a polar
-TO mode, requires the long-range dipole interaction; our force-constant model
-carries no Born effective charges / non-analytic correction, so the FE
-instability is not captured, whereas the non-polar AFD mode is.)
+value.
 
-\paragraph{The rattle amplitude is a renormalisation (temperature).} Fitting the
-\emph{same} cell to a \emph{larger} ($0.08$~\AA) rattle amplitude
-\emph{stabilises} the AFD mode ($\omega_R = +90$~cm$^{-1}$,
-\cref{fig:res_srtio3}). This is not a fitting error but the central identity of
-the effective-potential methods: a finite-amplitude fit returns the
-\emph{effective}, thermally renormalised FC2 at the temperature where
+Fitting the same cell to a larger ($0.08$~\AA) rattle amplitude stabilises the AFD mode
+($\omega_R = +90$~cm$^{-1}$, \cref{fig:res_srtio3}). This is not a fitting error,
+but the central identity of the effective-potential methods: a finite-amplitude fit
+returns the effective, renormalised FC2 at the temperature where
 $\langle u^2\rangle^{1/2}$ matches the rattle amplitude. Fitting at the thermal
 amplitude is exactly what the temperature-dependent effective potential
-(TDEP)~\cite{hellman_tdep_2013} and the stochastic self-consistent harmonic
-approximation (SSCHA)~\cite{errea_sscha_2014} do --- and the difference between
-the bare and effective FC2 \emph{is} the static loop self-energy
-$\tfrac12\Phi_4\!:\!\langle uu\rangle$. The bare $\to$ effective stiffening of an
-unstable mode into a stable one is precisely the SCP renormalisation of an
-instability mode~\cite{monacelli_sscha_transitions_2017}, here exhibited simply
-by varying the rattle amplitude.
+(TDEP)~\cite{hellman_temperature_2013} and the stochastic self-consistent harmonic
+approximation (SSCHA)~\cite{monacelli_stochastic_2021} do. The difference between
+the bare and effective FC2 is the static loop self-energy
+$\tfrac12\Phi_4\!:\!\langle uu\rangle$.
 
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.7\linewidth]{transport_sweeps/srtio3_rattle_renorm.pdf}
   \caption{SrTiO$_3$ phonon dispersion: FC2 fitted to a small ($0.025$~\AA, red)
-  versus large ($0.08$~\AA, blue) rattle amplitude. The bare (small-amplitude)
-  AFD branch is imaginary (plotted below zero) between $M$ and $R$; the
-  large-amplitude fit returns the effective, thermally renormalised FC2 with the
-  mode stabilised. The rattle amplitude acts as a temperature: this stiffening
-  \emph{is} the static loop renormalisation.}
+  versus large ($0.08$~\AA, blue) rattle amplitude.}
   \label{fig:res_srtio3}
 \end{figure}
 
-\paragraph{Consequence: the loop is one of two equivalent routes.} The
-renormalised phonons can be obtained \emph{either} from the bare FC2 plus an
+The renormalised phonons can hence be obtained either from the bare FC2 plus an
 explicit quartic loop (the deterministic SCP of \cref{sec:res_scp}, requiring
-FC4) \emph{or} directly by fitting the effective FC2 at the thermal amplitude
-(TDEP/SSCHA, no FC4 needed)~\cite{hellman_tdep_2013,errea_sscha_2014}. They are
-the same physics: in the perturbative limit the SSCHA reproduces the loop and
-tadpole diagrams~\cite{paulatto_anharmonic_2015}. The explicit loop is preferred
-when an analytic temperature dependence from a single FC4 is wanted, or when
-consistency (polar modes, polarisation mixing) matters; the effective-fit route
-is preferred when FC4 is too costly. In \emph{both} routes the cubic FC3 (bubble)
-is still required for the linewidth and transport. For the weakly anharmonic
-silicon systems neither matters (effective $\approx$ bare FC2); for SrTiO$_3$ one
-must use one route or the other.
+FC4), or directly by fitting the effective FC2 at the thermal amplitude
+(TDEP/SSCHA, no FC4 needed)~\cite{hellman_temperature_2013,monacelli_stochastic_2021}.
+The explicit loop is needed when an analytic temperature dependence from a single
+FC4 is wanted. The effective-fit route is preferred when FC4 is too costly.
+For the weakly anharmonic silicon systems neither matters (effective $\approx$ bare FC2).
+For SrTiO$_3$ one must use one route or the other.
 
-\paragraph{Commensurability, not size, converges a zone-boundary mode.} A natural
-attempt to converge the AFD frequency by enlarging the cell to $3\times3\times3$
-($135$ atoms, longer FC2 cutoff) instead \emph{stabilises} $R$ spuriously
-($+90$~cm$^{-1}$). The reason is that the AFD mode sits at
-$R=(\tfrac12,\tfrac12,\tfrac12)$, which is commensurate only with \emph{even}
-supercells: a $2\times2\times2$ samples $R$ exactly (it folds to $\Gamma$),
-whereas an odd $3\times3\times3$ does not have $R$ on its commensurate $q$-grid,
-so $R$ is obtained by Fourier interpolation of the real-space FC2 and is
-artificially smoothed. The $2\times2\times2$ result is therefore the correct one
-(and matches Tadano~\cite{tadano_first_2018}); converging the magnitude requires
-the next \emph{even} cell ($4\times4\times4$), not merely a larger one. This is
-why SCP studies converge a zone-boundary soft mode through the interpolation
-$q$-mesh rather than the real-space supercell~\cite{tadano_first_2018}.
-
-\paragraph{Soft by symmetry versus soft by anharmonicity.} The rattle-amplitude
-sweep cleanly distinguishes two kinds of soft mode. Repeating it for the
-\texttt{d5a} nanowire, whose $0.0075$~THz twist drives the convergence behaviour
-of \cref{sec:res_nw}, the twist frequency stays \emph{real and stable}
-($0.5$--$1.0$~THz at $q_z=0.02$) at \emph{every} amplitude ($0.015$--$0.08$~\AA),
-with only fit-noise scatter --- never imaginary. The \texttt{d5a} twist is thus a
-robust \emph{rotational quasi-Goldstone} (a near-symmetry of the wire), not an
-anharmonic instability: its renormalisation is a minor correction, in contrast to
-SrTiO$_3$'s AFD mode, which is bare-unstable and only stabilised by the
-renormalisation. Reassuringly, this means the \texttt{d5a} soft-twist physics is
-a genuine structural feature, not an artefact of the fitting amplitude.
-
-\paragraph{FC3 decomposability tracks symmetry, not anharmonicity.} A tensor
-rank-sweep of the device FC3 (truncated-SVD / HOSVD / CP) shows SrTiO$_3$ is
-markedly \emph{more} compressible than \texttt{d5a} --- a truncated SVD reaches a
+A tensor rank-sweep of the device FC3 (truncated-SVD / HOSVD / CP) shows SrTiO$_3$ is
+markedly more compressible than \texttt{d5a}.A truncated SVD reaches a
 $7.6\%$ Frobenius error at rank $16$ for SrTiO$_3$ versus $18\%$ for \texttt{d5a}.
-The high-symmetry $5$-atom perovskite has few symmetry-independent FC3 components
-and compresses cleanly despite its strong anharmonicity; the low-symmetry
-$21$-atom nanowire does not. Tensor complexity is therefore governed by
-structural symmetry, and is separable from anharmonicity strength.
-
-% ======================================================================
-\section{Negative results and method limitations}
-\label{sec:res_negative}
-% ======================================================================
-
-Several calculations failed or returned results that should not be
-over-interpreted; recording them is as informative as the successes.
-
-\begin{itemize}
-\item \textbf{The $\eta/\lambda$ convergence diagnostic was run
-unphysically.} An early sweep reported $G_\mathrm{anh}>G_\mathrm{ball}$
-(by up to $14\times$), which is impossible for purely resistive
-three-phonon scattering. The cause was a diagnostic broadening $\eta$
-several times the physical value, which crushes the ballistic
-transmission and inflates the ratio; at physical $\eta$ and moderate
-vertex strength the SCBA is well-posed (\cref{sec:res_nw}). Those numbers
-are not used; the full diagnosis is in \cref{app:convergence_diagnosis}.
-
-\item \textbf{Some tensor decompositions fail outright.} As
-\cref{fig:res_decomp} shows, the matricised SVD is both the densest
-representation and the only one that becomes \emph{unphysical}
-(heat-flow violation at rank $8$, negative conductance at rank $16$),
-while the Tucker and INDSCAL fits collapse to the bare ballistic value at
-the lowest ranks. Only the symmetric (INDSCAL/Waring) families compress
-gracefully: a small Frobenius residual is necessary but not sufficient
-for a usable FC3.
-
-\item \textbf{The \texttt{d17a} nanowire force constant is unusable.} Its
-fitted FC2 carries $86$ imaginary modes --- a fit pathology, not physics
---- so it was excluded from transport; the narrower \texttt{d5a} and
-\texttt{d11a} wires fit cleanly.
-
-\item \textbf{The tadpole self-energy diverges when run alone.} For the
-soft \texttt{d5a} wire the cubic tadpole evaluated on the un-stiffened
-reference drives the lowest mode imaginary and breaks the SCBA; it is
-well-behaved only when coupled self-consistently to the quartic loop
-(\cref{sec:res_scp}). This is the known structure of
-self-consistent-phonon theory, not a code error.
-
-\item \textbf{Force-constant inputs cap the absolute accuracy.} The
-bulk-silicon $\kappa$ from the $2\times2\times2$ FC3 is $20$--$30\%$
-below experiment (\cref{sec:res_fc}); third-order DFPT via \texttt{d3q}
-was not used because it requires a norm-conserving pseudopotential
-incompatible with our setup; and the silicon thin-film \emph{absolute}
-anharmonic conductance over-scatters relative to Guo~\emph{et al.}
-(\cref{sec:res_qfilm}) and is not claimed as converged.
-
-\item \textbf{Strongly anharmonic polar physics is partly out of reach.}
-For cubic SrTiO$_3$ the polar ferroelectric $\Gamma$ mode is not captured
-(the force-constant model carries no Born charges / non-analytic
-correction), and the zone-boundary AFD mode converges only on
-\emph{even} supercells (\cref{sec:res_strong}).
-
-\item \textbf{The energy axis does not parallelise.} The three-phonon
-bubble is an energy convolution coupling all frequencies, so distributing
-the energy grid gives no speed-up (\cref{sec:res_scaling}); only the
-spatial-block and transverse-$q$ axes scale.
-\end{itemize}
+\todo[inline]{Do some transport calculations}
