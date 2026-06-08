@@ -130,6 +130,20 @@ class PhononSolver(SubsystemSolver):
         )
         self.left_occupancies = bose_einstein(hbar_omega_eV, self.left_temperature)
         self.right_occupancies = bose_einstein(hbar_omega_eV, self.right_temperature)
+        # Regularise the omega=0 sampling point. The Bose factor diverges
+        # there, so the production grid has historically started at a small
+        # omega_0 > 0 to avoid it -- but the index-based FFT bubble forms
+        # Sigma(w_m)=sum_n G_n G_{m-n}, which is exact only when w_n = n*dw
+        # (omega_0 = 0): a nonzero offset samples the second G at a frequency
+        # shifted by omega_0, breaking the energy-current conservation sum
+        # rule with an error that scales as omega_0/dw (verified: 0.38*dw ->
+        # ~10% non-conservation, 0.15*dw -> ~5%). Zeroing the (non-physical,
+        # heat-less) omega=0 occupancy lets the grid start at omega_0 = 0 so
+        # the bubble is aligned; the lowest *active* mode is then at dw.
+        self.left_occupancies = xp.where(
+            xp.isfinite(self.left_occupancies), self.left_occupancies, 0.0)
+        self.right_occupancies = xp.where(
+            xp.isfinite(self.right_occupancies), self.right_occupancies, 0.0)
 
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc

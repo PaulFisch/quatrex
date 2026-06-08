@@ -485,8 +485,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         for m in (gtl, gtg, stl, stg):
             if m.distribution_state != "nnz":
                 m.dtranspose(discard=True)
-        gtl.data[:] = self._fft_pad(g_lesser.data, n_fft)
-        gtg.data[:] = self._fft_pad(g_greater.data, n_fft)
+        gl_in, gg_in = g_lesser.data, g_greater.data
+        # DC regularisation: when the grid starts at ω=0 (required for the
+        # index-based bubble to be aligned -- see _full_frequencies / the
+        # ω_0/dw conservation error), zero the ω=0 sample of BOTH G^< and
+        # G^> so the zero-frequency mode (no heat) contributes nothing and
+        # the Σ^<,> bubbles stay balanced. Zeroing only the lesser (via the
+        # ω=0 Bose-occupancy guard in PhononSolver) leaves a spurious DC
+        # term in Σ^>. The ω=0 sample is index 0 of the energy axis in nnz.
+        # The test is STRICT (index 0 must actually be ω=0): a deliberate
+        # small offset ω_0>0 makes index 0 a real low-ω mode that must NOT
+        # be zeroed (it would only be misaligned, not a DC point).
+        if bool(abs(float(full_freqs[0])) < 1e-6):
+            gl_in = gl_in.copy(); gl_in[0] = 0.0
+            gg_in = gg_in.copy(); gg_in[0] = 0.0
+        gtl.data[:] = self._fft_pad(gl_in, n_fft)
+        gtg.data[:] = self._fft_pad(gg_in, n_fft)
 
         # (2) g(τ) nnz→stack: τ-slice of the full band per stack rank.
         gtl.dtranspose()
