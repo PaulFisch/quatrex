@@ -249,20 +249,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if dynamical_matrix is None:
             warnings.warn(
                 "scp_tadpole requested but no dynamical_matrix passed to "
-                "SigmaPhononPhonon; SCP tadpole DISABLED.", stacklevel=2)
+                "SigmaPhononPhonon; SCP tadpole disabled.", stacklevel=2)
             self._scp_tadpole = False
             return
         if not np.all(self.block_sizes == self.block_sizes[0]):
             warnings.warn(
-                "scp_tadpole requires uniform block sizes; DISABLED.",
+                "scp_tadpole requires uniform block sizes; disabled.",
                 stacklevel=2)
             self._scp_tadpole = False
             return
         if ranks.block.size > 1:
             warnings.warn(
                 "scp_tadpole is not yet implemented for block-distributed "
-                "runs (comm.block.size>1); SCP tadpole DISABLED. Use a single "
-                "block rank (the soft-mode regime is single/few-cell).",
+                "runs (comm.block.size>1); SCP tadpole disabled. ",
                 stacklevel=2)
             self._scp_tadpole = False
             return
@@ -270,10 +269,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         n_dof = int(self.block_sizes[0])
         n_blocks = self.n_blocks
         N_D = n_blocks * n_dof
-        # Dense device FC3 in the tadpole mass-weighting (bubble blocks / C_FC3).
+        # Dense device FC3 in the tadpole mass-weighting
         self._fc3_dev_mw = device_fc3_mass_weighted(
             self.phi_blocks, n_blocks, n_dof)
-        # Dense device dynamical matrix D (THz²), ω-independent.
+        # Dense device dynamical matrix D (THz²), omega-independent.
         D = np.zeros((N_D, N_D), dtype=float)
         for I in range(n_blocks):
             for J in range(max(0, I - 1), min(n_blocks, I + 2)):
@@ -287,7 +286,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._scp_floor2 = float(getattr(config.phonon, "scp_floor_thz", 0.5)) ** 2
         if comm.rank == 0:
             print(
-                f"[SigmaPhononPhonon] SCP tadpole ON: N_D={N_D}, "
+                f"[SigmaPhononPhonon] SCP tadpole on: N_D={N_D}, "
                 f"mixing={self._scp_mix}, Phi_eff floor="
                 f"{getattr(config.phonon, 'scp_floor_thz', 0.5)} THz.",
                 flush=True,
@@ -296,18 +295,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     def _apply_scp_tadpole(self, g_lesser, sigma_retarded) -> None:
         """Self-consistent cubic tadpole, in the nnz state.
 
-        Forms ``<uu>`` from the ω-integral of the device ``G^<`` (full ω
-        local per nnz slice), solves the regularised ``mean_displacement``
-        against ``Phi_eff = D + Sigma_static``, mixes the resulting static
-        ``Sigma_T``, and broadcasts it into ``Sigma^R`` at every frequency
-        (≡ stiffening the dynamical matrix). Reuses the bubble's ``G^<`` --
-        no recomputation.
+        Forms <uu> from the omega-integral of the device G^< (full omega-
+        local per nnz slice), solves the regularised mean_displacement
+        against Phi_eff = D + Sigma_static, mixes the resulting static
+        Sigma_T, and broadcasts it into Sigma^R at every frequency.
         """
         from quatrex.phonon.static_self_energy import (
             equal_time_uu_from_sum, mean_displacement, sigma_tadpole)
 
         N_D = self._sigma_static.shape[0]
-        # ω-integral of G^< (nnz: all ω local). Sum over every stack axis.
+        # omea-integral of G^< Sum over every stack axis.
         ax = tuple(range(g_lesser.data.ndim - 1))
         g_sum_local = g_lesser.data.sum(axis=ax)             # (local_nnz,)
         rows = np.asarray(g_lesser.rows) + int(g_lesser.global_block_offset)
@@ -331,7 +328,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if getattr(self, "_scp_verbose", False) and comm.rank == 0:
             print(f"[SigmaPhononPhonon] ||Sigma_static||={np.linalg.norm(self._sigma_static):.3f} "
                   f"||Sigma_T(new)||={np.linalg.norm(sig_new):.3f} THz^2", flush=True)
-        # Broadcast the static self-energy into Σ^R at every frequency.
+        # Broadcast the static self-energy into Sigma^R at every frequency.
         sr_static = self._sigma_static[rows, cols].astype(sigma_retarded.data.dtype)
         sigma_retarded.data[:] = sigma_retarded.data + sr_static
 
@@ -346,26 +343,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         g_greater: DSDBSparse,
         out: tuple[DSDBSparse, ...],
     ) -> None:
-        """Compute the 3-phonon self-energy contribution (FFT-first).
+        """Compute the 3-phonon self-energy contribution
 
-        Memory-optimal distributed pipeline (theory.tex
-        §ssec:phph_distribution), reusing the GW polarisation pattern:
-
-        1. ``G(ω)→g(τ)`` by FFT in **nnz** distribution (full ω local
-           per nnz slice, so the FFT work and storage divide over the
-           ranks — the full-ω band is never replicated on every rank);
-        2. ``g(τ)`` **nnz→stack** so each ``comm.stack`` rank owns a
-           τ-slice of the full band, block-accessible;
-        3. the full off-diagonal ring contraction per τ-slice in stack
-           (``G_a=g_{K1K1'}``, ``G_b=g_{K2K2'}``, ``|K-K'|≤1`` — NOT a
-           diagonal-G approximation);
-        4. ``σ(τ)`` **stack→nnz** (a partition, so each ``(I,J)`` full-τ
-           lands on exactly one rank — no ``P_E``-fold double counting);
-        5. ``σ(τ)→Σ(ω)`` by IFFT in nnz, added into the outputs; ``Σ^R``
-           via the bosonic Hilbert transform.
-
-        The incoming distribution state of every buffer is restored on
-        exit. Additive: contributions are added into ``out``.
+        1. G(omega)->g(tau) by FFT in nnz distribution
+        2. g(tau) nnz->stack so each comm.stack rank owns a
+           tau-slice of the full band, block-accessible
+        3. the off-diagonal ring contraction per tau-slice in stack
+        4. sgima(tau) stack->nnz
+        5. sigma(tau)->Sigma(omega) by IFFT in nnz
 
         Parameters
         ----------
@@ -381,9 +366,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         )
         incoming_states = {id(m): m.distribution_state for m in all_bufs}
 
-        # The whole pipeline operates with the data buffers in nnz
-        # (full ω local per nnz slice — what the FFT/IFFT and the
-        # additive write-back need).
         for m in all_bufs:
             if m.distribution_state != "nnz":
                 m.dtranspose()
@@ -398,10 +380,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if m.distribution_state != incoming_states[id(m)]:
                     m.dtranspose()
 
-    # ------------------------------------------------------------------
-    # Internals — FFT-first pipeline
-    # ------------------------------------------------------------------
-
     def _compute_fft_first(
         self,
         g_lesser: DSDBSparse,
@@ -410,7 +388,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         sigma_greater: DSDBSparse,
         sigma_retarded: DSDBSparse,
     ) -> None:
-        """The FFT-first contraction; all output buffers in nnz on entry."""
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
         nq = int(np.prod(nk)) if len(nk) else 1
@@ -426,60 +403,38 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 f"Green's function has {nq} transverse momenta {nk}."
             )
         if nq > 1 and ranks.block.size > 1:
-            # The transverse-q axis is local in the stack, so q distributes
-            # over comm.stack (energy) for free; only the comm.block band
-            # halo would need to carry the q-axis. Distribute the film over
-            # energy (and/or comm.q), keeping block_comm_size == 1.
             raise NotImplementedError(
                 "Transverse-q (k>1) with comm.block.size > 1 is not "
-                "supported (the band halo is not q-aware); run the periodic "
-                "device with block_comm_size == 1 and distribute over the "
-                "energy/stack axis."
+                "supported."
             )
         n_fft = 2 * ne_full - 1
         full_freqs = self._full_frequencies(ne_full)
         prefactor = bubble_prefactor_thz(float(full_freqs[1] - full_freqs[0]))
-        # Coupled-q convolution carries the 1/N_q mesh-average (matches the
-        # dense reference's ``bubble_prefactor(..., n_kpts=N_q)``).
+        # Coupled-q convolution carries the 1/N_q mesh-average
         if nq > 1:
             prefactor = prefactor / nq
 
         gtl, gtg, stl, stg, gtlr, gtgr = self._ensure_tau_buffers(g_lesser, n_fft)
 
-        # (1) FFT G(ω)→g(τ) in nnz. The τ-buffers share G's exact nnz
-        # ordering (asserted at allocation), so the raw-data assignment
-        # is index-consistent.
+        # (1) FFT G(omega)->g(tau) in nnz.
         for m in (gtl, gtg, stl, stg, gtlr, gtgr):
             if m.distribution_state != "nnz":
                 m.dtranspose(discard=True)
         gl_in, gg_in = g_lesser.data, g_greater.data
-        # DC regularisation: when the grid starts at ω=0 (required for the
-        # index-based bubble to be aligned -- see _full_frequencies / the
-        # ω_0/dw conservation error), zero the ω=0 sample of BOTH G^< and
-        # G^> so the zero-frequency mode (no heat) contributes nothing and
-        # the Σ^<,> bubbles stay balanced. Zeroing only the lesser (via the
-        # ω=0 Bose-occupancy guard in PhononSolver) leaves a spurious DC
-        # term in Σ^>. The ω=0 sample is index 0 of the energy axis in nnz.
-        # The test is STRICT (index 0 must actually be ω=0): a deliberate
-        # small offset ω_0>0 makes index 0 a real low-ω mode that must NOT
-        # be zeroed (it would only be misaligned, not a DC point).
+        # DC regularisation: when the grid starts at omega=0, zero there both G^< and G^>
         if bool(abs(float(full_freqs[0])) < 1e-6):
             gl_in = gl_in.copy(); gl_in[0] = 0.0
             gg_in = gg_in.copy(); gg_in[0] = 0.0
         gtl.data[:] = self._fft_pad(gl_in, n_fft)
         gtg.data[:] = self._fft_pad(gg_in, n_fft)
         # DFT index-reversal rev(X)[l]=X[(-l) mod n_fft] of the FFT'd G, for
-        # the absorption (negative-ω') terms folded in via the bosonic
-        # symmetry G^<(-ω)=G^>(ω): a true (non-conjugating) correlation is
-        # corr(a,b)=IFFT[F(a)·rev(F(b))]. Formed in nnz (full-τ local) since
-        # the reversal mixes the whole τ axis; transposed to stack with the
-        # forward buffers below.
+        # the absorption (negative-omega') terms folded in via G^<(-omega)=G^>(omega)
         gtlr.data[0] = gtl.data[0]
         gtlr.data[1:] = gtl.data[:0:-1]
         gtgr.data[0] = gtg.data[0]
         gtgr.data[1:] = gtg.data[:0:-1]
 
-        # (2) g(τ) nnz→stack: τ-slice of the full band per stack rank.
+        # (2) g(tau) nnz->stack: tau-slice of the full band per stack rank
         gtl.dtranspose()
         gtg.dtranspose()
         gtlr.dtranspose()
@@ -495,11 +450,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         gtlrv, gtgrv = gtlr.stack[...], gtgr.stack[...]
         stlv, stgv = stl.stack[...], stg.stack[...]
 
-        # (3) Ring contraction per τ-slice in stack. Under a comm.block
+        # (3) Ring contraction per tau-slice in stack. Under a comm.block
         # split each rank owns outputs (I,J) with min(I,J) in its block
         # window and fetches the off-window band links from its
-        # neighbours via a width-N_h halo (arrow partitioning makes every
-        # band block addressable by the rank owning min(K,K')).
+        # neighbours via a width-N_h halo
         start = int(stl.block_section_offsets[ranks.block.rank])
         end = int(stl.block_section_offsets[ranks.block.rank + 1])
         owned = self._owned_outputs(start, end)
@@ -511,10 +465,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         else:
             halo_l = halo_g = halo_lr = halo_gr = {}
 
-        # Materialise each distinct band link once (a link recurs across
-        # many quads; the block indexer otherwise re-gathers it each time).
-        # The reversed blocks glr/ggr carry rev(F(G^<)), rev(F(G^>)) for the
-        # absorption correlation terms.
+        # Materialise each distinct band link
         gl_blk: dict[tuple[int, int], NDArray] = {}
         gg_blk: dict[tuple[int, int], NDArray] = {}
         glr_blk: dict[tuple[int, int], NDArray] = {}
@@ -531,14 +482,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 glr_blk[(K, Kp)] = halo_lr[(K, Kp)]
                 ggr_blk[(K, Kp)] = halo_gr[(K, Kp)]
 
-        # The full bubble folds the negative-ω' (absorption) contribution
+        # The full bubble folds the negative-omega contribution
         # into the one-sided grid via G^<(-ω)=G^>(ω): for each ring quad
-        #   Σ^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
-        #   Σ^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
-        # (decay + the two absorption correlations). Omitting the last two
-        # terms -- the one-sided convolution -- drops the dominant absorption
-        # channel and badly under-scatters (the dense solver gets these from
-        # its symmetric ±ω grid).
+        #   Sigma^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
+        #   Sigma^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
         def _fold_l(pl, pr, gla, glb, ggra, ggrb):
             return (ring_contract(pl, pr, gla, glb, xp=xp)
                     + ring_contract(pl, pr, gla, ggrb, xp=xp)
@@ -573,25 +520,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     acc_g = sg if acc_g is None else acc_g + sg
                 if acc_l is not None:
                     if Qproj is not None:
-                        # Two-sided rigid-mode projection on every band block
-                        # (τ-independent ⇒ commutes with the IFFT; preserves
-                        # Σ^<,> Hermiticity and the band sparsity). Q is real
-                        # n_dof×n_dof; broadcasts over the leading τ axis.
+                        # Two-sided projection on every band block
                         acc_l = Qproj @ acc_l @ Qproj
                         acc_g = Qproj @ acc_g @ Qproj
                     stlv.blocks[I - start, J - start] = acc_l
                     stgv.blocks[I - start, J - start] = acc_g
         else:
-            # Coupled-q convolution. The transverse-momentum axis rides as a
-            # LOCAL batch dimension of the stack (only ω is split across
-            # comm.stack), so the whole q-sum is local — no q communication.
-            # For each external q_ext: Σ(q_ext) = Σ_{q'} ring[ Φ̃(q',q2),
-            # Φ̃(q2,q'), G(q')_{K1K1'}, G(q2)_{K2K2'} ] with q2 = q_ext − q'.
+            # Coupled-q convolution.
             qdm = self._q_diff_map
             qv = self._qvertices
 
             def _qflat(d):
-                # (τ, *nk, b, b) → (τ, N_q, b, b); the q-axis is contiguous
+                # (tau, *nk, b, b) → (tau, N_q, b, b); the q-axis is contiguous
                 # in the same C-order as global_stack_shape[1:].
                 return {
                     kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
@@ -648,34 +588,29 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
                     stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
-        # (4) σ(τ) stack→nnz: each (I,J) full-τ on exactly one rank.
+        # (4) sigma(tau) stack->nnz
         stl.dtranspose()
         stg.dtranspose()
 
-        # (5) IFFT σ(τ)→Σ(ω) in nnz; add into outputs; build Σ^R.
+        # (5) IFFT sigma(τ)→Sigma(omega) in nnz; add into outputs; build Sigma^R.
         sl_data = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_full]
         sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
         sigma_lesser.data[:] = sigma_lesser.data + sl_data
         sigma_greater.data[:] = sigma_greater.data + sg_data
-        # Σ^R contribution: only the DISPERSIVE (Hilbert) part. The
-        # anti-Hermitian part ½(Σ^>−Σ^<) is added once by the SCBA loop
-        # after all interactions (the GW convention,
-        # cf. electron/sse_coulomb_screening); adding it here too would
-        # double-count it and break heat-flow conservation.
+        # Sigma^R contribution
         if self.retarded_method == "fft":
             delta = sg_data - sl_data
             sigma_retarded.data[:] = (
                 sigma_retarded.data + 0.5j * hilbert_transform(delta, full_freqs)
             )
 
-        # Self-consistent SCP cubic-tadpole static self-energy (stiffens the
-        # soft mode; added into Σ^R at every frequency). Uses the same G^<.
+        # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
             self._apply_scp_tadpole(g_lesser, sigma_retarded)
 
     @staticmethod
     def _fft_pad(data: NDArray, n_fft: int) -> NDArray:
-        """Zero-pad along the energy axis (0) to ``n_fft`` and FFT."""
+        """Zero-pad along the energy axis (0) to n_fft and FFT."""
         pad_shape = (n_fft - data.shape[0],) + tuple(data.shape[1:])
         padded = xp.concatenate(
             [data, xp.zeros(pad_shape, dtype=data.dtype)], axis=0
@@ -683,9 +618,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         return xp.fft.fft(padded, axis=0)
 
     def _links_for_range(self, a: int, b: int) -> set[tuple[int, int]]:
-        """Distinct inner G band links needed by outputs owned (by the
-        ``min(I,J)`` rule) by the block range ``[a, b)`` (cached: the
-        global pair index is fixed, so each range is scanned once)."""
+        """Distinct inner G band links needed by outputs owned
+         by the block range [a, b)"""
         cache = getattr(self, "_links_cache", None)
         if cache is None:
             cache = self._links_cache = {}
@@ -718,21 +652,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self, gtlv, gtgv, ref: DSDBSparse, start: int, end: int,
     ) -> tuple[dict[tuple[int, int], NDArray], dict[tuple[int, int], NDArray]]:
         """Fetch the off-window band links (for both lesser and greater)
-        from the immediate ``comm.block`` neighbours via a width-``N_h``
-        halo.
-
-        Arrow partitioning makes each band block addressable by the rank
-        owning ``min(K,K')``; this rank therefore sends to a neighbour the
-        links that neighbour's outputs need and which fall in this rank's
-        window, and receives the symmetric set. The send/receive lists are
-        derived from the global pair index and the global block ranges, so
-        both ends enumerate them in the same (sorted) order — matching the
-        non-overtaking ``Isend``/``Irecv`` per ``(source, tag)``.
+        from the immediate comm.block neighbours via a width-N_h halo.
         """
         bcomm = ranks.block._mpi_comm
         rank, size = ranks.block.rank, ranks.block.size
         offs = ref.block_section_offsets
-        nloc_tau = int(ref.data.shape[0])  # local τ count (stack state)
+        nloc_tau = int(ref.data.shape[0])  # local tau count (stack state)
 
         def is_local(link):
             return start <= min(link) < end
@@ -744,7 +669,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         halo_l: dict[tuple[int, int], NDArray] = {}
         halo_g: dict[tuple[int, int], NDArray] = {}
         reqs = []
-        sendbufs = []  # keep buffers alive until Waitall
+        sendbufs = []
 
         def post(neigh, lo, hi, send_tag_l, send_tag_g, recv_tag_l, recv_tag_g):
             # send: links the neighbour's outputs need that I own
@@ -770,8 +695,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             post(rank - 1, int(offs[rank - 1]), int(offs[rank]), 2, 3, 0, 1)
 
         # Guard: every non-local needed link must be in an immediate
-        # neighbour (i.e. each rank owns >= the halo reach). Otherwise the
-        # halo is multi-hop and this targeted exchange is insufficient.
+        # neighbour
         needed_nonlocal = {l for l in self._links_for_range(start, end)
                            if not is_local(l)}
         missing = needed_nonlocal - set(halo_l)
@@ -787,12 +711,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     def _ensure_tau_buffers(
         self, g_lesser: DSDBSparse, n_fft: int
     ) -> tuple[DSDBSparse, DSDBSparse, DSDBSparse, DSDBSparse]:
-        """Lazily allocate the four n_fft τ-buffers sharing G's pattern.
-
-        Built once via ``from_sparray`` from G's own sparsity (recovered
-        with :meth:`spy`), so they carry the identical nnz ordering —
-        a hard requirement for the raw-data FFT assignment in
-        :meth:`_compute_fft_first` to be index-consistent (asserted).
+        """Lazily allocate the four n_fft tau-buffers sharing G's pattern.
         """
         cls = type(g_lesser)
         key = (cls, n_fft)
@@ -815,10 +734,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             )
             for _ in range(6)
         )
-        # The raw-data FFT path requires the τ-buffers to carry G's exact
-        # internal nnz ordering. from_sparray is deterministic for a given
-        # pattern, so rebuilding from G's own spy() reproduces G's order;
-        # assert the (unsorted) per-index match to be certain.
         gt_rows, gt_cols = bufs[0].spy()
         if not (
             np.array_equal(np.asarray(rows), np.asarray(gt_rows))
@@ -831,7 +746,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         return bufs
 
     # ------------------------------------------------------------------
-    # Internals — block-bubble FFT contraction
+    # block-bubble FFT contraction
     # ------------------------------------------------------------------
 
     def _bubble_block(
@@ -858,9 +773,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             xp=xp,
         )
 
-    # ------------------------------------------------------------------
-    # Internals — distribution helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _block_range(m: DSDBSparse) -> tuple[int, int]:
@@ -872,7 +784,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         return start, end
 
     def _full_frequencies(self, ne_full: int) -> NDArray:
-        """Full (cached) frequency grid; all-gathers the local slice."""
+        """Full (cached) frequency grid, all-gathers the local slice."""
         if self._full_freqs is not None and self._full_freqs.shape[0] == ne_full:
             return self._full_freqs
         if ranks.stack.size == 1:
