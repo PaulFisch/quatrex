@@ -256,7 +256,12 @@ conductivity of a film of thickness $L$ is $\kappa(L)=G\,L$.
 both be converged: at a fixed eight-layer thickness the ballistic
 conductance converges for $8\times8$ or finer
 ($G_\mathrm{ball}=970/928/921/920$~MW\,m$^{-2}$K$^{-1}$ at
-$4\times4/8\times8/12\times12/16\times16$), and a small $\eta$ is needed \todo[inline]{Add some benchmark here and fix the plot}.
+$4\times4/8\times8/12\times12/16\times16$), and a small $\eta$ is needed to
+avoid the coherence attenuation of \cref{sec:res_nw} that otherwise
+crushes the conductance. With these settings the ballistic conductance is
+$\sim10^{3}$~MW\,m$^{-2}$K$^{-1}$, declining slowly with thickness
+(\cref{fig:res_sifilm_consol}) -- consistent with the scale of
+\citet{guo_quantum_2020} for the $2\times2\times2$ force constant.
 
 \paragraph{Anharmonic conductance.} \Cref{fig:res_sifilm} (left)
 compares our cross-plane conductance to the anharmonic-NEGF values of
@@ -268,8 +273,14 @@ additional self-energy approximations (the diagonal-block self-energy
 and the nearest-neighbour FC3 truncation quantified in
 \cref{sec:res_approx}), with the broadening and thin-device transport
 setup, and with the exchange--correlation functional of the underlying
-force constants (PBE here). The ballistic conductance, by contrast,
-matches their numbers.
+force constants (PBE here). The ballistic conductance is, by contrast,
+force-constant sensitive at the $\sim15\%$ level (\cref{fig:res_sifilm_consol}):
+the $2\times2\times2$ QE--FD constant -- comparable to the reference's own
+QE harmonic input -- matches their scale, but the higher-quality
+$5\times5\times5$ VASP constant gives a $\sim15\%$ lower ballistic (purely
+a harmonic difference, the slightly softer dispersion). So the agreement
+with the reference's ballistic value holds only for the $2\times2\times2$
+constant, not force-constant-independently.
 
 \paragraph{long-range force constant.} The thin-film
 results above use the bulk force constants from a small
@@ -281,23 +292,34 @@ $\sim$fourth-neighbour ($5.0$~\AA). The fit is good (automatic
 relevance determination, $103$ parameters, train/test RMSE both
 $0.020$~eV\,\AA$^{-1}$), the rotational and acoustic sum rules are
 satisfied, and the dispersion looks correct. On this force
-constant, the cross-plane scaling (\cref{fig:res_sifilm_big}) gives
+constant, the cross-plane scaling (\cref{fig:res_sifilm_consol}) gives
 $G_\mathrm{anh}/G_\mathrm{ball}=0.52,0.45,0.38$ at $1.16,1.93,3.09$~nm:
 the anharmonic reduction grows with thickness,
 and is larger than with the short-cutoff force constant because
 the longer-range third-order terms add inter-slab scattering. The
 over-reduction relative to \citet{guo_quantum_2020} therefore persists with the
-better-converged force constant.
+better-converged force constant. The long-range constant is also the more
+\emph{numerically} robust one: its anharmonic SCBA converges cleanly at
+every thickness, whereas the short-cutoff $2\times2\times2$ constant
+destabilises the small-broadening SCBA away from a single thickness
+(hence its anharmonic value is shown at one point only in
+\cref{fig:res_sifilm_consol}).
 
-\begin{figure}[t]
+\begin{figure}[htb]
   \centering
-  \includegraphics[width=0.72\linewidth]{fig/transport_sweeps/si_film_bigfc3.pdf}
-  \caption{Cross-plane silicon thin-film conductance from the
-  high-quality $5\times5\times5$ (fourth-neighbour) force constant
-  ($nk=8$, $121$ frequencies). The anharmonic
-  reduction $G_\mathrm{anh}/G_\mathrm{ball}$ (annotated) grows with
-  thickness and exceeds both the short-cutoff force constant.}
-  \label{fig:res_sifilm_big}
+  \includegraphics[width=0.72\linewidth]{transport_sweeps/si_film_vs_guo.pdf}
+  \caption{Consolidated cross-plane silicon thin-film conductance vs.\
+  thickness at $300$~K ($8\times8$ mesh, $121$ frequencies): our
+  ballistic and anharmonic NEGF with the $2\times2\times2$ (QE--FD) and
+  the high-quality $5\times5\times5$ ($\sim$fourth-neighbour, VASP)
+  force constants, against the anharmonic values of
+  \citet{guo_quantum_2020} ($939.7$ at $3$~uc, $890.97$ at $5$~uc; their
+  ballistic is a Boltzmann dashed line with no quoted value). The
+  $2\times2\times2$ ballistic matches the reference's scale while the
+  $5\times5\times5$ ballistic is $\sim15\%$ lower (a harmonic
+  force-constant difference); both anharmonic results lie well below the
+  reference -- the over-reduction of \cref{sec:res_approx}.}
+  \label{fig:res_sifilm_consol}
 \end{figure}
 
 % ======================================================================
