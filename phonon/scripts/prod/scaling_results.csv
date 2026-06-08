@@ -1,0 +1,13 @@
+system,axis,ranks,bubble_s_per_rank,speedup,eff_pct
+CNT33_L2,stack,1,207.8,1.0,100.0
+CNT33_L2,stack,2,137.1,1.52,76.0
+CNT33_L2,stack,4,57.0,3.65,91.0
+CNT33_L2,stack,8,22.5,9.24,115.0
+CNT33_L2,stack,16,13.0,15.98,100.0
+CNT33_L2,stack,32,12.3,16.89,53.0
+SiFilm_nk5,stack,1,309.1,1.0,100.0
+SiFilm_nk5,stack,4,87.9,3.52,88.0
+SiFilm_nk5,stack,8,46.8,6.6,83.0
+SiFilm_nk5,qcomm,1,309.9,1.0,100.0
+SiFilm_nk5,qcomm,2,180.7,1.71,86.0
+SiFilm_nk5,qcomm,4,198.9,1.56,39.0
