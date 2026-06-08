@@ -1,0 +1,262 @@
+\chapter{Production transverse-$q$ (coupled-$q$) anharmonic transport}
+\label{sec:prod_coupledq}
+
+This appendix documents the port of the coupled-$q$ three-phonon
+self-energy into the \emph{production} distributed \texttt{quatrex} phonon
+solver and every run made to validate and exercise it during the
+2026-06-08 session. The transversely-periodic physics and the silicon
+thin-film benchmark were already established in the standalone (dense)
+solver (\cref{sec:res_qfilm}); the contribution here is software and
+verification, not new physics. The full numerical record is saved under
+\texttt{phonon/scripts/out/production\_coupled\_q/} (run snapshots,
+\texttt{summary.json}) and is reproduced by
+\texttt{phonon/scripts/verify/production\_coupled\_q\_summary.py}. Results
+that are still running at the time of writing are marked as such; nothing
+below is extrapolated.
+
+\section{What was implemented}
+
+Before this work the production self-energy
+(\texttt{src/quatrex/phonon/sse\_phonon\_phonon.py}) raised
+\texttt{NotImplementedError} for any \texttt{kpoint\_grid} with a
+component $>1$: only the $\Gamma_\perp$-only finite device was supported.
+Two changes were made (both with accompanying regression tests; all
+$12$ self-energy and $18$ bubble unit tests remain green):
+
+\begin{itemize}
+\item \textbf{The coupled-$q$ convolution.} The transversely-periodic
+three-phonon self-energy couples the transverse momenta by
+crystal-momentum conservation,
+$\Sigma(q_\perp,\omega)=\tfrac{1}{N_q}\sum_{q_\perp'}\widetilde\Phi(q_\perp')\,
+G(q_\perp')\,G(q_\perp-q_\perp')\,\widetilde\Phi(q_\perp-q_\perp')$, an
+extra sum over the internal momentum on top of the energy convolution.
+The decisive observation is that in the production data layout only the
+energy axis is partitioned across \texttt{comm.stack}; the transverse-$q$
+axes of \texttt{global\_stack\_shape} are kept whole and local on every
+rank. The momentum sum is therefore \emph{local} --- it required changing
+only the inner contraction of the FFT-first bubble, not the
+distribution, halo, or Dyson machinery. A guard rejects
+\texttt{comm.block.size}${>}1$ together with $k{>}1$ (the spatial-block
+halo is not yet momentum-aware), so the film is distributed over the
+energy/stack axis.
+\item \textbf{Zero-mode projection for $k>1$.} The cell rigid-mode
+projector read the dynamical-matrix block and squeezed a single leading
+axis, which crashed on the $q$-stacked block of a periodic device; it now
+reduces every leading axis to zero, selecting the $q_\perp{=}0$
+(\,$\Gamma$-transverse\,) cell matrix as the reference for the rigid/soft
+modes. This makes zero-mode projection usable on the film.
+\end{itemize}
+
+The $q$-folded vertices are built offline (they do not depend on $G$) and
+serialised through a small loader
+(\texttt{src/quatrex/phonon/qfold.py}); the production solver only reads
+arrays and carries no dependency on the standalone science code.
+
+\section{Verification}
+
+The port was checked to be \emph{bit-exact} against independent
+references before any physics run (\cref{tab:prod_validation}). These are
+the gate: the production self-energy reproduces an independently written
+einsum oracle of the coupled-$q$ convolution to machine precision, the
+production-assembled film Hamiltonian $H(q_\perp)$ reproduces the dense
+\texttt{get\_btd\_blocks} to $10^{-10}$, and the real-space
+dynamical-matrix file used by the production input path round-trips
+against the dense $H(q_\perp)$ exactly.
+
+\begin{table}[h]
+\centering
+\caption{Bit-exact verification of the coupled-$q$ port (this session).}
+\label{tab:prod_validation}
+\begin{tabular}{lc}
+\hline
+Check & relative error \\
+\hline
+coupled-$q$ self-energy vs.\ independent einsum oracle & $6.4\times10^{-16}$ \\
+production $H(q_\perp)$ vs.\ dense \texttt{get\_btd\_blocks} & $1.1\times10^{-10}$ \\
+dynamical-matrix transverse-IDFT round-trip & $5.0\times10^{-16}$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{Input pipeline.} The production \texttt{construct\_from\_unit\_cell}
+path folds transverse Bloch phases over a Monkhorst--Pack mesh. Because
+that mesh is half-shifted, $q=(k+\tfrac12)/n_k-\tfrac12+\text{shift}$,
+while the standalone solver uses the $\Gamma$-centred $q=k/n_k$, the two
+were reconciled by setting \texttt{kpoint\_shift}$=\tfrac12-\tfrac{1}{2n_k}$
+per transverse axis. The real-space \texttt{dynamical\_matrix.mat} is then
+the exact transverse inverse-DFT of the dense $H(q_\perp)$ over that mesh,
+which is why the round-trip in \cref{tab:prod_validation} is exact by
+construction. The film inputs use the bulk-silicon force constants of
+\cref{sec:res_qfilm} with transport along a primitive axis.
+
+\section{Silicon thin film: transverse-mesh sweep}
+\label{sec:prod_film}
+
+The production film was run with the recipe that proved numerically
+stable (see \cref{sec:prod_open}): broadening $\eta=0.4$\,THz, $\eta_{\rm
+obc}=0.1$, retarded method \texttt{half}, and zero-mode projection of the
+three $q_\perp{=}0$ acoustic translations (which sit at $0$\,THz and carry
+no heat). The transverse mesh was swept at fixed thickness ($3$ primitive
+layers) to test momentum convergence, with one thicker point
+(\cref{tab:prod_film}, \cref{fig:prod_qfilm_qconv}).
+
+\begin{table}[h]
+\centering
+\caption{Production silicon film, coupled-$q$ self-energy, $\eta=0.4$\,THz
+with zero-mode projection. $G$ are the $q$-summed lead heat currents
+(arbitrary, common units); $G/N_q$ is the per-momentum value. The lead
+non-conservation is $|J_0-J_{-1}|/|J_0|$. The dense benchmark
+(\cref{sec:res_qfilm}) at a comparable setting is shown for scale.}
+\label{tab:prod_film}
+\begin{tabular}{llccc}
+\hline
+$n_k$ & $n_{\rm slabs}$ & $G_{\rm anh}/G_{\rm ball}$ & $G_{\rm ball}/N_q$ & lead non-cons. \\
+\hline
+$3$ & $3$ & $0.861$ & $3.29$ & $9.7\%$ \\
+$5$ & $3$ & $0.871$ & $3.02$ & $9.5\%$ \\
+$7$ & $3$ & $0.867$ & $3.05$ & $9.6\%$ \\
+$5$ & $5$ & $0.846$ & --- & $15.1\%$ \\
+\hline
+\multicolumn{2}{l}{(no zero-mode, $n_k{=}3$, $n_{\rm slabs}{=}3$)} & $0.733$ & --- & $22\%$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\linewidth]{transport_sweeps/prod_qfilm_qconv.pdf}
+\caption{Production silicon film coupled-$q$ transport vs.\ transverse mesh
+($n_{\rm slabs}{=}3$). The per-momentum ballistic and anharmonic
+conductances settle by $n_k{=}5$ and the anharmonic ratio is
+momentum-converged at $G_{\rm anh}/G_{\rm ball}\approx0.87$.}
+\label{fig:prod_qfilm_qconv}
+\end{figure}
+
+Two facts: (i) the per-momentum conductance and the anharmonic ratio are
+\emph{momentum-converged} --- $G_{\rm ball}/N_q$ settles by $n_k{=}5$ and
+the ratio is $0.861/0.871/0.867$ across $n_k=3/5/7$ --- so the coupled-$q$
+machinery behaves correctly across the full mesh; (ii) zero-mode
+projection of the $0$\,THz translations roughly halves the
+non-conservation ($22\%\to10\%$) and raises the ratio
+($0.733\to0.861$ at $n_k{=}3$), the same soft-mode effect seen on the
+wires. The residual $\sim10\%$ non-conservation does \emph{not} shrink
+with $n_k$ (\cref{fig:prod_qfilm_conservation}); it is therefore not a
+momentum-undersampling effect and is treated as an open issue in
+\cref{sec:prod_open}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\linewidth]{transport_sweeps/prod_qfilm_conservation.pdf}
+\caption{Lead-to-lead heat non-conservation of the production film. It is
+flat in the transverse mesh and is reduced, but not removed, by zero-mode
+projection. The dense solver reaches $\sim10^{-5}$ on the same physical
+system at small broadening; the gap is the open issue of
+\cref{sec:prod_open}.}
+\label{fig:prod_qfilm_conservation}
+\end{figure}
+
+\section{Carbon nanotube: length ladder}
+\label{sec:prod_cnt}
+
+To exercise the $k{=}1$ path at production length scales (where the dense
+multi-cell solver is prohibitively expensive, \cref{sec:res_cnt}), the
+$(3,3)$ carbon nanotube was run as a length ladder $L=2,4,6$ transport
+cells at $\eta=0.45$\,THz on a $121$-point grid with $50$ iterations
+(\cref{fig:prod_cnt_ladder}). The anharmonic self-consistency on this
+soft-twist tube is metastable: the iteration does not settle to a fixed
+point but passes through a conserving iterate that the heat-flow criterion
+captures (the final iterate diverges and is discarded). The captured
+best-iterate ratios are $G_{\rm anh}/G_{\rm ball}=0.896$ ($L{=}2$,
+conservation $1.0\%$) and $0.911$ ($L{=}4$, conservation $3.5\%$); $L{=}6$
+was still running at the time of writing. The large-broadening value is
+weaker (closer to one) than the dense small-$\eta$ ladder of
+\cref{sec:res_cnt}, consistent with the under-scattering discussed in
+\cref{sec:prod_open}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.55\linewidth]{transport_sweeps/prod_cnt_ladder.pdf}
+\caption{Production CNT(3,3) anharmonic ratio (best conserving iterate) vs.\
+device length at $\eta=0.45$\,THz; per-point lead-to-lead conservation
+annotated. $L{=}6$ pending.}
+\label{fig:prod_cnt_ladder}
+\end{figure}
+
+\section{Cross-check against the dense solver}
+\label{sec:prod_dense}
+
+To separate port correctness from broadening/grid effects, the dense
+\texttt{si\_film} solver was run at the \emph{same} transverse mesh
+($n_k{=}3$, $n_{\rm slabs}{=}3$) at two broadenings
+(\cref{tab:prod_dense}). At the production-accessible broadening
+($\eta_w\approx0.4$) the dense solver also fails to conserve
+($17\%$) and gives a ratio above one (the documented single-cell
+broadening artefact, \cref{sec:res_negative}); only at small broadening
+($\eta_w\approx0.05$) does the dense ratio settle to $0.766$. The
+production ($0.733$--$0.861$) and the dense both live in the unreliable
+large-broadening regime here, which is why their ratios differ; neither
+large-broadening ratio is the physical answer. Notably the dense solver
+also conserves only to $13\%$ at $n_k{=}3$, far from the $\sim10^{-5}$ it
+reaches at the converged $n_k{\geq}8$ mesh of \cref{sec:res_qfilm} ---
+i.e.\ the coarse $n_k{=}3$ mesh used for the matched cross-check is itself
+inadequate for conservation in \emph{both} solvers.
+
+\begin{table}[h]
+\centering
+\caption{Dense \texttt{si\_film} cross-check, $n_k{=}3$, $n_{\rm slabs}{=}3$,
+transport along the same axis as the production run.}
+\label{tab:prod_dense}
+\begin{tabular}{lccc}
+\hline
+broadening & $G_{\rm anh}/G_{\rm ball}$ & conservation \\
+\hline
+$\eta_w\approx0.4$ (matched to production) & $1.022$ & $17\%$ \\
+$\eta_w\approx0.05$ (small) & $0.766$ & $13\%$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Open issues}
+\label{sec:prod_open}
+
+\paragraph{Heat-flow conservation ($\sim10\%$) --- open, under
+investigation.} The production film conserves the lead-to-lead energy
+current only to $\sim10\%$ (with zero-mode projection; $22\%$ without),
+independent of the transverse mesh, against the dense solver's
+$\sim10^{-5}$ on the same physical system. A code-level candidate has been
+identified but \emph{not yet confirmed} as the dominant cause. The
+FFT-first bubble is \emph{index-based}: it forms
+$\Sigma(\omega_m)=\sum_n G_n\,G_{m-n}$ (the frequency grid enters only
+through the spacing $d\omega$ and the retarded Hilbert transform; the
+bubble call uses \texttt{zero\_freq\_idx=None}). This is exact only if the
+grid begins at $\omega_0=0$, so that difference frequencies
+$\omega_m-\omega_n=(m-n)\,d\omega$ land on grid points. The film runs used
+$\omega_0=0.05$\,THz $=0.38\,d\omega$ (non-commensurate), whereas the CNT
+runs used $\omega_0=0.01$\,THz $=0.02\,d\omega$; the observed
+non-conservation tracks $\omega_0/d\omega$ (film $\sim10\%$, CNT
+$\sim1\%$). Whether aligning the grid to $\omega_0=0$ (with proper
+DC-point handling, as the dense solver does) and/or a larger/finer grid
+recovers the dense conservation is the subject of the follow-up
+investigation; it is not asserted here as established.
+
+\paragraph{Small-broadening instability --- needs a solver-level fix.} The
+production film is numerically stable only for $\eta\gtrsim0.4$\,THz; at
+$\eta\leq0.2$ the Dyson solve $[(\omega+i\eta)^2 I - D - \Sigma^R]$ becomes
+singular and the block recursion returns NaN, where the dense solver's
+dense factorisation stays finite. The config-level remedies were
+exhausted without success in this session: retarded method \texttt{fft},
+large $\eta_{\rm obc}$ ($0.4$--$0.8$ with bulk $\eta\in[0.15,0.2]$), and
+zero-mode projection all still produced NaN at $\eta\leq0.2$. A
+solver-level regularisation of the block recursion is therefore required
+to reach the small-broadening regime the dense solver uses. This is a
+pre-existing fragility of the production phonon SCBA (the same family as
+the soft-mode behaviour of \cref{sec:res_nw}), not specific to the
+coupled-$q$ port.
+
+\paragraph{Large-broadening under-scattering.} As a consequence of the
+above, the production-accessible ($\eta\approx0.4$) anharmonic reduction
+is systematically weaker than the dense small-broadening result --- film
+$0.87$ vs.\ dense $0.77$, CNT $0.90$ vs.\ dense $0.70$--$0.81$
+(\cref{sec:res_cnt}). The same weakening appears in both the $k{>}1$ film
+and the $k{=}1$ tube, consistent with it being a broadening effect rather
+than anything specific to the momentum coupling.
