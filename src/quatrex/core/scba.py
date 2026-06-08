@@ -318,6 +318,7 @@ class SCBA:
         self._scba_iteration = 0
         self._best_heat_conservation = float("inf")
         self._best_heat_current = None
+        self._prev_lead_heat = None
 
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
@@ -576,12 +577,28 @@ class SCBA:
                 if spread < self._best_heat_conservation:
                     self._best_heat_conservation = spread
                     self._best_heat_current = heat.copy()
+                # Lead-current (conductance) stability. Heat-flow conservation
+                # is necessary but NOT sufficient: at large eta the heat flow
+                # conserves (the elastic part dominates) before Sigma reaches
+                # self-consistency, so the lead current is still drifting and
+                # the SCBA would stop prematurely with an under-scattered G_anh.
+                # Require the conductance observable itself to have stabilised.
+                # (For soft-mode structures where the lead current oscillates
+                # this never trips, so the run falls back to max_iterations +
+                # the best-iterate capture above -- no regression.)
+                lead = 0.5 * (abs(float(heat[0])) + abs(float(heat[-1])))
+                prev = self._prev_lead_heat
+                dlead = (abs(lead - prev) / (abs(lead) + 1e-300)
+                         if prev is not None else float("inf"))
+                self._prev_lead_heat = lead
                 if comm.rank == 0:
                     print(f"Phonon heat-flow conservation (rel spread): "
-                          f"{spread:.4e} (best {self._best_heat_conservation:.4e})",
+                          f"{spread:.4e} (best {self._best_heat_conservation:.4e})"
+                          f"; lead dJ/J: {dlead:.4e}",
                           flush=True)
                 if (self._scba_iteration >= self.config.scba.min_iterations
-                        and spread < self.config.phonon.heat_flow_conservation_tol):
+                        and spread < self.config.phonon.heat_flow_conservation_tol
+                        and dlead < self.config.phonon.current_stability_tol):
                     return True
 
         return False
