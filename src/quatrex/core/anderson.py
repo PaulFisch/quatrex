@@ -1,43 +1,24 @@
 """Safeguarded Anderson (Pulay/DIIS) acceleration for the SCBA fixed point.
 
-The bare linear self-energy mixing ``Sigma <- (1-a) Sigma_prev + a Sigma_new``
-oscillates on the strong-coupling SCBA fixed point of soft-mode structures
-(e.g. the d5a SiNW): the residual is a near-period-2 mode that damped linear
-mixing cannot kill. Anderson acceleration uses a short history of residual
-secants to extrapolate the fixed point and breaks that oscillation.
-
-This is a distributed-aware port of the dense reference
-``phonon/solver/dense.py::_AndersonAccelerator``. The only change required for
-the energy x block partitioned production self-energy is that every inner
-product (the residual norm and the least-squares normal equations) is a GLOBAL
-reduction: each rank holds a disjoint slice of the self-energy vector, so the
-true dot product is the sum of the local dots over all ranks. We therefore
-build the (depth x depth) Gram matrix ``dF^H dF`` and rhs ``dF^H f`` from
-all-reduced local contributions and solve the small system locally -- this
-reproduces the serial truncated-SVD least-squares to the regularisation
-tolerance while needing only two small all-reduces per step.
-
-Safeguards (identical to the dense reference): history kept across residual
-upticks (Anderson may be non-monotone); ill-conditioned secants filtered by a
-regularised solve; an over-long extrapolation replaced by the damped linear
-step for that iteration; restart on genuine stagnation; revert-to-best on a
-real divergence (so safeguarded Anderson is never worse than damped linear).
+history kept across residual upticks (Anderson may be non-monotone), ill-conditioned
+secants filtered by a regularised solve, an over-long extrapolation replaced by the damped linear
+step for that iteration, restart on stagnation, revert-to-best on divergence
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-try:  # global reduction over the full (energy x block) rank grid
+try:  # global reduction over the full rank grid
     from mpi4py.MPI import COMM_WORLD as _WORLD
     from mpi4py.MPI import SUM as _SUM
-except Exception:  # pragma: no cover - mpi4py always present in this env
+except Exception:
     _WORLD = None
     _SUM = None
 
 
 class AndersonMixer:
-    """Safeguarded distributed Anderson/Pulay mixer of a flat complex state.
+    """Safeguarded distributed Anderson mixer of a flat complex state.
 
     ``step(x_in, x_out)`` returns ``(x_mixed, fnorm)`` where ``x_in`` is the
     previous iterate, ``x_out`` the fixed-point map applied to it, and
@@ -55,8 +36,7 @@ class AndersonMixer:
         self.stagnation = int(stagnation)
         self.revert_factor = float(revert_factor)
         # Per-entry residual weights (block re-scaling); set by the caller after
-        # the first step. None => unit weights. Used in BOTH the norm and the
-        # least-squares fit.
+        # the first step. None => unit weights
         self.weights = None
         self.x_hist: list = []
         self.f_hist: list = []
@@ -121,12 +101,7 @@ class AndersonMixer:
             self.x_hist[-n_use + j] - self.x_hist[-n_use + j - 1]
             for j in range(n_use)])
 
-        # Block-weighted least squares min ||W(dF gamma - f)||: the weights
-        # (1/sqrt(||block||) per (I,J) self-energy block) put every block on an
-        # equal footing so the large diagonal blocks do not dominate the fit and
-        # over-extrapolate the small off-diagonal ones. ESSENTIAL for the
-        # soft-mode SCBA (the dense reference relies on it). The weights enter
-        # only the fit; the step is applied to the unweighted dX, dF.
+        # Block-weighted least squares min ||W(dF gamma - f)||
         if self.weights is not None:
             dF_w = dF * self.weights[:, None]
             f_w = f_k * self.weights
@@ -134,14 +109,13 @@ class AndersonMixer:
             dF_w, f_w = dF, f_k
         try:
             if self._comm is None or self._comm.size == 1:
-                # Serial: the dense reference's direct truncated-SVD lstsq.
+                # Serial: direct truncated-SVD lstsq.
                 gamma, *_ = np.linalg.lstsq(dF_w, f_w, rcond=1.0 / self.cond_max)
             else:
-                # Distributed: the same least squares via the GLOBAL normal
+                # Distributed: the same least squares via the global normal
                 # equations (dF_w^H dF_w) gamma = dF_w^H f_w from all-reduced
                 # local contractions, solved by a truncated pseudo-inverse of
-                # the Hermitian Gram (its eigenvalues are the squared singular
-                # values of dF_w). A small per-step communication.
+                # the Hermitian Gram
                 gram = self._gsum(dF_w.conj().T @ dF_w)
                 rhs = self._gsum(dF_w.conj().T @ f_w)
                 evals, evecs = np.linalg.eigh(0.5 * (gram + gram.conj().T))
