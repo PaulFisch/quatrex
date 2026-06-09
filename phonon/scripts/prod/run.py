@@ -140,6 +140,21 @@ if ranks.rank == 0:
     )
     if final_heat is not None:
         out["final_heat"] = final_heat
+        # Lead-to-lead conductance: interfaces 0 & -1, summed over any
+        # transverse-q axes, robust to NaN internal interfaces (the Inv
+        # solver fills only the leads). This is the physical film quantity
+        # (the internal interfaces differ structurally). NB at stack>1 this
+        # is the rank-0-local frequency slice; use np=1 for the clean number
+        # or read the (q-summed) best_heat when the RGF path supplies it.
+    # Converged-iterate (fixed-point) heat -- the canonical conductance source
+    # (all-reduced over stack + q-summed by the SCBA). Use this, NOT the
+    # best-conserved transient. converged = the SCBA stopped before max_iter.
+    out["converged"] = bool(_it["n"] < cfg.scba.max_iterations)
+    lh = getattr(scba, "_last_heat_current", None)
+    if lh is not None:
+        lh = np.asarray(lh)
+        out["last_heat"] = lh
+        out["lead_current"] = 0.5 * (abs(float(np.real(lh[0]))) + abs(float(np.real(lh[-1]))))
     bh = getattr(scba, "_best_heat_current", None)
     if bh is not None:
         out["best_heat"] = np.asarray(bh)

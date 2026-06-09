@@ -224,10 +224,9 @@ class SolverConfig(BaseModel):
             else:
                 self.compute_current = False
 
-        if self.compute_current and self.algorithm != "rgf":
-            raise ValueError(
-                "Current computation is only supported for the RGF algorithm."
-            )
+        # Both "rgf" and "inv" support the Meir-Wingreen boundary current.
+        # ("inv" is the small-eta-stable path: its dense inverse pivots
+        # through the near-singular Dyson matrix that NaNs the RGF recursion.)
 
         return self
 
@@ -761,21 +760,20 @@ class PhononConfig(BaseModel):
     soft-mode structures and must NOT be used. The most-conserved (best)
     iterate's heat current is captured even if the iteration later drifts."""
 
-    current_stability_tol: PositiveFloat = 5e-3
-    """Lead-current (conductance) stability tolerance for the anharmonic
-    phonon SCBA, applied IN ADDITION to ``heat_flow_conservation_tol``.
+    sigma_convergence_tol: PositiveFloat = 1e-2
+    """Relative Sigma^R residual tolerance for the anharmonic phonon SCBA
+    fixed point, applied IN ADDITION to ``heat_flow_conservation_tol``.
 
-    Heat-flow conservation is necessary but not sufficient for convergence:
-    at large broadening ``eta`` the heat flow conserves (its elastic part
-    dominates) several iterations before the scattering self-energy reaches
-    self-consistency, so the lead current -- the conductance observable -- is
-    still drifting. Without this check the SCBA stops prematurely with an
-    under-scattered ``G_anh`` (e.g. ratio ~0.9 instead of the converged ~0.6
-    on the CNT). Convergence therefore also requires the relative change of
-    the lead heat current between iterations, ``|J_n - J_{n-1}| / |J_n|``, to
-    fall below this tolerance. On soft-mode structures where the lead current
-    oscillates it never trips and the run falls back to the best-iterate
-    capture at ``max_iterations`` (no regression)."""
+    Convergence requires a GENUINE fixed point, not a transient: the scattering
+    self-energy must be self-consistent -- the relative residual
+    ``||Sigma_new - Sigma_old||_inf / ||Sigma||_inf`` below this -- AND the heat
+    flow conserved. Heat-flow conservation alone is necessary but not
+    sufficient: at large broadening ``eta`` the heat flow conserves (its
+    elastic part dominates) before Sigma reaches self-consistency, so a
+    heat-flow-only stop accepts an under-scattered, non-converged Sigma. If
+    Sigma oscillates (a limit cycle) the run does NOT converge and the mixing
+    must be fixed (Anderson / smaller linear) -- we report it as non-converged
+    rather than passing off the best-conserved transient as the answer."""
 
     zero_mode_projection: bool = False
     """Optional rigid-body (q=0) zero-mode projection of the 3-phonon
