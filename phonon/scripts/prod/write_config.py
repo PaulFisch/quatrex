@@ -88,6 +88,8 @@ retarded_method = "{a.retarded}"
 heat_flow_conservation_tol = 1e-2
 [phonon.solver]
 compute_current = true
+max_batch_size = {a.max_batch}
+algorithm = "{a.algorithm}"
 [phonon.obc]
 algorithm = "sancho-rubio"
 block_sections = 1
@@ -151,6 +153,8 @@ retarded_method = "{a.retarded}"
 heat_flow_conservation_tol = 1e-2
 [phonon.solver]
 compute_current = true
+max_batch_size = {a.max_batch}
+algorithm = "{a.algorithm}"
 [phonon.obc]
 algorithm = "sancho-rubio"
 block_sections = 1
@@ -183,6 +187,8 @@ def main():
     p.add_argument("--qcs", type=int, default=1, help="q_comm_size")
     p.add_argument("--numba-threads", type=int, default=1)
     p.add_argument("--blas-threads", type=int, default=1)
+    p.add_argument("--algorithm", default="rgf", choices=["rgf","inv"])
+    p.add_argument("--max-batch", dest="max_batch", type=int, default=100000)
     p.add_argument("--profile", action="store_true", help="enable per-phase profiler JSON dump")
     a = p.parse_args()
 

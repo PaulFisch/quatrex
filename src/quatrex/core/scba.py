@@ -318,7 +318,7 @@ class SCBA:
         self._scba_iteration = 0
         self._best_heat_conservation = float("inf")
         self._best_heat_current = None
-        self._prev_lead_heat = None
+        self._last_heat_current = None
 
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
@@ -565,40 +565,39 @@ class SCBA:
 
         self._scba_iteration += 1
 
-        # Anharmonic phonon: converge on HEAT-FLOW conservation (Guo/Luisier),
-        # NOT the Sigma residual (which is non-monotone on soft-mode structures)
-        # and NOT current_conservation above (the NUMBER-current G-R balance,
-        # which 3-phonon processes violate by design). Capture the best
-        # (most heat-flow-conserving) iterate.
+        # Anharmonic phonon convergence: a GENUINE FIXED POINT. The scattering
+        # self-energy must reach self-consistency (relative Sigma^R residual
+        # small) AND the heat flow must be conserved. We do NOT accept a
+        # non-converged Sigma at merely-okay conservation -- that is a transient,
+        # not the fixed point; if Sigma oscillates the run does NOT converge and
+        # the mixing must be fixed (Anderson / smaller linear). NB the
+        # current_conservation above is the NUMBER-current G-R balance, which
+        # 3-phonon processes violate by design -- the physical conservation
+        # criterion is the hbar-omega-weighted HEAT flow (Guo/Luisier).
         if (self.config.scba.phonon
                 and getattr(self.config.phonon, "model", "") == "negf"):
+            # Relative Sigma^R residual = ||Sigma_new - Sigma_old||_inf / ||Sigma||_inf
+            local_smag = get_host(xp.max(xp.abs(self.data.sigma_retarded.data)))
+            smag = np.empty_like(local_smag)
+            global_comm.Allreduce(local_smag, smag, op=MPI.MAX)
+            rel_sigma = float(max_diff) / (float(smag) + 1e-300)
             heat, spread = self._phonon_heat_flow_conservation()
             if heat is not None:
+                # Last-iterate heat (the actual current state at the fixed point)
+                # and a best-conserved fallback for diagnostics if it never
+                # converges (so a non-converged run is reported, not silently
+                # passed off as the answer).
+                self._last_heat_current = heat.copy()
                 if spread < self._best_heat_conservation:
                     self._best_heat_conservation = spread
                     self._best_heat_current = heat.copy()
-                # Lead-current (conductance) stability. Heat-flow conservation
-                # is necessary but NOT sufficient: at large eta the heat flow
-                # conserves (the elastic part dominates) before Sigma reaches
-                # self-consistency, so the lead current is still drifting and
-                # the SCBA would stop prematurely with an under-scattered G_anh.
-                # Require the conductance observable itself to have stabilised.
-                # (For soft-mode structures where the lead current oscillates
-                # this never trips, so the run falls back to max_iterations +
-                # the best-iterate capture above -- no regression.)
-                lead = 0.5 * (abs(float(heat[0])) + abs(float(heat[-1])))
-                prev = self._prev_lead_heat
-                dlead = (abs(lead - prev) / (abs(lead) + 1e-300)
-                         if prev is not None else float("inf"))
-                self._prev_lead_heat = lead
                 if comm.rank == 0:
-                    print(f"Phonon heat-flow conservation (rel spread): "
-                          f"{spread:.4e} (best {self._best_heat_conservation:.4e})"
-                          f"; lead dJ/J: {dlead:.4e}",
-                          flush=True)
+                    print(f"Phonon: rel Sigma^R residual {rel_sigma:.4e}; "
+                          f"heat-flow spread {spread:.4e} "
+                          f"(best {self._best_heat_conservation:.4e})", flush=True)
                 if (self._scba_iteration >= self.config.scba.min_iterations
-                        and spread < self.config.phonon.heat_flow_conservation_tol
-                        and dlead < self.config.phonon.current_stability_tol):
+                        and rel_sigma < self.config.phonon.sigma_convergence_tol
+                        and spread < self.config.phonon.heat_flow_conservation_tol):
                     return True
 
         return False
