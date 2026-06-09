@@ -85,7 +85,7 @@ class Inv(GFSolver):
                 if block is None:
                     continue
                 b_ = slice(a.block_offsets[j], a.block_offsets[j + 1], 1)
-                a_dense[:, b_, b_] -= block[stack_slice]
+                a_dense[..., b_, b_] -= block[stack_slice]
 
             inv_a[: batches_sizes[i]] = linalg.inv(a_dense)
 
@@ -145,11 +145,6 @@ class Inv(GFSolver):
             last element.
 
         """
-        if return_current:
-            raise NotImplementedError(
-                "The computation of the current is not implemented."
-            )
-
         # Get list of batches to perform
         batches_sizes, batches_slices = get_batches(a.shape[0], self.max_batch_size)
 
@@ -182,6 +177,18 @@ class Inv(GFSolver):
         if return_retarded:
             rows_r, cols_r = sel_x_r.spy()
 
+        if return_current:
+            # Meir-Wingreen boundary (lead) current per stack point. The
+            # robust dense inverse here pivots through the near-singular
+            # [(omega+i.eta)^2 - D - Sigma^R] that makes the block-RGF
+            # recursion lose precision / NaN at small eta -- this is the
+            # small-eta-stable path for the q-resolved phonon film.
+            current = xp.zeros((*a.shape[:-2], a.num_blocks + 1), dtype=a.dtype)
+            if a.num_blocks > 1:
+                current[..., 1:-1] = xp.nan
+            b0 = slice(int(a.block_offsets[0]), int(a.block_offsets[1]))
+            bn = slice(int(a.block_offsets[-2]), int(a.block_offsets[-1]))
+
         # Perform the inversion in batches
         for i in range(len(batches_sizes)):
             stack_slice = slice(batches_slices[i], batches_slices[i + 1], 1)
@@ -195,11 +202,18 @@ class Inv(GFSolver):
             ):
                 b_ = slice(a.block_offsets[j], a.block_offsets[j + 1], 1)
                 if block_r is not None:
-                    a_dense[:, b_, b_] -= block_r[stack_slice]
+                    # Retarded contact self-energy subtracts from A:
+                    # G^R = [A - Sigma^R_lead]^{-1}.
+                    a_dense[..., b_, b_] -= block_r[stack_slice]
                 if block_l is not None:
-                    sigma_lesser_dense[:, b_, b_] -= block_l[stack_slice]
+                    # Lesser/greater contact self-energies ADD to the total
+                    # in/out-scattering: Sigma^<_tot = Sigma^<_scatter +
+                    # Sigma^<_lead (the lead injection), matching the RGF
+                    # solver and the physical NEGF convention. (The OBC blocks
+                    # are filled as +i.Gamma.n etc. in the subsystem solvers.)
+                    sigma_lesser_dense[..., b_, b_] += block_l[stack_slice]
                 if block_g is not None:
-                    sigma_greater_dense[:, b_, b_] -= block_g[stack_slice]
+                    sigma_greater_dense[..., b_, b_] += block_g[stack_slice]
 
             x_r[: batches_sizes[i]] = linalg.inv(a_dense)
             x_l[: batches_sizes[i]] = (
@@ -221,6 +235,29 @@ class Inv(GFSolver):
                     : batches_sizes[i], ..., rows_r, cols_r
                 ]
 
+            if return_current:
+                xl_b = x_l[: batches_sizes[i]]
+                xg_b = x_g[: batches_sizes[i]]
+                if obc_blocks.greater[0] is not None:
+                    current[stack_slice, ..., 0] = xp.trace(
+                        obc_blocks.greater[0][stack_slice] @ xl_b[..., b0, b0]
+                        - xg_b[..., b0, b0] @ obc_blocks.lesser[0][stack_slice],
+                        axis1=-2, axis2=-1,
+                    )
+                if obc_blocks.greater[-1] is not None:
+                    # Negative sign: positive current flows left->right.
+                    current[stack_slice, ..., -1] = -xp.trace(
+                        obc_blocks.greater[-1][stack_slice] @ xl_b[..., bn, bn]
+                        - xg_b[..., bn, bn] @ obc_blocks.lesser[-1][stack_slice],
+                        axis1=-2, axis2=-1,
+                    )
+
+        if return_current:
+            if out is None:
+                if return_retarded:
+                    return sel_x_l, sel_x_g, sel_x_r, current
+                return sel_x_l, sel_x_g, current
+            return current
         if return_retarded:
             return sel_x_l, sel_x_g, sel_x_r
         else:
