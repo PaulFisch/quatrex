@@ -299,9 +299,7 @@ class SCBA:
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
-        # Optional Anderson/Pulay acceleration of the self-energy fixed point
-        # (breaks the period-2 oscillation linear mixing cannot damp on the
-        # strong-coupling soft-mode SCBA). Default "linear" -> bare mixing.
+        # Optional Anderson acceleration of the self-energy fixed point
         self._anderson_mixer = None
         if self.config.scba.mixing_method == "anderson":
             from quatrex.core.anderson import AndersonMixer
@@ -476,22 +474,13 @@ class SCBA:
         )
 
     def _update_sigma_anderson(self) -> None:
-        """Anderson/Pulay mix of the augmented [Sigma^<, Sigma^>, Sigma^R]
-        state. ``sigma_*`` hold the freshly computed map output; ``*_prev``
-        the previous iterate. The mixer's inner products are global
-        (all-reduced over the energy x block ranks), so each rank passes its
-        local slice. cupy buffers are moved host-side for the (numpy) mixer."""
+        """Anderson mix of the augmented [Sigma^<, Sigma^>, Sigma^R]
+        state."""
         cur = (self.data.sigma_lesser, self.data.sigma_greater,
                self.data.sigma_retarded)
         prev = (self.data.sigma_lesser_prev, self.data.sigma_greater_prev,
                 self.data.sigma_retarded_prev)
         to_host = (lambda a: a.get()) if xp.__name__ == "cupy" else (lambda a: a)
-        # On the first Anderson step, build the per-block residual weights
-        # (1/sqrt(||block||)) from the fresh bubble output and hold them fixed:
-        # they put every (I,J) self-energy block on an equal footing so the
-        # large diagonal blocks do not dominate the least squares and
-        # over-extrapolate the small off-diagonal ones (the dense-reference
-        # safeguard, essential for the soft-mode SCBA).
         if self._anderson_mixer.weights is None:
             self._anderson_mixer.weights = self._anderson_block_weights(cur, to_host)
         shapes = [m.data.shape for m in cur]
@@ -604,7 +593,7 @@ class SCBA:
 
     def _phonon_heat_flow_conservation(self):
         """Heat-flow conservation of the anharmonic phonon SCBA: the relative
-        spread of the (hbar-omega-weighted) Meir-Wingreen HEAT current across
+        spread of the (hbar-omega-weighted) Meir-Wingreen heat current across
         the device interfaces. Returns ``(heat_per_interface, rel_spread)`` or
         ``(None, inf)`` if the current is unavailable. All-reduced over the
         energy (stack) partition."""
