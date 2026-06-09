@@ -544,13 +544,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             ggr_q = _qflat(ggr_blk)
             n_tau = next(iter(gl_q.values())).shape[0]
             dtype = next(iter(gl_q.values())).dtype
+            # Distribute the EXTERNAL-q loop over comm.q. The q-folded
+            # internal q' Green's functions are kept whole/local on every
+            # rank (only the energy axis is split across comm.stack), so each
+            # q-rank computes a disjoint subset of iq_ext from the full local
+            # q' data -- no internal-q gather -- and the per-rank partial
+            # Sigma(q_ext) are summed over comm.q after the loop. This is the
+            # dedicated q axis: N_q-way parallelism on top of the energy axis.
+            q_lo = ranks.q.rank * nq // ranks.q.size
+            q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
             for (I, J) in owned:
                 bs_I = int(self.block_sizes[I])
                 bs_J = int(self.block_sizes[J])
                 out_l = xp.zeros((n_tau, nq, bs_I, bs_J), dtype=dtype)
                 out_g = xp.zeros((n_tau, nq, bs_I, bs_J), dtype=dtype)
                 wrote = False
-                for iq_ext in range(nq):
+                for iq_ext in range(q_lo, q_hi):
                     acc_l = None
                     acc_g = None
                     for iqp in range(nq):
@@ -587,6 +596,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
                     stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
                     stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+
+        # Assemble the external-q distribution: each comm.q rank computed a
+        # disjoint subset of iq_ext (others left zero), so sum over comm.q.
+        if nq > 1 and ranks.q.size > 1:
+            for m in (stl, stg):
+                recv = xp.empty_like(m.data)
+                ranks.q.all_reduce(np.ascontiguousarray(m.data), recv, op="sum")
+                m.data[:] = recv
 
         # (4) sigma(tau) stack->nnz
         stl.dtranspose()
