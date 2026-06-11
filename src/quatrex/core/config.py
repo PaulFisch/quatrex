@@ -749,6 +749,18 @@ class PhononConfig(BaseModel):
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
     warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
 
+    sse_vertex_scale: PositiveFloat = 1.0
+    """Uniform 3-phonon vertex scale lambda (Sigma scales as lambda^2).
+    lambda < 1 = reduced-coupling runs for LOA-style extrapolation and for
+    soft-mode structures whose full-coupling bubble-only SCBA is unstable
+    (cf. the dense reference's ``vertex_scale``; d5a F10 used 0.3)."""
+
+    sse_ramp_iterations: NonNegativeInt = 0
+    """Adiabatic switch-on of the 3-phonon bubble: scale the scattering
+    self-energy by ``min(1, it/N)`` over the first N SCBA iterations
+    (0 = off). Stabilises soft-mode structures whose full-coupling SCBA
+    overshoots into unphysical gain states under plain damped iteration."""
+
     heat_flow_conservation_tol: PositiveFloat = 1e-2
     """Convergence tolerance for the anharmonic phonon SCBA: the relative
     spread of the (hbar-omega-weighted) Meir-Wingreen HEAT current across
@@ -760,9 +772,14 @@ class PhononConfig(BaseModel):
     soft-mode structures and must NOT be used. The most-conserved (best)
     iterate's heat current is captured even if the iteration later drifts."""
 
-    sigma_convergence_tol: PositiveFloat = 1e-2
+    sigma_convergence_tol: PositiveFloat = 1e-3
     """Relative Sigma^R residual tolerance for the anharmonic phonon SCBA
     fixed point, applied IN ADDITION to ``heat_flow_conservation_tol``.
+
+    Default 1e-3 (0.1%): 1e-2 is too loose to call a fixed point. Linear mixing
+    contracts the residual geometrically (~x0.6 / 5 iters), so 1e-3 is reached
+    in ~55 iters and 1e-4 in ~75; Anderson (``scba.mixing_method``) reaches it
+    in far fewer.
 
     Convergence requires a GENUINE fixed point, not a transient: the scattering
     self-energy must be self-consistent -- the relative residual

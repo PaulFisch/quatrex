@@ -365,8 +365,15 @@ def compute_phph_self_energy(
                     pr = phiR.get((J, K2p, K1p))
                     if pl is None or pr is None:
                         continue
+                    # LEFT vertex conjugated: Phi(q', q-q')^* pairs with
+                    # Phi(q-q', q'); the unconjugated pairing breaks
+                    # Sigma(-q) = Sigma(q)^T and disagrees with the
+                    # real-space supercell ground truth (see
+                    # phonon/scripts/verify/audit_qfold_trs.py). Real
+                    # vertices at Gamma -> nq==1 results unchanged.
                     tasks.append(
-                        (I, J, iq_ext, iqp, iq2, K1, K2, K1p, K2p, pl, pr))
+                        (I, J, iq_ext, iqp, iq2, K1, K2, K1p, K2p,
+                         np.conj(pl), pr))
 
     sl_out = {(I, J): np.zeros((n_kpts, n_freq, n_dof, n_dof), dtype=complex)
               for (I, J) in pair_index}

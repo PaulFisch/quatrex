@@ -140,6 +140,55 @@ def retarded_from_lesser_greater(delta, omega_grid_thz):
     return sig_r
 
 
+def hilbert_transform_bosonic(delta, omega_grid_thz, axis):
+    """(1/pi) PV transform of the BOSONICALLY CONTINUED delta.
+
+    The positive-only grid is continued to negative frequencies via
+    ``delta(-w) = delta(w)*`` (exact for ``Sigma^> - Sigma^<``) before the
+    principal-value integral -- the window-only transform misses the
+    negative-frequency image entirely. Discretisation uses exact
+    cell-integrated log PV weights (the pole cell contributes zero), the
+    same scheme as the (audited) production
+    ``quatrex.core.fft_utils.hilbert_transform``.
+    """
+    w = np.asarray(omega_grid_thz, dtype=float)
+    ne = w.size
+    de = float(w[1] - w[0])
+    w0 = float(w[0])
+
+    d = np.moveaxis(np.asarray(delta, dtype=complex), axis, 0)
+    tail_shape = d.shape[1:]
+    d2 = d.reshape(ne, -1)
+
+    j = np.arange(-(ne - 1), ne, dtype=float)
+    absj = np.abs(j)
+    safe = np.where(absj > 0, absj, 1.0)
+    pos_k = np.where(absj > 0, np.log((safe + 0.5) / (safe - 0.5)) * np.sign(j), 0.0)
+
+    m = np.arange(0, 2 * ne - 1, dtype=float)
+    num = 2.0 * w0 + m * de + 0.5 * de
+    den = 2.0 * w0 + m * de - 0.5 * de
+    mir_k = np.where(den > 0,
+                     np.log(np.where(den > 0, num, 1.0)
+                            / np.where(den > 0, den, 1.0)), 0.0)
+
+    n_conv = ne + (2 * ne - 1)
+    K = np.fft.fft(pos_k, n_conv)
+    M = np.fft.fft(mir_k, n_conv)
+    D = np.fft.fft(d2, n_conv, axis=0)
+    out = np.fft.ifft(D * K[:, None], axis=0)[ne - 1: 2 * ne - 1]
+
+    dm = d2[::-1].conj()
+    if abs(w0) < 0.25 * de:
+        dm = dm.copy()
+        dm[-1] = 0.0  # the w=0 cell is already covered by the main kernel
+    Dm = np.fft.fft(dm, n_conv, axis=0)
+    out = out + np.fft.ifft(Dm * M[:, None], axis=0)[ne - 1: 2 * ne - 1]
+
+    out = (out / np.pi).reshape((ne,) + tail_shape)
+    return np.moveaxis(out, 0, axis)
+
+
 def build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
     """Build Sigma^R from Sigma^< and Sigma^> using the specified method.
 
@@ -148,6 +197,8 @@ def build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
     sig_l, sig_g : (..., n_freq, nd, nd)
         Lesser/greater self-energies. Leading dimensions are preserved.
     method : {"pv", "fft", "half"}
+        "fft" includes the bosonic negative-frequency mirror (2026-06-10
+        audit fix); "pv" remains the window-only O(N^2) reference.
     """
     delta = (sig_g - sig_l).astype(complex)
     if method == "pv":
@@ -159,7 +210,8 @@ def build_retarded(sig_l, sig_g, omega_grid_thz, method="pv"):
         return sig_r.reshape(leading + delta.shape[-3:])
     if method == "fft":
         freq_axis = len(delta.shape) - 3
-        return 0.5 * delta + 0.5j * hilbert_transform_axis(delta, axis=freq_axis)
+        return 0.5 * delta + 0.5j * hilbert_transform_bosonic(
+            delta, omega_grid_thz, axis=freq_axis)
     if method == "half":
         return 0.5 * delta
     raise ValueError(

@@ -50,9 +50,26 @@ def _qfold_device_blocks(M_stacked, prim_indices, cell_frac, slab_indices,
         vertex_cutoff=vertex_cutoff)
 
 
+_QFOLD_CTX = None
+
+
+def _qfold_pair_worker(pair):
+    """Module-level worker for the parallel folded-vertex build. The large
+    shared inputs (``M_stacked`` etc.) are read from a fork-inherited module
+    global so they are NOT pickled per task -- only the tiny ``(iq1, iq2)``
+    index travels to the worker."""
+    iq1, iq2 = pair
+    (M_stacked, prim_indices, cell_frac, slab_indices, n_atoms, n_slabs,
+     q_points, transport_direction, vertex_cutoff) = _QFOLD_CTX
+    return _qfold_device_blocks(
+        M_stacked, prim_indices, cell_frac, slab_indices, n_atoms, n_slabs,
+        q_points[iq1], q_points[iq2], transport_direction,
+        vertex_cutoff=vertex_cutoff)
+
+
 def _build_folded_vertices(M_stacked, prim_indices, cell_frac, slab_indices,
                            n_atoms, n_slabs, n_kpts, q_points, q_diff_map,
-                           transport_direction, vertex_cutoff=None):
+                           transport_direction, vertex_cutoff=None, nproc=1):
     """q-folded device vertex {(iq1, iq2): {(I, K, K'): Phi}} for every pair the
     coupled-q bubble loop needs.
 
@@ -60,6 +77,13 @@ def _build_folded_vertices(M_stacked, prim_indices, cell_frac, slab_indices,
     carries legs (q', q2) and the right vertex (q2, q'). Independent of G, so the
     driver builds this once per SCBA solve. The q=Gamma pair (0, 0) is always
     included (the unified kernel takes the (I, J) pair index from it).
+
+    ``nproc > 1`` folds the (independent) pairs in parallel -- the cost is
+    O(n_kpts^2) pairs, the dominant build cost at large transverse meshes (nk=9
+    is 6561 pairs). The serial default (``nproc=1``) is byte-identical to the
+    original, so callers other than the input builder are unchanged.
+    ``M_stacked`` is shared read-only via fork inheritance (copy-on-write),
+    never pickled per task.
     """
     folded_pairs = {(0, 0)}
     for iq_ext in range(n_kpts):
@@ -67,6 +91,22 @@ def _build_folded_vertices(M_stacked, prim_indices, cell_frac, slab_indices,
             iq2 = int(q_diff_map[iq_ext, iqp])
             folded_pairs.add((iqp, iq2))
             folded_pairs.add((iq2, iqp))
+
+    if nproc and int(nproc) > 1:
+        pairs = sorted(folded_pairs)
+        global _QFOLD_CTX
+        _QFOLD_CTX = (M_stacked, prim_indices, cell_frac, slab_indices,
+                      n_atoms, n_slabs, q_points, transport_direction,
+                      vertex_cutoff)
+        try:
+            import multiprocessing as mp
+            with mp.get_context("fork").Pool(int(nproc)) as pool:
+                vals = pool.map(_qfold_pair_worker, pairs,
+                                chunksize=max(1, len(pairs) // (int(nproc) * 4)))
+        finally:
+            _QFOLD_CTX = None
+        return dict(zip(pairs, vals))
+
     return {
         (iq1, iq2): _qfold_device_blocks(
             M_stacked, prim_indices, cell_frac, slab_indices, n_atoms, n_slabs,

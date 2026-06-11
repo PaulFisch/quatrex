@@ -30,7 +30,13 @@ from scipy import sparse
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.fft_utils import hilbert_transform
 from quatrex.core.sse import ScatteringSelfEnergy
-from quatrex.phonon.bubble import bubble_dense, ring_contract
+from quatrex.phonon.bubble import (
+    _RING_POOL,
+    _RING_THREADS,
+    _ring_contract_serial,
+    bubble_dense,
+    ring_contract,
+)
 from quatrex.phonon.fc3_loader import (
     PhiBlocks,
     load_device_fc3,
@@ -101,6 +107,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self.n_blocks = int(self.block_sizes.shape[0])
         self.block_offsets = np.concatenate(([0], np.cumsum(self.block_sizes)))
 
+        self._ramp_n = int(getattr(config.phonon, "sse_ramp_iterations", 0))
+        self._ramp_it = 0
+        self._vertex_scale = float(getattr(config.phonon, "sse_vertex_scale", 1.0))
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
             raise ValueError(
@@ -214,8 +223,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stacklevel=2,
             )
             return
-        h00 = np.asarray(dynamical_matrix.blocks[0, 0])
-        h01 = np.asarray(dynamical_matrix.blocks[0, 1])
+        # The cell blocks H00=[0,0] and H01=[0,1]. Under block distribution the
+        # [0,1] block is not owned by the local rank, so gather the diagonal /
+        # super-diagonal blocks across the block communicator (block_diagonal
+        # all-gathers); in the serial case this is just blocks[0,0]/[0,1].
+        block_distributed = (
+            dynamical_matrix.num_local_blocks != dynamical_matrix.num_blocks
+        )
+        if block_distributed:
+            h00 = np.asarray(dynamical_matrix.block_diagonal(0)[0])
+            h01 = np.asarray(dynamical_matrix.block_diagonal(1)[0])
+        else:
+            h00 = np.asarray(dynamical_matrix.blocks[0, 0])
+            h01 = np.asarray(dynamical_matrix.blocks[0, 1])
         while h00.ndim > 2:
             h00 = h00[0]
         while h01.ndim > 2:
@@ -410,6 +430,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         n_fft = 2 * ne_full - 1
         full_freqs = self._full_frequencies(ne_full)
         prefactor = bubble_prefactor_thz(float(full_freqs[1] - full_freqs[0]))
+        if self._vertex_scale != 1.0:
+            # Sigma ~ Phi^2 -> lambda^2 on the bubble
+            prefactor = prefactor * self._vertex_scale**2
+        if self._ramp_n > 0:
+            # adiabatic switch-on (config.phonon.sse_ramp_iterations)
+            self._ramp_it += 1
+            ramp = min(1.0, self._ramp_it / float(self._ramp_n))
+            prefactor = prefactor * ramp
+            if ranks.rank == 0 and ramp < 1.0:
+                print(f"SSE ramp: {ramp:.3f}", flush=True)
         # Coupled-q convolution carries the 1/N_q mesh-average
         if nq > 1:
             prefactor = prefactor / nq
@@ -486,15 +516,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # into the one-sided grid via G^<(-ω)=G^>(ω): for each ring quad
         #   Sigma^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
         #   Sigma^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
+        # Serial ring contraction (single-thread BLAS); the omega/tau batch is
+        # parallelised ONCE over the whole (I,J)/phi-pair loop below, not per
+        # call, so the worker threads stay busy across the whole contraction
+        # instead of idling on the GIL-held Python between 100s of short calls.
         def _fold_l(pl, pr, gla, glb, ggra, ggrb):
-            return (ring_contract(pl, pr, gla, glb, xp=xp)
-                    + ring_contract(pl, pr, gla, ggrb, xp=xp)
-                    + ring_contract(pl, pr, ggra, glb, xp=xp))
+            return (_ring_contract_serial(pl, pr, gla, glb, xp)
+                    + _ring_contract_serial(pl, pr, gla, ggrb, xp)
+                    + _ring_contract_serial(pl, pr, ggra, glb, xp))
 
         def _fold_g(pl, pr, gga, ggb, glra, glrb):
-            return (ring_contract(pl, pr, gga, ggb, xp=xp)
-                    + ring_contract(pl, pr, gga, glrb, xp=xp)
-                    + ring_contract(pl, pr, glra, ggb, xp=xp))
+            return (_ring_contract_serial(pl, pr, gga, ggb, xp)
+                    + _ring_contract_serial(pl, pr, gga, glrb, xp)
+                    + _ring_contract_serial(pl, pr, glra, ggb, xp))
 
         Qproj = (
             xp.asarray(self._zero_mode_Q)
@@ -502,27 +536,48 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             else None
         )
         if nq == 1:
-            for (I, J) in owned:
-                acc_l = None
-                acc_g = None
-                for K1, K2, K1p, K2p, phi_left, phi_right in self._phi_pair_index[(I, J)]:
-                    sl = _fold_l(
-                        phi_left, phi_right,
-                        gl_blk[(K1, K1p)], gl_blk[(K2, K2p)],
-                        ggr_blk[(K1, K1p)], ggr_blk[(K2, K2p)],
-                    )
-                    sg = _fold_g(
-                        phi_left, phi_right,
-                        gg_blk[(K1, K1p)], gg_blk[(K2, K2p)],
-                        glr_blk[(K1, K1p)], glr_blk[(K2, K2p)],
-                    )
-                    acc_l = sl if acc_l is None else acc_l + sl
-                    acc_g = sg if acc_g is None else acc_g + sg
-                if acc_l is not None:
-                    if Qproj is not None:
-                        # Two-sided projection on every band block
-                        acc_l = Qproj @ acc_l @ Qproj
-                        acc_g = Qproj @ acc_g @ Qproj
+            # Compute Sigma^{<,>}(I,J) for the tau slice [lo:hi]; returns the
+            # final (Q-projected) band blocks for that slice.
+            def _contract_tau(lo, hi):
+                res = {}
+                for (I, J) in owned:
+                    acc_l = None
+                    acc_g = None
+                    for (K1, K2, K1p, K2p, phi_left, phi_right
+                         ) in self._phi_pair_index[(I, J)]:
+                        sl = _fold_l(
+                            phi_left, phi_right,
+                            gl_blk[(K1, K1p)][lo:hi], gl_blk[(K2, K2p)][lo:hi],
+                            ggr_blk[(K1, K1p)][lo:hi], ggr_blk[(K2, K2p)][lo:hi],
+                        )
+                        sg = _fold_g(
+                            phi_left, phi_right,
+                            gg_blk[(K1, K1p)][lo:hi], gg_blk[(K2, K2p)][lo:hi],
+                            glr_blk[(K1, K1p)][lo:hi], glr_blk[(K2, K2p)][lo:hi],
+                        )
+                        acc_l = sl if acc_l is None else acc_l + sl
+                        acc_g = sg if acc_g is None else acc_g + sg
+                    if acc_l is not None:
+                        if Qproj is not None:
+                            acc_l = Qproj @ acc_l @ Qproj
+                            acc_g = Qproj @ acc_g @ Qproj
+                        res[(I, J)] = (acc_l, acc_g)
+                return res
+
+            n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
+            if _RING_POOL is not None and n_tau >= _RING_THREADS:
+                nt = min(_RING_THREADS, n_tau)
+                bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
+                chunks = list(_RING_POOL.map(lambda b: _contract_tau(*b), bnds))
+                for (I, J) in owned:
+                    parts = [c for c in chunks if (I, J) in c]
+                    if parts:
+                        stlv.blocks[I - start, J - start] = xp.concatenate(
+                            [c[(I, J)][0] for c in parts], axis=0)
+                        stgv.blocks[I - start, J - start] = xp.concatenate(
+                            [c[(I, J)][1] for c in parts], axis=0)
+            else:
+                for (I, J), (acc_l, acc_g) in _contract_tau(0, n_tau).items():
                     stlv.blocks[I - start, J - start] = acc_l
                     stgv.blocks[I - start, J - start] = acc_g
         else:
@@ -553,49 +608,85 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # dedicated q axis: N_q-way parallelism on top of the energy axis.
             q_lo = ranks.q.rank * nq // ranks.q.size
             q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
-            for (I, J) in owned:
-                bs_I = int(self.block_sizes[I])
-                bs_J = int(self.block_sizes[J])
-                out_l = xp.zeros((n_tau, nq, bs_I, bs_J), dtype=dtype)
-                out_g = xp.zeros((n_tau, nq, bs_I, bs_J), dtype=dtype)
-                wrote = False
-                for iq_ext in range(q_lo, q_hi):
-                    acc_l = None
-                    acc_g = None
-                    for iqp in range(nq):
-                        iq2 = int(qdm[iq_ext, iqp])
-                        phiL = qv.get((iqp, iq2))   # legs (q', q_ext−q')
-                        phiR = qv.get((iq2, iqp))   # legs (q_ext−q', q')
-                        if phiL is None or phiR is None:
-                            continue
+
+            # Resolve the per-(I, J) vertex-pair task list once. The LEFT
+            # vertex is CONJUGATED: the bubble at external q pairs
+            # Phi(q', q_ext-q')^* with Phi(q_ext-q', q'); the unconjugated
+            # pairing breaks momentum bookkeeping (Sigma(-q) != Sigma(q)^T
+            # under time reversal) and disagrees with a real-space supercell
+            # ground truth, see phonon/scripts/verify/audit_qfold_trs.py.
+            # At Gamma the vertices are real, so the Gamma-only (nq==1)
+            # path is unaffected.
+            qtasks: dict[tuple[int, int], list] = {}
+            for iq_ext in range(q_lo, q_hi):
+                for iqp in range(nq):
+                    iq2 = int(qdm[iq_ext, iqp])
+                    phiL = qv.get((iqp, iq2))   # legs (q', q_ext−q')
+                    phiR = qv.get((iq2, iqp))   # legs (q_ext−q', q')
+                    if phiL is None or phiR is None:
+                        continue
+                    for (I, J) in owned:
                         for K1, K2, K1p, K2p, _pl, _pr in self._phi_pair_index[(I, J)]:
                             pl = phiL.get((I, K1, K2))
                             pr = phiR.get((J, K2p, K1p))
                             if pl is None or pr is None:
                                 continue
-                            sl = _fold_l(
-                                pl, pr,
-                                gl_q[(K1, K1p)][:, iqp], gl_q[(K2, K2p)][:, iq2],
-                                ggr_q[(K1, K1p)][:, iqp], ggr_q[(K2, K2p)][:, iq2],
-                            )
-                            sg = _fold_g(
-                                pl, pr,
-                                gg_q[(K1, K1p)][:, iqp], gg_q[(K2, K2p)][:, iq2],
-                                glr_q[(K1, K1p)][:, iqp], glr_q[(K2, K2p)][:, iq2],
-                            )
-                            acc_l = sl if acc_l is None else acc_l + sl
-                            acc_g = sg if acc_g is None else acc_g + sg
-                    if acc_l is not None:
-                        if Qproj is not None:
-                            acc_l = Qproj @ acc_l @ Qproj
-                            acc_g = Qproj @ acc_g @ Qproj
-                        out_l[:, iq_ext] = acc_l
-                        out_g[:, iq_ext] = acc_g
-                        wrote = True
-                if wrote:
-                    blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
-                    stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
-                    stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+                            qtasks.setdefault((I, J), []).append(
+                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p,
+                                 xp.conj(pl), pr))
+
+            # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
+            # nq==1 _contract_tau so the omega/tau batch parallelises across
+            # the ring pool (the coupled-q path previously ran serial).
+            def _contract_tau_q(lo, hi):
+                res = {}
+                for (I, J), tasks in qtasks.items():
+                    bs_I = int(self.block_sizes[I])
+                    bs_J = int(self.block_sizes[J])
+                    out_l = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                    out_g = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                    for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, pl, pr) in tasks:
+                        out_l[:, iq_ext] += _fold_l(
+                            pl, pr,
+                            gl_q[(K1, K1p)][lo:hi, iqp],
+                            gl_q[(K2, K2p)][lo:hi, iq2],
+                            ggr_q[(K1, K1p)][lo:hi, iqp],
+                            ggr_q[(K2, K2p)][lo:hi, iq2],
+                        )
+                        out_g[:, iq_ext] += _fold_g(
+                            pl, pr,
+                            gg_q[(K1, K1p)][lo:hi, iqp],
+                            gg_q[(K2, K2p)][lo:hi, iq2],
+                            glr_q[(K1, K1p)][lo:hi, iqp],
+                            glr_q[(K2, K2p)][lo:hi, iq2],
+                        )
+                    if Qproj is not None:
+                        out_l = Qproj @ out_l @ Qproj
+                        out_g = Qproj @ out_g @ Qproj
+                    res[(I, J)] = (out_l, out_g)
+                return res
+
+            def _write_q(I, J, out_l, out_g):
+                bs_I = int(self.block_sizes[I])
+                bs_J = int(self.block_sizes[J])
+                blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
+                stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
+                stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+
+            if _RING_POOL is not None and xp is np and n_tau >= _RING_THREADS:
+                nt = min(_RING_THREADS, n_tau)
+                bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
+                        for i in range(nt)]
+                chunks = list(_RING_POOL.map(lambda b: _contract_tau_q(*b), bnds))
+                for (I, J) in qtasks:
+                    _write_q(
+                        I, J,
+                        xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
+                        xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
+                    )
+            else:
+                for (I, J), (out_l, out_g) in _contract_tau_q(0, n_tau).items():
+                    _write_q(I, J, out_l, out_g)
 
         # Assemble the external-q distribution: each comm.q rank computed a
         # disjoint subset of iq_ext (others left zero), so sum over comm.q.
@@ -612,6 +703,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # (5) IFFT sigma(τ)→Sigma(omega) in nnz; add into outputs; build Sigma^R.
         sl_data = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_full]
         sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
+        # DC regularisation, completing the G^≷(0)=0 treatment above: a
+        # nonzero scattering Sigma^≷(0) hits the near-singular acoustic
+        # G^R(0) in the Dyson solve and produces a huge spurious DC spike in
+        # G^≷(0)/I(0) (x1e5 the median on the soft d5a wire), which feeds
+        # the soft-mode region every SCBA iteration. The omega=0 bin carries
+        # zero heat (hbar*omega weight), so this costs nothing physical.
+        if bool(abs(float(full_freqs[0])) < 1e-6):
+            sl_data[0] = 0.0
+            sg_data[0] = 0.0
         sigma_lesser.data[:] = sigma_lesser.data + sl_data
         sigma_greater.data[:] = sigma_greater.data + sg_data
         # Sigma^R contribution
@@ -809,6 +909,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         else:
             freqs = ranks.stack.all_gather_v(
                 xp.asarray(self.local_frequencies, dtype=float), axis=0
+            )
+        if int(freqs.shape[0]) != int(ne_full):
+            raise ValueError(
+                f"Phonon frequency grid ({int(freqs.shape[0])} pts) does not "
+                f"match the Green's-function energy grid ({int(ne_full)} "
+                "pts). The bubble prefactor carries this grid's spacing, so "
+                "a mismatch silently misscales Sigma -- refusing to run. "
+                "Regenerate phonon_energies.npy to match the configured "
+                "energy window (write_config.py does this) or pass the "
+                "solver grid."
             )
         self._full_freqs = freqs
         return freqs
