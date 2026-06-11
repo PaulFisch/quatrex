@@ -152,18 +152,18 @@ class PCoulombScreening(ScatteringSelfEnergy):
                     # Note that only the hermitian part is computed here.
 
                     if self.include_energy_renormalization:
-                        p_retarded.data[..., batch] = (
-                            -(self.prefactor / 2)
-                            * (
-                                hilbert_transform(
-                                    (
-                                        p_greater.data[..., batch]
-                                        - p_lesser.data[..., batch]
-                                    ),
-                                    self.energies,
-                                )
-                            )
-                            * self.kpoint_volume
+                        # P^R = 0.5*(P^> - P^<) + 0.5j*H[P^> - P^<]; the
+                        # anti-Hermitian half is added in the SCBA loop.
+                        # hilbert_transform is the (1/pi)-normalised PV
+                        # transform incl. the dE quadrature weight, so no
+                        # prefactor is needed here (the previous
+                        # -(prefactor/2)*kvol == i*dE/2pi supplied exactly
+                        # the weight that the raw-kernel implementation
+                        # lacked; same scale, better PV kernel now).
+                        p_retarded.data[..., batch] = 0.5j * hilbert_transform(
+                            p_greater.data[..., batch]
+                            - p_lesser.data[..., batch],
+                            self.energies,
                         )
 
         with profiler.profile_range(

@@ -774,6 +774,19 @@ class DSDBSparse(ABC):
         """
         ...
 
+    def _local_spy(self) -> tuple[NDArray, NDArray]:
+        """LOCAL non-zero (row, col) indices in the GLOBAL index space.
+
+        Unlike :meth:`spy` (which all-gathers across the block communicator to
+        return the FULL pattern), this returns only this block-rank's entries,
+        ordered to align element-wise with ``self.data``. In-place ops against a
+        global sparse array must use this so they address only the local data
+        (otherwise ``data`` (local nnz) and ``csr[spy()]`` (global nnz) mismatch
+        under ``block_comm_size > 1``). The default equals :meth:`spy` (correct
+        when not block-distributed); block-distributed subclasses override it.
+        """
+        return self.spy()
+
     @abstractmethod
     def symmetrize(self, op: Callable[[NDArray, NDArray], NDArray] = xp.add) -> None:
         """Symmetrizes the matrix with a given operation.
@@ -998,7 +1011,7 @@ class _DStackView:
         if sparse.issparse(other):
             csr = other.tocsr()
             self._dsdbsparse.data[self._stack_index] += xp.squeeze(
-                xp.asarray(csr[self._dsdbsparse.spy()])
+                xp.asarray(csr[self._dsdbsparse._local_spy()])
             )
             return self._dsdbsparse
         try:
@@ -1019,7 +1032,7 @@ class _DStackView:
         if sparse.issparse(other):
             csr = other.tocsr()
             self._dsdbsparse.data[self._stack_index] -= xp.squeeze(
-                xp.asarray(csr[self._dsdbsparse.spy()])
+                xp.asarray(csr[self._dsdbsparse._local_spy()])
             )
             return self._dsdbsparse
         try:

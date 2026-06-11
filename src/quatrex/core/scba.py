@@ -407,9 +407,31 @@ class SCBA:
             if self.config.phonon.model == "negf":
                 energies_path = self.config.input_dir / "phonon_energies.npy"
                 self.phonon_energies = distributed_load(energies_path)
+                # The SSE MUST live on the grid the Green's functions live on
+                # (the solver grid): its bubble prefactor and the SCP <uu>
+                # carry the grid spacing d-omega. The npy file is an input
+                # artifact that can disagree with the configured window (it
+                # did: build-default nfreq vs config nfreq), which silently
+                # misscaled Sigma by d_npy/d_solver. Pass the solver grid and
+                # only warn about a stale npy.
+                solver_freqs = np.asarray(self.phonon_solver.local_frequencies)
+                npy_freqs = np.asarray(self.phonon_energies)
+                if npy_freqs.shape != solver_freqs.shape or not np.allclose(
+                    npy_freqs, solver_freqs
+                ):
+                    if comm.rank == 0:
+                        print(
+                            "WARNING: phonon_energies.npy "
+                            f"({npy_freqs.shape[0]} pts, dw="
+                            f"{float(npy_freqs[1] - npy_freqs[0]):.4g}) does "
+                            "not match the solver energy grid "
+                            f"({solver_freqs.shape[0]} pts); using the "
+                            "solver grid for the scattering self-energy.",
+                            flush=True,
+                        )
                 self._phonon_phonon_interaction = PhononPhononInteraction(
                     config=self.config,
-                    phonon_energies=self.phonon_energies,
+                    phonon_energies=solver_freqs,
                     block_sizes=self.data.g_lesser.block_sizes,
                     dynamical_matrix=self.phonon_solver.dynamical_matrix,
                 )
@@ -570,37 +592,53 @@ class SCBA:
             smag = np.empty_like(local_smag)
             global_comm.Allreduce(local_smag, smag, op=MPI.MAX)
             rel_sigma = float(max_diff) / (float(smag) + 1e-300)
-            heat, spread = self._phonon_heat_flow_conservation()
+            heat, balance, spread = self._phonon_heat_flow_conservation()
             if heat is not None:
                 # Last-iterate heat (the actual current state at the fixed point)
                 # and a best-conserved fallback for diagnostics if it never
                 # converges (so a non-converged run is reported, not silently
                 # passed off as the answer).
                 self._last_heat_current = heat.copy()
-                if spread < self._best_heat_conservation:
-                    self._best_heat_conservation = spread
+                self._last_heat_spread = spread
+                if balance < self._best_heat_conservation:
+                    self._best_heat_conservation = balance
                     self._best_heat_current = heat.copy()
                 if comm.rank == 0:
                     print(f"Phonon: rel Sigma^R residual {rel_sigma:.4e}; "
-                          f"heat-flow spread {spread:.4e} "
-                          f"(best {self._best_heat_conservation:.4e})", flush=True)
+                          f"lead balance {balance:.4e} "
+                          f"(best {self._best_heat_conservation:.4e}; "
+                          f"internal spread {spread:.4e})", flush=True)
+                # Conservation gate = LEAD balance |J_L - J_R| / |J|: in steady
+                # state the in/out lead currents must match; this is what the
+                # dense reference checks (dense.py conservation_err) and what a
+                # genuine SCBA inconsistency violates. The max-min spread over
+                # ALL interfaces additionally contains the eta-absorption dip of
+                # the internal interfaces (finite (omega+i eta)^2 broadening
+                # soaks up flux inside the device; grows with eta and device
+                # length, 3-17% on the production setups even BALLISTICALLY) --
+                # gating on it made convergence unreachable. It is still
+                # reported as a diagnostic above.
                 if (self._scba_iteration >= self.config.scba.min_iterations
                         and rel_sigma < self.config.phonon.sigma_convergence_tol
-                        and spread < self.config.phonon.heat_flow_conservation_tol):
+                        and balance < self.config.phonon.heat_flow_conservation_tol):
                     return True
 
         return False
 
     def _phonon_heat_flow_conservation(self):
-        """Heat-flow conservation of the anharmonic phonon SCBA: the relative
-        spread of the (hbar-omega-weighted) Meir-Wingreen heat current across
-        the device interfaces. Returns ``(heat_per_interface, rel_spread)`` or
-        ``(None, inf)`` if the current is unavailable. All-reduced over the
-        energy (stack) partition."""
+        """Heat-flow conservation of the anharmonic phonon SCBA.
+
+        Returns ``(heat_per_interface, lead_balance, rel_spread)`` or
+        ``(None, inf, inf)`` if the current is unavailable; all-reduced over
+        the energy (stack) partition. ``lead_balance`` is
+        ``|J_lead0 - J_leadN| / |mean|`` -- the physical steady-state
+        criterion, insensitive to the eta-absorption dip of the internal
+        interfaces; ``rel_spread`` is the max-min spread over all interfaces
+        (contains the eta dip; diagnostic only)."""
         solver = self.subsystems.get("phonon")
         mw = getattr(solver, "meir_wingreen_current", None)
         if mw is None:
-            return None, float("inf")
+            return None, float("inf"), float("inf")
         mw = xp.asarray(mw)
         w = xp.abs(xp.asarray(solver.local_frequencies)).reshape(
             (-1,) + (1,) * (mw.ndim - 1))
@@ -619,7 +657,8 @@ class SCBA:
             heat = recv
         denom = abs(float(heat.mean())) + 1e-300
         spread = float((heat.max() - heat.min()) / denom)
-        return heat, spread
+        balance = float(abs(abs(heat[0]) - abs(heat[-1])) / denom)
+        return heat, balance, spread
 
     @profiler.profile(label="SCBA: Interactions", level="default", comm=comm)
     def _compute_interactions(self) -> None:

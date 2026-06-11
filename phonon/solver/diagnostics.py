@@ -30,6 +30,12 @@ def check_broadening_sign(Sigma_R, freqs_thz, name,
         if abs(w) <= low_freq_thz:
             continue
         sr = Sigma_R[iw]
+        if not np.isfinite(sr).all():
+            # A diverged Sigma must be REPORTED as a violation, not crash
+            # the run inside eigvalsh (LinAlgError on non-finite input).
+            n_viol += 1
+            max_viol = float("inf")
+            continue
         Gamma = 1j * (sr - sr.conj().T)
         Gamma = 0.5 * (Gamma + Gamma.conj().T)
         eigs = np.linalg.eigvalsh(Gamma)

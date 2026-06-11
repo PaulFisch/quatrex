@@ -13,7 +13,22 @@ omega axis. The prefactor is supplied by the caller (``0.5j * hbar * d_omega / (
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
+
+# The ring contraction is a batch of small matmuls over the omega/tau axis and
+# is the dominant cost of the 3-phonon self-energy (~99%). The per-omega gemms
+# are too small for BLAS threading to scale (~1.5x at 8 threads), but the omega
+# BATCH is embarrassingly parallel: splitting it across a thread pool with
+# single-threaded BLAS per chunk scales ~linearly (numpy releases the GIL during
+# gemm) -- ~15x at 32 threads, bit-identical. Set QUATREX_PHPH_RING_THREADS=N
+# (with single-threaded BLAS) to enable; default 1 keeps the serial path.
+_RING_THREADS = max(1, int(os.environ.get("QUATREX_PHPH_RING_THREADS", "1")))
+_RING_POOL = ThreadPoolExecutor(max_workers=_RING_THREADS) if _RING_THREADS > 1 else None
+# Only worth the split + concatenate overhead when the batch is large enough.
+_RING_MIN_W = int(os.environ.get("QUATREX_PHPH_RING_MIN_W", "48"))
 
 
 def bubble_dense(
@@ -104,34 +119,56 @@ def bubble_dense(
 
 
 def ring_contract(phi_left, phi_right, Ga_fft, Gb_fft, *, xp=None):
-    """The per-frequency 3-phonon ring contraction
+    """The per-frequency 3-phonon ring contraction.
 
     Operates on already-transformed Green's functions Ga_fft on the
-    (c, b) = (K1, K1') link and Gb_fft on the
-    (e, d) = (K2, K2') link, each shaped (w, bK, bK') with w
-    the leading (frequency/τ) batch axis. Returns ``S_hat`` shaped
-    (w, nI, nJ) - the contraction
-    sigma_{c,d,e,f} phi_L[a,c,e] Ga[w,c,b] Gb[w,e,d] phi_R[J,d,b] evaluated
-    pointwise in w.
+    (c, b) = (K1, K1') link and Gb_fft on the (e, d) = (K2, K2') link, each
+    shaped (w, bK, bK') with w the leading (frequency/τ) batch axis. Returns
+    ``S_hat`` shaped (w, nI, nJ).
+
+    When ``QUATREX_PHPH_RING_THREADS>1`` and on the CPU (numpy) backend, the
+    embarrassingly-parallel w batch is split across a thread pool (single-thread
+    BLAS per chunk) -- the per-w matmuls are too small for BLAS threading but the
+    batch parallelises near-linearly. Bit-identical to the serial result.
     """
     if xp is None:
         xp = np
 
+    n_w = Ga_fft.shape[0]
+    if _RING_POOL is not None and xp is np and n_w >= _RING_MIN_W:
+        nt = min(_RING_THREADS, n_w)
+        bnds = [(i * n_w // nt, (i + 1) * n_w // nt) for i in range(nt)]
+        parts = list(_RING_POOL.map(
+            lambda b: _ring_contract_serial(
+                phi_left, phi_right, Ga_fft[b[0]:b[1]], Gb_fft[b[0]:b[1]], xp),
+            bnds))
+        return xp.concatenate(parts, axis=0)
+    return _ring_contract_serial(phi_left, phi_right, Ga_fft, Gb_fft, xp)
+
+
+def _ring_contract_serial(phi_left, phi_right, Ga_fft, Gb_fft, xp):
+    """Serial ring contraction over the full w batch (see ``ring_contract``).
+
+    Transpose-free evaluation of
+        S[w,a,J] = phi_L[a,c,e] Ga[w,c,b] Gb[w,e,d] phi_R[J,d,b]
+    via  T[w,(a,e),b] = PL[(a,e),c] @ Ga[w,c,b]      (PL = phi_L perm (a,e,c))
+         U[w,e,(b,J)] = Gb[w,e,d] @ PR[d,(b,J)]      (PR = phi_R perm (d,b,J))
+         S[w,a,J]     = T[w,a,(e,b)] @ U[w,(e,b),J]
+    Same three gemms / identical FLOPs as the textbook order, but ZERO
+    w-sized transpose copies (the old mid-chain (w,a,d,c) copy is GB-scale
+    for the 96-135 DOF blocks and was pure memory-bandwidth waste); only the
+    two w-independent O(BS^3) phi permutes remain.
+    """
     nI, bK1, bK2 = phi_left.shape
     nJ = phi_right.shape[0]
     n_w = Ga_fft.shape[0]
     bK1p = Ga_fft.shape[2]
     bK2p = Gb_fft.shape[2]
 
-    phi_L_r = phi_left.reshape(nI * bK1, bK2)
-    T1 = phi_L_r @ Gb_fft  # (w, a*c, d)
-    T1 = T1.reshape(n_w, nI, bK1, bK2p)  # (w, a, c, d)
+    # (a,c,e) -> [(a,e), c] and (J,d,b) -> [d, (b,J)]; w-independent.
+    PL = xp.ascontiguousarray(phi_left.transpose(0, 2, 1)).reshape(nI * bK2, bK1)
+    PR = xp.ascontiguousarray(phi_right.transpose(1, 2, 0)).reshape(bK2p, bK1p * nJ)
 
-    T1_t = T1.transpose(0, 1, 3, 2)  # (w, a, d, c)
-    T1_t_r = T1_t.reshape(n_w, nI * bK2p, bK1)
-    T2 = T1_t_r @ Ga_fft  # (w, a*d, b)
-    T2 = T2.reshape(n_w, nI, bK2p, bK1p)  # (w, a, d, b)
-
-    T2_r = T2.reshape(n_w, nI, bK2p * bK1p)
-    phi_R_r = phi_right.reshape(nJ, bK2p * bK1p)
-    return T2_r @ phi_R_r.T  # (w, a, J)
+    T = PL @ Ga_fft            # (w, nI*bK2, bK1p)  == (w, a, e, b)
+    U = Gb_fft @ PR            # (w, bK2,  bK1p*nJ) == (w, e, b, J)
+    return T.reshape(n_w, nI, bK2 * bK1p) @ U.reshape(n_w, bK2 * bK1p, nJ)
