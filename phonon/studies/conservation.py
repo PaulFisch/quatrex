@@ -184,17 +184,82 @@ def s3_violation(fc3_blocks_path) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def sigma_convention(config_path) -> dict:
+    """Sign-convention/positivity gate of the production SSE feedback.
+
+    Solves the ballistic G of ``config_path``, evaluates the 3-phonon SSE
+    once, and checks that Sigma^≷ follow the SOLVER convention
+    (-i Sigma^≷ >= 0 per omega > 0, like the lead injection
+    sigma^≷ = +i n(+1) gamma and like -iG^≷ >= 0). A violation here is the
+    anti-dissipative feedback that made the SCBA diverge at any coupling
+    (2026-06-12); the bubble energy balance is sign-blind and cannot see it.
+
+    Returns {"g_worst", "sl_worst", "sg_worst"}: worst relative negative
+    eigenvalue over all omega > 0 (0.0 = clean).
+    """
+    import numpy as np
+    from quatrex.core.config import parse_config, setup_context
+
+    cfg = parse_config(config_path)
+    setup_context(cfg)
+    from quatrex.core.scba import SCBA
+
+    scba = SCBA(cfg)
+    ph = scba.subsystems["phonon"]
+    d = scba.data
+    for solver in scba.subsystems.values():
+        solver.solve(d.sigma_lesser, d.sigma_greater,
+                     d.sigma_retarded_hermitian,
+                     out=(d.g_lesser, d.g_greater, d.g_retarded))
+    for m in (d.g_lesser, d.g_greater):
+        m.dtranspose(discard=False)
+    for m in (d.sigma_lesser, d.sigma_greater, d.sigma_retarded_hermitian):
+        m.dtranspose(discard=True)
+    scba._compute_interactions()
+    for m in (d.sigma_lesser, d.sigma_greater, d.sigma_retarded_hermitian):
+        m.dtranspose(discard=False)
+    for m in (d.g_lesser, d.g_greater):
+        m.dtranspose(discard=False)
+
+    w = np.abs(np.asarray(ph.local_frequencies, float))
+    rows = np.asarray(d.g_lesser.rows)
+    cols = np.asarray(d.g_lesser.cols)
+    n = int(max(rows.max(), cols.max())) + 1
+
+    def worst_negative(matrix):
+        worst = 0.0
+        for i in range(len(w)):
+            if w[i] <= 0.0:
+                continue
+            dense = np.zeros((n, n), complex)
+            dense[rows, cols] = np.asarray(matrix.data)[i]
+            m = -1j * dense
+            m = 0.5 * (m + m.conj().T)
+            ev = np.linalg.eigvalsh(m)
+            worst = max(worst, -float(ev.min()) / (float(np.abs(ev).max()) + 1e-300))
+        return worst
+
+    return {"g_worst": max(worst_negative(d.g_lesser), worst_negative(d.g_greater)),
+            "sl_worst": worst_negative(d.sigma_lesser),
+            "sg_worst": worst_negative(d.sigma_greater)}
+
+
 def run(argv) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m phonon.studies conservation run",
         description=("Energy-conservation gates: discrete bubble replica "
                      "(always) + S3 symmetry of device FC3 blocks "
-                     "(per --fc3 path)."),
+                     "(per --fc3 path) + SSE sign-convention/positivity "
+                     "(per --convention config)."),
     )
     parser.add_argument(
         "--fc3", nargs="+", default=[], metavar="PATH",
         help="fc3_blocks.hdf5 file(s) to gate on S3 symmetry "
              "(default: none -- only the replica check runs)")
+    parser.add_argument(
+        "--convention", default=None, metavar="CONFIG_TOML",
+        help="quatrex config of a small cell: run the single-shot SSE "
+             "sign-convention/positivity gate (-i Sigma^≷ >= 0)")
     args = parser.parse_args(argv)
 
     failures = 0
@@ -220,6 +285,14 @@ def run(argv) -> int:
         print(f"[s3] {path}: worst={res['worst']:.3e} mean={res['mean']:.3e} "
               f"({res['n_blocks']} blocks) -> {'PASS' if ok else 'FAIL'} "
               f"(tol {S3_TOL:g})")
+
+    if args.convention:
+        res = sigma_convention(args.convention)
+        ok = max(res.values()) < 1e-10
+        failures += not ok
+        print(f"[convention] {args.convention}: worst rel-negative eigenvalue "
+              f"G^≷ {res['g_worst']:.3e}, Sigma^< {res['sl_worst']:.3e}, "
+              f"Sigma^> {res['sg_worst']:.3e} -> {'PASS' if ok else 'FAIL'}")
 
     print(f"[conservation] {'ALL PASS' if failures == 0 else f'{failures} FAILED'}")
     return 0 if failures == 0 else 1
