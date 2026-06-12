@@ -497,7 +497,24 @@ class ElectronConfig(BaseModel):
     left_fermi_level: float | None = None
     right_fermi_level: float | None = None
 
-    band_edge_tracking: Literal["dos-peaks", "eigenvalues"] | None = None
+    band_edge_tracking: bool = False
+    """Whether to track the band edges during the SCBA iterations.
+
+    This is setting is only useful if the considered interactions result
+    in energy renormalization in the electronic subsystem, which is
+    primarily the screened Coulomb interaction.
+
+    If set to `True`, the band edges are tracked during the SCBA
+    iterations by computing the eigenvalues of the Hamiltonian
+    renormalized with the current self-energy.
+
+    The Fermi levels are then set to be a fixed distance from the band
+    edges, which is determined by the initial Fermi level and band
+    edges. For example, if the initial Fermi level is 0.5 eV above the
+    conduction band edge, the Fermi level is always set to be 0.5 eV
+    above the conduction band edge during the SCBA iterations.
+
+    """
 
     temperature: PositiveFloat = 300.0  # K
 
@@ -1000,15 +1017,14 @@ class DeviceConfig(BaseModel):
     ) = None
     """The number of neighbor cells to consider along each lattice direction.
 
-    !!! note
-
-        Currently, this parameter is only used if
-        `construct_from_unit_cell` is `True`.
-
     If set to `None`, all neighbor cells are considered. A
     `neighbor_cell_cutoff` of zero means that only the unit cell itself
-    is considered. Along the transport direction, at least one
-    neighboring cell must be included.
+    is considered. 
+    
+    Along the transport direction, at least one neighboring cell must be
+    included if `construct_from_unit_cell` is `True`. If
+    `construct_from_unit_cell` is `False`, no neighboring cells should be
+    included along the transport direction.
 
     If more neighbor cells are requested than present in the input
     Hamiltonian, a `ValueError` is raised.
@@ -1078,20 +1094,6 @@ class DeviceConfig(BaseModel):
     kpoint_grid: tuple[PositiveInt, PositiveInt, PositiveInt] = (1, 1, 1)
     kpoint_shift: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
-    orthogonal_basis: bool = True
-    """Whether the basis set is orthogonal.
-
-    This affects how the overlap matrix is handled.
-    In the case of `True`, the overlap matrix is identity.
-
-    !!! warning
-
-        Currently, `False` is not supported since
-        the code does not correctly handle overlap matrices in the case
-        of kpoints.
-
-    """
-
     @model_validator(mode="after")
     def to_tuple(self) -> Self:
         """Transforms list to tuple."""
@@ -1101,20 +1103,37 @@ class DeviceConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def check_kpoint_grid(self) -> Self:
+        """Checks that the k-point grid is 1 along the transport direction."""
+
+        ind = "xyz".index(self.transport_direction)
+        if self.kpoint_grid[ind] != 1:
+            raise ValueError(
+                f"Along the transport direction ('{self.transport_direction}'), the k-point grid must be 1."
+            )
+
+        return self
+
+    @model_validator(mode="after")
     def check_connecting_cells(self) -> Self:
         """Checks that num_connecting_cells is not zero in transport direction."""
-        if not self.construct_from_unit_cell:
-            return self
 
         if self.neighbor_cell_cutoff is None:
             return self
 
         ind = "xyz".index(self.transport_direction)
-        if self.neighbor_cell_cutoff[ind] < 1:
-            raise ValueError(
-                f"At least one neighboring cell in transport direction "
-                f"('{self.transport_direction}') must be included."
-            )
+        if not self.construct_from_unit_cell:
+            if self.neighbor_cell_cutoff[ind] != 0:
+                raise ValueError(
+                    f"Along the transport direction ('{self.transport_direction}'),"
+                    "no neighboring cells should be included if `construct_from_unit_cell` is False."
+                )
+        else:
+            if self.neighbor_cell_cutoff[ind] < 1:
+                raise ValueError(
+                    f"At least one neighboring cell in transport direction "
+                    f"('{self.transport_direction}') must be included."
+                )
 
         return self
 
@@ -1259,11 +1278,13 @@ class CommConfig(BaseModel):
     block_all_gather: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     block_all_reduce: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     block_bcast: Literal["host_mpi", "device_mpi", "nccl"] | None = None
+    block_send_recv: Literal["host_mpi", "device_mpi", "nccl"] | None = None
 
     stack_all_to_all: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     stack_all_gather: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     stack_all_reduce: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     stack_bcast: Literal["host_mpi", "device_mpi", "nccl"] | None = None
+    stack_send_recv: Literal["host_mpi", "device_mpi", "nccl"] | None = None
 
     # Transverse-momentum (q-point) communicator: a third axis alongside
     # block x stack, used to distribute the external q of the q-resolved
@@ -1509,6 +1530,7 @@ def _setup_comm(comm_config: CommConfig) -> None:
         "all_gather": comm_config.block_all_gather or default_backend,
         "all_reduce": comm_config.block_all_reduce or default_backend,
         "bcast": comm_config.block_bcast or default_backend,
+        "send_recv": comm_config.block_send_recv or default_backend,
     }
 
     stack_comm_config = {
@@ -1516,6 +1538,7 @@ def _setup_comm(comm_config: CommConfig) -> None:
         "all_gather": comm_config.stack_all_gather or default_backend,
         "all_reduce": comm_config.stack_all_reduce or default_backend,
         "bcast": comm_config.stack_bcast or default_backend,
+        "send_recv": comm_config.stack_send_recv or default_backend,
     }
 
     q_comm_config = {

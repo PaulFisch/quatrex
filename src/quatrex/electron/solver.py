@@ -7,47 +7,18 @@ from qttools.comm import comm
 from qttools.datastructures import DSDBSparse
 from qttools.greens_function_solver.solver import OBCBlocks
 from qttools.profiling import Profiler
-from qttools.utils.mpi_utils import distributed_load, get_local_slice, get_section_sizes
+from qttools.toeplitz.toeplitz import get_periodic_superblocks, homogenize
+from qttools.utils.mpi_utils import get_local_slice, get_section_sizes
 from qttools.utils.stack_utils import scale_stack
-from quatrex.bandstructure.band_edges import (
-    find_band_edges,
-    find_dos_peaks,
-    find_renormalized_eigenvalues,
-)
+from quatrex.bandstructure.band_edges import find_renormalized_eigenvalues
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.statistics import fermi_dirac
 from quatrex.core.subsystem import SubsystemSolver
-from quatrex.core.utils import get_periodic_superblocks, homogenize
-from quatrex.device.inputs import load_matrix
+from quatrex.device import Device
+from quatrex.device.contact import get_inverse_order, order_block
+from quatrex.device.inputs import assemble_matrix
 
 profiler = Profiler()
-
-
-def _btd_subtract(a: DSDBSparse, b: DSDBSparse) -> None:
-    """Subtracts b from a on the block-tridiagonal.
-
-    This is an in-place operation, i.e. a is modified.
-
-    Parameters
-    ----------
-    a : DSDBSparse
-        The matrix to subtract from.
-    b : DSDBSparse
-        The matrix to subtract.
-
-    """
-    a_ = a.stack[...]
-    b_ = b.stack[...]
-    for i in range(a.num_local_blocks):
-        j = i + 1
-        a_.blocks[i, i] -= b_.blocks[i, i]
-
-        if j >= a.num_local_blocks and comm.block.rank == comm.block.size - 1:
-            # The last rank does not have these blocks.
-            continue
-
-        a_.blocks[i, j] -= b_.blocks[i, j]
-        a_.blocks[j, i] -= b_.blocks[j, i]
 
 
 class ElectronSolver(SubsystemSolver):
@@ -76,7 +47,7 @@ class ElectronSolver(SubsystemSolver):
         self.local_energies = get_local_slice(energies, comm.stack)
 
         # Load the device Hamiltonian.
-        self.hamiltonian, hamiltonian_sparsity_pattern = load_matrix(
+        self.hamiltonian, hamiltonian_sparsity_pattern = assemble_matrix(
             config=config,
             matrix_name="hamiltonian",
             sparsity_pattern=None,
@@ -90,13 +61,9 @@ class ElectronSolver(SubsystemSolver):
         del hamiltonian_sparsity_pattern
         self.block_sizes = self.hamiltonian.block_sizes
 
-        self.orthogonal_basis = config.device.orthogonal_basis
-        if not self.orthogonal_basis:
-            # TODO: Overlap matrix is not supported correctly. The code
-            # should look like this.
-
-            # Load the device Overlap.
-            self.overlap, overlap_sparsity_pattern = load_matrix(
+        try:
+            # Attempt to load the device overlap matrix.
+            self.overlap, overlap_sparsity_pattern = assemble_matrix(
                 config=config,
                 matrix_name="overlap",
                 sparsity_pattern=None,
@@ -112,14 +79,13 @@ class ElectronSolver(SubsystemSolver):
                     "Overlap matrix and Hamiltonian matrix have different shapes."
                 )
 
-            raise NotImplementedError("Currently, overlap matrices are not supported.")
+            if comm.rank == 0:
+                print("Non-orthogonal basis detected.", flush=True)
 
-        else:
-            self.overlap_sparray = sparse.eye(
-                self.hamiltonian.shape[-2],
-                format="coo",
-                dtype=self.hamiltonian.dtype,
-            )
+        except FileNotFoundError:
+            self.overlap = None
+            if comm.rank == 0:
+                print("No overlap matrix found. Assuming orthogonal basis.", flush=True)
 
         # Allocate memory for the system matrix.
         self.system_matrix = config.compute.dsdbsparse_type.from_sparray(
@@ -140,13 +106,16 @@ class ElectronSolver(SubsystemSolver):
             )
 
         # Load the potential.
-        try:
-            self.potential = distributed_load(config.input_dir / "potential.npy")
-        except FileNotFoundError:
-            # No potential provided. Assume zero potential.
-            self.potential = xp.zeros(
-                self.hamiltonian.shape[-2], dtype=self.hamiltonian.dtype
-            )
+        # TODO: The structure should not be reloaded here.
+        # This will be fixed when the device is unified.
+        __, atom_coordinates, atomic_species = Device.load_structure(config)
+        self.potential = Device.load_potential(
+            config.input_dir,
+            atom_coordinates,
+            atomic_species,
+            config.device.num_orbitals_per_atom,
+        )
+
         if self.potential.size != self.hamiltonian.shape[-2]:
             raise ValueError("Potential matrix and Hamiltonian have different shapes.")
         self.eta = config.electron.eta
@@ -195,31 +164,6 @@ class ElectronSolver(SubsystemSolver):
         self.call_count = 0
         self.filtering_iteration_limit = config.electron.filtering_iteration_limit
 
-    @staticmethod
-    def get_block(
-        coo: sparse.coo_matrix, block_sizes: NDArray, index: tuple
-    ) -> NDArray:
-        """Gets a block from a COO matrix."""
-        block_offsets = np.hstack(([0], np.cumsum(block_sizes)))
-        row, col = index
-        row = row + len(block_sizes) if row < 0 else row
-        col = col + len(block_sizes) if col < 0 else col
-        mask = (
-            (block_offsets[row] <= coo.row)
-            & (coo.row < block_offsets[row + 1])
-            & (block_offsets[col] <= coo.col)
-            & (coo.col < block_offsets[col + 1])
-        )
-        block = xp.zeros(
-            (int(block_sizes[row]), int(block_sizes[col])), dtype=coo.dtype
-        )
-        block[
-            coo.row[mask] - block_offsets[row],
-            coo.col[mask] - block_offsets[col],
-        ] = coo.data[mask]
-
-        return block
-
     def update_potential(self, new_potential: NDArray) -> None:
         """Updates the potential matrix.
 
@@ -249,21 +193,22 @@ class ElectronSolver(SubsystemSolver):
         __, left_conduction_band_edge = left_band_edges
         __, right_conduction_band_edge = right_band_edges
 
-        (
-            print(
-                f"Updating conduction band edges: "
-                f"{left_conduction_band_edge}, {right_conduction_band_edge}",
-                flush=True,
-            )
-            if comm.rank == 0
-            else None
-        )
-
         self.left_fermi_level = (
             left_conduction_band_edge - self.delta_fermi_level_conduction_band
         )
         self.right_fermi_level = (
             right_conduction_band_edge - self.delta_fermi_level_conduction_band
+        )
+
+        (
+            print(
+                f"Updating conduction band edges: "
+                f"{left_conduction_band_edge:.6f}, {right_conduction_band_edge:.6f}\n",
+                f"Updating Fermi levels: {self.left_fermi_level:.6f}, {self.right_fermi_level:.6f}",
+                flush=True,
+            )
+            if comm.rank == 0
+            else None
         )
 
         self.left_occupancies = fermi_dirac(
@@ -275,130 +220,285 @@ class ElectronSolver(SubsystemSolver):
             self.temperature,
         )
 
-    def _get_block(self, coo: sparse.coo_matrix, index: tuple) -> NDArray:
-        """Gets a block from a COO matrix."""
-        row, col = index
-        row = row + len(self.block_sizes) if row < 0 else row
-        col = col + len(self.block_sizes) if col < 0 else col
-        mask = (
-            (self.block_offsets[row] <= coo.row)
-            & (coo.row < self.block_offsets[row + 1])
-            & (self.block_offsets[col] <= coo.col)
-            & (coo.col < self.block_offsets[col + 1])
-        )
-        block = xp.zeros(
-            (int(self.block_sizes[row]), int(self.block_sizes[col])), dtype=coo.dtype
-        )
-        block[
-            coo.row[mask] - self.block_offsets[row],
-            coo.col[mask] - self.block_offsets[col],
-        ] = coo.data[mask]
+    def _compute_contact_obc(
+        self,
+        contact: str,
+        diagonal_inds: tuple,
+        upper_inds: tuple,
+        occupancies: NDArray,
+        order: str | NDArray | None = None,
+    ) -> tuple[NDArray, NDArray, NDArray]:
+        """Computes the OBC for a specific contact.
 
-        return block
+        Parameters
+        ----------
+        contact : str
+            The contact for which to compute the OBC.
+            Used for profiling and caching purposes.
+        diagonal_inds : tuple
+            The indices of the diagonal blocks corresponding to the contact.
+        upper_inds : tuple
+            The indices of the upper off-diagonal blocks corresponding to the contact.
+        occupancies : NDArray
+            The occupancies of the contact at the local energies.
+        order : str | NDArray | None, optional
+            The permutation of the blocks to achieve the same order as the canonical left contact.
+            If None, the left contact order is assumed.
+            Instead of an explicit permutation, the string "reverse" can be passed
+            to reverse the order of the blocks, which is equivalent to the right contact order.
+
+        Returns
+        -------
+        obc_retarded : NDArray
+            The retarded OBC for the contact.
+        obc_lesser : NDArray
+            The lesser OBC for the contact.
+        obc_greater : NDArray
+            The greater OBC for the contact.
+
+        """
+
+        inverse_order = get_inverse_order(order)
+
+        m_10, m_00, m_01 = get_periodic_superblocks(
+            a_ji=order_block(self.system_matrix.blocks[*upper_inds[::-1]], order),
+            a_ii=order_block(self.system_matrix.blocks[*diagonal_inds], order),
+            a_ij=order_block(self.system_matrix.blocks[*upper_inds], order),
+            block_sections=self.block_sections,
+        )
+
+        if self.overlap is None:
+            s_10 = xp.zeros_like(m_10, dtype=m_10.dtype)
+            s_00 = 1j * self.eta_obc * xp.eye(m_00.shape[-1], dtype=m_00.dtype)
+            s_01 = xp.zeros_like(m_01, dtype=m_01.dtype)
+        else:
+            # Extract the overlap matrix blocks.
+            s_10 = 1j * self.eta_obc * self.overlap.blocks[*upper_inds[::-1]]
+            s_00 = 1j * self.eta_obc * self.overlap.blocks[*diagonal_inds]
+            s_01 = 1j * self.eta_obc * self.overlap.blocks[*upper_inds]
+
+        # TODO: use residuals to filter "bad" energies
+        g_00, *__ = self.obc(
+            (m_00 + s_00, m_01 + s_01, m_10 + s_10),
+            contact="G: " + contact,
+        )
+        # Apply the retarded boundary self-energy.
+        sigma_00 = m_10 @ g_00 @ m_01
+        gamma_00 = 1j * (sigma_00 - sigma_00.conj().swapaxes(-2, -1))
+
+        # Compute and apply the lesser boundary self-energy.
+        obc_lesser = 1j * scale_stack(gamma_00.copy(), occupancies)
+        # Compute and apply the greater boundary self-energy.
+        obc_greater = 1j * scale_stack(gamma_00.copy(), occupancies - 1)
+
+        return (
+            order_block(sigma_00, inverse_order),
+            order_block(obc_lesser, inverse_order),
+            order_block(obc_greater, inverse_order),
+        )
 
     @profiler.profile(label="ElectronSolver: OBC", level="default", comm=comm)
     def _compute_obc(self) -> None:
         """Computes open boundary conditions."""
         if comm.block.rank == 0:
-            # Extract the overlap matrix blocks.
-            s_00 = 1j * self.eta_obc * self._get_block(self.overlap_sparray, (0, 0))
-            s_01 = 1j * self.eta_obc * self._get_block(self.overlap_sparray, (0, 1))
-            s_10 = 1j * self.eta_obc * self._get_block(self.overlap_sparray, (1, 0))
-
-            m_10, m_00, m_01 = get_periodic_superblocks(
-                a_ii=self.system_matrix.blocks[0, 0],
-                a_ji=self.system_matrix.blocks[1, 0],
-                a_ij=self.system_matrix.blocks[0, 1],
-                block_sections=self.block_sections,
-            )
-
-            # TODO: use residuals to filter "bad" energies
-            g_00, *__ = self.obc(
-                (m_00 + s_00, m_01 + s_01, m_10 + s_10),
+            obc_retarded, obc_lesser, obc_greater = self._compute_contact_obc(
                 contact="left",
+                diagonal_inds=(0, 0),
+                upper_inds=(0, 1),
+                occupancies=self.left_occupancies,
             )
-            # Apply the retarded boundary self-energy.
-            sigma_00 = m_10 @ g_00 @ m_01
-            self.obc_blocks.retarded[0] = sigma_00
-            gamma_00 = 1j * (sigma_00 - sigma_00.conj().swapaxes(-2, -1))
+            self.obc_blocks.retarded[0] = obc_retarded
+            self.obc_blocks.lesser[0] = obc_lesser
+            self.obc_blocks.greater[0] = obc_greater
 
-            # Compute and apply the lesser boundary self-energy.
-            self.obc_blocks.lesser[0] = 1j * scale_stack(
-                gamma_00.copy(), self.left_occupancies
-            )
-            # Compute and apply the greater boundary self-energy.
-            self.obc_blocks.greater[0] = 1j * scale_stack(
-                gamma_00.copy(), self.left_occupancies - 1
-            )
         if comm.block.rank == comm.block.size - 1:
-            # Extract the overlap matrix blocks.
-            s_nn = 1j * self.eta_obc * self._get_block(self.overlap_sparray, (-1, -1))
-            s_nm = 1j * self.eta_obc * self._get_block(self.overlap_sparray, (-1, -2))
-            s_mn = 1j * self.eta_obc * self._get_block(self.overlap_sparray, (-2, -1))
-
             n = self.system_matrix.num_local_blocks - 1
             m = n - 1
-
-            m_mn, m_nn, m_nm = get_periodic_superblocks(
-                # Twist it, flip it, ...
-                a_ii=xp.flip(self.system_matrix.blocks[n, n], axis=(-2, -1)),
-                a_ji=xp.flip(self.system_matrix.blocks[m, n], axis=(-2, -1)),
-                a_ij=xp.flip(self.system_matrix.blocks[n, m], axis=(-2, -1)),
-                block_sections=self.block_sections,
-            )
-            # ... bop it.
-            m_nn = xp.flip(m_nn, axis=(-2, -1))
-            m_nm = xp.flip(m_nm, axis=(-2, -1))
-            m_mn = xp.flip(m_mn, axis=(-2, -1))
-            g_nn, *__ = self.obc(
-                # Twist it, flip it, ...
-                (
-                    xp.flip(m_nn + s_nn, axis=(-2, -1)),
-                    xp.flip(m_nm + s_nm, axis=(-2, -1)),
-                    xp.flip(m_mn + s_mn, axis=(-2, -1)),
-                ),
+            obc_retarded, obc_lesser, obc_greater = self._compute_contact_obc(
                 contact="right",
+                diagonal_inds=(n, n),
+                upper_inds=(n, m),
+                occupancies=self.right_occupancies,
+                order="reverse",
             )
-            # ... bop it.
-            g_nn = xp.flip(g_nn, axis=(-2, -1))
+            self.obc_blocks.retarded[-1] = obc_retarded
+            self.obc_blocks.lesser[-1] = obc_lesser
+            self.obc_blocks.greater[-1] = obc_greater
 
-            # NOTE: Here we could possibly do peak/discontinuity detection
-            # on the surface Green's function DOS (not same as actual DOS).
+    def _add_overlap(
+        self,
+    ) -> None:
+        """Adds the overlap matrix to the system matrix.
 
-            # Apply the retarded boundary self-energy.
-            sigma_nn = m_mn @ g_nn @ m_nm
+        This modifies the system matrix in-place, i.e. the result is stored in
+        `self.system_matrix`.
 
-            self.obc_blocks.retarded[-1] = sigma_nn
+        Parameters
+        ----------
+        self.system_matrix : DSDBSparse
+            The matrix to add to.
+        b : DSDBSparse
+            The matrix to add.
 
-            gamma_nn = 1j * (sigma_nn - sigma_nn.conj().swapaxes(-2, -1))
+        """
+        if not isinstance(self.overlap, DSDBSparse):
+            raise ValueError("Overlap matrix must be a DSDBSparse.")
 
-            self.obc_blocks.lesser[-1] = 1j * scale_stack(
-                gamma_nn.copy(), self.right_occupancies
+        system_matrix_ = self.system_matrix.stack[...]
+        overlap_ = self.overlap.stack[...]
+        for i in range(self.system_matrix.num_local_blocks):
+            j = i + 1
+            system_matrix_.blocks[i, i] += overlap_.blocks[i, i]
+
+            if (
+                j >= self.system_matrix.num_local_blocks
+                and comm.block.rank == comm.block.size - 1
+            ):
+                # The last rank does not have these blocks.
+                continue
+
+            system_matrix_.blocks[i, j] += overlap_.blocks[i, j]
+            system_matrix_.blocks[j, i] += overlap_.blocks[j, i]
+
+    def _apply_potential(
+        self,
+    ) -> None:
+        """Applies the potential to the system matrix.
+
+        This modifies the system matrix in-place, i.e. the result is stored in
+        `self.system_matrix`.
+
+        """
+        if not isinstance(self.overlap, DSDBSparse):
+            raise ValueError("Overlap matrix must be a DSDBSparse.")
+
+        system_matrix_ = self.system_matrix.stack[...]
+        overlap_ = self.overlap.stack[...]
+        offset = 0
+        for i in range(self.system_matrix.num_local_blocks):
+            j = i + 1
+            s_ii = overlap_.blocks[i, i]
+            potential_i = self.potential[offset : offset + s_ii.shape[-1]]
+
+            system_matrix_.blocks[i, i] -= (
+                s_ii * potential_i[..., np.newaxis] + s_ii * potential_i
+            ) / 2
+
+            offset += s_ii.shape[-1]
+
+            if (
+                j >= self.system_matrix.num_local_blocks
+                and comm.block.rank == comm.block.size - 1
+            ):
+                # The last rank does not have these blocks.
+                continue
+
+            s_ij = overlap_.blocks[i, j]
+            s_ji = overlap_.blocks[j, i]
+            potential_j = self.potential[offset : offset + s_ij.shape[-1]]
+
+            system_matrix_.blocks[i, j] -= (
+                s_ij * potential_i[..., np.newaxis] + s_ij * potential_j
+            ) / 2
+            system_matrix_.blocks[j, i] -= (
+                s_ji * potential_j[..., np.newaxis] + s_ji * potential_i
+            ) / 2
+
+    def _subtract_hamiltonian_and_self_energy(
+        self,
+        sse_lesser: DSDBSparse,
+        sse_greater: DSDBSparse,
+        sse_retarded_hermitian: DSDBSparse,
+    ) -> None:
+        r"""Subtracts the Hamiltonian and the self-energy from the system matrix
+        on the block-tridiagonal.
+
+        $$\mathbf{M} \mathrel{{-}{=}} \mathbf{H} + \mathbf{\Sigma}^R +
+        \frac{1}{2} \left(\mathbf{\Sigma}^{>} - \mathbf{\Sigma}^{<} \right)$$
+
+        This modifies the system matrix in-place, i.e. the result is stored in
+        `self.system_matrix`.
+
+        Parameters
+        ----------
+        sse_lesser : DSDBSparse
+            The lesser self-energy to subtract.
+        sse_greater : DSDBSparse
+            The greater self-energy to subtract.
+        sse_retarded_hermitian : DSDBSparse
+            The retarded self-energy to subtract.
+
+        """
+        system_matrix_ = self.system_matrix.stack[...]
+        hamiltonian_ = self.hamiltonian.stack[...]
+        sse_retarded_hermitian_ = sse_retarded_hermitian.stack[...]
+        sse_lesser_ = sse_lesser.stack[...]
+        sse_greater_ = sse_greater.stack[...]
+        for i in range(self.system_matrix.num_local_blocks):
+            j = i + 1
+            system_matrix_.blocks[i, i] -= (
+                sse_retarded_hermitian_.blocks[i, i]
+                + 0.5 * (sse_greater_.blocks[i, i] - sse_lesser_.blocks[i, i])
+                + hamiltonian_.blocks[i, i]
             )
 
-            self.obc_blocks.greater[-1] = 1j * scale_stack(
-                gamma_nn.copy(), self.right_occupancies - 1
+            if (
+                j >= self.system_matrix.num_local_blocks
+                and comm.block.rank == comm.block.size - 1
+            ):
+                # The last rank does not have these blocks.
+                continue
+
+            system_matrix_.blocks[i, j] -= (
+                sse_retarded_hermitian_.blocks[i, j]
+                + 0.5 * (sse_greater_.blocks[i, j] - sse_lesser_.blocks[i, j])
+                + hamiltonian_.blocks[i, j]
+            )
+            system_matrix_.blocks[j, i] -= (
+                sse_retarded_hermitian_.blocks[j, i]
+                + 0.5 * (sse_greater_.blocks[j, i] - sse_lesser_.blocks[j, i])
+                + hamiltonian_.blocks[j, i]
             )
 
-    def _assemble_system_matrix(self, sse_retarded: DSDBSparse) -> None:
+    def _assemble_system_matrix(
+        self,
+        sse_lesser: DSDBSparse,
+        sse_greater: DSDBSparse,
+        sse_retarded_hermitian: DSDBSparse,
+    ) -> None:
         """Assembles the system matrix.
 
         Parameters
         ----------
-        sse_retarded : DSDBSparse
-            The retarded scattering self-energy.
+        sse_lesser : DSDBSparse
+            The lesser scattering self-energy.
+        sse_greater : DSDBSparse
+            The greater scattering self-energy.
+        sse_retarded_hermitian : DSDBSparse
+            The hermitian part of the retarded scattering self-energy.
 
         """
         self.system_matrix.data = 0.0
-        self.system_matrix.fill_diagonal(1.0)
+        if self.overlap is None:
+            self.system_matrix.fill_diagonal(1.0)
+        else:
+            self._add_overlap()
 
         scale_stack(
             self.system_matrix.data,
             self.local_energies + 1j * self.eta,
         )
-        self.system_matrix -= sparse.diags(self.potential, format="csr")
-        _btd_subtract(self.system_matrix, sse_retarded)
-        _btd_subtract(self.system_matrix, self.hamiltonian)
+
+        if self.overlap is None:
+            self.system_matrix -= sparse.diags(self.potential, format="csr")
+        else:
+            self._apply_potential()
+
+        self._subtract_hamiltonian_and_self_energy(
+            sse_lesser,
+            sse_greater,
+            sse_retarded_hermitian,
+        )
 
     def _filter_peaks(self, out: tuple[DSDBSparse, ...]) -> None:
         """Filters out peaks in the Green's functions.
@@ -449,7 +549,7 @@ class ElectronSolver(SubsystemSolver):
         self,
         sse_lesser: DSDBSparse,
         sse_greater: DSDBSparse,
-        sse_retarded: DSDBSparse,
+        sse_retarded_hermitian: DSDBSparse,
         out: tuple[DSDBSparse, ...],
     ):
         """Solves for the electron Green's function.
@@ -460,8 +560,8 @@ class ElectronSolver(SubsystemSolver):
             The lesser self-energy.
         sse_greater : DSDBSparse
             The greater self-energy.
-        sse_retarded : DSDBSparse
-            The retarded self-energy.
+        sse_retarded_hermitian : DSDBSparse
+            The hermitian part of the retarded self-energy.
         out : tuple[DSDBSparse, ...]
             The output matrices. The order is (lesser, greater,
             retarded).
@@ -474,24 +574,26 @@ class ElectronSolver(SubsystemSolver):
             ):
                 homogenize(sse_greater)
                 homogenize(sse_lesser)
-                homogenize(sse_retarded)
+                homogenize(sse_retarded_hermitian)
 
         with profiler.profile_range(
             label="ElectronSolver: Assemble", level="default", comm=comm
         ):
             self.system_matrix.allocate_data()
 
-            self._assemble_system_matrix(sse_retarded)
+            self._assemble_system_matrix(
+                sse_lesser, sse_greater, sse_retarded_hermitian
+            )
 
-        if self.band_edge_tracking == "eigenvalues":
+        if self.band_edge_tracking:
             with profiler.profile_range(
                 label="ElectronSolver: Band edges", level="default", comm=comm
             ):
                 left_band_edges, right_band_edges = find_renormalized_eigenvalues(
                     hamiltonian=self.hamiltonian,
-                    overlap=self.overlap_sparray,
+                    overlap=self.overlap,
                     potential=self.potential,
-                    sigma_retarded=sse_retarded,
+                    sigma_retarded_hermitian=sse_retarded_hermitian,
                     energies=self.energies,
                     conduction_band_guesses=(
                         self.left_fermi_level + self.delta_fermi_level_conduction_band,
@@ -538,59 +640,5 @@ class ElectronSolver(SubsystemSolver):
             self.system_matrix.free_data()
             if self.call_count < self.filtering_iteration_limit:
                 self._filter_peaks(out)
-
-        if self.band_edge_tracking == "dos-peaks":
-
-            with profiler.profile_range(
-                label="ElectronSolver: DOS peaks", level="default", comm=comm
-            ):
-                _, _, g_retarded = out
-                left_band_edges = np.empty((2,), dtype=float)
-                right_band_edges = np.empty((2,), dtype=float)
-
-                if comm.block.rank == 0:
-                    s_00 = self._get_block(self.overlap_sparray, (0, 0))
-                    g_00 = g_retarded.blocks[0, 0]
-
-                    local_left_dos = -xp.mean(
-                        xp.diagonal(g_00 @ s_00, axis1=-2, axis2=-1).imag, axis=-1
-                    )
-
-                    left_dos = comm.stack.all_gather_v(
-                        local_left_dos,
-                        axis=0,
-                        mask=g_retarded._stack_padding_mask,
-                    )
-
-                    e_0_left = find_dos_peaks(left_dos, self.energies)
-                    left_band_edges = np.array(
-                        find_band_edges(e_0_left, self.left_mid_gap_energy)
-                    )
-
-                if comm.block.rank == comm.block.size - 1:
-                    s_nn = self._get_block(self.overlap_sparray, (-1, -1))
-                    n = g_retarded.num_local_blocks - 1
-                    g_nn = g_retarded.blocks[n, n]
-                    local_right_dos = -xp.mean(
-                        xp.diagonal(g_nn @ s_nn, axis1=-2, axis2=-1).imag, axis=-1
-                    )
-
-                    right_dos = comm.stack.all_gather_v(
-                        local_right_dos,
-                        axis=0,
-                        mask=g_retarded._stack_padding_mask,
-                    )
-
-                    e_0_right = find_dos_peaks(right_dos, self.energies)
-                    right_band_edges = np.array(
-                        find_band_edges(e_0_right, self.right_mid_gap_energy)
-                    )
-
-                comm.block.bcast(left_band_edges, root=0, backend="device_mpi")
-                comm.block.bcast(
-                    right_band_edges, root=comm.block.size - 1, backend="device_mpi"
-                )
-
-                self._update_fermi_levels(left_band_edges, right_band_edges)
 
         self.call_count += 1
