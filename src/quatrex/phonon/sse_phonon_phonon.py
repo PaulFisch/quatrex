@@ -110,6 +110,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._ramp_n = int(getattr(config.phonon, "sse_ramp_iterations", 0))
         self._ramp_it = 0
         self._vertex_scale = float(getattr(config.phonon, "sse_vertex_scale", 1.0))
+        self._sse_cutoff = float(
+            getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
             raise ValueError(
@@ -193,6 +195,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # Cached intermediate tau-domain buffers (length
         # n_fft) for FFTd G
         self._tau_cache: tuple | None = None
+        self._rev_perm: "NDArray | None | bool" = False  # False = not built
         self._full_freqs: NDArray | None = None
 
         # Optional zero-mode projector Q_cell, applied two-sided to every band block of Sigma^{<,>}.
@@ -451,18 +454,47 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if m.distribution_state != "nnz":
                 m.dtranspose(discard=True)
         gl_in, gg_in = g_lesser.data, g_greater.data
-        # DC regularisation: when the grid starts at omega=0, zero there both G^< and G^>
-        if bool(abs(float(full_freqs[0])) < 1e-6):
-            gl_in = gl_in.copy(); gl_in[0] = 0.0
-            gg_in = gg_in.copy(); gg_in[0] = 0.0
+        # Low-frequency masking of the bubble INPUT: the Green's functions
+        # stay intact for Dyson/observables; only the copies fed into the
+        # 3-phonon convolution are masked. The omega=0 bin is always
+        # excluded (Bose divergence at DC); below
+        # config.phonon.sse_low_freq_cutoff_thz (0 = off) the modes do not
+        # participate in the SSE at all -- with the matching OUTPUT mask in
+        # step (5), transport below the cutoff is purely ballistic.
+        sse_mask = xp.abs(xp.asarray(full_freqs)) < max(self._sse_cutoff, 1e-6)
+        if bool(sse_mask.any()):
+            gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
+            gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
         gtl.data[:] = self._fft_pad(gl_in, n_fft)
         gtg.data[:] = self._fft_pad(gg_in, n_fft)
         # DFT index-reversal rev(X)[l]=X[(-l) mod n_fft] of the FFT'd G, for
-        # the absorption (negative-omega') terms folded in via G^<(-omega)=G^>(omega)
-        gtlr.data[0] = gtl.data[0]
-        gtlr.data[1:] = gtl.data[:0:-1]
-        gtgr.data[0] = gtg.data[0]
-        gtgr.data[1:] = gtg.data[:0:-1]
+        # the absorption (negative-omega') terms. The exact bosonic
+        # continuation carries the ji-TRANSPOSE (and -q for coupled-q):
+        #     G^<_ij(q, -w) = G^>_ji(-q, w).
+        # The no-transpose shortcut is exact only for the EQUILIBRIUM
+        # (complex-symmetric) part of G; the current-carrying asymmetry of
+        # the nonequilibrium G^< (~2% on cnt33 at dT=10 K) was previously
+        # folded without it, breaking the Phi-derivable energy balance of
+        # the bubble at ~1e-5 (see SCBA._phonon_bubble_energy_balance).
+        perm = self._nnz_transpose_perm(g_lesser)
+        if perm is not None:
+            gl_rev_src = gl_in[..., perm]
+            gg_rev_src = gg_in[..., perm]
+            if nq > 1:
+                # negate the transverse momentum axes (Gamma-centered IDFT
+                # meshes are closed under q -> -q)
+                for ax, k in enumerate(nk, start=1):
+                    neg = (-xp.arange(k)) % k
+                    gl_rev_src = xp.take(gl_rev_src, neg, axis=ax)
+                    gg_rev_src = xp.take(gg_rev_src, neg, axis=ax)
+            Xl = self._fft_pad(gl_rev_src, n_fft)
+            Xg = self._fft_pad(gg_rev_src, n_fft)
+        else:
+            Xl, Xg = gtl.data, gtg.data  # equilibrium-fold fallback
+        gtlr.data[0] = Xl[0]
+        gtlr.data[1:] = Xl[:0:-1]
+        gtgr.data[0] = Xg[0]
+        gtgr.data[1:] = Xg[:0:-1]
 
         # (2) g(tau) nnz->stack: tau-slice of the full band per stack rank
         gtl.dtranspose()
@@ -703,27 +735,60 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # (5) IFFT sigma(τ)→Sigma(omega) in nnz; add into outputs; build Sigma^R.
         sl_data = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_full]
         sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
-        # DC regularisation, completing the G^≷(0)=0 treatment above: a
-        # nonzero scattering Sigma^≷(0) hits the near-singular acoustic
-        # G^R(0) in the Dyson solve and produces a huge spurious DC spike in
-        # G^≷(0)/I(0) (x1e5 the median on the soft d5a wire), which feeds
-        # the soft-mode region every SCBA iteration. The omega=0 bin carries
-        # zero heat (hbar*omega weight), so this costs nothing physical.
-        if bool(abs(float(full_freqs[0])) < 1e-6):
-            sl_data[0] = 0.0
-            sg_data[0] = 0.0
+        # OUTPUT mask, completing the input masking above: the scattering
+        # Sigma is NOT applied below the SSE cutoff (transport there stays
+        # ballistic), and never at the omega=0 bin (a nonzero Sigma^≷(0)
+        # hits the near-singular acoustic G^R(0) and produces a x1e5 DC
+        # spike in I(0) on soft wires; the bin carries zero heat anyway).
+        if bool(sse_mask.any()):
+            sl_data[sse_mask] = 0.0
+            sg_data[sse_mask] = 0.0
         sigma_lesser.data[:] = sigma_lesser.data + sl_data
         sigma_greater.data[:] = sigma_greater.data + sg_data
         # Sigma^R contribution
         if self.retarded_method == "fft":
             delta = sg_data - sl_data
-            sigma_retarded.data[:] = (
-                sigma_retarded.data + 0.5j * hilbert_transform(delta, full_freqs)
-            )
+            hil = 0.5j * hilbert_transform(delta, full_freqs)
+            if bool(sse_mask.any()):
+                hil[sse_mask] = 0.0  # ballistic below the SSE cutoff
+            sigma_retarded.data[:] = sigma_retarded.data + hil
 
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
             self._apply_scp_tadpole(g_lesser, sigma_retarded)
+
+    def _nnz_transpose_perm(self, g: "DSDBSparse") -> "NDArray | None":
+        """Permutation of the (local) nnz axis realizing (i,j) -> (j,i).
+
+        Returns None (with a one-time warning) when unavailable: pattern
+        without rows/cols, transpose-incomplete local slice (nnz split over
+        comm.stack with stack > 1), or block-distributed windows. The fold
+        then falls back to the no-transpose (equilibrium) continuation.
+        """
+        if self._rev_perm is not False:
+            return self._rev_perm
+        perm = None
+        rows = getattr(g, "rows", None)
+        cols = getattr(g, "cols", None)
+        if rows is not None and cols is not None and ranks.block.size == 1:
+            import numpy as _np
+            r = _np.asarray(rows.get() if hasattr(rows, "get") else rows)
+            c = _np.asarray(cols.get() if hasattr(cols, "get") else cols)
+            n_local = int(g.data.shape[-1])
+            if r.size == n_local:  # transpose-closed local slice
+                lut = {(int(i), int(j)): k
+                       for k, (i, j) in enumerate(zip(r, c))}
+                p = _np.array([lut.get((int(j), int(i)), -1)
+                               for i, j in zip(r, c)], dtype=_np.int64)
+                if (p >= 0).all():
+                    perm = xp.asarray(p)
+        if perm is None and ranks.rank == 0:
+            warnings.warn(
+                "SSE bosonic fold: nnz transpose unavailable (stack-split "
+                "nnz or block windows); using the no-transpose equilibrium "
+                "continuation (exact only for the symmetric part of G).")
+        self._rev_perm = perm
+        return perm
 
     @staticmethod
     def _fft_pad(data: NDArray, n_fft: int) -> NDArray:

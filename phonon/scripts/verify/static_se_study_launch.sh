@@ -2,7 +2,7 @@
 # Fan out the static-correction magnitude study: (T x mode) for one structure.
 set -u
 cd /usr/scratch/mont-fort11/pfischill/quatrex
-OUT=/tmp/claude/se_study; mkdir -p "$OUT"
+OUT=phonon/scripts/out/snapshots; mkdir -p "$OUT"
 STRUCT=${STRUCT:?set STRUCT}
 FC3=${FC3:-}
 NFREQ=${NFREQ:-61}
