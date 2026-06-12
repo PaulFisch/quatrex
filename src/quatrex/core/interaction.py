@@ -91,12 +91,12 @@ class CoulombScreeningInteraction(Interaction):
 
         data.p_greater.allocate_data()
         data.p_lesser.allocate_data()
-        data.p_retarded.allocate_data()
+        data.p_retarded_hermitian.allocate_data()
 
         self.p_coulomb_screening.compute(
             data.g_lesser,
             data.g_greater,
-            out=(data.p_lesser, data.p_greater, data.p_retarded),
+            out=(data.p_lesser, data.p_greater, data.p_retarded_hermitian),
         )
 
         data.w_greater.allocate_data()
@@ -105,7 +105,7 @@ class CoulombScreeningInteraction(Interaction):
         self.coulomb_screening_solver.solve(
             data.p_lesser,
             data.p_greater,
-            data.p_retarded,
+            data.p_retarded_hermitian,
             out=(data.w_lesser, data.w_greater),
         )
 
@@ -113,11 +113,11 @@ class CoulombScreeningInteraction(Interaction):
 
         data.p_lesser.free_data()
         data.p_greater.free_data()
-        data.p_retarded.free_data()
+        data.p_retarded_hermitian.free_data()
 
         self.sigma_fock.compute(
             data.g_lesser,
-            out=(data.sigma_retarded,),
+            out=(data.sigma_retarded_hermitian,),
         )
 
         self.sigma_coulomb_screening.compute(
@@ -128,7 +128,7 @@ class CoulombScreeningInteraction(Interaction):
             out=(
                 data.sigma_lesser,
                 data.sigma_greater,
-                data.sigma_retarded,
+                data.sigma_retarded_hermitian,
             ),
         )
 
@@ -161,7 +161,7 @@ class PhononPhononInteraction(Interaction):
             out=(
                 data.sigma_lesser,
                 data.sigma_greater,
-                data.sigma_retarded,
+                data.sigma_retarded_hermitian,
             ),
         )
 
@@ -184,7 +184,7 @@ class PseudoScatteringPhononInteraction(Interaction):
             out=(
                 data.sigma_lesser,
                 data.sigma_greater,
-                data.sigma_retarded,
+                data.sigma_retarded_hermitian,
             ),
         )
 

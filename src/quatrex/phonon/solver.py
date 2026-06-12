@@ -16,7 +16,7 @@ from quatrex.bandstructure.band_edges import (
     find_renormalized_eigenvalues,
 )
 from quatrex.core.statistics import bose_einstein
-from quatrex.core.utils import get_periodic_superblocks
+from qttools.toeplitz.toeplitz import get_periodic_superblocks
 from quatrex.device.inputs import load_matrix
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.subsystem import SubsystemSolver
