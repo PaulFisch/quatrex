@@ -749,6 +749,38 @@ class PhononConfig(BaseModel):
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
     warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
 
+    sse_low_freq_cutoff_thz: NonNegativeFloat = 0.0
+    """Low-frequency cutoff for the 3-phonon SSE (THz, 0 = off). Modes below
+    the cutoff are excluded from the bubble (masked on the INPUT Green's
+    functions fed to the convolution -- the Green's functions themselves are
+    untouched for Dyson/observables) AND the resulting Sigma is not applied
+    below the cutoff: transport below it stays purely BALLISTIC. The
+    omega=0 bin is always excluded regardless."""
+
+    broadening_form: Literal["squared", "linear"] = "linear"
+    """Regularisation of the phonon Dyson equation:
+    - "squared" (legacy): (omega + i*eta)^2 = omega^2 - eta^2 + 2i*eta*omega.
+      The -eta^2 REAL shift pushes omega <~ eta below the acoustic band
+      bottom -> artificially evanescent low-omega modes (T_eff suppressed
+      to ~half the acoustic plateau at omega ~ eta).
+    - "linear": omega^2 + 2i*eta*omega -- same frequency-proportional
+      damping, no band-edge shift (the AGF literature's omega^2 + i*delta
+      with delta -> 0+, cf. Mingo PRB 68, 245406), so T(omega->0)
+      approaches the physical acoustic-channel plateau."""
+
+    bubble_balance_check: bool = True
+    """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
+    bubble: P_in = sum hbar*w*Tr[Sigma^< G^>] must equal P_out (conserving
+    identity). Requires keeping the Green's-function data through the
+    nnz->stack back-transpose (free at stack=1; one extra all-to-all per
+    iteration at stack>1)."""
+
+    sse_cutoff_zero_g: bool = False
+    """With ``sse_low_freq_cutoff_thz`` > 0: additionally zero the lead
+    occupancies below the cutoff, killing G^< (and hence ALL transport)
+    there -- the hard "totally zeroed" treatment. Default False = the
+    masked treatment (transport below the cutoff stays ballistic)."""
+
     sse_vertex_scale: PositiveFloat = 1.0
     """Uniform 3-phonon vertex scale lambda (Sigma scales as lambda^2).
     lambda < 1 = reduced-coupling runs for LOA-style extrapolation and for

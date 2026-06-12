@@ -134,6 +134,15 @@ class PhononSolver(SubsystemSolver):
             xp.isfinite(self.left_occupancies), self.left_occupancies, 0.0)
         self.right_occupancies = xp.where(
             xp.isfinite(self.right_occupancies), self.right_occupancies, 0.0)
+        # Hard low-frequency cutoff (sse_cutoff_zero_g): no lead injection
+        # below the SSE cutoff -> G^< = 0 there -> zero current below the
+        # cutoff in BOTH ballistic and anharmonic runs (the "totally
+        # zeroed" treatment, vs. the default masked/ballistic-below one).
+        _cut = float(getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
+        if _cut > 0.0 and bool(getattr(config.phonon, "sse_cutoff_zero_g", False)):
+            _m = xp.abs(xp.asarray(self.local_frequencies)) < _cut
+            self.left_occupancies = xp.where(_m, 0.0, self.left_occupancies)
+            self.right_occupancies = xp.where(_m, 0.0, self.right_occupancies)
 
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc
@@ -166,6 +175,13 @@ class PhononSolver(SubsystemSolver):
             )
             # Apply the retarded boundary self-energy.
             sigma_00 = m_10 @ g_00 @ m_01
+            if len(self.system_matrix.global_stack_shape) == 1:
+                # Gamma-only (real-symmetric D): the exact contact Sigma^R is
+                # complex-SYMMETRIC, but the NEVP eigenvector construction
+                # breaks it at ~1e-2, which propagates into G (measured
+                # G-asymmetry 1.8%) and breaks the bosonic no-transpose fold
+                # of the SSE. Project back onto the symmetric subspace.
+                sigma_00 = 0.5 * (sigma_00 + sigma_00.swapaxes(-2, -1))
             self.obc_blocks.retarded[0] = sigma_00
             gamma_00 = 1j * (sigma_00 - sigma_00.conj().swapaxes(-2, -1))
 
@@ -212,6 +228,8 @@ class PhononSolver(SubsystemSolver):
 
             # Apply the retarded boundary self-energy.
             sigma_nn = m_mn @ g_nn @ m_nm
+            if len(self.system_matrix.global_stack_shape) == 1:
+                sigma_nn = 0.5 * (sigma_nn + sigma_nn.swapaxes(-2, -1))
 
             self.obc_blocks.retarded[-1] = sigma_nn
 
@@ -242,10 +260,15 @@ class PhononSolver(SubsystemSolver):
         # [ (omega+i eta)^2 - D - Sigma ] G = I, with D the dynamical matrix
         # and Sigma the scattering self-energy, all in THz^2
         self.system_matrix.fill_diagonal(1.0)
-        scale_stack(
-            self.system_matrix.data,
-            (self.local_frequencies + 1j * self.eta) ** 2,
-        )
+        if getattr(self.config.phonon, "broadening_form", "squared") == "linear":
+            # omega^2 + 2i*eta*omega: frequency-proportional damping WITHOUT
+            # the -eta^2 band-edge shift of (omega+i*eta)^2 (which makes
+            # omega <~ eta artificially evanescent; see config docstring).
+            z2 = (self.local_frequencies ** 2
+                  + 2j * self.eta * xp.abs(self.local_frequencies))
+        else:
+            z2 = (self.local_frequencies + 1j * self.eta) ** 2
+        scale_stack(self.system_matrix.data, z2)
 
         _btd_subtract(self.system_matrix, sse_retarded)
         _btd_subtract(self.system_matrix, self.dynamical_matrix)

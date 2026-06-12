@@ -54,9 +54,17 @@ from phonon_inputs.separable import (
 from phonon.solver.fc3_device import build_device_fc3_blocks
 from phonon_inputs.quatrex_writer import write_fc3_blocks, write_structure_xyz
 
+# Gamma-only (k==1) finite-device FC3 reaps. build_cnt() is species-agnostic, so
+# the multi-species SiNW (Si+H) wires flow through it unchanged.
 CNT_DIR = {
     "cnt33": _PHON / "configs/cnt/fc3_hiphive_cnt33_vasp",
     "cnt80": _PHON / "configs/cnt/fc3_hiphive_cnt80_vasp",
+    "sinw_d5a": _PHON / "configs/sinw/fc3_hiphive_sinw100_d5a_sc4_vasp",
+    "sinw_d11a": _PHON / "configs/sinw/fc3_hiphive_sinw100_d11a_vasp",
+    # SrTiO3 (5-atom cubic perovskite, [3,3,3]) -- Gamma-only finite slab,
+    # best-effort strong-anharmonicity transport (the bulk is transversely
+    # periodic; this is a finite-cross-section device).
+    "srtio3": _PHON / "configs/perovskite/fc3_hiphive_srtio3_333_vasp",
 }
 
 
@@ -150,7 +158,7 @@ def _load_bulk_si(fc3_subdir):
     return phonon, str(d / "fc3.hdf5")
 
 
-def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out):
+def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1):
     """Transversely-periodic (k>1) Si film. Port of /tmp/build_sifilm_inputs.py."""
     from phonon.solver.se_q import _build_folded_vertices
     from quatrex.phonon.qfold import save_qfold
@@ -228,9 +236,10 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out):
     with h5py.File(fc3_path, "r") as f:
         fc3 = f["fc3"][:]
     M_stacked = build_realspace_fc3_matrices(fc3, nat, phonon.supercell.masses, ref_sc)
-    print(f"building {n_kpts}^2-pair folded vertices (n_slabs={nslabs})...", flush=True)
+    print(f"building {n_kpts}^2-pair folded vertices (n_slabs={nslabs}, nproc={nproc})...", flush=True)
     vertices = _build_folded_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
-                                      nslabs, n_kpts, q_points, q_diff_map, tdir)
+                                      nslabs, n_kpts, q_points, q_diff_map, tdir,
+                                      nproc=nproc)
     print(f"  folded vertex pairs: {len(vertices)}", flush=True)
     save_qfold(out / "qfold_vertices.npz", vertices, q_diff_map, (nk, nk))
 
@@ -250,7 +259,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--system", required=True, choices=["cnt33", "cnt80", "sifilm"])
+    p.add_argument("--system", required=True,
+                   choices=["cnt33", "cnt80", "sinw_d5a", "sinw_d11a", "srtio3", "sifilm"])
     p.add_argument("-L", "--ncells", type=int, default=2, help="CNT transport cells")
     p.add_argument("--nslabs", type=int, default=5, help="film layers along transport")
     p.add_argument("--nk", type=int, default=8, help="film transverse mesh (odd)")
@@ -261,24 +271,43 @@ def main():
                    help="grid start (0.0 = w0=0, best heat-flow conservation)")
     p.add_argument("--fc3-subdir", default="reaps/si_big_hiphive",
                    help="film bulk-Si FC reap (default the 5^3 hiphive)")
-    p.add_argument("--no-asr", action="store_true", help="CNT: disable FC3 ASR projection")
+    # 2026-06-12: ASR projection now DEFAULT-OFF. enforce_asr_fc3_matrices is
+    # leg-asymmetric (breaks the vertex S3 symmetry -> bubble energy balance)
+    # and over-strong (projects the whole per-class q=0 subspace, suppressing
+    # linewidths ~4-5x vs phono3py). Both the cnt33 and d5a hiphive FC3 files
+    # satisfy the translational sum rule to ~1e-14 raw -- no projection needed.
+    p.add_argument("--asr", action="store_true",
+                   help="enable the LEGACY FC3 ASR projection (deprecated: "
+                        "leg-asymmetric, breaks S3/conservation, crushes "
+                        "linewidths; raw hiphive FC3 is already ASR-exact)")
+    p.add_argument("--no-asr", action="store_true",
+                   help="deprecated no-op (ASR projection is off by default)")
     p.add_argument("--out", required=True)
+    p.add_argument("--nproc", type=int, default=1,
+                   help="parallel workers for the O(nk^2) folded-vertex build")
     a = p.parse_args()
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    if a.system in ("cnt33", "cnt80"):
+    if a.system in ("cnt33", "cnt80", "sinw_d5a", "sinw_d11a", "srtio3"):
         tdir = a.tdir or "z"
-        nfreq = a.nfreq or 161
-        fmax = a.fmax or 55.0
+        if a.system in ("cnt33", "cnt80"):
+            nfreq = a.nfreq or 161
+            fmax = a.fmax or 55.0
+        elif a.system == "srtio3":  # perovskite optical max ~24 THz
+            nfreq = a.nfreq or 121
+            fmax = a.fmax or 26.0
+        else:  # SiNW: Si optical max ~15.5 THz -> tighter window than the CNT's 55
+            nfreq = a.nfreq or 101
+            fmax = a.fmax or 18.0
         emin = a.emin if a.emin is not None else 0.0
-        build_cnt(a.system, a.ncells, tdir, nfreq, fmax, emin, not a.no_asr, out)
+        build_cnt(a.system, a.ncells, tdir, nfreq, fmax, emin, bool(a.asr), out)
     else:
         tdir = a.tdir or "x"
         nfreq = a.nfreq or 121
         fmax = a.fmax or 15.0
-        build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, a.fc3_subdir, out)
+        build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, a.fc3_subdir, out, a.nproc)
     print(f"inputs -> {out}", flush=True)
 
 

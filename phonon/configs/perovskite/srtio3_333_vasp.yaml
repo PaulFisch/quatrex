@@ -1,0 +1,60 @@
+## phonon_inputs config: cubic SrTiO3 (Pm-3m) -- strongly anharmonic perovskite
+## (Tadano & Tsuneyuki, JPSJ 87 041015 (2018)). The harmonic phonons have
+## UNSTABLE soft modes (ferroelectric TO at Gamma, antiferrodistortive at R);
+## the self-consistent-phonon LOOP stiffens them to real frequencies -- the
+## regime where the static diagrams dominate (unlike weakly-anharmonic Si).
+## Larger rattle amplitude samples the anharmonic well.
+fc_method: hiphive
+structure:
+  source: inline
+  symbols: [Sr, Ti, O, O, O]
+  lattice:
+    - [3.905, 0.0, 0.0]
+    - [0.0, 3.905, 0.0]
+    - [0.0, 0.0, 3.905]
+  scaled_positions:
+    - [0.0, 0.0, 0.0]        # Sr
+    - [0.5, 0.5, 0.5]        # Ti
+    - [0.5, 0.5, 0.0]        # O
+    - [0.5, 0.0, 0.5]        # O
+    - [0.0, 0.5, 0.5]        # O
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Sr: Sr_sv
+    Ti: Ti_sv
+    O: O
+  encut: 520
+  ediff: 1.0e-6
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: Auto
+  lwave: false
+  lcharg: false
+  ncore: 4
+  kpar: 2
+  kpoints_scf: [2, 2, 2]
+  vasp_command: "ulimit -s unlimited; export OMP_STACKSIZE=512m; export LD_LIBRARY_PATH=/usr/pack/intel_compiler-2020-af/x64/lib/intel64:/usr/pack/intel_compiler-2020-af/x64/mkl/lib/intel64:/home/jiacao/openmpi/4.1.1-ifort/lib/; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 28 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+relax:
+  calculation: relax              # cubic Pm-3m: all atoms at special positions ->
+  forc_conv_thr: 0.01             # relaxation is symmetry-trivial (kept for the pipeline)
+  calculator: vasp
+  work_dir: ./relax_srtio3_333_vasp
+fc3:
+  calculator: vasp
+hiphive:
+  supercell: [3, 3, 3]            # 40 atoms (7.81 A); cutoffs < L/2 = 3.9 A
+  n_structures: 40
+  rattle_method: mc
+  rattle_std: 0.025                # Angstrom -- larger to sample the soft-mode anharmonicity
+  rattle_d_min: 1.4               # min separation during MC rattle
+  rattle_n_iter: 2
+  rattle_seed: 303
+  cutoffs: [5.5, 4.0, 3.0]        # [FC2, FC3, FC4] Angstrom
+  fit_method: rfe                 # recovers the quartic (ardr prunes it)
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: vasp
+  work_dir: ./fc3_hiphive_srtio3_333_vasp
+  pw_timeout: 3600

@@ -66,8 +66,8 @@ if big:
 ax.plot(list(guo), list(guo.values()), "k*", ms=15, label="Guo et al.\\ 2020 (anharmonic)")
 
 ax.set_xlabel("film thickness $L$ (nm)")
-ax.set_ylabel(r"cross-plane conductance $G$ (MW\,m$^{-2}$K$^{-1}$)")
-ax.set_title("Si thin film, cross-plane conductance vs.\\ Guo 2020", fontsize=10)
+ax.set_ylabel(r"cross-plane conductance $G$ (MW m$^{-2}$K$^{-1}$)")
+ax.set_title("Si thin film, cross-plane conductance vs. Guo 2020", fontsize=10)
 ax.set_ylim(0, 1150)
 ax.legend(fontsize=8, ncol=1, loc="upper right")
 ax.grid(alpha=0.3)

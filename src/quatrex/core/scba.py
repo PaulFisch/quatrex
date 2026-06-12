@@ -608,6 +608,17 @@ class SCBA:
                           f"lead balance {balance:.4e} "
                           f"(best {self._best_heat_conservation:.4e}; "
                           f"internal spread {spread:.4e})", flush=True)
+                bal = self._phonon_bubble_energy_balance()
+                if bal is not None:
+                    p_in, p_out, bres = bal
+                    if not hasattr(self, "_bubble_balance_history"):
+                        self._bubble_balance_history = []
+                    self._bubble_balance_history.append(
+                        (p_in.real, p_out.real, bres))
+                    if comm.rank == 0:
+                        print(f"Bubble energy balance: P_in={p_in.real:.6e} "
+                              f"P_out={p_out.real:.6e} resid={bres:.3e}",
+                              flush=True)
                 # Conservation gate = LEAD balance |J_L - J_R| / |J|: in steady
                 # state the in/out lead currents must match; this is what the
                 # dense reference checks (dense.py conservation_err) and what a
@@ -624,6 +635,78 @@ class SCBA:
                     return True
 
         return False
+
+    def _phonon_bubble_energy_balance(self):
+        """Bubble energy-balance diagnostic: the in- and out-scattering
+        energy integrals
+
+            P_in  = sum_w  hbar*w * Tr[Sigma^<(w) G^>(w)]
+            P_out = sum_w  hbar*w * Tr[Sigma^>(w) G^<(w)]
+
+        must be EQUAL for the Phi-derivable 3-phonon bubble evaluated with
+        the same iterand G on all legs (Lu & Wang, arXiv:0704.0723 App. B;
+        the conserving identity Tr[Sigma^< G^> - Sigma^> G^<] = 0 of a
+        Luttinger-Ward skeleton, folded to the one-sided zero-based grid
+        via the bosonic reflection G^<_ij(w) = G^>_ji(-w)). The trace uses
+        the TRANSPOSE pairing Sigma_ij G_ji. A residual at roundoff is
+        healthy; O(0.1) means the fold/vertex/grid breaks the reflection
+        or permutation symmetry (e.g. a non-zero-based frequency grid).
+
+        Returns (P_in, P_out, resid) or None if unavailable. Called between
+        the SSE evaluation and the mixing step, where data.sigma_* is the
+        raw new Sigma[G^[n]] and data.g_* is G^[n] -- the same-iterand
+        pairing the identity requires (a mixed-iterate pairing need not
+        balance).
+        """
+        if comm.block.size > 1:
+            return None  # rows/cols are block-window-local; not wired up
+        g_l, g_g = self.data.g_lesser, self.data.g_greater
+        s_l, s_g = self.data.sigma_lesser, self.data.sigma_greater
+        rows = getattr(g_l, "rows", None)
+        cols = getattr(g_l, "cols", None)
+        if rows is None or cols is None:
+            return None
+        if getattr(self, "_bal_perm", None) is None:
+            r = np.asarray(get_host(rows)).astype(np.int64)
+            c = np.asarray(get_host(cols)).astype(np.int64)
+            lut = {(int(i), int(j)): k for k, (i, j) in enumerate(zip(r, c))}
+            perm = np.array([lut.get((int(j), int(i)), -1)
+                             for i, j in zip(r, c)], dtype=np.int64)
+            ok = perm >= 0
+            if not ok.all() and comm.rank == 0:
+                print(f"Bubble balance: {int((~ok).sum())}/{ok.size} nnz "
+                      "without transpose partner excluded.", flush=True)
+            self._bal_perm = (xp.asarray(np.where(ok, perm, 0)),
+                              xp.asarray(ok.astype(np.float64)))
+        perm, ok = self._bal_perm
+        solver = self.subsystems.get("phonon")
+        w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
+
+        def weighted(sig, g):
+            sd = sig.data.reshape(sig.data.shape[0], -1, sig.data.shape[-1])
+            gd = g.data.reshape(g.data.shape[0], -1, g.data.shape[-1])
+            gt = gd[..., perm] * ok  # G_ji paired with Sigma_ij
+            tr = xp.sum(sd * gt, axis=(1, 2))  # trace per local omega
+            if os.environ.get("QX_BALANCE_DEBUG") == "1" and comm.rank == 0:
+                g_asym = float(get_host(
+                    xp.abs(gd - gd[..., perm]).max() / (xp.abs(gd).max() + 1e-300)))
+                s_asym = float(get_host(
+                    xp.abs(sd - sd[..., perm]).max() / (xp.abs(sd).max() + 1e-300)))
+                print(f"  [bal-dbg] |sig|={float(get_host(xp.abs(sig.data).max())):.3e} "
+                      f"|g|={float(get_host(xp.abs(g.data).max())):.3e} "
+                      f"G-asym={g_asym:.3e} S-asym={s_asym:.3e} "
+                      f"|tr|max={float(get_host(xp.abs(tr).max())):.3e}", flush=True)
+            return complex(get_host(xp.sum(w * tr)))
+
+        p_in = weighted(s_l, g_g)
+        p_out = weighted(s_g, g_l)
+        if comm.stack.size > 1:
+            buf = np.array([p_in, p_out], dtype=complex)
+            recv = np.empty_like(buf)
+            comm.stack.all_reduce(buf, recv, op="sum")
+            p_in, p_out = complex(recv[0]), complex(recv[1])
+        resid = abs(p_in - p_out) / max(abs(p_in) + abs(p_out), 1e-300)
+        return p_in, p_out, resid
 
     def _phonon_heat_flow_conservation(self):
         """Heat-flow conservation of the anharmonic phonon SCBA.
@@ -855,8 +938,17 @@ class SCBA:
                 with profiler.profile_range(
                     label="SCBA: stack->nnz transpose back", level="default", comm=comm
                 ):
+                    # Keep G through the back-transpose when the bubble
+                    # energy-balance diagnostic needs the same-iterand
+                    # (Sigma[G^n], G^n) pairing at the convergence check.
+                    keep_g = bool(
+                        self.config.scba.phonon
+                        and getattr(self.config.phonon, "model", "") == "negf"
+                        and getattr(self.config.phonon,
+                                    "bubble_balance_check", False)
+                    )
                     for m in (self.data.g_lesser, self.data.g_greater):
-                        m.dtranspose(discard=True)  # These can be safely discarded.
+                        m.dtranspose(discard=not keep_g)
                         assert m.distribution_state == "stack"
                     for m in (
                             self.data.sigma_lesser,
@@ -867,6 +959,15 @@ class SCBA:
                         assert m.distribution_state == "stack"
 
             # Symmetrize the self-energy.
+            if os.environ.get("QX_BALANCE_PRE_SYM") == "1":
+                # Bubble balance on the RAW SSE output, before the
+                # skew-Hermitian projection below alters Sigma^<>: isolates
+                # the projection's contribution to the balance floor.
+                bal = self._phonon_bubble_energy_balance()
+                if bal is not None and comm.rank == 0:
+                    print(f"Bubble energy balance (pre-sym): "
+                          f"P_in={bal[0].real:.6e} P_out={bal[1].real:.6e} "
+                          f"resid={bal[2]:.3e}", flush=True)
             self._symmetrize_sigma()
 
             # Add the anti-Hermitian part to the retarded self-energy.
