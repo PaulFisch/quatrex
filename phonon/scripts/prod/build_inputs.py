@@ -73,7 +73,7 @@ def _key_str(k):
     return f"[{k[0]}, {k[1]}, {k[2]}]"
 
 
-def build_cnt(system, ncells, tdir, nfreq, fmax, emin, asr, out):
+def build_cnt(system, ncells, tdir, nfreq, fmax, emin, out):
     """Gamma-only (k==1) CNT device. Port of /tmp/build_cnt_inputs.py."""
     D = CNT_DIR[system]
     meta = json.load(open(D / "hiphive_meta.json"))
@@ -96,7 +96,7 @@ def build_cnt(system, ncells, tdir, nfreq, fmax, emin, asr, out):
     print(
         f"{system}: prim {nat} atoms, ndof/cell={nd}, supercell {scm} "
         f"(n_qz={n_qz}), transport={tdir}, ncells={ncells}, "
-        f"grid {emin}-{fmax}/{nfreq}, ASR={asr}",
+        f"grid {emin}-{fmax}/{nfreq}",
         flush=True,
     )
 
@@ -133,7 +133,6 @@ def build_cnt(system, ncells, tdir, nfreq, fmax, emin, asr, out):
     prim_idx, _cf, slab_idx, ref = build_supercell_mapping(phonon, tdir)
     M = build_realspace_fc3_matrices(
         fc3_raw, nat, phonon.supercell.masses, ref,
-        enforce_asr=asr, prim_indices=prim_idx,
     )
     phi = build_device_fc3_blocks(M, prim_idx, slab_idx, nat, ncells)
     phi = {k: np.ascontiguousarray(v.astype(complex)) for k, v in phi.items()}
@@ -271,17 +270,10 @@ def main():
                    help="grid start (0.0 = w0=0, best heat-flow conservation)")
     p.add_argument("--fc3-subdir", default="reaps/si_big_hiphive",
                    help="film bulk-Si FC reap (default the 5^3 hiphive)")
-    # 2026-06-12: ASR projection now DEFAULT-OFF. enforce_asr_fc3_matrices is
-    # leg-asymmetric (breaks the vertex S3 symmetry -> bubble energy balance)
-    # and over-strong (projects the whole per-class q=0 subspace, suppressing
-    # linewidths ~4-5x vs phono3py). Both the cnt33 and d5a hiphive FC3 files
-    # satisfy the translational sum rule to ~1e-14 raw -- no projection needed.
-    p.add_argument("--asr", action="store_true",
-                   help="enable the LEGACY FC3 ASR projection (deprecated: "
-                        "leg-asymmetric, breaks S3/conservation, crushes "
-                        "linewidths; raw hiphive FC3 is already ASR-exact)")
-    p.add_argument("--no-asr", action="store_true",
-                   help="deprecated no-op (ASR projection is off by default)")
+    # The FC3 vertex is used raw (plain truncation). The former ASR
+    # projection was removed 2026-06-12: it was leg-asymmetric (broke the
+    # vertex S3 symmetry -> energy conservation) and over-strong (suppressed
+    # linewidths ~4-5x vs phono3py); hiphive fits are ASR-exact raw.
     p.add_argument("--out", required=True)
     p.add_argument("--nproc", type=int, default=1,
                    help="parallel workers for the O(nk^2) folded-vertex build")
@@ -302,7 +294,7 @@ def main():
             nfreq = a.nfreq or 101
             fmax = a.fmax or 18.0
         emin = a.emin if a.emin is not None else 0.0
-        build_cnt(a.system, a.ncells, tdir, nfreq, fmax, emin, bool(a.asr), out)
+        build_cnt(a.system, a.ncells, tdir, nfreq, fmax, emin, out)
     else:
         tdir = a.tdir or "x"
         nfreq = a.nfreq or 121

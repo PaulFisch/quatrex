@@ -123,8 +123,7 @@ def build_supercell_mapping(phonon, transport_direction="x"):
 
 
 def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
-                                 ref_sc_atoms, *, enforce_asr=False,
-                                 prim_indices=None):
+                                 ref_sc_atoms):
     """Build mass-weighted FC3 matrices in real space.
 
     For each DOF a = (i_prim, alpha), builds M_a of shape (dim_sc, dim_sc)
@@ -137,20 +136,17 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
     nat_prim : int
     masses_super : ndarray, shape (n_super,)
     ref_sc_atoms : ndarray, shape (nat_prim,)
-    enforce_asr : bool, optional
-        If True, project the assembled ``M_stacked`` onto the
-        translational-acoustic-sum-rule manifold via
-        :func:`enforce_asr_fc3_matrices` before returning. The exact FC3
-        annihilates the uniform-translation vector on every leg (rigid
-        translation of the whole structure is an exact symmetry); a
-        cluster-expansion / finite-cutoff fit leaves a residual that
-        injects spurious low-omega weight into the 3-phonon bubble. This
-        removes only that non-translation-invariant fitted component
-        (minimum-norm projection); the harmonic baseline is untouched.
-        Default ``False`` (raw fitted vertex). Requires ``prim_indices``.
-    prim_indices : ndarray, shape (n_super,), optional
-        Supercell-atom -> primitive-atom map (from
-        :func:`build_supercell_mapping`). Required when ``enforce_asr``.
+
+    Notes
+    -----
+    The raw fitted vertex is used as-is (plain truncation). The former
+    optional "ASR projection" (removed 2026-06-12) was leg-asymmetric and
+    over-strong: it broke the S3 permutation symmetry of the vertex (and
+    with it exact energy conservation of the SCBA bubble) and suppressed
+    3-phonon linewidths ~4-5x vs phono3py. hiphive fits are already
+    translation-invariant to machine precision; a genuinely ASR-violating
+    fit would need a minimal, leg-symmetric projection (the 3 global
+    translation vectors on all three legs), never a per-leg one.
 
     Returns
     -------
@@ -179,62 +175,7 @@ def build_realspace_fc3_matrices(fc3_raw, nat_prim, masses_super,
             mat *= CONVERSION_FC3_THZ
             M_stacked[a * dim_sc:(a + 1) * dim_sc, :] = mat
 
-    if enforce_asr:
-        if prim_indices is None:
-            raise ValueError(
-                "build_realspace_fc3_matrices(enforce_asr=True) requires "
-                "prim_indices (the supercell->primitive map from "
-                "build_supercell_mapping)."
-            )
-        M_stacked = enforce_asr_fc3_matrices(M_stacked, nat_prim, prim_indices)
-
     return M_stacked
-
-
-def enforce_asr_fc3_matrices(M_stacked, nat_prim, prim_indices):
-    """Enforce acoustic sum rule on FC3 matrices via projection.
-
-    For each M_a (dim_sc x dim_sc), removes the component that couples
-    to uniform translations by projecting out the null space of T(Gamma).
-
-    The ASR requires sum_{l,b} Phi(0b1, lb2, l'b3) = 0, which in
-    Fourier space means Phi(q=0, q') = 0.  This is equivalent to
-    T(Gamma) @ M_a = 0 and M_a @ T(Gamma)^T = 0.
-
-    Parameters
-    ----------
-    M_stacked : ndarray, shape (n_dof * dim_sc, dim_sc)
-    nat_prim : int
-    prim_indices : ndarray, shape (n_super,)
-
-    Returns
-    -------
-    M_corrected : ndarray, same shape as M_stacked
-    """
-    n_dof = nat_prim * 3
-    n_super = len(prim_indices)
-    dim_sc = n_super * 3
-
-    counts = np.zeros(nat_prim)
-    for s in range(n_super):
-        counts[prim_indices[s]] += 1
-
-    P = np.zeros((dim_sc, n_dof))
-    for s in range(n_super):
-        kappa = prim_indices[s]
-        w = 1.0 / np.sqrt(counts[kappa])
-        for beta in range(3):
-            P[s * 3 + beta, kappa * 3 + beta] = w
-
-    PPt = P @ P.T  # (dim_sc, dim_sc)
-    I_minus_PPt = np.eye(dim_sc) - PPt
-
-    M_corrected = np.zeros_like(M_stacked)
-    for a in range(n_dof):
-        M_a = M_stacked[a * dim_sc:(a + 1) * dim_sc, :]
-        M_corrected[a * dim_sc:(a + 1) * dim_sc, :] = I_minus_PPt @ M_a @ I_minus_PPt
-
-    return M_corrected
 
 
 def build_gathering_matrix(prim_indices, cell_frac, q_frac,
@@ -311,7 +252,6 @@ def decompose_fc3_supercell(
     ref_sc_atoms: np.ndarray,
     rank: int | None = None,
     tol: float = 1e-8,
-    enforce_asr: bool = False,
 ) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
     """Low-rank decomposition of supercell FC3 with shared right factor.
 
@@ -332,8 +272,6 @@ def decompose_fc3_supercell(
     prim_indices : ndarray, shape (n_super,)
     ref_sc_atoms : ndarray, shape (nat_prim,)
     rank, tol : SVD truncation control.
-    enforce_asr : bool
-        If True, project out uniform-translation components before SVD.
 
     Returns
     -------
@@ -350,11 +288,6 @@ def decompose_fc3_supercell(
     M_stacked = build_realspace_fc3_matrices(
         fc3_raw, nat_prim, masses_super, ref_sc_atoms
     )
-
-    if enforce_asr:
-        M_stacked = enforce_asr_fc3_matrices(
-            M_stacked, nat_prim, prim_indices
-        )
 
     # SVD
     U, S, Vt = np.linalg.svd(M_stacked, full_matrices=False)
@@ -590,7 +523,6 @@ def separable_anharmonic_transmission(
     n_slabs: int = 1,
     rank: int | None = None,
     svd_tol: float = 1e-8,
-    enforce_asr: bool = False,
     verbose: bool = True,
 ) -> dict:
     """Anharmonic phonon transmission via separable FC3 self-energy.
@@ -611,8 +543,6 @@ def separable_anharmonic_transmission(
         SVD rank.  None for automatic (via svd_tol).
     svd_tol : float
         Relative singular value cutoff.
-    enforce_asr : bool
-        If True, project out uniform-translation components before SVD.
 
     Returns
     -------
@@ -654,7 +584,7 @@ def separable_anharmonic_transmission(
 
     F_list, H, svals = decompose_fc3_supercell(
         fc3_raw, n_atoms, masses_super, prim_indices,
-        ref_sc_atoms, rank=rank, tol=svd_tol, enforce_asr=enforce_asr,
+        ref_sc_atoms, rank=rank, tol=svd_tol,
     )
     R = len(F_list)
     recon_err = reconstruction_error(

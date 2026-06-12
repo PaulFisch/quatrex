@@ -260,14 +260,11 @@ class PhononSolver(SubsystemSolver):
         # [ (omega+i eta)^2 - D - Sigma ] G = I, with D the dynamical matrix
         # and Sigma the scattering self-energy, all in THz^2
         self.system_matrix.fill_diagonal(1.0)
-        if getattr(self.config.phonon, "broadening_form", "squared") == "linear":
-            # omega^2 + 2i*eta*omega: frequency-proportional damping WITHOUT
-            # the -eta^2 band-edge shift of (omega+i*eta)^2 (which makes
-            # omega <~ eta artificially evanescent; see config docstring).
-            z2 = (self.local_frequencies ** 2
-                  + 2j * self.eta * xp.abs(self.local_frequencies))
-        else:
-            z2 = (self.local_frequencies + 1j * self.eta) ** 2
+        # omega^2 + 2i*eta*omega: frequency-proportional damping WITHOUT the
+        # -eta^2 band-edge shift of (omega+i*eta)^2 (which makes omega <~ eta
+        # artificially evanescent and suppresses the acoustic plateau).
+        z2 = (self.local_frequencies ** 2
+              + 2j * self.eta * xp.abs(self.local_frequencies))
         scale_stack(self.system_matrix.data, z2)
 
         _btd_subtract(self.system_matrix, sse_retarded)

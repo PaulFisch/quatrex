@@ -8,7 +8,7 @@ the per-phase profiler JSON when the config enables it.
 Env overrides (optional, on top of the TOML):
   QX_CONFIG (required, toml path), QX_NPZ (snapshot out, default <dir>/run.npz),
   QX_BALLISTIC=1 (zero the 3-phonon vertex -> the G_ball baseline),
-  QX_ETA QX_MIX QX_MAXIT QX_NE QX_RETARDED QX_FC3 QX_ETAOBC QX_ZMP QX_ZMFLOOR
+  QX_ETA QX_MIX QX_MAXIT QX_NE QX_RETARDED QX_FC3 QX_ETAOBC
   QX_BCS QX_QCS (comm sizes -- override the TOML for a one-config rank sweep).
 
 Run: ``mpirun -np N python run.py`` (config via QX_CONFIG).
@@ -38,8 +38,6 @@ if os.environ.get("QX_RETARDED"): cfg.phonon.retarded_method = os.environ["QX_RE
 if os.environ.get("QX_FC3"):      cfg.phonon.fc3_path = os.environ["QX_FC3"]
 if os.environ.get("QX_ETAOBC"):   cfg.phonon.eta_obc = float(os.environ["QX_ETAOBC"])
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
-if os.environ.get("QX_ZMP"):      cfg.phonon.zero_mode_projection = os.environ["QX_ZMP"] == "1"
-if os.environ.get("QX_ZMFLOOR"):  cfg.phonon.zero_mode_floor_thz = float(os.environ["QX_ZMFLOOR"])
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
 if os.environ.get("QX_QCS"):      cfg.compute.comm.q_comm_size = int(os.environ["QX_QCS"])
 
@@ -84,66 +82,6 @@ if os.environ.get("QX_BALLISTIC") == "1":
         sse._tau_cache = None
     if ranks.rank == 0:
         print(f"BALLISTIC: zeroed {n_zeroed} phi_blocks in place", flush=True)
-
-# QX_SYMMETRIZE_FC3=1: S3-symmetrize the device vertex in place (diagnostic
-# experiment: the Phi-derivable energy balance is exact only for a totally
-# symmetric vertex; the Gamma-folded device construction pins the external
-# leg and breaks it structurally).
-# NB =1 is BUGGY, kept only to reproduce the 2026-06-10/11 sym_full runs:
-# (a) the two 3-cycle key permutations need the INVERSE axis transpose
-# ((1,2,0) pairs with transpose (2,0,1) and vice versa); (b) acc/cnt over
-# present keys is not the S3 projection. Use =2 for the exact projection.
-if os.environ.get("QX_SYMMETRIZE_FC3") == "1":
-    for inter in getattr(scba, "interactions", []):
-        sse = getattr(inter, "sigma_phonon_phonon", None)
-        if sse is None or getattr(sse, "phi_blocks", None) is None:
-            continue
-        pb = sse.phi_blocks
-        orig = {k: v.copy() for k, v in pb.items()}
-        for (I, K1, K2) in list(pb):
-            acc = orig[(I, K1, K2)].copy()
-            cnt = 1
-            for key, tr in (((K1, I, K2), (1, 0, 2)), ((I, K2, K1), (0, 2, 1)),
-                            ((K2, K1, I), (2, 1, 0)), ((K1, K2, I), (1, 2, 0)),
-                            ((K2, I, K1), (2, 0, 1))):
-                if key in orig:
-                    acc += orig[key].transpose(tr)
-                    cnt += 1
-            pb[(I, K1, K2)][...] = acc / cnt
-        if ranks.rank == 0:
-            print(f"SYMMETRIZED FC3: {len(pb)} blocks (S3 average)", flush=True)
-
-# QX_SYMMETRIZE_FC3=2: EXACT S3 projection -- full-group average with the
-# correct axis transport (3-cycles use the inverse permutation as the numpy
-# transpose) and missing orbit members counted as zero (/6). Verified to
-# give worst-case S3 violation ~1e-16 on the cnt33_L2 device vertex.
-# Absent orbit keys cannot be created in place (the SSE pair index is
-# already built) -- they are only reported.
-if os.environ.get("QX_SYMMETRIZE_FC3") == "2":
-    _G = (((0, 1, 2), (0, 1, 2)), ((1, 0, 2), (1, 0, 2)),
-          ((0, 2, 1), (0, 2, 1)), ((2, 1, 0), (2, 1, 0)),
-          ((1, 2, 0), (2, 0, 1)), ((2, 0, 1), (1, 2, 0)))
-    for inter in getattr(scba, "interactions", []):
-        sse = getattr(inter, "sigma_phonon_phonon", None)
-        if sse is None or getattr(sse, "phi_blocks", None) is None:
-            continue
-        pb = sse.phi_blocks
-        orig = {k: v.copy() for k, v in pb.items()}
-        n_missing = 0
-        for key in list(pb):
-            acc = None
-            for kp, tr in _G:
-                ik = tuple(key[i] for i in kp)
-                if ik in orig:
-                    t = orig[ik].transpose(tr)
-                    acc = t.copy() if acc is None else acc + t
-                else:
-                    n_missing += 1
-            pb[key][...] = acc / 6.0
-        if ranks.rank == 0:
-            print(f"SYMMETRIZED FC3 (exact /6): {len(pb)} blocks, "
-                  f"{n_missing} missing orbit members counted as zero",
-                  flush=True)
 
 w = np.abs(np.asarray(ph.local_frequencies))
 
