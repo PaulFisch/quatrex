@@ -46,34 +46,6 @@ from quatrex.phonon.units import bubble_prefactor_thz
 profiler = Profiler()
 
 
-def _build_cell_zero_mode_projector(h00, h01, *, floor_thz=0.1):
-    """Cell-level rigid-mode projector ``Q = I - V Vᵀ`` (n_dof*n_dof).
-
-    Removes the cell's q=0 rigid-body modes -- the 3 Cartesian
-    translations plus any near-zero rotational quasi-Goldstone (e.g. a
-    1-D wire's axial twist for the small SiNW).
-    A mode is rigid if its frequency is below
-    floor_thz.
-
-    Returns (Q, projected_freqs_thz).
-    """
-    h00 = np.asarray(h00)
-    h01 = np.asarray(h01)
-    n_dof = h00.shape[0]
-    dyn = h00 + h01 + h01.conj().T
-    dyn = 0.5 * (dyn + dyn.conj().T)
-    eigvals, eigvecs = np.linalg.eigh(dyn)
-    idx = np.where(eigvals.real < float(floor_thz) ** 2)[0]
-    if idx.size == 0:
-        return np.eye(n_dof), np.array([])
-    V = eigvecs[:, idx]
-    Q = np.eye(n_dof, dtype=V.dtype) - V @ V.conj().T
-    if np.allclose(Q.imag, 0.0):
-        Q = Q.real
-    projected_freqs = np.sqrt(np.clip(eigvals[idx].real, 0.0, None))
-    return Q, projected_freqs
-
-
 class SigmaPhononPhonon(ScatteringSelfEnergy):
     """3-phonon SCBA scattering self-energy.
 
@@ -198,70 +170,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._rev_perm: "NDArray | None | bool" = False  # False = not built
         self._full_freqs: NDArray | None = None
 
-        # Optional zero-mode projector Q_cell, applied two-sided to every band block of Sigma^{<,>}.
-        self._zero_mode_Q: NDArray | None = None
-        if getattr(config.phonon, "zero_mode_projection", False):
-            self._build_zero_mode_projector(config, dynamical_matrix)
-
         # Optional self-consistent SCP cubic-tadpole static self-energy.
         self._scp_tadpole = bool(getattr(config.phonon, "scp_tadpole", False))
         self._sigma_static: NDArray | None = None
         if self._scp_tadpole:
             self._setup_scp_tadpole(config, dynamical_matrix)
-
-    def _build_zero_mode_projector(self, config, dynamical_matrix) -> None:
-        """Build the cell rigid-mode projector Q_cell from the cell
-        dynamical-matrix blocks (H00, H01) and store it on self._zero_mode_Q"""
-        if dynamical_matrix is None:
-            warnings.warn(
-                "zero_mode_projection requested but no dynamical_matrix was "
-                "passed to SigmaPhononPhonon; projection disabled.",
-                stacklevel=2,
-            )
-            return
-        if not np.all(self.block_sizes == self.block_sizes[0]):
-            warnings.warn(
-                "zero_mode_projection requires uniform block sizes "
-                f"(got {self.block_sizes.tolist()}); projection disabled.",
-                stacklevel=2,
-            )
-            return
-        # The cell blocks H00=[0,0] and H01=[0,1]. Under block distribution the
-        # [0,1] block is not owned by the local rank, so gather the diagonal /
-        # super-diagonal blocks across the block communicator (block_diagonal
-        # all-gathers); in the serial case this is just blocks[0,0]/[0,1].
-        block_distributed = (
-            dynamical_matrix.num_local_blocks != dynamical_matrix.num_blocks
-        )
-        if block_distributed:
-            h00 = np.asarray(dynamical_matrix.block_diagonal(0)[0])
-            h01 = np.asarray(dynamical_matrix.block_diagonal(1)[0])
-        else:
-            h00 = np.asarray(dynamical_matrix.blocks[0, 0])
-            h01 = np.asarray(dynamical_matrix.blocks[0, 1])
-        while h00.ndim > 2:
-            h00 = h00[0]
-        while h01.ndim > 2:
-            h01 = h01[0]
-        floor = float(getattr(config.phonon, "zero_mode_floor_thz", 0.1))
-        Q, projected = _build_cell_zero_mode_projector(h00, h01, floor_thz=floor)
-        if projected.size == 0:
-            warnings.warn(
-                f"zero_mode_projection on but no cell mode below "
-                f"{floor} THz; projector is identity (no-op).",
-                stacklevel=2,
-            )
-            self._zero_mode_Q = None
-            return
-        self._zero_mode_Q = np.ascontiguousarray(Q)
-        if comm.rank == 0:
-            freqs = ", ".join(f"{f:.4f}" for f in np.sort(projected))
-            print(
-                f"[SigmaPhononPhonon] zero-mode projection on: projecting "
-                f"{projected.size} cell mode(s) below {floor} THz "
-                f"[{freqs}] THz out of Sigma^<,>.",
-                flush=True,
-            )
 
     def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
         """Prepare the self-consistent SCP cubic-tadpole static self-energy:
@@ -562,14 +475,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     + _ring_contract_serial(pl, pr, gga, glrb, xp)
                     + _ring_contract_serial(pl, pr, glra, ggb, xp))
 
-        Qproj = (
-            xp.asarray(self._zero_mode_Q)
-            if self._zero_mode_Q is not None
-            else None
-        )
         if nq == 1:
-            # Compute Sigma^{<,>}(I,J) for the tau slice [lo:hi]; returns the
-            # final (Q-projected) band blocks for that slice.
+            # Compute Sigma^{<,>}(I,J) for the tau slice [lo:hi]; returns
+            # the band blocks for that slice.
             def _contract_tau(lo, hi):
                 res = {}
                 for (I, J) in owned:
@@ -590,9 +498,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         acc_l = sl if acc_l is None else acc_l + sl
                         acc_g = sg if acc_g is None else acc_g + sg
                     if acc_l is not None:
-                        if Qproj is not None:
-                            acc_l = Qproj @ acc_l @ Qproj
-                            acc_g = Qproj @ acc_g @ Qproj
                         res[(I, J)] = (acc_l, acc_g)
                 return res
 
@@ -692,9 +597,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             glr_q[(K1, K1p)][lo:hi, iqp],
                             glr_q[(K2, K2p)][lo:hi, iq2],
                         )
-                    if Qproj is not None:
-                        out_l = Qproj @ out_l @ Qproj
-                        out_g = Qproj @ out_g @ Qproj
                     res[(I, J)] = (out_l, out_g)
                 return res
 

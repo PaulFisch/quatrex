@@ -64,41 +64,23 @@ class SCBAConfig(BaseModel):
     convergence_tol: PositiveFloat = 1e-5
 
     mixing_factor: PositiveFloat = Field(default=0.1, le=1.0)
+    """Damped self-energy mixing factor: for ``mixing_method = "linear"``
+    the update is ``Sigma <- (1-a) Sigma_prev + a Sigma_new``; for
+    ``"anderson"`` it is the damping ``beta`` of the accelerated step."""
 
     mixing_method: Literal["linear", "anderson"] = "linear"
-    """Self-energy fixed-point mixer. ``"linear"`` (default) is the bare
-    damped mixing ``Sigma <- (1-a) Sigma_prev + a Sigma_new``. ``"anderson"``
-    is safeguarded Anderson/Pulay (DIIS) acceleration that uses a short
-    residual history to extrapolate the fixed point; it accelerates a
-    WELL-CONDITIONED SCBA and, with the revert-to-best safeguard, is not
-    worse than damped linear. ``mixing_factor`` is the Anderson relaxation
-    ``beta``. Cf. ``quatrex/core/anderson.py``.
+    """Self-energy fixed-point mixer. ``"linear"`` is plain damped mixing;
+    ``"anderson"`` is plain Anderson(m) acceleration (Anderson 1965;
+    Walker & Ni, SIAM J. Numer. Anal. 49, 1715 (2011), Alg. AA in the
+    unconstrained least-squares form) -- cf. ``quatrex/core/anderson.py``.
+    Acceleration helps a convergent (contractive) iteration; it is NOT a
+    cure for a marginal / non-existent fixed point (the strong-coupling
+    3-phonon SCBA needs continuation -- vertex-scale warm starts --
+    not extrapolation)."""
 
-    NOTE: Anderson is NOT a cure for a marginal / non-existent fixed point.
-    On the strong-coupling soft-mode SCBA (e.g. the d5a SiNW at full
-    coupling, whose omega->0 modes make the fixed point ill-defined) no
-    mixer converges -- that regime needs the LOA-Pade analytic continuation
-    from moderate coupling (a separate technique), not acceleration. There
-    Anderson reverts to its best iterate (>= linear, but not convergent)."""
-
-    anderson_depth: PositiveInt = 8
-    """History depth (number of residual secants) for ``mixing_method =
-    "anderson"``. Larger resolves more of the oscillation but costs more
-    least-squares conditioning."""
-
-    anderson_revert: NonNegativeFloat = 2.0
-    """Revert-to-best safeguard for Anderson. If the residual exceeds
-    ``anderson_revert`` x the best seen, the (poisoned) history is cleared
-    and the iterate reverted to the best one -- the "never worse than
-    linear" guarantee. Set to 0 to DISABLE (keep-history, aggressive: needed
-    to break a strong oscillation, but then not guaranteed monotone). The
-    dense reference converges the soft-mode CNT/SiNW with 0."""
-
-    anderson_step_cap: PositiveFloat = 3.0
-    """Max ratio of the Anderson extrapolation step to the damped-linear
-    step; an over-long step is replaced by the linear one for that
-    iteration (overshoot safeguard). Looser (larger) helps a strongly
-    oscillating fixed point but risks instability."""
+    anderson_depth: PositiveInt = 5
+    """History size m for ``mixing_method = "anderson"`` (number of stored
+    residual differences). Memory cost: 2*m copies of the full Sigma."""
 
     output_interval: PositiveInt = 1
 
@@ -774,17 +756,6 @@ class PhononConfig(BaseModel):
     below the cutoff: transport below it stays purely BALLISTIC. The
     omega=0 bin is always excluded regardless."""
 
-    broadening_form: Literal["squared", "linear"] = "linear"
-    """Regularisation of the phonon Dyson equation:
-    - "squared" (legacy): (omega + i*eta)^2 = omega^2 - eta^2 + 2i*eta*omega.
-      The -eta^2 REAL shift pushes omega <~ eta below the acoustic band
-      bottom -> artificially evanescent low-omega modes (T_eff suppressed
-      to ~half the acoustic plateau at omega ~ eta).
-    - "linear": omega^2 + 2i*eta*omega -- same frequency-proportional
-      damping, no band-edge shift (the AGF literature's omega^2 + i*delta
-      with delta -> 0+, cf. Mingo PRB 68, 245406), so T(omega->0)
-      approaches the physical acoustic-channel plateau."""
-
     bubble_balance_check: bool = True
     """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
     bubble: P_in = sum hbar*w*Tr[Sigma^< G^>] must equal P_out (conserving
@@ -827,8 +798,7 @@ class PhononConfig(BaseModel):
 
     Default 1e-3 (0.1%): 1e-2 is too loose to call a fixed point. Linear mixing
     contracts the residual geometrically (~x0.6 / 5 iters), so 1e-3 is reached
-    in ~55 iters and 1e-4 in ~75; Anderson (``scba.mixing_method``) reaches it
-    in far fewer.
+    in ~55 iters and 1e-4 in ~75.
 
     Convergence requires a GENUINE fixed point, not a transient: the scattering
     self-energy must be self-consistent -- the relative residual
@@ -837,35 +807,10 @@ class PhononConfig(BaseModel):
     sufficient: at large broadening ``eta`` the heat flow conserves (its
     elastic part dominates) before Sigma reaches self-consistency, so a
     heat-flow-only stop accepts an under-scattered, non-converged Sigma. If
-    Sigma oscillates (a limit cycle) the run does NOT converge and the mixing
-    must be fixed (Anderson / smaller linear) -- we report it as non-converged
-    rather than passing off the best-conserved transient as the answer."""
-
-    zero_mode_projection: bool = False
-    """Optional rigid-body (q=0) zero-mode projection of the 3-phonon
-    self-energy (``model == "negf"``).
-
-    When True, the per-cell rigid modes -- the 3 Cartesian translations
-    plus any near-zero rotational quasi-Goldstone (e.g. the axial twist
-    of a 1-D wire) -- are projected out of *every* band block of
-    ``Sigma^{<,>}`` (two-sided, ``Q Sigma Q``) each iteration. These q=0
-    modes carry no heat (they are global rigid-body symmetries), but
-    their divergent Bose occupation ``2n+1 ~ 2 kT / (hbar omega)`` as
-    ``omega -> 0`` injects an IR singularity into the bubble that
-    destabilises the SCBA on soft structures (e.g. the d5a SiNW twist).
-    The finite-q heat carriers are orthogonal to the uniform projected
-    subspace and are untouched, so transport physics is preserved.
-    Default OFF. Cf. ``phonon/solver/zero_modes.py`` and
-    ``build_cell_zero_mode_projector``."""
-
-    zero_mode_floor_thz: NonNegativeFloat = 0.1  # THz
-    """Absolute frequency floor for ``zero_mode_projection``: cell modes
-    with frequency below this (i.e. eigenvalue of the cell Gamma-matrix
-    below ``zero_mode_floor_thz**2``) are treated as rigid and projected
-    out. The floor is ABSOLUTE (not relative to the stiffest mode) so a
-    high-frequency mode like a Si-H stretch cannot inflate the cutoff and
-    over-project real low-omega heat carriers. Every projected mode's
-    frequency is logged at solver init."""
+    Sigma oscillates (a limit cycle) the run does NOT converge and needs a
+    continuation strategy (vertex-scale warm starts / annealing) -- we report
+    it as non-converged rather than passing off the best-conserved transient
+    as the answer."""
 
     scp_tadpole: bool = False
     """Optional self-consistent-phonon (SCP) cubic tadpole static

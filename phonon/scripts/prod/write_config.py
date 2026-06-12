@@ -2,7 +2,7 @@
 
 Committed, parameterized port of the /tmp config writers, emitting the
 converged anharmonic-SCBA recipe (``retarded_method="half"``, gentle linear
-mixing, ``zero_mode_projection``, heat-flow convergence) plus a
+mixing, heat-flow convergence) plus a
 ``[compute]`` / ``[compute.comm]`` block so a distributed run honors the
 rank grid (``block_comm_size`` x ``q_comm_size``) from the config -- this is
 what the scaling sweep drives.
@@ -97,15 +97,12 @@ fermi_level = 0.0
 
 [phonon]
 eta = {a.eta}
-zero_mode_projection = {str(a.zero_mode_projection).lower()}
-zero_mode_floor_thz = 0.1
 eta_obc = {a.eta_obc}
 left_temperature = {a.tL}
 right_temperature = {a.tR}
 model = "negf"
 fc3_path = "{a.work}/fc3_blocks.hdf5"
 retarded_method = "{a.retarded}"
-broadening_form = "{a.broadening}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
@@ -170,8 +167,6 @@ fermi_level = 0.0
 
 [phonon]
 eta = {a.eta}
-zero_mode_projection = {str(a.zero_mode_projection).lower()}
-zero_mode_floor_thz = 0.1
 eta_obc = {a.eta_obc}
 left_temperature = {a.tL}
 right_temperature = {a.tR}
@@ -179,7 +174,6 @@ model = "negf"
 fc3_path = "{a.work}/fc3_blocks.hdf5"
 qfold_path = "{a.work}/qfold_vertices.npz"
 retarded_method = "{a.retarded}"
-broadening_form = "{a.broadening}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
@@ -217,17 +211,14 @@ def main():
     p.add_argument("--nfreq", type=int, default=None)
     p.add_argument("--fmax", type=float, default=None)
     p.add_argument("--mix", type=float, default=0.1)
-    p.add_argument("--mixing-method", default="linear", choices=["linear", "anderson"])
-    p.add_argument("--anderson-depth", type=int, default=5,
-                   help="Anderson history depth (throttled small to bound memory)")
+    p.add_argument("--mixing-method", default="linear",
+                   choices=["linear", "anderson"],
+                   help="plain Anderson(m) acceleration (Walker & Ni 2011)")
+    p.add_argument("--anderson-depth", type=int, default=5)
     p.add_argument("--max-iter", type=int, default=50,
                    help="SCBA cap; the conductance (best-iterate) converges well "
                         "before the Sigma residual (F30), so 50 bounds wall-time")
     p.add_argument("--retarded", default="half", choices=["half", "fft"])
-    p.add_argument("--broadening", default="linear",
-                   choices=["squared", "linear"],
-                   help="phonon Dyson regularisation; 'linear' = w^2+2i*eta*w "
-                        "(no -eta^2 band-edge shift, physical low-w plateau)")
     p.add_argument("--sse-zero-g", action="store_true",
                    help="hard cutoff: zero lead injection below --sse-cutoff")
     p.add_argument("--sse-cutoff", type=float, default=0.0,
@@ -243,10 +234,6 @@ def main():
     p.add_argument("--obc", default="spectral", choices=["spectral", "sancho-rubio"],
                    help="contact solver; spectral(NEVP-full) is robust on soft "
                         "modes where sancho-rubio stalls (d5a)")
-    p.add_argument("--zero-mode-projection", dest="zero_mode_projection",
-                   action="store_true", default=True)
-    p.add_argument("--no-zero-mode-projection", dest="zero_mode_projection",
-                   action="store_false")
     p.add_argument("--bcs", type=int, default=1, help="block_comm_size")
     p.add_argument("--qcs", type=int, default=1, help="q_comm_size")
     p.add_argument("--numba-threads", type=int, default=1)

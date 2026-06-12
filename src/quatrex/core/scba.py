@@ -257,15 +257,13 @@ class SCBA:
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
-        # Optional Anderson acceleration of the self-energy fixed point
+        # Optional plain Anderson(m) acceleration (Walker & Ni 2011).
         self._anderson_mixer = None
         if self.config.scba.mixing_method == "anderson":
             from quatrex.core.anderson import AndersonMixer
             self._anderson_mixer = AndersonMixer(
                 depth=self.config.scba.anderson_depth,
                 beta=self.mixing_factor,
-                step_cap=self.config.scba.anderson_step_cap,
-                revert_factor=self.config.scba.anderson_revert,
             )
 
         # Anharmonic-phonon convergence by HEAT-FLOW conservation (Guo/Luisier),
@@ -444,7 +442,7 @@ class SCBA:
 
     @profiler.profile(label="SCBA: Update Sigma", level="default", comm=comm)
     def _update_sigma(self) -> None:
-        """Updates the self-energy: damped linear, or safeguarded Anderson."""
+        """Updates the self-energy: damped linear or Anderson(m) mixing."""
         if self._anderson_mixer is not None:
             self._update_sigma_anderson()
             return
@@ -462,50 +460,23 @@ class SCBA:
         )
 
     def _update_sigma_anderson(self) -> None:
-        """Anderson mix of the augmented [Sigma^<, Sigma^>, Sigma^R]
-        state."""
-        cur = (self.data.sigma_lesser, self.data.sigma_greater,
-               self.data.sigma_retarded_hermitian)
+        """Anderson(m) step over the concatenated
+        ``[Sigma^<, Sigma^>, Sigma^R]`` state: the iterate is the previous
+        (mixed) self-energy, the fixed-point map value is the raw SSE
+        output computed from it."""
+        bufs = (self.data.sigma_lesser, self.data.sigma_greater,
+                self.data.sigma_retarded_hermitian)
         prev = (self.data.sigma_lesser_prev, self.data.sigma_greater_prev,
                 self.data.sigma_retarded_hermitian_prev)
-        to_host = (lambda a: a.get()) if xp.__name__ == "cupy" else (lambda a: a)
-        if self._anderson_mixer.weights is None:
-            self._anderson_mixer.weights = self._anderson_block_weights(cur, to_host)
-        shapes = [m.data.shape for m in cur]
-        sizes = [m.data.size for m in cur]
-        x_in = np.concatenate([to_host(m.data).ravel() for m in prev])
-        x_out = np.concatenate([to_host(m.data).ravel() for m in cur])
-        x_mixed, _ = self._anderson_mixer.step(x_in, x_out)
-        off = 0
-        for m, shp, sz in zip(cur, shapes, sizes):
-            m.data[:] = xp.asarray(x_mixed[off:off + sz].reshape(shp))
-            off += sz
-
-    def _anderson_block_weights(self, cur, to_host):
-        """Per-entry weights ``1/sqrt(||block(I,J)||)`` for the concatenated
-        ``[Sigma^<, Sigma^>, Sigma^R]`` Anderson state (the dense
-        ``_block_weight_vector``). Block norms use ``|Sigma^<|+|Sigma^>|``,
-        globally reduced over the energy x block partition; the three halves
-        share the weights (same sparsity)."""
-        sl, sg, _sr = cur
-        mag = np.abs(to_host(sl.data)) + np.abs(to_host(sg.data))   # (*stack, nnz)
-        nnz = mag.shape[-1]
-        mag2_per_nnz = (mag ** 2).reshape(-1, nnz).sum(axis=0)      # per nnz
-        rows = np.asarray(to_host(sl.rows)) + int(sl.global_block_offset)
-        cols = np.asarray(to_host(sl.cols)) + int(sl.global_block_offset)
-        boff = np.asarray(sl.block_offsets)
-        n_blocks = len(boff) - 1
-        rblk = np.clip(np.searchsorted(boff, rows, side="right") - 1, 0, n_blocks - 1)
-        cblk = np.clip(np.searchsorted(boff, cols, side="right") - 1, 0, n_blocks - 1)
-        block_mag2 = np.zeros((n_blocks, n_blocks))
-        np.add.at(block_mag2, (rblk, cblk), mag2_per_nnz)
-        global_comm.Allreduce(MPI.IN_PLACE, block_mag2, op=MPI.SUM)
-        block_norm = np.sqrt(block_mag2)
-        floor = 1e-6 * (block_norm.max() + 1e-300) + 1e-300
-        w_per_nnz = 1.0 / np.sqrt(block_norm[rblk, cblk] + floor)
-        n_stack = int(np.prod(mag.shape[:-1])) if mag.ndim > 1 else 1
-        w_flat = np.tile(w_per_nnz, n_stack)                        # matches (*stack,nnz) ravel
-        return np.concatenate([w_flat, w_flat, w_flat])
+        to_host = (lambda a: a.get()) if xp.__name__ == "cupy" else np.asarray
+        x = np.concatenate([to_host(m.data).ravel() for m in prev])
+        gx = np.concatenate([to_host(m.data).ravel() for m in bufs])
+        x_new = self._anderson_mixer.step(x, gx)
+        offset = 0
+        for m in bufs:
+            size = m.data.size
+            m.data[:] = xp.asarray(x_new[offset:offset + size].reshape(m.data.shape))
+            offset += size
 
     @profiler.profile(label="SCBA: Convergence test", level="default", comm=comm)
     def _has_converged(self) -> bool:
@@ -550,7 +521,7 @@ class SCBA:
         # small) AND the heat flow must be conserved. We do NOT accept a
         # non-converged Sigma at merely-okay conservation -- that is a transient,
         # not the fixed point; if Sigma oscillates the run does NOT converge and
-        # the mixing must be fixed (Anderson / smaller linear). NB the
+        # needs a continuation strategy (vertex-scale warm starts). NB the
         # current_conservation above is the NUMBER-current G-R balance, which
         # 3-phonon processes violate by design -- the physical conservation
         # criterion is the hbar-omega-weighted HEAT flow (Guo/Luisier).
@@ -913,16 +884,6 @@ class SCBA:
                         m.dtranspose(discard=False)  # This must not be discarded.
                         assert m.distribution_state == "stack"
 
-            # Symmetrize the self-energy.
-            if os.environ.get("QX_BALANCE_PRE_SYM") == "1":
-                # Bubble balance on the RAW SSE output, before the
-                # skew-Hermitian projection below alters Sigma^<>: isolates
-                # the projection's contribution to the balance floor.
-                bal = self._phonon_bubble_energy_balance()
-                if bal is not None and comm.rank == 0:
-                    print(f"Bubble energy balance (pre-sym): "
-                          f"P_in={bal[0].real:.6e} P_out={bal[1].real:.6e} "
-                          f"resid={bal[2]:.3e}", flush=True)
             # The anharmonic phonon path keeps the raw SSE output: the
             # skew-Hermitian projection of Sigma^<> breaks the Phi-derivable
             # bubble energy balance (1e-15 -> 3e-6). The SSE writes only the
