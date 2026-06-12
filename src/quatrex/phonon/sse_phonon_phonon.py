@@ -645,9 +645,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if bool(sse_mask.any()):
             sl_data[sse_mask] = 0.0
             sg_data[sse_mask] = 0.0
-        sigma_lesser.data[:] = sigma_lesser.data + sl_data
-        sigma_greater.data[:] = sigma_greater.data + sg_data
-        # Sigma^R contribution
+        # SIGN CONVENTION (2026-06-12 fix): the bubble formula (textbook
+        # G^< = -i n A) is quadratic in G, so fed with this solver's
+        # occupation-positive Green's functions (-iG^≷ >= 0, the same
+        # convention as the lead injection sigma^≷ = +i n(+1) gamma) it
+        # returns TEXTBOOK-signed sigma^≷ (-i sigma^≷ <= 0) -- the exact
+        # NEGATIVE of what the Keldysh feedback G^≷ = G^R sigma^≷ G^A
+        # expects. Feeding it unflipped injects negative occupation
+        # (anti-dissipation): the SCBA then diverges at any coupling
+        # (2026-06-12: even lambda=0.25 diverged while the equilibrium
+        # textbook-convention loop converged). Negate sigma^≷ here; the
+        # retarded part below keeps its (damping-correct) sign by using
+        # the raw values.
+        sigma_lesser.data[:] = sigma_lesser.data - sl_data
+        sigma_greater.data[:] = sigma_greater.data - sg_data
+        # Sigma^R contribution (from the RAW, textbook-signed values:
+        # Gamma = i(sigma^> - sigma^<)_raw >= 0, matching the lead OBC
+        # damping sign -- unchanged by the convention flip above).
         if self.retarded_method == "fft":
             delta = sg_data - sl_data
             hil = 0.5j * hilbert_transform(delta, full_freqs)
