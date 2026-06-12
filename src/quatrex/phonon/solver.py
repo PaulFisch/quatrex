@@ -244,14 +244,17 @@ class PhononSolver(SubsystemSolver):
             )
 
     @profiler.profile(label="PhononSolver: Assemble", level="default", comm=comm)
-    def _assemble_system_matrix(self, sse_retarded: DSDBSparse) -> None:
-        """Assembles the system matrix.
+    def _assemble_system_matrix(self) -> None:
+        """Assembles the HARMONIC system matrix (no scattering self-energy).
 
-        Parameters
-        ----------
-        sse_retarded : DSDBSparse
-            The retarded scattering self-energy.
-
+        The scattering self-energy is subtracted in :meth:`solve` AFTER the
+        open boundary conditions are computed: the contacts are ideal
+        (harmonic, ballistic) reservoirs, so the lead surface Green's
+        function must be built from the bare blocks. Including the device's
+        scattering Sigma^R in the OBC input both extends the device
+        scattering periodically into the semi-infinite lead (unphysical)
+        and intermittently breaks the spectral NEVP once Sigma grows
+        (recursion errors ~1 -> residual spikes in the SCBA).
         """
         self.system_matrix.allocate_data()
         self.system_matrix.data = 0.0
@@ -267,7 +270,6 @@ class PhononSolver(SubsystemSolver):
               + 2j * self.eta * xp.abs(self.local_frequencies))
         scale_stack(self.system_matrix.data, z2)
 
-        _btd_subtract(self.system_matrix, sse_retarded)
         _btd_subtract(self.system_matrix, self.dynamical_matrix)
 
     @profiler.profile(label="PhononSolver: Selected Solve", level="default", comm=comm)
@@ -384,11 +386,14 @@ class PhononSolver(SubsystemSolver):
 
         """
 
-        self._assemble_system_matrix(sse_retarded)
+        self._assemble_system_matrix()
 
         # TODO Band ege Tracking
 
+        # OBC from the bare harmonic blocks (ideal-reservoir contacts);
+        # the scattering self-energy enters the device Dyson only.
         self._compute_obc()
+        _btd_subtract(self.system_matrix, sse_retarded)
         self._selected_solve(sse_lesser, sse_greater, out)
 
         self.system_matrix.free_data()

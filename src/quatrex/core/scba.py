@@ -893,8 +893,12 @@ class SCBA:
             # electron solver, by contrast, adds the skew part internally).
             if (self.config.scba.phonon
                     and getattr(self.config.phonon, "model", "") == "negf"):
+                # "half" retarded rule in the solver's occupation-positive
+                # convention (sigma^≷ = +i n(+1) Gamma_s, like the lead
+                # injection): the damping skew part is (sigma^< - sigma^>)/2
+                # = -i Gamma_s / 2.
                 self.data.sigma_retarded_hermitian.data += 0.5 * (
-                    self.data.sigma_greater.data - self.data.sigma_lesser.data
+                    self.data.sigma_lesser.data - self.data.sigma_greater.data
                 )
             else:
                 self._symmetrize_sigma()
