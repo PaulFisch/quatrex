@@ -1,0 +1,329 @@
+\chapter{Energy conservation in the phonon SCBA: the \texorpdfstring{$S_3$}{S3}
+vertex and the finite-\texorpdfstring{$\eta$}{eta} commutator}
+\label{app:conservation}
+
+This appendix verifies, step by step, the conservation analysis of
+\cref{sub:phph_se} (the identity \cref{eq:sumrule}, its two cancellation
+routes, the $S_3$/$\Phi$-derivability requirement for $J_s=0$, and the
+ghost-reservoir reading of $\eta$, \cref{eq:ghost}), and quantifies the
+finite-$\eta$ floor on production devices. The standalone gate lives in
+\texttt{phonon.studies.conservation} (\texttt{replica\_check} for the bubble
+energy balance, \texttt{s3\_violation} for the vertex symmetry,
+\texttt{sigma\_convention} for the SSE sign/positivity check); the production
+attributions are reproduced from cached run artifacts under
+\texttt{phonon/studies/out/}. The motivating observation is that on the
+\texttt{cnt33} carbon nanotube (two slabs, $300$\,K, $\eta=0.45$) the
+self-energy residual converges, $10^{-4}\!\to\!2.5\times10^{-10}$, while the
+lead-current imbalance \emph{floors} at $6.9\times10^{-6}$ and refuses to go
+lower --- a floor that, as shown below, is exactly the finite-$\eta$ ordering
+commutator and \emph{not} a defect of the FC3/SCBA formulation.
+\Cref{fig:cons_iter} shows the same pattern on the converged $\eta=10^{-12}$
+production run: the bubble balance is pinned at machine precision every iteration
+while the $\Sigma^R$ residual and the lead imbalance converge and then floor.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.62\linewidth]{transport_sweeps/eta0_cnt33_conservation_iter.pdf}
+  \caption{The motivating observation, on the production \texttt{cnt33}
+    transport iteration (L2, $300$\,K, $\eta=10^{-12}$). The bubble energy
+    balance $|P_{\rm in}-P_{\rm out}|$ is pinned at machine precision
+    ($\sim10^{-16}$) at \emph{every} iteration --- the discrete $S_3$ bubble is
+    exactly conserving --- while the $\Sigma^R$ residual and the lead-current
+    imbalance converge and then floor. The lead imbalance measures distance from
+    the fixed point plus the finite-$\eta$ term, not a violation of the bubble.}
+  \label{fig:cons_iter}
+\end{figure}
+
+% ======================================================================
+\section{Verification on artificial data}
+\label{sec:cons_toy}
+% ======================================================================
+
+A dense toy ($12$ degrees of freedom, two leads, $41$ frequencies) with random
+positive-semidefinite lead spectra $\gamma_{L,R}$ at $T_{L/R}=1.05/0.95$ and a
+random ``scattering'' spectrum with the half-rule retarded part
+(\cref{eq:sigma_r}) isolates each ingredient of the identity. Because the toy
+data are real-symmetric, \emph{both} cancellation routes of \cref{eq:sumrule}
+are active, so the pointwise commutator $D(\omega)$ vanishes to machine
+precision under every variation of the retarded rule and frequency masking
+(\cref{tab:cons_toy}). This confirms that the half rule and the
+self-energy cutoff are harmless to conservation.
+
+\begin{table}[t]
+  \centering
+  \caption{Toy ($12$ DOF, $2$ leads, $41$ frequencies, real-symmetric)
+    pointwise commutator $\max_\omega|D(\omega)|$ normalised to the trace
+    scale, for successive variations of the retarded rule and masking
+    (\texttt{conservation.steps}). All machine-zero: with real-symmetric data
+    both routes of \cref{eq:sumrule} cancel $D$ regardless.}
+  \label{tab:cons_toy}
+  \begin{tabular}{llr}
+    \toprule
+    case & configuration & $\max_\omega|D|/\text{scale}$\\
+    \midrule
+    S1 & $\eta=0$, consistent half rule                       & $6.9\mathrm{e}{-13}$\\
+    S2 & $+$ Hermitian (Kramers--Kronig) part in $\Sigma_s^R$ & $1.6\mathrm{e}{-12}$\\
+    S4 & $+$ $\omega$-mask (cutoff) on $\Sigma_s^{\lessgtr,R}$ & $7.0\mathrm{e}{-14}$\\
+    S3 & $\eta=0.1$ / $\eta=0.4$                              & $3.8\mathrm{e}{-12}$ / $1.5\mathrm{e}{-12}$\\
+    S5 & deliberately inconsistent $\Sigma^R$ (skew $\times0.6$) & $1.7\mathrm{e}{-12}$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The reciprocity route is isolated by a \emph{complex, non-symmetric} variant.
+There $D=0$ at $\eta=0$ to machine precision (the Keldysh route still holds),
+but $D/\text{scale}=4.3\times10^{-4}$ at $\eta=0.05$ and $1.4\times10^{-3}$ at
+$\eta=0.2$, whereas the complex-\emph{symmetric} variant stays at machine zero
+for all $\eta$. This is the finite-$\eta$, broken-reciprocity term of
+\cref{eq:sumrule} turning on, scaling with $\eta$.
+
+The $\hbar\omega$-weighted anatomy makes the diagnostic concrete. At $\eta=0.1$
+the identity \cref{eq:sumrule} holds, $J_L+J_R+J_s=-4.4\times10^{-14}$, while
+the bare \emph{lead} balance is $|J_L+J_R|=2.9\times10^{-1}$, carried entirely
+by $J_s=+0.306$ of the (non-self-consistent, hence non-$\Phi$-derivable) toy
+$\Sigma_s$. The lead balance \emph{is} $|J_s|$: it measures distance from the
+fixed point, not a violation of the formulation.
+
+% ======================================================================
+\section{The \texorpdfstring{$S_3$}{S3} vertex on the production pipeline}
+\label{sec:cons_s3}
+% ======================================================================
+
+The vertex-symmetry step is checked on the production fold layout
+(transpose-paired trace, DC masking) by \texttt{replica\_check}, which compares
+$P_{\rm in}=\sum_\omega\hbar\omega\,\mathrm{Tr}[\Sigma^<G^>]$ against
+$P_{\rm out}=\sum_\omega\hbar\omega\,\mathrm{Tr}[\Sigma^>G^<]$ in float64 and
+float128. With a fully $S_3$-symmetric cubic vertex the one-sided bubble
+identity $P_{\rm in}=P_{\rm out}$ holds to $2.9\times10^{-16}$ (float64) and
+$2.4\times10^{-19}$ (float128) --- the residual falling with the working
+precision (\cref{fig:cons_replica}) proves the bubble is \emph{exactly}
+conserving and the production $\sim10^{-6}$ balance is pure floating-point
+accumulation; random or leg-partial symmetrisations of the vertex violate it at
+$O(0.1\text{--}1)$.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.5\linewidth]{transport_sweeps/conservation_bubble_replica.pdf}
+  \caption{Discrete-bubble energy-balance residual
+    $|P_{\rm in}-P_{\rm out}|/|P|$ of the standalone replica
+    (\texttt{replica\_check}) in float64 and float128. It falls with the working
+    precision ($2.9\times10^{-16}\to2.4\times10^{-19}$), proving the $S_3$ bubble
+    is exactly energy-conserving and the production $\sim10^{-6}$ floor is pure
+    floating-point accumulation, not a formulation defect.}
+  \label{fig:cons_replica}
+\end{figure} The production device vertices (raw,
+plain truncation to the device degrees of freedom) gate at worst $S_3$
+violation $\le3.9\times10^{-16}$ after the force-constant regeneration, whereas
+the retired acoustic-sum-rule projection broke $S_3$ at $O(1)$ --- confirming
+that the vertex must be left as a genuine third derivative
+(\cref{eq:H_phonon}) rather than post-projected.
+
+% ======================================================================
+\section{Attribution on production fixed points}
+\label{sec:cons_attribution}
+% ======================================================================
+
+On the converged \texttt{cnt33} state the floor is decomposed exactly
+(\cref{tab:cons_cnt33}). The recursive Green's-function $G^{\lessgtr}$ reproduce
+the Keldysh product $G^R\Sigma^{\lessgtr}G^A$ to $7\times10^{-14}$; the
+$S_3$-vertex scattering current $J_s$ is $3.7\times10^{-8}$ relative; and the
+identity violation $J_L+J_R+J_s=+1.9138\times10^{-4}$ matches the finite-$\eta$
+ordering commutator $\sum_\omega\hbar\omega\,
+\mathrm{Tr}[\Sigma^<(G^R\Sigma^>G^A-G^A\Sigma^>G^R)]$ of \cref{eq:sumrule} to
+$2.4\times10^{-9}$ relative. \textbf{The lead-balance floor is, to nine digits,
+the commutator term} --- everything else is exact.
+
+\begin{table}[t]
+  \centering
+  \caption{Exact decomposition of the \texttt{cnt33} lead-balance floor
+    (L2, $300$\,K, $\eta=0.45$). The identity violation \cref{eq:sumrule}
+    equals the finite-$\eta$ ordering commutator.}
+  \label{tab:cons_cnt33}
+  \begin{tabular}{lr}
+    \toprule
+    quantity & value\\
+    \midrule
+    RGF Keldysh consistency $|G^{\lessgtr}_{\rm RGF}-G^R\Sigma^{\lessgtr}G^A|$ & $\le 7\mathrm{e}{-14}$ (exact)\\
+    scattering current $J_s$ ($S_3$ vertex) & $3.7\mathrm{e}{-8}$ (rel.)\\
+    identity violation $J_L+J_R+J_s$ & $+1.9138\mathrm{e}{-4}$ ($6.9\mathrm{e}{-6}$ rel.)\\
+    ordering commutator $\sum_\omega\hbar\omega\,\mathrm{Tr}[\Sigma^<(G^R\Sigma^>G^A-G^A\Sigma^>G^R)]$ & $+1.9138\mathrm{e}{-4}$\\
+    agreement & $2.4\mathrm{e}{-9}$ (rel.)\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The non-reciprocity is \emph{physical}. Under a temperature bias the partial
+combination $n_LG^R\gamma_LG^A+n_RG^R\gamma_RG^A$ is non-reciprocal --- only the
+equilibrium combination symmetrises through the resolvent identity --- so the
+lesser function is already complex-asymmetric ballistically,
+$|G^<-G^{<T}|/|G^<|=2\text{--}5\times10^{-2}$ in the current-carrying window;
+the bubble inherits it ($\Sigma_s$ asymmetry $0.5\text{--}4\times10^{-2}$), and
+$\eta\times\text{asym}$ survives in $D$. Purely ballistic transport, by
+contrast, conserves at $3\times10^{-15}$, because there
+$\Sigma^{\lessgtr}_{\rm tot}$ (leads only) and $G^R$ \emph{are} exactly
+complex-symmetric. The floor is non-monotonic in $\eta$
+($3.7/6.9/3.2\times10^{-6}$ at $\eta=0.225/0.45/0.9$): larger $\eta$ also
+smooths the nonequilibrium asymmetry. The soft \texttt{d5a} nanowire shows the
+same term amplified to $\sim2\times10^{-2}$ at $100$\,K by marginal carriers
+($\eta/\omega$ large where the current flows) and a larger $\Sigma_s$. Across the
+\texttt{cnt33} temperature sweep the lead balance stays at $10^{-7}$--$10^{-4}$
+while the iteration count grows toward room temperature (\cref{fig:cons_T}), well
+below the conductance systematic of \cref{fig:cons_ratio}.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.62\linewidth]{transport_sweeps/eta0_cnt33_conservation_T.pdf}
+  \caption{\texttt{cnt33} (L2, $\eta=10^{-12}$) lead conservation
+    $|J_L-J_R|/\bar J$ (left axis) and SCBA iteration count (right axis) versus
+    temperature. Conservation stays at $10^{-7}$--$10^{-4}$ across the sweep ---
+    well below the conductance systematic of \cref{fig:cons_ratio} --- while the
+    iteration count rises toward room temperature as the three-phonon phase space
+    and the marginal-mode content grow.}
+  \label{fig:cons_T}
+\end{figure}
+
+\paragraph{Side finding.}
+The RGF \texttt{selected\_solve} retarded output is the \emph{left-connected}
+$g^R$ except at the last diagonal block, and must not be mistaken for the
+physical $G^R$. The phonon observables never use it; only diagnostics were
+affected.
+
+% ======================================================================
+\section{Mechanism and remedies}
+\label{sec:cons_remedies}
+% ======================================================================
+
+The mechanism is the fluctuation--dissipation imbalance of \cref{eq:ghost}:
+$\eta$ is a damping channel with no companion $\Sigma_\eta^{\lessgtr}$, a ghost
+reservoir at undefined occupation. A controlled test confirms the scaling: two
+biased leads on a harmonic chain conserve to $10^{-16}$ at \emph{any} $\eta$
+while reciprocal, and a deliberately injected complex-antisymmetric component
+$\epsilon$ in $\Sigma_s$ turns on a lead imbalance $\propto\eta\times\epsilon$
+(vanishing if either factor is zero).
+
+That the production non-reciprocity is the bubble's complex asymmetry is shown
+directly: complex-symmetrising
+$\Sigma_s^{\{R,<,>\}}\to\tfrac12(\Sigma_s+\Sigma_s^T)$ on the converged
+\texttt{cnt33} state collapses the defect
+$1.9\times10^{-4}\to2.4\times10^{-13}$ (eight orders), and needs all of
+$\Sigma_s^<,\Sigma_s^>,G^R$ symmetric --- no single sub-block suffices. Phonon
+reciprocity demands the exact $\Sigma_s^R$ be complex-symmetric, so its
+$2.8\%$ asymmetry is numerical, while the $3.5\%$ asymmetry of $\Sigma_s^<$ has
+a genuine nonequilibrium part from $G^<$. \textbf{Crucially, symmetrising also
+shifts the lead heat current by $+1.5\%$}: a tiny lead balance does not certify
+a $10^{-6}$-accurate conductance --- conservation is necessary but not
+sufficient for accuracy.
+
+Three levers act on the floor. \emph{(1)~Grid refinement} cuts the numerical
+asymmetry: the \texttt{d5a} floor halved $2.06\to1.09\times10^{-2}$ from $101$
+to $201$ frequencies at $\eta=0.11$. \emph{(2)~$\eta\to0$ extrapolation}
+removes both the floor ($\propto\eta$) and the conductance systematic, limited
+only by SCBA stability for soft modes (\texttt{d5a} does not converge below
+$\eta\approx0.11$). \emph{(3)~A B\"uttiker dephasing probe} on the $\eta$
+channel, $\Sigma_\eta^<=i\Gamma_\eta n_p$, $\Sigma_\eta^>=i\Gamma_\eta(n_p+1)$
+with the self-consistent occupation $n_p=G^</(G^>-G^<)$ enforcing zero local
+current per energy, drives the toy defect $6\text{--}10\%\to10^{-16}$ at finite
+$\eta$ without touching $\Sigma_s$ --- but it injects \emph{physical} elastic
+dephasing, so it is appropriate only for a wanted incoherent channel, not as a
+pure regulator.
+
+% ======================================================================
+\section{The conductance ratio requires \texorpdfstring{$\eta\to0$}{eta to 0}
+extrapolation}
+\label{sec:cons_ratio}
+% ======================================================================
+
+The practical consequence is that a single-$\eta$ production number
+underestimates the anharmonic effect. At \emph{matched} $\eta$
+(\cref{tab:cons_ratio}) the \texttt{cnt33} lead balance stays $\sim10^{-5}$
+throughout, but the conductance ratio $G_{\rm anh}/G_{\rm ball}$ swings
+$0.79\to0.92$ over $\eta=0.30\text{--}0.90$ --- a $\sim13$-point finite-$\eta$
+systematic, far larger than the lead balance would suggest. Extrapolating the
+$\eta\ge0.30$ window to $\eta\to0$ (quadratic $0.68$, linear $0.70\text{--}0.74$)
+already gives $G_{\rm anh}/G_{\rm ball}\approx0.70$, a $\sim30\%$ reduction ---
+\emph{double} the $\sim16\%$ read off at the single point $\eta=0.45$. The
+directly converged $\eta=10^{-12}$ fixed point of \cref{sec:res_eta0} lies lower
+still, at $0.57$: the ratio keeps falling below $\eta=0.30$ faster than the
+window fit, so the extrapolation is only a lower bound on the effect and the
+physical reduction is $\sim40\%$. That $\eta=10^{-12}$ value is trustworthy
+here, not an under-resolved artefact --- it conserves at $7\times10^{-6}$ (lead
+balance), pins the bubble balance at $10^{-16}$ every iteration
+(\cref{fig:res_eta0_conv}), and shifts by only a few percent under the infrared
+regulariser and grid refinement (\cref{fig:res_eta0_cutoff}), far less than the
+$\sim13$--$22$-point $\eta$ systematic. Refining the grid at fixed $\eta=0.45$
+($0.838\to0.805$) moves the ratio the same way (\cref{fig:cons_ratio}). A
+single-$\eta$ figure must therefore be quoted with its finite-$\eta$ band or,
+preferably, taken from the directly converged $\eta\to0$ fixed point.
+
+\begin{table}[t]
+  \centering
+  \caption{\texttt{cnt33} (L2, $300$\,K) conductance ratio and lead balance at
+    matched $\eta$ (\texttt{conservation.ratio\_eta}). The lead balance is
+    flat at $\sim10^{-5}$ while the ratio carries a $13$-point systematic.}
+  \label{tab:cons_ratio}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    $\eta$ & $0.30$ & $0.45$ & $0.60$ & $0.90$ & $0.45$ ($241$\,pt)\\
+    \midrule
+    $G_{\rm anh}/G_{\rm ball}$ & $0.793$ & $0.838$ & $0.872$ & $0.920$ & $0.805$\\
+    lead balance & $5.1\mathrm{e}{-6}$ & $6.9\mathrm{e}{-6}$ & $7.3\mathrm{e}{-6}$ & $3.2\mathrm{e}{-6}$ & $3.3\mathrm{e}{-6}$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\linewidth]{transport_sweeps/eta0_cnt33_ratio_eta.pdf}
+  \caption{\texttt{cnt33} (L2, $300$\,K) anharmonic-to-ballistic conductance
+    ratio (left) and lead balance (right) at matched broadening $\eta$. The
+    matched-$\eta$ points ($\eta=0.30\text{--}0.90$) extrapolate to
+    $G_{\rm anh}/G_{\rm ball}\approx0.68\text{--}0.74$ as $\eta\to0$, while the
+    directly converged $\eta=10^{-12}$ fixed point (red triangle) lies lower, at
+    $0.57$; the single point at $\eta=0.45$ ($0.84$) understates the reduction by
+    roughly a factor of two. The lead balance (right) is flat at $\sim10^{-5}$
+    throughout --- it does \emph{not} track the conductance systematic --- and
+    grid refinement ($181\to241$ points) shifts both toward the $\eta\to0$
+    limit.}
+  \label{fig:cons_ratio}
+\end{figure}
+
+% ======================================================================
+\section{Literature}
+\label{sec:cons_literature}
+% ======================================================================
+
+The picture is consistent with, and extends, the conserving-approximation
+literature. Bare (non-self-consistent) self-energies break $I_L+I_R=0$ whereas
+the SCBA conserves~\cite{wang_quantum_2008,lu_coupled_2007}; substituting an
+approximate $\Sigma$ ``generically results in a spurious violation of current
+conservation''~\cite{klein_one-shot_2023}; and conservation is equivalent to
+$\Phi$-derivability with mutually consistent $G^R$ and
+$G^{\lessgtr}$~\cite{thygesen_conserving_2008,mera_inelastic_2012}. The
+self-consistent B\"uttiker/temperature probe is already standard in atomistic
+phonon NEGF --- probe temperatures are solved ``until the integrated energy
+current vanishes for each B\"uttiker probe''~\cite{miao_buttiker_2016} --- and
+harmonic-chain self-consistent reservoirs verify leakage
+$<10^{-12}$~\cite{bandyopadhyay_quantum_2011,roy_electron_2007}, with
+\citet{roy_electron_2007} noting that the ``$i\eta$'' \emph{is} the probe
+self-energy, conserving only under the zero-current condition; the
+dephasing-versus-voltage-probe distinction is classic~\cite{pilgram_full-counting_2006,de_jong_semiclassical_1996}.
+Atomistic Green's-function practice uses $\eta\approx i0^+$ with an $\eta\to0$
+extrapolation~\cite{sadasivam_atomistic_2014} but, being ballistic, never
+exposes the interacting defect. The explicit ordering-commutator form of
+\cref{eq:sumrule} and the $\eta\times\text{asym}$ scaling appear to be new.
+
+% ======================================================================
+\section{Recommendation}
+\label{sec:cons_recommendation}
+% ======================================================================
+
+For a coherent-plus-anharmonic conductance: refine the frequency grid until the
+numerical asymmetry is sub-dominant; run at least two or three converging
+$\eta$ and extrapolate $G(\eta\to0)$, quoting the spread as the finite-$\eta$
+band; and gate convergence on the self-energy residual and the bubble balance
+$P_{\rm in}=P_{\rm out}$ (machine precision), \emph{not} on the lead balance,
+which floors at the computable ghost-reservoir term and can be subtracted to
+give an $\eta$-compensated balance that does go to zero. For soft systems that
+cannot lower $\eta$ (\texttt{d5a}), quote the $\eta$-floor-limited number with
+its band and the marginal-quasiparticle caveat ($\gamma/\omega\sim0.5$).
+Reserve the B\"uttiker probe for a physically intended incoherent channel.

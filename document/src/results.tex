@@ -481,7 +481,9 @@ at two transport cells and $46\%$ at three -- the resistive onset grows with
 length. The ballistic conductance is itself length-independent (the Landauer
 baseline, $8.0\times10^{8}$~W\,m$^{-2}$K$^{-1}$ at two, three and four cells), so
 the falling anharmonic ratio is genuine scattering, not coherence loss. The
-frequency-integrated $G_\mathrm{anh}/G_\mathrm{ball}$ (\cref{fig:res_eta0_transport})
+frequency-integrated $G_\mathrm{anh}/G_\mathrm{ball}$ (\cref{fig:res_eta0_transport};
+the heat conductance weights $T(\omega)$ by the thermal window $\partial n/\partial T$,
+so it is not identical to the flat band-integrated suppression quoted above)
 rises modestly from $0.75$ at $30$~K to $\approx 0.81$ near $100$~K and then falls
 to $0.57$ at $300$~K as the three-phonon scattering rate grows with the thermal
 phonon population, and it deepens with device length, $0.57\to0.51$ from two to
@@ -490,7 +492,12 @@ at $\eta=0$ and is excluded). These production-NEGF values at $\eta=10^{-12}$ ar
 obtained with a different solver and broadening than the dense-reference numbers
 of \cref{sec:res_cnt} (a monotonic $0.92\to0.71$); they show a stronger reduction
 but the same qualitative increase of anharmonic resistance with temperature and
-length.
+length. The stronger reduction is the physical $\eta\to0$ limit, not an
+artefact: at matched broadening the ratio falls monotonically toward this value
+as $\eta\to0$, and the converged $\eta=10^{-12}$ conductance is robust to the
+infrared regulariser and grid at the few-percent level while conserving at
+$7\times10^{-6}$; the finite-$\eta$ systematic that separates it from a
+single-broadening number is quantified in \cref{app:conservation}.
 
 \begin{figure}[htb]
   \centering
@@ -599,6 +606,6 @@ For the weakly anharmonic silicon systems neither matters (effective $\approx$ b
 For SrTiO$_3$ one must use one route or the other.
 
 A tensor rank-sweep of the device FC3 (truncated-SVD / HOSVD / CP) shows SrTiO$_3$ is
-markedly more compressible than \texttt{d5a}.A truncated SVD reaches a
+markedly more compressible than \texttt{d5a}. A truncated SVD reaches a
 $7.6\%$ Frobenius error at rank $16$ for SrTiO$_3$ versus $18\%$ for \texttt{d5a}.
 \todo[inline]{Do some transport calculations}
