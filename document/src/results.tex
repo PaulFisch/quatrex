@@ -476,6 +476,35 @@ maximum) are shown in \cref{fig:res_eta0_trans}.
   \label{fig:res_eta0_trans}
 \end{figure}
 
+\paragraph{Anharmonic transport from the converged solution.} The conserving
+$\eta=0$ fixed point yields a genuine inelastic conductance. Three-phonon
+scattering suppresses the per-frequency heat current below the ballistic limit
+across the whole band (\cref{fig:res_eta0_transport}, left), most strongly in
+the populated acoustic and low-optical region. The frequency-integrated ratio
+$G_\mathrm{anh}/G_\mathrm{ball}$ rises modestly from $0.75$ at $30$~K to
+$\approx 0.81$ near $100$~K and then falls to $0.57$ at $300$~K as the
+three-phonon scattering rate grows with the thermal phonon population
+(\cref{fig:res_eta0_transport}, right); it deepens further with device length,
+$0.57\to0.51$ from two to three transport cells at $300$~K (the four-cell
+anharmonic run did not converge and is excluded). These production-NEGF values
+at $\eta=10^{-12}$ are obtained with a different solver and broadening than the
+dense-reference numbers of \cref{sec:res_cnt} (a monotonic $0.92\to0.71$); they
+show a stronger reduction but the same qualitative increase of anharmonic
+resistance with temperature and length.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_transport.pdf}
+  \caption{Anharmonic transport of the converged $\eta=0$ (3,3) CNT. Left: the
+  per-frequency heat-current spectrum of the anharmonic solution lies below the
+  ballistic one across the band -- the three-phonon scattering fingerprint
+  (hot-lead interface, $\omega\geq2$~THz). Right: the frequency-integrated
+  anharmonic/ballistic conductance ratio versus temperature (two transport
+  cells), with the three-cell point at $300$~K; the reduction deepens with both
+  temperature and length.}
+  \label{fig:res_eta0_transport}
+\end{figure}
+
 \paragraph{d5a: a marginal fixed point at finite grid.}
 The hydrogen-passivated \texttt{d5a} wire behaves differently because of its
 surface modes. The golden-rule linewidth (\cref{eq:fgr}), evaluated directly from
