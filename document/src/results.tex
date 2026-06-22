@@ -405,6 +405,124 @@ destabilises.
 \end{figure}
 
 % ======================================================================
+\section{Self-consistent convergence at vanishing broadening}
+\label{sec:res_eta0}
+% ======================================================================
+
+The numerical broadening $\eta$ in \cref{eq:system} regularises the contact and
+device Green's functions but is not physical; a conserving anharmonic
+conductance is defined only in the $\eta\to0$ limit (\cref{sub:eta_zero}). We
+examined whether that limit is reachable directly, using the
+extrapolation/root-finding solvers of \cref{sub:rootfinders} with the smooth
+spectral window and infrared taper. The two test structures behave oppositely,
+and the boundary between them is set by a single, a~priori computable quantity:
+the anharmonic linewidth relative to the frequency grid.
+
+\paragraph{CNT: a genuine $\eta=0$ fixed point.}
+For the armchair (3,3) tube the $\eta=0$ SCBA converges to a true fixed point.
+With the smooth window, the infrared taper, the causal (Kramers--Kronig)
+retarded self-energy and plain linear or reduced-rank-extrapolation mixing at
+$\eta=10^{-12}$, the two-cell device reaches a relative $\Sigma^R$ residual of
+$3.8\times10^{-11}$, a lead-current imbalance
+$|J_L-J_R|/|J|=3.2\times10^{-11}$, and an energy-balance residual
+(\cref{eq:bubble_balance}) of $1.8\times10^{-16}$ in $49$ iterations
+(\cref{fig:res_eta0_conv}, left) -- a self-consistent, current-conserving
+solution at no broadening. The physical conductance is the grid-weighted heat
+current $G\cdot\mathrm{d}\omega\approx 17$ (the unweighted lead sum scales with
+the number of grid points and is not itself the conductance). It is insensitive
+at the few-percent level to the infrared regularisation: across
+$\omega_{\rm reg}=1.83$--$3.06$~THz the converged $G\cdot\mathrm{d}\omega$ varies
+by $3.7\%$ and extrapolates to $17.4$ as $\omega_{\rm reg}\to0$
+(\cref{fig:res_eta0_cutoff}, left), and it changes by $1\%$ between the $181$-
+and $361$-point grids (right). The converged per-frequency heat current and the
+effective transmission $T(\omega)=I(\omega)/\Delta n(\omega)$ (normalised to its
+maximum) are shown in \cref{fig:res_eta0_trans}.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_convergence_methods.pdf}
+  \caption{$\eta=0$ SCBA convergence. Left: the (3,3) CNT reaches a genuine
+  fixed point -- the $\Sigma^R$ residual and lead imbalance fall to
+  $\sim 10^{-11}$ while the energy balance stays at $10^{-16}$. Right: for the
+  \texttt{d5a} nanowire none of the root-finders converges -- RPM diverges and
+  Jacobian-free Newton--Krylov stays bounded but stalls, the residual flooring
+  near $0.3$--$0.5$ independently of the Krylov dimension ($k=25$ or $50$).}
+  \label{fig:res_eta0_conv}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_cutoff.pdf}
+  \caption{CNT (3,3) $\eta=0$ conductance $G\cdot\mathrm{d}\omega$ versus the
+  infrared regularisation scale $\omega_{\rm reg}$ (left; filled markers are
+  genuine $10^{-10}$ fixed points, the dashed line a
+  $G_0-b\,\omega_{\rm reg}^2$ fit) and versus the frequency-grid size (right).
+  The cutoff and grid sensitivities are both at the few-percent level.}
+  \label{fig:res_eta0_cutoff}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_transmission.pdf}
+  \caption{Physics of the converged $\eta=0$ CNT solution. Left: the
+  per-frequency heat-current spectrum at the hot- and cold-lead interfaces. The
+  two differ band by band -- inelastic three-phonon scattering redistributes
+  heat between frequencies, so only the frequency-\emph{integrated} current is
+  conserved (lead imbalance $3\times10^{-11}$); the spectra converge in the
+  high-frequency tail. The sub-$2$~THz bins are the infrared-regularised
+  acoustic region. Right: the effective transmission
+  $T(\omega)=I(\omega)/\Delta n(\omega)$, normalised to its maximum, over the
+  propagating band.}
+  \label{fig:res_eta0_trans}
+\end{figure}
+
+\paragraph{d5a: a marginal fixed point at finite grid.}
+The hydrogen-passivated \texttt{d5a} wire behaves differently because of its
+surface modes. The golden-rule linewidth (\cref{eq:fgr}), evaluated directly from
+$\Phi^{(3)}$ with no SCBA, separates cleanly by hydrogen character
+(\cref{fig:res_eta0_gamma}): the silicon acoustic and optical modes
+($0$--$15$~THz) have $\Gamma_{\rm anh}\approx4$~THz, far above any feasible grid
+spacing; the Si--H bending band ($\approx 16$--$21$~THz, $\sim 90\%$ hydrogen character)
+has a median $\Gamma_{\rm anh}\approx 0.65$~THz but a tail down to
+$\approx 0.13$~THz; and the Si--H stretch ($\approx 63$~THz) has
+$\Gamma_{\rm anh}\approx 0.13$~THz but carries no heat -- its occupation is
+frozen and it is masked. The sharp, heat-carrying tail of the bending band thus
+straddles the grid spacing ($\mathrm{d}\omega=0.37$ and $0.18$~THz at $181$ and
+$361$ points), and by \cref{eq:resolvent_gain} it renders the $\eta=0$ fixed
+point marginal.
+
+Consistent with this, no iterative solver reaches it (\cref{fig:res_eta0_conv},
+right). Plain and reduced-rank mixing limit-cycle; RPM diverges, with a measured
+unstable-subspace radius $|\lambda(H)|\approx 28$ ($3$ unstable modes) at $181$
+points growing to $\approx 200$ ($5$ modes) at $361$ points -- the instability
+strengthens as the grid resolves the sharp modes, confirming it is physical
+rather than a discretisation artifact. Jacobian-free Newton--Krylov stays bounded
+(its trust region prevents the RPM blow-up) and reduces the residual from unity
+to $\approx 0.3$ ($0.285$ at $k{=}25$, $0.522$ at $k{=}50$), but then stalls:
+independently of the Krylov dimension the inner GMRES cannot reduce the Newton
+residual below $\sim 97\%$ of its value -- the signature of a near-singular,
+indefinite Newton Jacobian. We therefore did not obtain a converged, conserving $\eta=0$
+conductance for \texttt{d5a}. A fixed broadening makes the self-energy converge
+but breaks conservation in proportion to $\eta$ (the lead imbalance is $2.2$ at
+$\eta=0.37$~THz and $1.2$ at $0.18$~THz), so the physically meaningful number
+would have to come from a regularise-then-extrapolate sequence $\eta\to0$, which
+we have not carried out. The boundary is sharp and predictive: the $\eta=0$
+anharmonic transport problem is well posed exactly when every heat-carrying mode
+is resolved by the frequency grid.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.7\linewidth]{transport_sweeps/d5a_gamma_anh.pdf}
+  \caption{Golden-rule anharmonic linewidth $\Gamma_{\rm anh}$ of \texttt{d5a}
+  versus mode frequency, coloured by hydrogen character, with the
+  frequency-grid spacings $\mathrm{d}\omega$ at $181$ and $361$ points (dashed).
+  The heat-carrying Si--H bending band ($\sim 16$--$21$~THz, high hydrogen
+  character) has a tail of linewidths below $\mathrm{d}\omega$; the Si--H stretch
+  ($\approx 63$~THz) is sub-grid but thermally frozen.}
+  \label{fig:res_eta0_gamma}
+\end{figure}
+
+% ======================================================================
 \section{Strong anharmonicity: SrTiO\textsubscript{3}}
 \label{sec:res_strong}
 % ======================================================================

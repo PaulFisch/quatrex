@@ -1,10 +1,13 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 
+import warnings
+
 import numpy as np
 
 from qttools.datastructures import DSDBSparse
 from qttools import NDArray, sparse, xp
 from qttools.comm import comm
+from qttools.utils.gpu_utils import get_host
 from qttools.utils.mpi_utils import distributed_load, get_local_slice, get_section_sizes
 from qttools.utils.stack_utils import scale_stack
 from qttools.profiling import Profiler
@@ -144,8 +147,61 @@ class PhononSolver(SubsystemSolver):
             self.left_occupancies = xp.where(_m, 0.0, self.left_occupancies)
             self.right_occupancies = xp.where(_m, 0.0, self.right_occupancies)
 
+        # IR-consistent occupancy taper -- grid-resolution regularization of the
+        # unresolved Bose pole. n(omega) ~ kT/(hbar*omega) diverges as omega->0;
+        # sampled at the first grid bin it injects a ~1/dw spike that makes the
+        # eta=0 SCBA Sigma^R limit-cycle with an unphysical IR linewidth
+        # Gamma ~ 1/omega (the acoustic sum rule forces Gamma ~ omega^2 -> 0).
+        # Multiply the lead occupancy by the SMOOTH taper
+        #     t(omega) = omega^2 / (omega^2 + omega_reg^2),  omega_reg = C * dw,
+        # i.e. regularize the unresolved sharp eta=0 IR poles with a minimal
+        # effective width omega_reg. t ~ (omega/omega_reg)^2 as omega->0 (exact
+        # ASR onset), t -> 1 smoothly at large omega (no kink -> the instability
+        # is removed, not relocated to the first un-tapered bin as a hard
+        # min(1,.) cutoff does; high-omega physics untouched). Applied identically
+        # to both leads, so every G^< leg inherits it consistently and the
+        # Phi-derivable bubble energy balance is preserved (verified ~1e-16). dw
+        # is the global grid spacing; as dw->0, omega_reg = C*dw -> 0 and t -> 1,
+        # so the converged observable is taper-free (grid-consistent IR
+        # regularization, NOT a fixed-THz cutoff that deletes real channels).
+        _taper_C = float(getattr(config.phonon, "ir_taper_cells", 0.0))
+        if _taper_C > 0.0 and self.energies.size > 1:
+            _dw = float(abs(get_host(self.energies[1] - self.energies[0])))
+            if _dw > 0.0:
+                _w2 = xp.asarray(self.local_frequencies, dtype=float) ** 2
+                _wreg2 = (_taper_C * _dw) ** 2
+                _t = _w2 / (_w2 + _wreg2)
+                self.left_occupancies = self.left_occupancies * _t
+                self.right_occupancies = self.right_occupancies * _t
+
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc
+        # Optional in-SCBA broadening anneal: ramp eta DOWN from eta0 (iteration
+        # 0, while Sigma^R~0) to eta_final over eta_ramp_iterations solves, then
+        # hold. Lets the anharmonic Sigma^R take over the broadening (eta=0 limit).
+        self._eta0 = float(self.eta)
+        self._eta_final = float(getattr(config.phonon, "eta_final", 0.0))
+        self._eta_ramp_n = int(getattr(config.phonon, "eta_ramp_iterations", 0))
+        self._eta_it = 0
+        # Optional in-SCBA CONTACT-broadening ramp: ramp eta_obc DOWN from eta_obc0
+        # (large enough to converge the cell cold) to eta_obc_final over
+        # eta_obc_ramp_iterations solves, then hold. The MPI-compatible in-run
+        # analogue of the eta_obc warm-start chain for the eta=0 fixed point on the
+        # longer cells (warm-start files are single-rank only). lead(eta_obc_final)
+        # -> lead(0) via the ~L-independent universal bias factor.
+        self._eta_obc0 = float(self.eta_obc)
+        self._eta_obc_final = float(getattr(config.phonon, "eta_obc_final", self.eta_obc))
+        self._eta_obc_ramp_n = int(getattr(config.phonon, "eta_obc_ramp_iterations", 0))
+        self._eta_obc_it = 0
+
+        # Optional self-consistent Buttiker dephasing probe on the eta channel
+        # (config.phonon.buttiker_probe): adds the matching fluctuation
+        # Sigma_probe^{<,>} = i*4*eta*omega*(n_p + 0/1) that the bare eta
+        # broadening lacks, with n_p self-consistent for zero local current.
+        self._buttiker = bool(getattr(config.phonon, "buttiker_probe", False))
+        self._probe_np = None      # (*stack, n_dof) occupation, lazy
+        self._probe_diag = None    # (diag nnz positions, their DOF), lazy
+        self._probe_added = None   # cached (probe_l, probe_g) for restore
 
         self.obc_blocks = OBCBlocks(num_blocks=self.system_matrix.num_local_blocks)
         self.block_sections = config.phonon.obc.block_sections
@@ -243,6 +299,45 @@ class PhononSolver(SubsystemSolver):
                 gamma_nn.copy(), self.right_occupancies + 1
             )
 
+    def _apply_eta_ramp(self) -> None:
+        """In-SCBA broadening anneal (no-op unless ``eta_ramp_iterations>0``).
+
+        Linearly ramps ``self.eta`` from ``eta0`` (iteration 0) to ``eta_final``
+        over ``eta_ramp_iterations`` solves, then holds it there. Called once per
+        :meth:`solve` (= once per SCBA iteration); the first solve keeps the full
+        eta0 while Sigma^R is still ~0, and as Sigma^R develops the broadening is
+        turned off, approaching the eta -> eta_final limit.
+        """
+        if self._eta_ramp_n <= 0:
+            return
+        frac = min(1.0, self._eta_it / float(self._eta_ramp_n))
+        self.eta = self._eta0 + (self._eta_final - self._eta0) * frac
+        self._eta_it += 1
+        if comm.rank == 0:
+            print(f"eta ramp: it={self._eta_it - 1} eta={self.eta:.4g} "
+                  f"({self._eta0:.4g} -> {self._eta_final:.4g} over "
+                  f"{self._eta_ramp_n})", flush=True)
+
+    def _apply_eta_obc_ramp(self) -> None:
+        """In-SCBA contact-broadening ramp (no-op unless eta_obc_ramp_iterations>0).
+
+        Linearly ramps ``self.eta_obc`` from ``eta_obc0`` (iteration 0, large enough
+        to converge the cell cold) to ``eta_obc_final`` over ``eta_obc_ramp_iterations``
+        solves, then holds. The contact NEVP regularisation is strong while Sigma is
+        still developing and relaxes toward the (small) target -- the in-run,
+        MPI-compatible analogue of the eta_obc warm-start chain. The converged
+        lead(eta_obc_final) maps to lead(0) via the ~L-independent universal factor.
+        """
+        if self._eta_obc_ramp_n <= 0:
+            return
+        frac = min(1.0, self._eta_obc_it / float(self._eta_obc_ramp_n))
+        self.eta_obc = self._eta_obc0 + (self._eta_obc_final - self._eta_obc0) * frac
+        self._eta_obc_it += 1
+        if comm.rank == 0:
+            print(f"eta_obc ramp: it={self._eta_obc_it - 1} eta_obc={self.eta_obc:.4g} "
+                  f"({self._eta_obc0:.4g} -> {self._eta_obc_final:.4g} over "
+                  f"{self._eta_obc_ramp_n})", flush=True)
+
     @profiler.profile(label="PhononSolver: Assemble", level="default", comm=comm)
     def _assemble_system_matrix(self) -> None:
         """Assembles the HARMONIC system matrix (no scattering self-energy).
@@ -306,6 +401,79 @@ class PhononSolver(SubsystemSolver):
                 return_retarded=True,
                 return_current=self.compute_meir_wingreen_current,
             )
+
+    def _probe_indices(self, sse_lesser: DSDBSparse):
+        """Lazily cache the diagonal nnz positions and their device-DOF index
+        (where rows == cols), for the Buttiker probe diagonal."""
+        if self._probe_diag is not None:
+            return self._probe_diag
+        rows = getattr(sse_lesser, "rows", None)
+        cols = getattr(sse_lesser, "cols", None)
+        if rows is None or cols is None:
+            self._buttiker = False
+            warnings.warn("buttiker_probe disabled: sparsity has no rows/cols.",
+                          stacklevel=2)
+            return None
+        r = np.asarray(get_host(rows)); c = np.asarray(get_host(cols))
+        diag = np.where(r == c)[0]
+        self._probe_diag = (xp.asarray(diag), xp.asarray(r[diag]))
+        return self._probe_diag
+
+    def _apply_buttiker_probe(self, sse_lesser, sse_greater) -> None:
+        """Add Sigma_probe^{<,>} = i*4*eta*|omega|*(n_p + 0/1) to the device
+        source on the diagonal (no-op until n_p exists, i.e. from iteration 1)."""
+        self._probe_added = None
+        if not self._buttiker or self._probe_np is None:
+            return
+        if comm.block.size > 1:
+            self._buttiker = False
+            warnings.warn("buttiker_probe requires block_comm_size==1; disabled.",
+                          stacklevel=2)
+            return
+        idx = self._probe_indices(sse_lesser)
+        if idx is None:
+            return
+        diag, dof = idx
+        w4 = 4.0 * self.eta * xp.abs(xp.asarray(self.local_frequencies))
+        np_diag = xp.take(self._probe_np, dof, axis=-1)      # (*stack, n_diag)
+        probe_l = scale_stack(1j * np_diag.copy(), w4)
+        probe_g = scale_stack(1j * (np_diag + 1.0), w4)
+        sse_lesser.data[..., diag] += probe_l
+        sse_greater.data[..., diag] += probe_g
+        self._probe_added = (diag, probe_l, probe_g)
+
+    def _restore_buttiker_probe(self, sse_lesser, sse_greater) -> None:
+        """Remove the probe diagonal so the SCBA's tracked Sigma stays clean."""
+        if self._probe_added is None:
+            return
+        diag, probe_l, probe_g = self._probe_added
+        sse_lesser.data[..., diag] -= probe_l
+        sse_greater.data[..., diag] -= probe_g
+        self._probe_added = None
+
+    def _update_buttiker_probe(self, out: tuple[DSDBSparse, ...]) -> None:
+        """Refresh the per-DOF, per-omega probe occupation from the device G:
+        n_p = (-i G^<)_dd / (-i (G^> - G^<))_dd  (zero local current per energy)."""
+        if not self._buttiker or comm.block.size > 1:
+            return
+        g_lesser, g_greater = out[0], out[1]
+        idx = self._probe_indices(g_lesser)
+        if idx is None:
+            return
+        diag, dof = idx
+        gl = g_lesser.data[..., diag]
+        gg = g_greater.data[..., diag]
+        spectral = (-1j * (gg - gl)).real
+        nloc = (-1j * gl).real / xp.where(spectral > 1e-30, spectral, 1e-30)
+        nloc = xp.clip(nloc, 0.0, None)
+        if self._probe_np is None:
+            stack = g_lesser.data.shape[:-1]
+            ndof = int(get_host(dof).max()) + 1
+            self._probe_np = xp.zeros(stack + (ndof,), dtype=float)
+        # diagonal DOFs are unique -> direct scatter (light damping for stability)
+        new = xp.array(self._probe_np, copy=True)
+        new[..., dof] = nloc
+        self._probe_np = 0.5 * self._probe_np + 0.5 * new
 
     @profiler.profile(label="PhononSolver: Filter", level="default", comm=comm)
     def _filter_peaks(self, out: tuple[DSDBSparse, ...]) -> None:
@@ -386,6 +554,8 @@ class PhononSolver(SubsystemSolver):
 
         """
 
+        self._apply_eta_ramp()
+        self._apply_eta_obc_ramp()
         self._assemble_system_matrix()
 
         # TODO Band ege Tracking
@@ -394,7 +564,10 @@ class PhononSolver(SubsystemSolver):
         # the scattering self-energy enters the device Dyson only.
         self._compute_obc()
         _btd_subtract(self.system_matrix, sse_retarded)
+        self._apply_buttiker_probe(sse_lesser, sse_greater)   # no-op if off
         self._selected_solve(sse_lesser, sse_greater, out)
+        self._restore_buttiker_probe(sse_lesser, sse_greater)
+        self._update_buttiker_probe(out)
 
         self.system_matrix.free_data()
         if self.call_count < self.filtering_iteration_limit:

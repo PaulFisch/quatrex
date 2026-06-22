@@ -35,7 +35,9 @@ from quatrex.phonon.bubble import (
     _RING_THREADS,
     _ring_contract_serial,
     bubble_dense,
+    phi_perms,
     ring_contract,
+    ring_contract_pre,
 )
 from quatrex.phonon.fc3_loader import (
     PhiBlocks,
@@ -84,6 +86,81 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._vertex_scale = float(getattr(config.phonon, "sse_vertex_scale", 1.0))
         self._sse_cutoff = float(
             getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
+        # Band-limited SSE: scatter only where there are phonon states (mask the
+        # bubble where the spectral function A(w)=i(G^>-G^<) is negligible). The
+        # generic, automatic cutoff that fixes the eta->0 divergence (spurious
+        # self-energy in the empty above-band grid region amplifying with no
+        # damping) without a hand-set frequency.
+        self._band_limit = bool(getattr(config.phonon, "band_limit_sse", False))
+        self._band_tol = float(getattr(config.phonon, "spectral_support_tol", 1e-4))
+        self._sharp_cap = float(getattr(config.phonon, "spectral_sharp_cap", 0.0))
+        self._sharp_state = None  # persistent hysteresis mask of near-singular bins
+        self._band_support_mask = None  # FROZEN empty-region mask (A-threshold fallback)
+        # Fixed harmonic band top (THz) for the above-band mask. The eta->0
+        # divergence lives in the empty grid region ABOVE the phonon band; the
+        # band top is a G-independent property of the dynamical matrix, so the
+        # masked set never moves (flicker-free). This supersedes the A(w)-
+        # threshold support, which is unreliable for multi-cell devices: the
+        # full n_cells x n_cells block nnz pattern pads the physically-zero
+        # corner blocks with 1.0, flooring max_nnz|G^>-G^<| and hiding the
+        # above-band emptiness (cnt33 L3 masked 0 bins -> eta=0 diverged).
+        self._band_top = None
+        self._band_top_announced = False
+        if self._band_limit and dynamical_matrix is not None:
+            bt_local = 0.0
+            try:
+                bt_local = self._compute_band_top(dynamical_matrix)
+            except Exception as exc:  # noqa: BLE001 - fall back, never fatal
+                if ranks.rank == 0:
+                    print(f"SSE band-limit: band-top computation failed "
+                          f"({exc!r}); falling back to A-threshold support",
+                          flush=True)
+            # Agree across ranks: the dynamical matrix may be block-distributed,
+            # so only the rank(s) owning blocks (0,0)/(0,1) get a real value.
+            bt = np.array(float(bt_local), dtype=float)
+            comm.Allreduce(MPI.IN_PLACE, bt, op=MPI.MAX)
+            if float(bt) > 0.0:
+                self._band_top = float(bt)
+                if comm.rank == 0:
+                    print(f"SSE band-limit: harmonic band top "
+                          f"{self._band_top:.3f} THz (fixed above-band mask)",
+                          flush=True)
+        # HARMONIC spectral-support masking (band_support_margin_thz > 0): mask
+        # SSE bins far from EVERY harmonic band frequency -- above-band AND
+        # interior gaps AND between sparse high-freq modes (the single band-top
+        # mask misses the latter two). G-independent + frozen. self._support_freqs
+        # is local (only the rank(s) owning blocks (0,0)/(0,1) get a real value);
+        # the per-bin empty mask is OR-reduced across ranks at first use.
+        self._support_margin = float(
+            getattr(config.phonon, "band_support_margin_thz", 0.0))
+        self._support_freqs = None
+        self._support_empty = None
+        if (self._band_limit and self._support_margin > 0.0
+                and dynamical_matrix is not None):
+            try:
+                self._support_freqs = self._compute_band_support_freqs(
+                    dynamical_matrix)
+            except Exception as exc:  # noqa: BLE001 - never fatal
+                if ranks.rank == 0:
+                    print(f"SSE band-limit: band-support computation failed "
+                          f"({exc!r}); harmonic-support mask off", flush=True)
+        # Occupation-freeze mask (sse_freeze_occupation > 0): mask SSE bins whose
+        # Bose occupation n(omega, T_hot) is below the threshold -- thermally
+        # frozen spectator modes that carry ~zero heat (e.g. the isolated Si-H
+        # stretch island). T_hot = warmer lead, so a mode is frozen only if
+        # frozen at the hot contact too. x = hbar*omega/(kB*T_hot).
+        self._freeze_n = float(getattr(config.phonon, "sse_freeze_occupation", 0.0))
+        self._T_hot = max(float(getattr(config.phonon, "left_temperature", 300.0)),
+                          float(getattr(config.phonon, "right_temperature", 300.0)))
+        self._freeze_mask = None
+        # SMOOTH band-limit window (sse_smooth_window): replace the hard masks
+        # with a smooth multiplicative window -> no Sigma discontinuity -> no
+        # Hilbert/Gibbs edge ring -> no manufactured eta=0 marginal mode.
+        self._smooth_window = bool(getattr(config.phonon, "sse_smooth_window",
+                                           False))
+        self._support_taper_cells = float(
+            getattr(config.phonon, "support_taper_cells", 4.0))
+        self._sse_window = None  # cached (ne_full, 1, ...) float window
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
             raise ValueError(
@@ -168,6 +245,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # n_fft) for FFTd G
         self._tau_cache: tuple | None = None
         self._rev_perm: "NDArray | None | bool" = False  # False = not built
+        # Pre-permuted phi factors, built lazily on first compute (after any
+        # ballistic zeroing); the FC3 vertex is fixed so this is computed once.
+        self._phi_pre: dict | None = None
         self._full_freqs: NDArray | None = None
 
         # Optional self-consistent SCP cubic-tadpole static self-energy.
@@ -175,6 +255,104 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._sigma_static: NDArray | None = None
         if self._scp_tadpole:
             self._setup_scp_tadpole(config, dynamical_matrix)
+
+    @staticmethod
+    def _compute_band_top(dynamical_matrix, n_k: int = 512) -> float:
+        """Harmonic phonon band top (THz) from the dynamical matrix.
+
+        The device matrix is block-tridiagonal in the (nearest-neighbour) unit
+        cells, so the bulk dispersion is ``D(k) = D0 + D1 e^{ik} + D1^H
+        e^{-ik}`` with the on-site block ``D0 = blocks[0,0]`` and the coupling
+        ``D1 = blocks[0,1]``; its eigenvalues are ``omega^2(k)``. The band top
+        ``max_k sqrt(eig D(k))`` is the highest frequency with phonon states --
+        above it the grid is empty (the eta->0 divergence region). This is a
+        fixed property of D (no Green's function), so it is robust to the
+        constant-1.0 corner-block padding that corrupts the A(w) support.
+        """
+        D0 = np.asarray(dynamical_matrix.blocks[0, 0])
+        if D0.ndim == 3:
+            D0 = D0[0]
+        D1 = np.asarray(dynamical_matrix.blocks[0, 1])
+        if D1.ndim == 3:
+            D1 = D1[0]
+        D0 = 0.5 * (D0 + D0.conj().T)
+        ks = np.linspace(0.0, np.pi, int(n_k))
+        w_top = 0.0
+        for k in ks:
+            phase = np.exp(1j * k)
+            Dk = D0 + D1 * phase + D1.conj().T * np.conj(phase)
+            Dk = 0.5 * (Dk + Dk.conj().T)
+            ev_max = float(np.linalg.eigvalsh(Dk)[-1])
+            if ev_max > w_top:
+                w_top = ev_max
+        return float(np.sqrt(max(w_top, 0.0)))
+
+    @staticmethod
+    def _compute_band_support_freqs(dynamical_matrix, n_k: int = 512):
+        """ALL harmonic mode frequencies (THz) of the bulk dispersion
+        ``D(k)=D0+D1 e^{ik}+D1^H e^{-ik}``, k in [0, pi] -- the union over k and
+        bands is the phonon spectral SUPPORT. Grid bins far from every band
+        frequency are EMPTY (no states); masking them out of the SSE removes the
+        eta->0 FFT-leakage divergence in the above-band AND the interior gaps,
+        including for SPARSE high-frequency modes (e.g. discrete Si-H surface
+        modes) that the single band-top cutoff misses. Like
+        ``_compute_band_top`` but keeps the full spectrum; G-independent (robust
+        to corner-block padding). Returns sorted unique frequencies (THz)."""
+        D0 = np.asarray(dynamical_matrix.blocks[0, 0])
+        if D0.ndim == 3:
+            D0 = D0[0]
+        D1 = np.asarray(dynamical_matrix.blocks[0, 1])
+        if D1.ndim == 3:
+            D1 = D1[0]
+        D0 = 0.5 * (D0 + D0.conj().T)
+        out = []
+        for k in np.linspace(0.0, np.pi, int(n_k)):
+            phase = np.exp(1j * k)
+            Dk = D0 + D1 * phase + D1.conj().T * np.conj(phase)
+            Dk = 0.5 * (Dk + Dk.conj().T)
+            ev = np.linalg.eigvalsh(Dk)
+            out.append(np.sqrt(np.clip(ev.real, 0.0, None)))
+        return np.unique(np.concatenate(out))
+
+    def _build_sse_window(self, full_freqs):
+        """SMOOTH band-limit window w(omega) in [0,1] (1D, cached). Replaces the
+        hard support+freeze masks: w_supp (raised-cosine ramp of width
+        support_taper_cells*dw on the GLOBAL distance to the harmonic support --
+        subsumes band-top + gaps) times w_occ (smooth logistic in the Bose
+        occupation at T_hot -- subsumes the freeze). G-independent + frozen, so
+        no live-A limit cycle; C^1 smooth, so its Hilbert partner has no edge
+        ring; ramps ~dw, so -> the exact band indicator as dw->0."""
+        af = np.abs(np.asarray(full_freqs).real).astype(float)
+        dw = float(abs(full_freqs[1] - full_freqs[0])) if af.size > 1 else 1.0
+        w = np.ones(af.shape, dtype=float)
+        if self._support_margin > 0.0:
+            sf = self._support_freqs
+            if sf is not None and sf.size:
+                dist = np.min(np.abs(af[:, None] - sf[None, :]), axis=1)
+            else:
+                dist = np.full(af.shape, np.inf)
+            # global nearest-harmonic-mode distance (support is the union of ranks)
+            comm.Allreduce(MPI.IN_PLACE, dist, op=MPI.MIN)
+            ramp = max(self._support_taper_cells * dw, 1e-30)
+            s = np.clip((dist - self._support_margin) / ramp, 0.0, 1.0)
+            w *= 0.5 * (1.0 + np.cos(np.pi * s))  # 1 at dist<=m, 0 at dist>=m+ramp
+        if self._freeze_n > 0.0:
+            x = (6.582119569e-16 * 2.0 * np.pi * 1e12 / 8.617333262e-5) \
+                * af / max(self._T_hot, 1e-30)
+            with np.errstate(over="ignore", divide="ignore"):
+                n_bose = 1.0 / np.expm1(np.clip(x, 1e-30, None))
+            w *= 1.0 / (1.0 + (self._freeze_n
+                               / np.maximum(n_bose, 1e-300)) ** 3)
+        # The omega=0 bin is always zeroed (a nonzero Sigma^≷(0) hits the singular
+        # acoustic G^R(0) -> DC spike). The IR occupancy taper (ir_taper_cells)
+        # makes the approach ~omega^2 smooth, so this single-bin zero does not ring.
+        w[af < 1e-6] = 0.0
+        if comm.rank == 0:
+            print(f"SSE band-limit: SMOOTH window (support ramp "
+                  f"{self._support_taper_cells:g}*dw, freeze n<{self._freeze_n:g})"
+                  f" -> mean w={float(w.mean()):.3f}, {int((w < 0.5).sum())}/"
+                  f"{w.size} bins below 0.5", flush=True)
+        return xp.asarray(w)
 
     def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
         """Prepare the self-consistent SCP cubic-tadpole static self-energy:
@@ -375,7 +553,122 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # participate in the SSE at all -- with the matching OUTPUT mask in
         # step (5), transport below the cutoff is purely ballistic.
         sse_mask = xp.abs(xp.asarray(full_freqs)) < max(self._sse_cutoff, 1e-6)
-        if bool(sse_mask.any()):
+        if self._band_limit:
+            af = xp.abs(xp.asarray(full_freqs))
+            low = xp.zeros(af.shape, dtype=bool)
+            if self._band_top is not None:
+                # PRIMARY: fixed harmonic band-top mask. The eta->0 divergence
+                # lives in the empty grid region ABOVE the phonon band (no states
+                # there -> the resolvent is real -> the SCBA amplifies
+                # convolution leakage with no damping). omega_top is a fixed,
+                # G-independent property of the dynamical matrix, so the masked
+                # set never moves: a LIVE A(w) threshold instead makes the SCBA
+                # map discontinuous and it limit-cycles (Anderson on cnt33 L2
+                # converges to 9e-5 with no mask but cycles 0.09<->0.38 with a
+                # live mask). It also dodges the constant-1.0 corner-block
+                # padding of the full n_cells x n_cells nnz pattern, which floors
+                # max_nnz|G^>-G^<| at 1.0 on multi-cell devices and hides the
+                # above-band emptiness (cnt33 L3 masked 0 bins -> eta=0 diverged).
+                margin = (float(abs(full_freqs[1] - full_freqs[0]))
+                          if full_freqs.size > 1 else 0.0)
+                low = af > (self._band_top + margin)
+                if comm.rank == 0 and not self._band_top_announced:
+                    self._band_top_announced = True
+                    print(f"SSE band-limit: masking {int(low.sum())} bin(s) "
+                          f"above {self._band_top:.3f} THz", flush=True)
+            else:
+                # FALLBACK (no dynamical matrix passed): freeze the empty-region
+                # A(w)-threshold mask at the first (ballistic) call so the masked
+                # set does not flicker as the modes shift under Sigma. Unreliable
+                # on multi-cell devices (corner-block padding) -- prefer the band
+                # top above whenever the dynamical matrix is available.
+                a_w = xp.abs(gg_in - gl_in)
+                spec = a_w.reshape(a_w.shape[0], -1).max(axis=1)
+                spec_peak = float(spec.max())
+                if spec_peak > 0.0:
+                    if (self._band_support_mask is None
+                            or self._band_support_mask.shape != spec.shape):
+                        self._band_support_mask = spec < self._band_tol * spec_peak
+                        if ranks.rank == 0:
+                            print(f"SSE: froze band-support mask "
+                                  f"({int(self._band_support_mask.sum())}/"
+                                  f"{spec.size} empty bins, "
+                                  f"tol={self._band_tol:g})", flush=True)
+                    low = self._band_support_mask
+            if self._support_margin > 0.0:
+                # HARMONIC spectral-support empty-bin mask (above-band + interior
+                # gaps + between sparse high-freq modes). Computed once, frozen.
+                if self._support_empty is None:
+                    af_h = np.abs(np.asarray(full_freqs).real).astype(float)
+                    sf = self._support_freqs
+                    if sf is not None and sf.size:
+                        dist = np.min(np.abs(af_h[:, None] - sf[None, :]), axis=1)
+                        loc_sup = (dist <= self._support_margin).astype(np.int32)
+                    else:
+                        loc_sup = np.zeros(af_h.shape, dtype=np.int32)
+                    # OR across ranks: the block-owning rank holds the support.
+                    comm.Allreduce(MPI.IN_PLACE, loc_sup, op=MPI.MAX)
+                    self._support_empty = xp.asarray(loc_sup == 0)
+                    if comm.rank == 0:
+                        print(f"SSE band-limit: harmonic-support mask -> "
+                              f"{int((loc_sup == 0).sum())}/{loc_sup.size} empty "
+                              f"bins masked (margin {self._support_margin:g} THz)",
+                              flush=True)
+                low = low | self._support_empty
+            if self._freeze_n > 0.0:
+                # Occupation-freeze: mask thermally-frozen spectator bins
+                # (n(omega, T_hot) < threshold). Frozen once (T-fixed).
+                if self._freeze_mask is None:
+                    af_h = np.abs(np.asarray(full_freqs).real).astype(float)
+                    # hbar*omega/(kB*T): omega in THz -> 47.99 * f / T
+                    x = (6.582119569e-16 * 2.0 * np.pi * 1e12 / 8.617333262e-5) \
+                        * af_h / max(self._T_hot, 1e-30)
+                    with np.errstate(over="ignore", divide="ignore"):
+                        n_bose = 1.0 / np.expm1(np.clip(x, 1e-30, None))
+                    frozen = (n_bose < self._freeze_n) & (af_h > 0.0)
+                    self._freeze_mask = xp.asarray(frozen)
+                    if comm.rank == 0:
+                        print(f"SSE band-limit: occupation-freeze mask -> "
+                              f"{int(frozen.sum())}/{frozen.size} frozen bins "
+                              f"(n<{self._freeze_n:g}, T_hot={self._T_hot:g}K)",
+                              flush=True)
+                low = low | self._freeze_mask
+            sse_mask = sse_mask | low
+            if self._sharp_cap > 0.0:
+                # Near-singular (sharp) modes: A spikes far above the in-band
+                # median (sub-grid linewidth). Zero them for THIS iteration with
+                # HYSTERESIS (flag at cap x median, un-flag below cap/4) so the
+                # mask itself does not flicker; they re-enter once Sigma broadens
+                # them. (The in-band median is corrupted by corner-block padding
+                # on multi-cell devices -- this knob is for single-cell soft
+                # modes; default spectral_sharp_cap=0 keeps it off.)
+                a_w = xp.abs(gg_in - gl_in)
+                spec = a_w.reshape(a_w.shape[0], -1).max(axis=1)
+                inband = spec[(~low) & (spec > 0.0)]
+                if inband.size:
+                    med = float(xp.median(inband))
+                    if med > 0.0:
+                        newly = spec > self._sharp_cap * med
+                        healed = spec < 0.25 * self._sharp_cap * med
+                        if self._sharp_state is None or \
+                                self._sharp_state.shape != spec.shape:
+                            self._sharp_state = xp.zeros_like(spec, dtype=bool)
+                        self._sharp_state = (self._sharp_state & ~healed) | newly
+                        if ranks.rank == 0 and bool(self._sharp_state.any()):
+                            print(f"SSE: masked {int(self._sharp_state.sum())} "
+                                  f"near-singular bin(s) (A > {self._sharp_cap:g}"
+                                  f"x median, hysteresis)", flush=True)
+                        sse_mask = sse_mask | self._sharp_state
+        if self._smooth_window:
+            # SMOOTH window (replaces the hard masks). The reversed/absorption
+            # legs are built from gl_in/gg_in below, so they inherit it -> the
+            # bosonic fold stays exact (w is a function of |omega|).
+            if self._sse_window is None:
+                self._sse_window = self._build_sse_window(full_freqs)
+            _w = self._sse_window.reshape((-1,) + (1,) * (gl_in.ndim - 1))
+            gl_in = gl_in * _w
+            gg_in = gg_in * _w
+        elif bool(sse_mask.any()):
             gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
             gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
         gtl.data[:] = self._fft_pad(gl_in, n_fft)
@@ -389,21 +682,27 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # the nonequilibrium G^< (~2% on cnt33 at dT=10 K) was previously
         # folded without it, breaking the Phi-derivable energy balance of
         # the bubble at ~1e-5 (see SCBA._phonon_bubble_energy_balance).
-        perm = self._nnz_transpose_perm(g_lesser)
-        if perm is not None:
-            gl_rev_src = gl_in[..., perm]
-            gg_rev_src = gg_in[..., perm]
-            if nq > 1:
-                # negate the transverse momentum axes (Gamma-centered IDFT
-                # meshes are closed under q -> -q)
-                for ax, k in enumerate(nk, start=1):
-                    neg = (-xp.arange(k)) % k
-                    gl_rev_src = xp.take(gl_rev_src, neg, axis=ax)
-                    gg_rev_src = xp.take(gg_rev_src, neg, axis=ax)
-            Xl = self._fft_pad(gl_rev_src, n_fft)
-            Xg = self._fft_pad(gg_rev_src, n_fft)
-        else:
-            Xl, Xg = gtl.data, gtg.data  # equilibrium-fold fallback
+        # Build the reversed (absorption) legs. The q-negation (middle axes) and
+        # the FFT + tau reversal (axis 0) are state-independent and done here in
+        # the nnz state; the ji-TRANSPOSE (nnz/last axis) is applied AFTER the
+        # nnz->stack dtranspose below, where the FULL nnz pattern is local on
+        # every rank. The transpose (axis -1) commutes with the FFT/reversal
+        # (axis 0) and q-negation (middle axes), so this is EXACTLY the serial
+        # fold G^<_ij(q,-w)=G^>_ji(-q,w) -- now at ANY nranks (block_comm=1),
+        # not just nranks=1. The old code applied the transpose in the nnz state
+        # (nnz split over comm.stack -> partner non-local) and silently fell back
+        # to the no-transpose equilibrium continuation, breaking the
+        # Phi-derivable energy balance (~1e-5) for every multi-rank run.
+        gl_rev_src, gg_rev_src = gl_in, gg_in
+        if nq > 1:
+            # negate the transverse momentum axes (Gamma-centered IDFT
+            # meshes are closed under q -> -q)
+            for ax, k in enumerate(nk, start=1):
+                neg = (-xp.arange(k)) % k
+                gl_rev_src = xp.take(gl_rev_src, neg, axis=ax)
+                gg_rev_src = xp.take(gg_rev_src, neg, axis=ax)
+        Xl = self._fft_pad(gl_rev_src, n_fft)
+        Xg = self._fft_pad(gg_rev_src, n_fft)
         gtlr.data[0] = Xl[0]
         gtlr.data[1:] = Xl[:0:-1]
         gtgr.data[0] = Xg[0]
@@ -414,6 +713,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         gtg.dtranspose()
         gtlr.dtranspose()
         gtgr.dtranspose()
+        # ji-transpose of the reversed legs, applied in the "stack" state where
+        # the FULL nnz axis is local on every rank (perm is a pure function of
+        # the replicated sparsity pattern). Only the reversed/absorption legs
+        # gtlr/gtgr are transposed; the decay legs gtl/gtg are NOT. With
+        # block_comm_size==1 this is the exact conserving fold at every nranks.
+        perm = self._nnz_transpose_perm(g_lesser)
+        if perm is not None:
+            gtlr.data[:] = gtlr.data[..., perm]
+            gtgr.data[:] = gtgr.data[..., perm]
         if stl.distribution_state != "stack":
             stl.dtranspose(discard=True)
         if stg.distribution_state != "stack":
@@ -465,15 +773,28 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # parallelised ONCE over the whole (I,J)/phi-pair loop below, not per
         # call, so the worker threads stay busy across the whole contraction
         # instead of idling on the GIL-held Python between 100s of short calls.
-        def _fold_l(pl, pr, gla, glb, ggra, ggrb):
-            return (_ring_contract_serial(pl, pr, gla, glb, xp)
-                    + _ring_contract_serial(pl, pr, gla, ggrb, xp)
-                    + _ring_contract_serial(pl, pr, ggra, glb, xp))
+        # Pre-permute the (fixed) phi factors once: per (I,J) a list of
+        # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ). Removes the per-call transpose copy
+        # that dominates the bubble on small-block systems.
+        if self._phi_pre is None:
+            self._phi_pre = {}
+            for (I, J), quads in self._phi_pair_index.items():
+                self._phi_pre[(I, J)] = [
+                    (K1, K2, K1p, K2p) + phi_perms(pl, pr, xp)
+                    for (K1, K2, K1p, K2p, pl, pr) in quads
+                ]
 
-        def _fold_g(pl, pr, gga, ggb, glra, glrb):
-            return (_ring_contract_serial(pl, pr, gga, ggb, xp)
-                    + _ring_contract_serial(pl, pr, gga, glrb, xp)
-                    + _ring_contract_serial(pl, pr, glra, ggb, xp))
+        def _fold_l(pre, gla, glb, ggra, ggrb):
+            PL, PR, nI, bK2, nJ = pre
+            return (ring_contract_pre(PL, PR, nI, bK2, nJ, gla, glb, xp)
+                    + ring_contract_pre(PL, PR, nI, bK2, nJ, gla, ggrb, xp)
+                    + ring_contract_pre(PL, PR, nI, bK2, nJ, ggra, glb, xp))
+
+        def _fold_g(pre, gga, ggb, glra, glrb):
+            PL, PR, nI, bK2, nJ = pre
+            return (ring_contract_pre(PL, PR, nI, bK2, nJ, gga, ggb, xp)
+                    + ring_contract_pre(PL, PR, nI, bK2, nJ, gga, glrb, xp)
+                    + ring_contract_pre(PL, PR, nI, bK2, nJ, glra, ggb, xp))
 
         if nq == 1:
             # Compute Sigma^{<,>}(I,J) for the tau slice [lo:hi]; returns
@@ -483,15 +804,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 for (I, J) in owned:
                     acc_l = None
                     acc_g = None
-                    for (K1, K2, K1p, K2p, phi_left, phi_right
-                         ) in self._phi_pair_index[(I, J)]:
+                    for (K1, K2, K1p, K2p, *pre
+                         ) in self._phi_pre[(I, J)]:
                         sl = _fold_l(
-                            phi_left, phi_right,
+                            pre,
                             gl_blk[(K1, K1p)][lo:hi], gl_blk[(K2, K2p)][lo:hi],
                             ggr_blk[(K1, K1p)][lo:hi], ggr_blk[(K2, K2p)][lo:hi],
                         )
                         sg = _fold_g(
-                            phi_left, phi_right,
+                            pre,
                             gg_blk[(K1, K1p)][lo:hi], gg_blk[(K2, K2p)][lo:hi],
                             glr_blk[(K1, K1p)][lo:hi], glr_blk[(K2, K2p)][lo:hi],
                         )
@@ -502,8 +823,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 return res
 
             n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
-            if _RING_POOL is not None and n_tau >= _RING_THREADS:
-                nt = min(_RING_THREADS, n_tau)
+            # Cap the tau-split so each worker keeps >=~4 tau points. The per-ring
+            # contraction is cache-bound per chunk (the BS^3 ring intermediate
+            # stays in cache only while the chunk is small), so it scales near-
+            # linearly with threads UNTIL the chunk gets too short -- measured on
+            # cnt33 L2 (w=241): 64 threads = 56x (1232 GF/s), 128 threads regress
+            # to 791 GF/s purely from <2 tau/thread. n_tau//4 keeps us at the
+            # sweet spot and lets large-w cells use proportionally more threads.
+            nt = min(_RING_THREADS, max(1, n_tau // 4))
+            if _RING_POOL is not None and nt > 1:
                 bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
                 chunks = list(_RING_POOL.map(lambda b: _contract_tau(*b), bnds))
                 for (I, J) in owned:
@@ -569,8 +897,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             if pl is None or pr is None:
                                 continue
                             qtasks.setdefault((I, J), []).append(
-                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p,
-                                 xp.conj(pl), pr))
+                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p)
+                                + phi_perms(xp.conj(pl), pr, xp))
 
             # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
             # nq==1 _contract_tau so the omega/tau batch parallelises across
@@ -582,16 +910,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     bs_J = int(self.block_sizes[J])
                     out_l = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
                     out_g = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
-                    for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, pl, pr) in tasks:
+                    for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, *pre) in tasks:
                         out_l[:, iq_ext] += _fold_l(
-                            pl, pr,
+                            pre,
                             gl_q[(K1, K1p)][lo:hi, iqp],
                             gl_q[(K2, K2p)][lo:hi, iq2],
                             ggr_q[(K1, K1p)][lo:hi, iqp],
                             ggr_q[(K2, K2p)][lo:hi, iq2],
                         )
                         out_g[:, iq_ext] += _fold_g(
-                            pl, pr,
+                            pre,
                             gg_q[(K1, K1p)][lo:hi, iqp],
                             gg_q[(K2, K2p)][lo:hi, iq2],
                             glr_q[(K1, K1p)][lo:hi, iqp],
@@ -607,8 +935,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
                 stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
-            if _RING_POOL is not None and xp is np and n_tau >= _RING_THREADS:
-                nt = min(_RING_THREADS, n_tau)
+            nt = min(_RING_THREADS, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+            if _RING_POOL is not None and xp is np and nt > 1:
                 bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
                         for i in range(nt)]
                 chunks = list(_RING_POOL.map(lambda b: _contract_tau_q(*b), bnds))
@@ -642,7 +970,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # ballistic), and never at the omega=0 bin (a nonzero Sigma^≷(0)
         # hits the near-singular acoustic G^R(0) and produces a x1e5 DC
         # spike in I(0) on soft wires; the bin carries zero heat anyway).
-        if bool(sse_mask.any()):
+        if self._smooth_window:
+            _w = self._sse_window.reshape((-1,) + (1,) * (sl_data.ndim - 1))
+            sl_data = sl_data * _w
+            sg_data = sg_data * _w
+        elif bool(sse_mask.any()):
             sl_data[sse_mask] = 0.0
             sg_data[sse_mask] = 0.0
         # SIGN CONVENTION (2026-06-12 fix): the bubble formula (textbook
@@ -665,8 +997,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if self.retarded_method == "fft":
             delta = sg_data - sl_data
             hil = 0.5j * hilbert_transform(delta, full_freqs)
-            if bool(sse_mask.any()):
-                hil[sse_mask] = 0.0  # ballistic below the SSE cutoff
+            if not self._smooth_window and bool(sse_mask.any()):
+                # HARD path: post-mask the retarded too. (SMOOTH path: sl/sg are
+                # already windowed -> delta is C^1 smooth -> the Hilbert has NO
+                # edge ring; post-masking here would RE-INTRODUCE the step after
+                # the global KK transform -- the Gibbs source -- so we skip it.)
+                hil[sse_mask] = 0.0
             sigma_retarded.data[:] = sigma_retarded.data + hil
 
         # Self-consistent SCP cubic-tadpole static self-energy
@@ -674,12 +1010,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._apply_scp_tadpole(g_lesser, sigma_retarded)
 
     def _nnz_transpose_perm(self, g: "DSDBSparse") -> "NDArray | None":
-        """Permutation of the (local) nnz axis realizing (i,j) -> (j,i).
+        """Permutation of the (full) nnz axis realizing (i,j) -> (j,i).
 
-        Returns None (with a one-time warning) when unavailable: pattern
-        without rows/cols, transpose-incomplete local slice (nnz split over
-        comm.stack with stack > 1), or block-distributed windows. The fold
-        then falls back to the no-transpose (equilibrium) continuation.
+        Pure function of the (replicated, full) sparsity pattern -- independent
+        of the distribution state. It is APPLIED only in the "stack" state, where
+        the full nnz axis is local on every rank (see ``_compute_fft_first``), so
+        it works at any ``comm.stack`` size. Returns None (with a one-time
+        warning) only when ``comm.block.size > 1`` (the transpose partner block
+        (j,i) lives on a neighbour block rank -- not yet communicated); the fold
+        then falls back to the no-transpose (equilibrium) continuation. Use
+        ``block_comm_size = 1`` for the exact conserving fold.
         """
         if self._rev_perm is not False:
             return self._rev_perm
@@ -690,19 +1030,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             import numpy as _np
             r = _np.asarray(rows.get() if hasattr(rows, "get") else rows)
             c = _np.asarray(cols.get() if hasattr(cols, "get") else cols)
-            n_local = int(g.data.shape[-1])
-            if r.size == n_local:  # transpose-closed local slice
+            # The (j,i) lookup over the full pattern; well-defined for the
+            # transpose-closed BT-band sparsity. perm has length == full nnz ==
+            # the "stack"-state data last-axis length, so it indexes that axis.
+            if r.size == c.size:
                 lut = {(int(i), int(j)): k
                        for k, (i, j) in enumerate(zip(r, c))}
                 p = _np.array([lut.get((int(j), int(i)), -1)
                                for i, j in zip(r, c)], dtype=_np.int64)
                 if (p >= 0).all():
                     perm = xp.asarray(p)
-        if perm is None and ranks.rank == 0:
+        if perm is None and ranks.block.size > 1 and ranks.rank == 0:
             warnings.warn(
-                "SSE bosonic fold: nnz transpose unavailable (stack-split "
-                "nnz or block windows); using the no-transpose equilibrium "
-                "continuation (exact only for the symmetric part of G).")
+                "SSE bosonic fold: exact ji-transpose unavailable with "
+                "block_comm_size > 1 (transpose partner block on a neighbour "
+                "block rank); using the no-transpose equilibrium continuation "
+                "(exact only for the symmetric part of G). Use "
+                "block_comm_size = 1 for the exact conserving fold.")
         self._rev_perm = perm
         return perm
 
