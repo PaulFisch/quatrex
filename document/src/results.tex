@@ -434,9 +434,7 @@ at the few-percent level to the infrared regularisation: across
 $\omega_{\rm reg}=1.83$--$3.06$~THz the converged $G\cdot\mathrm{d}\omega$ varies
 by $3.7\%$ and extrapolates to $17.4$ as $\omega_{\rm reg}\to0$
 (\cref{fig:res_eta0_cutoff}, left), and it changes by $1\%$ between the $181$-
-and $361$-point grids (right). The converged per-frequency heat current and the
-effective transmission $T(\omega)=I(\omega)/\Delta n(\omega)$ (normalised to its
-maximum) are shown in \cref{fig:res_eta0_trans}.
+and $361$-point grids (right).
 
 \begin{figure}[htb]
   \centering
@@ -464,44 +462,43 @@ maximum) are shown in \cref{fig:res_eta0_trans}.
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_transmission.pdf}
-  \caption{Physics of the converged $\eta=0$ CNT solution. Left: the
-  per-frequency heat-current spectrum at the hot- and cold-lead interfaces. The
-  two differ band by band -- inelastic three-phonon scattering redistributes
-  heat between frequencies, so only the frequency-\emph{integrated} current is
-  conserved (lead imbalance $3\times10^{-11}$); the spectra converge in the
-  high-frequency tail. The sub-$2$~THz bins are the infrared-regularised
-  acoustic region. Right: the effective transmission
-  $T(\omega)=I(\omega)/\Delta n(\omega)$, normalised to its maximum, over the
-  propagating band.}
+  \caption{Ballistic versus anharmonic phonon transmission
+  $T(\omega)=I(\omega)/\Delta n(\omega)$ (in units of conducting channels) of the
+  converged $\eta=0$ (3,3) CNT, for two (left) and three (right) transport cells.
+  The ballistic transmission shows the channel structure (up to $\sim 12$
+  channels); three-phonon scattering suppresses it across the band, more strongly
+  at the longer device. The sub-$2$~THz bins are the infrared-regularised
+  acoustic region.}
   \label{fig:res_eta0_trans}
 \end{figure}
 
 \paragraph{Anharmonic transport from the converged solution.} The conserving
-$\eta=0$ fixed point yields a genuine inelastic conductance. Three-phonon
-scattering suppresses the per-frequency heat current below the ballistic limit
-across the whole band (\cref{fig:res_eta0_transport}, left), most strongly in
-the populated acoustic and low-optical region. The frequency-integrated ratio
-$G_\mathrm{anh}/G_\mathrm{ball}$ rises modestly from $0.75$ at $30$~K to
-$\approx 0.81$ near $100$~K and then falls to $0.57$ at $300$~K as the
-three-phonon scattering rate grows with the thermal phonon population
-(\cref{fig:res_eta0_transport}, right); it deepens further with device length,
-$0.57\to0.51$ from two to three transport cells at $300$~K (the four-cell
-anharmonic run did not converge and is excluded). These production-NEGF values
-at $\eta=10^{-12}$ are obtained with a different solver and broadening than the
-dense-reference numbers of \cref{sec:res_cnt} (a monotonic $0.92\to0.71$); they
-show a stronger reduction but the same qualitative increase of anharmonic
-resistance with temperature and length.
+$\eta=0$ fixed point yields a genuine inelastic conductance. The ballistic
+transmission carries up to $\sim 12$ channels with the expected band structure;
+three-phonon scattering suppresses it across the whole band
+(\cref{fig:res_eta0_trans}), removing $39\%$ of the band-integrated transmission
+at two transport cells and $46\%$ at three -- the resistive onset grows with
+length. The ballistic conductance is itself length-independent (the Landauer
+baseline, $8.0\times10^{8}$~W\,m$^{-2}$K$^{-1}$ at two, three and four cells), so
+the falling anharmonic ratio is genuine scattering, not coherence loss. The
+frequency-integrated $G_\mathrm{anh}/G_\mathrm{ball}$ (\cref{fig:res_eta0_transport})
+rises modestly from $0.75$ at $30$~K to $\approx 0.81$ near $100$~K and then falls
+to $0.57$ at $300$~K as the three-phonon scattering rate grows with the thermal
+phonon population, and it deepens with device length, $0.57\to0.51$ from two to
+three transport cells at $300$~K (the four-cell anharmonic run did not converge
+at $\eta=0$ and is excluded). These production-NEGF values at $\eta=10^{-12}$ are
+obtained with a different solver and broadening than the dense-reference numbers
+of \cref{sec:res_cnt} (a monotonic $0.92\to0.71$); they show a stronger reduction
+but the same qualitative increase of anharmonic resistance with temperature and
+length.
 
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_transport.pdf}
-  \caption{Anharmonic transport of the converged $\eta=0$ (3,3) CNT. Left: the
-  per-frequency heat-current spectrum of the anharmonic solution lies below the
-  ballistic one across the band -- the three-phonon scattering fingerprint
-  (hot-lead interface, $\omega\geq2$~THz). Right: the frequency-integrated
-  anharmonic/ballistic conductance ratio versus temperature (two transport
-  cells), with the three-cell point at $300$~K; the reduction deepens with both
-  temperature and length.}
+  \caption{Frequency-integrated anharmonic/ballistic conductance ratio of the
+  converged $\eta=0$ (3,3) CNT versus temperature (left, two transport cells) and
+  versus device length (right, at $300$~K). The reduction is non-monotonic in
+  temperature -- peaking near $100$~K -- and deepens with device length.}
   \label{fig:res_eta0_transport}
 \end{figure}
 

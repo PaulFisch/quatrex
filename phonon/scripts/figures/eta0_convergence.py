@@ -93,7 +93,7 @@ def fig_methods():
     j50_res, _, _ = parse_trace(CONV / "sinw_d5a_L2_nf181_jfnk_k50_eta0.log")
     rpm_lam = parse_rpm(CONV / "sinw_d5a_L2_rpm_eta0.log")
 
-    fig, axes = style.figure(ncols=2, width=4.6, height=3.5)
+    fig, axes = style.figure(ncols=2, width=4.4, height=3.4)
     ax = axes[0]
     it = np.arange(1, res_c.size + 1)
     ax.semilogy(it, res_c, "-", color="C0", lw=1.5, label=r"rel $\Sigma^R$ residual")
@@ -104,7 +104,6 @@ def fig_methods():
                     color="C2", lw=1.0, label="bubble balance")
     ax.axhline(1e-10, color="k", ls="--", lw=0.7)
     ax.set_xlabel("SCBA iteration"); ax.set_ylabel("convergence measure")
-    ax.set_title(r"cnt33 $\eta{=}0$: genuine fixed point")
     ax.legend(fontsize=7, loc="upper right"); ax.set_ylim(1e-17, 5)
 
     ax = axes[1]
@@ -120,7 +119,6 @@ def fig_methods():
         ax.annotate(rf"RPM $|\lambda|{{\approx}}{lam0:.0f}$ (nf181)$\to$199 (nf361)",
                     (0.5, 0.06), xycoords="axes fraction", fontsize=7, ha="center")
     ax.set_xlabel("SCBA iteration"); ax.set_ylabel(r"rel $\Sigma^R$ residual")
-    ax.set_title(r"d5a $\eta{=}0$: no method lands it")
     ax.legend(fontsize=7, loc="upper right"); ax.set_ylim(5e-2, 5)
     style.save(fig, "eta0_convergence_methods", directory=FIGDIR)
 
@@ -159,7 +157,6 @@ def fig_cutoff():
     ax.plot(0, G0, "k*", ms=13)
     ax.set_xlabel(r"IR regularisation $\omega_{\rm reg}=C\,d\omega$ (THz)")
     ax.set_ylabel(r"$G\cdot d\omega$ (d$\omega$-weighted heat)")
-    ax.set_title(r"cnt33 $\eta{=}0$ cutoff sensitivity")
     ax.legend(fontsize=7, loc="lower left")
 
     ax = axes[1]
@@ -169,7 +166,6 @@ def fig_cutoff():
         ax.annotate(f"{g:.2f}", (n, g), textcoords="offset points",
                     xytext=(5, 5), fontsize=8)
     ax.set_xlabel("nfreq"); ax.set_ylabel(r"$G\cdot d\omega$")
-    ax.set_title(r"grid convergence ($\omega_{\rm reg}{=}1.83$)")
     ax.set_ylim(16.2, 17.4)
     style.save(fig, "eta0_cnt33_cutoff", directory=FIGDIR)
 
@@ -178,46 +174,6 @@ def fig_cutoff():
           f"spread={spread:.1f}%  extrapolated G0(wreg->0)={G0:.2f}")
     print(f"[cnt33 grid]   nf181={CNT_GRID[0][1]}  nf361={CNT_GRID[1][1]}  "
           f"({abs(CNT_GRID[0][1]-CNT_GRID[1][1])/CNT_GRID[0][1]*100:.1f}%)")
-
-
-def fig_transmission():
-    """Physics of the converged cnt33 eta=0 run: per-omega heat-current spectrum,
-    and the effective transmission T(w)=I(w)/Delta n(w) over the propagating band
-    (the sub-1-THz bins are the IR-regularised acoustic region -- excluded from
-    the transmission panel, where dividing by the vanishing Delta n is ill-posed)."""
-    d = np.load(CONV / "cnt33_smooth_L2.npz", allow_pickle=True)
-    w = d["energies"]; cs = d["current_spectrum"]   # (nw,3) per interface
-    tL, tR = float(d["t_left"]), float(d["t_right"])
-    dn = _bose(w, tL) - _bose(w, tR)
-    # net forward heat-current spectrum (sign so a forward flow is positive)
-    Inet = np.sign(np.nanmean(cs[w > 5, 0])) * cs[:, 0]
-    band = w >= 2.0                                  # exclude IR-regularised bins
-    with np.errstate(divide="ignore", invalid="ignore"):
-        Teff = np.where(band & (dn > 1e-9), Inet / dn, np.nan)
-    Tn = Teff / np.nanmax(Teff[np.isfinite(Teff)])
-
-    fig, axes = style.figure(ncols=2, width=4.4, height=3.4)
-    ax = axes[0]
-    ax.plot(w, Inet, "-", color="C0", lw=1.2, label="hot-lead interface")
-    ax.plot(w, np.sign(np.nanmean(cs[w > 5, 0])) * cs[:, -1], "-", color="C3",
-            lw=1.0, alpha=0.7, label="cold-lead interface")
-    ax.axhline(0, color="k", lw=0.5)
-    ax.set_ylim(-0.25, 0.45)
-    ax.set_xlabel("frequency (THz)")
-    ax.set_ylabel(r"heat-current spectrum $I(\omega)$ (arb.)")
-    ax.set_title(r"cnt33 $\eta{=}0$ converged: $I(\omega)$")
-    ax.legend(fontsize=7, loc="upper right")
-    ax = axes[1]
-    ax.plot(w[band], Tn[band], "-", color="C2", lw=1.2)
-    ax.set_ylim(0, 1.05)
-    ax.set_xlabel("frequency (THz)")
-    ax.set_ylabel(r"$T(\omega)=I(\omega)/\Delta n(\omega)$ (norm.)")
-    ax.set_title(r"effective transmission ($\omega\!\geq\!2$ THz)")
-    style.save(fig, "eta0_cnt33_transmission", directory=FIGDIR)
-    dw = float(w[1] - w[0])
-    print(f"\n[cnt33 physics] lead temps {tL:.1f}/{tR:.1f} K; dw={dw:.4f} THz; "
-          f"raw lead_current(unweighted)={float(d['lead_current']):.3f} -> "
-          f"G*dw={float(d['lead_current'])*dw:.2f}; converged={bool(d['converged'])}")
 
 
 def fig_gamma():
@@ -240,7 +196,6 @@ def fig_gamma():
                 va="bottom")
     ax.set_yscale("log"); ax.set_xlabel("mode frequency (THz)")
     ax.set_ylabel(r"$\Gamma_{\rm anh}$ (THz)")
-    ax.set_title(r"d5a golden-rule linewidth vs grid $d\omega$")
     cb = fig.colorbar(sc, ax=ax); cb.set_label("H-character", fontsize=8)
     style.save(fig, "d5a_gamma_anh", directory=FIGDIR)
 
@@ -262,6 +217,5 @@ if __name__ == "__main__":
     print("=" * 70 + "\nVERIFIED NUMBERS FOR THE eta->0 WRITE-UP\n" + "=" * 70)
     fig_methods()
     fig_cutoff()
-    fig_transmission()
     fig_gamma()
     print("\nfigures ->", FIGDIR)
