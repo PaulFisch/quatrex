@@ -18,13 +18,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-# The ring contraction is a batch of small matmuls over the omega/tau axis and
-# is the dominant cost of the 3-phonon self-energy (~99%). The per-omega gemms
-# are too small for BLAS threading to scale (~1.5x at 8 threads), but the omega
-# BATCH is embarrassingly parallel: splitting it across a thread pool with
-# single-threaded BLAS per chunk scales ~linearly (numpy releases the GIL during
-# gemm) -- ~15x at 32 threads, bit-identical. Set QUATREX_PHPH_RING_THREADS=N
-# (with single-threaded BLAS) to enable; default 1 keeps the serial path.
 _RING_THREADS = max(1, int(os.environ.get("QUATREX_PHPH_RING_THREADS", "1")))
 _RING_POOL = ThreadPoolExecutor(max_workers=_RING_THREADS) if _RING_THREADS > 1 else None
 # Only worth the split + concatenate overhead when the batch is large enough.
@@ -154,10 +147,6 @@ def _ring_contract_serial(phi_left, phi_right, Ga_fft, Gb_fft, xp):
     via  T[w,(a,e),b] = PL[(a,e),c] @ Ga[w,c,b]      (PL = phi_L perm (a,e,c))
          U[w,e,(b,J)] = Gb[w,e,d] @ PR[d,(b,J)]      (PR = phi_R perm (d,b,J))
          S[w,a,J]     = T[w,a,(e,b)] @ U[w,(e,b),J]
-    Same three gemms / identical FLOPs as the textbook order, but ZERO
-    w-sized transpose copies (the old mid-chain (w,a,d,c) copy is GB-scale
-    for the 96-135 DOF blocks and was pure memory-bandwidth waste); only the
-    two w-independent O(BS^3) phi permutes remain.
     """
     nI, bK1, bK2 = phi_left.shape
     nJ = phi_right.shape[0]

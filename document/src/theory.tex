@@ -1033,9 +1033,21 @@ quadratic eigenvalue problem
 $(\lambda^2 H_{10} + \lambda(H_{00} - \omega^2 \mathbb{I}) +
 H_{01})\xi = 0$ to obtain $g_s$ in closed form~\cite{ando_quantum_1991,ong_efficient_2015},
 and have been claimed to be faster than Sancho-Rubio for
-electron transport~\cite{ong_efficient_2015}. for phonons they have the additional
+electron transport~\cite{ong_efficient_2015}. For phonons they have the additional
 advantage of producing mode-resolved transmission directly.
-\todo[inline]{Elaborate on the others in quatrex}
+
+\paragraph{Ideal-lead boundary conditions.}
+The contacts embed \emph{ideal}, scattering-free reservoirs: the decimation
+\cref{eq:sr_eps_s,eq:sr_eps,eq:sr_alpha,eq:sr_beta} is built from the bare
+harmonic lead blocks $H_{00},H_{01}$ and never sees the device anharmonic
+self-energy $\Sigma_s$. The scattering self-energy enters only the
+\emph{device} Dyson equation \cref{eq:system}; it is not folded back into the
+open-boundary problem. Feeding $\Sigma_s$ into the contacts -- effectively
+assuming the semi-infinite reservoir is as anharmonic as the device -- makes
+the right-contact surface eigenproblem intermittently ill-conditioned once
+$\Sigma_s$ grows under self-consistency, and was a source of SCBA divergence at
+finite anharmonicity. Keeping the leads ideal removes it and is the standard
+atomistic-NEGF boundary condition~\cite{luisier_atomistic_2012,sadasivam_atomistic_2014}.
 
 % ----------------------------------------------------------------------
 \subsection{Phonon--phonon scattering self-energy}
@@ -1198,7 +1210,7 @@ three-phonon scattering rates: in mode basis,
 with $n_i = n_{\mathrm{BE}}(\omega_{s_i},T)$, exhibiting the
 splitting/recombination ($1\to 2$) channel and the absorption ($2\to 1$)
 channel. This expression coincides with the Boltzmann result of~\citet{klemens_anharmonic_1966}
-in the relaxation-time approximation,.
+in the relaxation-time approximation.
 
 \subsubsection{Retarded self-energy}
 \label{subsub:KK}
@@ -1230,6 +1242,23 @@ the dispersive part is often dropped:
   \Sigma^R(\omega)
   \approx \tfrac{1}{2}\bigl[\Sigma^>(\omega) - \Sigma^<(\omega)\bigr].
 \end{equation}
+
+\paragraph{Storage sign convention.}
+The production solver stores \emph{occupation-positive} propagators,
+$-iG^{\lessgtr}(\omega)\succeq0$ for $\omega>0$, the same sign as the lead
+injection $\Sigma_\ell^{\lessgtr}=+i\,n_\ell(\pm1)\Gamma_\ell$
+(\cref{sec:solver_units}). The bubble \cref{eq:sigma_guo} is quadratic in $G$
+and therefore returns a \emph{textbook-signed} self-energy,
+$-i\Sigma^{\lessgtr}\preceq0$ --- the opposite sign to what the Keldysh feedback
+\cref{eq:keldysh_eq} expects in this convention. The implementation accordingly
+negates $\Sigma^{\lessgtr}$ on output, while the dissipative retarded part
+\cref{eq:sigma_r} is formed from the \emph{raw} (un-negated) values so that the
+damping $\Gamma_\Sigma=i(\Sigma^R-\Sigma^A)\succeq0$ keeps its sign. With the
+wrong sign the feedback is anti-dissipative and the SCBA diverges at any
+coupling; the single-shot positivity gate \texttt{sigma\_convention}
+(\cref{app:conservation}) verifies $-i\Sigma^{\lessgtr}\succeq0$ and catches
+exactly this error, which the sign-blind energy balance \cref{eq:bubble_balance}
+cannot.
 
 \subsubsection{Detailed balance}
 
@@ -1497,6 +1526,86 @@ self-consistency. At any finite iteration count, $\delta I/\bar I$ is
 non-zero. The Hilbert-transform neglect of \cref{eq:sigma_r} introduces an additional
 $\mathcal{O}(\Delta\omega/\omega)$ conservation error.
 
+\paragraph{The conservation identity.}
+The statement can be made exact at the level of \cref{eq:meir_wingreen}.
+Writing the $\hbar\omega$-weighted energy current \emph{into} the device from
+each terminal $a\in\{L,R,s\}$ (the two leads and the scattering ``terminal''),
+\begin{equation}\label{eq:Ja}
+  J_a = \int_0^\infty\!\frac{d\omega}{4\pi}\,\hbar\omega\,
+  \mathrm{Tr}\bigl[\Sigma_a^<(\omega)\,G^>(\omega) - \Sigma_a^>(\omega)\,G^<(\omega)\bigr],
+  \qquad \Sigma_{\rm tot} = \Sigma_L + \Sigma_R + \Sigma_s,
+\end{equation}
+steady-state energy balance is $J_L+J_R+J_s=0$. Summing \cref{eq:Ja} over $a$
+and inserting the Keldysh form \cref{eq:keldysh_eq}
+$G^{\lessgtr}=G^R\Sigma_{\rm tot}^{\lessgtr}G^A$ gives the identity
+\begin{equation}\label{eq:sumrule}
+  J_L+J_R+J_s = \int_0^\infty\!\frac{d\omega}{4\pi}\,\hbar\omega\,D(\omega),
+  \qquad
+  D(\omega) = \mathrm{Tr}\bigl[\Sigma_{\rm tot}^<\bigl(
+     G^R\Sigma_{\rm tot}^>G^A - G^A\Sigma_{\rm tot}^>G^R\bigr)\bigr],
+\end{equation}
+where $D(\omega)\equiv\mathrm{Tr}[\Sigma_{\rm tot}^<G^>-\Sigma_{\rm tot}^>G^<]$
+has been rewritten as the \emph{ordering commutator} on the right using the
+cyclic property of the trace. Energy conservation is thus the pointwise
+statement $D(\omega)\equiv0$, which holds through either of two independent
+mechanisms. \emph{(i)~Keldysh route ($\eta\to0$).} The half rule
+\cref{eq:sigma_r} satisfies $\Sigma^R-\Sigma^A=\Sigma^>-\Sigma^<$ (any
+Hermitian Kramers--Kronig part of \cref{eq:sigma_R_full} cancels in the
+difference), and the regulator term of \cref{eq:system}, being
+$\mathcal{O}(\eta)$, drops from $[G^R]^{-1}-[G^A]^{-1}$; hence
+$G^>-G^<=G^R-G^A$, the two resolvent orderings in \cref{eq:sumrule} coincide,
+and $D\equiv0$ for arbitrary data. \emph{(ii)~Reciprocity route (any $\eta$).}
+If every matrix is complex-symmetric, $M=M^T$ --- the reciprocity of a phonon
+system whose force constants obey \cref{eq:asr} --- the transpose identity
+$\mathrm{Tr}\,M=\mathrm{Tr}\,M^T$ maps one trace ordering in \cref{eq:sumrule}
+into the other and $D\equiv0$ identically. At finite $\eta$ \emph{and} broken
+reciprocity neither route applies and $D\neq0$.
+
+\paragraph{Total symmetry of the vertex and $\Phi$-derivability.}
+Vanishing of $J_s$ \emph{alone} is more restrictive. It requires that the
+scattering self-energy be the genuine functional derivative
+$\Sigma_s=\delta\Phi/\delta G$ of a Luttinger--Ward functional, evaluated with
+the \emph{same} $G$ on every internal line, \emph{and} that the cubic vertex be
+totally symmetric under the permutation group $S_3$,
+$\Phi_{\mu\nu\lambda}=\Phi_{\sigma(\mu)\sigma(\nu)\sigma(\lambda)}$ for all
+$\sigma\in S_3$. Only then do the $\hbar\omega$-weighted triads of the sunset
+bubble \cref{eq:sigma_guo} telescope pairwise to give
+$J_s=P_{\rm in}-P_{\rm out}=0$~\cite{lu_coupled_2007,wang_quantum_2008}. This
+symmetry is automatic for a vertex defined as a third derivative of the
+potential (\cref{eq:H_phonon})~\cite{luisier_atomistic_2012}: a vertex that is
+not totally symmetric is not the third derivative of any potential, the theory
+is then not $\Phi$-derivable~\cite{baym_self-consistent_1962}, and $J_s\neq0$
+even at self-consistency. At an SCBA fixed point with an exactly $S_3$ vertex
+the lead currents balance, $J_L=-J_R$, at \emph{any} $\eta$; away from the
+fixed point (a mixed iterate, $\Sigma_s\neq\delta\Phi/\delta G[G]$) $J_s\neq0$
+and the slab imbalance \cref{eq:I_local} is finite. The imbalance is therefore
+a \emph{convergence} diagnostic, not a defect of the formulation.
+
+\paragraph{The broadening $\eta$ as a ghost reservoir.}
+The residual finite-$\eta$ term in \cref{eq:sumrule} has a transparent origin.
+The total anti-Hermitian broadening of the propagator,
+\begin{equation}\label{eq:ghost}
+  i\bigl[(G^R)^{-\dagger}-(G^R)^{-1}\bigr]
+   = \Gamma_L + \Gamma_R + \Gamma_s + \Gamma_\eta,
+   \qquad \Gamma_a = i(\Sigma_a^R-\Sigma_a^A),
+\end{equation}
+shows that the numerical regulator of \cref{eq:system} adds a damping channel
+$\Gamma_\eta=\mathcal{O}(\eta)$ with \emph{no} companion fluctuation term
+$\Sigma_\eta^{\lessgtr}$. A conserving (Kadanoff--Baym) theory requires every
+dissipative self-energy to carry a matching $\Sigma^{\lessgtr}$ fixed by
+fluctuation--dissipation balance, so $\eta$ acts as a ``ghost reservoir'' at
+undefined occupation. In equilibrium, or whenever $G$ is reciprocal, its in-
+and out-flows cancel and \cref{eq:sumrule} vanishes; under a temperature bias
+the nonequilibrium $G^<$ is no longer complex-symmetric, the bubble inherits
+the asymmetry, and the product $\eta\times\mathrm{asym}$ survives in $D(\omega)$
+as a small spurious current. Consequently the slab/lead imbalance does not
+reach zero at finite $\eta$ under bias but floors at the value of
+\cref{eq:sumrule}; the robust convergence gates are the self-energy residual
+and the pairing-exact bubble balance $P_{\rm in}=P_{\rm out}$, while transport
+ratios should be extrapolated to $\eta\to0$. \Cref{app:conservation} verifies
+each step of this analysis numerically and quantifies the floor on production
+devices.
+
 % ----------------------------------------------------------------------
 \subsection{SCBA iterations}
 \label{sub:scba}
@@ -1706,7 +1815,12 @@ $\|\Sigma_s^{(n+1)}-\Sigma_s^{(n)}\|/\|\Sigma_s^{(n)}\|$,
 (ii) the conductance $G(T)$ from \cref{eq:G_thermal} or, in the
 inelastic case, the Meir--Wingreen current, and (iii) the slab-resolved
 current imbalance $\delta I/\bar I$. Convergence is declared when (i)
-and (iii) fall below prescribed tolerances simultaneously.
+and (iii) fall below prescribed tolerances simultaneously. Under a
+temperature bias at finite $\eta$, however, (iii) does not reach zero but
+floors at the ghost-reservoir term of \cref{eq:sumrule}
+(\cref{app:conservation}); the primary gates are then (i) and the
+pairing-exact bubble balance $P_{\rm in}=P_{\rm out}$, with (iii) reserved as
+an $\eta$-budget diagnostic.
 
 \subsubsection{Lowest-order approximation.}
 

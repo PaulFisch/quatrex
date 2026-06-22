@@ -107,6 +107,15 @@ which converts
 eV/(\AA$^3\cdot$amu$^{3/2}$) to the SI units required in the
 phonon--phonon self-energy expressions.
 
+\paragraph{Green's-function sign convention.}
+The solver stores the phonon Green's functions and self-energies
+\emph{occupation-positive}: $-iG^{\lessgtr}(\omega)\succeq0$ for $\omega>0$, the
+same sign as the lead injection
+$\Sigma_\ell^{\lessgtr}=+i\,n_\ell(\pm1)\Gamma_\ell$. This differs from the
+common textbook choice $G^<=-i\,nA$ by an overall sign of $G^{\lessgtr}$ --- and
+hence of any self-energy quadratic in $G$, such as the three-phonon bubble; see
+the remark following \cref{eq:sigma_r} for the consequent sign handling.
+
 % ----------------------------------------------------------------------
 \section{Notation and Fourier conventions}
 \label{sec:notation_fourier}
