@@ -1,0 +1,122 @@
+{
+  "study": "cnt33",
+  "cells": [
+    {
+      "tag": "T30",
+      "system": "cnt33",
+      "sweep": "temperature",
+      "t_mean": 30,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L4"
+    },
+    {
+      "tag": "T50",
+      "system": "cnt33",
+      "sweep": "temperature",
+      "t_mean": 50,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L3"
+    },
+    {
+      "tag": "T100",
+      "system": "cnt33",
+      "sweep": "temperature",
+      "t_mean": 100,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    },
+    {
+      "tag": "T150",
+      "system": "cnt33",
+      "sweep": "temperature",
+      "t_mean": 150,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    },
+    {
+      "tag": "T200",
+      "system": "cnt33",
+      "sweep": "temperature",
+      "t_mean": 200,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    },
+    {
+      "tag": "T300",
+      "system": "cnt33",
+      "sweep": "temperature",
+      "t_mean": 300,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    },
+    {
+      "tag": "L2",
+      "system": "cnt33",
+      "sweep": "length",
+      "t_mean": 300,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    },
+    {
+      "tag": "L3",
+      "system": "cnt33",
+      "sweep": "length",
+      "t_mean": 300,
+      "n_slabs": 3,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    },
+    {
+      "tag": "L4",
+      "system": "cnt33",
+      "sweep": "length",
+      "t_mean": 300,
+      "n_slabs": 4,
+      "tdir": "z",
+      "fmax": 55.0,
+      "nfreq": 181,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt33_L2"
+    }
+  ]
+}
