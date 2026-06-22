@@ -13,6 +13,7 @@ Internal units are THz / THz^2
 
 from __future__ import annotations
 
+import os
 import warnings
 from pathlib import Path
 
@@ -671,6 +672,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         elif bool(sse_mask.any()):
             gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
             gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
+        if os.environ.get("QX_DIAG_SPECTRAL") == "1":
+            # eta=0 convergence diagnostic: per-omega magnitude of the bubble
+            # INPUT G^<, RAW (g_lesser.data) vs WINDOWED/masked (gl_in, what is
+            # actually convolved). Full-omega axis here (nnz distribution);
+            # rank-local max over nnz is reduced to the global per-omega max
+            # over WORLD. Read on rank 0 in engine/run.py. No effect on the math.
+            nw = int(gl_in.shape[0])
+            graw = np.abs(np.asarray(g_lesser.data)).reshape(nw, -1).max(axis=1)
+            gwin = np.abs(np.asarray(gl_in)).reshape(nw, -1).max(axis=1)
+            graw = np.ascontiguousarray(graw, dtype=np.float64)
+            gwin = np.ascontiguousarray(gwin, dtype=np.float64)
+            comm.Allreduce(MPI.IN_PLACE, graw, op=MPI.MAX)
+            comm.Allreduce(MPI.IN_PLACE, gwin, op=MPI.MAX)
+            self._diag_graw_w = graw
+            self._diag_gwin_w = gwin
+            self._diag_full_freqs = np.abs(np.asarray(full_freqs).real)
         gtl.data[:] = self._fft_pad(gl_in, n_fft)
         gtg.data[:] = self._fft_pad(gg_in, n_fft)
         # DFT index-reversal rev(X)[l]=X[(-l) mod n_fft] of the FFT'd G, for

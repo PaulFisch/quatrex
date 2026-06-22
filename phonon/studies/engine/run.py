@@ -31,12 +31,18 @@ if os.environ.get("QX_ETA"):      cfg.phonon.eta = float(os.environ["QX_ETA"])
 if os.environ.get("QX_MIX"):      cfg.scba.mixing_factor = float(os.environ["QX_MIX"])
 if os.environ.get("QX_MIXMETHOD"):cfg.scba.mixing_method = os.environ["QX_MIXMETHOD"]
 if os.environ.get("QX_ADEPTH"):   cfg.scba.anderson_depth = int(os.environ["QX_ADEPTH"])
+if os.environ.get("QX_ADPERIOD"): cfg.scba.anderson_period = int(os.environ["QX_ADPERIOD"])
 if os.environ.get("QX_MAXIT"):    cfg.scba.max_iterations = int(os.environ["QX_MAXIT"])
 if os.environ.get("QX_MINIT"):    cfg.scba.min_iterations = int(os.environ["QX_MINIT"])
 if os.environ.get("QX_NE"):       cfg.electron.energy_window_num = int(os.environ["QX_NE"])
 if os.environ.get("QX_RETARDED"): cfg.phonon.retarded_method = os.environ["QX_RETARDED"]
 if os.environ.get("QX_FC3"):      cfg.phonon.fc3_path = os.environ["QX_FC3"]
 if os.environ.get("QX_ETAOBC"):   cfg.phonon.eta_obc = float(os.environ["QX_ETAOBC"])
+if os.environ.get("QX_ETA_RAMP_ITERS"): cfg.phonon.eta_ramp_iterations = int(os.environ["QX_ETA_RAMP_ITERS"])
+if os.environ.get("QX_ETA_FINAL"):      cfg.phonon.eta_final = float(os.environ["QX_ETA_FINAL"])
+if os.environ.get("QX_ALGORITHM"):      cfg.phonon.solver.algorithm = os.environ["QX_ALGORITHM"]
+if os.environ.get("QX_BAND_LIMIT"):     cfg.phonon.band_limit_sse = os.environ["QX_BAND_LIMIT"] == "1"
+if os.environ.get("QX_SHARP_CAP"):      cfg.phonon.spectral_sharp_cap = float(os.environ["QX_SHARP_CAP"])
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
 if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
@@ -95,8 +101,43 @@ def _heat(mw):
 
 
 _it = {"n": 0}
+_iter_sigma_max = []  # per-iteration, per-omega max |Sigma^<|
 _iter_heat = []  # per-SCBA-iteration heat (rank-0-local frequency slice)
 _orig = SCBA._has_converged
+
+# --- eta=0 spectral diagnostic (QX_DIAG_SPECTRAL=1): per-iteration, FULL-omega
+# G^R DOS fed into the bubble, |Sigma^R(w)|, |Sigma^<(w)|, and the raw vs
+# windowed G^< magnitude actually convolved (the latter two computed inside the
+# SSE and reduced to the global per-omega max -- read off the SSE object here).
+_DIAG = os.environ.get("QX_DIAG_SPECTRAL") == "1"
+_iter_gin_dos = []   # (n_iter, ne)  -Im Tr G^R  (G fed INTO the bubble)
+_iter_sigR_w = []    # (n_iter, ne)  max|Sigma^R(w)|
+_iter_sigL_w = []    # (n_iter, ne)  max|Sigma^<(w)|
+_iter_graw_w = []    # (n_iter, ne)  raw max|G^<(w)| before the window
+_iter_gwin_w = []    # (n_iter, ne)  windowed max|G^<(w)| into the FFT
+_sse_diag = None
+for _inter in getattr(scba, "interactions", []):
+    _s = getattr(_inter, "sigma_phonon_phonon", None)
+    if _s is not None:
+        _sse_diag = _s
+        break
+_eg_full = np.abs(np.asarray(scba.energies).real)   # (ne,) THz grid
+
+
+def _gather_full(local_w):
+    """Rank-local per-omega vector (ne_local,) -> full (ne,) by disjoint
+    placement + a stack SUM all-reduce (each omega bin owned by one rank).
+    Mirrors the current_spectrum gather below."""
+    local_w = np.asarray(local_w, float).ravel()
+    lf = np.abs(np.asarray(ph.local_frequencies))
+    full = np.zeros(_eg_full.size, dtype=np.float64)
+    i0 = int(np.argmin(np.abs(_eg_full - float(lf.flat[0]))))
+    full[i0:i0 + local_w.size] = local_w
+    if ranks.stack.size > 1:
+        recv = np.empty_like(full)
+        ranks.stack.all_reduce(np.ascontiguousarray(full), recv, op="sum")
+        full = recv
+    return full
 
 
 def _logged(self):
@@ -105,6 +146,29 @@ def _logged(self):
         h = _heat(mw)
         _iter_heat.append(np.asarray(h))
         print(f"[it {_it['n']:2d}] energy J(local)={np.round(h, 4)}", flush=True)
+    if ranks.rank == 0:
+        # per-omega magnitude of the raw SSE output: localizes WHERE a
+        # diverging update grows (the omega bin), at negligible cost.
+        sd = np.asarray(self.data.sigma_lesser.data)
+        _iter_sigma_max.append(np.abs(sd).reshape(sd.shape[0], -1).max(axis=1))
+    if _DIAG:
+        # collective gathers (ALL ranks). G^R DOS = -Im Tr G^R; per-omega
+        # |Sigma| = max over the (full, bcs=1) nnz block.
+        gloc = -np.asarray(self.data.g_retarded.diagonal()).imag.sum(axis=1)
+        gin = _gather_full(gloc)
+        sr = np.asarray(self.data.sigma_retarded_hermitian.data)
+        sl = np.asarray(self.data.sigma_lesser.data)
+        sR = _gather_full(np.abs(sr).reshape(sr.shape[0], -1).max(axis=1))
+        sL = _gather_full(np.abs(sl).reshape(sl.shape[0], -1).max(axis=1))
+        if ranks.rank == 0:
+            _iter_gin_dos.append(gin)
+            _iter_sigR_w.append(sR)
+            _iter_sigL_w.append(sL)
+            graw = getattr(_sse_diag, "_diag_graw_w", None)
+            gwin = getattr(_sse_diag, "_diag_gwin_w", None)
+            if graw is not None and gwin is not None:
+                _iter_graw_w.append(np.asarray(graw))
+                _iter_gwin_w.append(np.asarray(gwin))
     _it["n"] += 1
     return _orig(self)
 
@@ -187,7 +251,9 @@ if ranks.rank == 0:
     # Converged-iterate (fixed-point) heat -- the canonical conductance source
     # (all-reduced over stack + q-summed by the SCBA). Use this, NOT the
     # best-conserved transient. converged = the SCBA stopped before max_iter.
-    out["converged"] = bool(_it["n"] < cfg.scba.max_iterations)
+    out["diverged"] = bool(getattr(scba, "_diverged", False))
+    out["converged"] = (bool(_it["n"] < cfg.scba.max_iterations)
+                        and not out["diverged"])
     lh = getattr(scba, "_last_heat_current", None)
     if lh is not None:
         lh = np.asarray(lh)
@@ -207,6 +273,23 @@ if ranks.rank == 0:
         # (P_in, P_out, resid) per iteration -- the Phi-derivable energy
         # balance of the bubble; resid ~roundoff = conserving SSE.
         out["iter_bubble_balance"] = np.asarray(bb, dtype=float)
+    if _iter_sigma_max:
+        out["iter_sigma_max"] = np.asarray(_iter_sigma_max)
+    if _DIAG and _iter_gin_dos:
+        # eta=0 spectral diagnostic, full-omega per iteration (see _logged).
+        out["iter_gin_dos"] = np.asarray(_iter_gin_dos)
+        out["iter_sigR_w"] = np.asarray(_iter_sigR_w)
+        out["iter_sigL_w"] = np.asarray(_iter_sigL_w)
+        if _iter_graw_w:
+            out["iter_graw_w"] = np.asarray(_iter_graw_w)
+            out["iter_gwin_w"] = np.asarray(_iter_gwin_w)
+        if _sse_diag is not None:
+            _bt = getattr(_sse_diag, "_band_top", None)
+            if _bt is not None:
+                out["band_top"] = float(_bt)
+            _win = getattr(_sse_diag, "_sse_window", None)
+            if _win is not None:
+                out["sse_window"] = np.asarray(_win)
     if _iter_heat:
         # SCBA convergence trace: heat per interface per iteration. At
         # stack>1 this is the rank-0-local frequency slice (relative

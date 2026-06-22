@@ -73,7 +73,8 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
             support_taper_cells=4.0, eta_floor_cells=0.0, broyden_warmup=0,
             rpm_max_subspace=6, jfnk_warmup=10, jfnk_max_krylov=30,
             jfnk_inner_tol=0.1, jfnk_forcing="ew", jfnk_max_newton=60,
-            jfnk_eps=1e-7, jfnk_trust=0.5, jfnk_newton_damp=1.0, jfnk_ptc=0.0):
+            jfnk_eps=1e-7, jfnk_trust=0.5, jfnk_newton_damp=1.0, jfnk_ptc=0.0,
+            diag_spectral=False):
     work = OUT / "work" / tag
     work.mkdir(parents=True, exist_ok=True)
     geom = pipeline.GEOM / f"{system}_L{L}"
@@ -111,11 +112,13 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
     if nr > 0:
         raise SystemExit(f"refuse: {nr} live engine/run.py ranks (real load)")
     t0 = time.perf_counter()
+    _env = {"QX_MPI_BIND": "--bind-to core --map-by core", "QX_DIAG_OMEGA": "1",
+            "LD_LIBRARY_PATH": _ld_env()}
+    if diag_spectral:
+        _env["QX_DIAG_SPECTRAL"] = "1"
     rc = pipeline.launch_cell(
         work / "quatrex_config.toml", npz, log, nranks=nranks, ring_threads=1,
-        check_idle=False,
-        env={"QX_MPI_BIND": "--bind-to core --map-by core", "QX_DIAG_OMEGA": "1",
-             "LD_LIBRARY_PATH": _ld_env()})
+        check_idle=False, env=_env)
     wall = (time.perf_counter() - t0) / 60.0
     tr = pipeline.parse_scba_trace(log)
     res, lead, bub = tr["residual"], tr["lead_balance"], tr["bubble_balance"]
