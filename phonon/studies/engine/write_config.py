@@ -87,6 +87,24 @@ min_iterations = 3
 mixing_factor = {a.mix}
 mixing_method = "{a.mixing_method}"
 anderson_depth = {a.anderson_depth}
+anderson_period = {a.anderson_period}
+anderson_warmup_iters = {a.anderson_warmup}
+anderson_restart = {a.anderson_restart}
+anderson_ridge = {a.anderson_ridge}
+rre_cycle = {a.rre_cycle}
+broyden_warmup_iters = {a.broyden_warmup}
+broyden_ridge = {a.broyden_ridge}
+broyden_trust = {a.broyden_trust}
+rpm_max_subspace = {a.rpm_max_subspace}
+jfnk_warmup_iters = {a.jfnk_warmup}
+jfnk_max_krylov = {a.jfnk_max_krylov}
+jfnk_inner_tol = {a.jfnk_inner_tol}
+jfnk_forcing = "{a.jfnk_forcing}"
+jfnk_max_newton = {a.jfnk_max_newton}
+jfnk_eps = {a.jfnk_eps}
+jfnk_trust = {a.jfnk_trust}
+jfnk_newton_damp = {a.jfnk_newton_damp}
+jfnk_ptc = {a.jfnk_ptc}
 phonon = true
 
 [electron]
@@ -106,7 +124,20 @@ retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
+eta_ramp_iterations = {a.eta_ramp_iters}
+eta_final = {a.eta_final}
+eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
+eta_obc_final = {a.eta_obc_final}
 sse_low_freq_cutoff_thz = {a.sse_cutoff}
+ir_taper_cells = {a.ir_taper_cells}
+low_freq_mixing_thz = {a.low_freq_mix_thz}
+low_freq_mixing_factor = {a.low_freq_mix_factor}
+band_limit_sse = {str(a.band_limit).lower()}
+spectral_sharp_cap = {a.sharp_cap}
+band_support_margin_thz = {a.band_support_margin}
+sse_freeze_occupation = {a.sse_freeze_occupation}
+sse_smooth_window = {str(a.sse_smooth_window).lower()}
+support_taper_cells = {a.support_taper_cells}
 sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
@@ -157,6 +188,24 @@ min_iterations = 3
 mixing_factor = {a.mix}
 mixing_method = "{a.mixing_method}"
 anderson_depth = {a.anderson_depth}
+anderson_period = {a.anderson_period}
+anderson_warmup_iters = {a.anderson_warmup}
+anderson_restart = {a.anderson_restart}
+anderson_ridge = {a.anderson_ridge}
+rre_cycle = {a.rre_cycle}
+broyden_warmup_iters = {a.broyden_warmup}
+broyden_ridge = {a.broyden_ridge}
+broyden_trust = {a.broyden_trust}
+rpm_max_subspace = {a.rpm_max_subspace}
+jfnk_warmup_iters = {a.jfnk_warmup}
+jfnk_max_krylov = {a.jfnk_max_krylov}
+jfnk_inner_tol = {a.jfnk_inner_tol}
+jfnk_forcing = "{a.jfnk_forcing}"
+jfnk_max_newton = {a.jfnk_max_newton}
+jfnk_eps = {a.jfnk_eps}
+jfnk_trust = {a.jfnk_trust}
+jfnk_newton_damp = {a.jfnk_newton_damp}
+jfnk_ptc = {a.jfnk_ptc}
 phonon = true
 
 [electron]
@@ -177,7 +226,20 @@ retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
+eta_ramp_iterations = {a.eta_ramp_iters}
+eta_final = {a.eta_final}
+eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
+eta_obc_final = {a.eta_obc_final}
 sse_low_freq_cutoff_thz = {a.sse_cutoff}
+ir_taper_cells = {a.ir_taper_cells}
+low_freq_mixing_thz = {a.low_freq_mix_thz}
+low_freq_mixing_factor = {a.low_freq_mix_factor}
+band_limit_sse = {str(a.band_limit).lower()}
+spectral_sharp_cap = {a.sharp_cap}
+band_support_margin_thz = {a.band_support_margin}
+sse_freeze_occupation = {a.sse_freeze_occupation}
+sse_smooth_window = {str(a.sse_smooth_window).lower()}
+support_taper_cells = {a.support_taper_cells}
 sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
@@ -212,23 +274,142 @@ def main():
     p.add_argument("--fmax", type=float, default=None)
     p.add_argument("--mix", type=float, default=0.1)
     p.add_argument("--mixing-method", default="linear",
-                   choices=["linear", "anderson"],
-                   help="plain Anderson(m) acceleration (Walker & Ni 2011)")
+                   choices=["linear", "anderson", "broyden", "rre", "rpm", "jfnk"],
+                   help="linear | anderson | broyden | rre | rpm | jfnk. broyden "
+                        "(type-I good Broyden root finder), rpm (Recursive "
+                        "Projection Method) and jfnk (Jacobian-free Newton-Krylov, "
+                        "GMRES on the matrix-free Newton system -- lands the "
+                        "STRONGLY-unstable d5a eta=0 saddle where rpm fails) LAND "
+                        "the UNSTABLE eta=0 fixed point that damped/Anderson/rre "
+                        "mixing cannot reach")
+    p.add_argument("--rre-cycle", type=int, default=8,
+                   help="rre: restart cycle length (iterates per extrapolation)")
+    p.add_argument("--broyden-warmup-iters", dest="broyden_warmup", type=int,
+                   default=0,
+                   help="broyden/rpm: damped-LINEAR mixing for the first N iters "
+                        "(park in the bounded limit-cycle neighbourhood) then "
+                        "engage the quasi-Newton/projection root finder")
+    p.add_argument("--broyden-ridge", type=float, default=1e-8,
+                   help="broyden/rpm: tiny Tikhonov ridge on the small multisecant/"
+                        "restricted-Jacobian solve (keep small so it does not damp "
+                        "the marginal-mode Newton correction)")
+    p.add_argument("--broyden-trust", type=float, default=0.3,
+                   help="broyden/rpm: trust-region step cap -- limit "
+                        "||Sigma_new-Sigma|| to broyden_trust*||Sigma|| (tames the "
+                        "far-from-root quasi-Newton overshoot; 0 disables)")
+    p.add_argument("--rpm-max-subspace", dest="rpm_max_subspace", type=int,
+                   default=6,
+                   help="rpm: cap on the unstable-subspace dimension k (Newton on "
+                        "k modes, Picard on the complement; band-edge pair -> k~2)")
+    # --- jfnk (Jacobian-free Newton-Krylov) ------------------------------------
+    p.add_argument("--jfnk-warmup-iters", dest="jfnk_warmup", type=int, default=10,
+                   help="jfnk: damped-linear steps before engaging Newton-Krylov "
+                        "(basin capture)")
+    p.add_argument("--jfnk-max-krylov", dest="jfnk_max_krylov", type=int,
+                   default=30, help="jfnk: max GMRES dim per Newton step = max map "
+                                    "evals per Newton step (n_unstable + a few)")
+    p.add_argument("--jfnk-inner-tol", dest="jfnk_inner_tol", type=float,
+                   default=0.1, help="jfnk: base relative GMRES inner tolerance")
+    p.add_argument("--jfnk-forcing", dest="jfnk_forcing", default="ew",
+                   choices=["ew", "fixed"],
+                   help="jfnk: inner-tol forcing (ew=Eisenstat-Walker | fixed)")
+    p.add_argument("--jfnk-max-newton", dest="jfnk_max_newton", type=int,
+                   default=60, help="jfnk: cap on outer Newton steps")
+    p.add_argument("--jfnk-eps", dest="jfnk_eps", type=float, default=1e-7,
+                   help="jfnk: relative FD step for J*v, eps*(1+||Sigma||)")
+    p.add_argument("--jfnk-trust", dest="jfnk_trust", type=float, default=0.5,
+                   help="jfnk: trust-region cap ||delta||<=trust*||Sigma|| (0 off)")
+    p.add_argument("--jfnk-newton-damp", dest="jfnk_newton_damp", type=float,
+                   default=1.0, help="jfnk: damping of the trust-capped Newton step")
+    p.add_argument("--jfnk-ptc", dest="jfnk_ptc", type=float, default=0.0,
+                   help="jfnk: pseudo-transient/LM shift mu0 for (J+mu I)delta=-R, "
+                        "mu=ptc*||R||/||R0|| -> 0 at root (lifts marginal modes off "
+                        "the origin so inner GMRES does not stall; 0=pure Newton)")
     p.add_argument("--anderson-depth", type=int, default=5)
+    p.add_argument("--anderson-period", type=int, default=1,
+                   help="periodic-Pulay stride: extrapolate every Nth iter, "
+                        "damped linear between (breaks marginal-mode limit cycles)")
+    p.add_argument("--anderson-warmup-iters", dest="anderson_warmup", type=int,
+                   default=0,
+                   help="run LINEAR mixing for the first N SCBA iters then switch "
+                        "to Anderson (cold-start warmup for the eta=0 causal map)")
+    p.add_argument("--anderson-restart", type=int, default=0,
+                   help="forget Anderson history every N steps (escape the "
+                        "marginal-mode limit cycle at eta=0)")
+    p.add_argument("--anderson-ridge", type=float, default=0.0,
+                   help="Tikhonov regularisation of the Anderson lstsq "
+                        "(suppress the overshoot spikes)")
     p.add_argument("--max-iter", type=int, default=50,
                    help="SCBA cap; the conductance (best-iterate) converges well "
                         "before the Sigma residual (F30), so 50 bounds wall-time")
     p.add_argument("--retarded", default="half", choices=["half", "fft"])
     p.add_argument("--sse-zero-g", action="store_true",
                    help="hard cutoff: zero lead injection below --sse-cutoff")
+    p.add_argument("--band-limit", action="store_true",
+                   help="band-limit the SSE: scatter only where A(w) has weight "
+                        "(generic auto cutoff at both band edges; for eta->0)")
+    p.add_argument("--sse-smooth-window", dest="sse_smooth_window",
+                   action="store_true",
+                   help="replace the HARD band-limit masks with a SMOOTH "
+                        "multiplicative window (raised-cosine support ramp + "
+                        "logistic freeze) applied to SSE input/output AND the "
+                        "Hilbert input -- no Sigma discontinuity -> no eta=0 "
+                        "mask-edge marginal mode (general fix)")
+    p.add_argument("--support-taper-cells", dest="support_taper_cells",
+                   type=float, default=4.0,
+                   help="smooth-window support ramp width in grid cells (~3-5)")
+    p.add_argument("--sse-freeze-occupation", dest="sse_freeze_occupation",
+                   type=float, default=0.0,
+                   help="with --band-limit: mask SSE bins with Bose occupation "
+                        "n(omega,T_hot) below this (0=off). Masks thermally-frozen "
+                        "spectator modes (carry ~0 heat), e.g. the SiNW Si-H "
+                        "stretch island; ~1e-3 masks omega>~43 THz at 300 K")
+    p.add_argument("--band-support-margin", dest="band_support_margin",
+                   type=float, default=0.0,
+                   help="with --band-limit: HARMONIC spectral-support mask width "
+                        "in THz (0=off). Masks SSE bins farther than this from "
+                        "every harmonic band frequency -- above-band AND interior "
+                        "gaps AND between sparse high-freq modes (Si-H). Needed "
+                        "for gapped spectra where the single band-top mask leaves "
+                        "empty bins that blow up the eta=0 FFT")
+    p.add_argument("--sharp-cap", type=float, default=0.0,
+                   help="with --band-limit: also zero near-singular sharp modes "
+                        "(A > N x in-band median) per iteration (eta->0 stability)")
+    p.add_argument("--low-freq-mix-thz", dest="low_freq_mix_thz", type=float,
+                   default=0.0,
+                   help="frequency-dependent mixing: bins below this THz get "
+                        "--low-freq-mix-factor (damps the IR Bose marginal mode "
+                        "at eta=0 without removing low-omega scattering; 0=off)")
+    p.add_argument("--low-freq-mix-factor", dest="low_freq_mix_factor",
+                   type=float, default=0.02,
+                   help="gentle mixing factor for the low-omega bins")
     p.add_argument("--sse-cutoff", type=float, default=0.0,
                    help="low-frequency 3ph-SSE cutoff in THz (ballistic below)")
+    p.add_argument("--ir-taper-cells", dest="ir_taper_cells", type=float,
+                   default=0.0,
+                   help="IR occupancy-taper width in GRID CELLS (0=off): "
+                        "n(omega)*min(1,(|omega|/(C*dw))^2) enforces the ASR "
+                        "omega^2 onset on the unresolved low-freq bins (removes "
+                        "the 1/dw first-bin spike that limit-cycles the eta=0 "
+                        "SCBA); grid-tied, so it vanishes as dw->0")
     p.add_argument("--sigma-tol", type=float, default=1e-3,
                    help="relative Sigma^R residual tolerance")
     p.add_argument("--vertex-scale", type=float, default=1.0,
                    help="3-phonon vertex scale lambda (Sigma ~ lambda^2)")
     p.add_argument("--ramp", type=int, default=0,
                    help="adiabatic bubble switch-on over N SCBA iterations")
+    p.add_argument("--eta-ramp-iters", type=int, default=0,
+                   help="anneal eta DOWN over N SCBA iterations (0=off; the "
+                        "anharmonic Sigma^R takes over the broadening)")
+    p.add_argument("--eta-final", type=float, default=0.0,
+                   help="target eta (THz) at the end of the eta ramp")
+    p.add_argument("--eta-obc-ramp-iters", dest="eta_obc_ramp_iters", type=int,
+                   default=0,
+                   help="anneal eta_obc (contact broadening, THz^2) DOWN over N SCBA "
+                        "iters then hold (in-run eta_obc continuation for eta=0 on "
+                        "long cells; 0=off)")
+    p.add_argument("--eta-obc-final", type=float, default=0.0,
+                   help="target eta_obc (THz^2) at the end of the eta_obc ramp")
     p.add_argument("--tadpole", action="store_true",
                    help="enable the self-consistent SCP cubic tadpole static SE")
     p.add_argument("--obc", default="spectral", choices=["spectral", "sancho-rubio"],

@@ -257,13 +257,69 @@ class SCBA:
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
-        # Optional plain Anderson(m) acceleration (Walker & Ni 2011).
+        # Optional quasi-Newton mixing: Anderson(m) acceleration (Walker & Ni
+        # 2011) or the type-I "good" Broyden root finder (reaches an
+        # iteration-unstable fixed point that mixing limit-cycles around -- the
+        # eta->0 question; Žitko PRB 80, 125125 (2009)).
         self._anderson_mixer = None
-        if self.config.scba.mixing_method == "anderson":
+        if (self.config.scba.mixing_method == "anderson"
+                and getattr(self.config.scba, "anderson_warmup_iters", 0) == 0):
             from quatrex.core.anderson import AndersonMixer
             self._anderson_mixer = AndersonMixer(
                 depth=self.config.scba.anderson_depth,
                 beta=self.mixing_factor,
+                period=getattr(self.config.scba, "anderson_period", 1),
+                restart=getattr(self.config.scba, "anderson_restart", 0),
+                ridge=getattr(self.config.scba, "anderson_ridge", 0.0),
+            )
+        elif self.config.scba.mixing_method == "broyden":
+            from quatrex.core.broyden import BroydenMixer
+            self._anderson_mixer = BroydenMixer(
+                depth=self.config.scba.anderson_depth,
+                beta=self.mixing_factor,
+                ridge=getattr(self.config.scba, "broyden_ridge", 1e-8),
+                warmup=getattr(self.config.scba, "broyden_warmup_iters", 0),
+                trust=getattr(self.config.scba, "broyden_trust", 0.3),
+            )
+        elif self.config.scba.mixing_method == "rpm":
+            # Recursive Projection Method (Shroff & Keller 1993): Newton on the
+            # small unstable invariant subspace, Picard on the contractive
+            # complement -- the targeted backstop for the eta=0 band-edge saddle.
+            from quatrex.core.rpm import RPMMixer
+            self._anderson_mixer = RPMMixer(
+                max_subspace=getattr(self.config.scba, "rpm_max_subspace", 6),
+                beta=self.mixing_factor,
+                ridge=getattr(self.config.scba, "broyden_ridge", 1e-8),
+                warmup=getattr(self.config.scba, "broyden_warmup_iters", 25),
+                trust=getattr(self.config.scba, "broyden_trust", 0.3),
+            )
+        elif self.config.scba.mixing_method == "rre":
+            # Restarted reduced-rank extrapolation: locates the UNSTABLE eta=0
+            # fixed point of the longer cells (Jacobian |lambda|>1), which contact
+            # regularisation + damped/Anderson mixing cannot reach.
+            from quatrex.core.anderson import RREMixer
+            self._anderson_mixer = RREMixer(
+                cycle=getattr(self.config.scba, "rre_cycle", 8),
+                beta=self.mixing_factor,
+                ridge=getattr(self.config.scba, "anderson_ridge", 1e-6),
+            )
+        elif self.config.scba.mixing_method == "jfnk":
+            # Jacobian-free Newton-Krylov: GMRES on the matrix-free Newton system
+            # J delta = -R lands a STRONGLY-unstable fixed point (|lambda(J_F)| ~
+            # 100s, several unstable modes) where the subspace-tracking RPM fails
+            # -- the SiNW d5a Si-H bending eta=0 saddle.
+            from quatrex.core.jfnk import JFNKMixer
+            self._anderson_mixer = JFNKMixer(
+                warmup=getattr(self.config.scba, "jfnk_warmup_iters", 10),
+                beta=self.mixing_factor,
+                max_krylov=getattr(self.config.scba, "jfnk_max_krylov", 30),
+                inner_tol=getattr(self.config.scba, "jfnk_inner_tol", 0.1),
+                forcing=getattr(self.config.scba, "jfnk_forcing", "ew"),
+                max_newton=getattr(self.config.scba, "jfnk_max_newton", 60),
+                eps=getattr(self.config.scba, "jfnk_eps", 1e-7),
+                trust=getattr(self.config.scba, "jfnk_trust", 0.5),
+                newton_damp=getattr(self.config.scba, "jfnk_newton_damp", 1.0),
+                ptc=getattr(self.config.scba, "jfnk_ptc", 0.0),
             )
 
         # Anharmonic-phonon convergence by HEAT-FLOW conservation (Guo/Luisier),
@@ -273,6 +329,7 @@ class SCBA:
         self._best_heat_conservation = float("inf")
         self._best_heat_current = None
         self._last_heat_current = None
+        self._diverged = False
 
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
@@ -443,21 +500,77 @@ class SCBA:
     @profiler.profile(label="SCBA: Update Sigma", level="default", comm=comm)
     def _update_sigma(self) -> None:
         """Updates the self-energy: damped linear or Anderson(m) mixing."""
+        # Linear-warmup -> Anderson hand-off (anderson_warmup_iters > 0): build the
+        # accelerator once the iterate is past the cold-start transient, where the
+        # eta=0 causal-Sigma^R map is well-linearized and Anderson no longer
+        # limit-cycles on its marginal mode. (warmup == 0 already built it in
+        # __init__; broyden is unaffected -- its mixer is non-None from the start.)
+        if (self._anderson_mixer is None
+                and self.config.scba.mixing_method == "anderson"
+                and self._scba_iteration >= getattr(
+                    self.config.scba, "anderson_warmup_iters", 0)):
+            from quatrex.core.anderson import AndersonMixer
+            self._anderson_mixer = AndersonMixer(
+                depth=self.config.scba.anderson_depth,
+                beta=self.mixing_factor,
+                period=getattr(self.config.scba, "anderson_period", 1),
+                restart=getattr(self.config.scba, "anderson_restart", 0),
+                ridge=getattr(self.config.scba, "anderson_ridge", 0.0),
+            )
+            if comm.rank == 0:
+                print(f"mixer: linear -> Anderson(m={self.config.scba.anderson_depth}, "
+                      f"period={self.config.scba.anderson_period}, "
+                      f"beta={self.mixing_factor}) at iteration "
+                      f"{self._scba_iteration}", flush=True)
         if self._anderson_mixer is not None:
             self._update_sigma_anderson()
             return
+        # Frequency-dependent mixing factor: gentle on the IR-divergent low-omega
+        # bins (which limit-cycle the eta=0 Sigma^R), normal elsewhere. Scalar
+        # when the feature is off.
+        a = self._freq_mixing_factor()
         self.data.sigma_lesser.data[:] = (
-            (1 - self.mixing_factor) * self.data.sigma_lesser_prev.data
-            + self.mixing_factor * self.data.sigma_lesser.data
+            (1 - a) * self.data.sigma_lesser_prev.data
+            + a * self.data.sigma_lesser.data
         )
         self.data.sigma_greater.data[:] = (
-            (1 - self.mixing_factor) * self.data.sigma_greater_prev.data
-            + self.mixing_factor * self.data.sigma_greater.data
+            (1 - a) * self.data.sigma_greater_prev.data
+            + a * self.data.sigma_greater.data
         )
         self.data.sigma_retarded_hermitian.data[:] = (
-            (1 - self.mixing_factor) * self.data.sigma_retarded_hermitian_prev.data
-            + self.mixing_factor * self.data.sigma_retarded_hermitian.data
+            (1 - a) * self.data.sigma_retarded_hermitian_prev.data
+            + a * self.data.sigma_retarded_hermitian.data
         )
+
+    def _freq_mixing_factor(self):
+        """Per-omega SCBA mixing factor (cached). Returns the scalar
+        ``mixing_factor`` when frequency-dependent mixing is off
+        (``phonon.low_freq_mixing_thz <= 0``), else a broadcastable
+        ``(n_local_freq, 1, ...)`` array that is ``low_freq_mixing_factor`` on
+        the |omega| < cutoff bins and ``mixing_factor`` elsewhere -- damping the
+        IR (Bose) marginal mode without removing the low-omega scattering."""
+        cached = getattr(self, "_freq_mix", None)
+        if cached is not None:
+            return cached
+        w_c = float(getattr(self.config.phonon, "low_freq_mixing_thz", 0.0))
+        if w_c <= 0.0 or not hasattr(self, "phonon_solver"):
+            self._freq_mix = self.mixing_factor
+            return self._freq_mix
+        a_low = float(getattr(self.config.phonon, "low_freq_mixing_factor", 0.02))
+        wloc = xp.abs(xp.asarray(self.phonon_solver.local_frequencies,
+                                 dtype=float).real)
+        a = xp.where(wloc < w_c, a_low, self.mixing_factor)
+        data = self.data.sigma_retarded_hermitian.data
+        if a.shape[0] == data.shape[0]:
+            a = a.reshape((a.shape[0],) + (1,) * (data.ndim - 1))
+        else:  # state/shape mismatch -> safe fallback to uniform mixing
+            a = self.mixing_factor
+        self._freq_mix = a
+        if comm.rank == 0:
+            n_low = int(get_host(xp.asarray(wloc < w_c).sum()))
+            print(f"freq-dependent mixing: rank0 has {n_low} bins < {w_c} THz "
+                  f"at factor {a_low} (rest {self.mixing_factor})", flush=True)
+        return self._freq_mix
 
     def _update_sigma_anderson(self) -> None:
         """Anderson(m) step over the concatenated
@@ -489,6 +602,34 @@ class SCBA:
         local_max_diff = get_host(xp.max(xp.abs(diff)))
         max_diff = np.empty_like(local_max_diff)
         global_comm.Allreduce(local_max_diff, max_diff, op=MPI.MAX)
+
+        # DIAGNOSTIC (env QX_DIAG_OMEGA): which frequency does the Sigma^R
+        # residual concentrate at? Per-omega max over nnz, gathered over the
+        # energy (stack) split -> pinpoints whether the limit cycle lives at the
+        # band edge / a low-omega zero mode / broadband. Guarded; opt-in only.
+        if os.environ.get("QX_DIAG_OMEGA") and hasattr(self, "phonon_solver"):
+            try:
+                _d = xp.abs(diff)
+                _per_w = get_host(_d.reshape(_d.shape[0], -1).max(axis=1))
+                _wloc = np.abs(np.asarray(self.phonon_solver.local_frequencies,
+                                          dtype=float).real)
+                if comm.stack.size > 1:
+                    _prof = comm.stack.all_gather_v(
+                        np.ascontiguousarray(_per_w), 0)
+                    _wall = comm.stack.all_gather_v(
+                        np.ascontiguousarray(_wloc), 0)
+                else:
+                    _prof, _wall = np.asarray(_per_w), _wloc
+                if comm.rank == 0 and _prof.size == _wall.size and _prof.size:
+                    _k = int(np.argmax(_prof))
+                    _tot = float(_prof.sum()) + 1e-300
+                    _band = float(_prof[_wall <= 46.4].sum()) / _tot
+                    _lo = float(_prof[_wall <= 5.0].sum()) / _tot
+                    print(f"SigmaR resid-by-omega: peak w={float(_wall[_k]):.2f}THz "
+                          f"val={float(_prof[_k]):.3e} in-band(<=46.4)={_band:.3f} "
+                          f"low(<=5)={_lo:.3f}", flush=True)
+            except Exception:
+                pass
 
         current_diff = 0.0
         if "electron" in self.subsystems:
@@ -532,6 +673,18 @@ class SCBA:
             smag = np.empty_like(local_smag)
             global_comm.Allreduce(local_smag, smag, op=MPI.MAX)
             rel_sigma = float(max_diff) / (float(smag) + 1e-300)
+            # Divergence guard: an exploded update never recovers -- abort
+            # instead of burning the remaining iterations. QX_ABORT_RESIDUAL
+            # overrides the threshold (0 disables).
+            abort_at = float(os.environ.get("QX_ABORT_RESIDUAL", "1e3") or 0)
+            if (abort_at > 0 and self._scba_iteration > 3
+                    and rel_sigma > abort_at):
+                self._diverged = True
+                if comm.rank == 0:
+                    print(f"SCBA ABORTED: rel Sigma^R residual {rel_sigma:.3e}"
+                          f" > {abort_at:g} at iteration "
+                          f"{self._scba_iteration} (diverged).", flush=True)
+                return True
             heat, balance, spread = self._phonon_heat_flow_conservation()
             if heat is not None:
                 # Last-iterate heat (the actual current state at the fixed point)
@@ -540,7 +693,13 @@ class SCBA:
                 # passed off as the answer).
                 self._last_heat_current = heat.copy()
                 self._last_heat_spread = spread
-                if balance < self._best_heat_conservation:
+                # Only track the best-conserving iterate AFTER the self-energy has
+                # developed (past the initial transient). Without this gate the
+                # eta->0 case is broken: iteration 0 is ballistic (Sigma~0) and
+                # therefore conserves to machine precision, so it would pin
+                # `best_heat` to the BALLISTIC current and report G_anh == G_ball.
+                if (self._scba_iteration > self.config.scba.min_iterations
+                        and balance < self._best_heat_conservation):
                     self._best_heat_conservation = balance
                     self._best_heat_current = heat.copy()
                 if comm.rank == 0:
@@ -905,7 +1064,11 @@ class SCBA:
 
             if self._has_converged():
                 if comm.rank == 0:
-                    print(f"SCBA converged after {i} iterations.", flush=True)
+                    if self._diverged:
+                        print(f"SCBA diverged at iteration {i} "
+                              f"(reporting best-conserved iterate).", flush=True)
+                    else:
+                        print(f"SCBA converged after {i} iterations.", flush=True)
                 break
 
             # Update self-energy for next iteration with mixing factor.

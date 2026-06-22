@@ -68,19 +68,118 @@ class SCBAConfig(BaseModel):
     the update is ``Sigma <- (1-a) Sigma_prev + a Sigma_new``; for
     ``"anderson"`` it is the damping ``beta`` of the accelerated step."""
 
-    mixing_method: Literal["linear", "anderson"] = "linear"
+    mixing_method: Literal["linear", "anderson", "broyden", "rre", "rpm", "jfnk"] = "linear"
     """Self-energy fixed-point mixer. ``"linear"`` is plain damped mixing;
     ``"anderson"`` is plain Anderson(m) acceleration (Anderson 1965;
     Walker & Ni, SIAM J. Numer. Anal. 49, 1715 (2011), Alg. AA in the
     unconstrained least-squares form) -- cf. ``quatrex/core/anderson.py``.
     Acceleration helps a convergent (contractive) iteration; it is NOT a
-    cure for a marginal / non-existent fixed point (the strong-coupling
-    3-phonon SCBA needs continuation -- vertex-scale warm starts --
-    not extrapolation)."""
+    cure for a marginal / non-existent fixed point. ``"broyden"`` is the
+    MPI-aware type-I "good" Broyden ROOT FINDER and ``"rpm"`` the Recursive
+    Projection Method (Shroff & Keller 1993); both LAND an iteration-UNSTABLE
+    fixed point (Jacobian |lambda|>1, the cnt33 eta=0 band-edge mode on long
+    cells) that damped/Anderson/RRE provably cannot reach -- cf.
+    ``quatrex/core/broyden.py`` and ``quatrex/core/rpm.py``."""
 
     anderson_depth: PositiveInt = 5
     """History size m for ``mixing_method = "anderson"`` (number of stored
     residual differences). Memory cost: 2*m copies of the full Sigma."""
+    anderson_period: PositiveInt = 1
+    """Periodic-Pulay stride: apply the Anderson extrapolation only every
+    ``anderson_period``-th iteration, plain damped linear mixing in between
+    (Banerjee et al. 2016). >1 breaks the marginal-mode limit cycle that stalls
+    plain Anderson on soft-mode systems (d5a). 1 = ordinary Anderson(m)."""
+    anderson_warmup_iters: NonNegativeInt = 0
+    """For ``mixing_method = "anderson"``: run plain damped LINEAR mixing for the
+    first ``anderson_warmup_iters`` SCBA iterations, then switch to Anderson.
+    Anderson limit-cycles when started cold on the eta=0 causal-Sigma^R map (the
+    early non-linear transient), but converges fast once the iterate is near the
+    fixed point where the map is well-linearized. 0 = Anderson from the start."""
+    anderson_restart: NonNegativeInt = 0
+    """For ``mixing_method = "anderson"``: forget the Anderson history every N
+    steps (0 = never). Breaks the marginal-mode limit cycle that periodic Pulay
+    alone cannot escape on the eta=0 causal-Sigma^R band-edge mode (resid
+    oscillates 0.05<->0.49)."""
+    anderson_ridge: NonNegativeFloat = 0.0
+    """For ``mixing_method = "anderson"``: scale-relative Tikhonov regularisation
+    of the least-squares coefficients (suppresses the overshoot spikes from a
+    near-rank-deficient history). 0 = plain SVD lstsq. Also reused as the Gram
+    ridge for ``mixing_method = "rre"``."""
+    rre_cycle: PositiveInt = 8
+    """For ``mixing_method = "rre"``: restart cycle length (number of iterates per
+    reduced-rank-extrapolation step). Locates an UNSTABLE fixed point that damped /
+    Anderson mixing cannot reach (the cnt33 eta=0 band-edge mode on longer cells);
+    cf. ``RREMixer`` in ``quatrex/core/anderson.py``."""
+
+    broyden_warmup_iters: NonNegativeInt = 0
+    """For ``mixing_method = "broyden"`` / ``"rpm"``: run plain damped-LINEAR
+    mixing for the first N SCBA iterations (still accumulating secant history),
+    then engage the quasi-Newton / projection step. The iteration-unstable map
+    limit-cycles in a BOUNDED neighbourhood of the saddle, so the warm-up parks
+    the iterate there -- where the Jacobian I-G' is nonsingular and the secant
+    buffer is clean -- before the local root finder takes over. 0 = engage from
+    the start."""
+    broyden_ridge: NonNegativeFloat = 1e-8
+    """For ``mixing_method = "broyden"`` / ``"rpm"``: Tikhonov ridge on the small
+    multisecant / restricted-Jacobian solve, scaled by the matrix norm. Kept TINY
+    so it does not damp the Newton correction in the near-marginal band-edge
+    subspace (a fat ridge biases the step back toward limit-cycling Picard)."""
+    broyden_trust: NonNegativeFloat = 0.3
+    """For ``mixing_method = "broyden"`` / ``"rpm"``: trust-region step cap -- the
+    per-iteration update ``||Sigma_new - Sigma||`` is limited to
+    ``broyden_trust * ||Sigma||``. A full quasi-Newton step from a far-from-root /
+    stale secant model overshoots the nonlinear SCBA map (residual spikes > 2);
+    the cap forces gradual descent until the model is good, then deactivates near
+    the root. 0 disables it."""
+    rpm_max_subspace: PositiveInt = 6
+    """For ``mixing_method = "rpm"``: cap on the dimension k of the unstable
+    invariant subspace on which Newton is performed (Picard on the contractive
+    complement). The cnt33 instability is a single complex band-edge pair, so the
+    effective k is ~2; 6 leaves margin. cf. ``RPMMixer`` in ``quatrex/core/rpm.py``."""
+
+    # --- Jacobian-free Newton-Krylov (mixing_method = "jfnk") -----------------
+    # JFNK lands a STRONGLY-unstable fixed point (|lambda(J_F)| ~ 100s, several
+    # unstable modes) where the subspace-tracking RPM fails: GMRES on the matrix-
+    # free Newton system J delta = -R needs only finite-difference J*v products
+    # and converges on a cluster-plus-few-outliers spectrum. The Krylov solve runs
+    # in the real embedding [Re Sigma, Im Sigma] (the map is real- not complex-
+    # linear). cf. ``quatrex/core/jfnk.py``. The SiNW d5a Si-H bending eta=0 saddle.
+    jfnk_warmup_iters: NonNegativeInt = 10
+    """For ``mixing_method = "jfnk"``: damped-LINEAR steps to fall into the fixed
+    point's basin before engaging Newton-Krylov (the unstable modes have not yet
+    blown up in the first ~10 iterations)."""
+    jfnk_max_krylov: PositiveInt = 30
+    """For ``mixing_method = "jfnk"``: maximum GMRES (Arnoldi) dimension per Newton
+    step = max map evaluations per Newton step. ``n_unstable + a few`` suffices."""
+    jfnk_inner_tol: NonNegativeFloat = 0.1
+    """For ``mixing_method = "jfnk"``: base relative GMRES tolerance for the inner
+    Newton solve. With ``jfnk_forcing = "ew"`` it is tightened adaptively as the
+    outer residual falls (inexact Newton, Eisenstat-Walker)."""
+    jfnk_forcing: Literal["ew", "fixed"] = "ew"
+    """For ``mixing_method = "jfnk"``: inner-tolerance forcing. ``"ew"`` =
+    Eisenstat-Walker (tighten with the outer residual, quadratic-ish near the
+    root); ``"fixed"`` = constant ``jfnk_inner_tol``."""
+    jfnk_max_newton: PositiveInt = 60
+    """For ``mixing_method = "jfnk"``: cap on outer Newton steps (each ~ a GMRES
+    cycle of map evaluations)."""
+    jfnk_eps: PositiveFloat = 1e-7
+    """For ``mixing_method = "jfnk"``: relative finite-difference step for the
+    matrix-free Jacobian-vector product, ``eps_used = jfnk_eps * (1 + ||Sigma||)``."""
+    jfnk_trust: NonNegativeFloat = 0.5
+    """For ``mixing_method = "jfnk"``: trust-region cap on the Newton step,
+    ``||delta|| <= jfnk_trust * ||Sigma||`` (global). Adapts down on a step that
+    raises the residual, up on good progress. 0 disables."""
+    jfnk_newton_damp: PositiveFloat = 1.0
+    """For ``mixing_method = "jfnk"``: damping of the (already trust-capped) Newton
+    step, ``Sigma_{k+1} = Sigma_k + jfnk_newton_damp * delta``. < 1 globalises a
+    far-from-root start."""
+    jfnk_ptc: NonNegativeFloat = 0.0
+    """For ``mixing_method = "jfnk"``: pseudo-transient / Levenberg-Marquardt shift
+    -- solve ``(J + mu I) delta = -R`` with ``mu = jfnk_ptc * ||R_k||/||R_0||``
+    (annealed to 0 as the residual falls, recovering pure Newton at the root). The
+    shift lifts the near-zero (marginal, ``Gamma_anh ~ dw``) eigenvalues of
+    ``J = J_F - I`` off the origin so the inner GMRES no longer stalls on the
+    near-null-space. 0 = pure Newton (no shift); ~1 for the marginal d5a saddle."""
 
     output_interval: PositiveInt = 1
 
@@ -702,6 +801,20 @@ class PhononConfig(BaseModel):
 
     eta_obc: NonNegativeFloat = 0  # eV
     eta: NonNegativeFloat = 1e-12  # eV
+    eta_ramp_iterations: NonNegativeInt = 0
+    """Anneal the broadening DOWN over the first N SCBA iterations: the solver's
+    eta goes linearly from ``eta`` (iteration 0, while Sigma^R is still ~0) to
+    ``eta_final`` by iteration N, then stays at ``eta_final``. Lets the anharmonic
+    Sigma^R take over the broadening as it develops (the eta=0 limit). 0 = off
+    (constant eta)."""
+    eta_final: NonNegativeFloat = 0.0  # eV: target broadening at the end of the ramp
+    eta_obc_ramp_iterations: NonNegativeInt = 0
+    """Anneal the CONTACT broadening ``eta_obc`` DOWN over the first N SCBA iterations:
+    eta_obc goes linearly from ``eta_obc`` (iteration 0, large enough to converge the
+    cell cold) to ``eta_obc_final`` by iteration N, then holds. The MPI-compatible
+    in-run analogue of the eta_obc warm-start chain for the eta=0 fixed point on longer
+    cells (warm-start files are single-rank only). 0 = off (constant eta_obc)."""
+    eta_obc_final: NonNegativeFloat = 0.0  # target contact broadening at ramp end
 
     model: Literal["pseudo-scattering", "negf"] = "pseudo-scattering"
     phonon_energy: NonNegativeFloat | None = None
@@ -755,6 +868,112 @@ class PhononConfig(BaseModel):
     untouched for Dyson/observables) AND the resulting Sigma is not applied
     below the cutoff: transport below it stays purely BALLISTIC. The
     omega=0 bin is always excluded regardless."""
+    ir_taper_cells: NonNegativeFloat = 0.0
+    """IR occupancy-taper width in GRID CELLS (0 = off). The Bose occupancy
+    n(omega) ~ kT/(hbar*omega) diverges as omega->0; sampled at the first grid
+    bin it injects a ~1/dw spike that makes the eta=0 SCBA Sigma^R limit-cycle
+    with an UNPHYSICAL IR linewidth Gamma ~ 1/omega (the acoustic sum rule forces
+    Gamma ~ omega^2 -> 0). The lead occupancy is multiplied by the smooth taper
+    ``t(omega) = omega^2 / (omega^2 + (ir_taper_cells * dw)^2)`` -- regularizing
+    the unresolved sharp eta=0 IR poles with a minimal effective width
+    ``omega_reg = ir_taper_cells * dw``. ``t ~ (omega/omega_reg)^2`` as omega->0
+    (exact ASR onset) and ``t -> 1`` smoothly at large omega (no kink, so the IR
+    instability is removed rather than relocated to the first un-tapered bin).
+    Applied identically to both leads, so every G^< leg inherits it consistently
+    and the Phi-derivable bubble energy balance is preserved. Tied to the grid
+    spacing dw: the tapered band [0, ir_taper_cells*dw] shrinks as the grid
+    refines, so the converged observable is taper-independent (a grid-consistent
+    IR regularization of the unresolved Bose pole, NOT a fixed-frequency cutoff
+    that would delete real low-omega channels)."""
+    band_limit_sse: bool = False
+    """Restrict the 3-phonon SSE to the phonon band support: mask the bubble
+    INPUT G and OUTPUT Sigma at frequencies with no (resolved) spectral weight,
+    A(omega)=i(G^>-G^<) < ``spectral_support_tol`` x max. 'Only scatter where
+    there are states.' This is the GENERIC, automatic replacement for a hand-set
+    cutoff: it auto-locates the band edges at BOTH ends (the empty above-band
+    grid region that makes eta=0 diverge for the CNT, and the sub-grid soft band
+    for d5a), with no per-system tuning. Physically exact (Sigma=0 where A=0).
+    Recommended for the eta->0 limit."""
+    spectral_support_tol: NonNegativeFloat = 1e-4
+    """Threshold (relative to the per-frequency spectral-weight peak) below which
+    a frequency is treated as outside the band support by ``band_limit_sse``."""
+    sse_smooth_window: bool = False
+    """Replace the HARD band-limit masks (band-top / band-support / occupation-
+    freeze, which set Sigma=0 abruptly) with a SMOOTH, grid-consistent
+    multiplicative window w(omega) in [0,1] applied to the SSE input G legs AND
+    output Sigma AND -- crucially -- the Hilbert (Kramers-Kronig) INPUT, dropping
+    the post-Hilbert masking. RATIONALE (general eta=0 fix): a hard Sigma=0 edge
+    is a step discontinuity whose Hilbert partner is ~ln|omega-omega_edge| and
+    rings (Gibbs) at the edge bin -- an infinitely-sharp feature that the eta=0
+    SCBA amplifies into a marginal eigenmode pinned at the mask boundary (e.g. the
+    SiNW d5a residual stuck at the kept-band edge). A discontinuity cannot be
+    cured by another discontinuity. The window is w_supp(omega)*w_occ(omega):
+    w_supp is a raised-cosine ramp (width ``support_taper_cells``*dw) on the
+    distance to the harmonic spectral support (subsumes the band-top + gap masks);
+    w_occ is a smooth logistic in the Bose occupation (subsumes the freeze mask).
+    Frozen + G-independent (no live A(omega) threshold -> no limit cycle), applied
+    symmetrically (conserving), grid-consistent (ramps ~dw -> the exact band
+    indicator as dw->0). Pair with a grid-consistent broadening eta = c*dw (the
+    resolvent floor that raises every sub-grid-sharp pole's linewidth to the grid
+    -- the IR taper handles omega=0 where eta*|omega| vanishes)."""
+    support_taper_cells: NonNegativeFloat = 4.0
+    """``sse_smooth_window`` raised-cosine ramp width in grid cells (dw units) for
+    the harmonic-support window edge. ~3-5: wide enough that the Sigma transition
+    is smooth on the grid (no Gibbs ring), narrow enough to collapse to the exact
+    band indicator as dw->0."""
+    band_support_margin_thz: NonNegativeFloat = 0.0
+    """With ``band_limit_sse``: HARMONIC spectral-support masking (0 = off, use
+    only the single above-band-top mask). The bulk dispersion
+    D(k)=D0+D1 e^{ik}+D1^H e^{-ik} is diagonalized over k in [0,pi]; the union of
+    all eigenfrequencies is the phonon spectral support. A grid bin farther than
+    ``band_support_margin_thz`` from EVERY band frequency is empty (no states) and
+    is masked out of the SSE -- on BOTH sides AND in interior gaps. This is the
+    correct treatment for GAPPED / SPARSE spectra (e.g. SiNW: Si band 0-16 THz +
+    discrete Si-H surface modes 18-64 THz with empty bins between them) where the
+    eta->0 FFT convolution leaks Sigma into the empty bins with no spectral weight
+    to damp it -> divergence. The single band-top mask misses these interior
+    empties. Computed from the dynamical matrix only (G-independent, so robust to
+    the multi-cell corner-block padding that defeats a live A(omega) threshold)
+    and frozen. Set the margin to ~ the mode linewidth + a few grid spacings
+    (e.g. 1-2 THz) so real modes keep a scattering window but the gaps are masked."""
+    sse_freeze_occupation: NonNegativeFloat = 0.0
+    """With ``band_limit_sse``: also mask SSE bins whose thermal Bose occupation
+    ``n(omega, T_hot)`` is below this threshold (0 = off). These modes are
+    thermally FROZEN -- they carry negligible heat (heat ~ hbar*omega*n) -- so
+    masking them out of the SSE is transport-exact while removing their
+    contribution to the eta=0 iteration. Targets isolated, sharp, gapped
+    high-frequency modes that barely self-broaden at eta=0 (e.g. the SiNW Si-H
+    STRETCH island ~61-64 THz: n~1e-5 at 300 K, separated from the main band by a
+    ~30 THz gap, so almost no 3-phonon decay channels). ``T_hot`` is the warmer
+    lead temperature, so a mode is frozen only if frozen at the hot contact too.
+    Typical: 1e-3 (masks omega > ~43 THz at 300 K). Applied as an omega-diagonal
+    mask on the SSE input/output (conserving), like the band-limit."""
+    spectral_sharp_cap: NonNegativeFloat = 0.0
+    """With ``band_limit_sse``: also mask NEAR-SINGULAR (sharp) modes -- bins where
+    the spectral weight A(omega) exceeds this multiple of the in-band MEDIAN (a
+    sub-grid-linewidth resonance spikes A~1/Gamma). 0 = off. These bins are zeroed
+    from the bubble for THAT iteration (treated ballistic) and re-admitted once the
+    self-energy broadens them enough to drop below the cap -- a dynamic 'trim the
+    near-singular modes, reintroduce as they heal' that stabilises the eta->0 SCBA
+    on long devices where the anharmonic linewidth alone is sub-grid. ~20-50."""
+
+    buttiker_probe: bool = False
+    """Optional self-consistent Buttiker DEPHASING probe on the eta-broadening
+    channel (default OFF). The numerical broadening ``eta`` adds a damping
+    ``Gamma_eta = 4*eta*omega`` to G^R with NO matching fluctuation -- a
+    "damping without fluctuation" that violates the Baym-Kadanoff
+    (fluctuation-dissipation) balance and, under a thermal bias, injects a
+    spurious energy current (the finite-eta lead-balance floor). When True, a
+    matching fluctuation ``Sigma_probe^{<,>} = i*Gamma_eta*(n_p + 0/1)`` is
+    added to the device source, with the per-DOF, per-omega occupation
+    ``n_p = G^< / (G^> - G^<)`` updated self-consistently each SCBA iteration so
+    the LOCAL probe current vanishes at every energy. This restores exact
+    energy-current conservation at finite eta -- but it injects elastic
+    DEPHASING (it is physics, not a pure regularizer; Miao et al., APL 108,
+    113107 (2016); Roy & Dhar, PRB 75, 195110 (2007)). For the pure
+    coherent+anharmonic conductance use eta->0 extrapolation instead; use the
+    probe when an incoherent channel is physically intended. Single-block
+    (Gamma-only / coupled-q with block_comm_size==1) only."""
 
     bubble_balance_check: bool = True
     """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
@@ -774,6 +993,21 @@ class PhononConfig(BaseModel):
     lambda < 1 = reduced-coupling runs for LOA-style extrapolation and for
     soft-mode structures whose full-coupling bubble-only SCBA is unstable
     (cf. the dense reference's ``vertex_scale``; d5a F10 used 0.3)."""
+
+    low_freq_mixing_thz: NonNegativeFloat = 0.0
+    """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this
+    (THz) are mixed with ``low_freq_mixing_factor`` instead of the global
+    ``scba.mixing_factor``. 0 = off (uniform mixing). This DAMPS the IR
+    (Bose-divergent, n(omega)~kT/hbar.omega) marginal mode at the lowest
+    frequency bins -- which limit-cycles the eta=0 SCBA Sigma^R -- WITHOUT
+    removing the low-omega anharmonic scattering (unlike
+    ``sse_low_freq_cutoff_thz``), so the iteration converges to the CORRECT
+    conductance. The IR mode sits on the unit circle (|lambda|~1); a small
+    mixing factor pulls it inside (|1+a(lambda-1)|<1)."""
+    low_freq_mixing_factor: NonNegativeFloat = 0.02
+    """Gentle SCBA mixing factor applied to the |omega| < ``low_freq_mixing_thz``
+    bins (see there). Small (~0.01-0.03) to damp the IR marginal mode; the rest
+    of the spectrum keeps ``scba.mixing_factor``."""
 
     sse_ramp_iterations: NonNegativeInt = 0
     """Adiabatic switch-on of the 3-phonon bubble: scale the scattering
