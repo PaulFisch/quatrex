@@ -111,9 +111,61 @@ def fig_transport():
               {k: f"{gb[k]:.3e}" for k in sorted(gb)})
 
 
+def fig_ir_plateau():
+    """The infrared problem: the ballistic heat-current density omega*I(omega)
+    plateaus as omega->0 (the Bose 1/omega cancels hbar*omega -> the quantized
+    flux of N_ac acoustic channels), whereas the raw eta=0 anharmonic result
+    (NO taper, NO smooth window for cnt33) is suppressed and non-monotonic at low
+    omega -- the discrete grid cannot resolve the n(omega')~1/omega' pole in the
+    bubble self-energy, so the soft modes are over-weighted and over-scatter."""
+    db = np.load(PROD / "L2_ball.npz", allow_pickle=True)
+    da = np.load(PROD / "L2_anh.npz", allow_pickle=True)
+    w = db["energies"]
+    dn = _bose(w, float(db["t_left"])) - _bose(w, float(db["t_right"]))
+
+    def TI(d):
+        cs = d["current_spectrum"]
+        I = np.sign(np.nanmean(cs[w > 5, 0])) * cs[:, 0]
+        with np.errstate(all="ignore"):
+            T = np.where(dn > 1e-12, I / dn, np.nan)
+        return I, T
+
+    Ib, Tb = TI(db); Ia, Ta = TI(da)
+    lowb = (w > 0.2) & (w < 1.6)
+    Nac = int(round(float(np.nanmedian(Tb[lowb]))))
+
+    fig, ax = style.figure(ncols=2, width=4.4, height=3.4)
+    a = ax[0]
+    a.plot(w, Tb, "-o", color="C0", ms=2.5, label="ballistic")
+    a.plot(w, Ta, "-o", color="C3", ms=2.5, label=r"anharmonic ($\eta=0$)")
+    a.axhline(Nac, color="C0", ls=":", lw=0.8)
+    a.annotate(rf"$N_{{\rm ac}}={Nac}$ (ballistic plateau)", (4.5, Nac + 0.3),
+               fontsize=7, color="C0")
+    a.set_xlim(0, 15); a.set_ylim(0, 13)
+    a.set_xlabel("frequency (THz)")
+    a.set_ylabel(r"$T(\omega)=I/\Delta n$ (channels)")
+    a.legend(fontsize=7, loc="upper left")
+
+    a = ax[1]
+    a.plot(w, w * Ib, "-o", color="C0", ms=3, label="ballistic")
+    a.plot(w, w * Ia, "-o", color="C3", ms=3, label=r"anharmonic ($\eta=0$)")
+    a.set_xlim(0, 5); a.set_ylim(0, None)
+    a.set_xlabel("frequency (THz)")
+    a.set_ylabel(r"heat-current density $\propto\hbar\omega\,I(\omega)$ (arb.)")
+    a.legend(fontsize=7, loc="upper right")
+    style.save(fig, "eta0_cnt33_ir_plateau", directory=FIGDIR)
+
+    print(f"\n[ir plateau] ballistic low-w T = {float(np.nanmedian(Tb[lowb])):.3f} "
+          f"(N_ac={Nac});  ballistic w*I low-w (flat?) = "
+          f"{np.round((w * Ib)[1:6], 4).tolist()}")
+    print(f"  anharmonic low-w T (suppressed/non-monotonic) = "
+          f"{np.round(Ta[1:7], 3).tolist()}  vs ballistic {Nac}")
+
+
 if __name__ == "__main__":
     FIGDIR.mkdir(parents=True, exist_ok=True)
     print("=" * 64 + "\nCONVERGENT-cnt33 TRANSPORT PHYSICS\n" + "=" * 64)
     fig_transmission()
     fig_transport()
+    fig_ir_plateau()
     print("\nfigures ->", FIGDIR)

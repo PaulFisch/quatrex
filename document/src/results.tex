@@ -509,6 +509,40 @@ single-broadening number is quantified in \cref{app:conservation}.
   \label{fig:res_eta0_transport}
 \end{figure}
 
+\paragraph{Infrared behaviour.}
+The low-frequency end deserves a separate word. The ballistic transmission
+plateaus at the four acoustic channels of the tube,
+$\mathcal{T}(\omega\to0)\to N_{\rm ac}=4$, so the heat-current density
+$\hbar\omega\,I(\omega)$ tends to a constant --- the Bose factor's $1/\omega$ is
+cancelled by the $\hbar\omega$ weight, the quantised-conductance plateau
+(\cref{fig:res_eta0_ir}, blue). The $\eta=0$ anharmonic curve, computed here
+\emph{without} the infrared taper, instead bends down and varies
+non-monotonically as $\omega\to0$ (\cref{fig:res_eta0_ir}, red): the unmitigated
+$n(\omega')\sim1/\omega'$ pole in the bubble legs is sampled only at the first grid
+bin $\omega=\Delta\omega$, so the soft modes are over-weighted and over-scatter.
+The non-monotonic low-frequency variation is thus a numerical signature of the
+discretised Bose pole rather than converged physics; the exact
+singularity-subtracted treatment of \cref{sub:ir_subtraction} (full derivation in
+\cref{app:infrared}) is needed to extract the true low-frequency limit without any
+cutoff --- and the quasi-one-dimensional acoustic linewidths of the
+tube~\cite{bruns_nanotube_2021} mean that limit need not be the full ballistic
+plateau.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_ir_plateau.pdf}
+  \caption{Infrared behaviour of the converged $\eta=0$ (3,3) CNT. \emph{Left}:
+  effective transmission $T(\omega)=I/\Delta n$; the ballistic curve plateaus at
+  the $N_{\rm ac}=4$ acoustic channels as $\omega\to0$, while the anharmonic curve
+  (no taper) is suppressed and non-monotonic at low $\omega$. \emph{Right}: the
+  heat-current spectral density $\propto\hbar\omega\,I(\omega)$; the ballistic
+  value is flat as $\omega\to0$ (the Bose $1/\omega$ cancelled by $\hbar\omega$,
+  the quantised plateau), whereas the raw anharmonic result is suppressed and
+  fluctuates --- the signature of the discretised Bose pole in the bubble
+  self-energy that \cref{sub:ir_subtraction} removes.}
+  \label{fig:res_eta0_ir}
+\end{figure}
+
 \paragraph{d5a: a marginal fixed point at finite grid.}
 The hydrogen-passivated \texttt{d5a} wire behaves differently because of its
 surface modes. The golden-rule linewidth (\cref{eq:fgr}), evaluated directly from

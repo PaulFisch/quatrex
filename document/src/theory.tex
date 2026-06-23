@@ -1785,6 +1785,10 @@ restore the correct onset with the taper
 applied identically to both contact occupations so that every $G^<$ leg inherits
 it and the balance is preserved; as $\Delta\omega\to0$, $\omega_{\rm reg}\to0$ and
 $t\to1$, and the physical conductance is the $\omega_{\rm reg}\to0$ extrapolant.
+This taper is a \emph{pragmatic} regulator --- a cutoff that survives until the
+$\omega_{\rm reg}\to0$ extrapolation and, multiplying the occupations, also
+suppresses the genuine low-frequency transport; \cref{sub:ir_subtraction} removes
+the same singularity exactly, without a cutoff.
 
 \paragraph{Linewidth feasibility criterion.}
 Whether $\eta=0$ is reachable on a given grid can be decided a~priori, without any
@@ -1806,6 +1810,101 @@ self-consistency implies the per-iteration identity
 the net power exchanged by the scattering self-energy. Its residual isolates
 vertex and convolution errors from contact errors and is the most stringent of
 our convergence checks.
+
+\subsubsection{Exact infrared treatment by singularity subtraction}
+\label{sub:ir_subtraction}
+
+The taper \cref{eq:ir_taper} is a cutoff: it is removed only by the
+$\omega_{\rm reg}\to0$ extrapolation, and because it multiplies the contact
+occupations it suppresses the genuine low-frequency transport. The infrared
+singularity can instead be removed \emph{exactly}, with no cutoff, by subtracting
+its analytically known part --- the singularity-subtraction device of
+boundary-integral numerics~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023}
+and of the bosonic-pole treatment of Eliashberg
+theory~\cite{wu_special_2019,marsiglio_eliashberg_2020}.
+
+\paragraph{Where the pole sits, and why it is integrable.}
+The Bose factor $n(\omega)=1/(e^{\beta\hbar\omega}-1)$ enters three places: the
+contact injection $\Sigma_\ell^{\lessgtr}=i\Gamma_\ell[n_\ell+(1{\pm}1)/2]$, the
+bubble legs $G^{\lessgtr}(\omega')\sim n(\omega')A(\omega')$ of
+\cref{eq:sigma_guo}, and the Meir--Wingreen integral \cref{eq:meir_wingreen}. Its
+Laurent (Bernoulli) expansion is
+\begin{equation}\label{eq:bose_laurent}
+  n(\omega,T)=\frac{k_BT}{\hbar\omega}-\frac12+\frac{\hbar\omega}{12k_BT}
+  -\frac{(\hbar\omega)^3}{720(k_BT)^3}+\cdots,
+\end{equation}
+so the temperature-dependent piece is the c-number pole $k_BT/\hbar\omega$ and the
+constant $-\tfrac12$ cancels in any lead difference,
+$\hbar\omega\,[n_L-n_R]=k_B(T_L-T_R)+\mathcal{O}(\omega^2)$. The heat-current
+spectral density therefore has a \emph{finite} infrared limit,
+\begin{equation}\label{eq:ir_plateau}
+  j(\omega)=\frac{\hbar\omega}{2\pi}\,\mathcal{T}(\omega)\,[n_L(\omega)-n_R(\omega)]
+  \xrightarrow[\omega\to0]{}\frac{k_B\,\Delta T}{2\pi}\,\mathcal{T}(0),
+  \qquad \mathcal{T}(0)=N_{\rm ac},
+\end{equation}
+with $N_{\rm ac}$ the number of acoustic channels --- the quantised thermal
+conductance~\cite{rego_quantized_1998,schwab_measurement_2000,jeong_analysis_2012},
+$g_0=\pi^2k_B^2T/3h$ per channel. The $\hbar\omega$ prefactor cancels the
+$1/\omega$ of the Bose factor; the taper, multiplying the occupations by
+$\omega^2$, deletes exactly this plateau (\cref{fig:res_eta0_ir}). The same
+cancellation keeps the self-energy finite: in the mode basis the cubic matrix
+element carries $|V_3|^2\propto\omega_1\omega_2\omega_3$, so the soft-leg factor
+offsets the $n(\omega')\sim1/\omega'$ pole; in the displacement representation the
+offsetting $\omega$-weight lives in the acoustic spectral function $A(\omega')$.
+The product of a diverging and a vanishing factor is what makes the discrete
+evaluation delicate, and what the subtraction handles analytically.
+
+\paragraph{The subtraction.}
+Split the Bose factor exactly into its c-number pole and a bounded analytic
+remainder,
+\begin{equation}\label{eq:bose_split}
+  n(\omega)=\frac{k_BT}{\hbar\omega}+\tilde n(\omega),
+  \qquad \tilde n(\omega)=-\tfrac12+\frac{\hbar\omega}{12k_BT}-\cdots,
+\end{equation}
+and carry the split through every infrared-singular object. The remainder
+$\tilde n$ is sampled on the grid as usual; the singular piece is integrated in
+closed form. For the bubble convolution \cref{eq:sigma_guo}, writing
+$F=G^{\gtrless}$ for the second leg,
+\begin{equation}\label{eq:sse_subtract}
+  \int\!\frac{d\omega'}{2\pi}\,G^{<}(\omega')F(\omega{-}\omega')
+  =\int\!\frac{d\omega'}{2\pi}\bigl[G^{<}-G^{<}_{\rm s}\bigr]F
+  +\frac{k_BT}{2\pi}\,\mathcal{P}\!\!\int\!\frac{d\omega'}{\hbar\omega'}\,
+   A(\omega')\,F(\omega{-}\omega'),
+\end{equation}
+with the subtracted singular leg $G^{<}_{\rm s}(\omega')=-i\,(k_BT/\hbar\omega')
+A(\omega')$ (and the mirror pole at $\omega'\to\omega$). The bracket is regular and
+integrates by the ordinary rule; the residual Cauchy principal value is evaluated
+by the staggered/alternating trapezoidal rule, which is spectrally accurate for
+$\mathcal{P}\!\int q(\omega')/\omega'\,d\omega'$ and carries \emph{no}
+regularisation scale~\cite{toler_fast_2023} (subtracting a second Laurent term may
+be required where $A$ has a kink~\cite{hanninen_singularity_2006}). The contact
+injection is treated identically, its singular part
+$i\Gamma_\ell(\omega)\,k_BT_\ell/\hbar\omega$ being closed form. The dispersive
+(real) part of $\Sigma^R$ is then obtained from the imaginary part by the exact
+Kramers--Kronig relation \cref{eq:sigma_R_full}, so no broadening $\eta$ is needed
+to regularise it~\cite{lemus_modespace_2020}. Because the subtraction is analytic,
+the $\omega_{\rm reg}\to0$ limit is taken once and for all and the observable
+transmission approaches its physical plateau \cref{eq:ir_plateau} rather than
+being driven to zero.
+
+\paragraph{Caveat for quasi-one-dimensional conductors.}
+The cancellation does \emph{not} presuppose the bulk acoustic law
+$\Gamma\sim\omega^2$. In a single nanotube the long-wavelength three-phonon
+linewidths scale differently per polarisation ($\Gamma_{\rm LA}\sim|k|^{-1/2}$,
+$\Gamma_{\rm flexural}\sim|k|^{0}$,
+$\Gamma_{\rm twist}\sim|k|^{1/2}$)~\cite{bruns_nanotube_2021,ma_examining_2014,maznev_demystifying_2014};
+the subtraction uses the \emph{computed} $A(\omega)$ and is agnostic to the
+exponent, whereas a fixed $\omega^2$ taper is not.
+
+\paragraph{Implementation.}
+This replaces the \texttt{ir\_taper\_cells} regulator: the bubble kernel of
+\cref{sub:phph_se} is evaluated on the subtracted legs of \cref{eq:sse_subtract}
+with the Cauchy term added by the staggered rule, the contact injection carries
+its analytic pole, and the half rule \cref{eq:sigma_r} is upgraded to the full
+Kramers--Kronig transform. The ballistic limit, where the plateau
+$\mathcal{T}(0)=N_{\rm ac}$ is exact, is the validation target. We have not yet
+ported this to the production SCBA; \cref{app:infrared} gives the full derivation,
+the quadrature weights, and the literature.
 
 \subsubsection{Convergence diagnostics}
 
