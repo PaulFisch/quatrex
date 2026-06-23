@@ -885,6 +885,23 @@ class PhononConfig(BaseModel):
     refines, so the converged observable is taper-independent (a grid-consistent
     IR regularization of the unresolved Bose pole, NOT a fixed-frequency cutoff
     that would delete real low-omega channels)."""
+    sse_ir_subtraction: bool = False
+    """Replace the ``ir_taper_cells`` omega^2 IR taper with the physically-exact
+    IR treatment at the LEAD OCCUPATION level (phonon/solver.py). The lead
+    injection is Sigma^<_lead = i Gamma(omega) n(omega); the lead broadening
+    Gamma(omega) is ODD (Gamma(0)=0, ~omega for acoustic), so Gamma*n is FINITE
+    as omega->0 even though n ~ kT/(hbar*omega) diverges. The omega^2 taper
+    (omega_reg = ir_taper_cells*dw) therefore OVER-regularizes and unphysically
+    crushes the low-omega heat current (destroying the quantised plateau
+    omega*I(omega)->const; see document/src/appendices/infrared.tex). With this
+    flag the FULL physical Bose occupation is kept (Gamma~omega tames the pole;
+    only the omega=0 bin is clipped), applied identically to both leads so the
+    device G stays consistent and the Phi-derivable bubble energy balance is
+    preserved (~1e-15). NB the bubble itself is left as the bare conserving
+    convolution -- the device G^< has no 1/omega pole to subtract (the bosonic
+    fold + bounded spectral A cancel it). Off by default; sets ir_taper_cells=0.
+    Restores the low-omega physics but does NOT by itself stabilise the eta=0
+    SCBA iteration (a separate fixed-point problem)."""
     band_limit_sse: bool = False
     """Restrict the 3-phonon SSE to the phonon band support: mask the bubble
     INPUT G and OUTPUT Sigma at frequencies with no (resolved) spectral weight,

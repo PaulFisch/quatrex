@@ -161,6 +161,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                            False))
         self._support_taper_cells = float(
             getattr(config.phonon, "support_taper_cells", 4.0))
+        # NB: the IR Bose-singularity subtraction (sse_ir_subtraction) is handled
+        # in phonon/solver.py at the LEAD OCCUPATION level, not in the bubble --
+        # the device G^< has no 1/omega pole to subtract (the bosonic fold +
+        # bounded spectral A force it to cancel), so a bubble-leg subtraction
+        # both does nothing physical AND breaks the Phi-derivable conservation.
         self._sse_window = None  # cached (ne_full, 1, ...) float window
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
@@ -672,6 +677,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         elif bool(sse_mask.any()):
             gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
             gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
+        # NOTE: the IR Bose subtraction is NOT applied to the bubble legs -- the
+        # device G^< has no 1/omega pole (the bosonic fold + bounded spectral A
+        # force it to cancel; data confirm |G^<|~omega^-0.5 bounded). The pole is
+        # real only in the lead OCCUPATION; the sse_ir_subtraction treatment
+        # lives there (phonon/solver.py: use the full physical occupation instead
+        # of the omega^2 taper). The bubble stays the bare (conserving) convolution.
         if os.environ.get("QX_DIAG_SPECTRAL") == "1":
             # eta=0 convergence diagnostic: per-omega magnitude of the bubble
             # INPUT G^<, RAW (g_lesser.data) vs WINDOWED/masked (gl_in, what is

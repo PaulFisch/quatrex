@@ -74,7 +74,7 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
             rpm_max_subspace=6, jfnk_warmup=10, jfnk_max_krylov=30,
             jfnk_inner_tol=0.1, jfnk_forcing="ew", jfnk_max_newton=60,
             jfnk_eps=1e-7, jfnk_trust=0.5, jfnk_newton_damp=1.0, jfnk_ptc=0.0,
-            diag_spectral=False):
+            diag_spectral=False, ir_subtraction=False):
     work = OUT / "work" / tag
     work.mkdir(parents=True, exist_ok=True)
     geom = pipeline.GEOM / f"{system}_L{L}"
@@ -87,6 +87,9 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
     # Jacobian blow-up at band edges/sharp modes; -> 0 as dw->0). 0 = pure eta=0.
     dw = fmax / (nf - 1)
     eta_val = eta_floor_cells * dw if eta_floor_cells > 0 else 1e-12
+    # The exact Bose-pole subtraction REPLACES the omega^2 IR taper.
+    if ir_subtraction:
+        ir_taper_cells = 0.0
     pipeline.write_config(
         system, work, ncells=L, nfreq=nf, fmax=fmax,
         temperature=300.0, dt=10.0, eta=eta_val, eta_obc=eta_obc,
@@ -94,6 +97,7 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
         mix=mix, max_iter=max_iter, bcs=1, sse_cutoff=cutoff,
         low_freq_mix_thz=mix_thz, low_freq_mix_factor=a_low,
         sigma_tol=sigma_tol, ir_taper_cells=ir_taper_cells,
+        sse_ir_subtraction=ir_subtraction,
         band_support_margin=band_support_margin,
         sse_freeze_occupation=sse_freeze_occupation,
         sse_smooth_window=smooth_window,

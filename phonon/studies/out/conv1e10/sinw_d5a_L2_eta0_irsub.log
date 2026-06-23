@@ -1,0 +1,422 @@
+launch: NRANKS=128 QX_CONFIG=/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/conv1e10/work/sinw_d5a_L2_eta0_irsub/quatrex_config.toml BCS=cfg QCS=cfg ballistic=0
+/usr/scratch/mont-fort11/pfischill/quatrex/src/qttools/__init__.py:56: UserWarning: 'cupy' is unavailable or not working, defaulting to 'numpy'. (No module named 'cupy')
+  warnings.warn(
+/usr/scratch/mont-fort11/pfischill/quatrex/src/quatrex/core/config.py:1779: UserWarning: The CPU code will run sequentially which may impact performance.
+  warnings.warn(
+Max Interaction Cutoff: 10.0
+Energy window: 0.0 to 66.0 eV with 181 grid points.
+Resolution is 0.366667 eV.
+comm.stack size: 128, comm.block size: 1
+Each comm.block has 1 grid points.
+/usr/scratch/mont-fort11/pfischill/quatrex/src/quatrex/core/statistics.py:42: RuntimeWarning: divide by zero encountered in divide
+  return 1 / (xp.exp(energy / (k_B * temperature)) - 1)
+IR occupation subtraction ON: full physical Bose occupation (no omega^2 taper); Gamma~omega keeps the injection finite as omega->0.
+WARNING: phonon_energies.npy (181 pts, dw=0.3667) does not match the solver energy grid (2 pts); using the solver grid for the scattering self-energy.
+SSE band-limit: harmonic band top 64.081 THz (fixed above-band mask)
+Max Interaction Cutoff: 10.0
+RUN config=/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/conv1e10/work/sinw_d5a_L2_eta0_irsub/quatrex_config.toml phonon=True eta=1e-12 retarded=fft nblk=2 ne=181 bcs=1 qcs=1 nranks=128
+Entering SCBA loop...
+Iteration 0
+SSE band-limit: masking 5 bin(s) above 64.081 THz
+SSE band-limit: harmonic-support mask -> 96/181 empty bins masked (margin 1.5 THz)
+SSE band-limit: occupation-freeze mask -> 61/181 frozen bins (n<0.001, T_hot=305K)
+SSE band-limit: SMOOTH window (support ramp 4*dw, freeze n<0.001) -> mean w=0.429, 102/181 bins below 0.5
+[it  0] energy J(local)=[0.8332 0.8332 0.8332]
+SigmaR resid-by-omega: peak w=26.03THz val=2.678e+03 in-band(<=46.4)=0.963 low(<=5)=0.114
+Maximum Self-Energy Update: 2677.8930412311215
+Contact Current Difference: 0.0
+Current Conservation abs: 0.9945440298743051
+Current Conservation rel: 0.0003817223917024476
+Phonon: rel Sigma^R residual 1.0000e+00; lead balance 4.8274e-13 (best inf; internal spread 8.6683e-13)
+Bubble energy balance: P_in=-5.745525e+03 P_out=-5.745525e+03 resid=1.436e-14
+Writing output for iteration 0...
+Iteration 1
+[it  1] energy J(local)=[0.057  0.1818 0.1086]
+SigmaR resid-by-omega: peak w=26.03THz val=5.961e+03 in-band(<=46.4)=0.964 low(<=5)=0.161
+Maximum Self-Energy Update: 5961.269052207596
+Contact Current Difference: 0.0
+Current Conservation abs: 1.052752645568944
+Current Conservation rel: 0.00011084712014009478
+Phonon: rel Sigma^R residual 9.5829e-01; lead balance 1.1789e-01 (best inf; internal spread 3.5810e-01)
+Bubble energy balance: P_in=-5.400914e+03 P_out=-5.400914e+03 resid=1.474e-14
+Writing output for iteration 1...
+Iteration 2
+[it  2] energy J(local)=[0.1256 0.178  0.112 ]
+SigmaR resid-by-omega: peak w=10.63THz val=3.040e+03 in-band(<=46.4)=0.965 low(<=5)=0.208
+Maximum Self-Energy Update: 3040.284550584117
+Contact Current Difference: 0.0
+Current Conservation abs: 1.3984626512083196
+Current Conservation rel: 6.084988590796669e-05
+Phonon: rel Sigma^R residual 9.0799e-01; lead balance 1.5770e-01 (best inf; internal spread 5.5642e-01)
+Bubble energy balance: P_in=-1.498687e+04 P_out=-1.498687e+04 resid=1.942e-15
+Writing output for iteration 2...
+Iteration 3
+[it  3] energy J(local)=[0.1875 0.2403 0.1492]
+SigmaR resid-by-omega: peak w=2.20THz val=3.919e+03 in-band(<=46.4)=0.969 low(<=5)=0.282
+Maximum Self-Energy Update: 3919.3651577472697
+Contact Current Difference: 0.0
+Current Conservation abs: 3.4972269293502904
+Current Conservation rel: 5.52499170710941e-05
+Phonon: rel Sigma^R residual 9.0151e-01; lead balance 2.9444e-01 (best 2.9444e-01; internal spread 1.0136e+00)
+Bubble energy balance: P_in=-4.535904e+04 P_out=-4.535904e+04 resid=1.132e-15
+Writing output for iteration 3...
+Iteration 4
+[it  4] energy J(local)=[0.0459 0.1533 0.1177]
+SigmaR resid-by-omega: peak w=0.00THz val=3.690e+03 in-band(<=46.4)=0.967 low(<=5)=0.275
+Maximum Self-Energy Update: 3689.9443950443424
+Contact Current Difference: 0.0
+Current Conservation abs: 15.312754516300629
+Current Conservation rel: 7.647012661889524e-05
+Phonon: rel Sigma^R residual 8.1482e-01; lead balance 4.9574e-01 (best 2.9444e-01; internal spread 1.7238e+00)
+Bubble energy balance: P_in=-1.160994e+05 P_out=-1.160994e+05 resid=2.438e-16
+Writing output for iteration 4...
+Iteration 5
+[it  5] energy J(local)=[0.1996 0.2945 0.2132]
+SigmaR resid-by-omega: peak w=0.73THz val=1.282e+04 in-band(<=46.4)=0.970 low(<=5)=0.296
+Maximum Self-Energy Update: 12819.579577407285
+Contact Current Difference: 0.0
+Current Conservation abs: 25.261084303376265
+Current Conservation rel: 1.96221075193017e-05
+Phonon: rel Sigma^R residual 9.4991e-01; lead balance 2.8083e-01 (best 2.8083e-01; internal spread 2.9647e+00)
+Bubble energy balance: P_in=-4.816919e+05 P_out=-4.816919e+05 resid=1.820e-16
+Writing output for iteration 5...
+Iteration 6
+[it  6] energy J(local)=[0.241  0.436  0.5217]
+SigmaR resid-by-omega: peak w=0.73THz val=1.698e+03 in-band(<=46.4)=0.978 low(<=5)=0.230
+Maximum Self-Energy Update: 1698.4305608025077
+Contact Current Difference: 0.0
+Current Conservation abs: 2.79543632617424
+Current Conservation rel: 0.00029675494326753975
+Phonon: rel Sigma^R residual 1.1174e+00; lead balance 8.4143e-01 (best 2.8083e-01; internal spread 2.1874e+00)
+Bubble energy balance: P_in=-1.055869e+04 P_out=-1.055869e+04 resid=4.311e-16
+Writing output for iteration 6...
+Iteration 7
+[it  7] energy J(local)=[0.228  0.546  0.6392]
+SigmaR resid-by-omega: peak w=0.73THz val=1.526e+03 in-band(<=46.4)=0.978 low(<=5)=0.247
+Maximum Self-Energy Update: 1526.0518931224187
+Contact Current Difference: 0.0
+Current Conservation abs: 4.647771415192437
+Current Conservation rel: 0.0004857492471188187
+Phonon: rel Sigma^R residual 1.2522e+00; lead balance 8.2751e-01 (best 2.8083e-01; internal spread 2.2839e+00)
+Bubble energy balance: P_in=-1.071476e+04 P_out=-1.071476e+04 resid=3.647e-16
+Writing output for iteration 7...
+Iteration 8
+[it  8] energy J(local)=[0.1785 0.7091 0.765 ]
+SigmaR resid-by-omega: peak w=0.73THz val=1.365e+03 in-band(<=46.4)=0.977 low(<=5)=0.258
+Maximum Self-Energy Update: 1365.3748573653443
+Contact Current Difference: 0.0
+Current Conservation abs: 6.1826352490779755
+Current Conservation rel: 0.0006165365841254177
+Phonon: rel Sigma^R residual 1.2697e+00; lead balance 7.8694e-01 (best 2.8083e-01; internal spread 2.4188e+00)
+Bubble energy balance: P_in=-1.114102e+04 P_out=-1.114102e+04 resid=1.536e-15
+Writing output for iteration 8...
+Iteration 9
+[it  9] energy J(local)=[0.0939 0.9548 0.9443]
+SigmaR resid-by-omega: peak w=0.73THz val=1.217e+03 in-band(<=46.4)=0.977 low(<=5)=0.265
+Maximum Self-Energy Update: 1217.0389905162872
+Contact Current Difference: 0.0
+Current Conservation abs: 7.469229491543956
+Current Conservation rel: 0.0006960788511140093
+Phonon: rel Sigma^R residual 1.2812e+00; lead balance 7.4364e-01 (best 2.8083e-01; internal spread 2.5542e+00)
+Bubble energy balance: P_in=-1.179246e+04 P_out=-1.179246e+04 resid=7.405e-16
+Writing output for iteration 9...
+Iteration 10
+[it 10] energy J(local)=[-0.0431  1.3194  1.2207]
+SigmaR resid-by-omega: peak w=0.73THz val=1.082e+03 in-band(<=46.4)=0.977 low(<=5)=0.268
+Maximum Self-Energy Update: 1081.5985774022106
+Contact Current Difference: 0.0
+Current Conservation abs: 8.416867912205817
+Current Conservation rel: 0.0006932135080879875
+Phonon: rel Sigma^R residual 1.2662e+00; lead balance 6.9154e-01 (best 2.8083e-01; internal spread 2.7070e+00)
+Bubble energy balance: P_in=-1.284442e+04 P_out=-1.284442e+04 resid=9.541e-16
+Writing output for iteration 10...
+Iteration 11
+[it 11] energy J(local)=[-0.2652  1.8468  1.634 ]
+SigmaR resid-by-omega: peak w=0.73THz val=9.592e+02 in-band(<=46.4)=0.977 low(<=5)=0.270
+Maximum Self-Energy Update: 959.2047928133222
+Contact Current Difference: 0.0
+Current Conservation abs: 8.230638836938851
+Current Conservation rel: 0.0005525995420181697
+Phonon: rel Sigma^R residual 1.1743e+00; lead balance 6.4161e-01 (best 2.8083e-01; internal spread 2.8609e+00)
+Bubble energy balance: P_in=-1.449375e+04 P_out=-1.449375e+04 resid=4.808e-16
+Writing output for iteration 11...
+Iteration 12
+[it 12] energy J(local)=[-0.6138  2.5471  2.1861]
+SigmaR resid-by-omega: peak w=0.73THz val=8.512e+02 in-band(<=46.4)=0.978 low(<=5)=0.267
+Maximum Self-Energy Update: 851.2037912804441
+Contact Current Difference: 0.0
+Current Conservation abs: 6.220261044038125
+Current Conservation rel: 0.00032510448270142017
+Phonon: rel Sigma^R residual 9.7483e-01; lead balance 6.1718e-01 (best 2.8083e-01; internal spread 2.9735e+00)
+Bubble energy balance: P_in=-1.660719e+04 P_out=-1.660719e+04 resid=3.569e-16
+Writing output for iteration 12...
+Iteration 13
+[it 13] energy J(local)=[-1.1405  3.3698  2.7852]
+SigmaR resid-by-omega: peak w=0.73THz val=7.538e+02 in-band(<=46.4)=0.978 low(<=5)=0.258
+Maximum Self-Energy Update: 753.8080082872267
+Contact Current Difference: 0.0
+Current Conservation abs: 4.187553324303735
+Current Conservation rel: 0.00018337446996587162
+Phonon: rel Sigma^R residual 7.9175e-01; lead balance 6.2738e-01 (best 2.8083e-01; internal spread 3.0229e+00)
+Bubble energy balance: P_in=-1.824737e+04 P_out=-1.824737e+04 resid=2.112e-16
+Writing output for iteration 13...
+Iteration 14
+[it 14] energy J(local)=[-2.0651  4.8273  3.4862]
+SigmaR resid-by-omega: peak w=0.73THz val=6.665e+02 in-band(<=46.4)=0.977 low(<=5)=0.239
+Maximum Self-Energy Update: 666.4928729105278
+Contact Current Difference: 0.0
+Current Conservation abs: 12.229301542012763
+Current Conservation rel: 0.0004837269606071092
+Phonon: rel Sigma^R residual 6.5117e-01; lead balance 6.4461e-01 (best 2.8083e-01; internal spread 3.0457e+00)
+Bubble energy balance: P_in=-1.935607e+04 P_out=-1.935607e+04 resid=5.442e-17
+Writing output for iteration 14...
+Iteration 15
+[it 15] energy J(local)=[-6.3354 16.9926  6.9717]
+SigmaR resid-by-omega: peak w=0.73THz val=1.298e+03 in-band(<=46.4)=0.970 low(<=5)=0.230
+Maximum Self-Energy Update: 1298.455340523106
+Contact Current Difference: 0.0
+Current Conservation abs: 641.4424931483773
+Current Conservation rel: 0.010475960313702702
+Phonon: rel Sigma^R residual 7.5976e-01; lead balance 5.0847e-01 (best 2.8083e-01; internal spread 3.2611e+00)
+Bubble energy balance: P_in=-3.168368e+04 P_out=-3.168368e+04 resid=3.574e-16
+Writing output for iteration 15...
+Iteration 16
+[it 16] energy J(local)=[-1.2983  2.665   2.9764]
+SigmaR resid-by-omega: peak w=20.17THz val=5.526e+02 in-band(<=46.4)=0.971 low(<=5)=0.150
+Maximum Self-Energy Update: 552.5560331931372
+Contact Current Difference: 0.0
+Current Conservation abs: 36.49456568220194
+Current Conservation rel: 0.0011025215981648733
+Phonon: rel Sigma^R residual 4.2443e-01; lead balance 1.2578e-02 (best 1.2578e-02; internal spread 4.5875e+00)
+Bubble energy balance: P_in=-2.462154e+04 P_out=-2.462154e+04 resid=2.985e-16
+Writing output for iteration 16...
+Iteration 17
+[it 17] energy J(local)=[-2.2906  4.4906  4.5747]
+SigmaR resid-by-omega: peak w=0.73THz val=5.243e+02 in-band(<=46.4)=0.967 low(<=5)=0.162
+Maximum Self-Energy Update: 524.2893938705716
+Contact Current Difference: 0.0
+Current Conservation abs: 76.53390047865832
+Current Conservation rel: 0.0017482860920681952
+Phonon: rel Sigma^R residual 3.3726e-01; lead balance 3.4819e-01 (best 1.2578e-02; internal spread 3.7772e+00)
+Bubble energy balance: P_in=-2.998448e+04 P_out=-2.998448e+04 resid=1.848e-16
+Writing output for iteration 17...
+Iteration 18
+[it 18] energy J(local)=[-4.0723  7.5209  7.7891]
+SigmaR resid-by-omega: peak w=20.17THz val=1.155e+03 in-band(<=46.4)=0.965 low(<=5)=0.144
+Maximum Self-Energy Update: 1154.6127435444287
+Contact Current Difference: 0.0
+Current Conservation abs: 1533.2893175645804
+Current Conservation rel: 0.023911636252376918
+Phonon: rel Sigma^R residual 5.7758e-01; lead balance 7.1212e-01 (best 1.2578e-02; internal spread 2.8983e+00)
+Bubble energy balance: P_in=-3.685811e+04 P_out=-3.685811e+04 resid=2.517e-16
+Writing output for iteration 18...
+Iteration 19
+[it 19] energy J(local)=[-11.0523  10.0747  14.0273]
+SigmaR resid-by-omega: peak w=0.37THz val=2.050e+03 in-band(<=46.4)=0.962 low(<=5)=0.205
+Maximum Self-Energy Update: 2049.6733397047024
+Contact Current Difference: 0.0
+Current Conservation abs: 4.076822523245937
+Current Conservation rel: 2.035957685852934e-05
+Phonon: rel Sigma^R residual 6.3542e-01; lead balance 1.6639e+00 (best 1.2578e-02; internal spread 7.8130e+00)
+Bubble energy balance: P_in=-8.732858e+04 P_out=-8.732858e+04 resid=2.525e-16
+Writing output for iteration 19...
+Iteration 20
+[it 20] energy J(local)=[-54.0949  32.2035  24.4768]
+SigmaR resid-by-omega: peak w=20.17THz val=4.748e+03 in-band(<=46.4)=0.970 low(<=5)=0.156
+Maximum Self-Energy Update: 4747.729435424733
+Contact Current Difference: 0.0
+Current Conservation abs: 1071.7311739256547
+Current Conservation rel: 0.0024335843153667153
+Phonon: rel Sigma^R residual 9.0612e-01; lead balance 1.3140e+00 (best 1.2578e-02; internal spread 6.8883e+00)
+Bubble energy balance: P_in=-1.648074e+05 P_out=-1.648074e+05 resid=3.581e-16
+Writing output for iteration 20...
+Iteration 21
+[it 21] energy J(local)=[-5.7825 16.0309  8.5146]
+SigmaR resid-by-omega: peak w=17.97THz val=1.567e+03 in-band(<=46.4)=0.965 low(<=5)=0.146
+Maximum Self-Energy Update: 1566.5859714572023
+Contact Current Difference: 0.0
+Current Conservation abs: 92.6998431650427
+Current Conservation rel: 0.0005099850956654547
+Phonon: rel Sigma^R residual 7.6349e-01; lead balance 5.2809e-01 (best 1.2578e-02; internal spread 4.8119e+00)
+Bubble energy balance: P_in=-1.127209e+05 P_out=-1.127209e+05 resid=1.964e-16
+Writing output for iteration 21...
+Iteration 22
+[it 22] energy J(local)=[-5.7143  6.3158 18.082 ]
+SigmaR resid-by-omega: peak w=1.10THz val=2.347e+03 in-band(<=46.4)=0.962 low(<=5)=0.192
+Maximum Self-Energy Update: 2346.6936368045904
+Contact Current Difference: 0.0
+Current Conservation abs: 1692.004755561822
+Current Conservation rel: 0.0025514770690815195
+Phonon: rel Sigma^R residual 6.8836e-01; lead balance 2.4850e-01 (best 1.2578e-02; internal spread 4.1682e+00)
+Bubble energy balance: P_in=-3.572192e+05 P_out=-3.572192e+05 resid=1.809e-16
+Writing output for iteration 22...
+Iteration 23
+[it 23] energy J(local)=[-17.9553 140.5951 165.6738]
+SigmaR resid-by-omega: peak w=0.00THz val=6.292e+03 in-band(<=46.4)=0.962 low(<=5)=0.199
+Maximum Self-Energy Update: 6291.509240038078
+Contact Current Difference: 0.0
+Current Conservation abs: 21313.764892018633
+Current Conservation rel: 0.0050983364279018955
+Phonon: rel Sigma^R residual 8.2702e-01; lead balance 3.0020e-01 (best 1.2578e-02; internal spread 3.3085e+00)
+Bubble energy balance: P_in=-1.788066e+06 P_out=-1.788066e+06 resid=1.208e-16
+Writing output for iteration 23...
+Iteration 24
+[it 24] energy J(local)=[5.2619 1.3687 8.2045]
+SigmaR resid-by-omega: peak w=1.47THz val=9.560e+02 in-band(<=46.4)=0.965 low(<=5)=0.258
+Maximum Self-Energy Update: 956.0236785417252
+Contact Current Difference: 0.0
+Current Conservation abs: 3341.11321868113
+Current Conservation rel: 0.0048704487349998625
+Phonon: rel Sigma^R residual 3.5616e-01; lead balance 7.4346e-01 (best 1.2578e-02; internal spread 2.4960e+00)
+Bubble energy balance: P_in=1.801419e+05 P_out=1.801419e+05 resid=4.280e-16
+Writing output for iteration 24...
+Iteration 25
+[it 25] energy J(local)=[-6.3081 -3.0952  5.947 ]
+SigmaR resid-by-omega: peak w=0.37THz val=2.003e+03 in-band(<=46.4)=0.963 low(<=5)=0.255
+Maximum Self-Energy Update: 2003.3322916651282
+Contact Current Difference: 0.0
+Current Conservation abs: 1060.973191446683
+Current Conservation rel: 0.0031991342410816856
+Phonon: rel Sigma^R residual 5.0623e-01; lead balance 5.0395e-01 (best 1.2578e-02; internal spread 3.8506e+00)
+Bubble energy balance: P_in=-1.556107e+05 P_out=-1.556107e+05 resid=2.256e-16
+Writing output for iteration 25...
+Iteration 26
+[it 26] energy J(local)=[-8.8094  3.5521  1.6889]
+SigmaR resid-by-omega: peak w=0.73THz val=1.591e+03 in-band(<=46.4)=0.962 low(<=5)=0.226
+Maximum Self-Energy Update: 1590.660746655169
+Contact Current Difference: 0.0
+Current Conservation abs: 1281.1249845700804
+Current Conservation rel: 0.004740186956472723
+Phonon: rel Sigma^R residual 5.3876e-01; lead balance 1.8638e-01 (best 1.2578e-02; internal spread 5.6178e+00)
+Bubble energy balance: P_in=-1.398139e+05 P_out=-1.398139e+05 resid=1.171e-16
+Writing output for iteration 26...
+Iteration 27
+[it 27] energy J(local)=[-19.0635  16.2612  -0.1157]
+SigmaR resid-by-omega: peak w=0.73THz val=6.437e+03 in-band(<=46.4)=0.963 low(<=5)=0.253
+Maximum Self-Energy Update: 6437.433315151758
+Contact Current Difference: 0.0
+Current Conservation abs: 977.8174359973054
+Current Conservation rel: 0.0009319824306331202
+Phonon: rel Sigma^R residual 8.1143e-01; lead balance 3.3322e-01 (best 1.2578e-02; internal spread 5.3297e+00)
+Bubble energy balance: P_in=-4.008367e+05 P_out=-4.008367e+05 resid=2.179e-16
+Writing output for iteration 27...
+Iteration 28
+[it 28] energy J(local)=[-213.0493  223.4005    3.6084]
+SigmaR resid-by-omega: peak w=0.37THz val=9.696e+03 in-band(<=46.4)=0.963 low(<=5)=0.271
+Maximum Self-Energy Update: 9696.389104471036
+Contact Current Difference: 0.0
+Current Conservation abs: 5110.416944904253
+Current Conservation rel: 0.001804724002480252
+Phonon: rel Sigma^R residual 8.5714e-01; lead balance 4.6868e+00 (best 1.2578e-02; internal spread 1.4042e+01)
+Bubble energy balance: P_in=-9.429063e+05 P_out=-9.429063e+05 resid=1.986e-16
+Writing output for iteration 28...
+Iteration 29
+[it 29] energy J(local)=[-18.5746  23.2983   3.2256]
+SigmaR resid-by-omega: peak w=19.07THz val=1.721e+03 in-band(<=46.4)=0.966 low(<=5)=0.129
+Maximum Self-Energy Update: 1721.252103459904
+Contact Current Difference: 0.0
+Current Conservation abs: 2433.825189404364
+Current Conservation rel: 0.022467188956357798
+Phonon: rel Sigma^R residual 7.1234e-01; lead balance 6.8445e-02 (best 1.2578e-02; internal spread 3.4688e+00)
+Bubble energy balance: P_in=-1.983668e+04 P_out=-1.983668e+04 resid=8.566e-15
+Writing output for iteration 29...
+Iteration 30
+[it 30] energy J(local)=[-14.828   -7.5181   5.5982]
+SigmaR resid-by-omega: peak w=19.07THz val=5.456e+03 in-band(<=46.4)=0.963 low(<=5)=0.144
+Maximum Self-Energy Update: 5455.670748868181
+Contact Current Difference: 0.0
+Current Conservation abs: 7112.8582668481395
+Current Conservation rel: 0.0005930738081539595
+Phonon: rel Sigma^R residual 8.0957e-01; lead balance 1.1190e-01 (best 1.2578e-02; internal spread 3.0442e+00)
+Bubble energy balance: P_in=-8.924395e+06 P_out=-8.924395e+06 resid=1.048e-16
+Writing output for iteration 30...
+Iteration 31
+[it 31] energy J(local)=[-7.6357 17.2245  7.6863]
+SigmaR resid-by-omega: peak w=0.00THz val=5.353e+03 in-band(<=46.4)=0.963 low(<=5)=0.187
+Maximum Self-Energy Update: 5353.468084736323
+Contact Current Difference: 0.0
+Current Conservation abs: 35965.72461182857
+Current Conservation rel: 0.010901373837910412
+Phonon: rel Sigma^R residual 8.3271e-01; lead balance 4.7331e+01 (best 1.2578e-02; internal spread 1.0382e+02)
+Bubble energy balance: P_in=-4.202938e+06 P_out=-4.202938e+06 resid=1.485e-16
+Writing output for iteration 31...
+Iteration 32
+[it 32] energy J(local)=[-33.386  55.189  22.449]
+SigmaR resid-by-omega: peak w=0.73THz val=3.628e+04 in-band(<=46.4)=0.990 low(<=5)=0.224
+Maximum Self-Energy Update: 36275.721404529264
+Contact Current Difference: 0.0
+Current Conservation abs: 9269.018195485696
+Current Conservation rel: 0.0006895156736183648
+Phonon: rel Sigma^R residual 1.0080e+00; lead balance 1.0399e+00 (best 1.2578e-02; internal spread 5.3581e+00)
+Bubble energy balance: P_in=3.639716e+06 P_out=3.639716e+06 resid=1.218e-15
+Writing output for iteration 32...
+Iteration 33
+[it 33] energy J(local)=[-54.4664 153.9635   2.5439]
+SigmaR resid-by-omega: peak w=15.40THz val=2.193e+04 in-band(<=46.4)=0.966 low(<=5)=0.123
+Maximum Self-Energy Update: 21928.674241786273
+Contact Current Difference: 0.0
+Current Conservation abs: 97970.57806563377
+Current Conservation rel: 0.0004238681723420209
+Phonon: rel Sigma^R residual 9.7840e-01; lead balance 1.0307e-01 (best 1.2578e-02; internal spread 2.9165e+00)
+Bubble energy balance: P_in=-3.975720e+08 P_out=-3.975720e+08 resid=1.077e-15
+Writing output for iteration 33...
+Iteration 34
+[it 34] energy J(local)=[ -7.6019 134.9    -69.0175]
+SigmaR resid-by-omega: peak w=1.47THz val=1.505e+05 in-band(<=46.4)=0.966 low(<=5)=0.187
+Maximum Self-Energy Update: 150521.51263977733
+Contact Current Difference: 0.0
+Current Conservation abs: 5807663.083679199
+Current Conservation rel: 0.008264349546494583
+Phonon: rel Sigma^R residual 9.9362e-01; lead balance 2.1597e-02 (best 1.2578e-02; internal spread 3.0516e+00)
+Bubble energy balance: P_in=-8.258478e+08 P_out=-8.258478e+08 resid=2.998e-14
+Writing output for iteration 34...
+Iteration 35
+[it 35] energy J(local)=[ -160.599  -7589.8056   157.9123]
+SigmaR resid-by-omega: peak w=10.63THz val=1.799e+05 in-band(<=46.4)=0.963 low(<=5)=0.159
+Maximum Self-Energy Update: 179947.4123839277
+Contact Current Difference: 0.0
+Current Conservation abs: 16027842.111679077
+Current Conservation rel: 0.0001625851947085168
+Phonon: rel Sigma^R residual 9.5824e-01; lead balance 1.7504e-01 (best 1.2578e-02; internal spread 2.8211e+00)
+Bubble energy balance: P_in=7.600928e+10 P_out=7.600928e+10 resid=3.760e-15
+Writing output for iteration 35...
+Iteration 36
+[it 36] energy J(local)=[ -183.2087 -4129.8508   634.014 ]
+SigmaR resid-by-omega: peak w=11.73THz val=2.240e+05 in-band(<=46.4)=0.960 low(<=5)=0.216
+Maximum Self-Energy Update: 224040.74242838038
+Contact Current Difference: 0.0
+Current Conservation abs: 39149873.12036896
+Current Conservation rel: 0.0002856503794171291
+Phonon: rel Sigma^R residual 9.8318e-01; lead balance 7.4900e-02 (best 1.2578e-02; internal spread 2.9627e+00)
+Bubble energy balance: P_in=-1.211913e+11 P_out=-1.211913e+11 resid=9.916e-15
+Writing output for iteration 36...
+Iteration 37
+[it 37] energy J(local)=[ -187.3885 -2477.2321   322.2236]
+SigmaR resid-by-omega: peak w=17.60THz val=9.957e+04 in-band(<=46.4)=0.963 low(<=5)=0.132
+Maximum Self-Energy Update: 99569.36330941119
+Contact Current Difference: 0.0
+Current Conservation abs: 2973049.8712272644
+Current Conservation rel: 0.0001308375232548541
+Phonon: rel Sigma^R residual 1.0279e+00; lead balance 3.4912e-02 (best 1.2578e-02; internal spread 2.9415e+00)
+Bubble energy balance: P_in=-1.274959e+10 P_out=-1.274959e+10 resid=8.164e-15
+Writing output for iteration 37...
+Iteration 38
+[it 38] energy J(local)=[ -341.7454 -7239.3272   464.7615]
+SigmaR resid-by-omega: peak w=9.53THz val=1.188e+08 in-band(<=46.4)=0.988 low(<=5)=0.169
+Maximum Self-Energy Update: 118770564.58629742
+Contact Current Difference: 0.0
+Current Conservation abs: 57409981753.5
+Current Conservation rel: 2.3468288522402363e-05
+Phonon: rel Sigma^R residual 9.9999e-01; lead balance 1.6397e-04 (best 1.6397e-04; internal spread 3.0001e+00)
+Bubble energy balance: P_in=-7.753133e+15 P_out=-7.753133e+15 resid=4.318e-14
+Writing output for iteration 38...
+Iteration 39
+[it 39] energy J(local)=[ -180.4559 47147.0886  -324.1381]
+SigmaR resid-by-omega: peak w=9.53THz val=1.188e+07 in-band(<=46.4)=0.988 low(<=5)=0.168
+Maximum Self-Energy Update: 11878623.788912645
+Contact Current Difference: 0.0
+Current Conservation abs: 1293279.923983574
+Current Conservation rel: 0.00017879927632665182
+SCBA ABORTED: rel Sigma^R residual 2.048e+03 > 1000 at iteration 40 (diverged).
+SCBA diverged at iteration 39 (reporting best-conserved iterate).
+SAVED /usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/conv1e10/sinw_d5a_L2_eta0_irsub.npz  final_heat=[ -180.456 47147.089  -324.138]  best=[ 2.60138530e+04  1.87125772e+08 -1.57854310e+04]  best_cons=0.00016397308359735913
