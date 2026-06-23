@@ -137,6 +137,7 @@ spectral_sharp_cap = {a.sharp_cap}
 band_support_margin_thz = {a.band_support_margin}
 sse_freeze_occupation = {a.sse_freeze_occupation}
 sse_smooth_window = {str(a.sse_smooth_window).lower()}
+sse_ir_subtraction = {str(a.sse_ir_subtraction).lower()}
 support_taper_cells = {a.support_taper_cells}
 sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
@@ -239,6 +240,7 @@ spectral_sharp_cap = {a.sharp_cap}
 band_support_margin_thz = {a.band_support_margin}
 sse_freeze_occupation = {a.sse_freeze_occupation}
 sse_smooth_window = {str(a.sse_smooth_window).lower()}
+sse_ir_subtraction = {str(a.sse_ir_subtraction).lower()}
 support_taper_cells = {a.support_taper_cells}
 sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
@@ -355,6 +357,12 @@ def main():
                         "logistic freeze) applied to SSE input/output AND the "
                         "Hilbert input -- no Sigma discontinuity -> no eta=0 "
                         "mask-edge marginal mode (general fix)")
+    p.add_argument("--sse-ir-subtraction", dest="sse_ir_subtraction",
+                   action="store_true",
+                   help="replace the omega^2 IR taper with an EXACT Bose-pole "
+                        "singularity subtraction in the bubble (preserves the "
+                        "quantised ballistic plateau T(0)=N_ac; set ir-taper-"
+                        "cells=0 with this)")
     p.add_argument("--support-taper-cells", dest="support_taper_cells",
                    type=float, default=4.0,
                    help="smooth-window support ramp width in grid cells (~3-5)")

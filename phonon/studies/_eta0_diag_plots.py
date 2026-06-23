@@ -104,10 +104,20 @@ def fig_bands():
     return band_top
 
 
+# Run selection: figures are named sinw_d5a_eta0[<suffix>]_*  so the taper
+# baseline (suffix="") and the IR-occupation-subtraction run (suffix="_irsub")
+# coexist. `TAPER_*` point at the committed taper baseline for overlays.
+TAPER_NPZ = CONV / "sinw_d5a_L2_eta0_diag.npz"
+
+
+def _name(base, suffix):
+    return f"sinw_d5a_eta0{suffix}_{base}"
+
+
 # ----------------------------------------------------------------------------
 # (2) Convergence history
 # ----------------------------------------------------------------------------
-def fig_convergence(log: Path = DIAG_LOG):
+def fig_convergence(log: Path = DIAG_LOG, suffix=""):
     from phonon.studies.pipeline import parse_scba_trace
     tr = parse_scba_trace(Path(log))
 
@@ -123,11 +133,68 @@ def fig_convergence(log: Path = DIAG_LOG):
                     label="lead balance")
     if bub.size:
         ax.semilogy(np.arange(bub.size), np.abs(bub), "-", color="#029e73",
-                    label="bubble balance")
+                    label="bubble balance (conservation)")
     ax.set_xlabel("SCBA iteration")
     ax.set_ylabel("residual")
     ax.legend(fontsize=7)
-    style.save(fig, "sinw_d5a_eta0_convergence", directory=FIGDIR)
+    style.save(fig, _name("convergence", suffix), directory=FIGDIR)
+
+
+# ----------------------------------------------------------------------------
+# (2b) Heat-current convergence + lead deviation
+# ----------------------------------------------------------------------------
+def fig_heat_current(npz: Path = DIAG_NPZ, suffix=""):
+    """Per-interface heat current vs iteration (left) and the lead-to-lead
+    deviation |J_0 - J_last| (the heat-flow non-conservation) vs iteration
+    (right) -- the physical convergence criterion."""
+    d = np.load(npz, allow_pickle=True)
+    ih = np.asarray(d["iter_heat"], float)        # (n_iter, n_interface)
+    it = np.arange(ih.shape[0])
+    fig, ax = style.figure(ncols=2, width=4.6, height=3.2)
+    a = ax[0]
+    for k in range(ih.shape[1]):
+        a.plot(it, ih[:, k], "-", lw=1.1, label=f"interface {k}")
+    a.set_xlabel("SCBA iteration"); a.set_ylabel("heat current (arb.)")
+    a.legend(fontsize=7)
+    a = ax[1]
+    dev = np.abs(ih[:, 0] - ih[:, -1])            # lead-to-lead deviation
+    a.semilogy(it, dev + 1e-30, "-", color="#d55e00", lw=1.3)
+    a.set_xlabel("SCBA iteration")
+    a.set_ylabel(r"lead deviation $|J_0-J_{\rm last}|$")
+    print(f"[heat] final lead deviation = {dev[-1]:.3e}; "
+          f"min over run = {dev.min():.3e}")
+    style.save(fig, _name("heatcurrent", suffix), directory=FIGDIR)
+
+
+# ----------------------------------------------------------------------------
+# (2c) Spectral current + the omega->0 plateau (taper vs subtraction)
+# ----------------------------------------------------------------------------
+def fig_spectral_current(npz: Path = DIAG_NPZ, suffix="", overlay_taper=True):
+    """Spectral current I(omega) and the energy-current density omega*I(omega):
+    the omega->0 PLATEAU is the physical target (the omega^2 taper crushes it to
+    zero; the IR occupation subtraction restores it). Overlays the taper
+    baseline when available."""
+    d = np.load(npz, allow_pickle=True)
+    w = np.abs(np.asarray(d["energies"], float))
+    I = np.asarray(d["current_spectrum"])[:, 0]
+    I = np.sign(np.nanmean(I[(w > 5) & (w < 30)])) * I   # sign so forward>0
+    fig, ax = style.figure(ncols=2, width=4.6, height=3.2)
+    ax[0].plot(w, I, "-", color="#0173b2", lw=1.2, label="this run")
+    ax[1].plot(w, w * I, "-o", color="#0173b2", ms=2.5, lw=1.2, label="this run")
+    if overlay_taper and TAPER_NPZ.exists() and Path(npz) != TAPER_NPZ:
+        dt = np.load(TAPER_NPZ, allow_pickle=True)
+        wt = np.abs(np.asarray(dt["energies"], float))
+        It = np.asarray(dt["current_spectrum"])[:, 0]
+        It = np.sign(np.nanmean(It[(wt > 5) & (wt < 30)])) * It
+        ax[0].plot(wt, It, "--", color="#949494", lw=1.0, label=r"$\omega^2$ taper")
+        ax[1].plot(wt, wt * It, "--s", color="#949494", ms=2.5, lw=1.0,
+                   label=r"$\omega^2$ taper")
+    for a in ax:
+        a.set_xlim(0, 18); a.set_xlabel("frequency (THz)"); a.legend(fontsize=7)
+    ax[0].set_ylabel(r"spectral current $I(\omega)$")
+    ax[1].set_ylabel(r"energy-current density $\omega\,I(\omega)$ (plateau)")
+    ax[1].set_xlim(0, 6)
+    style.save(fig, _name("spectral_current", suffix), directory=FIGDIR)
 
 
 # ----------------------------------------------------------------------------
@@ -139,7 +206,7 @@ def _iter_selection(n: int):
     return sorted(set([0, 1, 2, n // 2, n - 2, n - 1]))
 
 
-def fig_spectral_iters(npz: Path = DIAG_NPZ):
+def fig_spectral_iters(npz: Path = DIAG_NPZ, suffix=""):
     d = np.load(npz, allow_pickle=True)
     w = np.abs(np.asarray(d["energies"], float))         # (ne,)
     gin = np.asarray(d["iter_gin_dos"])                  # (n_iter, ne)  -Im Tr G^R
@@ -189,10 +256,10 @@ def fig_spectral_iters(npz: Path = DIAG_NPZ):
     ax[0, 0].legend(fontsize=6, ncol=3, loc="upper right")
     ax[1, 0].plot([], [], "k-", label="raw"); ax[1, 0].plot([], [], "k--", label="windowed")
     ax[1, 0].legend(fontsize=6, loc="upper right")
-    style.save(fig, "sinw_d5a_eta0_spectral_iters", directory=FIGDIR)
+    style.save(fig, _name("spectral_iters", suffix), directory=FIGDIR)
 
 
-def fig_fluctuation(npz: Path = DIAG_NPZ):
+def fig_fluctuation(npz: Path = DIAG_NPZ, suffix=""):
     """WHERE it fluctuates: per-omega spread (std over iterations) of |Sigma^R|
     and |G^<|, normalised by the per-omega mean -> the relative oscillation
     amplitude vs frequency. Skip the first few iterations (transient)."""
@@ -233,24 +300,33 @@ def fig_fluctuation(npz: Path = DIAG_NPZ):
                    color="#d55e00")
     print(f"[fluctuation] |Sigma^R| oscillation peaks: near-DC {w[i_dc]:.2f} THz, "
           f"band-edge {w[i_edge]:.2f} THz")
-    style.save(fig, "sinw_d5a_eta0_fluctuation", directory=FIGDIR)
+    style.save(fig, _name("fluctuation", suffix), directory=FIGDIR)
 
 
 # ----------------------------------------------------------------------------
-def main(which="all"):
+def main(which="all", tag="sinw_d5a_L2_eta0_diag", suffix=""):
     FIGDIR.mkdir(parents=True, exist_ok=True)
-    print("=" * 64 + "\nsinw-d5a eta=0 CONVERGENCE DIAGNOSTICS\n" + "=" * 64)
+    npz = CONV / f"{tag}.npz"
+    log = CONV / f"{tag}.log"
+    print("=" * 64 + f"\nsinw-d5a eta=0 DIAGNOSTICS  tag={tag} suffix='{suffix}'\n"
+          + "=" * 64)
     if which in ("bands", "all"):
         fig_bands()
     if which in ("diag", "all"):
-        if DIAG_NPZ.exists():
-            fig_convergence()
-            fig_spectral_iters()
-            fig_fluctuation()
+        if npz.exists():
+            fig_convergence(log, suffix)
+            fig_heat_current(npz, suffix)
+            fig_spectral_current(npz, suffix)
+            fig_spectral_iters(npz, suffix)
+            fig_fluctuation(npz, suffix)
         else:
-            print(f"[diag] {DIAG_NPZ} not found yet -- run the diagnostic first.")
+            print(f"[diag] {npz} not found yet -- run the diagnostic first.")
     print("\nfigures ->", FIGDIR)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "all")
+    args = sys.argv[1:]
+    _which = args[0] if args else "all"
+    _tag = args[1] if len(args) > 1 else "sinw_d5a_L2_eta0_diag"
+    _suffix = args[2] if len(args) > 2 else ""
+    main(_which, _tag, _suffix)

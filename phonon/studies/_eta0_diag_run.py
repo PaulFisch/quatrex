@@ -20,6 +20,8 @@ tag = sys.argv[2] if len(sys.argv) > 2 else "sinw_d5a_L2_eta0_diag"
 # c*dw. Default 0 = literal eta=0 (most faithful to "eta=0", most revealing of
 # the fluctuation). The smooth window + IR taper + band support stay on.
 eta_floor = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
+# arg 4: ir_subtraction (1 -> exact Bose-pole subtraction in place of the taper)
+ir_sub = bool(int(sys.argv[4])) if len(sys.argv) > 4 else False
 
 r = cv.run_one(
     tag, 2, NF, 0.1, 0.0, 0.1, 1e-10, max_iter, 0.0, 128,
@@ -27,6 +29,6 @@ r = cv.run_one(
     system="sinw_d5a", fmax=FMAX, band_support_margin=1.5,
     sse_freeze_occupation=1e-3, smooth_window=True,
     support_taper_cells=4.0, eta_floor_cells=eta_floor,
-    diag_spectral=True,
+    diag_spectral=True, ir_subtraction=ir_sub,
 )
 print("DIAG_RUN_DONE", r, flush=True)

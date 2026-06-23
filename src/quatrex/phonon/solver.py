@@ -164,8 +164,25 @@ class PhononSolver(SubsystemSolver):
         # is the global grid spacing; as dw->0, omega_reg = C*dw -> 0 and t -> 1,
         # so the converged observable is taper-free (grid-consistent IR
         # regularization, NOT a fixed-THz cutoff that deletes real channels).
+        # IR singularity SUBTRACTION (sse_ir_subtraction): the physically-correct
+        # alternative to the omega^2 taper. The lead injection is
+        # Sigma^<_lead = i Gamma(omega) n(omega); the lead broadening Gamma(omega)
+        # is ODD (Gamma(0)=0, ~omega for acoustic), so Gamma*n is FINITE as
+        # omega->0 even though n ~ kT/(hbar*omega) diverges -- the omega^2 taper
+        # (omega_reg = C*dw, C~6 -> crushes everything below ~2 THz) is therefore
+        # OVER-regularizing and unphysically kills the low-omega heat current.
+        # With the flag we keep the FULL physical occupation (Gamma~omega tames
+        # the pole) and only set the omega=0 bin to its finite limit (n is already
+        # clipped to 0 there; Gamma(0)=0 -> the bin injects ~0, negligible).
+        # Applied identically to both leads -> conserving (device G consistent).
+        _ir_sub = bool(getattr(config.phonon, "sse_ir_subtraction", False))
         _taper_C = float(getattr(config.phonon, "ir_taper_cells", 0.0))
-        if _taper_C > 0.0 and self.energies.size > 1:
+        if _ir_sub:
+            if comm.rank == 0:
+                print("IR occupation subtraction ON: full physical Bose "
+                      "occupation (no omega^2 taper); Gamma~omega keeps the "
+                      "injection finite as omega->0.", flush=True)
+        elif _taper_C > 0.0 and self.energies.size > 1:
             _dw = float(abs(get_host(self.energies[1] - self.energies[0])))
             if _dw > 0.0:
                 _w2 = xp.asarray(self.local_frequencies, dtype=float) ** 2
