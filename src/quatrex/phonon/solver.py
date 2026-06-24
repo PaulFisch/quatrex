@@ -193,6 +193,8 @@ class PhononSolver(SubsystemSolver):
 
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc
+        self._eta_ir_floor_c = float(getattr(config.phonon,
+                                             "eta_ir_floor_cells", 0.0))
         # Optional in-SCBA broadening anneal: ramp eta DOWN from eta0 (iteration
         # 0, while Sigma^R~0) to eta_final over eta_ramp_iterations solves, then
         # hold. Lets the anharmonic Sigma^R take over the broadening (eta=0 limit).
@@ -380,6 +382,24 @@ class PhononSolver(SubsystemSolver):
         # artificially evanescent and suppresses the acoustic plateau).
         z2 = (self.local_frequencies ** 2
               + 2j * self.eta * xp.abs(self.local_frequencies))
+        # Sub-grid soft-mode broadening floor (eta_ir_floor_cells): the
+        # 2i*eta*omega damping vanishes as omega->0, leaving the acoustic soft
+        # modes (D->0) unregularised at eta=0 (G^R ~ 1/omega^2 -> SCBA diverges).
+        # Add a DC-CONCENTRATED constant broadening i*Gamma_floor*lowpass(omega)
+        # that damps only the lowest (unresolved, ~zero-heat) bins; the resolved
+        # low-omega physics and the IR plateau are untouched. Gamma_floor->0 as
+        # dw->0 (grid-consistent). NOT applied to the OBC (ideal leads).
+        _ir_floor_c = self._eta_ir_floor_c
+        if _ir_floor_c > 0.0 and self.energies.size > 1:
+            _dw = float(abs(get_host(self.energies[1] - self.energies[0])))
+            _w = xp.asarray(self.local_frequencies, dtype=float)
+            _gamma = (_ir_floor_c * _dw) ** 2          # THz^2
+            _wc2 = (2.0 * _dw) ** 2
+            z2 = z2 + 1j * _gamma * _wc2 / (_w ** 2 + _wc2)
+            if comm.rank == 0:
+                print(f"eta IR floor ON: Gamma_floor={_gamma:.4g} THz^2 "
+                      f"(eta_ir_floor_cells={_ir_floor_c:g}, omega_c=2*dw="
+                      f"{2*_dw:.3g} THz) on the unresolved soft modes.", flush=True)
         scale_stack(self.system_matrix.data, z2)
 
         _btd_subtract(self.system_matrix, self.dynamical_matrix)

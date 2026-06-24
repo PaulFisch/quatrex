@@ -43,6 +43,7 @@ if os.environ.get("QX_ETA_FINAL"):      cfg.phonon.eta_final = float(os.environ[
 if os.environ.get("QX_ALGORITHM"):      cfg.phonon.solver.algorithm = os.environ["QX_ALGORITHM"]
 if os.environ.get("QX_BAND_LIMIT"):     cfg.phonon.band_limit_sse = os.environ["QX_BAND_LIMIT"] == "1"
 if os.environ.get("QX_IR_SUB"):         cfg.phonon.sse_ir_subtraction = os.environ["QX_IR_SUB"] == "1"
+if os.environ.get("QX_ETA_IR_FLOOR"):   cfg.phonon.eta_ir_floor_cells = float(os.environ["QX_ETA_IR_FLOOR"])
 if os.environ.get("QX_SHARP_CAP"):      cfg.phonon.spectral_sharp_cap = float(os.environ["QX_SHARP_CAP"])
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
 if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
