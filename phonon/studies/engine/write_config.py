@@ -130,6 +130,7 @@ eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
 eta_obc_final = {a.eta_obc_final}
 sse_low_freq_cutoff_thz = {a.sse_cutoff}
 ir_taper_cells = {a.ir_taper_cells}
+eta_ir_floor_cells = {a.eta_ir_floor_cells}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
 band_limit_sse = {str(a.band_limit).lower()}
@@ -233,6 +234,7 @@ eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
 eta_obc_final = {a.eta_obc_final}
 sse_low_freq_cutoff_thz = {a.sse_cutoff}
 ir_taper_cells = {a.ir_taper_cells}
+eta_ir_floor_cells = {a.eta_ir_floor_cells}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
 band_limit_sse = {str(a.band_limit).lower()}
@@ -357,6 +359,11 @@ def main():
                         "logistic freeze) applied to SSE input/output AND the "
                         "Hilbert input -- no Sigma discontinuity -> no eta=0 "
                         "mask-edge marginal mode (general fix)")
+    p.add_argument("--eta-ir-floor-cells", dest="eta_ir_floor_cells", type=float,
+                   default=0.0,
+                   help="sub-grid soft-mode broadening floor (grid cells); a "
+                        "DC-concentrated constant broadening that stabilises the "
+                        "eta=0 SCBA without crushing the low-omega current")
     p.add_argument("--sse-ir-subtraction", dest="sse_ir_subtraction",
                    action="store_true",
                    help="replace the omega^2 IR taper with an EXACT Bose-pole "

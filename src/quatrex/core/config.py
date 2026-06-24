@@ -861,6 +861,21 @@ class PhononConfig(BaseModel):
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
     warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
 
+    eta_ir_floor_cells: NonNegativeFloat = 0.0
+    """Sub-grid soft-mode broadening floor for the eta=0 SCBA, in grid cells
+    (0 = off). At eta=0 the device retarded G^R = [omega^2 + 2i*eta*omega - D -
+    Sigma^R]^{-1} is UNREGULARISED at the acoustic soft modes (D->0): the
+    frequency-proportional damping 2i*eta*omega vanishes as omega->0, so G^R ~
+    1/omega^2 blows up and the SCBA diverges. d5a's twist modes (~0.01 THz) sit
+    far below the first grid bin -> unresolved, transport-irrelevant (they carry
+    ~zero heat), but they destabilise the iteration. This adds a DC-CONCENTRATED
+    constant broadening to the Dyson denominator,
+        z^2(omega) += i * Gamma_floor * omega_c^2/(omega^2 + omega_c^2),
+    Gamma_floor = (eta_ir_floor_cells*dw)^2 [THz^2], omega_c = 2*dw, so only the
+    lowest few (unresolved) bins are damped and the resolved low-omega physics
+    (and the IR occupation plateau, see ``sse_ir_subtraction``) is untouched.
+    Grid-consistent: Gamma_floor -> 0 as dw -> 0. Stabiliser for eta=0; does NOT
+    crush the heat current like the omega^2 occupation taper."""
     sse_low_freq_cutoff_thz: NonNegativeFloat = 0.0
     """Low-frequency cutoff for the 3-phonon SSE (THz, 0 = off). Modes below
     the cutoff are excluded from the bubble (masked on the INPUT Green's
