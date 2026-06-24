@@ -178,9 +178,17 @@ def fig_spectral_current(npz: Path = DIAG_NPZ, suffix="", overlay_taper=True):
     w = np.abs(np.asarray(d["energies"], float))
     I = np.asarray(d["current_spectrum"])[:, 0]
     I = np.sign(np.nanmean(I[(w > 5) & (w < 30)])) * I   # sign so forward>0
+    # The omega=0 bin is clipped to 0 (the Bose occupation n(0) is infinite ->
+    # the NUMBER current diverges as 1/omega there); the physical energy-current
+    # density omega*I is finite (the plateau). Plot omega*I with the DC point set
+    # to the first resolved bin so the figure shows the plateau, not the clip dip.
+    wI = w * I
+    wI_dc = wI.copy()
+    if wI.size > 1:
+        wI_dc[0] = wI[1]
     fig, ax = style.figure(ncols=2, width=4.6, height=3.2)
     ax[0].plot(w, I, "-", color="#0173b2", lw=1.2, label="this run")
-    ax[1].plot(w, w * I, "-o", color="#0173b2", ms=2.5, lw=1.2, label="this run")
+    ax[1].plot(w, wI_dc, "-o", color="#0173b2", ms=2.5, lw=1.2, label="this run")
     if overlay_taper and TAPER_NPZ.exists() and Path(npz) != TAPER_NPZ:
         dt = np.load(TAPER_NPZ, allow_pickle=True)
         wt = np.abs(np.asarray(dt["energies"], float))

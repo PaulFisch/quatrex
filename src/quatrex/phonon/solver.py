@@ -195,6 +195,17 @@ class PhononSolver(SubsystemSolver):
         self.eta_obc = config.phonon.eta_obc
         self._eta_ir_floor_c = float(getattr(config.phonon,
                                              "eta_ir_floor_cells", 0.0))
+        # Optional in-SCBA ANNEAL of the sub-grid soft-mode floor: ramp
+        # eta_ir_floor_cells DOWN from its start value to eta_ir_floor_final_cells
+        # over eta_ir_floor_ramp_iterations solves, then hold. Tests whether the
+        # floor is only a crutch to REACH the basin (anneal->0 holds) or is
+        # load-bearing (re-diverges as floor->0).
+        self._eta_ir_floor_c0 = self._eta_ir_floor_c
+        self._eta_ir_floor_final = float(getattr(config.phonon,
+                                                 "eta_ir_floor_final_cells", 0.0))
+        self._eta_ir_floor_ramp_n = int(getattr(config.phonon,
+                                                "eta_ir_floor_ramp_iterations", 0))
+        self._eta_ir_floor_it = 0
         # Optional in-SCBA broadening anneal: ramp eta DOWN from eta0 (iteration
         # 0, while Sigma^R~0) to eta_final over eta_ramp_iterations solves, then
         # hold. Lets the anharmonic Sigma^R take over the broadening (eta=0 limit).
@@ -336,6 +347,24 @@ class PhononSolver(SubsystemSolver):
             print(f"eta ramp: it={self._eta_it - 1} eta={self.eta:.4g} "
                   f"({self._eta0:.4g} -> {self._eta_final:.4g} over "
                   f"{self._eta_ramp_n})", flush=True)
+
+    def _apply_eta_ir_floor_ramp(self) -> None:
+        """In-SCBA anneal of the sub-grid soft-mode floor (no-op unless
+        eta_ir_floor_ramp_iterations>0). Linearly ramps eta_ir_floor_cells from
+        its start to eta_ir_floor_final_cells over the ramp, then holds. Recomputed
+        every solve; _assemble_system_matrix reads the current self._eta_ir_floor_c.
+        """
+        if self._eta_ir_floor_ramp_n <= 0:
+            return
+        frac = min(1.0, self._eta_ir_floor_it / float(self._eta_ir_floor_ramp_n))
+        self._eta_ir_floor_c = (self._eta_ir_floor_c0
+                                + (self._eta_ir_floor_final - self._eta_ir_floor_c0) * frac)
+        self._eta_ir_floor_it += 1
+        if comm.rank == 0:
+            print(f"eta IR floor ramp: it={self._eta_ir_floor_it - 1} "
+                  f"floor_cells={self._eta_ir_floor_c:.4g} "
+                  f"({self._eta_ir_floor_c0:.4g} -> {self._eta_ir_floor_final:.4g} "
+                  f"over {self._eta_ir_floor_ramp_n})", flush=True)
 
     def _apply_eta_obc_ramp(self) -> None:
         """In-SCBA contact-broadening ramp (no-op unless eta_obc_ramp_iterations>0).
@@ -593,6 +622,7 @@ class PhononSolver(SubsystemSolver):
 
         self._apply_eta_ramp()
         self._apply_eta_obc_ramp()
+        self._apply_eta_ir_floor_ramp()
         self._assemble_system_matrix()
 
         # TODO Band ege Tracking
