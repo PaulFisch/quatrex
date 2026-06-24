@@ -876,6 +876,15 @@ class PhononConfig(BaseModel):
     (and the IR occupation plateau, see ``sse_ir_subtraction``) is untouched.
     Grid-consistent: Gamma_floor -> 0 as dw -> 0. Stabiliser for eta=0; does NOT
     crush the heat current like the omega^2 occupation taper."""
+    eta_ir_floor_final_cells: NonNegativeFloat = 0.0
+    """Target for the in-SCBA anneal of ``eta_ir_floor_cells`` (grid cells). With
+    ``eta_ir_floor_ramp_iterations`` > 0 the soft-mode floor is ramped linearly
+    from its start value down to this over the ramp, then held. Tests whether the
+    floor is removable upon convergence (anneal -> 0 holds) or load-bearing (the
+    fixed point re-diverges as the floor -> 0)."""
+    eta_ir_floor_ramp_iterations: int = 0
+    """Number of SCBA solves over which to anneal ``eta_ir_floor_cells`` down to
+    ``eta_ir_floor_final_cells`` (0 = off, hold the floor constant)."""
     sse_low_freq_cutoff_thz: NonNegativeFloat = 0.0
     """Low-frequency cutoff for the 3-phonon SSE (THz, 0 = off). Modes below
     the cutoff are excluded from the bubble (masked on the INPUT Green's
