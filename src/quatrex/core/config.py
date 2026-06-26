@@ -54,57 +54,17 @@ class QTBMConfig(BaseModel):
     max_batch_size: PositiveInt = 10
 
 
-class SCBAConfig(BaseModel):
-    """Options for the self-consistent Born approximation."""
+class ExperimentalMixerConfig(BaseModel):
+    """Experimental SCBA root-finders for the iteration-UNSTABLE eta->0 fixed
+    point (cnt33 / SiNW d5a soft-mode saddle), kept out of the shared SCBA
+    surface. These are NOT standard NEGF accelerators: damped/Anderson mixing
+    accelerates a contractive iteration, whereas broyden/rpm/rre/jfnk LAND a
+    fixed point whose Jacobian has ``|lambda| > 1`` (which mixing provably cannot
+    reach). They target an η=0 self-energy fixed point whose existence on the
+    soft modes is itself marginal -- use only for that research path."""
 
     model_config = ConfigDict(extra="forbid")
 
-    min_iterations: PositiveInt = 1
-    max_iterations: PositiveInt = 100
-    convergence_tol: PositiveFloat = 1e-5
-
-    mixing_factor: PositiveFloat = Field(default=0.1, le=1.0)
-    """Damped self-energy mixing factor: for ``mixing_method = "linear"``
-    the update is ``Sigma <- (1-a) Sigma_prev + a Sigma_new``; for
-    ``"anderson"`` it is the damping ``beta`` of the accelerated step."""
-
-    mixing_method: Literal["linear", "anderson", "broyden", "rre", "rpm", "jfnk"] = "linear"
-    """Self-energy fixed-point mixer. ``"linear"`` is plain damped mixing;
-    ``"anderson"`` is plain Anderson(m) acceleration (Anderson 1965;
-    Walker & Ni, SIAM J. Numer. Anal. 49, 1715 (2011), Alg. AA in the
-    unconstrained least-squares form) -- cf. ``quatrex/core/anderson.py``.
-    Acceleration helps a convergent (contractive) iteration; it is NOT a
-    cure for a marginal / non-existent fixed point. ``"broyden"`` is the
-    MPI-aware type-I "good" Broyden ROOT FINDER and ``"rpm"`` the Recursive
-    Projection Method (Shroff & Keller 1993); both LAND an iteration-UNSTABLE
-    fixed point (Jacobian |lambda|>1, the cnt33 eta=0 band-edge mode on long
-    cells) that damped/Anderson/RRE provably cannot reach -- cf.
-    ``quatrex/core/broyden.py`` and ``quatrex/core/rpm.py``."""
-
-    anderson_depth: PositiveInt = 5
-    """History size m for ``mixing_method = "anderson"`` (number of stored
-    residual differences). Memory cost: 2*m copies of the full Sigma."""
-    anderson_period: PositiveInt = 1
-    """Periodic-Pulay stride: apply the Anderson extrapolation only every
-    ``anderson_period``-th iteration, plain damped linear mixing in between
-    (Banerjee et al. 2016). >1 breaks the marginal-mode limit cycle that stalls
-    plain Anderson on soft-mode systems (d5a). 1 = ordinary Anderson(m)."""
-    anderson_warmup_iters: NonNegativeInt = 0
-    """For ``mixing_method = "anderson"``: run plain damped LINEAR mixing for the
-    first ``anderson_warmup_iters`` SCBA iterations, then switch to Anderson.
-    Anderson limit-cycles when started cold on the eta=0 causal-Sigma^R map (the
-    early non-linear transient), but converges fast once the iterate is near the
-    fixed point where the map is well-linearized. 0 = Anderson from the start."""
-    anderson_restart: NonNegativeInt = 0
-    """For ``mixing_method = "anderson"``: forget the Anderson history every N
-    steps (0 = never). Breaks the marginal-mode limit cycle that periodic Pulay
-    alone cannot escape on the eta=0 causal-Sigma^R band-edge mode (resid
-    oscillates 0.05<->0.49)."""
-    anderson_ridge: NonNegativeFloat = 0.0
-    """For ``mixing_method = "anderson"``: scale-relative Tikhonov regularisation
-    of the least-squares coefficients (suppresses the overshoot spikes from a
-    near-rank-deficient history). 0 = plain SVD lstsq. Also reused as the Gram
-    ridge for ``mixing_method = "rre"``."""
     rre_cycle: PositiveInt = 8
     """For ``mixing_method = "rre"``: restart cycle length (number of iterates per
     reduced-rank-extrapolation step). Locates an UNSTABLE fixed point that damped /
@@ -166,9 +126,18 @@ class SCBAConfig(BaseModel):
     """For ``mixing_method = "jfnk"``: relative finite-difference step for the
     matrix-free Jacobian-vector product, ``eps_used = jfnk_eps * (1 + ||Sigma||)``."""
     jfnk_trust: NonNegativeFloat = 0.5
-    """For ``mixing_method = "jfnk"``: trust-region cap on the Newton step,
+    """For ``mixing_method = "jfnk"``: INITIAL trust-region cap on the Newton step,
     ``||delta|| <= jfnk_trust * ||Sigma||`` (global). Adapts down on a step that
-    raises the residual, up on good progress. 0 disables."""
+    raises the residual, up on good progress (toward ``jfnk_trust_max``). 0
+    disables. Start it SMALL (e.g. 0.05) so the early, far-from-root Newton steps
+    cannot overshoot the marginal flexural mode (the d5a blow-up); the radius then
+    breathes up as descent is demonstrated."""
+    jfnk_trust_max: NonNegativeFloat = 0.0
+    """For ``mixing_method = "jfnk"``: MAXIMUM trust radius the adaptive growth may
+    reach (``<= 0`` -> use ``jfnk_trust``, i.e. no growth above the initial). Set
+    ``jfnk_trust_max > jfnk_trust`` to let the radius accelerate as the residual
+    descends monotonically -- the cure for the d5a marginal-mode crawl where the
+    Newton step is permanently pinned at a small fixed trust boundary."""
     jfnk_newton_damp: PositiveFloat = 1.0
     """For ``mixing_method = "jfnk"``: damping of the (already trust-capped) Newton
     step, ``Sigma_{k+1} = Sigma_k + jfnk_newton_damp * delta``. < 1 globalises a
@@ -180,6 +149,66 @@ class SCBAConfig(BaseModel):
     shift lifts the near-zero (marginal, ``Gamma_anh ~ dw``) eigenvalues of
     ``J = J_F - I`` off the origin so the inner GMRES no longer stalls on the
     near-null-space. 0 = pure Newton (no shift); ~1 for the marginal d5a saddle."""
+
+
+class SCBAConfig(BaseModel):
+    """Options for the self-consistent Born approximation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_iterations: PositiveInt = 1
+    max_iterations: PositiveInt = 100
+    convergence_tol: PositiveFloat = 1e-5
+
+    mixing_factor: PositiveFloat = Field(default=0.1, le=1.0)
+    """Damped self-energy mixing factor: for ``mixing_method = "linear"``
+    the update is ``Sigma <- (1-a) Sigma_prev + a Sigma_new``; for
+    ``"anderson"`` it is the damping ``beta`` of the accelerated step."""
+
+    mixing_method: Literal["linear", "anderson", "broyden", "rre", "rpm", "jfnk"] = "linear"
+    """Self-energy fixed-point mixer. ``"linear"`` is plain damped mixing;
+    ``"anderson"`` is plain Anderson(m) acceleration (Anderson 1965;
+    Walker & Ni, SIAM J. Numer. Anal. 49, 1715 (2011), Alg. AA in the
+    unconstrained least-squares form) -- cf. ``quatrex/core/anderson.py``.
+    Acceleration helps a convergent (contractive) iteration; it is NOT a
+    cure for a marginal / non-existent fixed point. ``"broyden"`` is the
+    MPI-aware type-I "good" Broyden ROOT FINDER and ``"rpm"`` the Recursive
+    Projection Method (Shroff & Keller 1993); both LAND an iteration-UNSTABLE
+    fixed point (Jacobian |lambda|>1, the cnt33 eta=0 band-edge mode on long
+    cells) that damped/Anderson/RRE provably cannot reach -- cf.
+    ``quatrex/core/broyden.py`` and ``quatrex/core/rpm.py``."""
+
+    anderson_depth: PositiveInt = 5
+    """History size m for ``mixing_method = "anderson"`` (number of stored
+    residual differences). Memory cost: 2*m copies of the full Sigma."""
+    anderson_period: PositiveInt = 1
+    """Periodic-Pulay stride: apply the Anderson extrapolation only every
+    ``anderson_period``-th iteration, plain damped linear mixing in between
+    (Banerjee et al. 2016). >1 breaks the marginal-mode limit cycle that stalls
+    plain Anderson on soft-mode systems (d5a). 1 = ordinary Anderson(m)."""
+    anderson_warmup_iters: NonNegativeInt = 0
+    """For ``mixing_method = "anderson"``: run plain damped LINEAR mixing for the
+    first ``anderson_warmup_iters`` SCBA iterations, then switch to Anderson.
+    Anderson limit-cycles when started cold on the eta=0 causal-Sigma^R map (the
+    early non-linear transient), but converges fast once the iterate is near the
+    fixed point where the map is well-linearized. 0 = Anderson from the start."""
+    anderson_restart: NonNegativeInt = 0
+    """For ``mixing_method = "anderson"``: forget the Anderson history every N
+    steps (0 = never). Breaks the marginal-mode limit cycle that periodic Pulay
+    alone cannot escape on the eta=0 causal-Sigma^R band-edge mode (resid
+    oscillates 0.05<->0.49)."""
+    anderson_ridge: NonNegativeFloat = 0.0
+    """For ``mixing_method = "anderson"``: scale-relative Tikhonov regularisation
+    of the least-squares coefficients (suppresses the overshoot spikes from a
+    near-rank-deficient history). 0 = plain SVD lstsq. Also reused as the Gram
+    ridge for ``mixing_method = "rre"``."""
+
+    experimental_mixer: ExperimentalMixerConfig = Field(
+        default_factory=ExperimentalMixerConfig)
+    """Knobs for the experimental eta=0 root-finders (broyden / rpm / rre / jfnk),
+    selected via ``mixing_method``. Grouped here to keep the experimental
+    fixed-point machinery out of the shared SCBA surface; see
+    :class:`ExperimentalMixerConfig`."""
 
     output_interval: PositiveInt = 1
 
@@ -1135,6 +1164,25 @@ class PhononConfig(BaseModel):
                 "'fc3_path' must be set for model='negf'."
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def check_regularizer_exclusivity(self):
+        """Guard the mutually-exclusive eta=0 IR / mask regularizers: each
+        treats the same physics differently, so stacking them double-counts
+        and is almost always a config error."""
+        if self.sse_ir_subtraction and self.ir_taper_cells > 0.0:
+            raise ValueError(
+                "sse_ir_subtraction and ir_taper_cells are mutually-exclusive "
+                "IR occupation treatments: set ir_taper_cells = 0 when using "
+                "the exact Bose subtraction."
+            )
+        if self.sse_smooth_window and self.spectral_sharp_cap > 0.0:
+            raise ValueError(
+                "spectral_sharp_cap (a hard live-A mask) conflicts with "
+                "sse_smooth_window, whose C^1 window replaces the hard masks; "
+                "enable only one."
+            )
         return self
 
 

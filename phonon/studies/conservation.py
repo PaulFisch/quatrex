@@ -197,7 +197,6 @@ def sigma_convention(config_path) -> dict:
     Returns {"g_worst", "sl_worst", "sg_worst"}: worst relative negative
     eigenvalue over all omega > 0 (0.0 = clean).
     """
-    import numpy as np
     from quatrex.core.config import parse_config, setup_context
 
     cfg = parse_config(config_path)

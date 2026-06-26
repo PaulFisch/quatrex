@@ -21,6 +21,8 @@ through its SVD cutoff.
 
 import numpy as np
 
+from quatrex.core.mpi_linalg import allreduce_sum, get_comm
+
 
 class RREMixer:
     """Restarted Reduced-Rank (minimal-residual) Extrapolation for fixed points.
@@ -50,12 +52,7 @@ class RREMixer:
         self.ridge = float(ridge)
         self._X: list[np.ndarray] = []
         self._F: list[np.ndarray] = []
-        try:
-            from mpi4py import MPI
-            self._comm = MPI.COMM_WORLD
-            self._SUM = MPI.SUM
-        except Exception:  # pragma: no cover - no-MPI fallback
-            self._comm = None
+        self._comm, self._SUM = get_comm()
 
     def step(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
         """One RRE step; ``x`` is the (rank-local) iterate, ``gx = g(x)``."""
@@ -68,10 +65,7 @@ class RREMixer:
         F = np.stack(self._F, axis=1)          # (n_local, cycle)
         X = np.stack(self._X, axis=1)
         G = np.ascontiguousarray((F.conj().T @ F).real)   # local Gram (cycle x cycle)
-        if self._comm is not None and self._comm.size > 1:
-            g_glob = np.empty_like(G)
-            self._comm.Allreduce(G, g_glob, op=self._SUM)  # GLOBAL Gram
-            G = g_glob
+        G = allreduce_sum(self._comm, self._SUM, G)        # GLOBAL Gram
         self._X.clear()
         self._F.clear()                        # restart
 

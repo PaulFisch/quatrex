@@ -73,7 +73,8 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
             support_taper_cells=4.0, eta_floor_cells=0.0, broyden_warmup=0,
             rpm_max_subspace=6, jfnk_warmup=10, jfnk_max_krylov=30,
             jfnk_inner_tol=0.1, jfnk_forcing="ew", jfnk_max_newton=60,
-            jfnk_eps=1e-7, jfnk_trust=0.5, jfnk_newton_damp=1.0, jfnk_ptc=0.0,
+            jfnk_eps=1e-7, jfnk_trust=0.5, jfnk_trust_max=0.0,
+            jfnk_newton_damp=1.0, jfnk_ptc=0.0,
             diag_spectral=False, ir_subtraction=False, eta_ir_floor=0.0,
             eta_ir_floor_final=0.0, eta_ir_floor_ramp=0):
     work = OUT / "work" / tag
@@ -109,8 +110,8 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
         jfnk_warmup_iters=jfnk_warmup, jfnk_max_krylov=jfnk_max_krylov,
         jfnk_inner_tol=jfnk_inner_tol, jfnk_forcing=jfnk_forcing,
         jfnk_max_newton=jfnk_max_newton, jfnk_eps=jfnk_eps,
-        jfnk_trust=jfnk_trust, jfnk_newton_damp=jfnk_newton_damp,
-        jfnk_ptc=jfnk_ptc)
+        jfnk_trust=jfnk_trust, jfnk_trust_max=jfnk_trust_max,
+        jfnk_newton_damp=jfnk_newton_damp, jfnk_ptc=jfnk_ptc)
     # stack_comm_size = nranks (bcs=qcs=1); the solver requires it <= nfreq.
     nranks = min(int(nranks), nf - 1)
     log = OUT / f"{tag}.log"

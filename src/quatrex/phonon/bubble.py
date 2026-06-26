@@ -147,17 +147,49 @@ def _ring_contract_serial(phi_left, phi_right, Ga_fft, Gb_fft, xp):
     via  T[w,(a,e),b] = PL[(a,e),c] @ Ga[w,c,b]      (PL = phi_L perm (a,e,c))
          U[w,e,(b,J)] = Gb[w,e,d] @ PR[d,(b,J)]      (PR = phi_R perm (d,b,J))
          S[w,a,J]     = T[w,a,(e,b)] @ U[w,(e,b),J]
+
+    The permute and the three gemms live in :func:`phi_perms` /
+    :func:`ring_contract_pre`; this is the one-shot (un-cached phi) wrapper.
+    """
+    PL, PR, nI, bK2, nJ = phi_perms(phi_left, phi_right, xp)
+    return ring_contract_pre(PL, PR, nI, bK2, nJ, Ga_fft, Gb_fft, xp)
+
+
+# NOTE: an earlier "quad-batched / w-folded" rewrite (bubble_contract_batched)
+# and an einsum variant (bubble_ij_einsum) were removed after direct
+# benchmarking on this node: gemm-batching the ring is a DEAD END. Single-core
+# it is bit-identical and the SAME speed (~22 GF/s) as the per-ring loop below;
+# under the omega/tau thread pool it is ~10x SLOWER and does not scale, because
+# materialising every ring's BS^3 intermediate at once blows the cache and turns
+# the kernel memory-bound. The per-ring loop (ring_contract / ring_contract_pre)
+# keeps each chunk's intermediate in cache and scales ~56x to 64 threads. The
+# real throughput lever is the POOL WIDTH (QUATREX_PHPH_RING_THREADS), not the
+# kernel shape -- do not reintroduce batching here.
+
+
+def phi_perms(phi_left, phi_right, xp):
+    """Pre-permute the (fixed) phi factors for :func:`ring_contract_pre`.
+
+    The phi permutes PL, PR are w-INDEPENDENT and the FC3 vertex is constant
+    across SCBA iterations, so they are computed ONCE and reused -- removing
+    the per-call ``ascontiguousarray`` transpose copies that dominate the
+    bubble on small-block systems (the cnt33 36-DOF blocks: ~80 s/iter ->
+    a fraction). Returns ``(PL, PR, nI, bK2)`` for the contraction.
     """
     nI, bK1, bK2 = phi_left.shape
     nJ = phi_right.shape[0]
-    n_w = Ga_fft.shape[0]
-    bK1p = Ga_fft.shape[2]
-    bK2p = Gb_fft.shape[2]
-
-    # (a,c,e) -> [(a,e), c] and (J,d,b) -> [d, (b,J)]; w-independent.
+    bK2p, bK1p = phi_right.shape[1], phi_right.shape[2]
     PL = xp.ascontiguousarray(phi_left.transpose(0, 2, 1)).reshape(nI * bK2, bK1)
     PR = xp.ascontiguousarray(phi_right.transpose(1, 2, 0)).reshape(bK2p, bK1p * nJ)
+    return PL, PR, nI, bK2, nJ
 
-    T = PL @ Ga_fft            # (w, nI*bK2, bK1p)  == (w, a, e, b)
-    U = Gb_fft @ PR            # (w, bK2,  bK1p*nJ) == (w, e, b, J)
+
+def ring_contract_pre(PL, PR, nI, bK2, nJ, Ga_fft, Gb_fft, xp):
+    """Ring contraction with PRE-permuted phi factors (see :func:`phi_perms`).
+    Identical three gemms / FLOPs as :func:`_ring_contract_serial`, but with
+    ZERO per-call transpose/copy. Bit-exact with the un-cached path."""
+    n_w = Ga_fft.shape[0]
+    bK1p = Ga_fft.shape[2]
+    T = PL @ Ga_fft
+    U = Gb_fft @ PR
     return T.reshape(n_w, nI, bK2 * bK1p) @ U.reshape(n_w, bK2 * bK1p, nJ)

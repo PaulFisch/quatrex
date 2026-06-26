@@ -56,6 +56,8 @@ Same ``step(x, gx)`` signature as the other mixers (drop-in,
 
 import numpy as np
 
+from quatrex.core.mpi_linalg import get_comm, global_dot, global_norm, trust_cap
+
 
 def _c2r(z: np.ndarray) -> np.ndarray:
     """Complex (n,) -> real (2n,) embedding ``[Re z, Im z]``."""
@@ -101,7 +103,8 @@ class JFNKMixer:
                  max_krylov: int = 30, inner_tol: float = 0.1,
                  forcing: str = "ew", max_newton: int = 60, eps: float = 1e-7,
                  trust: float = 0.5, newton_damp: float = 1.0,
-                 ptc: float = 0.0, verbose: bool = True) -> None:
+                 ptc: float = 0.0, trust_max: float = 0.0,
+                 verbose: bool = True) -> None:
         self.warmup = int(warmup)
         self.beta = float(beta)
         self.max_krylov = int(max_krylov)
@@ -110,6 +113,11 @@ class JFNKMixer:
         self.max_newton = int(max_newton)
         self.eps = float(eps)
         self.trust = float(trust)
+        # The radius is allowed to GROW from the (small, safe) initial ``trust``
+        # up to ``trust_max`` as the residual descends -- the cure for the d5a
+        # marginal-mode crawl where the Newton step sits pinned at a fixed,
+        # too-small trust boundary. ``trust_max <= trust`` => no growth (legacy).
+        self.trust_max = max(float(trust_max), float(trust))
         self.newton_damp = float(newton_damp)
         # Pseudo-transient continuation / Levenberg-Marquardt shift: solve
         # (J + mu I) delta = -R instead of J delta = -R, with mu annealed to 0 as
@@ -142,37 +150,19 @@ class JFNKMixer:
         self._beta_g = 1.0
         self._inner_tol_k = float(inner_tol)
         self._pending_v = None
-        # MPI
-        try:
-            from mpi4py import MPI
-            self._comm = MPI.COMM_WORLD
-            self._SUM = MPI.SUM
-        except Exception:  # pragma: no cover - no-MPI fallback
-            self._comm = None
-            self._SUM = None
+        self._comm, self._SUM = get_comm()
 
     # ---- MPI-correct distributed primitives (row-partitioned real vectors) ---
+    # The iterate is in the real embedding, so the inner product is the plain
+    # real dot; ``global_dot`` (vdot.real) reduces to exactly that for real input.
     def _dot(self, u: np.ndarray, v: np.ndarray) -> float:
-        """Global real inner product ``<u, v> = sum u v``."""
-        s = np.array([float(np.dot(u, v))], dtype=np.float64)
-        if self._comm is not None and self._comm.size > 1:
-            out = np.empty_like(s)
-            self._comm.Allreduce(s, out, op=self._SUM)
-            s = out
-        return float(s[0])
+        return global_dot(self._comm, self._SUM, u, v)
 
     def _gnorm(self, v: np.ndarray) -> float:
-        return float(np.sqrt(max(self._dot(v, v), 0.0)))
+        return global_norm(self._comm, self._SUM, v)
 
     def _cap(self, step: np.ndarray, x: np.ndarray, radius: float) -> np.ndarray:
-        if radius <= 0.0:
-            return step
-        buf = np.array([self._dot(step, step), self._dot(x, x)], dtype=np.float64)
-        # _dot already reduced; recompute locally-then-reduce in one shot:
-        sn, xn = np.sqrt(max(buf[0], 0.0)), np.sqrt(max(buf[1], 0.0))
-        if sn > radius * xn and sn > 0.0:
-            return step * (radius * xn / sn)
-        return step
+        return trust_cap(self._comm, self._SUM, step, x, radius)
 
     def _log(self, msg: str) -> None:
         if self.verbose and (self._comm is None or self._comm.rank == 0):
@@ -219,11 +209,17 @@ class JFNKMixer:
             self._R0_norm = rk
 
         # Trust-region adaptation from the previous Newton step's progress.
+        # Asymmetric, with hysteresis: shrink HARD on any worsening (overshoot of
+        # the unstable mode), but GROW on any solid monotone descent -- not only on
+        # a halving -- up to ``trust_max``. The d5a saddle descends ~10-15% per
+        # Newton step (rk ~ 0.85 Rprev), so the legacy "rk < 0.5 Rprev" gate never
+        # fired and the radius stayed pinned at the small initial value, capping
+        # every step at the trust boundary and stalling the descent.
         if self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
                 self._trust_k = max(self._trust_k * 0.5, 1e-3)
-            elif rk < 0.5 * self._Rprev_norm:    # good progress -> relax
-                self._trust_k = min(self._trust_k * 1.5, max(self.trust, 1e-3))
+            elif rk < 0.95 * self._Rprev_norm:   # solid progress -> grow radius
+                self._trust_k = min(self._trust_k * 1.3, self.trust_max)
 
         # Eisenstat-Walker forcing: tighten the inner solve as R falls.
         if self.forcing == "ew" and self._Rprev_norm:

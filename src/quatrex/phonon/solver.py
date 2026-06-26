@@ -3,26 +3,21 @@
 import warnings
 
 import numpy as np
-
-from qttools.datastructures import DSDBSparse
 from qttools import NDArray, sparse, xp
 from qttools.comm import comm
+from qttools.datastructures import DSDBSparse
+from qttools.greens_function_solver.solver import OBCBlocks
+from qttools.profiling import Profiler
+from qttools.toeplitz.toeplitz import get_periodic_superblocks
 from qttools.utils.gpu_utils import get_host
 from qttools.utils.mpi_utils import distributed_load, get_local_slice, get_section_sizes
 from qttools.utils.stack_utils import scale_stack
-from qttools.profiling import Profiler
-from qttools.greens_function_solver.solver import OBCBlocks
 
-from quatrex.bandstructure.band_edges import (
-    find_band_edges,
-    find_dos_peaks,
-    find_renormalized_eigenvalues,
-)
-from quatrex.core.statistics import bose_einstein
-from qttools.toeplitz.toeplitz import get_periodic_superblocks
-from quatrex.device.inputs import load_matrix
 from quatrex.core.config import QuatrexConfig
+from quatrex.core.statistics import bose_einstein
 from quatrex.core.subsystem import SubsystemSolver
+from quatrex.device.inputs import load_matrix
+from quatrex.phonon.units import thz_to_ev
 
 profiler = Profiler()
 
@@ -71,13 +66,13 @@ class PhononSolver(SubsystemSolver):
     def __init__(
         self,
         config: QuatrexConfig,
-        frequecies: NDArray,
+        frequencies: NDArray,
         sparsity_pattern: sparse.coo_matrix,
     ) -> None:
         """Initializes the Phonon solver."""
-        super().__init__(config, frequecies)
+        super().__init__(config, frequencies)
 
-        self.local_frequencies = get_local_slice(frequecies, comm.stack)
+        self.local_frequencies = get_local_slice(frequencies, comm.stack)
 
         # Load the dynamical matrix
         self.dynamical_matrix, dynamical_matrix_sparsity_pattern = load_matrix(
@@ -124,12 +119,9 @@ class PhononSolver(SubsystemSolver):
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
-        # frequencies are the linear angular-frequency
-        # grid in THz (uniform spacing, as the bubble FFT requires). The Bose
-        # occupation uses hbar*omega with omega = 2*pi*1e12 * f[THz].
-        hbar_omega_eV = 6.582119569e-16 * (2 * np.pi * 1e12) * np.abs(
-            self.local_frequencies
-        )
+        # frequencies are the linear-frequency grid in THz (uniform spacing,
+        # as the bubble FFT requires); the Bose occupation needs hbar*omega.
+        hbar_omega_eV = thz_to_ev(np.abs(self.local_frequencies))
         self.left_occupancies = bose_einstein(hbar_omega_eV, self.left_temperature)
         self.right_occupancies = bose_einstein(hbar_omega_eV, self.right_temperature)
         # Regularize the omega=0 sampling point
@@ -548,53 +540,9 @@ class PhononSolver(SubsystemSolver):
 
     @profiler.profile(label="PhononSolver: DOS Peaks", level="default", comm=comm)
     def _track_dos_peaks(self, out: tuple[DSDBSparse, ...]) -> None:
-        """Tracks dos peaks in the output Green's functions"""
+        """Tracks dos peaks in the output Green's functions (no-op for phonons:
+        there is no Fermi-level / band-edge renormalisation to track here)."""
         pass
-        # _, _, g_retarded = out
-        # left_band_edges = np.empty((2,), dtype=float)
-        # right_band_edges = np.empty((2,), dtype=float)
-        #
-        # if comm.block.rank == 0:
-        #     g_00 = g_retarded.blocks[0, 0]
-        #     local_left_dos = -xp.mean(
-        #         xp.diagonal(g_00, axis1=-2, axis2=-1).imag, axis=-1
-        #     )
-        #
-        #     left_dos = comm.stack.all_gather_v(
-        #         local_left_dos,
-        #         axis=0,
-        #         mask=g_retarded._stack_padding_mask,
-        #     )
-        #
-        #     e_0_left = find_dos_peaks(left_dos, self.energies)
-        #     left_band_edges = np.array(
-        #         find_band_edges(e_0_left, self.left_mid_gap_frequency)
-        #     )
-        #
-        # if comm.block.rank == comm.block.size - 1:
-        #     n = g_retarded.num_local_blocks - 1
-        #     g_nn = g_retarded.blocks[n, n]
-        #     local_right_dos = -xp.mean(
-        #         xp.diagonal(g_nn, axis1=-2, axis2=-1).imag, axis=-1
-        #     )
-        #
-        #     right_dos = comm.stack.all_gather_v(
-        #         local_right_dos,
-        #         axis=0,
-        #         mask=g_retarded._stack_padding_mask,
-        #     )
-        #
-        #     e_0_right = find_dos_peaks(right_dos, self.energies)
-        #     right_band_edges = np.array(
-        #         find_band_edges(e_0_right, self.right_mid_gap_frequency)
-        #     )
-        #
-        # comm.block.bcast(left_band_edges, root=0, backend="device_mpi")
-        # comm.block.bcast(
-        #     right_band_edges, root=comm.block.size - 1, backend="device_mpi"
-        # )
-        #
-        # self._update_fermi_levels(left_band_edges, right_band_edges)
 
     @profiler.profile(label="PhononSolver", level="default", comm=comm)
     def solve(

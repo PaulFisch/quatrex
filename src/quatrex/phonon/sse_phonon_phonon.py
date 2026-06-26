@@ -48,6 +48,11 @@ from quatrex.phonon.units import bubble_prefactor_thz
 
 profiler = Profiler()
 
+# Bose argument hbar*omega/(kB*T) per THz per K: x = _THZ_OVER_K * f[THz] / T[K]
+# (~47.99 f/T) == units.HBAR_EV * units.THZ_TO_RAD / kB[eV/K]. Kept as the exact
+# literal product so the occupation window stays bit-identical.
+_THZ_OVER_K = 6.582119569e-16 * 2.0 * np.pi * 1e12 / 8.617333262e-5
+
 
 class SigmaPhononPhonon(ScatteringSelfEnergy):
     """3-phonon SCBA scattering self-energy.
@@ -73,8 +78,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         phonon_frequencies: NDArray,
         block_sizes: NDArray,
         phi_blocks: PhiBlocks | None = None,
-        dynamical_matrix: "DSDBSparse | None" = None,
-        qfold: "tuple | None" = None,
+        dynamical_matrix: DSDBSparse | None = None,
+        qfold: tuple | None = None,
     ) -> None:
         self.local_frequencies = np.asarray(phonon_frequencies)
 
@@ -250,7 +255,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # Cached intermediate tau-domain buffers (length
         # n_fft) for FFTd G
         self._tau_cache: tuple | None = None
-        self._rev_perm: "NDArray | None | bool" = False  # False = not built
+        # Cached bosonic-fold plan (local gather perm + neighbour exchange
+        # schedule); False = not yet built, None = no pattern, else the tuple.
+        self._rev_perm: tuple | None | bool = False
         # Pre-permuted phi factors, built lazily on first compute (after any
         # ballistic zeroing); the FC3 vertex is fixed so this is computed once.
         self._phi_pre: dict | None = None
@@ -343,8 +350,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             s = np.clip((dist - self._support_margin) / ramp, 0.0, 1.0)
             w *= 0.5 * (1.0 + np.cos(np.pi * s))  # 1 at dist<=m, 0 at dist>=m+ramp
         if self._freeze_n > 0.0:
-            x = (6.582119569e-16 * 2.0 * np.pi * 1e12 / 8.617333262e-5) \
-                * af / max(self._T_hot, 1e-30)
+            x = _THZ_OVER_K * af / max(self._T_hot, 1e-30)
             with np.errstate(over="ignore", divide="ignore"):
                 n_bose = 1.0 / np.expm1(np.clip(x, 1e-30, None))
             w *= 1.0 / (1.0 + (self._freeze_n
@@ -424,7 +430,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             equal_time_uu_from_sum, mean_displacement, sigma_tadpole)
 
         N_D = self._sigma_static.shape[0]
-        # omea-integral of G^< Sum over every stack axis.
+        # omega-integral of G^< summed over every stack axis.
         ax = tuple(range(g_lesser.data.ndim - 1))
         g_sum_local = g_lesser.data.sum(axis=ax)             # (local_nnz,)
         rows = np.asarray(g_lesser.rows) + int(g_lesser.global_block_offset)
@@ -445,9 +451,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         sig_new = sigma_tadpole(self._fc3_dev_mw, w_mean)
         self._sigma_static = (
             (1.0 - self._scp_mix) * self._sigma_static + self._scp_mix * sig_new)
-        if getattr(self, "_scp_verbose", False) and comm.rank == 0:
-            print(f"[SigmaPhononPhonon] ||Sigma_static||={np.linalg.norm(self._sigma_static):.3f} "
-                  f"||Sigma_T(new)||={np.linalg.norm(sig_new):.3f} THz^2", flush=True)
         # Broadcast the static self-energy into Sigma^R at every frequency.
         sr_static = self._sigma_static[rows, cols].astype(sigma_retarded.data.dtype)
         sigma_retarded.data[:] = sigma_retarded.data + sr_static
@@ -627,8 +630,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if self._freeze_mask is None:
                     af_h = np.abs(np.asarray(full_freqs).real).astype(float)
                     # hbar*omega/(kB*T): omega in THz -> 47.99 * f / T
-                    x = (6.582119569e-16 * 2.0 * np.pi * 1e12 / 8.617333262e-5) \
-                        * af_h / max(self._T_hot, 1e-30)
+                    x = _THZ_OVER_K * af_h / max(self._T_hot, 1e-30)
                     with np.errstate(over="ignore", divide="ignore"):
                         n_bose = 1.0 / np.expm1(np.clip(x, 1e-30, None))
                     frozen = (n_bose < self._freeze_n) & (af_h > 0.0)
@@ -742,14 +744,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         gtlr.dtranspose()
         gtgr.dtranspose()
         # ji-transpose of the reversed legs, applied in the "stack" state where
-        # the FULL nnz axis is local on every rank (perm is a pure function of
-        # the replicated sparsity pattern). Only the reversed/absorption legs
-        # gtlr/gtgr are transposed; the decay legs gtl/gtg are NOT. With
-        # block_comm_size==1 this is the exact conserving fold at every nranks.
-        perm = self._nnz_transpose_perm(g_lesser)
-        if perm is not None:
-            gtlr.data[:] = gtlr.data[..., perm]
-            gtgr.data[:] = gtgr.data[..., perm]
+        # the FULL nnz axis is local on every rank (the decay legs gtl/gtg are
+        # NOT transposed). The transpose (i,j)->(j,i) is a pure function of the
+        # sparsity pattern; with block_comm_size>1 the partner (j,i) of a
+        # block-boundary entry lives on a neighbour block rank and is fetched by
+        # an immediate-neighbour exchange (BT band => |I-J|<=1). Exact + conserving
+        # at any nranks AND any block_comm_size.
+        self._fold_reversed_legs(gtlr, gtgr, g_lesser)
         if stl.distribution_state != "stack":
             stl.dtranspose(discard=True)
         if stg.distribution_state != "stack":
@@ -1037,46 +1038,113 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if self._scp_tadpole and self._sigma_static is not None:
             self._apply_scp_tadpole(g_lesser, sigma_retarded)
 
-    def _nnz_transpose_perm(self, g: "DSDBSparse") -> "NDArray | None":
-        """Permutation of the (full) nnz axis realizing (i,j) -> (j,i).
+    def _fold_reversed_legs(self, gtlr, gtgr, g: DSDBSparse) -> None:
+        """Apply the exact bosonic ji-transpose ``X_ij -> X_ji`` to the reversed
+        (absorption) legs in place, at ANY ``comm.block`` size.
 
-        Pure function of the (replicated, full) sparsity pattern -- independent
-        of the distribution state. It is APPLIED only in the "stack" state, where
-        the full nnz axis is local on every rank (see ``_compute_fft_first``), so
-        it works at any ``comm.stack`` size. Returns None (with a one-time
-        warning) only when ``comm.block.size > 1`` (the transpose partner block
-        (j,i) lives on a neighbour block rank -- not yet communicated); the fold
-        then falls back to the no-transpose (equilibrium) continuation. Use
-        ``block_comm_size = 1`` for the exact conserving fold.
+        On the local nnz axis the partner ``(j,i)`` of an entry ``(i,j)`` is
+        stored locally unless ``(i,j)`` straddles a block-rank boundary, in which
+        case ``(j,i)`` lives on the immediate neighbour block rank (BT band =>
+        ``|I-J| <= 1``). The pattern-only plan (a local gather permutation plus a
+        neighbour request/reply schedule) is built once; per call only the
+        boundary entries are exchanged.
+        """
+        plan = self._build_fold_plan(g)
+        if plan is None:  # serial-equivalent (single nnz block / no pattern)
+            return
+        local_perm, recv_dest, send_src = plan
+        for leg in (gtlr, gtgr):
+            data = leg.data
+            folded = data[..., local_perm]
+            for nbr in sorted(set(recv_dest) | set(send_src)):
+                sbuf = xp.ascontiguousarray(data[..., send_src[nbr]]) \
+                    if nbr in send_src else xp.empty((0,), dtype=data.dtype)
+                rshape = data.shape[:-1] + (recv_dest[nbr].size,)
+                rbuf = xp.empty(rshape, dtype=data.dtype) if nbr in recv_dest \
+                    else xp.empty((0,), dtype=data.dtype)
+                self._fold_bcomm.Sendrecv(sbuf, dest=nbr, sendtag=7,
+                                          recvbuf=rbuf, source=nbr, recvtag=7)
+                if nbr in recv_dest:
+                    folded[..., recv_dest[nbr]] = rbuf
+            data[:] = folded
+
+    def _build_fold_plan(self, g: DSDBSparse):
+        """Pattern-only schedule for :meth:`_fold_reversed_legs` (cached).
+
+        Returns ``(local_perm, recv_dest, send_src)`` where ``local_perm`` gathers
+        the locally-resolvable ``(j,i)`` partners (boundary slots point at 0 and
+        are overwritten by the exchange), ``recv_dest[nbr]`` are the local nnz
+        positions filled from neighbour ``nbr``, and ``send_src[nbr]`` are the
+        local nnz positions sent to ``nbr`` (in the order it requests them).
         """
         if self._rev_perm is not False:
             return self._rev_perm
-        perm = None
         rows = getattr(g, "rows", None)
         cols = getattr(g, "cols", None)
-        if rows is not None and cols is not None and ranks.block.size == 1:
-            import numpy as _np
-            r = _np.asarray(rows.get() if hasattr(rows, "get") else rows)
-            c = _np.asarray(cols.get() if hasattr(cols, "get") else cols)
-            # The (j,i) lookup over the full pattern; well-defined for the
-            # transpose-closed BT-band sparsity. perm has length == full nnz ==
-            # the "stack"-state data last-axis length, so it indexes that axis.
-            if r.size == c.size:
-                lut = {(int(i), int(j)): k
-                       for k, (i, j) in enumerate(zip(r, c))}
-                p = _np.array([lut.get((int(j), int(i)), -1)
-                               for i, j in zip(r, c)], dtype=_np.int64)
-                if (p >= 0).all():
-                    perm = xp.asarray(p)
-        if perm is None and ranks.block.size > 1 and ranks.rank == 0:
-            warnings.warn(
-                "SSE bosonic fold: exact ji-transpose unavailable with "
-                "block_comm_size > 1 (transpose partner block on a neighbour "
-                "block rank); using the no-transpose equilibrium continuation "
-                "(exact only for the symmetric part of G). Use "
-                "block_comm_size = 1 for the exact conserving fold.")
-        self._rev_perm = perm
-        return perm
+        if rows is None or cols is None:
+            self._rev_perm = None
+            return None
+        off = int(getattr(g, "global_block_offset", 0))
+        r = (np.asarray(rows.get() if hasattr(rows, "get") else rows) + off)
+        c = (np.asarray(cols.get() if hasattr(cols, "get") else cols) + off)
+        lut = {(int(i), int(j)): k for k, (i, j) in enumerate(zip(r, c))}
+        local_perm = np.zeros(r.size, dtype=np.int64)
+        want = {}  # nbr -> list of (dest_local_idx, requested (j,i) key)
+        for k, (i, j) in enumerate(zip(r, c)):
+            src = lut.get((int(j), int(i)))
+            if src is not None:
+                local_perm[k] = src
+            else:
+                nbr = self._block_owner(int(j), g)
+                want.setdefault(nbr, []).append((k, (int(j), int(i))))
+        recv_dest, send_src = {}, {}
+        if want or ranks.block.size > 1:
+            bcomm = ranks.block._mpi_comm
+            self._fold_bcomm = bcomm
+            rank, size = ranks.block.rank, ranks.block.size
+            for nbr in (rank - 1, rank + 1):
+                if not (0 <= nbr < size):
+                    continue
+                my_keys = [key for _, key in want.get(nbr, [])]
+                their_keys = bcomm.sendrecv(my_keys, dest=nbr, sendtag=5,
+                                            source=nbr, recvtag=5)
+                if nbr in want:
+                    recv_dest[nbr] = np.array([d for d, _ in want[nbr]],
+                                              dtype=np.int64)
+                # reply with MY entry (a,b) the neighbour requested as its (j,i)
+                if their_keys:
+                    src_idx = []
+                    for (a, b) in their_keys:
+                        s = lut.get((int(a), int(b)))
+                        if s is None:
+                            raise RuntimeError(
+                                "SSE bosonic fold: neighbour requested a "
+                                f"transpose partner ({a},{b}) not stored locally "
+                                "-- the ji-band reaches beyond the immediate "
+                                "block neighbour; reduce comm.block.size.")
+                        src_idx.append(s)
+                    send_src[nbr] = np.array(src_idx, dtype=np.int64)
+        # every boundary slot must be covered by exactly one neighbour recv
+        covered = sum(d.size for d in recv_dest.values())
+        missing = [k for k, (i, j) in enumerate(zip(r, c))
+                   if lut.get((int(j), int(i))) is None]
+        if len(missing) != covered:
+            raise RuntimeError(
+                "SSE bosonic fold: %d boundary partners unresolved by the "
+                "neighbour exchange (covered %d)." % (len(missing), covered))
+        local_perm = xp.asarray(local_perm)
+        recv_dest = {nbr: xp.asarray(v) for nbr, v in recv_dest.items()}
+        send_src = {nbr: xp.asarray(v) for nbr, v in send_src.items()}
+        self._rev_perm = (local_perm, recv_dest, send_src)
+        return self._rev_perm
+
+    def _block_owner(self, orbital_row: int, g: DSDBSparse) -> int:
+        """``comm.block`` rank owning the block that contains global ORBITAL
+        row ``orbital_row`` (``block_section_offsets`` is in block units, so map
+        it through the orbital block-offsets first)."""
+        bso = np.asarray(g.block_section_offsets)
+        orbital_bounds = self.block_offsets[bso]
+        return int(np.searchsorted(orbital_bounds, orbital_row, side="right") - 1)
 
     @staticmethod
     def _fft_pad(data: NDArray, n_fft: int) -> NDArray:
@@ -1242,16 +1310,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             zero_freq_idx=None,
             xp=xp,
         )
-
-
-    @staticmethod
-    def _block_range(m: DSDBSparse) -> tuple[int, int]:
-        """Return the [start, end) global-block range owned by this
-        ``comm.block`` rank.
-        """
-        start = int(m.block_section_offsets[ranks.block.rank])
-        end = int(m.block_section_offsets[ranks.block.rank + 1])
-        return start, end
 
     def _full_frequencies(self, ne_full: int) -> NDArray:
         """Full (cached) frequency grid, all-gathers the local slice."""
