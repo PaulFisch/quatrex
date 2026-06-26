@@ -1,3 +1,4 @@
+# Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 """Self-consistent static (SCP) self-energy for the phonon SCBA.
 
 The dynamic 3-phonon bubble (SigmaPhononPhonon) is the leading anharmonic

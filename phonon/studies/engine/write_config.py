@@ -91,6 +91,9 @@ anderson_period = {a.anderson_period}
 anderson_warmup_iters = {a.anderson_warmup}
 anderson_restart = {a.anderson_restart}
 anderson_ridge = {a.anderson_ridge}
+phonon = true
+
+[scba.experimental_mixer]
 rre_cycle = {a.rre_cycle}
 broyden_warmup_iters = {a.broyden_warmup}
 broyden_ridge = {a.broyden_ridge}
@@ -103,9 +106,9 @@ jfnk_forcing = "{a.jfnk_forcing}"
 jfnk_max_newton = {a.jfnk_max_newton}
 jfnk_eps = {a.jfnk_eps}
 jfnk_trust = {a.jfnk_trust}
+jfnk_trust_max = {a.jfnk_trust_max}
 jfnk_newton_damp = {a.jfnk_newton_damp}
 jfnk_ptc = {a.jfnk_ptc}
-phonon = true
 
 [electron]
 energy_window_min = {a.emin}
@@ -196,6 +199,9 @@ anderson_period = {a.anderson_period}
 anderson_warmup_iters = {a.anderson_warmup}
 anderson_restart = {a.anderson_restart}
 anderson_ridge = {a.anderson_ridge}
+phonon = true
+
+[scba.experimental_mixer]
 rre_cycle = {a.rre_cycle}
 broyden_warmup_iters = {a.broyden_warmup}
 broyden_ridge = {a.broyden_ridge}
@@ -208,9 +214,9 @@ jfnk_forcing = "{a.jfnk_forcing}"
 jfnk_max_newton = {a.jfnk_max_newton}
 jfnk_eps = {a.jfnk_eps}
 jfnk_trust = {a.jfnk_trust}
+jfnk_trust_max = {a.jfnk_trust_max}
 jfnk_newton_damp = {a.jfnk_newton_damp}
 jfnk_ptc = {a.jfnk_ptc}
-phonon = true
 
 [electron]
 energy_window_min = {a.emin}
@@ -326,7 +332,11 @@ def main():
     p.add_argument("--jfnk-eps", dest="jfnk_eps", type=float, default=1e-7,
                    help="jfnk: relative FD step for J*v, eps*(1+||Sigma||)")
     p.add_argument("--jfnk-trust", dest="jfnk_trust", type=float, default=0.5,
-                   help="jfnk: trust-region cap ||delta||<=trust*||Sigma|| (0 off)")
+                   help="jfnk: INITIAL trust-region cap ||delta||<=trust*||Sigma|| (0 off)")
+    p.add_argument("--jfnk-trust-max", dest="jfnk_trust_max", type=float,
+                   default=0.0, help="jfnk: MAX trust radius the adaptive growth "
+                        "may reach (<=0 -> = jfnk_trust, no growth). Lets the radius "
+                        "breathe up as the residual descends (d5a marginal-mode crawl)")
     p.add_argument("--jfnk-newton-damp", dest="jfnk_newton_damp", type=float,
                    default=1.0, help="jfnk: damping of the trust-capped Newton step")
     p.add_argument("--jfnk-ptc", dest="jfnk_ptc", type=float, default=0.0,

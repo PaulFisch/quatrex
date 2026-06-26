@@ -274,32 +274,35 @@ class SCBA:
             )
         elif self.config.scba.mixing_method == "broyden":
             from quatrex.core.broyden import BroydenMixer
+            xm = self.config.scba.experimental_mixer
             self._anderson_mixer = BroydenMixer(
                 depth=self.config.scba.anderson_depth,
                 beta=self.mixing_factor,
-                ridge=getattr(self.config.scba, "broyden_ridge", 1e-8),
-                warmup=getattr(self.config.scba, "broyden_warmup_iters", 0),
-                trust=getattr(self.config.scba, "broyden_trust", 0.3),
+                ridge=xm.broyden_ridge,
+                warmup=xm.broyden_warmup_iters,
+                trust=xm.broyden_trust,
             )
         elif self.config.scba.mixing_method == "rpm":
             # Recursive Projection Method (Shroff & Keller 1993): Newton on the
             # small unstable invariant subspace, Picard on the contractive
             # complement -- the targeted backstop for the eta=0 band-edge saddle.
             from quatrex.core.rpm import RPMMixer
+            xm = self.config.scba.experimental_mixer
             self._anderson_mixer = RPMMixer(
-                max_subspace=getattr(self.config.scba, "rpm_max_subspace", 6),
+                max_subspace=xm.rpm_max_subspace,
                 beta=self.mixing_factor,
-                ridge=getattr(self.config.scba, "broyden_ridge", 1e-8),
-                warmup=getattr(self.config.scba, "broyden_warmup_iters", 25),
-                trust=getattr(self.config.scba, "broyden_trust", 0.3),
+                ridge=xm.broyden_ridge,
+                warmup=xm.broyden_warmup_iters,
+                trust=xm.broyden_trust,
             )
         elif self.config.scba.mixing_method == "rre":
             # Restarted reduced-rank extrapolation: locates the UNSTABLE eta=0
             # fixed point of the longer cells (Jacobian |lambda|>1), which contact
             # regularisation + damped/Anderson mixing cannot reach.
             from quatrex.core.anderson import RREMixer
+            xm = self.config.scba.experimental_mixer
             self._anderson_mixer = RREMixer(
-                cycle=getattr(self.config.scba, "rre_cycle", 8),
+                cycle=xm.rre_cycle,
                 beta=self.mixing_factor,
                 ridge=getattr(self.config.scba, "anderson_ridge", 1e-6),
             )
@@ -309,17 +312,19 @@ class SCBA:
             # 100s, several unstable modes) where the subspace-tracking RPM fails
             # -- the SiNW d5a Si-H bending eta=0 saddle.
             from quatrex.core.jfnk import JFNKMixer
+            xm = self.config.scba.experimental_mixer
             self._anderson_mixer = JFNKMixer(
-                warmup=getattr(self.config.scba, "jfnk_warmup_iters", 10),
+                warmup=xm.jfnk_warmup_iters,
                 beta=self.mixing_factor,
-                max_krylov=getattr(self.config.scba, "jfnk_max_krylov", 30),
-                inner_tol=getattr(self.config.scba, "jfnk_inner_tol", 0.1),
-                forcing=getattr(self.config.scba, "jfnk_forcing", "ew"),
-                max_newton=getattr(self.config.scba, "jfnk_max_newton", 60),
-                eps=getattr(self.config.scba, "jfnk_eps", 1e-7),
-                trust=getattr(self.config.scba, "jfnk_trust", 0.5),
-                newton_damp=getattr(self.config.scba, "jfnk_newton_damp", 1.0),
-                ptc=getattr(self.config.scba, "jfnk_ptc", 0.0),
+                max_krylov=xm.jfnk_max_krylov,
+                inner_tol=xm.jfnk_inner_tol,
+                forcing=xm.jfnk_forcing,
+                max_newton=xm.jfnk_max_newton,
+                eps=xm.jfnk_eps,
+                trust=xm.jfnk_trust,
+                trust_max=xm.jfnk_trust_max,
+                newton_damp=xm.jfnk_newton_damp,
+                ptc=xm.jfnk_ptc,
             )
 
         # Anharmonic-phonon convergence by HEAT-FLOW conservation (Guo/Luisier),

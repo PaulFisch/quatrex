@@ -7,11 +7,13 @@ window + IR taper + band support + eta-floor=dw.
 Run (background, after node hygiene):
   python phonon/studies/_eta0_diag_run.py <max_iter> <tag>
 """
+import os
 import sys
 
 from phonon.studies import _conv1e10 as cv
 
-NF, FMAX, WREG = 181, 66.0, 2.16
+NF = int(os.environ.get("QX_DIAG_NF", "181"))   # grid size override (refinement)
+FMAX, WREG = 66.0, 2.16
 C = WREG * (NF - 1) / FMAX            # ir_taper_cells (omega_reg = WREG THz)
 
 max_iter = int(sys.argv[1]) if len(sys.argv) > 1 else 60
@@ -30,6 +32,17 @@ mixf = float(sys.argv[7]) if len(sys.argv) > 7 else 0.1
 # arg 8: eta_ir_floor_final (anneal target) ; arg 9: eta_ir_floor_ramp_iterations
 floor_final = float(sys.argv[8]) if len(sys.argv) > 8 else 0.0
 floor_ramp = int(sys.argv[9]) if len(sys.argv) > 9 else 0
+# arg 10: jfnk_warmup_iters (Picard iters before Newton) ; arg 11: jfnk_trust
+jfnk_warmup = int(sys.argv[10]) if len(sys.argv) > 10 else 10
+jfnk_trust = float(sys.argv[11]) if len(sys.argv) > 11 else 0.5
+# arg 12: jfnk_trust_max (adaptive trust ceiling; <=0 -> = jfnk_trust, no growth)
+jfnk_trust_max = float(sys.argv[12]) if len(sys.argv) > 12 else 0.0
+# arg 13: jfnk_ptc (pseudo-transient/LM shift mu0; lifts the marginal near-null
+# eigenvalues of J=J_F-I off the origin so inner GMRES stops stalling). 0 = off.
+# arg 14: jfnk_max_krylov (GMRES dimension per Newton step; raise to resolve both
+# the |lambda|~28 outlier AND the near-null marginal cluster).
+jfnk_ptc = float(sys.argv[13]) if len(sys.argv) > 13 else 0.0
+jfnk_max_krylov = int(sys.argv[14]) if len(sys.argv) > 14 else 30
 
 r = cv.run_one(
     tag, 2, NF, 0.1, 0.0, mixf, 1e-10, max_iter, 0.0, 128,
@@ -39,5 +52,8 @@ r = cv.run_one(
     support_taper_cells=4.0, eta_floor_cells=eta_floor,
     diag_spectral=True, ir_subtraction=ir_sub, eta_ir_floor=eta_ir_floor,
     eta_ir_floor_final=floor_final, eta_ir_floor_ramp=floor_ramp,
+    jfnk_warmup=jfnk_warmup, jfnk_trust=jfnk_trust,
+    jfnk_trust_max=jfnk_trust_max, jfnk_ptc=jfnk_ptc,
+    jfnk_max_krylov=jfnk_max_krylov,
 )
 print("DIAG_RUN_DONE", r, flush=True)
