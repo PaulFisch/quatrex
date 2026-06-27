@@ -1,0 +1,112 @@
+\section{Silicon thin film}
+\label{sec:res_qfilm}
+% ======================================================================
+
+For a transversely-periodic system, the three-phonon self-energy couples
+the transverse momenta by crystal-momentum conservation
+(\cref{eq:sigma_guo}). As a quantitative benchmark, we model
+cross-plane heat transport through a silicon thin film following~\citet{guo_quantum_2020}:
+the film is bulk silicon truncated to $N$ layers along the transport direction with
+in-plane two-dimensional periodicity. Conductance
+is reported per unit area, $G=J/(A_\perp\Delta T)$, and the cross-plane
+conductivity of a film of thickness $L$ is $\kappa(L)=G\,L$.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_a.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_b.pdf}
+  \caption{Cross-plane heat transport through a silicon thin film at
+  $300$~K with bulk-silicon force constants (transverse mesh $8\times8$,
+  $121$ frequencies). \emph{Left}: per-area conductance --
+  our ballistic and anharmonic NEGF against \citet{guo_quantum_2020}.
+  \emph{Right}: the ballistic $\kappa=G_\mathrm{ball}L$ rises linearly
+  with thickness.}
+  \label{fig:res_sifilm}
+\end{figure}
+
+\paragraph{Ballistic baseline.} The transverse mesh and broadening must
+both be converged: at a fixed eight-layer thickness the ballistic
+conductance converges for $8\times8$ or finer
+($G_\mathrm{ball}=970/928/921/920$~MW\,m$^{-2}$K$^{-1}$ at
+$4\times4/8\times8/12\times12/16\times16$), and a small $\eta$ is needed to
+avoid the coherence attenuation of \cref{sec:res_nw} that otherwise
+crushes the conductance. With these settings the ballistic conductance is
+$\sim10^{3}$~MW\,m$^{-2}$K$^{-1}$, declining slowly with thickness
+(\cref{fig:res_sifilm_consol}) -- consistent with the scale of
+\citet{guo_quantum_2020} for the $2\times2\times2$ force constant.
+
+\paragraph{Anharmonic conductance.} \Cref{fig:res_sifilm} (left)
+compares our cross-plane conductance to the anharmonic-NEGF values of
+Guo~\emph{et al.} at $3$ and $5$ unit cells. The three-phonon scattering
+reduces the $3$-unit-cell conductance by $\sim45\%$
+($G_\mathrm{anh}\approx570$~MW\,m$^{-2}$K$^{-1}$), significantly more than the
+reference's $\sim10\%$ ($G_\mathrm{anh}=939.7$). This might be due to the reference's
+additional self-energy approximations (the diagonal-block self-energy
+and the nearest-neighbour FC3 truncation quantified in
+\cref{sec:res_approx}), with the broadening and thin-device transport
+setup, and with the exchange--correlation functional of the underlying
+force constants (PBE here). The ballistic conductance is, by contrast,
+force-constant sensitive at the $\sim15\%$ level (\cref{fig:res_sifilm_consol}):
+the $2\times2\times2$ QE--FD constant -- comparable to the reference's own
+QE harmonic input -- matches their scale, but the higher-quality
+$5\times5\times5$ VASP constant gives a $\sim15\%$ lower ballistic (purely
+a harmonic difference, the slightly softer dispersion). So the agreement
+with the reference's ballistic value holds only for the $2\times2\times2$
+constant, not force-constant-independently.
+
+\paragraph{long-range force constant.} The thin-film
+results above use the bulk force constants from a small
+$2\times2\times2$ supercell with FD. To test convergence, we generated a substantially
+higher-quality force constant using hiphive on a $5\times5\times5$
+primitive supercell ($250$ atoms) from $24$ rattled
+VASP-PBE configurations, with a third-order cutoff extended to
+$\sim$fourth-neighbour ($5.0$~\AA). The fit is good (automatic
+relevance determination, $103$ parameters, train/test RMSE both
+$0.020$~eV\,\AA$^{-1}$), the rotational and acoustic sum rules are
+satisfied, and the dispersion looks correct. On this force
+constant, the cross-plane scaling (\cref{fig:res_sifilm_consol}) gives
+$G_\mathrm{anh}/G_\mathrm{ball}=0.52,0.45,0.38$ at $1.16,1.93,3.09$~nm:
+the anharmonic reduction grows with thickness,
+and is larger than with the short-cutoff force constant because
+the longer-range third-order terms add inter-slab scattering. The
+over-reduction relative to \citet{guo_quantum_2020} therefore persists with the
+better-converged force constant. The long-range constant is also the more
+\emph{numerically} robust one: its anharmonic SCBA converges cleanly at
+every thickness, whereas the short-cutoff $2\times2\times2$ constant
+destabilises the small-broadening SCBA away from a single thickness
+(hence its anharmonic value is shown at one point only in
+\cref{fig:res_sifilm_consol}).
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.72\linewidth]{transport_sweeps/si_film_vs_guo.pdf}
+  \caption{Consolidated cross-plane silicon thin-film conductance vs.\
+  thickness at $300$~K ($8\times8$ mesh, $121$ frequencies): our
+  ballistic and anharmonic NEGF with the $2\times2\times2$ (QE--FD) and
+  the high-quality $5\times5\times5$ ($\sim$fourth-neighbour, VASP)
+  force constants, against the anharmonic values of
+  \citet{guo_quantum_2020} ($939.7$ at $3$~uc, $890.97$ at $5$~uc; their
+  ballistic is a Boltzmann dashed line with no quoted value). The
+  $2\times2\times2$ ballistic matches the reference's scale while the
+  $5\times5\times5$ ballistic is $\sim15\%$ lower (a harmonic
+  force-constant difference); both anharmonic results lie well below the
+  reference -- the over-reduction of \cref{sec:res_approx}.}
+  \label{fig:res_sifilm_consol}
+\end{figure}
+
+% ======================================================================
+\section{Silicon/germanium heterostructure}
+\label{sec:res_hetero}
+% ======================================================================
+
+A Ge-layer barrier embedded in a silicon film (Si force constants,
+Ge mass; Si contacts) is built with a per-slab mass profile threaded
+through the $q_\perp$-resolved driver (an all-Si profile reproduces the
+homogeneous driver to machine precision). The mass-mismatch barrier
+raises the ballistic thermal resistance by $+340$--$370\%$.
+The phonon-phonon enhancement of the resistance is present in the pure
+silicon film -- $+32\%$ at $2.3$~nm growing to $+51\%$ at $5.4$~nm -- but is suppressed
+($\lesssim1\%$) in the heterostructure.
+
+
+% ======================================================================

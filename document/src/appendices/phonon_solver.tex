@@ -497,12 +497,12 @@ machine precision, so the per-iteration
 \texttt{symmetrize\_lesser\_greater} projection is a genuine no-op on
 a consistent input rather than a band-aid hiding an error.
 
-\subsection{A bug found and fixed: the FFT Hilbert transform}
+\subsection{The FFT Hilbert transform: periodic-wrap correction}
 
 The retarded self-energy is reconstructed from $\Sigma^{<,>}$ by the
 Kramers--Kronig relation
 $\Sigma^{R}=\tfrac12(\Sigma^{>}-\Sigma^{<})
-+\tfrac{i}{2}\mathcal{H}[\Sigma^{>}-\Sigma^{<}]$. The audit found that the
++\tfrac{i}{2}\mathcal{H}[\Sigma^{>}-\Sigma^{<}]$. The
 default \texttt{retarded="fft"} path used the bare sign-multiplier
 FFT, which computes the \emph{periodic} Hilbert transform. For the
 finite-support self-energies fed here the periodic wrap injects a
@@ -866,9 +866,10 @@ $\Sigma\propto\lambda^{2}$
 \cite{bescond_LOA_pade_2011}.
 \end{itemize}
 The physical observable lives at $(\eta_{w}\!\to\!0,\lambda\!=\!1)$;
-the two natural routes to it from a numerically tractable point are
-sketched in figure~\ref{fig:phonon_solver:eta_lambda}, and the
-diagnostic content lies in whether they agree.
+the two natural routes to it from a numerically tractable point are the
+$\eta_{w}\!\to\!0$ extrapolation and the $\lambda\!\to\!1$ Pad\'e
+continuation described below, and the diagnostic content lies in
+whether they agree.
 
 \paragraph{$\eta_{w}\!\to\!0$ at fixed $\lambda=1$.}
 Sweeping $\eta_{w}\in\{\eta_{1},\eta_{2},\ldots\}$ from a safely large

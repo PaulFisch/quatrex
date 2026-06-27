@@ -40,7 +40,7 @@ and the Landauer integral gives the heat current $Q$.
 \subsection*{Unit system}
 The package operates in \textbf{THz/(amu$\cdot$\AA$^2)$} throughout
 (matching \path{phonon_inputs/anharmonic.py}; see
-\cref{ap:conventions_units}).  Force constants are mass-weighted up
+\cref{ch:conventions_units}).  Force constants are mass-weighted up
 front by \texttt{phonon\_inputs.fc3\_compression.build\_fc3\_target},
 $D$ is built by \texttt{synthetic\_gf.dynamical\_matrix}, and the
 bubble prefactor $i\hbar\,d\omega/(4\pi)$ in
@@ -76,7 +76,7 @@ prefixed with an underscore.
   FC3 along legs 2 and 3 first, which is the canonical way to
   eliminate the Drude-like weight in $\Sigma$ at $\omega \to 0$ when
   the upstream hiphive fit leaves a structural axis-$j/k$ ASR residual
-  (see \cref{sec:leg_j_rel}).
+  (the \texttt{leg\_j\_rel} metric below).
 
 \item[\texttt{constants.py}] Single home for every numeric default in
   the package.  Notable: $\texttt{THZ\_TO\_CM1} = 33.35641$;
@@ -105,7 +105,7 @@ prefixed with an underscore.
   storage.  The full off-diagonal $(K_1, K_1', K_2, K_2')$ enumeration
   is the production path; the original \texttt{quatrex} $K_1 = K_1', K_2
   = K_2'$ restriction is recovered by setting \texttt{diag\_G\_in\_se =
-  True}.  Five cutoff knobs documented in \cref{sec:res_cutoffs}.  The
+  True}.  Five cutoff knobs documented in \cref{sec:res_nw}.  The
   \texttt{\_compat} module retains the legacy one-sided convention for
   bit-for-bit cross-checks.
 
@@ -132,8 +132,8 @@ prefixed with an underscore.
   mass-weighted lifted FC3; hiphive's \texttt{ClusterSpace} enforces
   axis-$i$ ASR by orbit construction but not the other two axes, so
   a residual reading of $\sim 0.8$ on a SiNW reap and $\sim 0$ on a
-  bulk-Si reap is structural rather than a fit defect
-  (\cref{sec:leg_j_rel}).  Downstream consumers that need strict
+  bulk-Si reap is structural rather than a fit defect.  Downstream
+  consumers that need strict
   axis-$j/k$ ASR can invoke the explicit projection via
   \texttt{load\_quatrex\_blocks(asr\_project=True)} or
   \texttt{phonon\_inputs.fc3\_compression.asr\_project\_factor}.
@@ -181,7 +181,7 @@ prefixed with an underscore.
 
 \item[\texttt{decomposition.py}] Drives the six existing FC3 tensor
   fitters (mSVD, HOSVD, CP, INDSCAL, Waring, PCP; see
-  \cref{sec:fc3_compression}) over a rank ladder, reporting parameter
+  \cref{sub:fc3_compression}) over a rank ladder, reporting parameter
   cost vs Frobenius reconstruction error and reconstruction-nnz at the
   same $\varepsilon$ ladder as \texttt{sparsity}.
 
@@ -470,7 +470,7 @@ A condensed version of \path{phonon/finite_analysis/RESULTS_RUNBOOK.md}.
 \paragraph{Per system} (SiNW(100), Si chain, finite CNT(3,3))
 \begin{enumerate}
   \item Run the cluster pipeline as described in
-    \cref{sec:res_nw} and \cref{sec:input_gen}; the reap lands at
+    \cref{sec:res_nw} and \cref{ch:input_gen}; the reap lands at
     \path{phonon/reaps/<name>/fc3.hdf5}.
   \item Sanity-check the configuration:
     \verb|python -m finite_analysis validate <config>|.
@@ -500,7 +500,7 @@ python -m finite_analysis.cross_system_plots \
 \end{verbatim}
 produces three cross-system PDFs: FC3-decay envelope,
 decomposition-rank panels, and the headline-numbers summary table
-(\cref{sec:res_cutoffs}).
+(\cref{sec:res_nw}).
 
 \paragraph{Known limitations to compensate for in the writeup}
 The bubble does not ASR-project FC3 by default; pass

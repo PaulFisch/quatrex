@@ -1,0 +1,56 @@
+% ======================================================================
+\section{Cost of the numerical approximations}
+\label{sec:res_approx}
+% ======================================================================
+
+The transport numbers above are computed under a hierarchy of controlled
+approximations -- a finite numerical broadening, a truncated frequency grid,
+real-space cutoffs on the FC3 vertex and the Green's function, and, optionally, a
+low-rank compression of the vertex. This section quantifies how each affects the
+converged conductance, so that every reported number carries a known systematic.
+
+\paragraph{Finite broadening.}
+The broadening $\eta$ of \cref{eq:system} is not physical, and the conserving
+conductance is defined only as $\eta\to0$ (\cref{sec:res_eta0}). Its systematic on
+the \emph{finite}-$\eta$ numbers is larger than the lead-balance residual suggests.
+On the \texttt{cnt33} tube at matched $\eta$ the lead balance stays $\sim10^{-5}$
+throughout, yet the anharmonic ratio $G_{\rm anh}/G_{\rm ball}$ swings
+$0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz; extrapolating the converging window
+to $\eta\to0$ gives $\approx0.70$, a $\sim30\%$ reduction -- roughly twice the
+$\sim16\%$ read off at the single point $\eta=0.45$. A single-$\eta$ number
+therefore \emph{underestimates} the anharmonic effect by about a factor of two;
+transport ratios must be $\eta\to0$-extrapolated or quoted with the finite-$\eta$
+band. The mechanism and the step-by-step numerical verification are given in
+\cref{app:conservation}.
+
+\paragraph{Frequency grid.}
+The bubble convolution \cref{eq:sigma_phph_tau} has support up to
+$2\omega_{\max}$, so the grid must satisfy $f_{\max}\ge2\omega_{\max}/2\pi$
+(\cref{eq:conv_support}). An under-ranged grid aliases the truncated tail back
+into the band as a spurious strong-coupling self-energy that destabilises the
+SCBA: for the \texttt{d5a} wire the historical $f_{\max}=18$\,THz, far below the
+$\sim129$\,THz convolution support set by the $63$\,THz Si--H stretch, inflates
+$|\Sigma^R|$ by $\sim25\times$ and diverges the multi-slab iteration, whereas the
+properly-ranged grid returns it to the
+perturbative regime ($|\Sigma^R|/\omega_{\max}^2\approx0.2\%$). The one-shot
+verification across bulk Si and \texttt{d5a} is tabulated in
+\cref{tab:fmax_aliasing_one_shot}; the solver auto-extends $f_{\max}$ by default.
+
+\paragraph{Self-energy cutoffs.}
+The FC3-magnitude threshold, the Green's-function range, and a diagonal-$G$
+approximation inside the bubble were swept on the open nanowires
+(\cref{fig:res_cutoffs}) and on the carbon nanotube (\cref{fig:res_cnt_cutoff}).
+The dominant cutoff is the off-diagonal Green's-function content: a diagonal-$G$
+approximation is catastrophic on the open wires ($5$--$30\times$), while the
+magnitude threshold converges quickly. The closed tube is far more forgiving --
+all corners of the cutoff cube lie within $\pm10\%$ of the full-coupling value.
+
+\paragraph{Vertex compression.}
+The low-rank FC3 decompositions of \cref{sub:fc3_compression} trade parameter count
+for accuracy (\cref{fig:res_decomp}): the transport observable converges faster
+than the Frobenius residual the fitters minimise, but the matricised SVD becomes
+unphysical at higher rank while the symmetric ans\"atze degrade gracefully.
+
+\todo[inline]{Consolidate the three sweeps above into one approximation-cost figure
+(conductance / $G_{\rm anh}-G_{\rm ball}$ vs.\ each approximation, across
+\texttt{cnt33}/\texttt{d5a}/\texttt{d11a}/film) -- see \texttt{document/MISSING.md} (A,B).}

@@ -3,18 +3,15 @@
 
 This appendix documents the port of the coupled-$q$ three-phonon
 self-energy into the \emph{production} distributed \texttt{quatrex} phonon
-solver and every run made to validate and exercise it during the
-2026-06-08 session. The transversely-periodic physics and the silicon
-thin-film benchmark were already established in the standalone (dense)
-solver (\cref{sec:res_qfilm}); the contribution here is software and
+solver and the runs that validate and exercise it. The transversely-periodic
+physics and the silicon thin-film benchmark are established in the standalone
+(dense) solver (\cref{sec:res_qfilm}); the contribution here is software and
 verification, not new physics. The full numerical record is saved under
 \texttt{phonon/scripts/out/production\_coupled\_q/} (run snapshots,
 \texttt{summary.json}) and is reproduced by
-\texttt{phonon/scripts/verify/production\_coupled\_q\_summary.py}. Results
-that are still running at the time of writing are marked as such; nothing
-below is extrapolated.
+\texttt{phonon/scripts/verify/production\_coupled\_q\_summary.py}.
 
-\section{What was implemented}
+\section{Implementation}
 
 Before this work the production self-energy
 (\texttt{src/quatrex/phonon/sse\_phonon\_phonon.py}) raised
@@ -65,7 +62,7 @@ against the dense $H(q_\perp)$ exactly.
 
 \begin{table}[h]
 \centering
-\caption{Bit-exact verification of the coupled-$q$ port (this session).}
+\caption{Bit-exact verification of the coupled-$q$ port.}
 \label{tab:prod_validation}
 \begin{tabular}{lc}
 \hline
@@ -167,8 +164,8 @@ soft-twist tube is metastable: the iteration does not settle to a fixed
 point but passes through a conserving iterate that the heat-flow criterion
 captures (the final iterate diverges and is discarded). The captured
 best-iterate ratios are $G_{\rm anh}/G_{\rm ball}=0.896$ ($L{=}2$,
-conservation $1.0\%$) and $0.911$ ($L{=}4$, conservation $3.5\%$); $L{=}6$
-was still running at the time of writing. The large-broadening value is
+conservation $1.0\%$) and $0.911$ ($L{=}4$, conservation $3.5\%$); the
+$L{=}6$ point is not shown. The large-broadening value is
 weaker (closer to one) than the dense small-$\eta$ ladder of
 \cref{sec:res_cnt}, consistent with the under-scattering discussed in
 \cref{sec:prod_open}.
@@ -178,7 +175,7 @@ weaker (closer to one) than the dense small-$\eta$ ladder of
 \includegraphics[width=0.55\linewidth]{transport_sweeps/prod_cnt_ladder.pdf}
 \caption{Production CNT(3,3) anharmonic ratio (best conserving iterate) vs.\
 device length at $\eta=0.45$\,THz; per-point lead-to-lead conservation
-annotated. $L{=}6$ pending.}
+annotated.}
 \label{fig:prod_cnt_ladder}
 \end{figure}
 
@@ -191,7 +188,7 @@ To separate port correctness from broadening/grid effects, the dense
 (\cref{tab:prod_dense}). At the production-accessible broadening
 ($\eta_w\approx0.4$) the dense solver also fails to conserve
 ($17\%$) and gives a ratio above one (the documented single-cell
-broadening artefact, \cref{sec:res_negative}); only at small broadening
+broadening artefact, \cref{sec:res_approx}); only at small broadening
 ($\eta_w\approx0.05$) does the dense ratio settle to $0.766$. The
 production ($0.733$--$0.861$) and the dense both live in the unreliable
 large-broadening regime here, which is why their ratios differ; neither
@@ -244,7 +241,7 @@ production film is numerically stable only for $\eta\gtrsim0.4$\,THz; at
 $\eta\leq0.2$ the Dyson solve $[(\omega+i\eta)^2 I - D - \Sigma^R]$ becomes
 singular and the block recursion returns NaN, where the dense solver's
 dense factorisation stays finite. The config-level remedies were
-exhausted without success in this session: retarded method \texttt{fft},
+exhausted without success: retarded method \texttt{fft},
 large $\eta_{\rm obc}$ ($0.4$--$0.8$ with bulk $\eta\in[0.15,0.2]$), and
 zero-mode projection all still produced NaN at $\eta\leq0.2$. A
 solver-level regularisation of the block recursion is therefore required

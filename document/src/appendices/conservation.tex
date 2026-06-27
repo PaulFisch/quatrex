@@ -46,8 +46,12 @@ random ``scattering'' spectrum with the half-rule retarded part
 data are real-symmetric, \emph{both} cancellation routes of \cref{eq:sumrule}
 are active, so the pointwise commutator $D(\omega)$ vanishes to machine
 precision under every variation of the retarded rule and frequency masking
-(\cref{tab:cons_toy}). This confirms that the half rule and the
-self-energy cutoff are harmless to conservation.
+(\cref{tab:cons_toy}). This confirms that the half rule and the self-energy cutoff
+are harmless to the \emph{lead-summed} balance via the Keldysh route. The dispersive
+$\mathrm{Re}\,\Sigma^R$ the half rule drops is harmless only at finite $\eta$ and
+short devices; at $\eta\to0$ on longer biased devices it breaks per-interface
+conservation, where the full Kramers--Kronig retarded is mandatory
+(\cref{subsub:KK}).
 
 \begin{table}[t]
   \centering
@@ -217,9 +221,12 @@ sufficient for accuracy.
 Three levers act on the floor. \emph{(1)~Grid refinement} cuts the numerical
 asymmetry: the \texttt{d5a} floor halved $2.06\to1.09\times10^{-2}$ from $101$
 to $201$ frequencies at $\eta=0.11$. \emph{(2)~$\eta\to0$ extrapolation}
-removes both the floor ($\propto\eta$) and the conductance systematic, limited
-only by SCBA stability for soft modes (\texttt{d5a} does not converge below
-$\eta\approx0.11$). \emph{(3)~A B\"uttiker dephasing probe} on the $\eta$
+removes both the floor ($\propto\eta$) and the conductance systematic. For soft
+systems whose self-energy stays marginal as $\eta\to0$ (\texttt{d5a}, whose flexural
+/ Si--H-bending mode straddles the grid) the bare iteration does not contract, but a
+grid-consistent broadening floor with a trust-region Newton step reaches a marginal,
+conserving fixed point with a method-invariant conductance (\cref{sec:res_eta0}).
+\emph{(3)~A B\"uttiker dephasing probe} on the $\eta$
 channel, $\Sigma_\eta^<=i\Gamma_\eta n_p$, $\Sigma_\eta^>=i\Gamma_\eta(n_p+1)$
 with the self-consistent occupation $n_p=G^</(G^>-G^<)$ enforcing zero local
 current per energy, drives the toy defect $6\text{--}10\%\to10^{-16}$ at finite
@@ -323,7 +330,9 @@ $\eta$ and extrapolate $G(\eta\to0)$, quoting the spread as the finite-$\eta$
 band; and gate convergence on the self-energy residual and the bubble balance
 $P_{\rm in}=P_{\rm out}$ (machine precision), \emph{not} on the lead balance,
 which floors at the computable ghost-reservoir term and can be subtracted to
-give an $\eta$-compensated balance that does go to zero. For soft systems that
-cannot lower $\eta$ (\texttt{d5a}), quote the $\eta$-floor-limited number with
-its band and the marginal-quasiparticle caveat ($\gamma/\omega\sim0.5$).
+give an $\eta$-compensated balance that does go to zero. For marginal-fixed-point
+systems (\texttt{d5a}) quote the directly converged $\eta\to0$ marginal-fixed-point
+conductance (method-invariant to a few percent), noting the residual $\sim0.03$
+self-energy floor and the grid-consistent ghost-reservoir lead term, rather than an
+$\eta$-floor-limited extrapolation (\cref{sec:res_eta0}).
 Reserve the B\"uttiker probe for a physically intended incoherent channel.

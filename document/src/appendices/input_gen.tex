@@ -599,7 +599,7 @@ write KPOINTS at the user-configured density.
 
 % ----------------------------------------------------------------------
 \subsection{DFPT flow: \texttt{dfpt.py}}
-\label{sec:dfpt}
+\label{sec:dfpt_pkg}
 % ----------------------------------------------------------------------
 
 \texttt{dfpt.py} drives the DFPT-based alternative FC pipeline using
@@ -779,7 +779,7 @@ metadata to a sibling \texttt{.json}.  \texttt{save\_transport\_results}
 and \texttt{load\_transport\_results} round-trip the SCBA output
 dictionary; an additional helper writes the per-decomposition
 ``cache'' entries that \texttt{transport\_quality} in
-\texttt{finite\_analysis} (\cref{sec:transport_quality}) reads on
+\texttt{finite\_analysis} (\cref{ap:finite_analysis}) reads on
 restart.
 
 
@@ -788,7 +788,7 @@ restart.
 
 This section documents a systematic audit of the imaginary-mode
 problem observed for the H-passivated Si nanowire (SiNW) family used
-throughout the rest of this report.  The investigation began when, even
+throughout the rest of this report.  Even
 after a sequence of cleanups to the wire generator and the relax/sow
 plumbing (tighter \texttt{EDIFF}, $a_\mathrm{lattice}$ set to the
 PBE-equilibrium value, auto-sized vacuum, FC2 cutoff scaled with the

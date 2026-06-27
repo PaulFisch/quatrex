@@ -1,0 +1,375 @@
+\subsection{SCBA iterations}
+\label{sub:scba}
+% ----------------------------------------------------------------------
+
+\Cref{eq:system,eq:keldysh_eq,eq:sigma_phph,eq:sigma_r} together define
+a nonlinear fixed-point problem $\Sigma_s = \mathcal{F}[G[\Sigma_s]]$,
+solved iteratively in the SCBA. Convergence is two-fold: numerical
+(consecutive iterates close in some norm) and physical (current
+conservation, \cref{eq:I_local}). Mixing schemes are necessary because
+pure fixed-point iteration of \cref{eq:sigma_phph} is often divergent or
+oscillatory at finite anharmonicity~\cite{wang_nonequilibrium_2007,luisier_atomistic_2012}.
+
+\subsubsection{Linear mixing}
+
+The simplest scheme,
+\begin{equation}\label{eq:linear_mix}
+  \Sigma^{(n+1)} = (1-\alpha)\,\Sigma^{(n)} + \alpha\,\Sigma^{\mathrm{new}},
+\end{equation}
+with damping parameter $\alpha \in (0,1]$. Linear mixing converges if
+the fixed-point Jacobian
+$J = \partial\mathcal{F}/\partial\Sigma_s$ has spectral radius
+$\sigma(I - \alpha J) < 1$, i.e.\ $\alpha < 2/(1+|\sigma(J)|_{\max})$.
+For weak anharmonicity ($|\sigma(J)|<1$) any $\alpha \le 1$ works; for
+strong anharmonicity the spectrum of $J$ extends close to $-1$ in
+some directions and small $\alpha\sim 0.1\text{--}0.3$ is required, with
+linear convergence rate $1-\alpha$ in the slowest mode.
+
+\subsubsection{Anderson mixing}
+
+Anderson acceleration~\cite{anderson_iterative_1965} constructs a quasi-Newton
+update from a history of residuals,
+\begin{equation}\label{eq:anderson}
+  \vc{x}_{k+1}
+  = \bigl(\vc{x}_k + \alpha\,\vc{f}_k\bigr)
+    - \bigl(\Delta\vc{X} + \alpha\,\Delta\vc{F}\bigr)\,\vc{\gamma}_k,
+\end{equation}
+with $\vc{f}_k = G(\vc{x}_k) - \vc{x}_k$ the residual,
+$\Delta\vc{X}, \Delta\vc{F}$ the matrices of consecutive iterate and
+residual differences, and $\vc{\gamma}_k$ solving the regularized
+least-squares problem
+\begin{equation}
+  (\Delta\vc{F}^H \Delta\vc{F} + \lambda \mathbb{I})\,\vc{\gamma}
+  = \Delta\vc{F}^H \vc{f}_k,
+  \qquad
+  \lambda = 10^{-8}\,\tr(\Delta\vc{F}^H \Delta\vc{F}).
+\end{equation}
+For linear problems Anderson mixing is
+essentially equivalent to GMRES applied to the residual
+equation~\cite{walker_anderson_2011,rohwedder_analysis_2011}, with provable
+$q$-linear convergence with $q$-factor $q = 3c - c^2$ for depth-1
+Anderson when the underlying iteration is a contraction with constant
+$c < 2-\sqrt{3}$~\cite{toth_convergence_2015,bian_anderson_2021}. Local
+convergence in nonlinear electronic-structure problems is well
+established under mild Lipschitz assumptions on the
+fixed-point map~\cite{rohwedder_analysis_2011,toth_convergence_2015}. In
+practice, Anderson mixing dramatically accelerates convergence when the
+fixed-point equation is well-conditioned, with rates approaching that
+of Newton's method. However, storing the history is often prohibitive, so that
+Anderson mixing becomes infeasible for large structures.
+
+\subsubsection{Extrapolation and Newton root-finders for unstable fixed points}
+\label{sub:rootfinders}
+
+Linear and Anderson mixing both presuppose that the fixed point is
+\emph{stable} under iteration, i.e.\ that the map Jacobian
+$G'\equiv\partial\mathcal{F}/\partial\Sigma_s$ is contractive,
+$|\sigma(G')|<1$. As the numerical broadening is taken to zero
+(\cref{sub:eta_zero}) this fails for sharp, weakly damped resonances: a few
+eigenvalues of $G'$ acquire modulus $\geq 1$ and no contraction-based scheme
+converges. Three progressively stronger tools target this regime, all
+MPI-distributed over the energy grid.
+
+\paragraph{Reduced-rank extrapolation (RRE).}
+RRE~\cite{sidi_vector_2017} forms the affine combination
+$\Sigma=\sum_i\gamma_i\,\Sigma^{(i)}$, $\sum_i\gamma_i=1$, of a short window of
+iterates that minimises the residual norm
+$\bigl\|\sum_i\gamma_i\,\vc{f}_i\bigr\|$ (minimal-polynomial extrapolation).
+Restarted every few iterates, it recovers a mildly unstable fixed point from the
+algebra of the residual history rather than by contraction, at the cost of one
+small real Gram solve per cycle and no extra map evaluations.
+
+\paragraph{Recursive projection method (RPM).}
+When the unstable subspace is low-dimensional, the RPM of
+\citet{shroff_stabilization_1993} applies Newton on that subspace and Picard on
+its contractive complement,
+\begin{equation}\label{eq:rpm}
+  \Sigma^{(n+1)}
+  =\mathcal{F}[\Sigma^{(n)}]
+   -Z\,(\mathbb{I}_k-H)^{-1}Z^{H}\vc{f}^{(n)},
+  \qquad \vc{f}^{(n)}=\mathcal{F}[\Sigma^{(n)}]-\Sigma^{(n)},
+\end{equation}
+where the columns of $Z$ span the $k$-dimensional unstable invariant subspace and
+$H=Z^{H}G'Z$ is the restricted Jacobian. Both are obtained without extra map
+evaluations -- $Z$ from the dominant singular vectors of a sliding buffer of
+increments (a dynamic-mode decomposition) and $H$ from the projected secants
+$Z^{H}\Delta\mathcal{F}=H\,Z^{H}\Delta\Sigma$. The correction multiplies
+$\vc{f}$ and so vanishes identically at the fixed point; the safeguarded modal
+step $\phi(\lambda)=\lambda/(1-\lambda)$ is applied only on directions with
+$|\lambda(H)|>1$, the rest being left to Picard.
+
+\paragraph{Jacobian-free Newton--Krylov (JFNK).}
+When the unstable subspace is larger, or its eigenvalues very large, we instead
+solve the Newton system for the residual $R(\Sigma)=\mathcal{F}[\Sigma]-\Sigma$,
+\begin{equation}\label{eq:jfnk}
+  (G'-\mathbb{I})\,\delta=-R,
+\end{equation}
+by GMRES~\cite{saad_gmres_1986}, which requires only Jacobian--vector products.
+These are formed matrix-free by a finite difference of the map,
+\begin{equation}\label{eq:jfnk_jv}
+  (G'-\mathbb{I})\,\vc{v}
+  =\frac{\mathcal{F}[\Sigma+\epsilon\vc{v}]-\mathcal{F}[\Sigma]}{\epsilon}-\vc{v},
+\end{equation}
+at one self-energy evaluation per Krylov vector. Because the self-energy map
+conjugates -- $\Sigma^R$ through the Kramers--Kronig relation
+\cref{eq:sigma_R_full}, $G^A=(G^R)^{H}$, and the bubble leg structure -- $G'$ is
+real-linear but not complex-analytic, so the Krylov solve is run in the real
+embedding $[\,\mathrm{Re}\,\Sigma,\ \mathrm{Im}\,\Sigma\,]$. The inner solve is
+truncated inexactly with an Eisenstat--Walker forcing
+term~\cite{eisenstat_choosing_1996} and globalised by a trust-region cap on
+$\|\delta\|$, following~\citet{brown_hybrid_1990,kelley_iterative_1995}. A
+Levenberg--Marquardt / pseudo-transient shift
+$G'-\mathbb{I}\to G'-\mathbb{I}+\mu\mathbb{I}$ is inappropriate here: the Newton
+Jacobian of \cref{eq:jfnk} is indefinite (contractive modes contribute
+eigenvalues in $[-2,0)$, unstable modes positive eigenvalues), so a positive
+shift drives a negative eigenvalue through zero; the trust region is the only
+safe globalisation.
+
+\subsubsection{The $\eta\to0$ limit and grid-consistent regularisation}
+\label{sub:eta_zero}
+
+The broadening $\eta$ in \cref{eq:system} is a numerical device; the conserving
+transport limit is $\eta\to0$. Its difficulty is a resolvent-sensitivity effect.
+Differentiating the Dyson equation gives
+$\mathrm{d}G^R=G^R(\mathrm{d}\Sigma^R)G^R$, so near a mode of frequency $\Omega$
+and linewidth $\Gamma$ the map gain scales as
+\begin{equation}\label{eq:resolvent_gain}
+  \Bigl|\frac{\partial G^R}{\partial\Sigma^R}\Bigr|\sim|G^R|^2\sim
+  \frac{1}{(2\Omega\Gamma)^2},
+  \qquad
+  |\lambda(G')|\sim\frac{\Phi^2}{\max(\Gamma,\,c\,\Delta\omega)^2},
+\end{equation}
+the floor $c\,\Delta\omega$ arising because a Lorentzian narrower than the grid
+samples as an undamped pole. The iteration is therefore marginal or unstable
+wherever a heat-carrying mode is sharper than the grid,
+$\Gamma\lesssim\Delta\omega$ -- the regime the root-finders above are built for.
+We pair them with two regularisations that vanish as $\Delta\omega\to0$ and
+preserve the $\Phi$-derivable conservation laws.
+
+\paragraph{Smooth spectral window.}
+Above the harmonic band top and inside any spectral gap the device Green's
+functions have no support, yet the convolution \cref{eq:sigma_phph} leaks a small
+self-energy there which, at $\eta\to0$, is divided by an undamped resolvent.
+Masking those bins with a hard window is itself harmful: a step discontinuity in
+$\Sigma$ has a Kramers--Kronig partner $\sim\ln|\omega-\omega_{\rm edge}|$ that
+rings (Gibbs), manufacturing a marginal mode at the mask edge. We instead apply a
+\emph{smooth} multiplicative window
+$w(\omega)=w_{\rm supp}(\omega)\,w_{\rm occ}(\omega)\in[0,1]$: a raised-cosine
+ramp of width a few $\Delta\omega$ on the distance to the harmonic support
+(computed once from the band structure $D(k)=D_0+D_1e^{ik}+D_1^{H}e^{-ik}$,
+independent of $G$), times a logistic in the Bose occupation that freezes
+thermally inactive spectator modes. The window multiplies the input
+Green's-function legs, the output $\Sigma^{\gtrless}$, and the Kramers--Kronig
+input; because the same per-frequency factor multiplies both sides of the
+energy-balance identity \cref{eq:bubble_balance}, the equality
+$P_{\rm in}=P_{\rm out}$ is preserved and conservation is left intact.
+
+\paragraph{Infrared occupancy taper.}
+The Bose factor $n(\omega)\simeq k_BT/\hbar\omega$ diverges as $\omega\to0$;
+sampled at the first grid bin it injects a spurious $\sim 1/\Delta\omega$
+linewidth, whereas the acoustic sum rule forces $\Gamma\sim\omega^2\to0$. We
+restore the correct onset with the taper
+\begin{equation}\label{eq:ir_taper}
+  t(\omega)=\frac{\omega^2}{\omega^2+\omega_{\rm reg}^2},
+  \qquad\omega_{\rm reg}=C\,\Delta\omega,
+\end{equation}
+applied identically to both contact occupations so that every $G^<$ leg inherits
+it and the balance is preserved; as $\Delta\omega\to0$, $\omega_{\rm reg}\to0$ and
+$t\to1$, and the physical conductance is the $\omega_{\rm reg}\to0$ extrapolant.
+This taper is a \emph{pragmatic} regulator: it is a cutoff, removed by the
+$\omega_{\rm reg}\to0$ extrapolation, and because it multiplies the occupations it
+slightly suppresses the genuine low-frequency transport. That suppression is small
+--- the heat current is $\hbar\omega$-weighted, so the infrared region carries
+little conductance --- and, as \cref{sub:ir_subtraction} shows, the bare untapered
+bubble is itself exactly conserving; the taper is therefore a stabiliser of the
+marginal $\eta=0$ iteration, not a correction to the physics.
+
+\paragraph{Linewidth feasibility criterion.}
+Whether $\eta=0$ is reachable on a given grid can be decided a~priori, without any
+SCBA, by evaluating the golden-rule linewidth $\Gamma_{\rm anh}(\omega)$
+(\cref{eq:fgr}) directly from $\Phi^{(3)}$ and the harmonic eigenvectors and
+comparing it to $\Delta\omega$: by \cref{eq:resolvent_gain} the fixed point is
+well posed only where every heat-carrying mode satisfies
+$\Gamma_{\rm anh}\gtrsim\Delta\omega$.
+
+\paragraph{Energy-balance diagnostic.}
+Beyond the lead imbalance $\delta I/\bar I$, full $\Phi$-derivable
+self-consistency implies the per-iteration identity
+\begin{equation}\label{eq:bubble_balance}
+  P_{\rm in}=\sum_\omega\hbar\omega\,
+   \mathrm{Tr}\bigl[\Sigma^<(\omega)G^>(\omega)\bigr]
+  =\sum_\omega\hbar\omega\,
+   \mathrm{Tr}\bigl[\Sigma^>(\omega)G^<(\omega)\bigr]=P_{\rm out},
+\end{equation}
+the net power exchanged by the scattering self-energy. Its residual isolates
+vertex and convolution errors from contact errors and is the most stringent of
+our convergence checks.
+
+\subsubsection{Infrared limit of the heat current}
+\label{sub:ir_subtraction}
+
+The taper \cref{eq:ir_taper} regularises the iteration, not the physics; the
+infrared behaviour itself is benign, and no exact bubble-level subtraction is
+required. The Bose factor $n(\omega)=1/(e^{\beta\hbar\omega}-1)$ enters three
+places --- the contact injection
+$\Sigma_\ell^{\lessgtr}=i\Gamma_\ell[n_\ell+(1{\pm}1)/2]$, the bubble legs
+$G^{\lessgtr}(\omega')\sim n(\omega')A(\omega')$ of \cref{eq:sigma_guo}, and the
+Meir--Wingreen integral \cref{eq:meir_wingreen} --- through its Laurent (Bernoulli)
+expansion
+\begin{equation}\label{eq:bose_laurent}
+  n(\omega,T)=\frac{k_BT}{\hbar\omega}-\frac12+\frac{\hbar\omega}{12k_BT}
+  -\frac{(\hbar\omega)^3}{720(k_BT)^3}+\cdots,
+\end{equation}
+whose singular part is the c-number pole $k_BT/\hbar\omega$.
+
+\paragraph{The pole is physical only in the observable.}
+In the heat current the $1/\omega$ is cancelled by the explicit $\hbar\omega$
+weight. The constant $-\tfrac12$ is temperature-independent and drops from any lead
+difference, $\hbar\omega\,[n_L-n_R]=k_B(T_L-T_R)+\mathcal{O}(\omega^2)$, so the
+spectral density has the finite infrared limit
+\begin{equation}\label{eq:ir_plateau}
+  j(\omega)=\frac{\hbar\omega}{2\pi}\,\mathcal{T}(\omega)\,[n_L(\omega)-n_R(\omega)]
+  \xrightarrow[\omega\to0]{}\frac{k_B\,\Delta T}{2\pi}\,\mathcal{T}(0),
+  \qquad \mathcal{T}(0)=N_{\rm ac},
+\end{equation}
+with $N_{\rm ac}$ the number of acoustic channels, each contributing the quantised
+thermal conductance $g_0=\pi^2k_B^2T/3h$~\cite{rego_quantized_1998,schwab_measurement_2000,jeong_analysis_2012}
+(\cref{app:infrared} for the derivation). This plateau is the physical infrared
+target; a regulator that multiplies the occupations by $\omega^2$, as the taper
+\cref{eq:ir_taper} does, removes a finite, quantised piece of it
+(\cref{fig:res_eta0_ir}).
+
+\paragraph{There is no pole to subtract in the bubble.}
+It is tempting to remove the $1/\omega$ from the scattering self-energy by the
+singularity-subtraction device of boundary-integral
+numerics~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023}.
+Applied to the bubble legs this is both unnecessary and harmful. The cubic matrix
+element carries $|V_3|^2\propto\omega_1\omega_2\omega_3$, so the soft-leg factor
+offsets the absorption pole; equivalently the acoustic spectral weight vanishes
+linearly, $A(\omega')\to A'(0)\,\omega'$, so the equilibrium lesser function
+$G^{<}_{\rm eq}=-i\,nA$ stays finite. Out of equilibrium the bosonic fold
+$G^{<}(-\omega)=G^{>}(\omega)^T$ together with the bounded spectral function forces
+the $1/\omega$ parts of $G^{<}$ and $G^{>}$ to be equal and opposite, hence both
+zero; and the contact broadening $\Gamma_\ell(\omega)$, being the bosonic (odd)
+anti-Hermitian part of $\Sigma^R_\ell$, vanishes as $\omega\to0$, so
+$\Gamma_\ell n_\ell$ is finite. The device bubble therefore carries no net infrared
+pole. Subtracting one regardless feeds the bubble a modified $G$, so that
+$\Sigma\neq\mathcal{F}[G]$ and the $\Phi$-derivable balance \cref{eq:bubble_balance}
+is broken. The accurate and conserving choice near $\omega=0$ is the \emph{bare}
+bubble; the taper is retained only as a numerical stabiliser of the marginal
+$\eta=0$ iteration (\cref{sub:eta_zero}), its small effect on the conductance
+removed by the $\omega_{\rm reg}\to0$ extrapolation rather than by any analytic
+subtraction. In a single nanotube the long-wavelength three-phonon linewidths scale
+per polarisation ($\Gamma_{\rm LA}\sim|k|^{-1/2}$, $\Gamma_{\rm flexural}\sim|k|^{0}$,
+$\Gamma_{\rm twist}\sim|k|^{1/2}$)~\cite{bruns_nanotube_2021,ma_examining_2014,maznev_demystifying_2014},
+so the converged anharmonic plateau need not equal the ballistic
+$\mathcal{T}(0)=N_{\rm ac}$.
+
+\subsubsection{Convergence diagnostics}
+
+We monitor three quantities across iterations: (i) the relative
+Frobenius norm
+$\|\Sigma_s^{(n+1)}-\Sigma_s^{(n)}\|/\|\Sigma_s^{(n)}\|$,
+(ii) the conductance $G(T)$ from \cref{eq:G_thermal} or, in the
+inelastic case, the Meir--Wingreen current, and (iii) the slab-resolved
+current imbalance $\delta I/\bar I$. Convergence is declared when (i)
+and (iii) fall below prescribed tolerances simultaneously. Under a
+temperature bias at finite $\eta$, however, (iii) does not reach zero but
+floors at the ghost-reservoir term of \cref{eq:sumrule}
+(\cref{app:conservation}); the primary gates are then (i) and the
+pairing-exact bubble balance $P_{\rm in}=P_{\rm out}$, with (iii) reserved as
+an $\eta$-budget diagnostic.
+
+\subsubsection{Lowest-order approximation.}
+
+An attractive alternative to direct SCBA, developed by~\citet{lee_anharmonic_2018,lee_quantum_2019}, is the
+lowest-order approximation (LOA) implemented through Padé
+resummation. LOA collects only the conserving ($\Phi$-derivable) diagrams
+at each order in $\Phi^{(3)}$, ensuring exact current conservation
+at every iteration, then accelerates the resulting series by
+Padé approximants. Compared to SCBA, LOA achieves comparable accuracy
+at $\sim 2\times$ lower cost for thermal transport in 3D
+nanostructures~\cite{lee_anharmonic_2018}.
+
+% ----------------------------------------------------------------------
+\subsection{Decay properties and Truncation errors}
+\label{sub:decay}
+% ----------------------------------------------------------------------
+
+Truncations at every step (real-space FC cutoff, finite device length, finite $\omega$ grid,
+finite Sancho-Rubio iteration count) introduce errors with
+quantifiable scaling. We summarize, from first principles, the decay
+rates of each of the involved quantities.
+
+\subsubsection{Real-space decay of harmonic force constants}
+\label{subsub:fc2_decay}
+
+The asymptotic behaviour of $\Phi^{(2)}(R)$ at large $|R|$ is controlled
+by the analytic structure of the dielectric response of the underlying
+electronic system. \Citet{cances_decay_2025} prove the following
+within the reduced Hartree--Fock (or random-phase
+approximation) model:
+
+\paragraph{Insulators at zero electronic temperature.}
+The dynamical matrix $D(\qp)$ is singular at $\qp = 0$, with the
+non-analytic dipole--dipole structure given in~\cite{cochran_dielectric_1962}:
+\begin{equation}\label{eq:fc2_dipole}
+  D^{\mathrm{LR}}_{\kappa\alpha,\kappa'\beta}(\qp \to 0)
+  \;\sim\;
+  \frac{4\pi}{\Omega_{\mathrm{cell}}}\,
+  \frac{(\qp\cdot Z^*_{\kappa})_\alpha\,(\qp\cdot Z^*_{\kappa'})_\beta}
+       {\qp\cdot \epsilon_\infty\cdot \qp},
+\end{equation}
+where $Z^*_\kappa$ is the Born effective charge tensor of atom $\kappa$
+and $\epsilon_\infty$ the optical dielectric tensor. Inverse Fourier
+transform of this $\qp\to 0$ singularity gives an algebraic
+real-space tail to $\Phi$.
+
+\paragraph{Materials at finite electronic temperature (metals).}
+\Citet{cances_decay_2025} prove that the
+dynamical matrix is analytic in $\qp$, and
+$\Phi^{(2)}(R)$ decays exponentially:
+\begin{equation}\label{eq:fc2_metal}
+  |\Phi^{(2)}(R)|\;\le\;C\,e^{-|R|/\xi_e},\qquad
+  \xi_e \;\sim\;\frac{\hbar v_F}{k_B T_{\mathrm{el}}}.
+\end{equation}
+
+\paragraph{Concrete truncation error.}
+Truncating at distance $R_c$ introduces an error in the dynamical matrix
+of order
+\begin{equation}\label{eq:fc2_error_metal}
+  \|D(\qp) - D^{R_c}(\qp)\| \;\lesssim\;C \frac{e^{-R_c/\xi_e}}{1 - e^{-1/\xi_e}}
+  \quad\text{(metals, exponential)},
+\end{equation}
+or, in polar insulators, $\sim 1/R_c^3$ for the bare truncation, but
+$\sim e^{-R_c/\xi_e}$ if the short-range part once the
+$1/r^3$ Cochran--Cowley tail has been subtracted analytically and added
+back exactly via Ewald summation~\cite{gonze_dynamical_1997}.
+
+\subsubsection{Transverse $\qp$-mesh convergence}
+\label{subsub:qp_decay}
+
+The convergence of observables in $N_q$ depends on the differentiability
+of the integrand. For the Caroli formula \cref{eq:caroli}, the
+$\qp$-integrand is generically smooth and trapezoidal Monkhorst--Pack
+sampling converges as $\mathcal{O}(N_q^{-2})$ in 2D. At Brillouin-zone boundaries or near van
+Hove singularities, convergence degrades to $\mathcal{O}(N_q^{-1})$;
+a Gaussian smearing or tetrahedron method may then be preferable. The
+self-energy convolution \cref{eq:sigma_phph} couples $\qp$ and $\qp{}'$,
+so the effective integrand has $N_q^{-1/2}$ statistical-noise structure
+under random sampling, but adaptive importance sampling can recover
+$\mathcal{O}(N_q^{-1})$ ~\cite{lee_anharmonic_2018}.
+
+\subsubsection{Convergence rate of Sancho-Rubio decimation revisited}
+
+As discussed in \cref{sub:contact_se}, the decimation iteration
+\cref{eq:sr_eps_s,eq:sr_eps,eq:sr_alpha,eq:sr_beta} effectively doubles
+the number of decimated layers at each step, with iterates obeying
+$\|\alpha_n\|, \|\beta_n\| \sim \rho^{2^n}$ inside gaps and
+$e^{-c\eta\cdot 2^n}$ on bands. The practical implication is that
+\emph{doubling the tolerance roughly costs one extra iteration}; total
+cost is $\mathcal{O}(N_\omega\,N_q\,N_{\mathrm{DOF}}^3\,N_{\mathrm{iter}})$
+with $N_{\mathrm{iter}}$ essentially constant (and small,
+$\sim 10\text{--}30$).
+
+% ----------------------------------------------------------------------

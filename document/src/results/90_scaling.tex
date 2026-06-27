@@ -1,0 +1,69 @@
+% ======================================================================
+\section{Solver verification, cost, and scaling}
+\label{sec:res_scaling}
+% ======================================================================
+
+The production distributed solver is validated against the dense reference and
+benchmarked on the two axes that matter for anharmonic transport: the
+block-tridiagonal recursion along the device and the energy-point parallelism
+across MPI ranks. The two solvers follow the structure of the self-energy
+(\cref{ssec:phph_distribution,ssec:phph_qdist}): Gamma-only conductors ($k{=}1$,
+the nanowires and tubes) scale on $\texttt{block\_comm\_size}\times\texttt{stack}$,
+while the transversely-periodic systems ($k{>}1$, films and perovskites) scale on
+$\texttt{q\_comm\_size}\times\texttt{stack}$ with $\texttt{block\_comm\_size}{=}1$;
+for the large-block Gamma-only regime the inner-ring contraction additionally
+threads over the frequency axis (\cref{ssec:phph_ring}).
+
+\paragraph{Machine-precision agreement with the dense reference.} The production
+block-tridiagonal recursive Green's-function solver
+(\texttt{qttools.greens\_function\_solver.RGF}) reproduces the dense reference and a
+direct \texttt{numpy} inverse: the generic selected-inversion suite passes all
+$144$ parametrised cases, and an end-to-end check on a genuine phonon Dyson matrix
+$A(\omega^2)=\omega^2 I-H_D-\Sigma_\mathrm{leads}$ with Sancho--Rubio
+open-boundary self-energies agrees to $1.4\times10^{-16}$ on the selected retarded
+Green's function across $\omega\in[1,16]$\,THz. The three-phonon bubble and
+scattering-self-energy kernels pass all $28$ tests; these also flag that a
+nearest-neighbour FC3 truncation discards $34$--$48\%$ of the Frobenius norm for the
+test fixtures, so the number of primitive cells per transport cell must be chosen
+with care. The block-distributed recursion
+(\texttt{rgf\_dist.RGFDist}) reproduces the serial reference under
+\texttt{mpirun -np 3} ($\texttt{block\_comm\_size}{=}3$).
+
+\paragraph{Solver cost.} The dense reference inverts the full $N_D\times N_D$ device
+matrix, so its cost grows as $\mathcal{O}(n_\mathrm{slabs}^3)$, whereas RGF exploits
+the block-tridiagonal structure and is linear in the number of cells
+(\cref{fig:res_solver_scaling}, left): on phonon-Dyson matrices with a fixed
+$192$-dof block, from $2$ to $32$ blocks the RGF wall time rises linearly while the
+dense time follows the cubic guide, a $58\times$ gap at $32$ blocks, with the two
+agreeing to $\sim10^{-13}$ on the block-tridiagonal entries. The complementary axis
+-- distributing the energy points across MPI ranks -- is shown on the right: a fixed
+$1536\times1536$ problem with $128$ energy points falls from $1.55$\,s on one rank to
+$0.86$, $0.55$ and $0.28$\,s on $2$, $4$ and $8$ ranks, a $5.3$--$5.5\times$ speed-up
+at eight ranks ($68\%$ parallel efficiency) that improves with problem size.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/solver_scaling.pdf}
+  \caption{Solver scaling. Left: selected-inversion wall time vs.\ number of
+  transport-cell blocks -- RGF is linear, the dense reference cubic ($58\times$
+  apart at $32$ blocks), agreeing to $\sim10^{-13}$. Right: distributed
+  energy-parallel speed-up ($5.3\times$ at eight ranks).}
+  \label{fig:res_solver_scaling}
+\end{figure}
+
+This separation is decisive for the anharmonic problem. The dense self-energy bubble
+parallelises across the $(I,J)$ slab-pair blocks -- their count grows
+$1\to8\to15$ for $n_\mathrm{slabs}=1,2,3$ -- but each block's bubble is itself a
+serial BLAS contraction, so the dense per-point wall time climbs steeply: a single
+$(3,3)$-CNT SCBA point costs $66$\,s at $n_\mathrm{slabs}{=}1$ and $1193$\,s
+($\sim18\times$) at $n_\mathrm{slabs}{=}2$, and the converged three-cell point
+($108$ DOF, $15$ blocks) costs $6.8$\,h. Multi-cell anharmonic transport is therefore
+the regime of the RGF and energy-parallel production path, with the dense solver kept
+as the verification oracle.
+
+\todo[inline]{Add the production phph throughput study (the restored
+\texttt{phph\_scaling}/\texttt{phph\_q\_scaling}/\texttt{phph\_memory}/%
+\texttt{prod\_phph\_scaling} figures in \texttt{fig/transport\_sweeps/}): strong/weak
+scaling on $\texttt{block}\times\texttt{stack}$ and $\texttt{q}\times\texttt{stack}$,
+the ring-thread throughput curve, and host/GPU memory vs.\ system size. See
+\texttt{document/MISSING.md} (A2).}

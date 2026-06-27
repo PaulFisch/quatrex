@@ -1,17 +1,15 @@
-\chapter{Exact infrared treatment of the phonon heat current by singularity
-subtraction}
+\chapter{Infrared limit of the phonon heat current}
 \label{app:infrared}
 
-This appendix expands \cref{sub:ir_subtraction}: the Bose pole and the two
-cancellations that make the $\omega\to0$ limit finite, the c-number subtraction
-applied to each infrared-singular object, the Cauchy principal-value quadrature
-that carries no regularisation scale, the proof that the ballistic infrared
-plateau is the quantised thermal conductance, and the literature this draws on.
-We use $\beta=1/k_BT$, $x=\beta\hbar\omega$, and the occupation-positive
-convention of \cref{sec:solver_units}. The motivation is the artefact of
-\cref{fig:res_eta0_ir}: the ballistic heat-current density $\hbar\omega\,I(\omega)$
-is flat as $\omega\to0$, while the raw $\eta=0$ anharmonic result bends down and
-fluctuates --- the discretised Bose pole, not converged physics.
+This appendix expands \cref{sub:ir_subtraction}: the Bose pole, the two
+cancellations that make the $\omega\to0$ limit finite, and the proof that the
+ballistic infrared plateau is the quantised thermal conductance. We use
+$\beta=1/k_BT$, $x=\beta\hbar\omega$, and the occupation-positive convention of
+\cref{sec:solver_units}. The motivation is the artefact of \cref{fig:res_eta0_ir}:
+the ballistic heat-current density $\hbar\omega\,I(\omega)$ is flat as $\omega\to0$,
+while the raw $\eta=0$ anharmonic result bends down and fluctuates --- the first-bin
+sampling of the soft-mode resolvent under the marginal $\eta=0$ fixed point
+(\cref{sub:eta_zero}), not a Bose pole in the bubble.
 
 % ======================================================================
 \section{The Bose pole and the two cancellations}
@@ -27,7 +25,7 @@ $B_{2k}$,
    -\frac{(\hbar\omega)^3}{720(k_BT)^3}+\cdots,
 \end{equation}
 the singular part being the c-number pole $k_BT/\hbar\omega$ (\cref{eq:bose_laurent}).
-Two distinct cancellations follow.
+Two distinct cancellations make every device quantity infrared-finite.
 
 \paragraph{Observable (exact).}
 The constant $-\tfrac12$ is temperature-independent and cancels in any lead
@@ -39,13 +37,12 @@ difference, so
 \end{equation}
 a smooth function with the finite limit $k_B\,\Delta T$. The Meir--Wingreen
 spectral density \cref{eq:meir_wingreen} therefore tends to the finite plateau of
-\cref{eq:ir_plateau}; the $\hbar\omega$ weight exactly offsets the $1/\omega$ of
-the Bose factor. The number current $I(\omega)=j(\omega)/\hbar\omega$ itself
-\emph{diverges} as $1/\omega$ --- this is the curve plotted in
-\cref{fig:res_eta0_ir} after division by $\Delta n\sim1/\omega$, hence the flat
-ballistic transmission.
+\cref{eq:ir_plateau}; the $\hbar\omega$ weight exactly offsets the $1/\omega$ of the
+Bose factor. The number current $I(\omega)=j(\omega)/\hbar\omega$ itself diverges as
+$1/\omega$ --- this is the curve plotted in \cref{fig:res_eta0_ir} after division by
+$\Delta n\sim1/\omega$, hence the flat ballistic transmission.
 
-\paragraph{Self-energy (conditional).}
+\paragraph{Self-energy (no removal needed).}
 In the harmonic mode basis the cubic matrix element is
 $V_3\propto(\omega_1\omega_2\omega_3)^{1/2}$ (each leg contributes the
 displacement-to-mode factor $\sqrt{\hbar/2\omega}$), so the golden-rule rate
@@ -53,103 +50,23 @@ displacement-to-mode factor $\sqrt{\hbar/2\omega}$), so the golden-rule rate
 factor offsets the $n(\omega')\sim1/\omega'$ of the absorption channel: the
 equilibrium linewidth is finite. In the displacement representation used by the
 solver this $\omega$-weight sits in the spectral function, $A(\omega')\to
-A'(0)\,\omega'$ as $\omega'\to0$ (the acoustic spectral weight vanishes linearly),
-so the \emph{equilibrium} lesser function
-$G^{<}_{\rm eq}(\omega')=-i\,n(\omega')A(\omega')$ has the finite limit
-$-i\,(k_BT/\hbar)\,A'(0)$. The cancellation is, however, between a diverging and a
-vanishing factor: on a grid whose first sample is $\omega'=\Delta\omega$ the
-product $n(\Delta\omega)A(\Delta\omega)$ is a large number times a small one, and
-unless $A$'s linear onset is resolved the result is wrong. Out of equilibrium the
-device lesser function $G^{<}=G^R\Sigma^{<}G^A$ inherits the genuine $1/\omega$ of
-the contact injection (below), so the offsetting $A'(0)\omega'$ no longer fully
-protects it and the pole must be removed explicitly.
-
-\paragraph{The contact pole is genuine.}
-The injection $\Sigma_\ell^{\lessgtr}(\omega)=i\,\Gamma_\ell(\omega)
-\bigl[n_\ell(\omega)+\tfrac{1}{2}(1\pm1)\bigr]$ has a contact broadening
-$\Gamma_\ell(\omega\to0)\to\Gamma_\ell^{(0)}\neq0$ (the leads keep
-$N_{\rm ac}$ open acoustic channels), so $\Sigma_\ell^{<}\sim
-i\,\Gamma_\ell^{(0)}k_BT_\ell/\hbar\omega$ is a true $1/\omega$ pole with no
-internal cancellation. This is the source term that propagates into every device
-quantity.
-
-% ======================================================================
-\section{The subtraction}
-\label{sec:ir_subtract}
-% ======================================================================
-
-Split the occupation exactly (\cref{eq:bose_split}), $n(\omega)=k_BT/\hbar\omega+
-\tilde n(\omega)$ with $\tilde n$ bounded and analytic, and propagate the split.
-
-\paragraph{Injection.}
-$\Sigma_\ell^{<}=i\Gamma_\ell\,\tilde n_\ell
-+i\Gamma_\ell\,k_BT_\ell/\hbar\omega$. The first term is regular; the second is a
-known c-number pole whose contribution to any $\hbar\omega$-weighted observable is
-finite by \cref{eq:ir_hbarw} and is added in closed form.
-
-\paragraph{Bubble.}
-With $F=G^{\gtrless}$ the second leg, the convolution of \cref{eq:sigma_guo}
-becomes
-\begin{equation}\label{eq:sse_split_app}
-  \int\!\frac{d\omega'}{2\pi}\,G^{<}(\omega')F(\omega-\omega')
-  =\underbrace{\int\!\frac{d\omega'}{2\pi}\bigl[G^{<}(\omega')-G^{<}_{\rm s}(\omega')\bigr]
-     F(\omega-\omega')}_{\text{regular, ordinary rule}}
-  +\underbrace{\frac{k_BT}{2\pi}\,\mathcal{P}\!\!\int\!\frac{d\omega'}{\hbar\omega'}\,
-     A(\omega')\,F(\omega-\omega')}_{\text{Cauchy PV, analytic weight}},
-\end{equation}
-$G^{<}_{\rm s}(\omega')=-i\,(k_BT/\hbar\omega')A(\omega')$, plus the mirror term
-with the pole at $\omega'\to\omega$ from the bosonic fold
-$G^{<}(-\omega)=G^{>}(\omega)^{T}$. Over the first interval the singular weight is
-integrated with the analytic onset $A(\omega')\simeq A'(0)\,\omega'$,
-\begin{equation}\label{eq:first_interval}
-  \frac{k_BT}{\hbar}\int_0^{\Delta\omega}\!\frac{A(\omega')}{\omega'}\,
-  F(\omega-\omega')\,d\omega'
-  \;\simeq\; \frac{k_BT}{\hbar}\,A'(0)\,F(\omega)\,\Delta\omega,
-\end{equation}
-which is finite and replaces the ill-conditioned grid product
-$n(\Delta\omega)A(\Delta\omega)$ by its exact limit.
-
-\paragraph{Retarded part.}
-The dispersive part of $\Sigma^R$ follows from the imaginary part by the exact
-Kramers--Kronig transform \cref{eq:sigma_R_full}, evaluated on the subtracted,
-regular data; no broadening $\eta$ is introduced to soften the
-kernel~\cite{lemus_modespace_2020}. The same imaginary-axis/spectral manoeuvre
-underlies the Eliashberg treatment, where the divergent thermal (first-Matsubara)
-bosonic term is split off and the rest summed
-normally~\cite{wu_special_2019,marsiglio_eliashberg_2020}.
-
-% ======================================================================
-\section{Cauchy principal-value quadrature}
-\label{sec:ir_pv}
-% ======================================================================
-
-The residual $\mathcal{P}\!\int q(\omega')/\omega'\,d\omega'$ in
-\cref{eq:sse_split_app} is the Hilbert-type kernel of singular-integral numerics.
-Two standard routes apply. (i) \emph{Additive singularity
-subtraction}~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023}:
-write the integral as a closed-form singular part plus a regular remainder,
-\begin{equation}\label{eq:wang_split}
-  G=\int\!\bigl[\tilde G-\tilde G_{\rm subt}\bigr]\,d\omega'+G_{\rm subt},
-\end{equation}
-``where the subtracted integrand part $\tilde G_{\rm subt}$ has an integral result
-$G_{\rm subt}$ with a favourable analytical form, while the remainder $\dots$
-behaves as [a] rapidly decreasing function''~\cite{wang_logarithmic_2023}; this is
-\cref{eq:sse_split_app}. Hänninen \emph{et al.} note that a single subtracted
-Taylor term may be insufficient where the integrand's derivative is discontinuous,
-so a second term is then removed~\cite{hanninen_singularity_2006}. (ii)
-\emph{Staggered (alternating) trapezoidal rule}: place the nodes off the
-singularity, $\omega'_m=(m+\tfrac12)\Delta\omega$, with equal weights, so that the
-$\pm\omega'_m$ pair captures the principal-value cancellation,
-\begin{equation}\label{eq:staggered}
-  \mathcal{P}\!\!\int_{-a}^{a}\!\frac{q(\omega')}{\omega'}\,d\omega'
-  \;\approx\; \Delta\omega\sum_{m}\frac{q(\omega'_m)-q(-\omega'_m)}{\omega'_m},
-\end{equation}
-which converges spectrally for analytic $q$ and introduces no regularisation
-length~\cite{toler_fast_2023}. (Subtraction schemes alone are typically only
-low-order accurate~\cite{toler_fast_2023}; the staggered rule, or a Kapur--Rokhlin
-rule for the logarithmic case, restores high order.) Either route eliminates the
-$\omega_{\rm reg}$ of \cref{eq:ir_taper}: the limit is taken analytically, not by
-extrapolation.
+A'(0)\,\omega'$ as $\omega'\to0$ (the acoustic spectral weight vanishes linearly), so
+the lesser function $G^{<}_{\rm eq}=-i\,nA$ has the finite limit
+$-i\,(k_BT/\hbar)\,A'(0)$. The same protection survives out of equilibrium: the
+bosonic fold $G^{<}(-\omega)=G^{>}(\omega)^T$ and the bounded spectral function force
+the $1/\omega$ parts of $G^{<}$ and $G^{>}$ to be equal and opposite, hence both
+zero, while the contact broadening $\Gamma_\ell(\omega)=i[\Sigma^R_\ell-\Sigma^A_\ell]$
+is odd in $\omega$ and vanishes at the origin, so the injection $\Gamma_\ell n_\ell$
+is finite. The bubble legs therefore carry no net infrared pole, and the bare
+convolution is exactly conserving. A singularity subtraction of the kind used in
+boundary-integral
+numerics~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023,toler_fast_2023}
+would feed the bubble a modified $G$, so that $\Sigma\neq\mathcal{F}[G]$ and the
+$\Phi$-derivable balance \cref{eq:bubble_balance} is broken; it is therefore neither
+needed nor used. The only genuine delicacy is that on a grid whose first sample is
+$\omega'=\Delta\omega$ the product $n(\Delta\omega)A(\Delta\omega)$ is a large number
+times a small one; the smooth occupancy taper \cref{eq:ir_taper} resolves that
+conditioning without altering the conserving structure (\cref{sub:eta_zero}).
 
 % ======================================================================
 \section{The ballistic plateau is the quantised conductance}
@@ -165,8 +82,8 @@ linear-response conductance \cref{eq:G_thermal} is
   \hbar\omega\,\frac{\partial n}{\partial T}=k_B\,\frac{x^2e^{x}}{(e^{x}-1)^2}
   \xrightarrow[\omega\to0]{}k_B,
 \end{equation}
-so the window $\hbar\omega\,\partial_Tn$ is finite at $\omega=0$ (it does
-\emph{not} vanish there) and a single perfectly-transmitting channel contributes
+so the window $\hbar\omega\,\partial_Tn$ is finite at $\omega=0$ (it does \emph{not}
+vanish there) and a single perfectly-transmitting channel contributes
 \begin{equation}\label{eq:g0}
   g_0=\frac{1}{2\pi}\int_0^\infty\! d\omega\,\hbar\omega\,\frac{\partial n}{\partial T}
    =\frac{k_B^2T}{2\pi\hbar}\int_0^\infty\!\frac{x^2e^{x}}{(e^{x}-1)^2}\,dx
@@ -175,40 +92,26 @@ so the window $\hbar\omega\,\partial_Tn$ is finite at $\omega=0$ (it does
 \end{equation}
 the universal quantum of thermal
 conductance~\cite{rego_quantized_1998,schwab_measurement_2000,jeong_analysis_2012}.
-The infrared plateau $\mathcal{T}(0)=N_{\rm ac}$ is thus a hard physical
-constraint: any regulator that drives $\mathcal{T}(\omega\to0)\to0$ --- as the
-taper \cref{eq:ir_taper} does by multiplying the occupations by $\omega^2$ ---
-removes a finite, quantised piece of the conductance. The subtraction preserves it
-by construction.
+The infrared plateau $\mathcal{T}(0)=N_{\rm ac}$ is thus a hard physical constraint:
+any regulator that drives $\mathcal{T}(\omega\to0)\to0$ --- as the taper
+\cref{eq:ir_taper} does by multiplying the occupations by $\omega^2$ --- removes a
+finite, quantised piece of the conductance, which is why the taper is a stabiliser to
+be extrapolated away ($\omega_{\rm reg}\to0$), not a physical input.
 
 % ======================================================================
 \section{Literature}
 \label{sec:ir_literature}
 % ======================================================================
 
-The ingredients are established, but their combination for the phonon-NEGF
-infrared appears to be new.
-\emph{(A)~Singularity-subtraction numerics.} The add-and-subtract split
-\cref{eq:wang_split} and its higher-order variants are standard in
-boundary-element and layered-medium
-solvers~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023};
-the staggered-trapezoid/Kapur--Rokhlin alternatives for Cauchy and logarithmic
-kernels are reviewed by~\citet{toler_fast_2023}.
+\emph{(A)~Quantised conductance} fixes the $\omega\to0$
+target~\cite{rego_quantized_1998,schwab_measurement_2000,jeong_analysis_2012}.
 \emph{(B)~Phonon NEGF.} Atomistic three-phonon NEGF
 implementations~\cite{xu_nonequilibrium_2008,guo_anharmonic_interface_2021,polanco_phonon_2023}
 compute the same Meir--Wingreen current and note the special difficulty of
-low-frequency modes, and~\citet{lemus_modespace_2020} compute $\mathrm{Re}\,\Sigma^R$
-by exact Kramers--Kronig --- but none applies an analytic infrared subtraction;
-the standard practice is mesh refinement or a broadening floor.
-\emph{(C)~Quantised conductance} fixes the $\omega\to0$
-target~\cite{rego_quantized_1998,schwab_measurement_2000,jeong_analysis_2012}.
-\emph{(D)~Boltzmann transport} establishes that the long-wavelength acoustic
-relaxation is physical and is cut off by defect/boundary/four-phonon channels, not
-by a frequency taper, and that the three-phonon acoustic rate vanishes
-($\Gamma\sim\omega^2$ in the bulk)~\cite{ma_examining_2014,maznev_demystifying_2014}
---- with the important caveat that in a single nanotube the polarisation-resolved
-exponents differ~\cite{bruns_nanotube_2021}, so the subtraction must read the
-exponent off the computed $A(\omega)$.
-\emph{(E)~Eliashberg theory} provides the closest realised analogue: the singular
-bosonic propagator is handled by splitting off its divergent thermal term and
-recovering the real part by Kramers--Kronig~\cite{wu_special_2019,marsiglio_eliashberg_2020}.
+low-frequency modes; the standard practice is mesh refinement or a broadening floor,
+and~\citet{lemus_modespace_2020} compute $\mathrm{Re}\,\Sigma^R$ by exact
+Kramers--Kronig. \emph{(C)~Boltzmann transport} establishes that the long-wavelength
+acoustic relaxation is physical and is cut off by defect/boundary/four-phonon
+channels, not by a frequency taper, with $\Gamma\sim\omega^2$ in the
+bulk~\cite{ma_examining_2014,maznev_demystifying_2014} but polarisation-resolved
+exponents in a single nanotube~\cite{bruns_nanotube_2021}.

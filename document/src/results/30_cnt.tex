@@ -1,0 +1,75 @@
+\section{Carbon nanotubes}
+\label{sec:res_cnt}
+% ======================================================================
+
+An armchair $(3,3)$ carbon nanotube is tested: a stiff, defect-free
+$sp^2$ tube ($36$ DOF per cell, $\sim4$~\AA\ diameter). Its force
+constants fit with a larger absolute residual than the silicon wires
+(train/test RMSE $0.245$/$0.282$~eV\,\AA$^{-1}$, reflecting the much stiffer
+$sp^2$ bonds and hence larger forces) but a clean harmonic spectrum --- no
+imaginary modes, and the periodic acoustic sum rule exact (FC3 leg residual
+$\sim0$, versus $0.8$ for the open wire). It carries $\sim11$ ballistic channels at
+low frequency (versus $\sim4.5$ for \texttt{d11a}), and the SCBA converges to a tight
+fixed point (heat-flow conservation $10^{-5}$--$10^{-4}$); driven to a tight
+tolerance the one-cell residual reaches $9.6\times10^{-10}$ in $188$
+safeguarded-Anderson iterations, giving the same conductance as the loose
+($10^{-3}$) stop --- the tube has a single, well-conditioned fixed point.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_g.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_ratio.pdf}
+  \caption{Anharmonic transport of the $(3,3)$ carbon nanotube
+  versus temperature (single transport cell). \emph{Left}: ballistic and
+  anharmonic per-area conductance. \emph{Right}: the ratio
+  $G_\mathrm{anh}/G_\mathrm{ball}$ rises toward unity as $T\to0$.}
+  \label{fig:res_cnt_T}
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.62\linewidth]{transport_sweeps/cnt33_cutoff.pdf}
+  \caption{$(3,3)$ carbon nanotube with two transport cells: $G_\mathrm{anh}$ across the
+   self-energy combinations (FC3 magnitude $\sigma$,
+   vertex range $v$, Green's-function range $g$).
+  All lie within $\pm10\%$ of the full-coupling value (dashed).}
+  \label{fig:res_cnt_cutoff}
+\end{figure}
+
+\paragraph{Temperature.} \Cref{fig:res_cnt_T} shows the converged
+conductance from $30$ to $300$~K at a single transport cell. Both the
+ballistic and the anharmonic conductance rise with temperature as
+channels populate; the anharmonic ratio $G_\mathrm{anh}/G_\mathrm{ball}$
+falls monotonically from $0.92$ at $30$~K to $0.71$ at $300$~K, the
+signature of three-phonon scattering switching on with the Bose-weighted
+phase space and freezing out as $T\to0$.
+
+\paragraph{Length.} At fixed $300$~K the anharmonic ratio decreases with
+device length: the converged $G_\mathrm{anh}/G_\mathrm{ball}=0.810,0.702,0.694$ at
+one, two and three cells (each to $\le10^{-5}$ with $\lesssim3\times10^{-4}$
+heat-flow non-conservation), a clean ballistic-to-diffusive reduction that
+accumulates from one to two cells and then nearly saturates. Beyond three cells the
+dense reference is too expensive --- the three-cell point already costs $6.8$~h
+(\cref{sec:res_scaling}).
+
+\paragraph{Cutoff robustness.}  Across all eight corners of the
+(FC3-magnitude, vertex-range, Green's-function-range) cutoff cube,
+the converged $G_\mathrm{anh}$ varies by $\pm10\%$ about
+the full-coupling value (\cref{fig:res_cnt_cutoff}). This is in contrast to the open
+nanowires, where a diagonal-$G$ approximation is
+catastrophic (\cref{sec:res_nw}).
+
+\paragraph{The $(8,0)$ zigzag.} As a second, larger tube, we tested
+the semiconducting $(8,0)$ zigzag nanotube ($32$ atoms per cell,
+the geometry of the electron-transport quatrex example). The fit is clean (test
+RMSE $0.151$~eV\,\AA$^{-1}$, about half the $(3,3)$ value thanks to the larger
+cell; a soft $0.0014$~THz twist, as befits the wider tube), the ballistic
+conductance behaves as expected --- it decreases with length through finite-$\eta$
+coherence attenuation, and the larger tube carries more channels at lower per-area
+conductance --- and the anharmonic SCBA converges at one cell to
+$G_\mathrm{anh}/G_\mathrm{ball}=0.775$, slightly below the $(3,3)$'s $0.810$ (more
+channels and more three-phonon phase space). The multi-cell ladder ($192$ DOF at two
+cells) exceeds the dense solver's reach and is left to the production path.
+\todo[inline]{Add the multi-cell quatrex $(8,0)$ ladder.}
+
+% ======================================================================

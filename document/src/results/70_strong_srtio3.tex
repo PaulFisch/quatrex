@@ -1,0 +1,52 @@
+\section{Strong anharmonicity: SrTiO\textsubscript{3}}
+\label{sec:res_strong}
+% ======================================================================
+
+The static corrections of \cref{sec:res_scp} are a small perturbation for the
+weakly anharmonic silicon systems. To test the opposite, strongly anharmonic
+regime, where the harmonic approximation fails, we computed
+FC2/FC3/FC4 for cubic SrTiO$_3$, the canonical
+self-consistent-phonon (SCP) test case from~\cite{tadano_first-principles_2018}.
+
+Cubic SrTiO$_3$ has unstable harmonic phonons: a ferroelectric (FE) mode at $\Gamma$ and an
+antiferrodistortive (AFD) octahedral-rotation mode at
+$R=(\tfrac12,\tfrac12,\tfrac12)$~\cite{tadano_first-principles_2018}. Fitting FC2 to
+small-amplitude ($0.025$~\AA) rattled displacements in the same $2\times2\times2$
+($40$-atom) cell used by Tadano \& Tsuneyuki recovers the AFD instability:
+$\omega_R = 55i$--$92i$~cm$^{-1}$ (converging upward with the number of training
+structures, an instability that strengthens as the fit
+converges). Their PBEsol value is $76i$~cm$^{-1}$. The static loop$+$tadpole magnitude is
+$\|\Sigma_\mathrm{static}\|\approx39$~THz$^2$ at $300$~K, $\sim6\times$ the bulk-Si
+value.
+
+Fitting the same cell to a larger ($0.08$~\AA) rattle amplitude stabilises the AFD mode
+($\omega_R = +90$~cm$^{-1}$, \cref{fig:res_srtio3}). This is not a fitting error,
+but the central identity of the effective-potential methods: a finite-amplitude fit
+returns the effective, renormalised FC2 at the temperature where
+$\langle u^2\rangle^{1/2}$ matches the rattle amplitude. Fitting at the thermal
+amplitude is exactly what the temperature-dependent effective potential
+(TDEP)~\cite{hellman_temperature_2013} and the stochastic self-consistent harmonic
+approximation (SSCHA)~\cite{monacelli_stochastic_2021} do. The difference between
+the bare and effective FC2 is the static loop self-energy
+$\tfrac12\Phi_4\!:\!\langle uu\rangle$.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.7\linewidth]{transport_sweeps/srtio3_rattle_renorm.pdf}
+  \caption{SrTiO$_3$ phonon dispersion: FC2 fitted to a small ($0.025$~\AA, red)
+  versus large ($0.08$~\AA, blue) rattle amplitude.}
+  \label{fig:res_srtio3}
+\end{figure}
+
+The renormalised phonons can hence be obtained either from the bare FC2 plus an
+explicit quartic loop (the deterministic SCP of \cref{sec:res_scp}, requiring
+FC4), or directly by fitting the effective FC2 at the thermal amplitude
+(TDEP/SSCHA, no FC4 needed)~\cite{hellman_temperature_2013,monacelli_stochastic_2021}.
+The explicit loop is needed when an analytic temperature dependence from a single
+FC4 is wanted. The effective-fit route is preferred when FC4 is too costly.
+For the weakly anharmonic silicon systems neither matters (effective $\approx$ bare FC2).
+For SrTiO$_3$ one must use one route or the other.
+
+A tensor rank-sweep of the device FC3 (truncated-SVD / HOSVD / CP) shows SrTiO$_3$ is
+markedly more compressible than \texttt{d5a}. A truncated SVD reaches a
+$7.6\%$ Frobenius error at rank $16$ for SrTiO$_3$ versus $18\%$ for \texttt{d5a}.

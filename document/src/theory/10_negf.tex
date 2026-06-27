@@ -1,0 +1,267 @@
+\section{Phonon NEGF}
+\label{sec:ph_negf}
+% ----------------------------------------------------------------------
+
+We apply the non-equilibrium Green's function (NEGF) formalism to phonon quantum transport,
+taking as starting point the energy expansion in atomic displacements introduced in
+\cref{eq:e_exp_ph}. Truncated at second order, the Hamiltonian generates
+ballistic (harmonic) transport. The third-order contribution gives the
+leading anharmonic phonon--phonon scattering, treated perturbatively in
+the self-consistent Born approximation (SCBA). The phonon NEGF algorithm is
+in close analogy with the electronic case~\cite{caroli_direct_1971,meir_landauer_1992,haug_quantum_2008,wang_quantum_2008, wang_nonequilibrium_2014},
+with two major differences: the natural energy variable is
+$\omega^2$ because the lattice equation of motion is second-order in
+time, and the particles are bosons whose vacuum-fluctuation
+contributions persist at $T = 0$. The phonon-NEGF strategy was developed
+by Mingo and Yang for ballistic transport~\cite{mingo_calculation_2003, mingo_phonon_2003},
+extended to anharmonicity by~\citet{mingo_anharmonic_2006, wang_nonequilibrium_2007,wang_nonequilibrium_2007},
+and by~\cite{luisier_atomistic_2012,lee_anharmonic_2018}. An explicit derivation
+of the SCBA self-energy at the diagrammatic level is given by~\citet{guo_quantum_2020}.
+
+% ----------------------------------------------------------------------
+\subsection{Hamiltonian and lattice-dynamical setup}
+\label{sub:ph_hamiltonian}
+% ----------------------------------------------------------------------
+
+Let $u_{l\kappa\alpha}$ denote the Cartesian displacement of atom $\kappa$
+in unit cell $l$, and let $m_\kappa$ be its mass. In
+mass-weighted coordinates $\tilde{u}_{l\kappa\alpha}=\sqrt{m_\kappa}\,u_{l\kappa\alpha}$,
+the lattice Hamiltonian truncated at third order is
+\begin{equation}\label{eq:H_phonon}
+  \hat{H}
+  = \tfrac{1}{2}\sum_{\mu}\tilde{p}_\mu^{\,2}
+    + \tfrac{1}{2}\sum_{\mu\nu} D_{\mu\nu}\,\tilde{u}_\mu \tilde{u}_\nu
+    + \tfrac{1}{3!}\sum_{\mu\nu\lambda} \Phi_{\mu\nu\lambda}\,
+      \tilde{u}_\mu \tilde{u}_\nu \tilde{u}_\lambda
+    + \mathcal{O}(\tilde{u}^4),
+\end{equation}
+where the multi-index $\mu = (l,\kappa,\alpha)$ collects unit-cell,
+sublattice, and Cartesian labels. The mass-weighted second- and
+third-order force constants are
+\begin{align}
+  D_{\mu\nu} &= \frac{1}{\sqrt{m_\kappa m_{\kappa'}}}\,\Phi^{(2)}_{\mu\nu}, &
+  \Phi_{\mu\nu\lambda} &= \frac{1}{\sqrt{m_\kappa m_{\kappa'} m_{\kappa''}}}\,\Phi^{(3)}_{\mu\nu\lambda},
+\end{align}
+with $\Phi^{(2)}_{\mu\nu}=\partial^2 V/\partial u_\mu \partial u_\nu$ and analogously
+for $\Phi^{(3)}$. The acoustic sum rules
+\begin{equation}\label{eq:asr}
+  \sum_{l\kappa} \Phi^{(n)}_{l\kappa\alpha,\,\mu_2\ldots\mu_n}
+  = 0
+  \qquad (n = 2, 3, \ldots),
+\end{equation}
+plus translational and permutation symmetry are imposed by the definition of the FCs.
+
+Quantizing in the harmonic basis,
+\begin{equation}
+  \tilde{u}_\mu(t)
+  = \sum_{s} \sqrt{\frac{\hbar}{2\omega_s}}\,e_{\mu s}\,
+    \bigl[a_s\,e^{-i\omega_s t} + a_s^\dagger\,e^{i\omega_s t}\bigr],
+  \qquad D\,e_s = \omega_s^2\,e_s,
+\end{equation}
+we obtain $\omega^2$ as the spectral variable of phonon Green's
+functions.
+
+% ----------------------------------------------------------------------
+\subsection{Contour-ordered Green's function and Dyson equation}
+\label{sub:ph_dyson}
+% ----------------------------------------------------------------------
+
+Following the conventions of~\citet{wang_nonequilibrium_2014}, we
+define the contour-ordered phonon Green's function on the Keldysh contour $\mathcal{C}$:
+\begin{equation}\label{eq:G_def}
+  G_{\mu\nu}(\tau,\tau')
+  = -\frac{i}{\hbar}\,
+    \bigl\langle T_{\mathcal{C}}\,
+      \tilde{u}_\mu(\tau)\,\tilde{u}_\nu(\tau')\bigr\rangle.
+\end{equation}
+Projecting $\tau$ onto the upper/lower branches yields the
+lesser, greater, retarded, advanced, and time-ordered components
+$G^{\lessgtr},\, G^{R/A},\, G^t$, with the standard relations
+\begin{align}
+  G^R(t,t') &= \theta(t-t')\bigl[G^>(t,t') - G^<(t,t')\bigr], &
+  G^A &= (G^R)^\dagger,\\
+  G^R - G^A &= G^> - G^<. &
+  G^t &= G^< + G^r
+\end{align}
+At equilibrium, the fluctuation--dissipation theorem can be written as~\cite[Eq. 24]{wang_nonequilibrium_2014}
+\begin{equation}\label{eq:phonon_fdt}
+  G^<(\omega) = -2 i\,n_{\mathrm{BE}}(\omega,T)\,\mathrm{Im}\,G^R(\omega),\qquad
+  G^>(\omega) = -2 i\,[1 + n_{\mathrm{BE}}(\omega,T)]\,\mathrm{Im}\,G^R(\omega).
+\end{equation}
+Out of
+equilibrium, \cref{eq:phonon_fdt} does not hold and one must solve the
+Keldysh equation
+\begin{equation}\label{eq:keldysh_eq}
+  G^{\lessgtr}(\omega) = G^R(\omega)\,\Sigma^{\lessgtr}(\omega)\,G^A(\omega).
+\end{equation}
+The retarded Green's function can be computed from the Dyson equation
+\begin{equation}\label{eq:system}
+  \bigl[G^R(\omega^2)\bigr]^{-1}
+  = (\omega^2 + i\eta)\,\mathbb{I}
+    - D
+    - \Sigma^R(\omega^2),
+\end{equation}
+with $D$ the dynamical matrix, $\eta>0$ a numerical broadening matched
+to the frequency grid, and the total retarded self-energy decomposed as
+\begin{equation}
+  \Sigma^R(\omega^2) = \Sigma_L^R(\omega^2) + \Sigma_R^R(\omega^2)
+                      + \Sigma_s^R(\omega^2).
+\end{equation}
+The lead self-energies $\Sigma_{L,R}^R$ are due to the semi-infinite harmonic
+contacts. $\Sigma_s^R$ collects all many-body scattering and equals zero
+in the ballistic limit. The spectral function is defined as
+\begin{equation}\label{eq:spectral}
+  A(\omega^2) = i[G^R(\omega^2)-G^A(\omega^2)] = -2\,\mathrm{Im}\,G^R(\omega^2),
+\end{equation}
+with sum rule $\int_0^\infty\!\frac{d(\omega^2)}{2\pi}\,[A(\omega^2)]_{\mu\mu}
+= 1$ and poles only at positive $\omega^2$.
+
+% ----------------------------------------------------------------------
+\subsection{Transverse periodic NEGF}
+\label{sub:transper_negf}
+% ----------------------------------------------------------------------
+
+We consider both finite and transversely periodic geometries, with
+transport along $x$ and periodicity in $(y,z)$. Following~\cite{tian_enhancing_2012,zhang_simulation_2007,guo_quantum_2020},
+the transverse wave vector
+$\qp$ (we use $q$ for phonons, $k$ for electrons) is sampled on a uniform
+Monkhorst--Pack mesh
+\begin{equation}
+  k_i = \frac{n_i + 0.5}{N_i} - 0.5 + \mathrm{shift}_i,
+  \qquad n_i = 0,\ldots,N_i-1,
+\end{equation}
+with total count $N_q$ chosen to converge the transverse Brillouin-zone
+integral (e.g.\ $N_q=400$ on a $20\times 20$ grid). The Dyson equation
+becomes $\qp$-dependent,
+\begin{equation}\label{eq:dyson_qp}
+  \bigl[G^R(\omega^2,\qp)\bigr]^{-1}
+  = (\omega^2 + i\eta)\,\mathbb{I}
+    - D(\qp)
+    - \Sigma^R(\omega^2,\qp).
+\end{equation}
+For fixed $\qp = (q_x,q_y)$, the on-site and nearest-neighbour
+transport-direction blocks are obtained by partial Fourier transform
+over the $q_z$ mesh:
+\begin{align}
+  H_{00}(\qp)
+    &= \frac{C}{N_{q_z}}
+       \sum_{q=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(q_x,q_y,\frac{q}{N_{q_z}}\right),
+  \label{eq:H00}\\
+  H_{01}(\qp)
+    &= \frac{C}{N_{q_z}}
+       \sum_{q=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(q_x,q_y,\frac{q}{N_{q_z}}\right)\,
+       e^{-2\pi i q / N_{q_z}}.
+  \label{eq:H01}
+\end{align}
+At nonzero $\qp$, these blocks are generally complex and may equivalently
+be written as the 2D Fourier transform of the real-space FC2:
+\begin{equation}
+  H_{0n_z}(\qp)
+  = \sum_{n_x,n_y}
+    \Phi(n_x,n_y,n_z)\,e^{2\pi i(q_x n_x + q_y n_y)},
+\end{equation}
+with hermiticity enforcing $H_{10}(\qp) = H_{01}^\dagger(\qp)$.
+
+% ----------------------------------------------------------------------
+\subsection{Contact self-energy}
+\label{sub:contact_se}
+% ----------------------------------------------------------------------
+
+The contact self-energies $\Sigma^R_{L,R}$ embed the semi-infinite
+harmonic leads via the surface Green's function $g_s$, computed
+iteratively by the renormalization--decimation algorithm of~\citet{sancho_highly_1985}.
+The method has quadratic-doubling convergence: each iteration
+doubles the number of decimated layers, so the iteration error
+falls as $\|T\|^{2^n}$ with $n$ the iteration index.
+
+\paragraph{Decimation iteration.}
+Given the bulk on-site and coupling blocks $H_{00}$ and $H_{01}$,
+initialize
+\begin{equation}
+  \epsilon = \epsilon_s = (\omega^2 + i\eta)\mathbb{I} - H_{00},
+  \qquad
+  \alpha = -H_{10},
+  \qquad
+  \beta  = -H_{01},
+\end{equation}
+and iterate
+\begin{align}
+  \epsilon_s &\leftarrow \epsilon_s - \alpha\,\epsilon^{-1}\beta, \label{eq:sr_eps_s}\\
+  \epsilon   &\leftarrow \epsilon - \alpha\,\epsilon^{-1}\beta
+              - \beta\,\epsilon^{-1}\alpha, \label{eq:sr_eps}\\
+  \alpha     &\leftarrow \alpha\,\epsilon^{-1}\alpha, \label{eq:sr_alpha}\\
+  \beta      &\leftarrow \beta\,\epsilon^{-1}\beta, \label{eq:sr_beta}
+\end{align}
+terminating when $\|\alpha\|+\|\beta\|<\mathrm{tol}$. The surface
+Green's function is then $g_s = \epsilon_s^{-1}$. For the left lead
+$g_L = g_s(H_{00},H_{01})$. For the right lead, the coupling direction
+is reversed, $g_R = g_s(H_{00},H_{01}^\dagger)$. The contact
+self-energies follow from
+\begin{equation}\label{eq:sigma_lr}
+  \Sigma_L^R = D_{10}\,g_L\,D_{01},
+  \qquad
+  \Sigma_R^R = D_{01}\,g_R\,D_{10},
+\end{equation}
+and the broadening matrices, which set the rate at which lead $\ell$
+injects phonons into the device, are
+\begin{equation}\label{eq:gamma_def}
+  \Gamma_\ell(\omega^2) = i[\Sigma_\ell^R(\omega^2) - \Sigma_\ell^A(\omega^2)].
+\end{equation}
+
+\paragraph{Convergence rate and concrete error bound.}
+The decimation can be written as a transfer-matrix recursion. Eliminating
+odd-numbered layers in the bulk lead leads to an effective
+coupling between layers separated by $2,4,8,\ldots$ unit cells. In
+matrix form, writing $T_n$ for the effective transfer operator after
+$n$ decimation steps,
+\begin{equation}\label{eq:Tn_recursion}
+  T_{n+1} = T_n^2,
+  \qquad
+  T_0 = -\epsilon_0^{-1} H_{01}.
+\end{equation}
+The eigenvalues of $T_0$ are $\lambda_j = e^{i k_j a}$ with $k_j$ the
+complex band wavevectors at energy $\omega^2$. In a bulk gap,
+$|\lambda_j| < 1$ strictly for evanescent solutions and
+$|\lambda_j|\to\infty$ for those that grow into the lead; only the
+former survive the iteration. After $n$ steps,
+\begin{equation}\label{eq:sr_decay}
+  \|\alpha_n\|,\;\|\beta_n\| \;\sim\; \rho^{2^n},
+  \qquad
+  \rho := \max_j\bigl\{|\lambda_j|: |\lambda_j|<1\bigr\} < 1,
+\end{equation}
+i.e.  double-exponential convergence in $n$. On a
+propagating band, $\max_j |\lambda_j| = 1$ exactly, and the convergence
+is entirely due to $\eta>0$: writing
+$|\lambda_j(\omega^2 + i\eta)| = 1 - c_j \eta + \mathcal{O}(\eta^2)$,
+\begin{equation}\label{eq:sr_decay_band}
+  \|\alpha_n\|\sim e^{-c_j\,\eta\cdot 2^n},
+\end{equation}
+which is still exponential in $2^n$ but with a small effective rate.
+At van Hove singularities where $v_g \to 0$, $c_j \to 0$ and the
+decay degenerates to algebraic.
+
+\paragraph{Alternative algorithms.}
+Several alternatives exist. Direct eigenvalue methods solve the
+quadratic eigenvalue problem
+$(\lambda^2 H_{10} + \lambda(H_{00} - \omega^2 \mathbb{I}) +
+H_{01})\xi = 0$ to obtain $g_s$ in closed form~\cite{ando_quantum_1991,ong_efficient_2015},
+and have been claimed to be faster than Sancho-Rubio for
+electron transport~\cite{ong_efficient_2015}. For phonons they have the additional
+advantage of producing mode-resolved transmission directly.
+
+\paragraph{Ideal-lead boundary conditions.}
+The contacts embed \emph{ideal}, scattering-free reservoirs: the decimation
+\cref{eq:sr_eps_s,eq:sr_eps,eq:sr_alpha,eq:sr_beta} is built from the bare
+harmonic lead blocks $H_{00},H_{01}$ and never sees the device anharmonic
+self-energy $\Sigma_s$. The scattering self-energy enters only the
+\emph{device} Dyson equation \cref{eq:system}; it is not folded back into the
+open-boundary problem. Feeding $\Sigma_s$ into the contacts -- effectively
+assuming the semi-infinite reservoir is as anharmonic as the device -- makes
+the right-contact surface eigenproblem intermittently ill-conditioned once
+$\Sigma_s$ grows under self-consistency, and was a source of SCBA divergence at
+finite anharmonicity. Keeping the leads ideal removes it and is the standard
+atomistic-NEGF boundary condition~\cite{luisier_atomistic_2012,sadasivam_atomistic_2014}.
+
+% ----------------------------------------------------------------------

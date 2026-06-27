@@ -1,0 +1,631 @@
+\section{Phonon-Phonon SSE with decomposed FC3}
+\label{sec:phph_decomp}
+% ----------------------------------------------------------------------
+
+The sparsity layers of \cref{ssec:phph_sparsity} reduce the per-pair
+ring contraction from $\cO(\NBS^{4})$ to $\cO(\NBS\,C_a^{3})$. The
+factor $C_a^{3}$ remains the dominant const in
+\cref{eq:cost_phph_total}. We now show that any decomposition of the FC3
+in \cref{sub:fc3_compression} reduces this further to
+$\cO(R\,\NBS\,r_c\,C_a + R^{2}\NBS)$ by collapsing the four-cycle of
+the ring contraction into a single Gram matrix on the propagator.
+The reduction is independent of which decomposition is used in the
+sense that all CP-family decompositions (CP, INDSCAL, Waring, PCP) produce
+the same kernel structure. The symmetry constraints distinguishing
+them affect only which factor vectors enter the Gram product and how
+much it can be symmetrised.
+
+We derive this under two assumptions that hold for the SSE of a single
+SCBA iteration on a single FC3 dataset. First, both vertices of the
+sunset diagram (\cref{fig:sunset_diagram}) are evaluated against the
+same $\Phi^{(3)}$: $\Phi_L \equiv \Phi_R \equiv \Phi$. Second, the
+two internal propagator lines are restrictions of the same Green's
+function $g(\tau)$ to (possibly different) block-row supports.
+
+The section is organised as follows.
+\Cref{ssec:phph_decomp_setup} fixes the notation and the abstract
+separable form. \Cref{ssec:phph_decomp_kernel} derives the factorised
+kernel and identifies the algebraic simplification that distinguishes
+the symmetric ans\"atze from plain CP.
+\Cref{ssec:phph_decomp_ansatze} specialises to each ansatz of
+\cref{sub:fc3_compression}. \Cref{ssec:phph_decomp_blocks} traces
+through the three block-sparsity layers of \cref{ssec:phph_sparsity}
+under decomposition. \Cref{ssec:phph_decomp_compute} gives a concrete
+three-step algorithm and its cost. \Cref{ssec:phph_decomp_qspace}
+addresses the partial Fourier transform.
+\Cref{ssec:phph_decomp_dist} reworks the distributed pipeline of
+\cref{ssec:phph_distribution}.
+
+% ----------------------------------------------------------------------
+\subsection{Setup}
+\label{ssec:phph_decomp_setup}
+% ----------------------------------------------------------------------
+
+Every decomposition considered in \cref{sub:fc3_compression} writes the FC3 vertex as a sum of
+separable terms. The most general form is
+\begin{equation}\label{eq:fc3_separable_general}
+  \Phi_{x y_1 y_2}
+  \;\approx\;
+  \sum_{r=1}^{R} \lambda_r\;\alpha_r(x)\;\beta_r(y_1)\;\gamma_r(y_2),
+\end{equation}
+with weights $\lambda_r\in\mathbb{R}$ and factor vectors
+$\alpha_r,\beta_r,\gamma_r\in\mathbb{R}^{\ndof}$. The symmetry constraints are
+\begin{equation}\label{eq:symmetry_constraints}
+\begin{aligned}
+  \text{CP:}      \quad& \text{no constraint,}\\
+  \text{INDSCAL:} \quad& \beta_r=\gamma_r,\\
+  \text{Waring:}  \quad& \alpha_r=\beta_r=\gamma_r,\\
+  \text{Tucker:}  \quad& \text{$\beta,\gamma$ taken from a common $R_2$-dim basis,}\\
+                   & \text{$\alpha$ from a separate $R_1$-dim basis, plus a small core.}
+\end{aligned}
+\end{equation}
+These constraints reduce parameter count
+(\cref{eq:fc3_matsvd_params,eq:fc3_tucker_params,eq:fc3_cp_params,eq:fc3_indscal_params,eq:fc3_waring_params,eq:fc3_pcp_params})
+and enforce permutation symmetry of
+the reconstructed tensor in $(y_1,y_2)$ (INDSCAL, Waring) or all
+three legs (Waring, PCP). PCP is treated separately in
+\cref{ssec:phph_decomp_ansatze} because its $6$-term explicit
+symmetrisation interacts non-trivially with the kernel.
+
+We collect the factor vectors as columns of three matrices
+$A,B,C \in \mathbb{R}^{\ndof\times R}$ with
+$A_{x,r}\!=\!\alpha_r(x)$, $B_{y,r}\!=\!\beta_r(y)$,
+$C_{y,r}\!=\!\gamma_r(y)$, and the weights as a diagonal matrix
+$\Lambda = \diag(\lambda_1,\dots,\lambda_R)$. Under the constraints
+\cref{eq:symmetry_constraints}, $B=C$ for INDSCAL and $A=B=C\equiv U$
+for Waring. The propagator $g\equiv g(\tau)\in\mathbb{R}^{\ndof\times\ndof}$
+is the time-domain Green's function obtained from Stage~1 of
+\cref{ssec:phph_distribution}. We will not yet distinguish lesser,
+greater, or retarded components, the derivation applies unchanged to
+all three.
+
+% ----------------------------------------------------------------------
+\subsection{Factorised kernel}
+\label{ssec:phph_decomp_kernel}
+% ----------------------------------------------------------------------
+
+The per-pair ring \cref{eq:inner_contraction} is
+\begin{equation}
+  \mathcal{B}_{xx'}
+  = \sum_{y_1 y_2 y_3 y_4}
+    \Phi(x,y_1,y_2)\,g(y_1,y_4)\,g(y_2,y_3)\,
+    \Phi(x',y_3,y_4).
+\end{equation}
+Substituting \cref{eq:fc3_separable_general} for both copies of
+$\Phi$, factoring the $g$-independent parts, and collecting yields
+\begin{align}
+  \label{eq:bubble_factorised}
+  \mathcal{B}_{xx'}
+  &= \sum_{r,s=1}^{R} \lambda_r\,\lambda_s\;
+      \alpha_r(x)\,\alpha_s(x')\;
+      P_{rs}\,Q_{rs},
+  \\
+  \label{eq:gram_P}
+  P_{rs} &\equiv \beta_r^{\!\top} g\,\gamma_s \;=\; (B^{\!\top} g C)_{rs},
+  \\
+  \label{eq:gram_Q}
+  Q_{rs} &\equiv \gamma_r^{\!\top} g\,\beta_s \;=\; (C^{\!\top} g B)_{rs}.
+\end{align}
+The four-cycle in the original ring collapses to two independent
+two-cycles. Each two-cycle is a scalar bilinear form on the
+propagator. The full $\NBS\times\NBS$ propagator entered
+\cref{eq:inner_contraction} four times through tensor contractions. In
+\cref{eq:bubble_factorised,eq:gram_P,eq:gram_Q}, it enters twice as the
+kernel of a quadratic form.
+
+The matrices $P$ and $Q$ defined in \cref{eq:gram_P,eq:gram_Q} are
+not independent. They satisfy the algebraic identity
+\begin{equation}\label{eq:Q_transpose}
+  Q \;=\; C^{\!\top} g\,B \;=\; (B^{\!\top} g^{\!\top} C)^{\!\top}.
+\end{equation}
+
+\emph{INDSCAL ($B=C$).} The two bilinear forms are
+\begin{equation}\label{eq:P_indscal}
+  P_{rs} \;=\; \beta_r^{\!\top} g\,\beta_s
+         \;=\; (B^{\!\top} g B)_{rs}
+         \;=\; Q_{rs},
+\end{equation}
+identical entry-by-entry. The result holds without any symmetry
+assumption on $g$.
+
+\emph{Waring ($A=B=C=U$).} Same as INDSCAL, with the additional
+property that the assembly factor $\alpha$ also reduces to $U$:
+\begin{equation}\label{eq:bubble_waring}
+  \mathcal{B}_{xx'}^{\mathrm{Waring}}
+  = \sum_{r,s} \lambda_r \lambda_s\,U_{x,r}\,U_{x',s}\,
+      \bigl[(U^{\!\top} g\,U)_{rs}\bigr]^{2}.
+\end{equation}
+The bilinear form is squared elementwise; the entire kernel is
+parametrised by a single $\ndof\times R$ matrix $U$ and the weights
+$\lambda$.
+
+For CP without symmetry, $P\ne Q$ in general.
+
+\paragraph{Unified kernel.}
+Under the simplifications above, the bubble \cref{eq:bubble_factorised}
+can be written as a single GEMM--Hadamard--GEMM sequence:
+\begin{align}
+  \label{eq:kernel_step1}
+  V       &= g\,W,                          \\
+  \label{eq:kernel_step2}
+  P       &= W^{\!\top} V,                     \\
+  \label{eq:kernel_step3}
+  H_{rs}  &= \lambda_r\,\lambda_s\,P_{rs}\,P^{\star}_{rs}, \\
+  \label{eq:kernel_step4}
+  \Sigma  &= A\,H\,A^{\!\top},
+\end{align}
+where the choice of $W$ and $P^{\star}$ depends on the ansatz:
+\begin{equation}\label{eq:kernel_choices}
+\begin{aligned}
+  \text{Waring:}\;\; & W = U,\;\; P^\star = P, \;\; A = U, \\
+  \text{INDSCAL:}\;\; & W = B,\;\; P^\star = P, \;\; A = A_{\mathrm{INDSCAL}}, \\
+  \text{CP:}\;\; & W = (B,C),\;\; P^\star = Q, \;\; A = A_{\mathrm{CP}}.
+\end{aligned}
+\end{equation}
+For CP, $W=(B,C)$ denotes that two SpMMs are needed (one against $B$,
+one against $C$) to obtain $V_B=gB$ and $V_C=gC$.INDSCAL and Waring need only
+one SpMM. This is the dominant cost saving from imposing internal
+symmetry on the decomposition.
+
+% ----------------------------------------------------------------------
+\subsection{Specialisation to each ansatz}
+\label{ssec:phph_decomp_ansatze}
+% ----------------------------------------------------------------------
+
+The CP-family ans\"atze all fit the unified kernel
+\cref{eq:kernel_step1,eq:kernel_step2,eq:kernel_step3,eq:kernel_step4}
+with the choices \cref{eq:kernel_choices}. Tucker and the
+matricisation SVD require minor modifications, given below.
+
+\paragraph{CP.}
+$\Phi_{xy_1y_2}^{\mathrm{CP}} = \sum_{r} \lambda_r\,a_r(x)\,b_r(y_1)\,c_r(y_2)$
+with $A,B,C$ independent. The kernel requires both $V_B = gB$ and
+$V_C = gC$; $P = B^{\!\top}V_C$ and (assuming $g=g^{\!\top}$) $Q=P^{\!\top}$,
+giving $H_{rs}=\lambda_r\lambda_s P_{rs}P_{sr}$. The reconstructed
+tensor is generically not $S_2$-symmetric in $(y_1,y_2)$; this
+asymmetry survives into $\Sigma$ unless restored in post-processing.
+
+\paragraph{INDSCAL.}
+$\Phi_{xy_1y_2}^{\mathrm{INDSCAL}} = \sum_{r}\,d_r(x)\,v_r(y_1)\,v_r(y_2)$
+with $B=C\equiv V$ and $A_\mathrm{INDSCAL} = D = [d_1\,\dots\,d_R]$.
+The kernel computes $V_B = gV$, $P=V^{\!\top}V_B$ (a single GEMM-like
+product), and assembles via $\Sigma = D\,(P\circ P)\,D^{\!\top}$ with
+the elementwise square $(P\circ P)_{rs}=\lambda_r\lambda_s P_{rs}^{2}$.
+The reconstructed tensor is exactly $S_2$-symmetric, so the SSE
+inherits exact $\Sigma_{xx'}=\Sigma_{x'x}$ at the algorithmic level.
+
+\paragraph{Waring.}
+$\Phi_{xy_1y_2}^{\mathrm{Waring}} = \sum_{r}\lambda_r\,u_r(p(x))\,u_r(y_1)\,u_r(y_2)$,
+where $p$ is the supercell lift of \cref{sub:fc3_symcp}. With
+$A=B=C=U$, the kernel reduces further: a single matrix $U$
+parametrises both the SpMM input and the output assembly. The bubble
+is symmetric in $(r,s)$ by construction, so $P$ is symmetric
+($P=P^{\!\top}$) and may be computed as a SYRK (upper-triangular GEMM)
+at half the cost of the general INDSCAL GEMM.
+
+\paragraph{PCP.}
+$\Phi^{\mathrm{PCP}}_{xy_1y_2} = \sum_{\xi}\tfrac{\lambda_\xi}{6}
+\sum_{\sigma\in S_3}
+u^{\xi}_{\sigma_1}(p(x))\,u^{\xi}_{\sigma_2}(y_1)\,u^{\xi}_{\sigma_3}(y_2)$.
+Each $\sigma\in S_3$ contributes a CP-shaped term, so PCP is
+algebraically equivalent to CP at rank $6R$ with a specific structure
+on the $6R$ triplets. The kernel
+\cref{eq:kernel_step1,eq:kernel_step2,eq:kernel_step3,eq:kernel_step4}
+applies with $R \to 6R$. For SSE evaluation, PCP is dominated by
+Waring at matched fitting cost; we include it only for completeness.
+
+\paragraph{Tucker.}
+$\Phi_{xy_1y_2}^{\mathrm{Tucker}}=\sum_{pqr}G_{pqr}A_{xp}B_{y_1 q}B_{y_2 r}$
+with $A\in\mathbb{R}^{\ndof\times R_1}$, $B\in\mathbb{R}^{\ndof\times R_2}$
+columnwise orthonormal and a core $G\in\mathbb{R}^{R_1\times R_2\times R_2}$
+with $G_{pqr}=G_{prq}$. The factorised kernel becomes matrix-valued:
+\begin{align}
+  \label{eq:tucker_kernel_step1}
+  V_B    &= g\,B \in\mathbb{R}^{\ndof\times R_2},\\
+  \label{eq:tucker_kernel_step2}
+  M      &= B^{\!\top} V_B \in\mathbb{R}^{R_2\times R_2},\\
+  \label{eq:tucker_kernel_step3}
+  H_{pp'} &= \sum_{q r q' r'} G_{p q r}\,G_{p' q' r'}\,M_{q r'}\,M_{r q'},\\
+  \label{eq:tucker_kernel_step4}
+  \Sigma &= A\,H\,A^{\!\top},
+\end{align}
+The bilinear form is a single $R_2\times R_2$ Gram matrix $M$ (a
+single SpMM-GEMM); the core contraction
+\cref{eq:tucker_kernel_step3} is purely propagator-independent and
+has cost $\cO(R_1^{2}R_2^{3})$ after $S_2$ symmetrisation. The
+propagator-side cost is $\cO(R_2\,\NBS\,r_c\,C_a + R_2^{2}\NBS)$,
+identical in form to the CP family with $R\to R_2$.
+
+% ----------------------------------------------------------------------
+\subsection{Block sparsity}
+\label{ssec:phph_decomp_blocks}
+% ----------------------------------------------------------------------
+
+The unified kernel
+\cref{eq:kernel_step1,eq:kernel_step2,eq:kernel_step3,eq:kernel_step4}
+contracts $g$ against a dense factor matrix $W$ in step
+\cref{eq:kernel_step1} and contracts $H$ against $A$ in step
+\cref{eq:kernel_step4}. Two of the four block-sparsity layers of
+\cref{ssec:phph_sparsity} survive the decomposition unchanged; one is
+absorbed into the factor vectors; one becomes the support pattern of
+$P$.
+
+\paragraph{(a) BT-band of $g$ — preserved.}
+The cut-off $r_c$ on the dynamical matrix gives $g(\tau)$
+a block-banded structure of bandwidth $r_c$ along the transport
+direction (\cref{eq:G_bb_nnz}). The SpMM $V=g\,W$ is therefore a
+block-banded matrix times a dense $\ndof\times R$ matrix. The
+non-zero pattern of $V$ is dictated by $g$: for any block $I$ on the
+transport axis, $V_I = \sum_{|J-I|\le r_c}\,g_{IJ}\,W_J$, a band of
+width $2r_c+1$ in the input. The non-zero count of $V$ is
+\begin{equation}\label{eq:V_nnz}
+  \mathrm{nnz}(V) \;=\; R\cdot\mathrm{nnz}_{\text{cols}}(g)
+                 \;=\; \cO\!\bigl(R\,\NBS\,\NB\bigr)
+                 \;=\; \cO\!\bigl(R\,\ndof\bigr),
+\end{equation}
+provided $W$ is dense (factor vectors with full support along
+transport). The cost of the SpMM is
+$\cO(R\cdot\mathrm{nnz}(g))=\cO(R\,\ndof\,r_c\,C_a)$.
+
+\paragraph{(b) Intra-block atom-pair sparsity of $g$ — preserved.}
+Within each $\NBS\times\NBS$ block, $g_{IJ}$ has nominal density
+$C_a/\NBS$ (with $C_a=\NBS$ in the present dense-block kernel; see
+the forward note in \cref{ssec:phph_sparsity}). The block-level SpMM
+$V_I=\sum_J g_{IJ}\,W_J$ is therefore a sparse--dense block product
+with cost
+$\cO(R\,\NBS\,C_a)$ per source block $J$, summed over the $\cO(r_c)$
+blocks within bandwidth, giving $\cO(R\,\NBS\,r_c\,C_a)$ per output
+block and $\cO(R\,\ndof\,r_c\,C_a)$ for the full SpMM.
+
+\paragraph{(c) FC3 inter-block support — absorbed.}
+The FC3 cut-off
+\cref{eq:fc3_block_support} restricts $\Phi^{(3)}_{I,K_1,K_2}$ to
+block triples with mutual transport-direction distance
+$\le N_\mathrm{c,x}$. After decomposition, the FC3 cut-off is
+absorbed into the support of the factor vectors. Specifically, for
+a CP fit of the full FC3 tensor, each rank-one component
+$\lambda_r\,a_r\otimes b_r\otimes c_r$ has full support
+$\mathrm{supp}(a_r)\times\mathrm{supp}(b_r)\times\mathrm{supp}(c_r)$;
+all such supports must lie within the FC3 cut-off, so each individual
+factor vector has support within $\cO(N_\mathrm{c,x}+\mathrm{spread})$
+transport blocks. The total non-zero count of $W$ is therefore
+\begin{equation}\label{eq:W_nnz}
+  \mathrm{nnz}(W) \;=\; \cO\!\bigl(R\,\NBS\,N_\mathrm{c,x}\bigr)
+                 \;=\; \cO\!\bigl(R\,\ndof\,N_\mathrm{c,x}/\NB\bigr),
+\end{equation}
+substantially smaller than the dense $R\,\ndof$ when
+$N_\mathrm{c,x}\ll\NB$ (true for any transport device longer than
+the FC3 cut-off).
+
+In practice, an unconstrained CP-ALS fit produces factor vectors
+without compact support: the rotational gauge of CP allows globally
+delocalised factors to represent locally supported tensors. To
+preserve the FC3 cut-off as factor-vector support, one of three
+strategies is used: (i) initialise CP-ALS from a spatially localised
+seed (e.g.\ the slice-wise SVD initialisation of
+\cref{sub:fc3_indscal}); (ii) regularise with an $\ell_1$ or
+group-sparse penalty as in
+\cite{papalexakis_parcube_2012, kim_sparse_2007}; or (iii) work in
+the CANDELINC framework of \cref{sub:fc3_other} with a basis that
+respects the FC3 cut-off. All three preserve \cref{eq:W_nnz} at
+matched accuracy; the choice is empirical and beyond the scope of
+the SSE kernel.
+
+\paragraph{(d) Output BT band — preserved by output projection.}
+The output $\Sigma$ lives on the same BT band as $G$, with
+$|I-J|\le 1$. The assembly step \cref{eq:kernel_step4} is therefore
+restricted to this band. \emph{Crucially}, this restriction is
+applied at the output, not at the intermediate $H$: the $R\times R$
+matrix $H$ has dense support and does not inherit the band structure
+of $\Sigma$. We compute $H$ once per $\tau$ and project to the BT
+band when constructing $\Sigma$.
+
+\paragraph{Effective sparsity of $P$.}
+The Gram matrix $P$ has entries $P_{rs} = \beta_r^{\!\top} g\,\gamma_s$.
+Two effects can render $P$ sparse:
+\begin{itemize}
+  \item \emph{Disjoint factor supports.} If
+    $\mathrm{supp}(\beta_r)\cap N_{r_c}(\mathrm{supp}(\gamma_s))=\emptyset$
+    (where $N_{r_c}$ is the $r_c$-block neighbourhood induced by $g$'s
+    bandwidth), then $P_{rs}=0$ exactly.
+  \item \emph{Approximate orthogonality.} For Waring with
+    fitted $u_r$ that are approximately orthonormal in the metric
+    $g$, the off-diagonal entries of $P$ are small. This is a
+    refit-dependent property and we do not assume it.
+\end{itemize}
+The first effect can be substantial: for FC3 with $N_\mathrm{c,x}=3$
+and a device of $\NB$ transport blocks, the fraction of $P_{rs}$
+pairs with overlapping supports scales as
+$N_\mathrm{c,x}/\NB$ — between $10^{-2}$ and $10^{-1}$ at production
+device sizes. Exploiting this sparsity in step
+\cref{eq:kernel_step2} converts the dense $R^{2}\NBS$ GEMM into a
+sparse--sparse product at cost $\cO(R^{2}N_\mathrm{c,x})$, dominated
+by the SpMM cost.
+
+% ----------------------------------------------------------------------
+\subsection{Computation strategy}
+\label{ssec:phph_decomp_compute}
+% ----------------------------------------------------------------------
+
+The per-$\tau$ kernel
+\cref{eq:kernel_step1,eq:kernel_step2,eq:kernel_step3,eq:kernel_step4}
+maps onto three numerical primitives, all standard in modern linear
+algebra libraries:
+\begin{enumerate}
+  \item \emph{Step \cref{eq:kernel_step1}: batched sparse SpMM.}
+        $V = g\,W$, where $g$ is block-banded sparse and $W$ is
+        $\ndof\times R$ with FC3-induced support \cref{eq:W_nnz}.
+        Implemented as a sparse matrix times dense matrix product
+        with $R$ right-hand sides batched into a single SpMM call.
+        Cost: $\cO(R\,\ndof\,r_c\,C_a)$ flops, memory traffic
+        $\cO(\mathrm{nnz}(g) + R\,\ndof)$. With $R$ batched RHSs,
+        the arithmetic intensity is $\cO(R)$ flops/byte, placing the
+        kernel firmly in the compute-bound regime of modern
+        accelerators for $R\gtrsim 32$.
+  \item \emph{Step \cref{eq:kernel_step2}: small dense GEMM.}
+        $P = W^{\!\top}V$, a dense $R\times\ndof$ times $\ndof\times R$
+        product yielding an $R\times R$ matrix.
+        For Waring, $P$ is symmetric and the product reduces to
+        SYRK. Cost: $\cO(R^{2}\,\ndof)$ flops. With $R^{2}$ output
+        entries and $\cO(R\,\ndof)$ input non-zeros, the arithmetic
+        intensity is $\cO(\ndof/R)$ flops/byte, comfortably
+        compute-bound.
+  \item \emph{Step \cref{eq:kernel_step4}: sparse-output sandwich.}
+        $\Sigma = A\,H\,A^{\!\top}$ restricted to the output BT band
+        and any available intra-block atom-pair sparsity
+        (with $C_a=\NBS$ in the present dense-block kernel; see the
+        forward note in \cref{ssec:phph_sparsity}).
+        Implemented as: (i) precompute $T=AH$, a dense $\ndof\times R$
+        matrix, cost $\cO(R^{2}\ndof)$; (ii) for each non-zero
+        entry $(x,x')$ in the output support, compute
+        $\Sigma_{xx'}=T_{x,:}\cdot A_{x',:}^{\!\top}$, cost
+        $\cO(R)$. Total: $\cO(R^{2}\ndof + R\,\ndof\,C_a)$.
+\end{enumerate}
+The Hadamard step \cref{eq:kernel_step3} has cost $\cO(R^{2})$ and
+is negligible.
+
+\paragraph{Per-$\tau$ cost.}
+Summing the dominant terms,
+\begin{equation}\label{eq:per_tau_cost}
+  \mathcal{C}_{\tau}^{\mathrm{decomp}}
+  \;=\;
+  \underbrace{\cO\!\bigl(R\,\ndof\,r_c\,C_a\bigr)}_{\text{SpMM}}
+  \;+\;
+  \underbrace{\cO\!\bigl(R^{2}\,\ndof\bigr)}_{\text{Gram + assembly}}.
+\end{equation}
+This is to be compared with the sparse-ring per-$\tau$ cost
+\cref{eq:cost_phph_total},
+\begin{equation}\label{eq:per_tau_cost_sparse}
+  \mathcal{C}_{\tau}^{\mathrm{sparse}}
+  \;=\;
+  \cO\!\bigl(\ndof\,N_\mathrm{c,x}^{2}\,C_a^{3}\bigr).
+\end{equation}
+At Si-nanoribbon parameters ($C_a\sim 30$, $N_\mathrm{c,x}=3$,
+$r_c\sim 2$), the sparse-ring cost has prefactor
+$N_\mathrm{c,x}^{2}C_a^{3}\sim 2.4\times 10^{5}$; the factorised
+kernel has prefactor $R\,r_c\,C_a + R^{2}\sim 60R + R^{2}$. For
+$R=100$, the factorised kernel is roughly two orders of magnitude
+cheaper.
+
+\paragraph{Crossover.}
+The factorised kernel is cheaper than the sparse ring when
+\begin{equation}\label{eq:crossover}
+  R\,r_c\,C_a + R^{2}
+  \;<\; N_\mathrm{c,x}^{2}\,C_a^{3},
+\end{equation}
+which, for $R\ll C_a$, simplifies to $R\lesssim N_\mathrm{c,x}^{2}\,C_a^{2}/r_c\sim 10^{4}$
+at the same parameters; for $R$ comparable to $C_a$, the $R^{2}$
+term enters and the crossover moves to
+$R\lesssim N_\mathrm{c,x}\,C_a^{3/2}\sim 500$. Reported CP and
+Waring ranks for FC3 of Si, MgO, HgTe, TiNiSn, ZrO$_2$
+\cite{luo_tensor_2025} are well below these bounds, placing the
+factorised kernel firmly in the favourable regime.
+
+\paragraph{Batching over $\tau$.}
+The kernel is local in $\tau$: each $\tau$-slice produces an
+independent $\Sigma(\tau)$. The natural batching strategy is to
+process $N_b$ $\tau$-slices in a single call, stacking the
+$N_b$ propagator slices into a $\ndof\times\ndof\times N_b$ tensor
+and the corresponding $V$ matrices into a $\ndof\times R\times N_b$
+tensor. The SpMM becomes a batched SpMM (cuSPARSE/MKL support);
+the GEMM becomes a batched GEMM. Batch size $N_b$ is chosen
+adaptively from the free HBM, with the dominant memory term being
+the $V$ tensor at $\cO(N_b R\,\ndof)$.
+
+\paragraph{Sparse-factor optimisation.}
+When the factor vectors $W$ are intra-block sparse with density
+$C_a/\NBS$ (the case for FC3-localised factors, see
+\cref{ssec:phph_decomp_blocks}), the GEMM in
+\cref{eq:kernel_step2} can be replaced by a sparse--dense product at
+cost $\cO(R^{2}\,C_a\,N_\mathrm{c,x})$, reducing the second term in
+\cref{eq:per_tau_cost} by a factor $\NBS/(C_a N_\mathrm{c,x})$. The
+SpMM cost is unaffected (it is already proportional to
+$\mathrm{nnz}(g)$, not to the density of $W$).
+
+% ----------------------------------------------------------------------
+\subsection{Transverse periodic case}
+\label{ssec:phph_decomp_qspace}
+% ----------------------------------------------------------------------
+
+In the transverse-periodic setting of \cref{sub:transper_negf}, the
+SSE \cref{eq:sigma_phph} carries an internal sum over a transverse
+wavevector $\qp'$ which couples $g$ at $\qp'$ and $\qp-\qp'$ via the
+FC3 evaluated at the same pair of momenta. We carry the
+factorised kernel through the partial Fourier transform and identify
+the structural simplifications.
+
+\paragraph{Partial Fourier transform of CP factors.}
+Performing the CP decomposition on the real-space FC3
+$\Phi^{(3)}_{\mu,\,l_1\nu_1,\,l_2\nu_2}$ gives factor matrices in
+which the second and third legs include the transverse cell label.
+The partial Fourier transform \cref{eq:fc3_fourier} acts on these
+cell labels and produces
+\begin{equation}\label{eq:cp_fourier_decomp}
+  \tilde\Phi^{(3)}_{\mu\nu_1\nu_2}(\qp,\qp')
+  \;=\; \sum_{r}\lambda_r\,a_r(\mu)\,b_r(\nu_1;\qp)\,c_r(\nu_2;\qp'),
+\end{equation}
+with $\qp$-dependent factor vectors
+$b_r(\nu_1;\qp)=\sum_{l_1}\tilde b_r(l_1,\nu_1)e^{-i\qp\cdot l_1}$ and
+likewise for $c_r$. The CP rank is preserved exactly under the
+partial Fourier transform: the decomposition
+\cref{eq:fc3_separable_general} commutes with the cell-FT because the
+FT acts on each factor leg separately. For Waring, the single
+factor vector $u_r$ has all three legs Fourier-transformed against
+the appropriate cell labels.
+
+\paragraph{Factorised kernel in $\qp$-space.}
+With $\Phi_L=\Phi_R$ at $(\qp',\qp-\qp')$ and $(\qp'-\qp,-\qp')$
+respectively, and noting that for real factor vectors
+$b_r(\nu;-\qp)=b_r(\nu;\qp)^{*}$, the kernel
+\cref{eq:bubble_factorised} becomes
+\begin{align}
+  \label{eq:bubble_qspace}
+  \mathcal{B}_{xx'}(\tau,\qp,\qp')
+  &= \sum_{rs}\lambda_r\lambda_s\,a_r(x)\,a_s(x')\,
+      P_{rs}(\tau,\qp,\qp')\,Q_{rs}(\tau,\qp,\qp'),\\
+  \label{eq:P_qspace}
+  P_{rs}(\tau,\qp,\qp')
+  &= b_r(\cdot;\qp')^{\!\top}\,g(\tau,\qp')\,c_s(\cdot;\qp-\qp')^{*},\\
+  \label{eq:Q_qspace}
+  Q_{rs}(\tau,\qp,\qp')
+  &= c_r(\cdot;\qp-\qp')^{\!\top}\,g(\tau,\qp-\qp')\,b_s(\cdot;\qp')^{*}.
+\end{align}
+The two bilinear forms now involve $g$ at \emph{different} transverse
+momenta, $\qp'$ and $\qp-\qp'$, and are no longer related by transposition
+even for Waring. They are, however, related by a change of summation
+variable: under $\qp'\to\qp-\qp'$,
+$P_{rs}(\tau,\qp,\qp-\qp')=Q_{rs}(\tau,\qp,\qp')$. After summing over
+the full Monkhorst--Pack mesh (which is closed under
+$\qp'\to\qp-\qp'$ for appropriate shifts), the contributions of $P$ and
+$Q$ to $\Sigma$ are equal, so only $P$ need be evaluated.
+
+\paragraph{Kernel restructure.}
+The change-of-variable identity collapses
+\cref{eq:bubble_qspace,eq:P_qspace,eq:Q_qspace} to
+\begin{equation}\label{eq:sigma_qspace_final}
+  \Sigma_{xx'}(\tau,\qp)
+  = \frac{2}{N}\!\sum_{\qp'}\!
+    \sum_{rs}\lambda_r\lambda_s a_r(x)a_s(x')\,
+    P_{rs}(\tau,\qp,\qp')\,P_{rs}(\tau,\qp,\qp-\qp'),
+\end{equation}
+which is a convolution along $\qp'$ of the matrix-valued quantity
+$P(\tau,\qp,\qp')$ with its shift $P(\tau,\qp,\qp-\qp')$. The
+$\qp'$-sum is therefore a Fourier transform of a per-block product, and
+the $N_q^{2}$ factor in \cref{eq:cost_q} is replaced by
+$N_q \log N_q$ after a single FFT along the transverse axis. The
+explicit factor of 2 in \cref{eq:sigma_qspace_final} comes from the
+$P\leftrightarrow Q$ symmetry; for CP without internal symmetry the
+factor is 1 and both bilinear forms enter explicitly.
+
+% ----------------------------------------------------------------------
+\subsection{Distributed implementation}
+\label{ssec:phph_decomp_dist}
+% ----------------------------------------------------------------------
+
+The four-redistribution pipeline of \cref{ssec:phph_distribution} is
+preserved bit-for-bit. The decomposition changes only Stage~2 of the
+pipeline (the per-$\tau$ ring contraction). Stages~1 and~3
+(FFT $G\to g$ and IFFT $\sigma\to\Sigma$), the two interconvertible
+distributions \texttt{stack}/\texttt{nnz}, and the four
+\texttt{stack}$\leftrightarrow$\texttt{nnz} dtransposes are unchanged.
+
+\paragraph{Stage~2 with decomposition.}
+The ring contraction
+\cref{eq:phph_step_A,eq:phph_step_B,eq:phph_step_S} is replaced by
+the unified kernel
+\cref{eq:kernel_step1,eq:kernel_step2,eq:kernel_step3,eq:kernel_step4}.
+On a single rank holding a $\tau$-slice of $g$ in the \texttt{stack}
+distribution, the kernel is purely local in $\tau$ and consists of
+SpMM, GEMM, and the sparse-output sandwich. No communication is
+incurred inside Stage~2 except the FC3-dictionary halo discussed
+below.
+
+\paragraph{Per-rank arithmetic.}
+Summing over $N_\tau$, $N_q^{2}$ (or $N_q\log N_q$ in the
+$\qp'\to\qp-\qp'$ symmetrised form of
+\cref{eq:sigma_qspace_final}) and distributing across $P=P_E\,P_S$
+ranks gives
+\begin{equation}\label{eq:cost_phph_dist_cp}
+  W^{\mathrm{rank}}_\mathrm{phph,decomp}
+  \;=\;
+  \cO\!\Bigl(
+    \tfrac{N_\tau\,N_q^{2}\,N_{AO}\,(R\,r_c\,C_a + R^{2})}{P}
+  \Bigr).
+\end{equation}
+The $C_a^{3}\,N_\mathrm{c,x}^{2}$ factor of \cref{eq:cost_phph_dist}
+is replaced by $R\,r_c\,C_a + R^{2}$. At $C_a=30$, $r_c=2$, $R=100$:
+the old factor is $2.4\times 10^{5}$, the new factor is
+$\sim 1.6\times 10^{4}$ --- a 15$\times$ arithmetic reduction. With
+$\qp'$-FFT symmetrisation (\cref{ssec:phph_decomp_qspace}), an
+additional factor $N_q/\log N_q\sim 50$ is gained for production
+$N_q=400$.
+ 
+% ----------------------------------------------------------------------
+\subsection{Transverse-momentum (q-point) distribution and vertex streaming}
+\label{ssec:phph_qdist}
+% ----------------------------------------------------------------------
+
+The distribution of \cref{ssec:phph_distribution,ssec:phph_decomp_dist}
+spreads the work over frequency ($P_E$, \texttt{comm.stack}) and
+transport blocks ($P_S$, \texttt{comm.block}). In the
+transverse-periodic setting of \cref{ssec:phph_decomp_qspace} a third
+index appears: the external transverse momentum $\qp$. Unlike the
+finite (zone-centre) device, where each $\qp$ is an independent
+external label, the periodic self-energy
+\begin{equation}\label{eq:sigma_q_dist}
+  \Sigma^{\lessgtr}(\qp,\omega)
+  = \frac{i\hbar}{2}\frac{1}{N_q}\sum_{\qp'}\!\int\!\frac{d\omega'}{2\pi}\,
+    \tilde\Phi(\qp',\qp{-}\qp')\,
+    G^{\lessgtr}(\qp',\omega')\,G^{\lessgtr}(\qp{-}\qp',\omega{-}\omega')\,
+    \tilde\Phi(\qp{-}\qp',\qp')
+\end{equation}
+\emph{couples} the momenta through crystal-momentum conservation
+$\qp=\qp'+(\qp-\qp')$: every external $\qp$ draws on the Green's
+functions of \emph{all} internal $\qp'$. The momenta are therefore not
+embarrassingly parallel, and a naive per-$\qp$ split would replicate
+the full $G(\qp')$ set on every rank.
+
+\paragraph{The q-communicator.}
+We add $\qp$ as a third communicator axis alongside block and stack, so
+that the global ranks factor as
+$q\times\mathrm{stack}\times\mathrm{block}$. Concretely
+\texttt{QuatrexCommunicator.configure} gains a \texttt{q\_comm\_size}
+and a third \texttt{MPI\_Comm} split; the previous two-axis layout is
+recovered exactly at \texttt{q\_comm\_size}~$=1$ (the $q$-communicator
+then has one rank and is a no-op), so block and stack behaviour is
+unchanged. Each $q$-rank owns a disjoint slice of the \emph{external}
+$\qp$ mesh and stores only its own per-$\qp$ Green's functions and
+output self-energies. The \emph{internal} $\qp'$ Green's functions that
+\cref{eq:sigma_q_dist} needs are reconstructed once per SCBA iteration
+by an \texttt{all\_gather\_v} over the $q$-communicator -- the
+``data exchange between processors'' inherent to the momentum
+convolution. The explicit external-$\qp$ loop then divides as $1/P_q$,
+while the all-gather of the per-$\qp$ diagonal $G$ carries the
+communication cost; the bubble kernel itself is unchanged. This third
+axis composes with the energy and block axes without touching them: a
+production run can use all three simultaneously
+($P=P_q\,P_E\,P_S$).
+
+\paragraph{Streaming the momentum-space vertex.}
+On an accelerator the binding constraint for
+\cref{eq:sigma_q_dist} is memory rather than arithmetic. The
+Fourier-transformed FC3 vertex
+$\tilde\Phi(\qp,\qp')=T(\qp)\,M\,T(\qp')^{\dagger}$ -- with $T(\qp)$
+the supercell-to-primitive gathering matrix and $M$ the (small,
+real-space) mass-weighted FC3 -- is a dense rank-five object of size
+$N_q^{2}\,\ndof^{3}$ if materialised. At an $8\times8$ transverse mesh
+($N_q=64$) and a wire-scale cross section ($\ndof=63$) this is already
+$\sim 16$~GB, beyond a single device, and it grows as $N_q^{2}$. Since
+the kernel only ever touches the pair
+$(\tilde\Phi(\qp',\qp{-}\qp'),\,\tilde\Phi(\qp{-}\qp',\qp'))$ for the
+momenta in the current batch, we never form the full tensor: with
+\texttt{stream\_phi} enabled the kernel keeps only $T$ and $M$ and
+rebuilds $\tilde\Phi$ on the fly per momentum batch, dropping the peak
+from $\cO(N_q^{2}\ndof^{3})$ to $\cO(N_q\,\ndof^{2})$. This trades a
+vertex recomputation for memory, which is favourable on a GPU where the
+bandwidth-bound bubble contractions dominate the run time regardless,
+and it composes with the $q$-communicator at no extra communication
+(each rank streams only the vertices for its own external-$\qp$ slice).
+The result is algebraically identical to the dense path; the measured
+memory reduction and the near-ideal $q$-axis speed-up are reported in
+\cref{sec:results}.

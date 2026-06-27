@@ -1,0 +1,1051 @@
+\section{Computation of the Phonon-Phonon Scattering Self Energy}
+\label{sec:phph_computation}
+% ----------------------------------------------------------------------
+
+The phonon-phonon SSE in \cref{eq:sigma_phph} involves three computational
+steps that dominate the cost of an SCBA iteration of the anharmonic
+SCAB equations: a four-index ring
+contraction over $y_1,y_2,y_3,y_4$, an internal sum over the
+transverse wavevector $\qp'$, and a frequency convolution along
+$\omega$. The frequency convolution is structurally identical to the
+polarisation that appears in the GW formalism
+\cite{deuschle_electron-electron_2025},
+\begin{equation}\label{eq:gw_polarization}
+  P_{ij}^{\gtrless}(E)
+  = -i \int dE'\;
+       G_{ij}^{\gtrless}(E')\,G_{ji}^{\gtrless}(E'-E),
+\end{equation}
+and reuses the same FFT-based machinery. The $\qp'$-sum couples
+distinct transverse wavevectors through the FC3 vertices
+$\tilde\Phi$ and is unique to the transverse-periodic geometry. The
+inner four-index contraction has no analogue in GW: in
+\cref{eq:gw_polarization}, the contraction structure of $P$ is local
+in the orbital pair $(i,j)$, whereas the phonon bubble couples
+$y_1,\dots,y_4$ across the supercell. In what follows we omit the
+$\gtrless$ superscripts unless the distinction matters; all
+derivations apply unchanged to lesser, greater, and (via the
+fluctuation--dissipation construction of \cref{eq:sigma_r}) retarded
+self-energies.
+
+% ----------------------------------------------------------------------
+\subsection{Frequency convolution and discretisation}
+\label{ssec:phph_freq}
+% ----------------------------------------------------------------------
+
+The integrand in \cref{eq:sigma_phph} contains a single frequency
+convolution $\int d\omega'\;G_1(\omega')\,G_2(\omega-\omega')$. We
+turn it into a pointwise product in time through the Fourier
+transform pair
+\begin{equation}\label{eq:g_tau}
+  g(\tau;\cdot)
+  = \int\!\frac{d\omega}{2\pi}\;
+    G(\omega;\cdot)\,e^{-i\omega\tau},
+  \qquad
+  G(\omega;\cdot)
+  = \int\!d\tau\;g(\tau;\cdot)\,e^{+i\omega\tau},
+\end{equation}
+under which the 1D convolution theorem gives
+\begin{equation}\label{eq:omega_conv}
+  \int\!d\omega'\;
+    G_1(\omega';\cdot)\,G_2(\omega-\omega';\cdot)
+  = \int\!d\tau\;
+    g_1(\tau;\cdot)\,g_2(\tau;\cdot)\,e^{+i\omega\tau}.
+\end{equation}
+Substituting \cref{eq:omega_conv} into \cref{eq:sigma_phph}, the
+bubble takes the $\tau$-domain form
+\begin{equation}\label{eq:sigma_phph_tau}
+\begin{aligned}
+  \Sigma_{xx'}(\omega;\qp)
+  = \frac{i\hbar}{2}
+    &\sum_{y_1y_2y_3y_4}
+    \frac{1}{N}\sum_{\qp'}
+    \tilde\Phi_{xy_1y_2}(\qp',\qp-\qp')\,
+    \tilde\Phi_{x'y_3y_4}(\qp'-\qp,-\qp')\\
+    &\times\int\!d\tau\;
+    g_{y_1y_4}(\tau;\qp')\,g_{y_2y_3}(\tau;\qp-\qp')\,
+    e^{+i\omega\tau}.
+\end{aligned}
+\end{equation}
+The $\omega$-integral has been replaced by a $\tau$-integral, the
+two propagators are now multiplied pointwise, and a
+final $\tau\to\omega$ Fourier transform delivers
+$\Sigma$ on the original frequency grid.
+
+\paragraph{Discrete frequency grid.} Numerically, the SSE is
+evaluated on a uniform grid
+$\omega_n = \omega_\mathrm{min} + n\Delta\omega$ for
+$n=0,\ldots,N_\omega-1$, with broadening
+$\eta = \eta_\mathrm{factor}(\Delta\omega)^{2}$ to suppress
+spurious poles at the resolution scale of the grid. The convolution
+is evaluated by FFT on a zero-padded grid of length
+\begin{equation}\label{eq:nfft_pad}
+  N_\mathrm{fft} = 2N_\omega - 1,
+\end{equation}
+which is the smallest length that avoids cyclic wrap-around between
+the two factors when both have support of width $N_\omega$. Stages~1 and~3
+(\cref{ssec:phph_distribution}) operate on $N_\mathrm{fft}$-long
+arrays, the SSE on the original grid is recovered by truncation to
+the first $N_\omega$ points after the inverse FFT.
+
+\paragraph{Convolution support: $f_{\max}\!\ge\!2\omega_{\max}/2\pi$.}
+The harmonic Green's functions $G^{\gtrless}(\omega)$ have spectral
+support bounded by the largest phonon frequency $\omega_{\max}$ of the
+device, i.e.\ the spectrum of
+$H_{00}+H_{01}+H_{01}^{\dagger}$. The product
+$g_1(\tau)\,g_2(\tau)$ in \cref{eq:omega_conv} has Fourier support
+that is the convolution sum of the individual supports, so
+$\Sigma^{\gtrless}(\omega)$ is nonzero on
+\begin{equation}\label{eq:conv_support}
+  \omega\in[-2\omega_{\max},\,2\omega_{\max}]
+\end{equation}
+and only there. The truncated linear convolution \cref{eq:nfft_pad} is
+unbiased on that interval \emph{only when the grid covers it}, i.e.\
+when $f_{\max}\ge 2\omega_{\max}/2\pi$. If the grid is shorter,
+$f_{\max}<2\omega_{\max}/2\pi$, the bubble contributions at
+$|\omega|\in(f_{\max},2\omega_{\max})$ are missing from the inverse
+FFT and, on a discrete grid, the residual aliases back into the
+visible window. The bubble then carries large spurious contributions
+that fake a strong-coupling self-energy and drive the SCBA loop
+unstable. The required grid size is therefore set by the stiffest
+mode of the device, not by the thermally populated bands; in
+particular, an H-terminated wire with $\omega_{\max}/2\pi\sim 64$\,THz
+from the Si--H stretch needs $f_{\max}\gtrsim 130$\,THz, not the
+$\sim 16$\,THz of a bulk-Si default. \Cref{sec:phonon_solver_pkg}
+documents the runtime safety net that enforces this condition.
+
+\paragraph{Negative-frequency handling.} The bosonic phonon Green's
+functions live on a real frequency grid centred on $\omega=0$. Both
+$\Sigma^{<}$ and $\Sigma^{>}$ involve products of $G^{\gtrless}$ at
+shifted arguments. Depending on the relative sign of $\omega$ and
+$\omega'$, these give two distinct convolution patterns. Following
+the convention used in the GW SSE
+\cite{deuschle_electron-electron_2025}, we can split each product into a
+forward convolution on the positive-frequency support and a
+cross-correlation against the conjugate on the negative-frequency
+support. Concretely, defining
+\begin{equation}
+  \mathrm{conv}(f,g)[\omega]
+    = \int\!d\omega'\,f(\omega')\,g(\omega-\omega'),
+  \qquad
+  \mathrm{corr}(f,g)[\omega]
+    = \int\!d\omega'\,f(\omega')\,g(\omega'-\omega),
+\end{equation}
+the bubble splits as
+\begin{equation}
+  \Sigma^{\gtrless}(\omega) \;\propto\;
+    \mathrm{conv}\bigl(g^{\gtrless},g^{\gtrless}\bigr)[\omega]
+    + \mathrm{corr}\bigl(g^{\gtrless},(g^{\lessgtr})^{*}\bigr)[\omega],
+\end{equation}
+the second term capturing contributions where one factor's frequency
+exceeds $\omega$ in absolute value. Both pieces are evaluated by FFT
+on the padded grid \cref{eq:nfft_pad}. The only book-keeping is the
+sign convention on the frequency axis. The retarded SSE is
+constructed from $\Sigma^{>}-\Sigma^{<}$ via \cref{eq:sigma_r},
+optionally with the Hilbert-transform real-part correction obtained
+by another FFT-based pass.
+
+% ----------------------------------------------------------------------
+\subsection{Inner ring contraction}
+\label{ssec:phph_ring}
+% ----------------------------------------------------------------------
+
+At each working point $(\tau,\qp,\qp')$, the SSE entry $\Sigma_{xx'}$
+contains the four-tensor ring contraction
+\begin{equation}\label{eq:inner_contraction}
+  \mathcal{B}_{xx'}
+  = \sum_{y_1y_2y_3y_4}
+    \Phi_{xy_1y_2}\,g_{y_1y_4}\,g_{y_2y_3}\,\Phi_{x'y_3y_4},
+\end{equation}
+where $\Phi$ stands for either $\tilde\Phi$ at the working
+$(\qp,\qp')$ or the real-space FC3, and the indices each range over
+$\ndof = N_{AO} = \NB\NBS$ degrees of freedom. The graph defined by
+the index structure is a four-cycle: $x \to y_1 \to y_4 \to x'$ via
+$\Phi_L$ and $g$, and $x' \to y_3 \to y_2 \to x$ via $\Phi_R$ and the
+second $g$. The two $\Phi$ legs and two $g$ legs alternate around
+the ring.
+
+A ring of four tensors admits
+three structurally distinct evaluation orders, distinguished by
+which pair of adjacent tensors is contracted first.
+
+\paragraph{Outside-in.} Contract one $\Phi$ leg at a time, starting
+from one corner of the ring. The intermediate $A_{x,c,d} = \sum_{e}
+\Phi_{x,c,e}\,g_{e,d}$ has three free indices and per-entry cost
+$\cO(\ndof)$. Building $A$ for all $(x,c,d)$ costs $\cO(\ndof^{4})$
+and uses $\cO(\ndof^{3})$ memory; iterating around the ring gives
+two more steps of the same shape, for a total cost
+$\cO(\ndof^{4})$.
+
+\paragraph{Balanced tree.} Compute the two halves
+\begin{equation}\label{eq:balanced_tree}
+  T_1(x)_{y_2y_4}
+  = \sum_{y_1}\Phi_{xy_1y_2}\,g_{y_1y_4},
+  \qquad
+  T_2(x')_{y_2y_4}
+  = \sum_{y_3}g_{y_2y_3}\,\Phi_{x'y_3y_4},
+\end{equation}
+in parallel, then contract along the shared $(y_2,y_4)$
+indices,
+\begin{equation}\label{eq:balanced_pair}
+  \mathcal{B}_{xx'}
+  = \sum_{y_2y_4}
+    T_1(x)_{y_2y_4}\,T_2(x')_{y_2y_4}.
+\end{equation}
+Each half-tree has the same arithmetic shape as one outside-in step
+($\cO(\ndof^{4})$ to build, $\cO(\ndof^{3})$ memory per piece). The
+final pairing has cost $\cO(\ndof^{4})$. The total is again
+$\cO(\ndof^{4})$ but now exposes two independent halves that can be
+distributed across disjoint resources.
+
+\paragraph{Inside-out.} Contract the two propagators first into the
+four-index intermediate $C_{y_1y_4y_2y_3}=g_{y_1y_4}g_{y_2y_3}$, then
+sandwich with $\Phi_L,\Phi_R$. This intermediate has four free
+spatial indices and $\cO(\ndof^{4})$ entries; building it costs
+$\cO(\ndof^{4})$ and the subsequent contraction with each $\Phi$
+costs $\cO(\ndof^{5})$. The intermediate also defeats sparsity
+exploitation, because the propagator pair is generically denser
+than either $g$ alone. We discard this order in what follows.
+
+Outside-in (i) and
+balanced-tree (ii) have identical asymptotic cost
+\begin{equation}\label{eq:cic_cost}
+  \mathcal{C}_\mathrm{ic}^\mathrm{dense}
+  = \cO\!\bigl(\ndof^{4}\bigr),
+\end{equation}
+which we take as the unit cost throughout. Balanced-tree is
+preferable when the two halves can be evaluated on different ranks,
+which is the case in our distribution scheme; otherwise the two are
+interchangeable. Outside-in is the natural form for a single-rank
+evaluation and is the form we use to express the per-block kernel
+in \cref{ssec:phph_algebra}.
+
+% ----------------------------------------------------------------------
+\subsection{Q-space and real-space formulations}
+\label{ssec:phph_qspace}
+% ----------------------------------------------------------------------
+
+We present two evaluation strategies of \cref{eq:sigma_phph_tau} that differ in how
+they treat the $\qp'$-sum: a direct evaluation in the Brillouin zone
+(``q-space'' below), or a reformulation in real space via a second
+application of the convolution theorem.
+
+\paragraph{Q-space formulation.} The direct evaluation retains the
+explicit $\qp'$-loop. At each working point $(\tau,\qp,\qp')$, the
+partially Fourier-transformed FC3 $\tilde\Phi_{xy_1y_2}(\qp',\qp-\qp')$
+is needed. We assemble it on the fly by streaming through the
+$N_\perp^{2}$ non-zero real-space FC3 entries with the corresponding
+phase factors. Because $N_\perp^{2} \ll \ndof^{2}$ for realistic
+FC3 cut-offs, this phase assembly is negligible compared with the
+subsequent ring contraction. We never materialise the dense
+$\tilde\Phi$ at every $(\qp,\qp')$. Defining the $\tau$-bubble at
+fixed transverse $\qp$,
+\begin{equation}\label{eq:bubble_q}
+\begin{aligned}
+  \mathcal{B}_{xx'}(\tau;\qp)
+  \equiv \frac{1}{N}\sum_{\qp'}
+    \sum_{y_1y_2y_3y_4}
+    \tilde\Phi_{xy_1y_2}&(\qp',\qp-\qp')\,
+    g_{y_1y_4}(\tau;\qp')\,\\
+    &\times g_{y_2y_3}(\tau;\qp-\qp')\,
+    \tilde\Phi_{x'y_3y_4}(\qp'-\qp,-\qp'),
+\end{aligned}
+\end{equation}
+the SSE follows from a single $\tau\to\omega$ Fourier transform.
+The total cost is
+\begin{equation}\label{eq:cost_q}
+  \mathcal{W}_q = N_\tau\,N_q^{\,2}\,\mathcal{C}_\mathrm{ic},
+\end{equation}
+with $N_\tau = N_\mathrm{fft}$ the number of frequency grid points,
+$N_q$ the number of transverse Brillouin-zone samples (e.g.\
+$N_q=400$ for a $20\times 20$ grid). The factor $N_q^{2}$
+is the direct consequence of the two transverse momentum arguments
+of $\tilde\Phi$ and is the primary cost increase of the
+transverse-periodic problem over the purely local one.
+
+\paragraph{Real-space formulation.} The $N_q^{2}$ factor in
+\cref{eq:cost_q} can in principle be eliminated by applying the
+convolution theorem to the $\qp'$-sum and evaluating the resulting
+expression on a finite real-space lattice of $\vR$ values.
+
+Substituting the Fourier expansion \cref{eq:fc3_fourier} of both
+FC3 factors into \cref{eq:sigma_phph}:
+\begin{align}
+  \tilde\Phi_{xy_1y_2}(\qp',\qp-\qp')
+  &= \sum_{\vc{\rho}_1,\vc{\rho}_2}
+     \Phi_{xy_1y_2}(\vc{\rho}_1,\vc{\rho}_2)\,
+     e^{-i\qp'\cdot\vc{\rho}_1}\,
+     e^{-i(\qp-\qp')\cdot\vc{\rho}_2},
+  \label{eq:v1_expand}\\
+  \tilde\Phi_{x'y_3y_4}(\qp'-\qp,-\qp')
+  &= \sum_{\vc{\rho}_3,\vc{\rho}_4}
+     \Phi_{x'y_3y_4}(\vc{\rho}_3,\vc{\rho}_4)\,
+     e^{-i(\qp'-\qp)\cdot\vc{\rho}_3}\,
+     e^{+i\qp'\cdot\vc{\rho}_4}.
+  \label{eq:v2_expand}
+\end{align}
+Collecting the four phase factors gives
+\begin{equation}\label{eq:phases_combined}
+  e^{-i\qp'\cdot\vc{\rho}_1}\,e^{-i(\qp-\qp')\cdot\vc{\rho}_2}\,
+  e^{-i(\qp'-\qp)\cdot\vc{\rho}_3}\,e^{+i\qp'\cdot\vc{\rho}_4}
+  =
+  \underbrace{e^{+i\qp\cdot(\vc{\rho}_3-\vc{\rho}_2)}}_{\text{$\qp$-dep.}}
+  \cdot
+  \underbrace{e^{-i\qp'\cdot\vc{S}}}_{\text{$\qp'$-dep.}},
+\end{equation}
+with $\vc{S} = \vc{\rho}_1 - \vc{\rho}_2 + \vc{\rho}_3 - \vc{\rho}_4$.
+The $\qp$-dependence is now a single phase
+multiplying everything, and the $\qp'$-dependence is
+in the second factor and in the two $g$-arguments. Pulling the
+$\qp$-phase outside the $\qp'$-sum and applying the convolution
+theorem to the $\qp'$-sum yields
+\begin{equation}\label{eq:conv_result}
+\begin{aligned}
+  \frac{1}{N}\sum_{\qp'} e^{-i\qp'\cdot\vc{S}}\,
+  G_{y_1y_4}(\omega';&\qp')\,G_{y_2y_3}(\omega-\omega';\qp-\qp')\\
+  &= \sum_{\vR}
+    g_{y_1y_4}(\omega';\vR-\vc{S})\,
+    g_{y_2y_3}(\omega-\omega';\vR)\,e^{-i\qp\cdot\vR},
+\end{aligned}
+\end{equation}
+where the shift by $\vc{S}$ in the first $g$ argument reflects the
+multiplication by $e^{-i\qp'\cdot\vc{S}}$ in $\qp'$-space. A change
+of variables $\vR' = \vR - (\vc{\rho}_3 - \vc{\rho}_2)$ combined
+with the identity
+\begin{equation}
+  \vc{\rho}_3 - \vc{\rho}_2 - \vc{S}
+  = \vc{\rho}_4 - \vc{\rho}_1
+\end{equation}
+cancels the $\qp$-dependent phase against the $e^{-i\qp\cdot\vR}$
+factor produced by \cref{eq:conv_result}, leaving
+\begin{equation}\label{eq:sigma_realspace}
+  \Sigma_{xx'}^{\gtrless}(\omega;\qp)
+  = \frac{i\hbar}{2}
+    \sum_{\vR}\int\!d\tau\;
+    \mathcal{B}_{xx'}(\tau;\vR)\,e^{+i\omega\tau}\,e^{-i\qp\cdot\vR},
+\end{equation}
+with the real-space bubble
+\begin{equation}\label{eq:bubble_realspace}
+\begin{aligned}
+  \mathcal{B}_{xx'}(\tau;\vR)
+  \equiv
+  \!\!\sum_{\substack{\vc{\rho}_1,\ldots,\vc{\rho}_4\\y_1,\ldots,y_4}}\!\!
+  &\Phi_{xy_1y_2}(\vc\rho_1,\vc\rho_2)\,
+   \Phi_{x'y_3y_4}(\vc\rho_3,\vc\rho_4)\\
+  &\times g_{y_1y_4}(\tau;\,\vR{+}\vc\rho_4{-}\vc\rho_1)\,
+          g_{y_2y_3}(\tau;\,\vR{+}\vc\rho_3{-}\vc\rho_2).
+\end{aligned}
+\end{equation}
+The structure of \cref{eq:bubble_realspace} replaces the explicit
+$\qp'$-sum by a loop over $N_D \le N_\perp^{4}$ FC3-displacement
+quadruples and an effective lattice $\mathcal{R}_\mathrm{eff}$ of
+size $N_T^\mathrm{eff} = (4 N_\mathrm{cut}+1)^{2}$, the latter
+following from the largest possible $\vR + \vc\rho_i - \vc\rho_j$
+shift with $|\vc\rho_i|\le N_\mathrm{cut}$. The total cost is
+\begin{equation}\label{eq:cost_real}
+  \mathcal{W}_R = N_\tau\,N_D\,N_T^\mathrm{eff}\,\mathcal{C}_\mathrm{ic}.
+\end{equation}
+Comparing \cref{eq:cost_q,eq:cost_real}, the real-space approach
+becomes favourable when $N_D N_T^\mathrm{eff} < N_q^{2}$. With
+$N_\mathrm{cut} = 3$ and $N_\perp = 7$ (a typical FC3 support along
+each transverse direction), $N_D \sim 7^{4} \approx 2400$ and
+$N_T^\mathrm{eff} = 13^{2} \approx 170$, giving $N_D N_T^\mathrm{eff}
+\sim 4\times 10^{5}$. For a $20\times 20$ transverse grid
+($N_q = 400$, $N_q^{2} = 1.6\times 10^{5}$), the q-space form is
+already cheaper, and the gap widens for finer Brillouin-zone
+sampling.
+
+% ----------------------------------------------------------------------
+\subsection{Sparsity layers}
+\label{ssec:phph_sparsity}
+% ----------------------------------------------------------------------
+
+Four sparsity patterns reduce the dense ring cost
+\cref{eq:cic_cost} by several orders of magnitude before any further
+approximation is introduced. These mirror the sparsity
+exploitations of the GW solver
+\cite{vetsch_ab-initio_2025, deuschle_electron-electron_2025} and
+follow from the same physical assumption -- a real-space cut-off on
+inter-atomic interactions -- applied to the harmonic and cubic
+parts of the lattice Hamiltonian.
+
+We denote by $r_{\mathrm{cut}}$ the physical real-space cut-off
+radius applied to both IFC2 and IFC3 (in \AA), by $r_c$ the
+corresponding bandwidth on the block-tridiagonal representation of
+$G^{\gtrless}$ (the number of primitive blocks within $r_{\mathrm{cut}}$
+along the transport direction), by $N_\mathrm{c,x}$ the FC3 cut-off
+in transport-cell units along the transport direction
+($N_\mathrm{c,x}\le 3$ typically), and by $C_a$ the number of atoms
+within $r_{\mathrm{cut}}$ of any reference atom.
+
+\paragraph{(a)~BT-band cut-off on $G^{\gtrless}$.} As in the
+electronic GW problem, applying $r_{\mathrm{cut}}$ to the harmonic
+dynamical matrix gives $G^{\gtrless}$ a block-banded structure of
+width $r_c$ along the transport direction. Block entries $G_{KK'}$
+are non-zero only for $|K-K'|\le r_c$. The total non-zero count of
+$G$ per frequency, before any intra-block sparsity, is
+\begin{equation}\label{eq:G_bb_nnz}
+  \mathrm{nnz}(G)_\mathrm{BB}
+  = \cO\!\bigl(\NB\,r_c\,\NBS^{2}\bigr)
+  = \cO\!\bigl(N_{AO}\,r_c\,\NBS\bigr).
+\end{equation}
+
+\paragraph{(b)~Inter-block FC3 cut-off.} The decay of cubic force
+constants with pair distance (\cref{sub:fc3_compression}) admits the
+same real-space cut-off $r_{\mathrm{cut}}$ on $\Phi^{(3)}$. For
+transport-cell labels $(I,K_1,K_2)$, $\tilde\Phi^{(3)}_{I,K_1,K_2}$
+is non-zero only when
+\begin{equation}\label{eq:fc3_block_support}
+  |I-K_1|, \quad |I-K_2|, \quad |K_1-K_2| \le N_\mathrm{c,x}.
+\end{equation}
+The block-pair index
+\begin{equation}\label{eq:phph_pair_index}
+  \mathcal{P}(I,J)
+  = \bigl\{(K_1,K_2) :
+      \Phi^{(3)}_{I,K_1,K_2}\;\text{and}\;
+      \Phi^{(3)}_{J,K_2,K_1}\;\text{both present}\bigr\},
+\end{equation}
+encodes which inner block-pairs contribute to a given output
+block-pair $(I,J)$. From \cref{eq:fc3_block_support} together with
+the BT-band requirement on the output ($|I-J|\le 1$), the cardinality
+of $\mathcal{P}(I,J)$ is bounded by
+$|\mathcal{P}(I,J)| = \cO(N_\mathrm{c,x}^{2})$, with the proportionality
+constant set by the lattice geometry. For a cubic lattice and
+$N_\mathrm{c,x}=3$, $|\mathcal{P}(I,J)|\le 49$ in the worst case.
+The partial Fourier transform $\Phi^{(3)} \to \tilde\Phi^{(3)}(\qp,\qp')$
+over the transverse cells preserves block-sparsity along the transport direction unchanged.
+
+\paragraph{(c)~Output BT band.} $\Sigma$ inherits the BT structure of
+the upstream SCBA solver: only $(I,J)$ with $|I-J|\le 1$ are
+retained. The number of distinct output block-pairs is therefore
+$\cO(\NB)$, and the bubble decomposes into a finite sum
+\begin{equation}\label{eq:sigma_block_sum}
+  \Sigma_{IJ}(\omega;\qp)
+  = \frac{i\hbar}{2}
+    \sum_{(K_1,K_2)\in\mathcal{P}(I,J)}
+      \mathcal{B}_{IJ}^{K_1K_2}(\omega;\qp).
+\end{equation}
+This output truncation is consistent with the input truncation (a)
+on $G$.
+
+\paragraph{(d)~Intra-block atom-pair sparsity.} Within a single
+transport cell of size $\NBS = 3 N_a N_U$ ($N_a$ atoms per primitive
+cell, $N_U$ primitive cells per transport cell), the same cut-off
+$r_{\mathrm{cut}}$ acts at the atomic level. Each atom couples to only
+$C_a$ neighbours within $r_{\mathrm{cut}}$, so each row of an
+intra-block matrix carries $\cO(C_a)$ non-zero atom pairs
+(times $3\times 3 = 9$ Cartesian-direction entries each, absorbed
+into the constant). The block-level non-zero counts are therefore
+\begin{equation}\label{eq:phph_intra_block_nnz}
+  \mathrm{nnz}\bigl(G^{\gtrless}_{KK'}\bigr) = \cO(\NBS\,C_a),
+  \qquad
+  \mathrm{nnz}\bigl(\Phi^{(3)}_{I,K_1,K_2}\bigr) = \cO(\NBS\,C_a^{2}).
+\end{equation}
+
+\paragraph{Sparsity propagation through the kernel.} The sparsity
+patterns above are not lost by the half-tree contractions in
+\cref{eq:balanced_tree,eq:balanced_pair}. They propagate
+through the pipeline in the same way that they do in
+sparse--sparse matrix multiplication. We make this precise for the
+half-tree $T_1(x)_{y_2y_4} = \sum_{y_1}\Phi_{x,y_1,y_2}g_{y_1,y_4}$.
+
+For fixed transport-cell labels $(I,K_1,K_2)$ within FC3 support, the
+non-zero entries of $\Phi^{(3)}_{I,K_1,K_2}$ at the atomic level
+correspond to triples $(\mu,\nu_1,\nu_2)$ where atoms $\mu,\nu_1,\nu_2$
+are mutually within $r_{\mathrm{cut}}$ of one another. For each such
+$(\mu,\nu_1)$, $g_{\nu_1,\nu_4}$ is non-zero only for $\nu_4$ within
+$r_{\mathrm{cut}}$ of $\nu_1$. The contraction therefore scans
+$\mathrm{nnz}(\Phi)\cdot C_a = \cO(\NBS\,C_a^{3})$ entries to
+produce $T_1$ at fixed $(I,K_1,K_2)$, and $T_1$ itself has support
+on $(I,K_1,K_2)$ atoms-within-cut-off triples, with non-zero count
+$\cO(\NBS\,C_a^{2})$. The second half-tree has the same shape; the
+final ring-closing contraction over the shared $(\nu_2,\nu_4)$
+indices runs over the joint support, again $\cO(\NBS\,C_a^{3})$ per
+working point. The per-pair ring cost reduces from $\NBS^{4}$ to
+\begin{equation}\label{eq:cic_sparse}
+  \mathcal{C}_\mathrm{ic}^\mathrm{sparse}
+  = \cO\!\bigl(\NBS\,C_a^{3}\bigr),
+\end{equation}
+a saving of $(\NBS/C_a)^{3} = (N_a/C_a)^{3}$ over the dense kernel.
+For Si nanoribbons with $N_a/C_a\sim 25$, this is roughly $1.5\times
+10^{4}$.
+
+Combining \cref{eq:cic_sparse} with the q-space cost
+\cref{eq:cost_q} and the $\mathcal{P}$-cardinality bound
+$|\mathcal{P}(I,J)|=\cO(N_\mathrm{c,x}^{2})$, the total q-space SSE
+cost reduces to
+\begin{equation}\label{eq:cost_phph_total}
+  \mathcal{W}_\mathrm{phph}
+  = \cO\!\bigl(N_\tau\,N_q^{2}\,\NB\,N_\mathrm{c,x}^{2}\,
+               \NBS\,C_a^{3}\bigr)
+  = \cO\!\bigl(N_\tau\,N_q^{2}\,N_{AO}\,N_\mathrm{c,x}^{2}\,
+               C_a^{3}\bigr).
+\end{equation}
+
+% ----------------------------------------------------------------------
+\subsection{Separable FC3 approximation}
+\label{ssec:phph_separable}
+% ----------------------------------------------------------------------
+
+The intra-block sparsity layer (d) reduces the per-pair ring cost
+from $\NBS^{4}$ to $\NBS\,C_a^{3}$, but $C_a^{3}$ remains the
+dominant arithmetic factor at production block sizes. The factor can
+be reduced further by exploiting low-rank structure in the FC3
+itself, replacing $\Phi$ by a sum-of-products approximation that
+factorises the ring into a product of two independent bilinear
+forms.
+
+Treating $\Phi_{xy_1y_2}(\vc\rho_1,\vc\rho_2)$ as a matrix with row
+index $(\vc\rho_1,y_1)$ and column index $(\vc\rho_2,y_2)$, a
+rank-$R$ truncated SVD yields
+\begin{equation}\label{eq:fc3_lowrank}
+  \Phi_{xy_1y_2}(\vc\rho_1,\vc\rho_2)
+  \approx \sum_{r=1}^{R}
+    f^{x}_{y_1,r}(\vc\rho_1)\,
+    h_{y_2,r}(\vc\rho_2),
+\end{equation}
+with $R \ll \NBS$, and analogously for the second FC3 factor with
+factors $f',h'$ at rank $R$.  Substituting both into
+\cref{eq:inner_contraction} gives the factorised ring
+\begin{equation}\label{eq:sep_split}
+  \mathcal{B}_{xx'}
+  = \sum_{r,s}
+    \underbrace{
+      \Bigl[\sum_{y_1,y_4}f^{x}_{y_1,r}\,g_{y_1y_4}\,h'_{y_4,s}\Bigr]
+    }_{P^{x}_{rs}}
+    \cdot
+    \underbrace{
+      \Bigl[\sum_{y_2,y_3}h_{y_2,r}\,g_{y_2y_3}\,f'^{x'}_{y_3,s}\Bigr]
+    }_{Q^{x'}_{rs}}.
+\end{equation}
+Naive evaluation of $P^{x}_{rs}$ as $R^{2}$ independent bilinears
+costs $\cO(R^{2}\ndof^{2})$ per working point. Sharing the
+matrix-vector products across $(r,s)$ pairs gives a two-stage
+evaluation:
+\begin{enumerate}
+  \item For each $s$, compute the projected propagator
+    $\vc{v}_s^{y_1} = \sum_{y_4}g_{y_1,y_4}\,h'_{y_4,s}$. With $g$
+    sparse (nnz $\NBS\,C_a$ per block, banded with bandwidth $r_c$),
+    each $\vc{v}_s$ costs $\cO(\ndof\,r_c\,C_a)$. Total over $s$:
+    $\cO(R\,\ndof\,r_c\,C_a)$.
+  \item For each $(r,s,x)$, compute the inner product
+    $P^{x}_{rs} = \sum_{y_1}f^{x}_{y_1,r}\,\vc{v}_s^{y_1}$ at cost
+    $\cO(C_a)$ per output (intra-block-sparse $f$). Total over
+    $(r,s,x)$: $\cO(R^{2}\,\ndof\,C_a)$.
+\end{enumerate}
+The combined per-pair cost is
+\begin{equation}\label{eq:cost_opt}
+  \cO\!\bigl(R\,\ndof\,r_c\,C_a + R^{2}\,\ndof\,C_a\bigr),
+\end{equation}
+to be compared with $\cO(\ndof\,C_a^{3}/\NBS)$ from
+\cref{eq:cic_cost} under the assumption that intra-block
+sparsity is exploitable (cf.\ the forward note in
+\cref{ssec:phph_sparsity}: in the current dense-kernel
+implementation $C_a=\NBS$, and the comparison collapses to the
+asymptotically equivalent $\cO(\NBS^{3})$ baseline). For
+$R\ll C_a^{2}$ the separable form is the cheaper one.
+Structurally richer decompositions (Tucker, CP, INDSCAL, symmetric
+CP; \cref{sub:fc3_tucker,sub:fc3_cp,sub:fc3_indscal,sub:fc3_symcp})
+plug into the same kernel with different factor matrices and the
+same two-stage evaluation.
+
+In the transverse-periodic setting, Fourier-transforming each
+factor in \cref{eq:fc3_lowrank} turns the $\qp'$-sum at fixed
+$(r,s)$ into a convolution evaluated by FFT. The dense
+$\ndof^{2}\times N_q^{2}$ ring is replaced by $R^{2}$ pointwise
+products of two FFT-convolved factors, each of which inherits the
+two-stage assembly cost \cref{eq:cost_opt}.
+
+% ----------------------------------------------------------------------
+\subsection{Algebraic structure: FFT placement and evaluation order}
+\label{ssec:phph_algebra}
+% ----------------------------------------------------------------------
+
+The bubble involves five elementary operations: forward FFT
+$\mathcal{F}_\omega$ along $\omega$, inverse FFT
+$\mathcal{F}^{-1}_\tau$ along $\tau$, contractions $\mathcal{C}_L$
+and $\mathcal{C}_R$ with $\Phi_L$ and $\Phi_R$, and the pointwise
+product $\mathcal{M}_\tau$ that closes the ring at fixed $\tau$.
+Because $\mathcal{F}_\omega$ acts on the $\omega$-axis while
+$\mathcal{C}_{L/R}$ acts only on index axes, the two commute,
+\begin{equation}\label{eq:fft_contraction_commute}
+  \mathcal{F}_\omega\circ\mathcal{C}_{L/R}
+  = \mathcal{C}_{L/R}\circ\mathcal{F}_\omega,
+\end{equation}
+and we may choose the order of operations.
+
+\paragraph{FFT placement.} Two orderings are possible.
+
+\emph{(i) FFT-first.} Take the input $G^{\gtrless}(\omega)$ to the
+$\tau$-domain once, and perform all FC3 contractions on $g(\tau)$.
+The FFT input has $\mathrm{nnz}(G)$ entries (\cref{eq:G_bb_nnz}
+times intra-block sparsity), each FFT'd independently along $\omega$
+at cost $\cO(N_\omega\log N_\omega)$. Total FFT work:
+\begin{equation}\label{eq:fft_cost_first}
+  W_\mathrm{FFT}^\mathrm{first}
+  = \cO\!\bigl(N_\omega\log N_\omega \cdot
+               N_{AO}\,r_c\,C_a\bigr).
+\end{equation}
+
+\emph{(ii) Contract-first.} Perform all index contractions in the
+$\omega$-domain to produce a four-index intermediate of FC3 shape,
+then FFT the result. The intermediate has nnz proportional to
+$\mathrm{nnz}(\Phi^{(3)})\sim N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{2}$,
+each entry needs an FFT along $\omega$ at cost
+$\cO(N_\omega\log N_\omega)$. Total FFT work:
+\begin{equation}\label{eq:fft_cost_after}
+  W_\mathrm{FFT}^\mathrm{after}
+  = \cO\!\bigl(N_\omega\log N_\omega \cdot
+               N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{2}\bigr).
+\end{equation}
+
+he FFT-first ordering is therefore the
+clearly superior choice.
+
+\paragraph{Per-pair kernel.} With the FFT-first ordering, the
+balanced-tree (or, equivalently for one-rank evaluation, outside-in)
+contraction at fixed $(I,J,K_1,K_2,K_1',K_2')\in\mathcal{P}$ -- with
+$\Phi_L\equiv\Phi^{(3)}_{I,K_1,K_2}$, $\Phi_R\equiv\Phi^{(3)}_{J,K_2',K_1'}$,
+and the (generally off-diagonal) link propagators
+$g_a\equiv g_{K_1K_1'}(\tau)$, $g_b\equiv g_{K_2K_2'}(\tau)$ -- takes the
+form
+\begin{align}
+  A_{w,a,c,d}
+    &= \sum_{e}(\Phi_L)_{a,c,e}\,(g_b)_{w,e,d},
+    \label{eq:phph_step_A}\\
+  B_{w,a,b,d}
+    &= \sum_{c}A_{w,a,c,d}\,(g_a)_{w,c,b},
+    \label{eq:phph_step_B}\\
+  \hat\Sigma_{w,a,J}
+    &= \sum_{b,d}B_{w,a,b,d}\,(\Phi_R)_{J,d,b},
+    \label{eq:phph_step_S}
+\end{align}
+where $w$ enumerates the padded $\tau$-grid of size
+$N_\mathrm{fft}=2N_\omega-1$, $\Phi_L \equiv \Phi^{(3)}_{I,K_1,K_2}$
+and $\Phi_R \equiv \Phi^{(3)}_{J,K_2,K_1}$ are the FC3 blocks for
+the working triplet, and $g_a \equiv \mathcal{F}_\omega^{-1}\bigl[
+G^{\gtrless}_{K_1\bullet}\bigr]$,
+$g_b \equiv \mathcal{F}_\omega^{-1}\bigl[G^{\gtrless}_{K_2\bullet}\bigr]$
+are the FFTs of the relevant blocks of $G$ along the transport
+direction. The intermediates $A,B$ are stored only on the joint
+sparse support of their inputs: $A$ on
+$\mathrm{supp}(\Phi_L)\cap\mathrm{supp}(g_b)$ (which has nnz
+$\cO(\NBS\,C_a^{2})$ per $\tau$ at fixed $(I,K_1,K_2)$), and
+similarly for $B$.
+
+An optimisation arises from sharing intermediates across FC3 triplets
+that share an inner block. For fixed $K_1$, all
+$(I,K_2)\in\mathcal{P}$ produce $A$-tensors that share the same
+$g_a$-input. The $\mathcal{C}_L$ contraction can therefore be
+batched into a single sparse einsum over the FC3 entries with
+shared $K_1$.. Analogous sharing
+applies across $K_2$.
+
+% ----------------------------------------------------------------------
+\subsection{Distribution and parallelisation}
+\label{ssec:phph_distribution}
+% ----------------------------------------------------------------------
+
+The FFT-first pipeline factorises into three computational stages,
+each of which is local in a different index. Let $P_E$ be the number of
+ranks distributed along the $\omega$-axis, $P_S$ the number of ranks
+distributed along the transport-direction blocks $I$ (the spatial
+decomposition of \cite{vetsch_ab-initio_2025}), and $P=P_E P_S$ the
+total rank count.
+
+\paragraph{Stages.} We can split the computation in three stages,
+\begin{align}
+  g_{ij}(\tau)
+    &= \mathcal{F}_{\omega\to\tau}\bigl[G_{ij}(\omega)\bigr]
+    \qquad\text{(Stage~1: forward FFT, local in $(i,j)$)},
+    \label{eq:phph_stage1}\\
+  \sigma_{xx'}(\tau)
+    &= \!\!\sum_{(K_1,K_2)\in\mathcal{P}(I,J)}\!\!
+       \mathcal{B}_{IJ}^{K_1K_2}(\tau)
+    \qquad\text{(Stage~2: ring contraction, local in $\tau$)},
+    \label{eq:phph_stage2}\\
+  \Sigma_{xx'}(\omega)
+    &= \tfrac{i\hbar}{2}\,
+       \mathcal{F}^{-1}_{\tau\to\omega}\bigl[\sigma_{xx'}(\tau)\bigr]
+    \qquad\text{(Stage~3: inverse FFT, local in $(I,J)$)}.
+    \label{eq:phph_stage3}
+\end{align}
+Stage~1 acts independently on each $(i,j)$ entry, Stage~2 acts independently at
+each $\tau$ but couples block-diagonal $g$-blocks at different
+$(K_1,K_2)$, and Stage~3 acts independently on each output $(I,J)$.
+
+Following the GW solver, we use a block-banded sparse container with two
+interconvertible distributions:
+\begin{itemize}
+  \item \texttt{stack}: each rank holds an $\omega$-slice (or
+        $\tau$-slice after FFT) for the full BT band. The non-zero
+        pattern of the BT band is replicated on every rank, the
+        $\omega$-axis is partitioned across $P_E$.
+  \item \texttt{nnz}: each rank holds the full $\omega$-axis for an
+        $(i,j)$-slice of the BT band. The frequency axis is
+        replicated, the non-zero pattern is partitioned across
+        $P_E P_S = P$.
+\end{itemize}
+The \texttt{dtranspose} primitive converts between the two via a
+balanced \texttt{Alltoall}. Stage~1 and Stage~3 are local in
+\texttt{nnz}; Stage~2 is local in \texttt{stack}. Placing each stage in its preferred
+distribution gives a four-redistribution pipeline:
+\begin{enumerate}[label=(\roman*)]
+  \item \texttt{stack}$\to$\texttt{nnz} on $G^{\gtrless}$.
+  \item \texttt{nnz}: FFT $G\to g(\tau)$.
+  \item \texttt{nnz}$\to$\texttt{stack} on $g(\tau)$.
+  \item \texttt{stack}: per-$\tau$ ring contraction
+        \cref{eq:phph_step_A,eq:phph_step_B,eq:phph_step_S} (Stage~2).
+  \item \texttt{stack}$\to$\texttt{nnz} on $\sigma(\tau)$.
+  \item \texttt{nnz}: IFFT $\sigma\to\Sigma$ (Stage~3).
+  \item \texttt{nnz}$\to$\texttt{stack} on $\Sigma$ for hand-off
+        to the next SCBA iteration.
+\end{enumerate}
+The four redistributions occur at steps (i), (iii), (v), (vii).
+
+\paragraph{Per-rank cost derivation.} Each stage's cost follows
+from the sparsity bookkeeping of \cref{ssec:phph_sparsity} together
+with the distribution above.
+
+\emph{Stage~1 (FFT, $G$ in \texttt{nnz})}. Memory: each rank holds
+the full $\omega$-axis for its share of the BT-band non-zero blocks.
+With $\mathrm{nnz}(G)$ per $\omega$ given by \cref{eq:G_bb_nnz}, the
+per-rank footprint is
+\begin{equation}
+  M^{(1)}_\mathrm{rank}
+  = \cO\!\Bigl(\frac{N_\omega \cdot N_{AO}\,r_c\,\NBS}{P}\Bigr).
+\end{equation}
+Computation: each non-zero $(I,J)$ block is FFT'd elementwise
+along $\omega$; per-rank work is the same expression times
+$\log N_\omega$:
+\begin{equation}
+  W^{(1)}_\mathrm{rank}
+  = \cO\!\Bigl(\frac{N_\omega\log N_\omega \cdot N_{AO}\,r_c\,\NBS}{P}\Bigr).
+\end{equation}
+Communication: the \texttt{stack}$\to$\texttt{nnz} dtranspose has
+the same volume as the memory footprint (this is the entire payload
+that traverses the dtranspose).
+
+\emph{Stage~2 (ring contraction, $g(\tau)$ in \texttt{stack})}. The
+arithmetic at each working point is bounded by
+\cref{eq:cic_cost}; summed over all working points and
+distributed across all ranks,
+\begin{equation}
+  W^{(2)}_\mathrm{rank}
+  = \cO\!\Bigl(\frac{N_q^{2}\,N_\tau\,N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}\Bigr).
+\end{equation}
+Memory: dominated by the FC3 dictionary, which is partitioned along
+its first leg $I$ across $P_S$ but not along $\omega$ (the FC3 is
+$\omega$-independent). Each $P_S$ rank therefore holds
+\begin{equation}
+  M^{(2)}_\mathrm{rank}
+  = \cO\!\Bigl(\frac{N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{2}}{P_S}\Bigr).
+\end{equation}
+The $g(\tau)$ payload itself is in \texttt{stack} and adds an
+$\cO(M^{(1)}_\mathrm{rank})$ contribution which is sub-leading at
+production block sizes. Communication: the only Stage~2
+communication is the spatial halo exchange discussed below.
+
+\emph{Stage~3 (IFFT, $\sigma(\tau)$ in \texttt{nnz})}. The output
+$\Sigma$ inherits the BT band of $G$: only $|I-J|\le 1$ blocks are
+retained, each stored densely. The output entry count per $\omega$
+is therefore $\cO(N_{AO}\,\NBS)$ (the BT-band factor $r_c$ of $G$
+is replaced by the strict $|I-J|\le 1$ output band). Memory and
+computation scale as
+\begin{equation}
+  M^{(3)}_\mathrm{rank}
+    = \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,\NBS}{P}\Bigr),
+  \qquad
+  W^{(3)}_\mathrm{rank}
+    = \cO\!\Bigl(\frac{N_\omega\log N_\omega\,N_{AO}\,\NBS}{P}\Bigr).
+\end{equation}
+
+\paragraph{Spatial decomposition and halo.} When $P_S>1$ ranks
+partition the transport-direction blocks, the FC3 cut-off and the
+$G$-band imply that an output block $I\in\mathcal{I}_p$ couples only
+to band links $g_{KK'}$ within a shell of width
+$N_h=N_\mathrm{c,x}+r_c$ of $\mathcal{I}_p$ (the pair-index
+constraint that $\Phi_{J,K_2',K_1'}$ exist often tightens this to the
+vertex reach $N_\mathrm{c,x}$). Outputs are assigned by the
+$\min(I,J)$ rule so the owner can both compute and store $\Sigma_{IJ}$
+(\cref{rem:arrow}); each rank then needs only its assigned range
+$\mathcal{I}_p$ plus a width-$N_h$ halo fetched from its two
+immediate neighbours. The halo traffic per $(P_E,P_S)$ rank is
+\begin{equation}\label{eq:halo_volume}
+  V_\mathrm{halo}^\mathrm{rank}
+  = \cO\!\Bigl(\frac{N_\tau\,N_h\,\NBS^{2}}{P_E}\Bigr),
+\end{equation}
+independent of $\NB$ (a surface term), plus $\cO(\alpha)$ latency for
+the $\cO(1)$ neighbour messages per iteration.
+
+\paragraph{Aggregate per-rank cost.} The dominant cost contributions
+balance across stages and ranks, giving
+\begin{align}
+  W^\mathrm{rank}_\mathrm{phph}
+    &= \cO\!\Bigl(\frac{N_q^{2}\,N_\tau\,N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}\Bigr),
+    \label{eq:cost_phph_dist}\\
+  V^\mathrm{rank}_\mathrm{phph}
+    &= \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,r_c\,\NBS}{P}\Bigr),
+    \label{eq:vol_phph_dist}\\
+  M^\mathrm{rank}_\mathrm{phph}
+    &= \cO\!\Bigl(\frac{N_\omega\,N_{AO}\,r_c\,\NBS}{P}\Bigr)
+       + \cO\!\Bigl(\frac{N_{AO}\,N_\mathrm{c,x}^{2}\,\NBS^{2}}{P_S}\Bigr).
+    \label{eq:mem_phph_dist}
+\end{align}
+The two terms in \cref{eq:mem_phph_dist} reflect the two kinds of
+data resident on a rank: the $\omega$-distributed $G$ and $\Sigma$
+payloads (split over $P$) and the $\omega$-independent FC3
+dictionary (split over $P_S$ only). Stage~2 dominates the
+arithmetic; Stages~1 and 3 dominate the communication.
+
+% ----------------------------------------------------------------------
+\subsection{Memory and batching}
+\label{ssec:phph_memory}
+% ----------------------------------------------------------------------
+
+The peak memory consumer in the per-pair kernel is the intermediate
+$A$ or $B$ in \cref{eq:phph_step_A,eq:phph_step_B}, both of which
+are dense $\NBS^{3}$-shaped tensors per $\tau$, i.e.\
+$\cO(N_\mathrm{fft}\,\NBS^{3})$ entries across the padded grid.
+At production block sizes ($\NBS\sim 2\times 10^{3}$,
+$N_\omega\sim 10^{4}$), this is several TB per block triplet in
+complex FP64 -- well beyond a single device. Two batching axes keep
+the resident working set bounded:
+\begin{itemize}
+  \item The $\tau$-axis is point-wise within Stage~2 and can be
+        batched without inducing additional communication. Batches
+        of $N_b$ contiguous $\tau$-slices are sized adaptively from
+        the free HBM at runtime, mirroring the GW polarisation
+        kernel's batching strategy (\texttt{PCoulombScreening.compute}
+        in \cite{vetsch_ab-initio_2025}).
+  \item The output $(I,J)$-axis is batched analogously, since the
+        contributions from different $(I,J)$ pairs are independent;
+        the per-batch intermediate footprint is then
+        $\cO(N_b\,\NBS^{3})$ per active $(I,J)$ pair.
+\end{itemize}
+
+The FC3 dictionary, with non-zero count
+$\cO(\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3})$ for block-dense storage,
+is partitioned along its first leg $I$ across the $P_S$ spatial
+ranks. With $\NBS\sim 2000$, $N_\mathrm{c,x}=3$ shells, the per-rank
+FC3 footprint is hundreds of GB on a single device -- the
+single-device regime is only practical for much smaller transport
+cells ($\NBS\lesssim 300$). The compressed FC3 representations of
+\cref{eq:fc3_lowrank,sub:fc3_compression} replace the per-block
+$\NBS^{3}$ count by $R\,\NBS$ at moderate $R$ and integrate into
+the same kernel and distribution scheme without further
+modification; together with the GPU-resident dense BLAS that
+already dominates Stage~2's arithmetic, they bring per-rank FC3
+storage and per-pair arithmetic back to the few-GB / few-TFLOP
+regime that fits a single HBM device.
+
+% ----------------------------------------------------------------------
+\subsection{Implemented distributed phonon-phonon SSE}
+\label{ssec:phph_dist_impl}
+% ----------------------------------------------------------------------
+
+The current quatrex production implementation
+(\texttt{quatrex.phonon.sse\_phonon\_phonon.SigmaPhononPhonon})
+realises the dense-block kernel of \cref{eq:inner_contraction} as a
+\emph{full off-diagonal ring}: every band link $g_{KK'}^{\gtrless}$
+with $|K-K'|\le r_c$ enters Stage~2 -- not merely the diagonal
+$g_{KK}$ -- so the inter-slab coherence that a diagonal-$G$
+approximation discards is retained, while the output band stays
+$|I-J|\le 1$. It uses no FC3 decomposition
+(\cref{sec:phph_decomp} remains a future optimisation) and follows
+the FFT-first pipeline of \cref{ssec:phph_distribution} verbatim,
+distributing over the frequency ($P_E$, \texttt{comm.stack}) and
+transport-block ($P_S$, \texttt{comm.block}) axes.
+
+\paragraph{FFT-first pipeline.} A single SCBA iteration runs the
+six steps of \cref{ssec:phph_distribution}, reusing the GW
+solver's \texttt{dtranspose} machinery
+\cite{vetsch_ab-initio_2025} for the four redistributions:
+\begin{enumerate}[label=(\roman*)]
+  \item \emph{State-restoration contract.} The incoming
+        distribution state of every buffer is recorded on entry and
+        restored in a \texttt{finally} block, so the routine
+        composes with the surrounding SCBA loop (which hands the
+        Green's functions over in \texttt{nnz}).
+  \item \emph{Forward FFT in \texttt{nnz}.} With $G^{\gtrless}$ in
+        \texttt{nnz} (full $\omega$ local, non-zeros partitioned
+        over $P$), the padded forward transform
+        $g^{\gtrless}(\tau)=\mathcal{F}\{G^{\gtrless}(\omega)\}$ is
+        a local operation into cached length-$N_\tau$ buffers that
+        share $G$'s exact non-zero ordering; the FFT work and this
+        storage divide over $P$.
+  \item \emph{Redistribute $g(\tau)$ to \texttt{stack}.} Each
+        \texttt{comm.stack} rank now owns a $\tau$-slice of the full
+        band, block-addressable; the spatial halo (below) supplies
+        the off-window neighbour blocks.
+  \item \emph{Ring contraction per $\tau$ (Stage~2), in
+        \texttt{stack}.} For each owned output $(I,J)$ the rank sums
+        $\mathcal{P}(I,J)$ of
+        $\Phi\,g_{K_1K_1'}(\tau)\,g_{K_2K_2'}(\tau)\,\Phi$ at its
+        $\tau$-slice (the three-\texttt{einsum} \texttt{ring\_contract}
+        kernel), streaming $\Phi$ from the block dictionary.
+  \item \emph{Redistribute $\sigma(\tau)$ to \texttt{nnz}.} A
+        \emph{partition}, not a broadcast: each $(I,J)$ full-$\tau$
+        lands on exactly one rank, which is what prevents a
+        $P_E$-fold double count.
+  \item \emph{Inverse FFT in \texttt{nnz}.}
+        $\Sigma^{\gtrless}(\omega)=\tfrac{i\hbar}{2}\,
+        \mathcal{F}^{-1}\{\sigma^{\gtrless}(\tau)\}|_{[0:N_\omega]}$
+        added into the outputs; the retarded part follows from the
+        bosonic Hilbert transform
+        $\Sigma^R=\tfrac{1}{2}(\Sigma^>{-}\Sigma^<)
+        +\tfrac{i}{2}\mathcal{H}\{\Sigma^>{-}\Sigma^<\}$, evaluated
+        along the (locally complete) $\omega$ axis.
+\end{enumerate}
+Because the contraction is in $\tau$-space and partitioned over
+$P_E$, the full-$\omega$ band is never replicated on every rank --
+the memory bottleneck of the earlier diagonal-gather design.
+
+\paragraph{Spatial halo and addressing.} Under $P_S>1$ the output
+$(I,J)$ is assigned to the rank owning block $\min(I,J)$; arrow
+partitioning (\cref{rem:arrow}) guarantees that this rank stores
+$\Sigma_{IJ}$ and can write it through the block indexer. The
+ring needs band blocks $g_{KK'}(\tau)$ that may lie one shell
+outside the rank's window; those are fetched from the immediate
+\texttt{comm.block} neighbours by a width-$N_h$ ($N_h=N_\mathrm{c,x}+r_c$)
+halo. Each rank sends a neighbour exactly the links that
+neighbour's outputs need and which fall in its own window, and
+receives the symmetric set; the send/receive lists follow from the
+global pair index and block ranges, so both ends enumerate them in
+the same order and the non-overtaking \texttt{Isend}/\texttt{Irecv}
+match per \texttt{(source, tag)} (the bidirectional exchange of
+\texttt{qttools.datastructures.routines.arrow\_partition\_halo\_comm},
+reused by the recursive Green's-function solver). The halo blocks
+are read transparently alongside local blocks during the
+contraction.
+
+\paragraph{Per-rank cost.} The arithmetic is the FFT plus the
+dense ring summed over the rank's owned outputs and $\tau$-slice,
+both divided over the full $P=P_EP_S$:
+\begin{equation}\label{eq:cost_phph_impl}
+  W^\mathrm{rank}_{\mathrm{phph,impl}}
+  = \cO\!\Bigl(
+      \frac{N_\tau\log N_\tau\,\NB\,r_c\,\NBS^{2}}{P}
+    \Bigr)
+  + \cO\!\Bigl(
+      \frac{N_\tau\,\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}
+    \Bigr).
+\end{equation}
+Communication is the four energy redistributions plus the spatial
+halo,
+\begin{equation}\label{eq:vol_phph_impl}
+  V^\mathrm{rank}_{\mathrm{phph,impl}}
+  = \underbrace{\cO\!\Bigl(\frac{N_\omega\,\NB\,r_c\,\NBS^{2}}{P}\Bigr)}_{\text{4 \texttt{dtranspose}}}
+  + \underbrace{\cO\!\Bigl(\frac{N_\tau\,N_h\,\NBS^{2}}{P_E}\Bigr)}_{\text{halo, \cref{eq:halo_volume}}}
+  + \cO(\alpha),
+\end{equation}
+with $\alpha$ the per-message latency of the $\cO(1)$ neighbour
+exchanges. The halo term is independent of $\NB$ (surface, not
+volume). Memory divides over $P$ for the frequency-resident data,
+over $P_S$ for the $\omega$-independent FC3 dictionary, plus a
+transient halo buffer:
+\begin{equation}\label{eq:mem_phph_impl}
+  M^\mathrm{rank}_{\mathrm{phph,impl}}
+  = \cO\!\Bigl(\frac{N_\tau\,\NB\,r_c\,\NBS^{2}}{P}\Bigr)
+  + \cO\!\Bigl(\frac{\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P_S}\Bigr)
+  + \cO\!\Bigl(\frac{N_\tau\,N_h\,\NBS^{2}}{P_E}\Bigr).
+\end{equation}
+Every intrinsic-data term thus divides over the full rank count;
+the only residual overheads are the two \emph{irreducible}
+couplings -- the energy all-to-all (the convolution couples all
+frequencies) and the spatial halo (the operator is banded) -- both
+$\cO(\text{surface})$. This is the communication-optimal point for
+the finite block-tridiagonal device.
+
+\begin{lemma}[Arrow partitioning resolves the boundary block]\label{rem:arrow}
+The distributed container partitions the block-sparse non-zeros
+\emph{arrow-wise} (\texttt{dsdbcoo.py}): rank $r$, owning the global
+element window $[s_r,e_r)$, stores every entry whose row and column
+both lie at or beyond $s_r$ and at least one of which lies before
+$e_r$. Consequently each band block $g_{KK'}$ is stored on, and
+addressable by, the rank owning block $\min(K,K')$. The boundary
+block $g_{I_\mathrm{lo},I_\mathrm{lo}-1}$ that a rank cannot index
+in its own frame (the column lies below its window) is exactly the
+block its lower neighbour holds in the down-arm of its arrow -- so
+no raw-data access is needed, only the nearest-neighbour halo above.
+\end{lemma}
+
+\paragraph{Distribution-algorithm comparison.}
+\Cref{tab:phph_dist} contrasts the per-rank bounds of the retired
+diagonal-gather design, the implemented FFT-first $\times$ spatial-halo
+algorithm, and the $q$-resolved variants (\cref{ssec:phph_qspace}).
+The implemented algorithm is preferred whenever
+$\NB/P_S \gg N_h$ (so the halo surface is negligible against the
+owned volume); a band-replication variant ($P_S=1$, no halo) is
+simpler but does not divide the band over the spatial axis and is
+therefore confined to short devices.
+\begin{table}[htb]
+  \centering
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    algorithm & work $W^\mathrm{rank}$ & comm.\ $V^\mathrm{rank}$ & memory $M^\mathrm{rank}$ \\
+    \midrule
+    diagonal gather (retired)
+      & $\dfrac{N_\omega\log N_\omega\,\NB N_\mathrm{c,x}^{2}\NBS^{4}}{P_S}$
+      & $\dfrac{N_\omega\NB\NBS^{2}}{P}$
+      & $\dfrac{N_\omega\NB\NBS^{2}}{P}+\dfrac{\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P_S}$ \\[1.4ex]
+    FFT-first $\times$ halo (\emph{impl.})
+      & $\dfrac{N_\tau\,\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P}$
+      & $\dfrac{N_\omega\NB r_c\NBS^{2}}{P}+\dfrac{N_\tau N_h\NBS^{2}}{P_E}$
+      & $\dfrac{N_\tau\NB r_c\NBS^{2}}{P}+\dfrac{\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P_S}$ \\[1.4ex]
+    $q$-dense vertex
+      & $\dfrac{N_q^{2}N_\tau N_{AO}N_\mathrm{c,x}^{2}\NBS^{3}}{P}$
+      & + dense $\tilde\Phi$: $\cO(N_q^{2}\NBS^{3})$
+      & $+\,\cO(N_q^{2}\NBS^{3})$ \\[1.0ex]
+    $q$-streamed (real-space)
+      & $\dfrac{N_q\,N_T^{\mathrm{eff}}N_\tau\,\cdots}{P}$
+      & no dense vertex
+      & $\cO(N_q\NBS^{2})$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Per-rank cost of the candidate self-energy distribution
+  algorithms. The implemented FFT-first $\times$ spatial-halo scheme
+  divides every intrinsic-data term over $P=P_EP_S$, leaving only the
+  two irreducible $\cO(\text{surface})$ couplings (the energy
+  all-to-all and the nearest-neighbour halo). For the transverse-periodic
+  problem the real-space-streamed vertex replaces the dense
+  $\cO(N_q^{2}\NBS^{3})$ Fourier vertex once $N_D N_T^{\mathrm{eff}}<N_q^{2}$
+  (\cref{ssec:phph_qspace}).}
+  \label{tab:phph_dist}
+\end{table}
+
+\paragraph{Validation.} The implementation is pinned bit-for-bit
+against an independent dense oracle in
+\texttt{tests/quatrex/phonon/test\_sse\_phonon\_phonon.py}: single
+transport cell, off-diagonal output, and multi-block ($N_B\ge 3$)
+with genuine off-diagonal vertices, all to $<10^{-10}$ relative.
+The full off-diagonal ring is further checked on \emph{real}
+bulk-silicon multi-cell force constants
+(\texttt{phonon/scripts/verify/phph\_real\_fc3\_parity.py}) and the
+self-energy is verified \emph{bit-identical across rank counts}:
+under \texttt{comm.stack} ($P_E=1,2,3,4$) and under
+\texttt{comm.block}$\times$\texttt{comm.stack} factorisations
+($2{\times}2$, $3{\times}2$ with $N_B\ge 4$, so the boundary outputs
+exercise the halo), to $\sim10^{-15}$
+(\texttt{phph\_block\_parallel\_check.py}). A separate test pins the
+state-restoration contract.
+
+\paragraph{Composition with the Interaction registry.}
+The implemented bubble is registered as
+\texttt{PhononPhononInteraction}, one of several concrete
+\texttt{Interaction} instances iterated by the SCBA driver
+(\texttt{quatrex.core.scba.SCBA.\_compute\_interactions}). The
+registry is the architectural seam for adding a coupled
+electron-phonon SSE: a future
+\texttt{ElectronPhononInteraction} reads from both the electron
+and phonon subsystems' Green's functions and writes its
+contribution into the appropriate $\sigma_*$ buffer, using the
+same \texttt{comm.stack}/\texttt{comm.block} grid and the same
+\texttt{dtranspose} machinery as the existing interactions, with
+no further driver-side changes required. In particular, the
+state-restoration contract above guarantees that
+\texttt{PhononPhononInteraction.compute} can be sequenced before
+or after a future \texttt{ElectronPhononInteraction.compute}
+without spurious distribution-state transitions between them.
+
+% ----------------------------------------------------------------------
