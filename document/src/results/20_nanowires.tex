@@ -112,10 +112,12 @@ or in the $\eta\to0$ limit of \cref{sec:res_eta0}.
 narrow \texttt{d5a}. The wider \texttt{d11a} has no imaginary modes and its lowest
 non-translational mode sits at $1.07$~THz, two orders of magnitude above
 \texttt{d5a}'s $0.027$~THz twist, so the Bose-enhanced infrared stiffness is absent and
-its SCBA is well conditioned: $\lambda=0.3$ converges in $37$ iterations to
-$G_\mathrm{anh}/G_\mathrm{ball}=0.997$ (conservation $2.7\times10^{-3}$) and
-$\lambda=0.6$ holds a stable $\approx0.98$. \texttt{d11a} is therefore the natural
-structure for production nanowire transport. A third wire, \texttt{d17a}, was
+its SCBA is well conditioned: the finite-$\eta$ vertex-continuation converges in
+$37$ iterations at $\lambda=0.3$ and stays stable to $\lambda=0.6$ (these are
+low-coupling, finite-$\eta$ convergence points, not the physical conductance, which
+is the $\eta\to0$ result of \cref{sec:res_eta0}). \texttt{d11a} is therefore the
+better-conditioned structure for production nanowire transport. A third wire,
+\texttt{d17a}, was
 discarded: its force constants as fit carry $86$ imaginary modes at $\Gamma$ down to
 $-34$~THz --- a fit-quality artefact of training on too few rattled supercells,
 resolved by refitting rather than by the solver, and a reminder that the harmonic

@@ -11,6 +11,16 @@ in-plane two-dimensional periodicity. Conductance
 is reported per unit area, $G=J/(A_\perp\Delta T)$, and the cross-plane
 conductivity of a film of thickness $L$ is $\kappa(L)=G\,L$.
 
+Unlike the $\Gamma$-only conductors above, the film conductances in this section are
+\emph{necessarily} finite-$\eta$ ($\eta=0.4$~THz): the coupled-$q$ production solver
+becomes singular below $\eta\approx0.4$ (\cref{sec:prod_open}), so the $\eta\to0$
+fixed point of \cref{sec:res_eta0} is not reachable here. They therefore carry the
+broadening systematic of \cref{sec:res_approx} --- the absolute reductions are
+under-estimates of the conserving $\eta\to0$ value --- and are reported as a
+literature benchmark of the coupled-$q$ machinery, not as converged $\eta=0$
+transport. Lifting this requires the block-recursion regularisation noted in
+\cref{sec:prod_open}.
+
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.48\linewidth]{transport_sweeps/si_film_conductance_a.pdf}\hfill

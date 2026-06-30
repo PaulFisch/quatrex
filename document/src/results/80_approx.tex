@@ -9,19 +9,39 @@ real-space cutoffs on the FC3 vertex and the Green's function, and, optionally, 
 low-rank compression of the vertex. This section quantifies how each affects the
 converged conductance, so that every reported number carries a known systematic.
 
-\paragraph{Finite broadening.}
-The broadening $\eta$ of \cref{eq:system} is not physical, and the conserving
-conductance is defined only as $\eta\to0$ (\cref{sec:res_eta0}). Its systematic on
-the \emph{finite}-$\eta$ numbers is larger than the lead-balance residual suggests.
-On the \texttt{cnt33} tube at matched $\eta$ the lead balance stays $\sim10^{-5}$
-throughout, yet the anharmonic ratio $G_{\rm anh}/G_{\rm ball}$ swings
-$0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz; extrapolating the converging window
-to $\eta\to0$ gives $\approx0.70$, a $\sim30\%$ reduction -- roughly twice the
-$\sim16\%$ read off at the single point $\eta=0.45$. A single-$\eta$ number
-therefore \emph{underestimates} the anharmonic effect by about a factor of two;
-transport ratios must be $\eta\to0$-extrapolated or quoted with the finite-$\eta$
-band. The mechanism and the step-by-step numerical verification are given in
+\paragraph{Finite broadening: why it is not the physical answer.}
+The broadening $\eta$ of \cref{eq:system} is a numerical regulator, not physics, and
+the conserving conductance is defined only as $\eta\to0$ (\cref{sec:res_eta0}).
+Finite-$\eta$ transport numbers are reported nowhere in this chapter as a result;
+they are collected here only to show that they are biased and, crucially, that the
+bias cannot be removed by extrapolation. Its systematic is much larger than the
+lead-balance residual suggests: on the \texttt{cnt33} tube at matched $\eta$ the
+lead balance stays $\sim10^{-5}$ throughout, yet the anharmonic ratio
+$G_{\rm anh}/G_{\rm ball}$ swings $0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz
+(\cref{fig:res_cnt_T}), so a single broadening over-broadens the spectral function
+and \emph{under}-estimates the scattering. Worse, the extrapolation overshoots: the
+$\eta\ge0.30$ window extrapolates to $G_{\rm anh}/G_{\rm ball}\approx0.70$, whereas
+the directly converged $\eta\to0$ fixed point gives $0.57$ (\cref{sec:res_eta0}) ---
+the finite-$\eta$ family does not connect smoothly to the $\eta=0$ limit, so even an
+$\eta\to0$ fit of finite-$\eta$ data is wrong by $\sim20\%$. The same lesson is
+sharper on the soft \texttt{d5a} wire, where a single cell at finite $\eta$ returns
+the unphysical $G_{\rm anh}/G_{\rm ball}>1$ (\cref{tab:res_anh_T}): finite broadening
+can violate the resistive bound outright. The only defensible transport number is the
+$\eta=0$ fixed point; the mechanism and step-by-step verification are in
 \cref{app:conservation}.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_g.pdf}\hfill
+  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_ratio.pdf}
+  \caption{Finite-$\eta$ (\emph{not} physical) anharmonic transport of the $(3,3)$
+  carbon nanotube versus temperature at a single transport cell, shown to quantify
+  the broadening bias. \emph{Left}: ballistic and anharmonic per-area conductance.
+  \emph{Right}: the finite-$\eta$ ratio $G_\mathrm{anh}/G_\mathrm{ball}$ (falling
+  $0.92\to0.71$ over $30$--$300$~K) sits well above the conserving $\eta\to0$ result
+  of \cref{sec:res_eta0} ($0.75\to0.57$); the gap is the over-broadening systematic.}
+  \label{fig:res_cnt_T}
+\end{figure}
 
 \paragraph{Frequency grid.}
 The bubble convolution \cref{eq:sigma_phph_tau} has support up to

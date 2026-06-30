@@ -17,17 +17,6 @@ safeguarded-Anderson iterations, giving the same conductance as the loose
 
 \begin{figure}[htb]
   \centering
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_g.pdf}\hfill
-  \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_ratio.pdf}
-  \caption{Anharmonic transport of the $(3,3)$ carbon nanotube
-  versus temperature (single transport cell). \emph{Left}: ballistic and
-  anharmonic per-area conductance. \emph{Right}: the ratio
-  $G_\mathrm{anh}/G_\mathrm{ball}$ rises toward unity as $T\to0$.}
-  \label{fig:res_cnt_T}
-\end{figure}
-
-\begin{figure}[htb]
-  \centering
   \includegraphics[width=0.62\linewidth]{transport_sweeps/cnt33_cutoff.pdf}
   \caption{$(3,3)$ carbon nanotube with two transport cells: $G_\mathrm{anh}$ across the
    self-energy combinations (FC3 magnitude $\sigma$,
@@ -36,21 +25,17 @@ safeguarded-Anderson iterations, giving the same conductance as the loose
   \label{fig:res_cnt_cutoff}
 \end{figure}
 
-\paragraph{Temperature.} \Cref{fig:res_cnt_T} shows the converged
-conductance from $30$ to $300$~K at a single transport cell. Both the
-ballistic and the anharmonic conductance rise with temperature as
-channels populate; the anharmonic ratio $G_\mathrm{anh}/G_\mathrm{ball}$
-falls monotonically from $0.92$ at $30$~K to $0.71$ at $300$~K, the
-signature of three-phonon scattering switching on with the Bose-weighted
-phase space and freezing out as $T\to0$.
-
-\paragraph{Length.} At fixed $300$~K the anharmonic ratio decreases with
-device length: the converged $G_\mathrm{anh}/G_\mathrm{ball}=0.810,0.702,0.694$ at
-one, two and three cells (each to $\le10^{-5}$ with $\lesssim3\times10^{-4}$
-heat-flow non-conservation), a clean ballistic-to-diffusive reduction that
-accumulates from one to two cells and then nearly saturates. Beyond three cells the
-dense reference is too expensive --- the three-cell point already costs $6.8$~h
-(\cref{sec:res_scaling}).
+\paragraph{Transport.} The physical, conserving conductance of the tube is the
+$\eta\to0$ result of \cref{sec:res_eta0}: the anharmonic ratio falls from
+$G_\mathrm{anh}/G_\mathrm{ball}\approx0.75$ at $30$~K to $0.57$ at $300$~K, and
+deepens with device length ($0.574,0.506$ at two and three cells). We do
+\emph{not} report the finite-$\eta$ ratios as the transport result: a finite
+broadening systematically over-broadens the spectral function and
+\emph{under}-estimates the scattering, giving a much weaker reduction (e.g.\
+$0.71$ rather than $0.57$ at $300$~K, one cell), and --- as
+\cref{sec:res_approx} shows --- the bias does not even extrapolate cleanly to
+$\eta\to0$. The finite-$\eta$ numbers are retained only in \cref{sec:res_approx}
+as a quantification of that systematic.
 
 \paragraph{Cutoff robustness.}  Across all eight corners of the
 (FC3-magnitude, vertex-range, Green's-function-range) cutoff cube,
@@ -66,10 +51,10 @@ RMSE $0.151$~eV\,\AA$^{-1}$, about half the $(3,3)$ value thanks to the larger
 cell; a soft $0.0014$~THz twist, as befits the wider tube), the ballistic
 conductance behaves as expected --- it decreases with length through finite-$\eta$
 coherence attenuation, and the larger tube carries more channels at lower per-area
-conductance --- and the anharmonic SCBA converges at one cell to
-$G_\mathrm{anh}/G_\mathrm{ball}=0.775$, slightly below the $(3,3)$'s $0.810$ (more
-channels and more three-phonon phase space). The multi-cell ladder ($192$ DOF at two
-cells) exceeds the dense solver's reach and is left to the production path.
+conductance --- and the $\eta\to0$ anharmonic SCBA converges at one cell to
+$G_\mathrm{anh}/G_\mathrm{ball}=0.783$, slightly below the $(3,3)$'s one-cell value
+(more channels and more three-phonon phase space). The multi-cell ladder ($192$ DOF
+at two cells) exceeds the dense solver's reach and is left to the production path.
 \todo[inline]{Add the multi-cell quatrex $(8,0)$ ladder.}
 
 % ======================================================================
