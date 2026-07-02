@@ -47,6 +47,70 @@ and $361$-point grids (right).
   \label{fig:res_eta0_conv}
 \end{figure}
 
+\paragraph{What each stabilisation knob does.} The $\eta=0$ fixed point is
+reached only with three ingredients, and archived runs with each ingredient
+removed isolate their roles (\cref{fig:res_eta0_knobs}). \emph{(a) The causal
+retarded self-energy}: with the finite-$\eta$ half-rule
+$\Sigma^R=(\Sigma^>-\Sigma^<)/2$ (which drops $\mathrm{Re}\,\Sigma^R$) the
+three-cell device limit-cycles at $O(0.1)$ under \emph{every} mixer -- linear,
+Anderson and Broyden alike -- because the non-causal map is not the
+$\Phi$-derivable partner of the bubble and breaks per-interface conservation;
+restoring the Kramers--Kronig real part (\texttt{retarded\_method="fft"}) makes
+plain linear mixing contract and the production run converges in $296$
+iterations. \emph{(b) The infrared occupancy taper and smooth spectral window}:
+the bare causal iteration settles at a $2\times10^{-4}$ residual floor (the
+limit-cycling infrared bins); a taper of $3\,d\omega$ is too narrow and stalls,
+$4\,d\omega$ reaches $10^{-2}$, and the grid-consistent $6\,d\omega$ taper with
+the smooth window turns the floor into a genuine $4\times10^{-11}$ fixed point
+in $49$ iterations. \emph{(c) The mixer is not the lever}: on the marginal
+$\eta=0$ mode Anderson and Broyden do not beat plain linear mixing (they
+plateau or oscillate on the same limit cycle); what converges is the causal map
+with the infrared regularisation under patient linear (or
+reduced-rank-extrapolated) mixing.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=\linewidth]{transport_sweeps/eta0_knob_ablation.pdf}
+  \caption{Stabilisation-knob ablation of the $\eta=0$ SCBA (rel.\ $\Sigma^R$
+  residual vs.\ iteration; every curve is an archived run). \emph{(a)} cnt33
+  L3: the half-rule $\Sigma^R$ limit-cycles under every mixer; the causal
+  (\texttt{fft}) $\Sigma^R$ converges under plain linear mixing.
+  \emph{(b)} cnt33 L2, causal $\Sigma^R$ throughout: the infrared-taper ladder
+  (none $\to3\to4\to6\,d\omega$ + smooth window) turns a $2\times10^{-4}$
+  residual floor into a $4\times10^{-11}$ fixed point. \emph{(c)} cnt33 L3
+  with the causal $\Sigma^R$: mixer choice alone does not converge the
+  marginal mode.}
+  \label{fig:res_eta0_knobs}
+\end{figure}
+
+\paragraph{Sensitivity of the physics to the knobs.} The knobs are not
+interchangeable regularisations -- they move the converged conductance by very
+different amounts (\cref{fig:res_eta0_knob_sens}). Relative to the
+$\omega_{\rm reg}\to0$ extrapolation $G_0=17.4$: the half-rule, although it
+\emph{converges} on the short two-cell device, lands $16.6\%$ low (it is a
+different, non-conserving map -- its interior heat current dips $1.7\%$ below
+the leads); the bare causal run without the infrared taper sits $21.7\%$ low
+(the un-regularised infrared bins carry spurious scattering that suppresses
+transport); within the properly tapered family the remaining knobs are benign
+-- the cutoff scale moves $G$ by $\le3.7\%$ with a smooth
+$\omega_{\rm reg}^2\to0$ extrapolation, the grid by $1\%$ ($181\to361$
+points), and the mixer not at all (identical fixed point; on \texttt{d5a} the
+floor-stabilised solvers agree to $1\%$, \cref{fig:res_d5a_eta0_panel}). The
+hierarchy is the practical message: the causal $\Sigma^R$ and the infrared
+treatment are \emph{physics} choices that must be converged, the cutoff and
+grid are controlled few-percent systematics, and the mixer is pure numerics.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.75\linewidth]{transport_sweeps/eta0_knob_sensitivity.pdf}
+  \caption{Converged $\eta=0$ conductance $G\cdot d\omega$ of the two-cell
+  (3,3) CNT for each stabilisation-knob setting (filled markers: members of
+  the $10^{-10}$ fixed-point family; open: converged/settled but outside it).
+  The dashed line is the $\omega_{\rm reg}\to0$ extrapolation $G_0$ of
+  \cref{fig:res_eta0_cutoff}.}
+  \label{fig:res_eta0_knob_sens}
+\end{figure}
+
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_cutoff.pdf}

@@ -28,6 +28,7 @@ cited in the script.
 | figure(s) | generator | data |
 |---|---|---|
 | eta0_convergence_methods, eta0_cnt33_cutoff, d5a_gamma_anh | `eta0_convergence.py` | `phonon/studies/out/conv1e10/*.log` (cnt33_smooth_L2, d5a rpm/jfnk/diag/tgrow), `phonon/scripts/verify/d5a_gamma_anh.npz` |
+| eta0_knob_ablation, eta0_knob_sensitivity | `eta0_knob_ablation.py` | `phonon/studies/out/convergence/L{2,3}e0_*.{log,npz}` (half-vs-fft x mixer matrix), `phonon/studies/out/conv1e10/{L2_taper3,L2_taper4s,cnt33_smooth_L2}.log`+npz, `phonon/scripts/out/prod/cnt33_eta0/L{2,3}_anh.{log,npz}` |
 | eta0_cnt33_transmission, eta0_cnt33_transport, eta0_cnt33_ir_plateau | `eta0_physics.py` | `phonon/scripts/out/prod/cnt33_eta0/` (summary.json + L2/L3/T-sweep npz), `…/prod/geom/cnt33_L2/dynamical_matrix.mat` |
 | eta0_cnt33_conservation_iter, eta0_cnt33_ratio_eta, eta0_cnt33_conservation_T, conservation_bubble_replica | `conservation_figs.py` | `phonon/scripts/out/prod/cnt33_eta0/` (+ the matched-η table from `conservation.ratio_eta`, hard-coded) |
 | sinw_d5a_eta0_panel | `sinw_d5a_eta0_panel.py` | `phonon/studies/out/conv1e10/sinw_d5a_L2_eta0_{jfnk_tgrow,jfnk_warm,jfnk_t005,jfnk_ptc01,jfnk_tgrow_repro,floor_anneal}.{npz,log}` |
