@@ -17,7 +17,6 @@ transport parameters.
 This MATLAB \texttt{.mat} file stores the real-space blocks
 $H(\vc{R})$ in Convention~B, already converted to
 $(\mathrm{rad/s})^2$.  Each block is stored under a string key of the
-% REVIEW: code/string literal does not belong in a numbered equation; use inline \texttt
 form \texttt{"[nx, ny, nz]"},
 mapping to a real matrix of dimension
 $(n_\mathrm{dof}\times n_\mathrm{dof})$, where
@@ -26,7 +25,6 @@ cell.  For nearest-neighbour interactions extracted on a
 $3\times3\times3$ mesh, the file contains up to 27 blocks.
 
 The solver interprets these blocks as real-space couplings and, for
-% REVIEW: removed duplicate of eq:assemble; reference the single definition instead
 periodic transverse directions, performs the transverse Fourier sum
 given in \cref{eq:assemble}.
 
@@ -96,9 +94,8 @@ matrix_sparray = distributed_load(f"{matrix_name}.mat")
 assert (0, 0, 0) in matrix_sparray.keys()
 matrix_sparray = matrix_sparray[(0, 0, 0)]
 \end{lstlisting}
-% REVIEW: ambiguous notation; intended is a square matrix of linear size N_blocks*B (i.e. (N_blocks*B) x (N_blocks*B))
-The result is a single sparse matrix of size
-$(N_\mathrm{blocks}\times B)^2$, where $B$ is the block size and
+The result is a single square sparse matrix of size
+$(N_\mathrm{blocks}B)\times(N_\mathrm{blocks}B)$, where $B$ is the block size and
 $N_\mathrm{blocks}$ is the number of transport cells.  No transverse
 $k$-point Fourier assembly is performed.
 
@@ -231,7 +228,6 @@ unit-cell expansion to allow different block dictionaries in different
 transport cells.  Two new functions were added to
 \texttt{quatrex/device/inputs.py}.
 
-% REVIEW: document the upper-triangular-half Hermitian-operator storage/assembly convention used by the device builder
 Throughout the device builder, operators are stored and assembled as a
 single upper-triangular half: \texttt{load\_matrices} keeps only the
 \texttt{triu} of each loaded block, and \texttt{\_construct\_transport\_cell}
@@ -266,7 +262,6 @@ summed to determine the sparsity pattern.
 
 \subsubsection{Boundary coupling}
 
-% REVIEW: flag -- consistency assumes the supplied lead blocks already satisfy H_10 = H_01^dagger; state this prerequisite
 At the interfaces between the $L$, $D$, and $R$ regions, the
 off-diagonal couplings must be chosen consistently with Hermiticity.
 For harmonic real-space blocks, the relevant relation is
@@ -279,4 +274,10 @@ the left-lead block $H_{01}^L$, while the corresponding sub-diagonal is
 $H_{10}^L$.  At the device/right boundary, the couplings are taken from
 the right-lead blocks $H_{01}^R$ and $H_{10}^R$.  This ensures that the
 assembled heterogeneous matrix remains consistent with the physical lead
-couplings on either side of the interface.
+couplings on either side of the interface.  The boundary blocks are taken
+\emph{literally} from the lead dictionaries (both sub- and super-diagonal,
+never as conjugate transposes of one another, since at non-zero transverse
+shift $H_{10}(\vc{R}_\perp)=H_{01}(-\vc{R}_\perp)^\dagger$, not
+$H_{01}(\vc{R}_\perp)^\dagger$); Hermiticity of the assembled matrix
+therefore \emph{presupposes} that the supplied lead blocks already satisfy
+\cref{eq:hermiticity_perp} --- the assembly does not re-symmetrise them.

@@ -223,8 +223,6 @@ to arbitrary neighbour shell from a single set of displacements by
 solving a linear least-squares problem with symmetry constraints.
 Widely used implementations for the IFC3 include thirdorder.py
 (distributed with ShengBTE) \cite{li_shengbte_2014} and phono3py
-% REVIEW: togo_first_2015 is the phonopy (Scripta Mater.) review; phono3py is a
-% separate Togo 2015 paper. togo_implementation_2023 is the phono3py-specific ref.
 \cite{togo_implementation_2023}.  The
 latter also provides the infrastructure for computing phonon
 linewidths, thermal conductivity, and spectral functions from the
@@ -623,8 +621,6 @@ jointly-fitted INDSCAL) but is useful as an initialisation.
   \;\sim\; \cO\!\bigl(R\,\ndof\bigr)
   \;=\; \cO\!\bigl(R\,\Ncell\,\nprim\bigr),
 \end{equation}
-% REVIEW: imprecise -- both INDSCAL and CP are O(R*ndof); merging b_r=c_r removes
-% one ndof-length vector per term (a ~2x constant factor), not a factor of ndof.
 smaller than CP by one $\ndof$-length factor per term (a constant $\sim2$, not a
 factor of $\ndof$), from merging $b_r\equiv c_r$.
 

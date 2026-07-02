@@ -19,9 +19,6 @@ The simplest scheme,
 with damping parameter $\alpha \in (0,1]$. Linear mixing converges if
 the fixed-point Jacobian
 $J = \partial\mathcal{F}/\partial\Sigma_s$ has spectral radius
-% REVIEW: the linear-mixing map is M=(1-alpha)I+alpha J=I-alpha(I-J), so the
-% convergence condition is sigma((1-alpha)I+alpha J)<1 (was sigma(I-alpha J)<1).
-% The final bound alpha < 2/(1+|sigma(J)|_max) is correct.
 $\sigma\bigl((1-\alpha) I + \alpha J\bigr) < 1$, i.e.\ $\alpha < 2/(1+|\sigma(J)|_{\max})$.
 For weak anharmonicity ($|\sigma(J)|<1$) any $\alpha \le 1$ works; for
 strong anharmonicity the spectrum of $J$ extends close to $-1$ in
@@ -52,11 +49,6 @@ least-squares problem
 For linear problems Anderson mixing is
 essentially equivalent to GMRES applied to the residual
 equation~\cite{walker_anderson_2011,rohwedder_analysis_2011}, with provable
-% REVIEW: removed the explicit "q = 3c - c^2 for c < 2-sqrt(3)" -- it was
-% internally inconsistent (2-sqrt(3) is the root of c^2-4c+1, unrelated to
-% 3c-c^2; and 3c-c^2 > c for c in (0,2) is not an acceleration). The depth-1
-% q-factor and its validity threshold are given explicitly by Bian-Chen-Kelley;
-% reinsert the exact closed form from that reference if a number is wanted.
 local $q$-linear convergence for depth-1
 Anderson when the underlying iteration is a
 contraction~\cite{toth_convergence_2015,bian_anderson_2021}. Local
@@ -99,10 +91,6 @@ small real Gram solve per cycle and no extra map evaluations.
 When the unstable subspace is low-dimensional, the RPM of
 \citet{shroff_stabilization_1993} applies Newton on that subspace and Picard on
 its contractive complement,
-% REVIEW: corrected to the canonical Shroff-Keller RPM update. The correction
-% term is +Z(I_k-H)^{-1} H Z^H f, whose modal gain on an unstable mode is
-% lambda/(1-lambda) (matching phi(lambda) in the text below); the previous
-% -Z(I_k-H)^{-1} Z^H f dropped the H factor and carried the wrong sign.
 \begin{equation}\label{eq:rpm}
   \Sigma^{(n+1)}
   =\mathcal{F}[\Sigma^{(n)}]
@@ -299,12 +287,6 @@ It is tempting to remove the $1/\omega$ from the scattering self-energy by the
 singularity-subtraction device of boundary-integral
 numerics~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023}.
 Applied to the bubble legs this is both unnecessary and harmful.
-% REVIEW: removed "|V_3|^2 propto omega_1 omega_2 omega_3, so the soft-leg factor
-% offsets the absorption pole". In the harmonic mode basis each leg carries
-% sqrt(hbar/2 omega) ~ omega^{-1/2}, so |V_3|^2 propto 1/(omega_1 omega_2 omega_3),
-% which COMPOUNDS the n(omega')~1/omega' pole rather than offsetting it. Finiteness
-% comes from the linearly vanishing acoustic spectral weight (the same omega-factors,
-% carried by A) together with the acoustic phase space (~omega'^2 in 3D).
 The acoustic spectral weight vanishes
 linearly, $A(\omega')\to A'(0)\,\omega'$, so the equilibrium lesser function
 $G^{<}_{\rm eq}=-i\,nA$ stays finite despite $n(\omega')\sim1/\omega'$. Out of equilibrium the bosonic fold
@@ -342,9 +324,6 @@ an $\eta$-budget diagnostic.
 
 \subsubsection{Lowest-order approximation.}
 
-% REVIEW: re-attributed. The one-shot current-conserving lowest-order
-% approximation is due to Mera et al.; the lee_* papers apply/extend it to
-% anharmonic phonon transport in 3D nanostructures.
 An attractive alternative to direct SCBA is the
 lowest-order approximation (LOA), introduced for inelastic quantum transport
 by~\citet{mera_inelastic_2012} and applied to anharmonic phonon transport
@@ -409,12 +388,12 @@ of order
 or, in polar insulators, $\sim 1/R_c^3$ for the bare truncation, but
 exponential, $\sim e^{-R_c/\xi_g}$, once the
 $1/r^3$ Cochran--Cowley tail has been subtracted analytically and added
-back exactly via Ewald summation~\cite{gonze_dynamical_1997}.
-% REVIEW: the insulator short-range decay length xi_g is set by the electronic
-% band gap, NOT by the metal thermal length xi_e = hbar v_F/(k_B T_el) of
-% eq:fc2_metal (an insulator at T=0 has no Fermi velocity). Also the geometric
-% tail in eq:fc2_error_metal is the 1D form; in d dimensions a shell degeneracy
-% multiplies the summand by ~R_c^{d-1}.
+back exactly via Ewald summation~\cite{gonze_dynamical_1997}. Here
+$\xi_g$ is the short-range decay length set by the electronic band gap
+of the insulator, distinct from the thermal length $\xi_e$ of
+\cref{eq:fc2_metal}. \Cref{eq:fc2_error_metal} is the 1D geometric
+form; in $d$ dimensions the shell degeneracy multiplies the summand by
+$\sim R_c^{d-1}$, a polynomial correction to the exponential bound.
 
 \subsubsection{Transverse $\qp$-mesh convergence}
 \label{subsub:qp_decay}
@@ -427,9 +406,6 @@ Hove singularities, convergence degrades to $\mathcal{O}(N_q^{-1})$;
 a Gaussian smearing or tetrahedron method may then be preferable. The
 self-energy convolution \cref{eq:sigma_phph} couples $\qp$ and $\qp{}'$,
 so the effective integrand has $N_q^{-1/2}$ statistical-noise structure
-% REVIEW: importance sampling lowers the variance prefactor but not the
-% N_q^{-1/2} Monte-Carlo exponent; approaching O(N_q^{-1}) needs quasi-Monte-Carlo
-% / low-discrepancy sequences.
 under random sampling, and reducing this toward $\mathcal{O}(N_q^{-1})$ requires
 variance reduction beyond plain importance sampling, e.g.\ quasi-Monte-Carlo /
 low-discrepancy sampling~\cite{lee_anharmonic_2018}.

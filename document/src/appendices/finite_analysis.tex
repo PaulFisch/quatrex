@@ -85,8 +85,9 @@ prefixed with an underscore.
   $\texttt{DEFAULT\_DROP\_THRESHOLD\_THZ} = 0.05$~THz with adaptive
   relative cut at $10^{-3}\times \max|\omega_n|$;
   $\texttt{DEFAULT\_ETA\_FACTOR\_DW} = 0.5$ with floor
-% REVIEW: doc gap -- DEFAULT_ETA_THZ_TRANSPORT (0.05 THz, used at eq:gf_retarded_bare) is missing from this constants list
   $\texttt{DEFAULT\_ETA\_THZ\_FLOOR} = 0.02$~THz;
+  $\texttt{DEFAULT\_ETA\_THZ\_TRANSPORT} = 0.05$~THz (the transport-path
+  broadening of \cref{eq:gf_retarded_bare});
   $\texttt{EPS\_LADDER} = (10^{-2}, 10^{-3}, 10^{-4}, 10^{-5})$ for the
   sparsity nnz tables.
 
@@ -132,9 +133,10 @@ prefixed with an underscore.
   measures the axis-$j$ (and analogously axis-$k$) trace of the
   mass-weighted lifted FC3; hiphive's \texttt{ClusterSpace} enforces
   axis-$i$ ASR by orbit construction but not the other two axes, so
-% REVIEW: reconcile -- this leg_j_rel residual ~0.8 conflicts with the ~60% quoted at l.421 for the same SiNW metric
-  a residual reading of $\sim 0.8$ on a SiNW reap and $\sim 0$ on a
-  bulk-Si reap is structural rather than a fit defect.  Downstream
+  a residual reading of $\sim 0.8$ on a SiNW reap ($0.796$ measured on
+  the \emph{device-truncated} d5a tensor, whose leg sums run over the
+  kept atoms only) and $\sim 0$ on a bulk-Si reap is structural rather
+  than a fit defect.  Downstream
   consumers that need strict
   axis-$j/k$ ASR can invoke the explicit projection via
   \texttt{load\_quatrex\_blocks(asr\_project=True)} or
@@ -142,7 +144,6 @@ prefixed with an underscore.
 
 \item[\texttt{physics\_validation.py}] Identity-style validators for the
   Green's-function machinery: anti-Hermiticity, $G^R{}^\dagger = G^A$,
-% REVIEW: sign fix -- Sigma^>-Sigma^<=Sigma^R-Sigma^A=+2i Im Sigma^R (consistent with l.375 Gamma=-2 Im Sigma^R)
   optical theorem $\Sigma^> - \Sigma^< = +2i\,\mathrm{Im}\,\Sigma^R$,
   first-moment spectral sum rule
   $\int 2\omega^3 A(\omega) d\omega = \mathrm{Tr}(D)$, ballistic
@@ -249,7 +250,6 @@ prefixed with an underscore.
 \subsection{Contacted propagator}
 \label{ap:fa_obs_bare}
 
-% REVIEW: rename -- this lead-dressed propagator is not "bare"; reserve G^R_0 / "bare" for the no-self-energy form in l.26
 In the THz$^2$ unit system, the contacted retarded propagator
 (bare device propagator dressed by the lead self-energy) is
 \begin{equation}
@@ -283,7 +283,7 @@ where $L_\eta(x) = (\eta/\pi)/(x^2 + \eta^2)$ is the Lorentzian
 broadening of the bare delta and the sum runs over the physical
 modes ($\omega_n > \texttt{THZ\_ACOUSTIC\_BAND}$).  These satisfy the
 bosonic full-axis identity $G^<(\omega) = [G^>(-\omega)]^{\mathsf{T}}$
-(theory.tex eq.~873--874) and are anti-Hermitian on the DOF axes;
+(\cref{eq:bosonic_fold}) and are anti-Hermitian on the DOF axes;
 both checked by the chain test \texttt{test\_synthetic\_gf\_bose\_symmetry}
 and \texttt{test\_synthetic\_gf\_anti\_hermiticity}.  The Lorentzian
 prefactor $-2\pi i$ is pinned by
@@ -299,7 +299,6 @@ to better than 5\,\% on the analytic chain.
 
 The Migdal-like sunset diagram, in block-tridiagonal device storage,
 is
-% REVIEW: make the energy-conserving omega' convolution explicit (was implicit; cf. eq:sigma_guo / theory eq.20)
 \begin{equation}
   \label{eq:sunset_lesser}
   \Sigma^{<,>}_{IJ}(\omega) = \frac{i\hbar}{2}
@@ -424,9 +423,10 @@ Keldysh formalism (\textit{cf.}\ Wang 2014; Stefanucci \& van Leeuwen
   tensor (machine precision; \texttt{fc3\_perm\_symmetry}).
 \item[\textsc{FC3 acoustic sum rule}] Per-leg Frobenius residual
   warned above $\texttt{ASR\_REL\_RESIDUAL\_WARN} = 5\%$
-% REVIEW: reconcile -- this ~60% leg_j_rel residual conflicts with the ~0.8 quoted at l.134 for the same SiNW metric
-  (\texttt{fc3\_asr\_legs}).  When violated (e.g.\ hiphive
-  least-squares on SiNW gave $\sim 60\%$), \texttt{load\_quatrex\_blocks(asr\_project=True)}
+% REVIEW(verified): reconciled to the ~0.8 of the module reference -- 0.796 was measured on the device-truncated d5a tensor (conserving_vertex_findings.md); the raw hiphive fits are ASR-exact (residual ~1e-14), so no "hiphive least-squares gave 60%" run exists
+  (\texttt{fc3\_asr\_legs}).  When violated (e.g.\ the
+  \emph{device-truncated} SiNW tensor reads $\sim0.8$; the raw hiphive
+  fits are ASR-exact), \texttt{load\_quatrex\_blocks(asr\_project=True)}
   projects FC3 onto the ASR null space along legs 2 and 3 before the
   bubble consumes it.
 \item[\textsc{FC2 PSD}] Eigenvalue distribution of the mass-weighted
@@ -453,7 +453,6 @@ Keldysh formalism (\textit{cf.}\ Wang 2014; Stefanucci \& van Leeuwen
 \item[\textsc{Ballistic transmission bound}] $0 \le T(\omega) \le n_{\mathrm{modes}}$
   (Datta 2005 eq.~9.16; checker
   \texttt{ballistic\_transmission\_bound}).
-% REVIEW: sign fix -- Sigma^>-Sigma^<=Sigma^R-Sigma^A=+2i Im Sigma^R (consistent with l.375 Gamma=-2 Im Sigma^R)
 \item[\textsc{Optical theorem}] $\Sigma^> - \Sigma^< = +2i\,\mathrm{Im}\,\Sigma^R$
   (\texttt{optical\_theorem\_residual}).
 \item[\textsc{$G^R{}^\dagger = G^A$}] (\texttt{retarded\_advanced\_residual}).

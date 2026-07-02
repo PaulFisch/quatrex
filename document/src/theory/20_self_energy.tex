@@ -100,10 +100,6 @@ renormalisation $D\mapsto D + \Sigma^{(4),\mathrm{HF}}$.}
 
 A second diagram, lower order in derivatives but one loop, survives:
 the FC4 Hartree--Fock ``loop'' tadpole
-% REVIEW: tadpole prefactor corrected so the result is real. With the equal-time
-% relation <u_nu u_lambda> = i*hbar*G^<_{nu lambda}(tau,tau), the Hartree tadpole
-% (1/2)Phi^(4)<uu> equals (i*hbar/2)Phi^(4)G^<; the previous -hbar/2*G^< was
-% imaginary. Confirm the overall sign against static_self_energy.py.
 $\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = \tfrac{1}{2}
 \sum_{\nu\lambda} \Phi^{(4)}_{\mu\mu'\nu\lambda}\,\langle u_\nu u_\lambda\rangle
 = \tfrac{i\hbar}{2}
@@ -149,10 +145,6 @@ energy-conservation $\delta(\omega - \omega' - \omega'')$ implicit in
 the contour integral. Substituting equilibrium FDT
 \cref{eq:phonon_fdt} reproduces Fermi's-golden-rule expressions for
 three-phonon scattering rates: in mode basis,
-% REVIEW: absorption-channel Bose factor corrected to 2[n_2 - n_1]. On the
-% delta(omega_s - omega_{s1} + omega_{s2}) channel, energy conservation forces
-% omega_{s1} > omega_{s2} (so n_1 < n_2); the Maradudin-Fein / phono3py linewidth
-% and the bubble combination (1+n_1)n_2 - n_1(1+n_2) = n_2 - n_1 are positive.
 \begin{align}\label{eq:fgr}
   \mathrm{Im}\,\Sigma^R_s(\omega_s,\qp)
   &\;=\;
@@ -175,11 +167,6 @@ in the relaxation-time approximation.
 
 By construction $\Sigma^R$ is causal in time, so its frequency
 components satisfy a Kramers--Kronig relation. Starting from
-% REVIEW: sign fixed. The Keldysh identities are Sigma^t + Sigma^{tbar} =
-% Sigma^< + Sigma^>, Sigma^t - Sigma^{tbar} = Sigma^R + Sigma^A; the retarded
-% combination is (1/2)(Sigma^t - Sigma^{tbar}) + (1/2)(Sigma^> - Sigma^<).
-% (With the previous '+' the RHS collapsed to Sigma^>.) The final eq:sigma_R_full
-% below is unaffected.
 $\Sigma^R = \tfrac{1}{2}(\Sigma^t - \Sigma^{\bar{t}}) +
 \tfrac{1}{2}(\Sigma^> - \Sigma^<)$ and using the spectral identity for
 $\Sigma^{t,\bar{t}}$, one obtains~\cite{guo_quantum_2020,wang_nonequilibrium_2014}
@@ -191,11 +178,6 @@ $\Sigma^{t,\bar{t}}$, one obtains~\cite{guo_quantum_2020,wang_nonequilibrium_201
 \end{equation}
 The antihermitian (dissipative) first term carries inverse-lifetime
 information,
-% REVIEW: units fixed. With the omega^2 spectral variable (eq:system), Sigma^R has
-% units (rad/s)^2 and the linewidth (HWHM in omega) is -Im Sigma^R/(2 omega_s), so
-% the inverse lifetime (FWHM rate) is tau^{-1} = -Im Sigma^R/omega_s -- no factor
-% of hbar. (was 2/(hbar omega_s), dimensionally not a rate.) Consistent with the
-% companion shift Delta omega = Re Sigma^R/(2 omega_s) below.
 \begin{equation}\label{eq:lifetime}
   \tau_s^{-1}(\qp)
   \equiv -\frac{1}{\omega_s(\qp)}\,
@@ -333,7 +315,6 @@ $(\Phi^{(3)})^4$ that lie beyond bubble-SCBA.}
 \Cref{eq:sigma_guo} captures the leading three-phonon process. Higher
 orders include~\cite{wang_nonequilibrium_2014,guo_quantum_2020}:
 (i) the four-phonon tadpole from $\Phi^{(4)}$,
-% REVIEW: prefactor matches the corrected real form of the tadpole defined above.
 $\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = \tfrac{i\hbar}{2}\sum_{\nu\lambda}
 \Phi^{(4)}_{\mu\mu'\nu\lambda}\,G^<_{\nu\lambda}(\tau,\tau)$,
 which is real, frequency-independent, and renormalizes

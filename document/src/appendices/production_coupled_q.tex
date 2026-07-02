@@ -6,10 +6,12 @@ self-energy into the \emph{production} distributed \texttt{quatrex} phonon
 solver and the runs that validate and exercise it. The transversely-periodic
 physics and the silicon thin-film benchmark are established in the standalone
 (dense) solver (\cref{sec:res_qfilm}); the contribution here is software and
-verification, not new physics. The full numerical record is saved under
-\texttt{phonon/scripts/out/production\_coupled\_q/} (run snapshots,
-\texttt{summary.json}) and is reproduced by
-\texttt{phonon/scripts/verify/production\_coupled\_q\_summary.py}.
+verification, not new physics.
+% REVIEW(open): the numerical record of the 2026-06-08 session (phonon/scripts/out/production_coupled_q/ and phonon/scripts/verify/production_coupled_q_summary.py) was purged in the studies reorganisation (commit 843c3069); the film figures below survive from that session, the CNT ladder data does not
+The figures below are the surviving artifacts of the original
+(2026-06-08) verification session; the consolidation script and run
+snapshots were removed in a later cleanup of superseded one-off
+scripts.
 
 \section{Implementation}
 
@@ -155,29 +157,24 @@ system at small broadening; the gap is the open issue of
 \section{Carbon nanotube: length ladder}
 \label{sec:prod_cnt}
 
+% REVIEW(open): source run purged -- the L=2,4,6 eta=0.45 ladder snapshots were deleted with phonon/scripts/out/production_coupled_q/ (commit 843c3069), and the current phonon/scripts/out/prod/cnt33/summary.csv is a superseded, unconverged finite-eta run (L2/L3/L4 ratios 1.32/1.80/1.89, L3/L4 not converged), so the 0.896/0.911 best-iterate ratios are no longer reproducible; superseded by the eta=0 ladder in sec:res_eta0. fig:prod_cnt_ladder removed (the regenerated PDF plots the superseded run, not the session described here).
 To exercise the $k{=}1$ path at production length scales (where the dense
 multi-cell solver is prohibitively expensive, \cref{sec:res_cnt}), the
 $(3,3)$ carbon nanotube was run as a length ladder $L=2,4,6$ transport
-cells at $\eta=0.45$\,THz on a $121$-point grid with $50$ iterations
-(\cref{fig:prod_cnt_ladder}). The anharmonic self-consistency on this
-soft-twist tube is metastable: the iteration does not settle to a fixed
-point but passes through a conserving iterate that the heat-flow criterion
-captures (the final iterate diverges and is discarded). The captured
-best-iterate ratios are $G_{\rm anh}/G_{\rm ball}=0.896$ ($L{=}2$,
-conservation $1.0\%$) and $0.911$ ($L{=}4$, conservation $3.5\%$); the
-$L{=}6$ point is not shown. The large-broadening value is
-weaker (closer to one) than the dense small-$\eta$ ladder of
-\cref{sec:res_cnt}, consistent with the under-scattering discussed in
-\cref{sec:prod_open}.
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=0.55\linewidth]{transport_sweeps/prod_cnt_ladder.pdf}
-\caption{Production CNT(3,3) anharmonic ratio (best conserving iterate) vs.\
-device length at $\eta=0.45$\,THz; per-point lead-to-lead conservation
-annotated.}
-\label{fig:prod_cnt_ladder}
-\end{figure}
+cells at $\eta=0.45$\,THz on a $121$-point grid with $50$ iterations. The
+anharmonic self-consistency on this soft-twist tube is metastable at this
+large broadening: the iteration does not settle to a fixed point but
+passes through a conserving iterate that the heat-flow criterion captures
+(the final iterate diverges and is discarded). The best-iterate ratios of
+that session ($G_{\rm anh}/G_{\rm ball}\approx0.90$ at $1$--$3.5\%$
+lead conservation) were weaker (closer to one) than the dense
+small-$\eta$ ladder of \cref{sec:res_cnt}, consistent with the
+under-scattering discussed in \cref{sec:prod_open}. The run snapshots
+have since been purged, so those ratios are quoted here for the
+historical record only; the definitive production CNT length ladder is
+the directly converged $\eta\to0$ one of \cref{sec:res_eta0}, and the
+surviving coupled-$q$ verification record is the film sweep of
+\cref{fig:prod_qfilm_qconv,fig:prod_qfilm_conservation}.
 
 \section{Cross-check against the dense solver}
 \label{sec:prod_dense}

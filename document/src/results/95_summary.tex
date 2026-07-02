@@ -1,0 +1,40 @@
+% ======================================================================
+\section{Summary of systems}
+\label{sec:res_summary}
+% ======================================================================
+
+\Cref{tab:res_summary} consolidates the headline transport numbers of this
+chapter with their convergence pedigree. Only $\eta=0$ (or, where marked, the
+necessarily finite-$\eta$ coupled-$q$) results are quoted; the finite-$\eta$
+systematics are collected in \cref{sec:res_approx}.
+
+\begin{table}[htb]
+  \centering
+  \caption{Headline anharmonic transport per system. ``lead'' is the
+  lead-current imbalance $|J_L-J_R|/|J|$ at the accepted iterate; $\eta=0$
+  results use the production solver ($\eta=10^{-12}$, \texttt{retarded=fft})
+  unless noted. Cells marked $^\dagger$ did not close the residual gate
+  (best-iterate value shown); ``in flight'' rows are running at the time of
+  writing.}
+  \label{tab:res_summary}
+  \begin{tabular}{llllll}
+    \hline
+    system & device & $G_\mathrm{anh}/G_\mathrm{ball}$ & lead & grid & note \\
+    \hline
+    CNT (3,3) & 2 cells, 300 K & $0.574$ & $7\times10^{-6}$ & 181 & $\eta=0$ fixed point \\
+    CNT (3,3) & 3 cells, 300 K & $0.506$ & $9\times10^{-6}$ & 181 & $\eta=0$ fixed point \\
+    % REVIEW(verified): cnt33_eta0 L4 lead_conservation = 1.27e-4 (best_cons 4.0e-6); grids checked against run manifests/logs (cnt33 181, cnt80 121, srtio3 121, d11a_eta0 161, film 121; d5a 181 = the conv1e10 JFNK-family grid the quoted numbers come from -- prod/sinw_d5a_eta0's manifest is a separate 201-point campaign).
+    CNT (3,3) & 4 cells, 300 K & $0.479^\dagger$ & $1.3\times10^{-4}$ & 181 & best-iterate \\
+    CNT (3,3) & 2 cells, 30--300 K & $0.75\to0.81\to0.57$ & $\le10^{-4}$ & 181 & non-monotonic, max near 100 K \\
+    CNT (8,0) & 2 cells, 300 K & $0.783$ & $4\times10^{-5}$ & 121 & $\eta=0$ fixed point \\
+    CNT (8,0) & 3 cells, 300 K & --- & --- & 121 & in flight (soft-mode recipe) \\
+    SrTiO$_3$ & 2 cells, 300 K & $0.728$ & $1\times10^{-5}$ & 121 & $\eta=0$ fixed point \\
+    SrTiO$_3$ & 3 cells, 300 K & $0.627$ & $2\times10^{-4}$ & 121 & $\eta=0$ fixed point \\
+    SrTiO$_3$ & 2 cells, 200 K & $0.777$ & $4\times10^{-5}$ & 121 & $\eta=0$ fixed point \\
+    SrTiO$_3$ & 2 cells, 600 K & $0.676^\dagger$ & $6.6\times10^{-3}$ & 121 & best-iterate \\
+    SiNW d5a & 2 cells, 300 K & marginal & $2.5\times10^{-3}$ & 181 & residual floor $0.016$--$0.032$; $G$ method-invariant $1\%$ (\cref{sec:res_eta0}) \\
+    SiNW d11a & 2 cells, 300 K & --- & --- & 161 & ballistic done; anharmonic in flight \\
+    Si film & 3--8 layers, 300 K & $0.52/0.45/0.38$ & $\sim10^{-3}$ & 121 & coupled-$q$, necessarily $\eta=0.4$ (\cref{sec:res_qfilm}) \\
+    \hline
+  \end{tabular}
+\end{table}

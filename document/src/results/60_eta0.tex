@@ -32,14 +32,18 @@ and $361$-point grids (right).
 \begin{figure}[htb]
   \centering
   \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_convergence_methods.pdf}
-  \caption{$\eta=0$ SCBA convergence. Left: the (3,3) CNT reaches a genuine
-  fixed point -- the $\Sigma^R$ residual and lead imbalance fall to
-  $\sim 10^{-11}$ while the energy balance stays at $10^{-16}$. Right: for the
-  \texttt{d5a} nanowire the bare $\eta=0$ root-finders do not converge by
-  contraction -- RPM diverges and Jacobian-free Newton--Krylov stays bounded but
-  stalls (residual near $0.3$--$0.5$, independent of the Krylov dimension $k=25$
-  or $50$); the broadening-floor-stabilised marginal fixed point ($G\approx2.6$,
-  conserving) is described in the text.}
+  \caption{$\eta=0$ SCBA convergence. \emph{Left}: the (3,3) CNT reaches a
+  genuine fixed point -- the $\Sigma^R$ residual and lead imbalance fall to
+  $\sim 10^{-11}$ while the energy balance stays at $10^{-16}$ (this tight run
+  uses the infrared taper of \cref{fig:res_eta0_cutoff}; the untapered
+% REVIEW(verified): conservation_figs.py -- untapered production run final rel-resid 2.29e-4 at 220 iterations.
+  production run of \cref{app:conservation} settles at $\sim2\times10^{-4}$ in $220$
+  iterations -- same conductance). \emph{Right}: for the \texttt{d5a} nanowire
+  the \emph{bare} $\eta=0$ root-finders do not converge by contraction -- plain
+  linear mixing limit-cycles at $O(1)$, RPM diverges ($\times$), and bare
+  Jacobian-free Newton--Krylov stalls -- whereas the broadening-floor-stabilised
+  trust-region JFNK descends to the \emph{marginal floor} $\approx0.016$ with a
+  conserving, method-invariant conductance $G\approx2.61$.}
   \label{fig:res_eta0_conv}
 \end{figure}
 
@@ -49,7 +53,8 @@ and $361$-point grids (right).
   \caption{CNT (3,3) $\eta=0$ conductance $G\cdot\mathrm{d}\omega$ versus the
   infrared regularisation scale $\omega_{\rm reg}$ (left; filled markers are
   genuine $10^{-10}$ fixed points, the dashed line a
-  $G_0-b\,\omega_{\rm reg}^2$ fit) and versus the frequency-grid size (right).
+  $G_0+b\,\omega_{\rm reg}^2$ fit through them, extrapolating to
+  $G_0=17.4$) and versus the frequency-grid size (right).
   The cutoff and grid sensitivities are both at the few-percent level.}
   \label{fig:res_eta0_cutoff}
 \end{figure}
@@ -59,21 +64,29 @@ and $361$-point grids (right).
   \includegraphics[width=0.95\linewidth]{transport_sweeps/eta0_cnt33_transmission.pdf}
   \caption{Ballistic versus anharmonic phonon transmission
   $T(\omega)=I(\omega)/\Delta n(\omega)$ (in units of conducting channels) of the
-  converged $\eta=0$ (3,3) CNT, for two (left) and three (right) transport cells.
-  The ballistic transmission shows the channel structure (up to $\sim 12$
-  channels); three-phonon scattering suppresses it across the band, more strongly
+  converged $\eta=0$ (3,3) CNT, for two (left) and three (right) transport cells,
+  against the analytic integer channel count $N(\omega)$ of the periodic lead
+  (grey staircase). The ballistic transmission \emph{equals} $N(\omega)$;
+  three-phonon scattering suppresses it across the band, more strongly
   at the longer device. The sub-$2$~THz bins are the infrared-regularised
   acoustic region.}
   \label{fig:res_eta0_trans}
 \end{figure}
 
 \paragraph{Anharmonic transport from the converged solution.} The conserving
-$\eta=0$ fixed point yields a genuine inelastic conductance. The ballistic
-transmission carries up to $\sim 12$ channels with the expected band structure;
-three-phonon scattering suppresses it across the whole band
-(\cref{fig:res_eta0_trans}), removing $39\%$ of the band-integrated transmission
-at two transport cells and $46\%$ at three -- the resistive onset grows with
-length. The ballistic conductance is itself length-independent (the Landauer
+$\eta=0$ fixed point yields a genuine inelastic conductance, and its ballistic
+baseline is \emph{exactly} the Landauer channel count: at every resolved
+frequency the converged ballistic $T(\omega)$ equals the integer number of lead
+bands crossing $\omega$ (computed independently from the periodic dynamical
+matrix; maximum deviation below $10^{-4}$ channels, peak $12=12$, zero
+unitarity violations, and $T_{\rm anh}\le T_{\rm ball}$ in every bin,
+\cref{fig:res_eta0_trans}). The $\eta=0$ transmission being \emph{higher} than
+any finite-$\eta$ result is therefore not an artefact but the removal of one:
+finite $\eta$ makes the near-edge channels artificially evanescent and absorbs
+flux in the device interior, pushing $T$ \emph{below} the exact integers
+(\cref{sec:res_approx}). Three-phonon scattering then removes $39\%$ of the
+band-integrated transmission at two transport cells and $46\%$ at three -- the
+resistive onset grows with length. The ballistic conductance is itself length-independent (the Landauer
 baseline, $8.0\times10^{8}$~W\,m$^{-2}$K$^{-1}$ at two, three and four cells), so
 the falling anharmonic ratio is genuine scattering, not coherence loss. The
 frequency-integrated $G_\mathrm{anh}/G_\mathrm{ball}$ (\cref{fig:res_eta0_transport};
@@ -82,10 +95,12 @@ so it is not identical to the flat band-integrated suppression quoted above)
 rises modestly from $0.75$ at $30$~K to $\approx 0.81$ near $100$~K and then falls
 to $0.57$ at $300$~K as the three-phonon scattering rate grows with the thermal
 phonon population, and it deepens with device length, $0.57\to0.51$ from two to
-three transport cells at $300$~K (the four-cell anharmonic run did not converge
-at $\eta=0$ and is excluded). These production-NEGF values at $\eta=10^{-12}$ are
-obtained with a different solver and broadening than the dense-reference numbers
-of \cref{sec:res_cnt} (a monotonic $0.92\to0.71$); they show a stronger reduction
+three transport cells at $300$~K (the four-cell anharmonic run reached
+best-iterate conservation $4\times10^{-6}$ at ratio $0.479$ but did not close
+the residual gate and is excluded). These production-NEGF values at
+$\eta=10^{-12}$ are obtained with a different solver and broadening than the
+dense-reference numbers of \cref{sec:res_cnt} (a monotonic $0.92\to0.709$ at
+$\eta_w=0.05$~THz, one cell); they show a stronger reduction
 but the same qualitative increase of anharmonic resistance with temperature and
 length. The stronger reduction is the physical $\eta\to0$ limit, not an
 artefact: at matched broadening the ratio falls monotonically toward this value
@@ -111,9 +126,13 @@ $\mathcal{T}(\omega\to0)\to N_{\rm ac}=4$, so the heat-current density
 $\hbar\omega\,I(\omega)$ tends to a constant --- the Bose factor's $1/\omega$ is
 cancelled by the $\hbar\omega$ weight, the quantised-conductance plateau
 $g_0=\pi^2k_B^2T/3h$ per channel (\cref{fig:res_eta0_ir}, blue;
-\cref{eq:ir_plateau}). The $\eta=0$ anharmonic curve, computed here \emph{without}
-the infrared taper, instead bends down and fluctuates as $\omega\to0$
-(\cref{fig:res_eta0_ir}, red). This is \emph{not} a Bose pole in the scattering
+\cref{eq:ir_plateau}). This plateau is not merely flat but \emph{quantised}: in
+units of $k_B\Delta T/2\pi$ the converged ballistic heat-current density reads
+$3.999$ at the first resolved bin -- the absolute quantum of thermal
+conductance per channel times $N_{\rm ac}=4$, with no adjustable normalisation.
+The $\eta=0$ anharmonic curve, computed here \emph{without}
+the infrared taper, is instead suppressed as $\omega\to0$, with a shallow
+non-monotonic dip (\cref{fig:res_eta0_ir}, red). This is \emph{not} a Bose pole in the scattering
 self-energy: the bosonic fold and the linearly-vanishing acoustic spectral weight
 cancel the $1/\omega$ of the bubble legs, and the bare bubble is exactly
 conserving (\cref{app:conservation}). What remains is the first-bin sampling of
@@ -136,11 +155,12 @@ ballistic plateau.
   \caption{Infrared behaviour of the converged $\eta=0$ (3,3) CNT. \emph{Left}:
   effective transmission $T(\omega)=I/\Delta n$; the ballistic curve plateaus at
   the $N_{\rm ac}=4$ acoustic channels as $\omega\to0$, while the anharmonic curve
-  (no taper) is suppressed and non-monotonic at low $\omega$. \emph{Right}: the
-  heat-current spectral density $\propto\hbar\omega\,I(\omega)$; the ballistic
-  value is flat as $\omega\to0$ (the Bose $1/\omega$ cancelled by $\hbar\omega$,
-  the quantised plateau), whereas the raw anharmonic result is suppressed and
-  fluctuates --- the first-bin sampling of the acoustic $G^R\sim1/\omega^2$
+  (no taper) is suppressed at low $\omega$. \emph{Right}: the heat-current
+  spectral density in quantised units, $\hbar\omega\,I(\omega)/(k_B\Delta T/2\pi)$;
+  the ballistic value is flat and equals $N_{\rm ac}=4$ ($3.999$ at the first
+  bin) --- the quantised thermal-conductance plateau, absolute normalisation
+  included --- whereas the raw anharmonic result is suppressed with a shallow
+  dip: the first-bin sampling of the acoustic $G^R\sim1/\omega^2$
   enhancement under the marginal $\eta=0$ fixed point (\cref{sub:eta_zero}), not a
   Bose pole in the bubble self-energy (the bare bubble is conserving,
   \cref{app:conservation}).}
@@ -175,28 +195,53 @@ Jacobian. The fixed point is therefore \emph{marginal}: the flexural-mode
 eigenvalue of the SCBA map sits at $|\lambda|\approx1$, so no iteration can drive
 the self-energy residual to zero.
 
-The transport observable, however, is well defined. A DC-concentrated,
+The transport observable, however, is well defined
+(\cref{fig:res_d5a_eta0_panel}). A DC-concentrated,
 grid-consistent broadening floor ($\Gamma_{\rm floor}\propto\mathrm{d}\omega^2$,
 acting only on the unresolved sub-grid bins so that it vanishes in the continuum)
 lifts the marginal mode just enough to enter its basin, and a warm-started
-trust-region JFNK then settles there. Across the root-finders that reach the basin
-the self-energy residual floors at $\approx0.03$ -- not $10^{-10}$, the marginal
-mode forbidding a tight fixed point -- while the conductance is method-invariant,
-$G\approx2.6$ within $\sim3\%$ ($2.61$, $2.63$, $2.64$, $2.70$ across the four
-converging solvers; the best-conserved trust-region JFNK gives $2.61$). The
-$\Phi$-derivable bubble balance \cref{eq:bubble_balance} holds to machine
-precision ($\sim10^{-18}$) at every iterate, while the lead-current imbalance
-floors at $\sim2.5\times10^{-3}$ -- the finite-broadening ghost-reservoir term of
+trust-region JFNK then settles there. Across the four floored JFNK variants that
+reach the basin the self-energy residual floors at $0.016$--$0.032$ -- not
+$10^{-10}$, the marginal mode forbidding a tight fixed point -- while the
+conductance is method-invariant at the one-percent level: $G=2.613$--$2.640$
+(trust-grow $2.614$, warm-start $2.613$, fixed-trust $2.627$, pseudo-transient
+$2.635$, and an independent re-run of the trust-grow recipe $2.640$); the
+coarser infrared-subtraction variant, whose residual floors higher
+($\approx0.07$--$0.09$), gives $2.70$. The
+$\Phi$-derivable bubble balance \cref{eq:bubble_balance} holds at machine
+precision ($10^{-17}$--$10^{-16}$) at every iterate, while the lead-current
+imbalance floors at $2.5\times10^{-3}$ for the best-conserved solver
+($\le1.7\times10^{-2}$ across the family) -- the finite-broadening
+ghost-reservoir term of
 \cref{app:conservation}, which vanishes only as the floor (hence $\mathrm{d}\omega$)
 goes to zero. The floor is a crutch to reach the basin, not a physical input:
-annealing it to zero leaves $G$ unchanged at the $3\%$ level. The $\eta=0$
+annealing it $2\to0$ grid cells over $80$ iterations preserves the fixed point
+-- the solution survives at zero floor -- with the annealed endpoint within
+$7\%$ of the floored family, the difference bounded by the anneal's own looser
+residual ($\approx0.1$; \cref{fig:res_d5a_eta0_panel}c). The $\eta=0$
 \texttt{d5a} conductance is thus converged and conserving as a transport number,
 the residual marginality -- not a missing solution -- being the honest content of
-the surface-mode physics. Whether the $\approx0.03$ residual floor is structural
-or merely resolution-limited is being settled by the grid-doubling to $361$
-points. The boundary is in either case sharp and predictive: the $\eta=0$
-anharmonic transport problem is well posed exactly when every heat-carrying mode
-is resolved by the frequency grid.
+the surface-mode physics. Whether the residual floor is structural
+or merely resolution-limited remains open: at $361$ points the same
+floor-stabilised recipe does not re-enter the basin (the warm-started JFNK
+stalls at $O(1)$ residual), so the grid-doubling comparison of the floor could
+not yet be made. The boundary is in either case sharp and predictive: the
+$\eta=0$ anharmonic transport problem is well posed exactly when every
+heat-carrying mode is resolved by the frequency grid.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=\linewidth]{transport_sweeps/sinw_d5a_eta0_panel.pdf}
+  \caption{The \texttt{d5a} $\eta=0$ marginal fixed point. \emph{(a)} The
+  floor-stabilised JFNK family (trust-grow bold; warm-start/fixed-trust/PTC
+  thin): the $\Sigma^R$ residual floors at $0.016$--$0.032$ while the bubble
+  balance stays at machine precision and the lead imbalance floors at the
+  ghost-reservoir level. \emph{(b)} The lead heat current is method-invariant,
+  $G=2.61$--$2.64$ ($\approx1\%$, shaded band) across the four solvers and an
+  independent re-run. \emph{(c)} Annealing the broadening floor $2\to0$ cells
+  (orange, right axis): the fixed point survives at zero floor.}
+  \label{fig:res_d5a_eta0_panel}
+\end{figure}
 
 \begin{figure}[htb]
   \centering

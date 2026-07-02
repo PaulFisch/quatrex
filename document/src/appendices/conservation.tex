@@ -9,7 +9,7 @@ ghost-reservoir reading of $\eta$, \cref{eq:ghost}), and quantifies the
 finite-$\eta$ floor on production devices. The standalone gate lives in
 \texttt{phonon.studies.conservation} (\texttt{replica\_check} for the bubble
 energy balance, \texttt{s3\_violation} for the vertex symmetry,
-% REVIEW: FLAG coverage gap -- the sigma_convention positivity gate (-i Sigma^{><} >= 0) is named here but never exercised/quantified in the body
+% REVIEW(open): sigma_convention positivity gate (-i Sigma^{><} >= 0) is named here but not quantified anywhere in the body
 \texttt{sigma\_convention} for the SSE sign/positivity check); the production
 attributions are reproduced from cached run artifacts under
 \texttt{phonon/studies/out/}. The motivating observation is that on the
@@ -68,7 +68,6 @@ conservation, where the full Kramers--Kronig retarded is mandatory
     \midrule
     S1 & $\eta=0$, consistent half rule                       & $6.9\mathrm{e}{-13}$\\
     S2 & $+$ Hermitian (Kramers--Kronig) part in $\Sigma_s^R$ & $1.6\mathrm{e}{-12}$\\
-    % REVIEW: reordered case rows to S1..S5 (S3 was listed after S4)
     S3 & $\eta=0.1$ / $\eta=0.4$                              & $3.8\mathrm{e}{-12}$ / $1.5\mathrm{e}{-12}$\\
     S4 & $+$ $\omega$-mask (cutoff) on $\Sigma_s^{\lessgtr,R}$ & $7.0\mathrm{e}{-14}$\\
     S5 & deliberately inconsistent $\Sigma^R$ (skew $\times0.6$) & $1.7\mathrm{e}{-12}$\\
@@ -85,7 +84,6 @@ for all $\eta$. This is the finite-$\eta$, broken-reciprocity term of
 
 The $\hbar\omega$-weighted anatomy makes the diagnostic concrete. At $\eta=0.1$
 the identity \cref{eq:sumrule} holds, $J_L+J_R+J_s=-4.4\times10^{-14}$, while
-% REVIEW: lead balance must equal |J_s|=0.306 by J_L+J_R+J_s~=0; 2.9e-1 was ~5% off
 the bare \emph{lead} balance is $|J_L+J_R|=3.1\times10^{-1}$, carried entirely
 by $J_s=+0.306$ of the (non-self-consistent, hence non-$\Phi$-derivable) toy
 $\Sigma_s$. The lead balance \emph{is} $|J_s|$: it measures distance from the
@@ -121,10 +119,12 @@ $O(0.1\text{--}1)$.
 \end{figure} The production device vertices (raw,
 plain truncation to the device degrees of freedom) gate at worst $S_3$
 violation $\le3.9\times10^{-16}$ after the force-constant regeneration, whereas
-the retired acoustic-sum-rule projection broke $S_3$ at $O(1)$ --- confirming
-% REVIEW: FLAG over-generalisation -- a permutation-symmetric ASR projection preserves S3; the O(1) breaking is specific to the non-symmetric projection used here
-that the vertex must be left as a genuine third derivative
-(\cref{eq:H_phonon}) rather than post-projected.
+the retired acoustic-sum-rule projection --- which acted on two of the three
+legs only, and was therefore not permutation-symmetric --- broke $S_3$ at
+$O(1)$. A leg-symmetric ASR projection would preserve $S_3$; the practical
+conclusion is that the vertex must remain a genuine (totally symmetric) third
+derivative (\cref{eq:H_phonon}), which plain truncation preserves and the
+retired leg-asymmetric projection destroyed.
 
 % ======================================================================
 \section{Attribution on production fixed points}
@@ -244,25 +244,26 @@ extrapolation}
 \label{sec:cons_ratio}
 % ======================================================================
 
-% REVIEW: FLAG inconsistent statement -- eta-window extrapolation (0.68-0.74) vs directly-converged 0.57 differ by ~13 pts (as large as the systematic removed); "13-22 point" mixes two undefined figures, make consistent
 The practical consequence is that a single-$\eta$ production number
 underestimates the anharmonic effect. At \emph{matched} $\eta$
 (\cref{tab:cons_ratio}) the \texttt{cnt33} lead balance stays $\sim10^{-5}$
 throughout, but the conductance ratio $G_{\rm anh}/G_{\rm ball}$ swings
 $0.79\to0.92$ over $\eta=0.30\text{--}0.90$ --- a $\sim13$-point finite-$\eta$
 systematic, far larger than the lead balance would suggest. Extrapolating the
-$\eta\ge0.30$ window to $\eta\to0$ (quadratic $0.68$, linear $0.70\text{--}0.74$)
-already gives $G_{\rm anh}/G_{\rm ball}\approx0.70$, a $\sim30\%$ reduction ---
-\emph{double} the $\sim16\%$ read off at the single point $\eta=0.45$. The
-directly converged $\eta=10^{-12}$ fixed point of \cref{sec:res_eta0} lies lower
-still, at $0.57$: the ratio keeps falling below $\eta=0.30$ faster than the
-window fit, so the extrapolation is only a lower bound on the effect and the
-physical reduction is $\sim40\%$. That $\eta=10^{-12}$ value is trustworthy
-here, not an under-resolved artefact --- it conserves at $7\times10^{-6}$ (lead
-balance), pins the bubble balance at $10^{-16}$ every iteration
-(\cref{fig:res_eta0_conv}), and shifts by only a few percent under the infrared
-regulariser and grid refinement (\cref{fig:res_eta0_cutoff}), far less than the
-$\sim13$--$22$-point $\eta$ systematic. Refining the grid at fixed $\eta=0.45$
+$\eta\ge0.30$ window to $\eta\to0$ gives
+$G_{\rm anh}/G_{\rm ball}\approx0.68\text{--}0.74$ (quadratic $0.68$, linear
+$0.74$), a $\sim30\%$ reduction --- already \emph{double} the $\sim16\%$ read
+off at the single point $\eta=0.45$. The directly converged $\eta=10^{-12}$
+fixed point of \cref{sec:res_eta0} lies lower still, at $0.574$, another
+$11$--$17$ points below the extrapolated band: the finite-$\eta$ family does
+not connect smoothly to $\eta=0$, so the window fit is only a lower bound on
+the effect and the physical reduction is $\sim40\%$. That $\eta=10^{-12}$ value
+is trustworthy here, not an under-resolved artefact --- it conserves at
+$7\times10^{-6}$ (lead balance), pins the bubble balance at $10^{-16}$ every
+iteration (\cref{fig:res_eta0_conv}), and shifts by only a few percent under
+the infrared regulariser and grid refinement (\cref{fig:res_eta0_cutoff}), far
+less than either the $13$-point in-window swing or the $11$--$17$-point gap to
+the direct fixed point. Refining the grid at fixed $\eta=0.45$
 ($0.838\to0.805$) moves the ratio the same way (\cref{fig:cons_ratio}). A
 single-$\eta$ figure must therefore be quoted with its finite-$\eta$ band or,
 preferably, taken from the directly converged $\eta\to0$ fixed point.

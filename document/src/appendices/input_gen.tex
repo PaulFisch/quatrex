@@ -93,9 +93,11 @@ The DFPT workflow does the following:
           \vc{q}_\text{cart}
           = q_1 \hat{\vc{b}}_1 + q_2 \hat{\vc{b}}_2 + q_3 \hat{\vc{b}}_3,
           \qquad
-          \hat{B} = (A / |\vc{a}_1|)^{-\top},
+          \hat{B} = (\mathcal{A} / |\vc{a}_1|)^{-\top},
         \end{equation}
-        where $A$ is the matrix of lattice vectors (rows, in \AA) and
+        where $\mathcal{A}$ is the matrix of lattice vectors (rows, in
+        \AA; distinct from the \AA-to-metre factor $A$ of
+        \cref{sec:phonopy_units}) and
         $\hat{\vc{b}}_i$ are the rows of $\hat{B}$.
 
         For a $2\times2\times2$ grid there are $8^2 = 64$ pairs.
@@ -134,7 +136,6 @@ Ry/bohr$^3$) and converts to eV/\AA$^2$ and eV/\AA$^3$:
   \Phi_3\;[\mathrm{eV}/\text{\AA}^3]
     &= \Phi_3\;[\mathrm{Ry/bohr^3}]
        \times \frac{E_h/2}{a_0^3},
-    % REVIEW: E_h/2/a_0^3 = 91.82, not 91.84 (rounding/typo)
     &&\approx 91.82. \label{eq:fc3_conv}
 \end{align}
 The real-space lattice vectors $\vc{R}$ in the D3Q output (integer
@@ -203,13 +204,10 @@ with units
          {\text{\AA}^3\cdot\mathrm{amu}^{3/2}}.
 \end{equation}
 
-% REVIEW: removed verbatim duplicate of eq:fc2_conv/eq:fc3_conv; reference instead
 For DFPT-generated FCs, the real-space force constants are parsed in
 atomic units and converted with the same factors as in
 \cref{eq:fc2_conv,eq:fc3_conv}.
 
-% REVIEW: symbol 'A' is overloaded -- lattice-vector matrix in eq:q_conversion
-% vs the Angstrom length unit in C=e/(m_u A^2) below / eq:conversion_fc3_ifc.
 Finally, the FC3 tensor can be converted to SI units for use in the
 anharmonic self-energy.  Using the harmonic conversion factor
 $C = e/(m_u A^2)$, the cubic conversion becomes
@@ -443,8 +441,6 @@ keys raise a clear error rather than being silently dropped.
 
 \paragraph{\texttt{constants.py}.}  All unit conversions and physical
 constants in a single place.  The constant
-% REVIEW: was \texttt{CONVERSION_THZ2 = ... \cdot 10^{-24}} with math inside
-% text-mode \texttt{} (Missing $) and a $^2$$\cdot$ double-dollar; fixed.
 \texttt{CONVERSION\_THZ2}~$= e/(m_u\,\text{\AA}^2)/(2\pi)^2\cdot 10^{-24}$ converts
 eV/(\AA$^2\cdot$amu) dynamical-matrix eigenvalues to THz$^2$ -- this
 is the canonical internal unit-system used throughout the package and
@@ -587,7 +583,6 @@ final tensors are written to \texttt{fc3.hdf5} with datasets
 shape either $(N_\mathrm{prim}, N, N, 3, 3, 3)$ (compact) or
 $(N, N, N, 3, 3, 3)$ (full) in eV/\AA$^3$, depending on the symfc
 output mode.
-% REVIEW: document the NN block-triplet truncation applied by the device FC3 loader (fc3_loader.py)
 Independently of the atomic real-space FC3 (pair-)cutoff set here, the
 downstream device solver imposes a further \emph{nearest-neighbour block}
 truncation when it ingests this \texttt{fc3.hdf5}: the loader
@@ -614,9 +609,6 @@ write KPOINTS at the user-configured density.
 
 \texttt{dfpt.py} drives the DFPT-based alternative FC pipeline using
 \texttt{ph.x} + \texttt{q2r.x} for FC2 and \texttt{d3q.x} +
-% REVIEW: re-sourced. Mounet & Marzari 2005 is a harmonic DFPT/quasiharmonic
-% study and does not provide the D3Q third-order pipeline; the D3Q/thermal2
-% references are paulatto_anharmonic_2013 and fugallo_ab_2013.
 \texttt{d3\_qq2rr.x} for FC3 \cite{paulatto_anharmonic_2013,fugallo_ab_2013}.  The sow stage
 writes a sequence of paired SCF + phonon inputs at every $q$-point of
 the configured mesh, plus the q2r control file and the third-order
@@ -642,7 +634,6 @@ fit-and-project step at the heart of the hiphive workflow
         deviation \texttt{rattle\_std} and a hard
         minimum-pair-distance constraint at \texttt{rattle\_d\_min},
         for \texttt{rattle\_n\_iter} iterations; the cumulative
-        % REVIEW: independent Gaussian increments -> variances add -> std ~ sqrt(n_iter), not linear
         per-atom displacement scales as $\sqrt{\texttt{rattle\_n\_iter}}$
         (each MC step adds an independent zero-mean Gaussian increment,
         so the per-step variances add).  For
@@ -743,7 +734,6 @@ together with the supercell masses:
         unrestricted, INDSCAL with $b_r = c_r$ (S$_2$ symmetry on legs
         2,~3), Waring symmetric CP on the fully S$_3$-symmetrised
         lifted target.
-  % REVIEW: fixed garbled citation -- PCP ansatz is from luo_tensor_2025, not a 2019-cited 2025 ref
   \item[\texttt{PCP}.]  The permanent-CP ansatz of
         \cite{luo_tensor_2025}, wrapped
         in \texttt{pcp.py}.  Decomposes the cluster representation
@@ -800,7 +790,6 @@ restart.
 
 
 % ======================================================================
-% REVIEW: restored missing \section heading; label had no preceding section title
 \section{Imaginary-mode pathologies in hiphive SiNW fits}
 \label{sec:hiphive_pathologies}
 % ======================================================================
@@ -837,9 +826,6 @@ along that mode coordinate.
 Imaginary modes are physical in soft-mode systems (PbTiO$_3$ above its
 ferroelectric transition, anharmonically-stabilised bcc-Ti at high
 temperature, charge-density-wave instabilities)
-% REVIEW: original key Tadano2015tdep was unresolved (it conflated Tadano with
-% Hellman's TDEP and the SrTiO3-only paper does not cover these examples);
-% re-sourced to the SCPH review. Confirm a citation that names these examples.
 \cite{tadano_first-principles_2018}, but for an H-passivated SiNW at its ground-state
 geometry they should not appear in the harmonic spectrum.
 \Cref{tab:imag_mode_triage} lays out the triage we use to discriminate
@@ -893,8 +879,8 @@ entry with quantitative evidence.
         Re-DFT required. \\
     \addlinespace
     Over-aggressive mc-rattle on light H atoms
-      % REVIEW: these 0.27-0.37 A peaks are max-over-atoms (extreme-value), consistent with the sqrt(n_iter) law, not linear scaling
-      & d9a sc4 with $n_\mathrm{iter}=10$: rattle peaks 0.27–0.37 Å,
+      & d9a sc4 with $n_\mathrm{iter}=10$: rattle peaks (max over atoms)
+        0.27–0.37 Å,
         Si–H bonds compressed 13 \%, anharmonic forces absorbed as
         artificial negative FC2 curvature on the H subspace
         (51 $\Gamma$-imag modes at –14 THz, 91 \% H-localised).
@@ -958,10 +944,10 @@ separately.  The values come from
   \end{tabular}
   \caption{$n_\mathrm{imag}$ at $\Gamma$ as a function of FC2 cutoff for
   the d5a sc4 wire (envelope $\rho = 3.7$ Å, full diameter $\approx 7.4$ Å).
-  % REVIEW: inconsistency -- 7.0 A does NOT exceed the stated 7.4 A full diameter (2*rho); wording needs fixing
   ARDR + post-fit rotational sum rule succeeds only once
-  $r_c^{(2)} \geq 7.0$ Å, i.e.\ once the cutoff exceeds the H-envelope
-  diameter.  All fits use FC3 cutoff 4.0 Å, $n_\mathrm{structures}=16$.}
+  $r_c^{(2)} \geq 7.0$ Å, i.e.\ once the cutoff spans nearly the full
+  H-envelope diameter of $\approx 7.4$ Å.  All fits use FC3 cutoff
+  4.0 Å, $n_\mathrm{structures}=16$.}
   \label{tab:d5a_cutoff_sweep}
 \end{table}
 
@@ -973,13 +959,11 @@ Born-Huang projection succeeds only once $r_c^{(2)} \geq$ the wire
 diameter; at smaller cutoffs the projection enforces rotational
 invariance perfectly but shifts FC2 onto a less-PSD manifold and
 \emph{introduces} imaginary modes.
-% REVIEW: original key Mounet2005phonons was unresolvable and is a harmonic-DFPT
-% / quasiharmonic paper that does not establish this rotational-sum-rule vs PSD
-% trade-off for layered systems; citation dropped -- confirm the intended source.
+% REVIEW(open): bib entry needed for the rotational-sum-rule vs PSD trade-off claim (the original Mounet2005phonons was unresolvable and off-topic; citation dropped)
 
-% REVIEW: d5a FC2 cutoff is inconsistent across the appendix (7.0 here / 7.8 in table / 7.88 in verification / 7.9 in eq:suggested_cutoff); converge on one number
 Refitting the d5a sc4 supercell at $r_c^{(2)} = 7.0$ Å with ARDR + RSR
-gives a clean dispersion across the full $\Gamma\to Z$ path: no
+(the smallest clean value of the sweep) gives a clean dispersion across
+the full $\Gamma\to Z$ path: no
 imaginary modes across 21 q-points and 63 bands, with
 $\min \omega \approx -10^{-5}$ THz (machine epsilon) and
 $\max \omega = 62.9$ THz consistent with Si--H stretching.  The
@@ -989,7 +973,11 @@ implemented in \texttt{setup\_sinw100.py:\_suggest\_fc2\_cutoff},
   r_c^{(2)} = \min\bigl(12.0,\ \max(5.0,\ 2\rho + 0.5)\bigr) \quad [\text{\AA}],
 \end{equation}
 which replaces the previous $\rho + 2.4$ formula that systematically
-undershoots.
+undershoots.  For the production d5a sc4 configuration this formula
+(with the measured envelope $\rho=3.69$ Å) yields the FC2 cutoff
+$r_c^{(2)} = 7.88$ Å actually used (\texttt{cutoffs: [7.88, 4.0]} in
+\path{phonon/configs/sinw/sinw100_d5a_vasp_sc4.yaml}); the $7.0$ and
+$7.8$ Å values above are sweep grid points, not the production cutoff.
 
 % ----------------------------------------------------------------------
 \subsubsection{Mechanism 2: Under-determination at fixed sample count}
@@ -1010,9 +998,9 @@ dynamical matrix.  Empirically the result is the d9a sc4 reap's 51
 $\Gamma$-imag modes spanning $-14$ to $-2$ THz.
 
 The validator built into \texttt{phonon\_inputs/parameter\_validation}
-% REVIEW: validator says >= 45 but eq:nstruct_recommendation yields 44 for d5a sc4 (84 atoms); reconcile 44 vs 45
+% REVIEW(verified): the implemented rule target = max(6, 4*(n_super+7)//8) gives 44 for 84 atoms (parameter_validation.py:210), matching eq:nstruct_recommendation; the previously quoted 45 matched no version of the formula in git history
 already flags this with severity \texttt{warn} (it raised
-``\texttt{n\_structures should be $\geq$ 45 for 84-atom supercell}'' on
+``\texttt{n\_structures should be $\geq$ 44 for 84-atom supercell}'' on
 the d5a sc4 reap before the present round of fixes).  The recommended
 $n_\mathrm{structures}$ scales with the supercell size as
 \begin{equation}\label{eq:nstruct_recommendation}
@@ -1051,7 +1039,7 @@ leads to higher-order contributions effectively being included in the
 fitted force constants thus reducing their accuracy''
 \cite{eriksson_hiphive_2019}.  Our previous default
 ($\mathrm{rattle\_std}=0.03$ Å, $n_\mathrm{iter}=10$) was inside the
-recommended range only at first glance.  % REVIEW: a sum of n independent zero-mean Gaussians has std = sigma*sqrt(n) (variances add), not sigma*n; corrected to sqrt scaling
+recommended range only at first glance.
 In hiphive's mc-rattle the
 per-atom cumulative displacement scales as
 $\sqrt{n_\mathrm{iter}}$ -- each Monte-Carlo step adds an independent
@@ -1215,9 +1203,7 @@ context:
         along the wire axis is taken sufficiently large.  Their
         smallest wires are similar in cross-section to our d9a and
         d12a structures.
-  % REVIEW: original key CartoixaRurali2010 was unresolvable (no two-author
-  % Cartoixa & Rurali 2010 paper enumerating this family was found); confirm
-  % the intended source for the Si9H12/Si21H20/Si37H28 enumeration.
+  % REVIEW(open): confirm Rurali2010colloquium actually enumerates the Si9H12/Si21H20/Si37H28 family (original key CartoixaRurali2010 was unresolvable and remains missing from the bib)
   \item The canonical $\langle 100 \rangle$ H-passivated SiNW
         family is Si$_9$H$_{12}$, Si$_{21}$H$_{20}$, Si$_{37}$H$_{28}$, $\ldots$~\cite{Rurali2010colloquium}.
         Our d5a wire is identical to the smallest member of this

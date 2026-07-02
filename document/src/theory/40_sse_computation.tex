@@ -45,9 +45,6 @@ transform pair
   = \int\!d\tau\;g(\tau;\cdot)\,e^{+i\omega\tau},
 \end{equation}
 under which the 1D convolution theorem gives
-% REVIEW: 1/(2pi) restored on the LHS to match the eq:g_tau Fourier convention
-% (and eq:sigma_phph, which carries d omega'/2pi via the \dw macro). Display only;
-% eq:sigma_phph_tau downstream is already correct.
 \begin{equation}\label{eq:omega_conv}
   \int\!\frac{d\omega'}{2\pi}\;
     G_1(\omega';\cdot)\,G_2(\omega-\omega';\cdot)
@@ -234,11 +231,11 @@ balanced-tree (ii) have identical asymptotic cost
   \mathcal{C}_\mathrm{ic}^\mathrm{dense}
   = \cO\!\bigl(\ndof^{4}\bigr),
 \end{equation}
-which we take as the unit cost throughout.
-% REVIEW: ndof is overloaded. At the head of this subsection ndof=N_AO=N_B*NBS
-% (the full ring), but the block-sparse per-pair kernel below (eq:cic_sparse,
-% eq:cost_opt, eq:phph_step_*) works at fixed block pair, where the relevant
-% dimension is the PER-BLOCK size NBS. Read ndof->NBS in those per-pair costs. Balanced-tree is
+which we take as the unit cost throughout. Note the two index scales in
+use: $\ndof=N_{AO}=\NB\NBS$ for the full ring of this subsection, and
+the per-block size $\NBS$ for the block-sparse \emph{per-pair} kernel
+of \cref{eq:cic_sparse,eq:phph_step_A,eq:phph_step_B,eq:phph_step_S},
+which works at a fixed transport-block pair. Balanced-tree is
 preferable when the two halves can be evaluated on different ranks,
 which is the case in our distribution scheme; otherwise the two are
 interchangeable. Outside-in is the natural form for a single-rank
@@ -558,17 +555,24 @@ evaluation:
     $\cO(C_a)$ per output (intra-block-sparse $f$). Total over
     $(r,s,x)$: $\cO(R^{2}\,\ndof\,C_a)$.
 \end{enumerate}
-The combined per-pair cost is
+The combined cost per working point (full ring, all block pairs) is
+% REVIEW(verified): the two-stage costs above are full-ring (ndof rows, band r_c),
+% not per-pair; per-pair comparison target is therefore NB*Nc,x^2*NBS*Ca^3.
 \begin{equation}\label{eq:cost_opt}
   \cO\!\bigl(R\,\ndof\,r_c\,C_a + R^{2}\,\ndof\,C_a\bigr),
 \end{equation}
-to be compared with the sparse ring cost $\cO(\NBS\,C_a^{3})$ of
-\cref{eq:cic_sparse} under the assumption that intra-block
+to be compared with the per-pair sparse ring cost $\cO(\NBS\,C_a^{3})$ of
+\cref{eq:cic_sparse}, i.e.\
+$\cO(\NB\,N_\mathrm{c,x}^{2}\,\NBS\,C_a^{3})$ per working point,
+under the assumption that intra-block
 sparsity is exploitable (cf.\ the forward note in
 \cref{ssec:phph_sparsity}: in the current dense-kernel
 implementation $C_a=\NBS$, and the comparison collapses to the
 asymptotically equivalent $\cO(\NBS^{3})$ baseline). For
-$R\ll C_a^{2}$ the separable form is the cheaper one.
+$R\ll C_a^{2}$ the first (SpMM) term is cheaper, and for
+$R\lesssim N_\mathrm{c,x}\,C_a$ the quadratic term as well, making the
+separable form the cheaper one; the crossover is analysed in
+\cref{ssec:phph_decomp_compute}.
 Structurally richer decompositions (Tucker, CP, INDSCAL, symmetric
 CP; \cref{sub:fc3_tucker,sub:fc3_cp,sub:fc3_indscal,sub:fc3_symcp})
 plug into the same kernel with different factor matrices and the
@@ -956,11 +960,6 @@ both divided over the full $P=P_EP_S$:
       \frac{N_\tau\,\NB\,N_\mathrm{c,x}^{2}\,\NBS^{4}}{P}
     \Bigr).
 \end{equation}
-% REVIEW: ring-work exponent corrected NBS^3 -> NBS^4. The dense per-pair ring
-% (eq:inner_contraction; steps A,B each NBS^4) costs NBS^4, so summed over N_B
-% outputs and N_c,x^2 inner pairs the work is N_B N_c,x^2 NBS^4/P
-% (= N_AO N_c,x^2 NBS^3/P, matching eq:cost_phph_dist). The implemented full
-% off-diagonal ring is more work than the retired diagonal design, not less.
 Communication is the four energy redistributions plus the spatial
 halo,
 \begin{equation}\label{eq:vol_phph_impl}

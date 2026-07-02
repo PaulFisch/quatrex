@@ -17,19 +17,20 @@ they are collected here only to show that they are biased and, crucially, that t
 bias cannot be removed by extrapolation. Its systematic is much larger than the
 lead-balance residual suggests: on the \texttt{cnt33} tube at matched $\eta$ the
 lead balance stays $\sim10^{-5}$ throughout, yet the anharmonic ratio
-% REVIEW(kept from remote): eta enters as i*eta added to omega^2, so its unit is THz^2 -- applied here
-$G_{\rm anh}/G_{\rm ball}$ swings $0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz$^2$
+% REVIEW(open): per-solver eta-unit conventions (production Dyson 2i*eta|omega|, eta in THz, vs the dense additive i*eta in THz^2) still need one reconciliation in app:finite_analysis.
+$G_{\rm anh}/G_{\rm ball}$ swings $0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz
 (\cref{fig:res_cnt_T}), so a single broadening over-broadens the spectral function
-and \emph{under}-estimates the scattering (a single point at $\eta=0.45$\,THz$^2$
+and \emph{under}-estimates the scattering (a single point at $\eta=0.45$\,THz
 reads only a $\sim16\%$ reduction). Worse, the extrapolation overshoots: the
-$\eta\ge0.30$ window extrapolates to $G_{\rm anh}/G_{\rm ball}\approx0.70$, whereas
-the directly converged $\eta\to0$ fixed point gives $0.574$ (\cref{sec:res_eta0}) ---
-the finite-$\eta$ family does not connect smoothly to the $\eta=0$ limit, so even an
-$\eta\to0$ fit of finite-$\eta$ data is wrong by $\sim20\%$. The same lesson is
+% REVIEW(verified): conservation_figs.py -- eta->0 fits give linear 0.739 / quadratic 0.682 (was "0.70--0.73"); vs the direct 0.574 that is +19% (quadratic) to +29% (linear).
+$\eta\ge0.30$ window extrapolates to $G_{\rm anh}/G_{\rm ball}\approx0.68$--$0.74$
+(quadratic--linear), whereas the directly converged $\eta\to0$ fixed point gives
+$0.574$ (\cref{sec:res_eta0}) --- the finite-$\eta$ family does not connect smoothly
+to the $\eta=0$ limit, so even an $\eta\to0$ fit of finite-$\eta$ data overestimates
+the ratio by $19$--$29\%$. The same lesson is
 sharper on the soft \texttt{d5a} wire, where a single cell at finite $\eta$ returns
 the unphysical $G_{\rm anh}/G_{\rm ball}>1$ (\cref{tab:res_anh_T}): finite broadening
 can violate the resistive bound outright. The only defensible transport number is the
-% REVIEW(merge): remote text claimed the window extrapolates to 0.57; our sweep gives ~0.70 vs direct 0.574 -- verify the extrapolation number from the eta-sweep npz in the claims pass, and align sec:cons_ratio in app:conservation to the same story
 $\eta=0$ fixed point; the mechanism and step-by-step verification are in
 \cref{app:conservation}.
 
@@ -38,25 +39,28 @@ $\eta=0$ fixed point; the mechanism and step-by-step verification are in
   \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_g.pdf}\hfill
   \includegraphics[width=0.48\linewidth]{transport_sweeps/cnt33_temperature_ratio.pdf}
   \caption{Finite-$\eta$ (\emph{not} physical) anharmonic transport of the $(3,3)$
-  carbon nanotube versus temperature at a single transport cell, shown to quantify
-  the broadening bias. \emph{Left}: ballistic and anharmonic per-area conductance.
-  \emph{Right}: the finite-$\eta$ ratio $G_\mathrm{anh}/G_\mathrm{ball}$ (falling
-  % REVIEW(merge): 0.810 per the remote 0.71->0.810 reconciliation at 1 cell/300 K; confirm against the regenerated figure data
-  $0.92\to0.810$ over $30$--$300$~K) sits well above the conserving $\eta\to0$ result
-  of \cref{sec:res_eta0} ($0.75\to0.57$); the gap is the over-broadening systematic.}
+  carbon nanotube versus temperature, shown to quantify the broadening bias.
+  \emph{Left}: ballistic and anharmonic conductance (dense reference at
+  $\eta_w=0.05$~THz, one cell; conserving $\eta=0$ production at two cells).
+  \emph{Right}: the finite-$\eta$ ratio falls $0.92\to0.709$ over $30$--$300$~K at
+  $\eta_w=0.05$~THz --- but the \emph{same} one-cell/$300$~K point moves to $0.810$
+  at $\eta_w=0.206$~THz: the broadening choice shifts the answer by $\sim14\%$. At
+  matched length (two cells, $300$~K) the finite-$\eta$ $0.702$ collapses to the
+  conserving $\eta=0$ value $0.574$. The $\eta=0$ sweep is also \emph{non-monotonic}
+  (maximum near $100$~K), a feature the over-broadened sweep misses entirely.}
   \label{fig:res_cnt_T}
 \end{figure}
 
 \paragraph{Frequency grid.}
 The bubble convolution \cref{eq:sigma_phph_tau} has support up to
-% REVIEW: [FLAG-ONLY] mixed omega convention -- f_max >= 2*omega_max/2pi carries an explicit 1/2pi (angular) while |Sigma^R|/omega_max^2 and the THz^2 magnitudes treat omega as ordinary THz
+% REVIEW(open): mixed omega convention -- f_max >= 2*omega_max/2pi carries an explicit 1/2pi (angular) while |Sigma^R|/omega_max^2 and the THz^2 magnitudes treat omega as ordinary THz.
 $2\omega_{\max}$, so the grid must satisfy $f_{\max}\ge2\omega_{\max}/2\pi$
 (\cref{eq:conv_support}). An under-ranged grid aliases the truncated tail back
 into the band as a spurious strong-coupling self-energy that destabilises the
 SCBA: for the \texttt{d5a} wire the historical $f_{\max}=18$\,THz, far below the
-% REVIEW: 2*63 = 126, not 129
 $\sim126$\,THz convolution support set by the $63$\,THz Si--H stretch, inflates
-$|\Sigma^R|$ by $\sim25\times$ and diverges the multi-slab iteration, whereas the
+% REVIEW(verified): tab:fmax_aliasing_one_shot -- d5a |Sigma^R| 205 vs 8.7 THz^2 = 24x (was "~25x"); 8.7/omega_max^2 = 0.2%.
+$|\Sigma^R|$ by $\sim24\times$ and diverges the multi-slab iteration, whereas the
 properly-ranged grid returns it to the
 perturbative regime ($|\Sigma^R|/\omega_{\max}^2\approx0.2\%$). The one-shot
 verification across bulk Si and \texttt{d5a} is tabulated in
@@ -69,7 +73,7 @@ approximation inside the bubble were swept on the open nanowires
 The dominant cutoff is the off-diagonal Green's-function content: a diagonal-$G$
 approximation is catastrophic on the open wires ($5$--$30\times$), while the
 magnitude threshold converges quickly. The closed tube is far more forgiving --
-all corners of the cutoff cube lie within $\pm10\%$ of the full-coupling value.
+all corners of the cutoff cube lie within $+11/{-}9\%$ of the full-coupling value.
 
 \paragraph{Vertex compression.}
 The low-rank FC3 decompositions of \cref{sub:fc3_compression} trade parameter count
@@ -77,7 +81,6 @@ for accuracy (\cref{fig:res_decomp}): the transport observable converges faster
 than the Frobenius residual the fitters minimise, but the matricised SVD becomes
 unphysical at higher rank while the symmetric ans\"atze degrade gracefully.
 
-\todo[inline]{Consolidate the three sweeps above into one approximation-cost figure
-(conductance / $G_{\rm anh}-G_{\rm ball}$ vs.\ each approximation, across
-% REVIEW: removed dangling reference to non-existent document/MISSING.md
-\texttt{cnt33}/\texttt{d5a}/\texttt{d11a}/film).}
+% REVIEW(open): consolidate the three sweeps above into one approximation-cost
+% overview figure (conductance vs each approximation, across
+% cnt33/d5a/d11a/film) -- the individual sweeps all exist as figures (MISSING.md E).

@@ -84,9 +84,6 @@ $G^{\lessgtr},\, G^{R/A},\, G^t$, with the standard relations
   G^t &= G^< + G^R
 \end{align}
 At equilibrium, the fluctuation--dissipation theorem can be written as~\cite[Eq. 24]{wang_nonequilibrium_2014}
-% REVIEW: sign corrected. This file's own eq:spectral gives A=i[G^R-G^A]=-2 Im G^R
-% and G^R-G^A=G^>-G^< (relations above), so G^>-G^<=-iA=+2i Im G^R; the FDT must
-% therefore read G^{<}=-i n A=+2i n Im G^R (was -2i, internally inconsistent).
 \begin{equation}\label{eq:phonon_fdt}
   G^<(\omega) = 2 i\,n_{\mathrm{BE}}(\omega,T)\,\mathrm{Im}\,G^R(\omega),\qquad
   G^>(\omega) = 2 i\,[1 + n_{\mathrm{BE}}(\omega,T)]\,\mathrm{Im}\,G^R(\omega).
@@ -106,10 +103,6 @@ The retarded Green's function can be computed from the Dyson equation
 \end{equation}
 with $D$ the dynamical matrix, $\eta>0$ a numerical broadening matched
 to the frequency grid, and the total retarded self-energy decomposed as
-% REVIEW: the constant i*eta here is the idealised regulator; the production
-% solver uses the frequency-proportional form (omega^2 + 2i*eta*|omega|) plus a
-% DC-concentrated soft-mode broadening floor on the device matrix only -- see the
-% eta->0 discussion (eq:regulator_impl, eq:eta_floor in sub:eta_zero).
 \begin{equation}
   \Sigma^R(\omega^2) = \Sigma_L^R(\omega^2) + \Sigma_R^R(\omega^2)
                       + \Sigma_s^R(\omega^2).
