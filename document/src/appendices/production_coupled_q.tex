@@ -60,7 +60,7 @@ production-assembled film Hamiltonian $H(q_\perp)$ reproduces the dense
 dynamical-matrix file used by the production input path round-trips
 against the dense $H(q_\perp)$ exactly.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Bit-exact verification of the coupled-$q$ port.}
 \label{tab:prod_validation}
@@ -97,7 +97,7 @@ no heat). The transverse mesh was swept at fixed thickness ($3$ primitive
 layers) to test momentum convergence, with one thicker point
 (\cref{tab:prod_film}, \cref{fig:prod_qfilm_qconv}).
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Production silicon film, coupled-$q$ self-energy, $\eta=0.4$\,THz
 with zero-mode projection. $G$ are the $q$-summed lead heat currents
@@ -119,7 +119,7 @@ $5$ & $5$ & $0.846$ & --- & $15.1\%$ \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering
 \includegraphics[width=0.6\linewidth]{transport_sweeps/prod_qfilm_qconv.pdf}
 \caption{Production silicon film coupled-$q$ transport vs.\ transverse mesh
@@ -141,7 +141,7 @@ with $n_k$ (\cref{fig:prod_qfilm_conservation}); it is therefore not a
 momentum-undersampling effect and is treated as an open issue in
 \cref{sec:prod_open}.
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering
 \includegraphics[width=0.6\linewidth]{transport_sweeps/prod_qfilm_conservation.pdf}
 \caption{Lead-to-lead heat non-conservation of the production film. It is
@@ -170,7 +170,7 @@ weaker (closer to one) than the dense small-$\eta$ ladder of
 \cref{sec:res_cnt}, consistent with the under-scattering discussed in
 \cref{sec:prod_open}.
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering
 \includegraphics[width=0.55\linewidth]{transport_sweeps/prod_cnt_ladder.pdf}
 \caption{Production CNT(3,3) anharmonic ratio (best conserving iterate) vs.\
@@ -198,7 +198,7 @@ reaches at the converged $n_k{\geq}8$ mesh of \cref{sec:res_qfilm} ---
 i.e.\ the coarse $n_k{=}3$ mesh used for the matched cross-check is itself
 inadequate for conservation in \emph{both} solvers.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Dense \texttt{si\_film} cross-check, $n_k{=}3$, $n_{\rm slabs}{=}3$,
 transport along the same axis as the production run.}

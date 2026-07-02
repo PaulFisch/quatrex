@@ -100,7 +100,13 @@ renormalisation $D\mapsto D + \Sigma^{(4),\mathrm{HF}}$.}
 
 A second diagram, lower order in derivatives but one loop, survives:
 the FC4 Hartree--Fock ``loop'' tadpole
-$\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = -\tfrac{\hbar}{2}
+% REVIEW: tadpole prefactor corrected so the result is real. With the equal-time
+% relation <u_nu u_lambda> = i*hbar*G^<_{nu lambda}(tau,tau), the Hartree tadpole
+% (1/2)Phi^(4)<uu> equals (i*hbar/2)Phi^(4)G^<; the previous -hbar/2*G^< was
+% imaginary. Confirm the overall sign against static_self_energy.py.
+$\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = \tfrac{1}{2}
+\sum_{\nu\lambda} \Phi^{(4)}_{\mu\mu'\nu\lambda}\,\langle u_\nu u_\lambda\rangle
+= \tfrac{i\hbar}{2}
 \sum_{\nu\lambda} \Phi^{(4)}_{\mu\mu'\nu\lambda}\,
 G^{<}_{\nu\lambda}(\tau,\tau)$ from a single quartic vertex (\cref{fig:fc4_tadpole}).
 The loop self-energy is real and frequency-independent.
@@ -143,6 +149,10 @@ energy-conservation $\delta(\omega - \omega' - \omega'')$ implicit in
 the contour integral. Substituting equilibrium FDT
 \cref{eq:phonon_fdt} reproduces Fermi's-golden-rule expressions for
 three-phonon scattering rates: in mode basis,
+% REVIEW: absorption-channel Bose factor corrected to 2[n_2 - n_1]. On the
+% delta(omega_s - omega_{s1} + omega_{s2}) channel, energy conservation forces
+% omega_{s1} > omega_{s2} (so n_1 < n_2); the Maradudin-Fein / phono3py linewidth
+% and the bubble combination (1+n_1)n_2 - n_1(1+n_2) = n_2 - n_1 are positive.
 \begin{align}\label{eq:fgr}
   \mathrm{Im}\,\Sigma^R_s(\omega_s,\qp)
   &\;=\;
@@ -152,7 +162,7 @@ three-phonon scattering rates: in mode basis,
   &\quad\times
    \Bigl\{
      [1 + n_1 + n_2]\,\delta(\omega_s - \omega_{s_1} - \omega_{s_2})
-     + 2[n_1 - n_2]\,\delta(\omega_s - \omega_{s_1} + \omega_{s_2})
+     + 2[n_2 - n_1]\,\delta(\omega_s - \omega_{s_1} + \omega_{s_2})
    \Bigr\},
 \end{align}
 with $n_i = n_{\mathrm{BE}}(\omega_{s_i},T)$, exhibiting the
@@ -165,7 +175,12 @@ in the relaxation-time approximation.
 
 By construction $\Sigma^R$ is causal in time, so its frequency
 components satisfy a Kramers--Kronig relation. Starting from
-$\Sigma^R = \tfrac{1}{2}(\Sigma^t + \Sigma^{\bar{t}}) +
+% REVIEW: sign fixed. The Keldysh identities are Sigma^t + Sigma^{tbar} =
+% Sigma^< + Sigma^>, Sigma^t - Sigma^{tbar} = Sigma^R + Sigma^A; the retarded
+% combination is (1/2)(Sigma^t - Sigma^{tbar}) + (1/2)(Sigma^> - Sigma^<).
+% (With the previous '+' the RHS collapsed to Sigma^>.) The final eq:sigma_R_full
+% below is unaffected.
+$\Sigma^R = \tfrac{1}{2}(\Sigma^t - \Sigma^{\bar{t}}) +
 \tfrac{1}{2}(\Sigma^> - \Sigma^<)$ and using the spectral identity for
 $\Sigma^{t,\bar{t}}$, one obtains~\cite{guo_quantum_2020,wang_nonequilibrium_2014}
 \begin{equation}\label{eq:sigma_R_full}
@@ -176,9 +191,14 @@ $\Sigma^{t,\bar{t}}$, one obtains~\cite{guo_quantum_2020,wang_nonequilibrium_201
 \end{equation}
 The antihermitian (dissipative) first term carries inverse-lifetime
 information,
+% REVIEW: units fixed. With the omega^2 spectral variable (eq:system), Sigma^R has
+% units (rad/s)^2 and the linewidth (HWHM in omega) is -Im Sigma^R/(2 omega_s), so
+% the inverse lifetime (FWHM rate) is tau^{-1} = -Im Sigma^R/omega_s -- no factor
+% of hbar. (was 2/(hbar omega_s), dimensionally not a rate.) Consistent with the
+% companion shift Delta omega = Re Sigma^R/(2 omega_s) below.
 \begin{equation}\label{eq:lifetime}
   \tau_s^{-1}(\qp)
-  \equiv -\frac{2}{\hbar\omega_s(\qp)}\,
+  \equiv -\frac{1}{\omega_s(\qp)}\,
      \mathrm{Im}\,\langle s|\Sigma^R(\omega_s,\qp)|s\rangle,
 \end{equation}
 while the dispersive second term encodes the anharmonic frequency
@@ -256,7 +276,7 @@ detailed balance and drives a steady-state heat current.
 \end{tikzpicture}
 \caption{Two-loop $\Phi^{(3)}$ vertex correction to the phonon
 self-energy ($\mathcal{O}((\Phi^{(3)})^4)$). Four cubic vertices form a
-1PI ``diamond'' subgraph}
+1PI ``diamond'' subgraph.}
 \label{fig:vertex_correction}
 \end{figure}
 
@@ -313,7 +333,8 @@ $(\Phi^{(3)})^4$ that lie beyond bubble-SCBA.}
 \Cref{eq:sigma_guo} captures the leading three-phonon process. Higher
 orders include~\cite{wang_nonequilibrium_2014,guo_quantum_2020}:
 (i) the four-phonon tadpole from $\Phi^{(4)}$,
-$\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = -\tfrac{\hbar}{2}\sum_{\nu\lambda}
+% REVIEW: prefactor matches the corrected real form of the tadpole defined above.
+$\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = \tfrac{i\hbar}{2}\sum_{\nu\lambda}
 \Phi^{(4)}_{\mu\mu'\nu\lambda}\,G^<_{\nu\lambda}(\tau,\tau)$,
 which is real, frequency-independent, and renormalizes
 $D \mapsto D + \Sigma^{(4),\mathrm{HF}}$, contributing the
@@ -322,8 +343,8 @@ shifts~\cite{wang_nonequilibrium_2014} (\cref{fig:fc4_tadpole}),
 (ii) the two-loop $\Phi^{(3)}$ vertex correction, relevant at high
 $T$ where $\hbar\omega_{\max}/k_B T \lesssim 1$ and three-phonon
 processes saturate (\cref{fig:vertex_correction}) and
-(iii) crossed and ladder graphs that are needed to maintain
-$\Phi$-derivability.
+(iii) crossed and ladder graphs (\cref{fig:two_loop_topologies}) that are needed
+to maintain $\Phi$-derivability.
 
 The $\Phi$-derivability framework of Baym and Kadanoff~\cite{baym_conservation_1961, baym_self-consistent_1962}
 states that $\Sigma$ must be the functional derivative of a generating
@@ -353,8 +374,10 @@ transverse momenta~\cite{guo_quantum_2020}:
     G^{\gtrless}_{y_1 y_4}(\omega',\qp{}')\,
     G^{\gtrless}_{y_2 y_3}(\omega-\omega',\qp - \qp{}'),
 \end{align}
-where $x,y$ denote transport-direction DOF indices, i.e.\ $x=(l_x,\mu)=(l_x,\kappa,\alpha)$
-with $l_x$ enumerating transport-direction slabs/supercells. The
+where $x,y$ denote transport-direction DOF indices, i.e.\ $x=(l_x,\kappa,\alpha)$
+with $l_x$ enumerating transport-direction slabs/supercells (here $(\kappa,\alpha)$
+is the intra-slab DOF, distinct from the global index $\mu=(l,\kappa,\alpha)$ of
+\cref{eq:H_phonon}). The
 partially Fourier-transformed FC3 entering this expression is
 \begin{align}\label{eq:fc3_fourier}
   \tilde{\Phi}_{x y_1 y_2}(\qp,\qp{}')
@@ -371,6 +394,9 @@ $\qp{}'$ sum couples all transverse wavevectors, so evaluating
 $\Sigma_s(\qp)$ requires Green's functions at every $\qp{}'$, destroying
 the embarrassing parallelism of the ballistic problem. The arithmetic
 complexity scales as $\mathcal{O}(N_q^2 N_\omega^2 N_{\mathrm{DOF}}^4)$
+(the $N_{\mathrm{DOF}}^4$, rather than the naive $N_{\mathrm{DOF}}^6$ of the
+four-index ring, already assumes the FC3 block-locality of
+\cref{ssec:phph_sparsity})
 before any low-rank or stochastic acceleration. This is the dominant
 cost of the anharmonic simulation, as reported in~\cite{luisier_atomistic_2012,guo_quantum_2020, lee_anharmonic_2018}.
 
@@ -535,7 +561,9 @@ totally symmetric under the permutation group $S_3$,
 $\Phi_{\mu\nu\lambda}=\Phi_{\sigma(\mu)\sigma(\nu)\sigma(\lambda)}$ for all
 $\sigma\in S_3$. Only then do the $\hbar\omega$-weighted triads of the sunset
 bubble \cref{eq:sigma_guo} telescope pairwise to give
-$J_s=P_{\rm in}-P_{\rm out}=0$~\cite{lu_coupled_2007,wang_quantum_2008}. This
+$J_s=P_{\rm in}-P_{\rm out}=0$, the energy-current conservation of the SCBA
+established in~\cite{lu_coupled_2007,wang_quantum_2008} (the explicit $S_3$
+telescoping is the present derivation). This
 symmetry is automatic for a vertex defined as a third derivative of the
 potential (\cref{eq:H_phonon})~\cite{luisier_atomistic_2012}: a vertex that is
 not totally symmetric is not the third derivative of any potential, the theory

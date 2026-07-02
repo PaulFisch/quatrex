@@ -1,5 +1,17 @@
 \documentclass[]{iisreport}
 
+% --- subfigure support (used by the two-loop self-energy topology figure) ---
+\usepackage{subcaption}
+% --- Feynman-diagram styles used in the self-energy diagrams (theory/20) ---
+\usetikzlibrary{decorations.pathmorphing}
+\tikzset{
+  phonon/.style={decorate, decoration={snake, amplitude=0.6pt, segment length=5pt}},
+  fc3 vertex/.style={circle, fill, inner sep=2pt},
+  fc4 vertex/.style={rectangle, fill, inner sep=2.2pt},
+}
+% --- logos/title image live in elements/ ---
+\graphicspath{{fig/}{elements/}}
+
 \addbibresource{./bib/main.bib}
 \addbibresource{references.bib}
 
@@ -16,7 +28,7 @@
 \advisor{Dr.\ Jiang\ Cao, jiacao@iis.ee.ethz.ch}
 \advisor{Dr.\ Alexandros\ Nikolaos\ Ziogas, alexandros.ziogas@iis.ee.ethz.ch}
 
-\titlelogo{titlepage_logo}
+\titlelogo{title-page-image}
 \titlelogoheight{7cm}
 
 \begin{document}

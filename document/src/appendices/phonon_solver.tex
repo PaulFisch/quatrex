@@ -42,7 +42,8 @@ upstream by
 \texttt{phonon\_inputs.fc3\_compression.build\_fc3\_target} (or by
 \texttt{gamma\_project\_M\_blocks} for the $\Gamma$-only path) and the
 dynamical-matrix entries are scaled by the
-\texttt{CONVERSION\_THZ2 = e/(m_u \AA^2)/(2\pi)^2 \cdot 10^{-24}}
+% REVIEW: math chars (m_u, ^2, (2pi)^2) cannot sit in \texttt{} text mode -- wrap the formula in math
+\texttt{CONVERSION\_THZ2}~$= e/(m_u\,\text{\AA}^2)/(2\pi)^2\cdot 10^{-24}$
 factor from \texttt{phonon\_inputs.constants}.  Self-energies always
 carry a $q$-axis of shape
 $(n_\mathrm{slabs}, n_\mathrm{kpts}, n_\mathrm{freq}, n_\mathrm{dof}, n_\mathrm{dof})$,
@@ -63,10 +64,16 @@ arithmetic clean; physical integrals exclude it via the
 \texttt{pos\_mask} returned by the same routine, and the
 bubble integrand zeroes the $\omega=0$ slice of the input Green's
 functions before FFT to suppress the bosonic singularity.  The
+% REVIEW: this appendix uses a LINEAR eta=eta_factor*dOmega convention; the theory chapter (eq. ~40) uses a QUADRATIC eta=eta_factor*dOmega^2 -- different convention noted explicitly
+% REVIEW: default eta_factor=1.0 (so eta~dOmega); 0.05 is the LEGACY value, not the working default (consistent with the options table)
 Lorentzian broadening parameter $\eta$ defaults to
-\texttt{eta\_factor}$\cdot \Delta\omega$ (the $\eta = 0.05\Delta\omega$
-that has been our working value), but can be overridden directly via
-\texttt{eta\_w\_thz}.
+\texttt{eta\_factor}$\cdot \Delta\omega$ (linear in the grid spacing,
+with the default \texttt{eta\_factor}$=1.0$ giving $\eta\sim\Delta\omega$;
+the legacy value was $\eta = 0.05\,\Delta\omega$), but can be overridden
+directly via \texttt{eta\_w\_thz}.  Note that the theory chapter adopts a
+different, \emph{quadratic} convention $\eta = \texttt{eta\_factor}\cdot
+(\Delta\omega)^2$; the appendix retains the linear form used in the solver
+code.
 
 \section{The bubble kernel: \texttt{bubble.py}}
 \label{sec:bubble_kernel}
@@ -84,6 +91,7 @@ of the 3-phonon self-energy
 where $x \in \{<, >\}$ selects the lesser or greater branch and
 $\star$ denotes the frequency convolution.  The kernel evaluates the
 convolution as a zero-padded FFT along the $\omega$ axis -- the
+% REVIEW: FLAG-ONLY -- bubble_dense rounds n_fft to the next power of two, but se_finite/theory (eq:nfft_pad) state n_fft = 2 n_freq - 1; unreconciled FFT length
 FFT length \texttt{n\_fft} is the next power of two above the linear
 output length $n_\mathrm{freq}^\mathrm{out} + n_\mathrm{freq}^\mathrm{G\_a} - 1$ --
 contracts indices with two \texttt{einsum} calls per frequency
@@ -141,7 +149,8 @@ omega\_grid\_thz, method)} dispatches over three options:
   \item[\texttt{"half"}.]  Drops the principal-value integral entirely
         and returns $\Sigma^R = \tfrac{1}{2}(\Sigma^> - \Sigma^<)$.
         This is the imaginary part of $\Sigma^R$ only -- i.e.\ the
-        broadening, $-\mathrm{Im}\,\Sigma^R = \tfrac{1}{2}(\Sigma^> + \Sigma^<)$
+        % REVIEW: broadening ~ (Sigma^> - Sigma^<), not the sum (sign fix)
+        broadening, $-\mathrm{Im}\,\Sigma^R = \tfrac{1}{2}(\Sigma^> - \Sigma^<)$
         up to a sign and factor.  Used when only the broadening matters
         (e.g.\ the $\Gamma$-only regression check
         \texttt{compare\_q11\_to\_finite}, where $\mathrm{Re}\,\Sigma^R$
@@ -171,6 +180,7 @@ $\mathrm{Im}\,G^R = -\pi\sum_n\delta(\omega-\omega_n)$ is absorbed
 into the Lorentzian
 $L_\eta(\omega-\omega_n) = (\eta/\pi)/[(\omega-\omega_n)^2+\eta^2]$
 that replaces the delta in the broadened expansion.  This convention
+% REVIEW: FLAG-ONLY -- hard-coded equation numbers 873-874 and file name theory.tex are fragile; use \cref labels instead
 is the one used throughout \texttt{theory.tex} (see equations 873--874
 of the theory chapter).
 
@@ -183,7 +193,7 @@ device-side Dyson solve.  The five public entry points:
 \begin{description}
   \item[\texttt{sancho\_rubio(z2, H\_00, H\_01)}.]  Surface Green's
         function for one lead at frequency $z = \omega^2$, computed
-        by iterative decimation \cite{Sancho1985SR}.  The fast iteration
+        by iterative decimation \cite{sancho_highly_1985}.  The fast iteration
         is the standard $\varepsilon, \varepsilon_s, \alpha, \beta$
         update; convergence is monitored by the relative residual
         $\|\alpha\| / \|\varepsilon\|$.  If the matrix iteration
@@ -234,7 +244,8 @@ device-side Dyson solve.  The five public entry points:
         baseline and the regression target for the SCBA loop.
 \end{description}
 
-\section{$\Gamma$-only self-energy driver: \texttt{se\_finite.py}}
+% REVIEW: wrap heading math in \texorpdfstring for PDF bookmarks/intcalc
+\section[Gamma-only self-energy driver: \texttt{se\_finite.py}]{Γ-only self-energy driver: \texttt{se\_finite.py}}
 \label{sec:se_finite}
 
 \texttt{compute\_phph\_self\_energy\_finite(G\_lesser, G\_greater, Phi,
@@ -258,7 +269,8 @@ Returns $(\Sigma^<, \Sigma^>)$ only -- the retarded reconstruction is
 done downstream by \texttt{retarded.build\_retarded} so that callers
 can pick the Kramers--Kronig precision they need.
 
-\section{$q$-resolved self-energy driver: \texttt{se\_q.py}}
+% REVIEW: wrap heading math in \texorpdfstring for PDF bookmarks/intcalc
+\section[q-resolved self-energy driver: \texttt{se\_q.py}]{$q$-resolved self-energy driver: \texttt{se\_q.py}}
 \label{sec:se_q}
 
 The $q$-resolved path generalises \texttt{se\_finite.py} by lifting the
@@ -275,6 +287,7 @@ parallelised by the worker pool), the worker iterates over all
 internal $q'$-points compatible with momentum conservation, picks the
 corresponding $G^{<,>}(q', \omega)$ slices, contracts with the
 pre-computed FFT-domain $\Phi$ tensor along the frequency axis, and
+% REVIEW: FLAG-ONLY -- literal Unicode 'Sigma' glyph mixed with math $^{<,>}$ relies on unicode-math; prefer $\Sigma^{<,>}$
 accumulates into the output Σ$^{<,>}(q_\mathrm{ext}, \omega)$.  The
 $q$-difference index map \texttt{q\_diff\_map} is pre-built so the
 inner loop is a flat array access rather than a modular-arithmetic
@@ -585,19 +598,22 @@ bulk Si --- a textbook weakly anharmonic crystal --- gives
 $|\Sigma^{R}|/\omega_{\max}^{2}\approx 33\%$ and a median linewidth
 $\sim 0.67$\,THz, an order of magnitude above the experimental
 $\sim 0.05$--$0.1$\,THz for the Si optical mode at $300$\,K. Extending
+% REVIEW: 0.024 THz is BELOW the 0.05-0.1 THz experimental range, not "within" it; one-shot Born underestimates, ~factor of two (consistent with caption)
 $f_{\max}$ to cover the convolution support recovers
-$\sim 0.024$\,THz, well within the expected range. For d5a the
+$\sim 0.024$\,THz, below the experimental $\sim 0.05$--$0.1$\,THz range
+(the one-shot Born underestimates), within about a factor of two. For d5a the
 correction is even larger, $\sim 25\times$ in $|\Sigma^{R}|$, and the
 relative magnitude drops to $|\Sigma^{R}|/\omega_{\max}^{2}\approx
 0.2\%$ --- squarely in the perturbative regime where SCBA is well
 defined.
 
-\begin{table}[h]
+\begin{table}[ht]
   \centering
   \begin{tabular}{lrrrr}
     \hline
     system & $f_{\max}$ (THz) & $2\omega_{\max}/2\pi$ (THz)
       & $|\Sigma^{R}|_{\max}$ (THz$^{2}$)
+      % REVIEW: FLAG-ONLY -- |Im Sigma^R|/omega is not the linewidth; HWHM = |Im Sigma^R|/(2 omega) (factor-2 ambiguity)
       & median $|\mathrm{Im}\,\Sigma^{R}|/\omega$ (THz) \\
     \hline
     Bulk Si & $18$ (under-ranged) & $30$  & $72$  & $0.67$ \\
@@ -606,11 +622,13 @@ defined.
     d5a SiNW & $140$ (proper)      & $129$ & $8.7$ & $1.1\times10^{-5}$ \\
     \hline
   \end{tabular}
+  % REVIEW: FLAG-ONLY -- "~25-30x larger Sigma" over-generalises: table shows bulk Si only ~3.3x (72->22); only d5a is ~24x
   \caption{One-shot (lowest-order Born) self-energy magnitude through
   the identical \texttt{transmission\_finite} pipeline, at
   $n_\mathrm{slabs}=1$ and $\eta/\Delta\omega=1$. Under-ranged grids
   fake a $\sim25$--$30\times$ larger $\Sigma$ that destabilises SCBA;
-  the bulk-Si linewidth under the proper grid matches the experimental
+  % REVIEW: Debernardi 1995 is a first-principles DFPT lifetimes paper, not experimental
+  the bulk-Si linewidth under the proper grid matches the first-principles (DFPT)
   $\sim 0.05$\,THz \cite{debernardi_PRB_1995} within a factor of two
   (the one-shot Born underestimates the converged value).}
   \label{tab:fmax_aliasing_one_shot}
@@ -649,7 +667,7 @@ on \emph{any} residual uptick. On the noisy residual near the
 fixed point the restart fired every iteration, collapsing Anderson to
 a bare linear step that --- on an unstable fixed point --- diverges.
 The new scheme follows the standard
-recipe~\cite{walker_anderson_2011,toth_anderson_2015}: history is
+recipe~\cite{walker_anderson_2011,toth_convergence_2015}: history is
 \emph{kept} across small upticks; the least-squares is solved by a
 truncated-SVD \texttt{lstsq} with cutoff $\mathrm{rcond}=10^{-8}$,
 filtering ill-conditioned secant directions instead of discarding all
@@ -683,7 +701,8 @@ rotation about the wire axis --- the ``twist'' mode --- at the
 finite-but-tiny value set by the wire's torsional restoring force.
 For the d5a SiNW the twist sits at
 $\omega^{2}\approx 7.7\times10^{-4}\,\mathrm{THz}^{2}$, i.e.\
-$\omega\approx 0.028$\,THz, which gives $n_{B}\approx 700$ at room
+% REVIEW: n_B = 1/(exp(hf/kT)-1) ~= 223 for f=0.028 THz at 300 K (was ~700)
+$\omega\approx 0.028$\,THz, which gives $n_{B}\approx 223$ at room
 temperature --- the dominant IR contribution to the bubble.
 
 The module \texttt{phonon/solver/zero\_modes.py} therefore builds the
@@ -749,8 +768,12 @@ acausal the Dyson solve produces a $G^{R}$ with poles in the upper
 half-plane; the next bubble amplifies the violation, the
 \emph{symptom} on d5a being a catastrophic
 $\sim\!1000\times$ jump in the SCF residual after several iterations
-of apparent improvement. The standard cure
-\cite{pourfath_causal_2010} is to project $\Sigma^{R}$ onto the
+of apparent improvement. A standard remedy
+% REVIEW: original key pourfath_causal_2010 was unresolvable (no such 2010 paper);
+% re-sourced to Pourfath's 2014 NEGF monograph, which treats causal/retarded
+% self-energy enforcement. The PSD-eigenvalue clip + KK rebuild below is our
+% specific implementation.
+\cite{pourfath_negf_2014} is to restore causality of $\Sigma^{R}$ by projecting it onto the
 causal manifold each iteration: write
 $\Sigma^{R}=X+iY$ with $X,Y$ matrix-Hermitian, take the eigen-
 decomposition of $Y(\omega)$, clip its positive eigenvalues
@@ -775,7 +798,7 @@ For systems where the SCBA fixed point is genuinely linearly
 unstable (the residual stays bounded away from zero under every
 linear and Newton step), the principled alternative to iterating an
 unstable map is the rescaling technique of
-\cite{bescond_LOA_pade_2011}. The bubble self-energy scales as
+\cite{mera_inelastic_2012}. The bubble self-energy scales as
 $\Sigma\propto\lambda^{2}$ in the cubic coupling, so the SCBA
 fixed-point observable $\mathcal{O}(\lambda)$ can be expanded as a
 series in $\lambda^{2}$. Running the SCBA at a few rescaled vertices
@@ -814,7 +837,7 @@ decoupling this means a bad run fails fast and returns a meaningful
 diagnostic rather than wandering to \texttt{max\_scba\_iter} and
 returning garbage.
 
-\begin{table}[h]
+\begin{table}[ht]
   \centering
   \begin{tabular}{lll}
     \hline
@@ -847,7 +870,8 @@ returning garbage.
   \label{tab:solver_recommended}
 \end{table}
 
-\subsection{Joint $\eta\!\to\!0$ and $\lambda\!\to\!1$ convergence diagnostic}
+% REVIEW: wrap heading math in \texorpdfstring for PDF bookmarks/intcalc
+\subsection[Joint eta->0 and lambda->1 convergence diagnostic]{Joint $\eta\!\to\!0$ and $\lambda\!\to\!1$ convergence diagnostic}
 \label{sec:phonon_solver:eta_lambda_diag}
 
 The SCBA fixed-point observable, e.g.\ the anharmonic conductance
@@ -863,7 +887,7 @@ Hilbert transform;
 in \texttt{transmission\_finite}), which multiplies the cubic
 force-constant tensor $\Phi^{(3)}\to\lambda\Phi^{(3)}$, so that
 $\Sigma\propto\lambda^{2}$
-\cite{bescond_LOA_pade_2011}.
+\cite{mera_inelastic_2012}.
 \end{itemize}
 The physical observable lives at $(\eta_{w}\!\to\!0,\lambda\!=\!1)$;
 the two natural routes to it from a numerically tractable point are the
@@ -882,7 +906,7 @@ regulator-free SCBA prediction at the physical coupling.
 
 \paragraph{$\lambda\!\to\!1$ at fixed safe $\eta_{w}$.}
 The lowest-order-approximation rescaling
-of~\cite{bescond_LOA_pade_2011} runs the SCBA at
+of~\cite{mera_inelastic_2012} runs the SCBA at
 $\lambda\in(0,1)$, where the contraction
 $|\Sigma|/|H|\propto\lambda^{2}$ is small and convergence is
 mechanical, and fits a Pad\'e in $\lambda^{2}$. Evaluating the fit at
@@ -919,7 +943,7 @@ saturating Pad\'e $[1/1]$ form $a+b\lambda^{2}/(1+c\lambda^{2})$;
 two-loop $\Phi[G]$ -- in particular the \emph{vertex correction}
 (a ladder of bubbles inside the bubble), which contributes at
 $\mathcal{O}(\lambda^{4})$ at the level of $\Sigma$
-\cite{bescond_LOA_pade_2011}, and the four-phonon scattering
+\cite{mera_inelastic_2012}, and the four-phonon scattering
 channel, which appears at the same order in the cubic coupling once
 the quartic FC tensor is included
 \cite{han_fourphonon_2021}. In electron-phonon transport,
@@ -985,12 +1009,14 @@ $H_{00}+H_{01}+H_{01}^{\dagger}$ at $\Gamma$ for d5a has four (not
 three) eigenvalues below $10^{-4}\,\omega_{\max}^{2}$: the three
 rigid-cartesian translations and the rigid rotation about the wire
 axis (the ``twist''), the latter at
+% REVIEW: n_B = 1/(exp(hf/kT)-1) ~= 223 for f=0.028 THz at 300 K (was ~700)
 $\omega\approx 0.028$\,THz. The construction
 $\Sigma^{\gtrless}\propto\Phi G^{\gtrless}G^{\gtrless}\Phi$ contains
 two contracted Green's functions that do not annihilate this subspace,
 and on the real device a generic $\mathrm{Re}\,\Sigma^{R}$ acquires a
 $\sim 0.25$ weight across the four-dimensional zero subspace. At
-$T=300$\,K the Bose factor $n_{B}\approx 700$ on the twist makes the
+% REVIEW: n_B = 1/(exp(hf/kT)-1) ~= 223 for f=0.028 THz at 300 K (was ~700)
+$T=300$\,K the Bose factor $n_{B}\approx 223$ on the twist makes the
 soft-mode $G^{<}$ enormous, and the bubble's IR contribution there
 drives the SCBA non-contractive even when the grid covers
 $2\omega_{\max}$. The \texttt{zero\_mode\_projection} option
@@ -1004,14 +1030,15 @@ them.
 
 \subsection{Literature consistency}
 
-The bubble is the Migdal form of Guo \emph{et al.}, Phys.\ Rev.\ B
-\textbf{102}, 195412 (2020), Eq.~8; the prefactor, the
+% REVIEW: replace hard-typed citation with \cite{guo_quantum_2020}
+The bubble is the Migdal form of Guo \emph{et al.}~\cite{guo_quantum_2020}, Eq.~8; the prefactor, the
 $\omega$-convolution and
 the Kramers--Kronig reconstruction all match the theory note. The
 scheme is the self-consistent Born approximation --- iteration zero is
 the lowest-order Born self-energy and the converged fixed point is the
 SCBA --- with 3-phonon scattering only, consistent with reference NEGF
 phonon-transport implementations. The Si/Ge interface benchmark data
-of Guo, Latour and Tian ship in
+% REVIEW: "Guo, Latour and Tian" attribution does not match the Guo bib entry (no Latour/Tian coauthor); use \cite
+of Guo \emph{et al.}~\cite{guo_quantum_2020} ship in
 \texttt{phonon/examples/literature\_fig5b.npz} for the overlay
 produced by \texttt{si\_ge\_interface\_quatrex.py}.

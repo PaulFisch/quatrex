@@ -4,7 +4,7 @@
 
 The phonon-phonon SSE in \cref{eq:sigma_phph} involves three computational
 steps that dominate the cost of an SCBA iteration of the anharmonic
-SCAB equations: a four-index ring
+SCBA equations: a four-index ring
 contraction over $y_1,y_2,y_3,y_4$, an internal sum over the
 transverse wavevector $\qp'$, and a frequency convolution along
 $\omega$. The frequency convolution is structurally identical to the
@@ -33,7 +33,7 @@ self-energies.
 % ----------------------------------------------------------------------
 
 The integrand in \cref{eq:sigma_phph} contains a single frequency
-convolution $\int d\omega'\;G_1(\omega')\,G_2(\omega-\omega')$. We
+convolution $\int \frac{d\omega'}{2\pi}\;G_1(\omega')\,G_2(\omega-\omega')$. We
 turn it into a pointwise product in time through the Fourier
 transform pair
 \begin{equation}\label{eq:g_tau}
@@ -45,8 +45,11 @@ transform pair
   = \int\!d\tau\;g(\tau;\cdot)\,e^{+i\omega\tau},
 \end{equation}
 under which the 1D convolution theorem gives
+% REVIEW: 1/(2pi) restored on the LHS to match the eq:g_tau Fourier convention
+% (and eq:sigma_phph, which carries d omega'/2pi via the \dw macro). Display only;
+% eq:sigma_phph_tau downstream is already correct.
 \begin{equation}\label{eq:omega_conv}
-  \int\!d\omega'\;
+  \int\!\frac{d\omega'}{2\pi}\;
     G_1(\omega';\cdot)\,G_2(\omega-\omega';\cdot)
   = \int\!d\tau\;
     g_1(\tau;\cdot)\,g_2(\tau;\cdot)\,e^{+i\omega\tau}.
@@ -109,8 +112,8 @@ that fake a strong-coupling self-energy and drive the SCBA loop
 unstable. The required grid size is therefore set by the stiffest
 mode of the device, not by the thermally populated bands; in
 particular, an H-terminated wire with $\omega_{\max}/2\pi\sim 64$\,THz
-from the Si--H stretch needs $f_{\max}\gtrsim 130$\,THz, not the
-$\sim 16$\,THz of a bulk-Si default. \Cref{sec:phonon_solver_pkg}
+from the Si--H stretch needs $f_{\max}\gtrsim 130$\,THz, well above the
+$\sim 32$\,THz a bulk-Si device ($\omega_{\max}/2\pi\sim 16$\,THz) would require. \Cref{sec:phonon_solver_pkg}
 documents the runtime safety net that enforces this condition.
 
 \paragraph{Negative-frequency handling.} The bosonic phonon Green's
@@ -143,6 +146,25 @@ sign convention on the frequency axis. The retarded SSE is
 constructed from $\Sigma^{>}-\Sigma^{<}$ via \cref{eq:sigma_r},
 optionally with the Hilbert-transform real-part correction obtained
 by another FFT-based pass.
+
+\paragraph{Exact bosonic continuation (production).}
+The conjugation form $\mathrm{corr}(g^{\gtrless},(g^{\lessgtr})^{*})$ above is
+exact only when the propagators are complex-symmetric (equilibrium, or a
+reciprocal device). Under a temperature bias $G^{\lessgtr}$ are no longer
+symmetric, and the negative-frequency (absorption) leg must be continued with
+the full bosonic relation
+\begin{equation}\label{eq:bosonic_fold}
+  G^{<}_{ij}(\qp,-\omega) = G^{>}_{ji}(-\qp,\omega),
+\end{equation}
+i.e.\ with a spatial \emph{transpose} ($ij\to ji$) \emph{and} a transverse-momentum
+negation ($\qp\to-\qp$), not merely a conjugation. The production kernel
+(\texttt{quatrex.phonon.sse\_phonon\_phonon}, \texttt{\_build\_fold\_plan}/%
+\texttt{\_fold\_reversed\_legs}) folds the $\omega<0$ contribution onto the
+one-sided $\omega\ge0$ grid through \cref{eq:bosonic_fold}, so each
+$\Sigma^{\lessgtr}$ is the sum of the forward ring and the
+transposed/$\qp$-reversed ring. This retains the inter-block (off-diagonal)
+coherence that the equilibrium conjugation shortcut discards and keeps the bubble
+exact and conserving away from equilibrium (\cref{app:conservation}).
 
 % ----------------------------------------------------------------------
 \subsection{Inner ring contraction}
@@ -212,7 +234,11 @@ balanced-tree (ii) have identical asymptotic cost
   \mathcal{C}_\mathrm{ic}^\mathrm{dense}
   = \cO\!\bigl(\ndof^{4}\bigr),
 \end{equation}
-which we take as the unit cost throughout. Balanced-tree is
+which we take as the unit cost throughout.
+% REVIEW: ndof is overloaded. At the head of this subsection ndof=N_AO=N_B*NBS
+% (the full ring), but the block-sparse per-pair kernel below (eq:cic_sparse,
+% eq:cost_opt, eq:phph_step_*) works at fixed block pair, where the relevant
+% dimension is the PER-BLOCK size NBS. Read ndof->NBS in those per-pair costs. Balanced-tree is
 preferable when the two halves can be evaluated on different ranks,
 which is the case in our distribution scheme; otherwise the two are
 interchangeable. Outside-in is the natural form for a single-rank
@@ -536,8 +562,8 @@ The combined per-pair cost is
 \begin{equation}\label{eq:cost_opt}
   \cO\!\bigl(R\,\ndof\,r_c\,C_a + R^{2}\,\ndof\,C_a\bigr),
 \end{equation}
-to be compared with $\cO(\ndof\,C_a^{3}/\NBS)$ from
-\cref{eq:cic_cost} under the assumption that intra-block
+to be compared with the sparse ring cost $\cO(\NBS\,C_a^{3})$ of
+\cref{eq:cic_sparse} under the assumption that intra-block
 sparsity is exploitable (cf.\ the forward note in
 \cref{ssec:phph_sparsity}: in the current dense-kernel
 implementation $C_a=\NBS$, and the comparison collapses to the
@@ -598,7 +624,7 @@ $\cO(N_\omega\log N_\omega)$. Total FFT work:
                N_{AO}\,N_\mathrm{c,x}^{2}\,C_a^{2}\bigr).
 \end{equation}
 
-he FFT-first ordering is therefore the
+The FFT-first ordering is therefore the
 clearly superior choice.
 
 \paragraph{Per-pair kernel.} With the FFT-first ordering, the
@@ -637,7 +663,7 @@ that share an inner block. For fixed $K_1$, all
 $(I,K_2)\in\mathcal{P}$ produce $A$-tensors that share the same
 $g_a$-input. The $\mathcal{C}_L$ contraction can therefore be
 batched into a single sparse einsum over the FC3 entries with
-shared $K_1$.. Analogous sharing
+shared $K_1$. Analogous sharing
 applies across $K_2$.
 
 % ----------------------------------------------------------------------
@@ -927,9 +953,14 @@ both divided over the full $P=P_EP_S$:
       \frac{N_\tau\log N_\tau\,\NB\,r_c\,\NBS^{2}}{P}
     \Bigr)
   + \cO\!\Bigl(
-      \frac{N_\tau\,\NB\,N_\mathrm{c,x}^{2}\,\NBS^{3}}{P}
+      \frac{N_\tau\,\NB\,N_\mathrm{c,x}^{2}\,\NBS^{4}}{P}
     \Bigr).
 \end{equation}
+% REVIEW: ring-work exponent corrected NBS^3 -> NBS^4. The dense per-pair ring
+% (eq:inner_contraction; steps A,B each NBS^4) costs NBS^4, so summed over N_B
+% outputs and N_c,x^2 inner pairs the work is N_B N_c,x^2 NBS^4/P
+% (= N_AO N_c,x^2 NBS^3/P, matching eq:cost_phph_dist). The implemented full
+% off-diagonal ring is more work than the retired diagonal design, not less.
 Communication is the four energy redistributions plus the spatial
 halo,
 \begin{equation}\label{eq:vol_phph_impl}
@@ -990,7 +1021,7 @@ therefore confined to short devices.
       & $\dfrac{N_\omega\NB\NBS^{2}}{P}$
       & $\dfrac{N_\omega\NB\NBS^{2}}{P}+\dfrac{\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P_S}$ \\[1.4ex]
     FFT-first $\times$ halo (\emph{impl.})
-      & $\dfrac{N_\tau\,\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P}$
+      & $\dfrac{N_\tau\,\NB N_\mathrm{c,x}^{2}\NBS^{4}}{P}$
       & $\dfrac{N_\omega\NB r_c\NBS^{2}}{P}+\dfrac{N_\tau N_h\NBS^{2}}{P_E}$
       & $\dfrac{N_\tau\NB r_c\NBS^{2}}{P}+\dfrac{\NB N_\mathrm{c,x}^{2}\NBS^{3}}{P_S}$ \\[1.4ex]
     $q$-dense vertex

@@ -4,7 +4,8 @@
 
 For a transversely-periodic system, the three-phonon self-energy couples
 the transverse momenta by crystal-momentum conservation
-(\cref{eq:sigma_guo}). As a quantitative benchmark, we model
+% REVIEW: eq:sigma_guo is the mode-space sunset SE w/o q_perp; the q_perp-coupled form is eq:sigma_phph
+(\cref{eq:sigma_phph}). As a quantitative benchmark, we model
 cross-plane heat transport through a silicon thin film following~\citet{guo_quantum_2020}:
 the film is bulk silicon truncated to $N$ layers along the transport direction with
 in-plane two-dimensional periodicity. Conductance
@@ -37,14 +38,17 @@ $\sim10^{3}$~MW\,m$^{-2}$K$^{-1}$, declining slowly with thickness
 
 \paragraph{Anharmonic conductance.} \Cref{fig:res_sifilm} (left)
 compares our cross-plane conductance to the anharmonic-NEGF values of
+% REVIEW: thickness-unit inconsistency -- "3 and 5 unit cells" (uc=5.4018 A -> 1.62/2.70 nm) vs the nm-sweep 1.16/1.93/3.09 nm (not integer multiples of 5.4 A)
 Guo~\emph{et al.} at $3$ and $5$ unit cells. The three-phonon scattering
+% REVIEW: Guo's reduction is ~16-20% (5uc 1065.81 -> 890.97 = 16.4%), not ~10%
 reduces the $3$-unit-cell conductance by $\sim45\%$
 ($G_\mathrm{anh}\approx570$~MW\,m$^{-2}$K$^{-1}$), significantly more than the
-reference's $\sim10\%$ ($G_\mathrm{anh}=939.7$). This might be due to the reference's
+reference's $\sim16\%$ ($G_\mathrm{anh}=939.7$). This might be due to the reference's
 additional self-energy approximations (the diagonal-block self-energy
 and the nearest-neighbour FC3 truncation quantified in
 \cref{sec:res_approx}), with the broadening and thin-device transport
 setup, and with the exchange--correlation functional of the underlying
+% REVIEW: "(PBE here)" implies a different XC than the reference, but the reference functional is never stated (Guo uses LDA) -- clarify
 force constants (PBE here). The ballistic conductance is, by contrast,
 force-constant sensitive at the $\sim15\%$ level (\cref{fig:res_sifilm_consol}):
 the $2\times2\times2$ QE--FD constant -- comparable to the reference's own
@@ -54,7 +58,8 @@ a harmonic difference, the slightly softer dispersion). So the agreement
 with the reference's ballistic value holds only for the $2\times2\times2$
 constant, not force-constant-independently.
 
-\paragraph{long-range force constant.} The thin-film
+% REVIEW: capitalise paragraph heading
+\paragraph{Long-range force constant.} The thin-film
 results above use the bulk force constants from a small
 $2\times2\times2$ supercell with FD. To test convergence, we generated a substantially
 higher-quality force constant using hiphive on a $5\times5\times5$
@@ -86,6 +91,7 @@ destabilises the small-broadening SCBA away from a single thickness
   the high-quality $5\times5\times5$ ($\sim$fourth-neighbour, VASP)
   force constants, against the anharmonic values of
   \citet{guo_quantum_2020} ($939.7$ at $3$~uc, $890.97$ at $5$~uc; their
+  % REVIEW: only partly true -- Guo's convergence table DOES quote ballistic NEGF values (e.g. 1065.81 at 5uc)
   ballistic is a Boltzmann dashed line with no quoted value). The
   $2\times2\times2$ ballistic matches the reference's scale while the
   $5\times5\times5$ ballistic is $\sim15\%$ lower (a harmonic

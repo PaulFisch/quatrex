@@ -15,9 +15,12 @@ conductance is defined only as $\eta\to0$ (\cref{sec:res_eta0}). Its systematic 
 the \emph{finite}-$\eta$ numbers is larger than the lead-balance residual suggests.
 On the \texttt{cnt33} tube at matched $\eta$ the lead balance stays $\sim10^{-5}$
 throughout, yet the anharmonic ratio $G_{\rm anh}/G_{\rm ball}$ swings
-$0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz; extrapolating the converging window
-to $\eta\to0$ gives $\approx0.70$, a $\sim30\%$ reduction -- roughly twice the
-$\sim16\%$ read off at the single point $\eta=0.45$. A single-$\eta$ number
+% REVIEW: eta enters as i*eta added to omega^2, so its unit is THz^2 not THz
+$0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz$^2$; extrapolating the converging window
+% REVIEW: reconcile with sec:cons_ratio directly-converged eta=1e-12 fixed point 0.57 (~40%)
+to $\eta\to0$ gives $\approx0.57$, a $\sim40\%$ reduction (\cref{sec:cons_ratio}) -- roughly twice the
+% REVIEW: eta given as the THz^2 value (i*eta added to omega^2)
+$\sim16\%$ read off at the single point $\eta=0.45$\,THz$^2$. A single-$\eta$ number
 therefore \emph{underestimates} the anharmonic effect by about a factor of two;
 transport ratios must be $\eta\to0$-extrapolated or quoted with the finite-$\eta$
 band. The mechanism and the step-by-step numerical verification are given in
@@ -25,11 +28,13 @@ band. The mechanism and the step-by-step numerical verification are given in
 
 \paragraph{Frequency grid.}
 The bubble convolution \cref{eq:sigma_phph_tau} has support up to
+% REVIEW: [FLAG-ONLY] mixed omega convention -- f_max >= 2*omega_max/2pi carries an explicit 1/2pi (angular) while |Sigma^R|/omega_max^2 and the THz^2 magnitudes treat omega as ordinary THz
 $2\omega_{\max}$, so the grid must satisfy $f_{\max}\ge2\omega_{\max}/2\pi$
 (\cref{eq:conv_support}). An under-ranged grid aliases the truncated tail back
 into the band as a spurious strong-coupling self-energy that destabilises the
 SCBA: for the \texttt{d5a} wire the historical $f_{\max}=18$\,THz, far below the
-$\sim129$\,THz convolution support set by the $63$\,THz Si--H stretch, inflates
+% REVIEW: 2*63 = 126, not 129
+$\sim126$\,THz convolution support set by the $63$\,THz Si--H stretch, inflates
 $|\Sigma^R|$ by $\sim25\times$ and diverges the multi-slab iteration, whereas the
 properly-ranged grid returns it to the
 perturbative regime ($|\Sigma^R|/\omega_{\max}^2\approx0.2\%$). The one-shot
@@ -53,4 +58,5 @@ unphysical at higher rank while the symmetric ans\"atze degrade gracefully.
 
 \todo[inline]{Consolidate the three sweeps above into one approximation-cost figure
 (conductance / $G_{\rm anh}-G_{\rm ball}$ vs.\ each approximation, across
-\texttt{cnt33}/\texttt{d5a}/\texttt{d11a}/film) -- see \texttt{document/MISSING.md} (A,B).}
+% REVIEW: removed dangling reference to non-existent document/MISSING.md
+\texttt{cnt33}/\texttt{d5a}/\texttt{d11a}/film).}

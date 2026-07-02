@@ -4,7 +4,7 @@
 
 The sparsity layers of \cref{ssec:phph_sparsity} reduce the per-pair
 ring contraction from $\cO(\NBS^{4})$ to $\cO(\NBS\,C_a^{3})$. The
-factor $C_a^{3}$ remains the dominant const in
+factor $C_a^{3}$ remains the dominant cost in
 \cref{eq:cost_phph_total}. We now show that any decomposition of the FC3
 in \cref{sub:fc3_compression} reduces this further to
 $\cO(R\,\NBS\,r_c\,C_a + R^{2}\NBS)$ by collapsing the four-cycle of
@@ -73,7 +73,9 @@ $A_{x,r}\!=\!\alpha_r(x)$, $B_{y,r}\!=\!\beta_r(y)$,
 $C_{y,r}\!=\!\gamma_r(y)$, and the weights as a diagonal matrix
 $\Lambda = \diag(\lambda_1,\dots,\lambda_R)$. Under the constraints
 \cref{eq:symmetry_constraints}, $B=C$ for INDSCAL and $A=B=C\equiv U$
-for Waring. The propagator $g\equiv g(\tau)\in\mathbb{R}^{\ndof\times\ndof}$
+for Waring. The propagator
+% REVIEW: time-domain greater/lesser GF is complex, not real
+$g\equiv g(\tau)\in\mathbb{C}^{\ndof\times\ndof}$
 is the time-domain Green's function obtained from Stage~1 of
 \cref{ssec:phph_distribution}. We will not yet distinguish lesser,
 greater, or retarded components, the derivation applies unchanged to
@@ -115,6 +117,7 @@ kernel of a quadratic form.
 
 The matrices $P$ and $Q$ defined in \cref{eq:gram_P,eq:gram_Q} are
 not independent. They satisfy the algebraic identity
+% REVIEW: reference identity -- not used downstream (orphan); kept for completeness
 \begin{equation}\label{eq:Q_transpose}
   Q \;=\; C^{\!\top} g\,B \;=\; (B^{\!\top} g^{\!\top} C)^{\!\top}.
 \end{equation}
@@ -163,7 +166,7 @@ where the choice of $W$ and $P^{\star}$ depends on the ansatz:
 \end{aligned}
 \end{equation}
 For CP, $W=(B,C)$ denotes that two SpMMs are needed (one against $B$,
-one against $C$) to obtain $V_B=gB$ and $V_C=gC$.INDSCAL and Waring need only
+one against $C$) to obtain $V_B=gB$ and $V_C=gC$. INDSCAL and Waring need only
 one SpMM. This is the dominant cost saving from imposing internal
 symmetry on the decomposition.
 
@@ -191,16 +194,20 @@ with $B=C\equiv V$ and $A_\mathrm{INDSCAL} = D = [d_1\,\dots\,d_R]$.
 The kernel computes $V_B = gV$, $P=V^{\!\top}V_B$ (a single GEMM-like
 product), and assembles via $\Sigma = D\,(P\circ P)\,D^{\!\top}$ with
 the elementwise square $(P\circ P)_{rs}=\lambda_r\lambda_s P_{rs}^{2}$.
+% REVIEW: S_2-symmetric reconstruction -> Sigma_{xx'}=Sigma_{x'x} requires g=g^T (equilibrium/reciprocal G)
 The reconstructed tensor is exactly $S_2$-symmetric, so the SSE
-inherits exact $\Sigma_{xx'}=\Sigma_{x'x}$ at the algorithmic level.
+inherits exact $\Sigma_{xx'}=\Sigma_{x'x}$ (requires $g=g^{\!\top}$,
+i.e.\ equilibrium / reciprocal $G$) at the algorithmic level.
 
 \paragraph{Waring.}
 $\Phi_{xy_1y_2}^{\mathrm{Waring}} = \sum_{r}\lambda_r\,u_r(p(x))\,u_r(y_1)\,u_r(y_2)$,
 where $p$ is the supercell lift of \cref{sub:fc3_symcp}. With
 $A=B=C=U$, the kernel reduces further: a single matrix $U$
 parametrises both the SpMM input and the output assembly. The bubble
+% REVIEW: P=P^T (hence the SYRK) requires g=g^T (equilibrium/reciprocal G)
 is symmetric in $(r,s)$ by construction, so $P$ is symmetric
-($P=P^{\!\top}$) and may be computed as a SYRK (upper-triangular GEMM)
+($P=P^{\!\top}$, requires $g=g^{\!\top}$, i.e.\ equilibrium / reciprocal $G$)
+and may be computed as a SYRK (upper-triangular GEMM)
 at half the cost of the general INDSCAL GEMM.
 
 \paragraph{PCP.}
@@ -233,6 +240,7 @@ The bilinear form is a single $R_2\times R_2$ Gram matrix $M$ (a
 single SpMM-GEMM); the core contraction
 \cref{eq:tucker_kernel_step3} is purely propagator-independent and
 has cost $\cO(R_1^{2}R_2^{3})$ after $S_2$ symmetrisation. The
+% REVIEW: cost mixes per-block (NBS) and per-tau (ndof=NB*NBS) conventions vs the CP family
 propagator-side cost is $\cO(R_2\,\NBS\,r_c\,C_a + R_2^{2}\NBS)$,
 identical in form to the CP family with $R\to R_2$.
 
@@ -368,6 +376,7 @@ algebra libraries:
         For Waring, $P$ is symmetric and the product reduces to
         SYRK. Cost: $\cO(R^{2}\,\ndof)$ flops. With $R^{2}$ output
         entries and $\cO(R\,\ndof)$ input non-zeros, the arithmetic
+        % REVIEW: O(ndof/R) intensity is inconsistent with the standard GEMM roofline O(R) and the compute-bound claim
         intensity is $\cO(\ndof/R)$ flops/byte, comfortably
         compute-bound.
   \item \emph{Step \cref{eq:kernel_step4}: sparse-output sandwich.}
@@ -404,8 +413,9 @@ At Si-nanoribbon parameters ($C_a\sim 30$, $N_\mathrm{c,x}=3$,
 $r_c\sim 2$), the sparse-ring cost has prefactor
 $N_\mathrm{c,x}^{2}C_a^{3}\sim 2.4\times 10^{5}$; the factorised
 kernel has prefactor $R\,r_c\,C_a + R^{2}\sim 60R + R^{2}$. For
-$R=100$, the factorised kernel is roughly two orders of magnitude
-cheaper.
+% REVIEW: 2.4e5/1.6e4 ~ 15x is about one order of magnitude, not two
+$R=100$, the factorised kernel is roughly an order of magnitude
+($\sim 15\times$) cheaper.
 
 \paragraph{Crossover.}
 The factorised kernel is cheaper than the sparse ring when
@@ -483,12 +493,14 @@ $b_r(\nu;-\qp)=b_r(\nu;\qp)^{*}$, the kernel
   \mathcal{B}_{xx'}(\tau,\qp,\qp')
   &= \sum_{rs}\lambda_r\lambda_s\,a_r(x)\,a_s(x')\,
       P_{rs}(\tau,\qp,\qp')\,Q_{rs}(\tau,\qp,\qp'),\\
+  % REVIEW: conjugated factor sits on the g(q') line -> momentum q' (not q-q'), conserving momentum
   \label{eq:P_qspace}
   P_{rs}(\tau,\qp,\qp')
-  &= b_r(\cdot;\qp')^{\!\top}\,g(\tau,\qp')\,c_s(\cdot;\qp-\qp')^{*},\\
+  &= b_r(\cdot;\qp')^{\!\top}\,g(\tau,\qp')\,c_s(\cdot;\qp')^{*},\\
+  % REVIEW: conjugated factor sits on the g(q-q') line -> momentum q-q' (= q'-q*), conserving momentum
   \label{eq:Q_qspace}
   Q_{rs}(\tau,\qp,\qp')
-  &= c_r(\cdot;\qp-\qp')^{\!\top}\,g(\tau,\qp-\qp')\,b_s(\cdot;\qp')^{*}.
+  &= c_r(\cdot;\qp-\qp')^{\!\top}\,g(\tau,\qp-\qp')\,b_s(\cdot;\qp-\qp')^{*}.
 \end{align}
 The two bilinear forms now involve $g$ at \emph{different} transverse
 momenta, $\qp'$ and $\qp-\qp'$, and are no longer related by transposition
@@ -503,19 +515,24 @@ $Q$ to $\Sigma$ are equal, so only $P$ need be evaluated.
 The change-of-variable identity collapses
 \cref{eq:bubble_qspace,eq:P_qspace,eq:Q_qspace} to
 \begin{equation}\label{eq:sigma_qspace_final}
+  % REVIEW: restore i\hbar/2 prefactor of eq:sigma_phph; drop spurious factor 2 (full q'-sum already double-counts P<->Q)
   \Sigma_{xx'}(\tau,\qp)
-  = \frac{2}{N}\!\sum_{\qp'}\!
+  = \frac{i\hbar}{2N}\!\sum_{\qp'}\!
     \sum_{rs}\lambda_r\lambda_s a_r(x)a_s(x')\,
     P_{rs}(\tau,\qp,\qp')\,P_{rs}(\tau,\qp,\qp-\qp'),
 \end{equation}
 which is a convolution along $\qp'$ of the matrix-valued quantity
-$P(\tau,\qp,\qp')$ with its shift $P(\tau,\qp,\qp-\qp')$. The
+$P(\tau,\qp,\qp')$ with its shift $P(\tau,\qp,\qp-\qp')$.
+% REVIEW: "single FFT" understates it -- the q'-convolution needs FFTs over the nu/r/s structure
+The
 $\qp'$-sum is therefore a Fourier transform of a per-block product, and
 the $N_q^{2}$ factor in \cref{eq:cost_q} is replaced by
-$N_q \log N_q$ after a single FFT along the transverse axis. The
-explicit factor of 2 in \cref{eq:sigma_qspace_final} comes from the
-$P\leftrightarrow Q$ symmetry; for CP without internal symmetry the
-factor is 1 and both bilinear forms enter explicitly.
+$N_q \log N_q$ after a single FFT along the transverse axis.
+% REVIEW: full q'-sum already includes both orderings, so no extra factor 2 (would apply only under half-BZ folding)
+Summing over the full $\qp'$ mesh already accounts for both orderings
+$P(\qp')P(\qp-\qp')$, so no extra factor of 2 appears; for CP without
+internal symmetry $P$ and $Q$ differ and both bilinear forms enter
+explicitly.
 
 % ----------------------------------------------------------------------
 \subsection{Distributed implementation}
@@ -552,11 +569,13 @@ ranks gives
     \tfrac{N_\tau\,N_q^{2}\,N_{AO}\,(R\,r_c\,C_a + R^{2})}{P}
   \Bigr).
 \end{equation}
-The $C_a^{3}\,N_\mathrm{c,x}^{2}$ factor of \cref{eq:cost_phph_dist}
+% REVIEW: 2.4e5 = N_cx^2 C_a^3 is the sparse baseline (cost_phph_total), not the dense-block cost_phph_dist
+The $C_a^{3}\,N_\mathrm{c,x}^{2}$ factor of \cref{eq:cost_phph_total}
 is replaced by $R\,r_c\,C_a + R^{2}$. At $C_a=30$, $r_c=2$, $R=100$:
 the old factor is $2.4\times 10^{5}$, the new factor is
 $\sim 1.6\times 10^{4}$ --- a 15$\times$ arithmetic reduction. With
 $\qp'$-FFT symmetrisation (\cref{ssec:phph_decomp_qspace}), an
+% REVIEW: N_q=400 here vs N_q=64 (8x8) in the streaming example below -- two different example meshes
 additional factor $N_q/\log N_q\sim 50$ is gained for production
 $N_q=400$.
  
@@ -577,7 +596,8 @@ external label, the periodic self-energy
   = \frac{i\hbar}{2}\frac{1}{N_q}\sum_{\qp'}\!\int\!\frac{d\omega'}{2\pi}\,
     \tilde\Phi(\qp',\qp{-}\qp')\,
     G^{\lessgtr}(\qp',\omega')\,G^{\lessgtr}(\qp{-}\qp',\omega{-}\omega')\,
-    \tilde\Phi(\qp{-}\qp',\qp')
+    % REVIEW: use established convention Phi~(q'-q,-q') of eq:sigma_phph (differs by a reality conjugation)
+    \tilde\Phi(\qp'{-}\qp,-\qp')
 \end{equation}
 \emph{couples} the momenta through crystal-momentum conservation
 $\qp=\qp'+(\qp-\qp')$: every external $\qp$ draws on the Green's

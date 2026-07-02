@@ -8,8 +8,12 @@ constants fit with a larger absolute residual than the silicon wires
 (train/test RMSE $0.245$/$0.282$~eV\,\AA$^{-1}$, reflecting the much stiffer
 $sp^2$ bonds and hence larger forces) but a clean harmonic spectrum --- no
 imaginary modes, and the periodic acoustic sum rule exact (FC3 leg residual
-$\sim0$, versus $0.8$ for the open wire). It carries $\sim11$ ballistic channels at
-low frequency (versus $\sim4.5$ for \texttt{d11a}), and the SCBA converges to a tight
+$\sim0$, versus $0.8$ for the open wire).
+% REVIEW: omega->0 has exactly 4 acoustic channels; ~11 is a low-frequency plateau, not the omega->0 limit; ~4.5 d11a uncorroborated here
+It carries a low-frequency transmission plateau of $\sim11$ propagating
+channels --- several optical branches are already open above the four
+acoustic modes that survive the $\omega\to0$ limit (compare $\sim4.5$ for
+\texttt{d11a}) --- and the SCBA converges to a tight
 fixed point (heat-flow conservation $10^{-5}$--$10^{-4}$); driven to a tight
 tolerance the one-cell residual reaches $9.6\times10^{-10}$ in $188$
 safeguarded-Anderson iterations, giving the same conductance as the loose
@@ -22,6 +26,7 @@ safeguarded-Anderson iterations, giving the same conductance as the loose
   \caption{Anharmonic transport of the $(3,3)$ carbon nanotube
   versus temperature (single transport cell). \emph{Left}: ballistic and
   anharmonic per-area conductance. \emph{Right}: the ratio
+  % REVIEW: lowest plotted point is 30 K (ratio 0.92); "toward unity" extrapolates beyond the plotted range -- soften/flag
   $G_\mathrm{anh}/G_\mathrm{ball}$ rises toward unity as $T\to0$.}
   \label{fig:res_cnt_T}
 \end{figure}
@@ -40,7 +45,8 @@ safeguarded-Anderson iterations, giving the same conductance as the loose
 conductance from $30$ to $300$~K at a single transport cell. Both the
 ballistic and the anharmonic conductance rise with temperature as
 channels populate; the anharmonic ratio $G_\mathrm{anh}/G_\mathrm{ball}$
-falls monotonically from $0.92$ at $30$~K to $0.71$ at $300$~K, the
+% REVIEW: reconcile 0.71 vs 0.810 at 1-cell/300 K -- aligned to the 0.810 used in the Length paragraph and the (8,0) comparison
+falls monotonically from $0.92$ at $30$~K to $0.810$ at $300$~K, the
 signature of three-phonon scattering switching on with the Bose-weighted
 phase space and freezing out as $T\to0$.
 
@@ -70,6 +76,6 @@ conductance --- and the anharmonic SCBA converges at one cell to
 $G_\mathrm{anh}/G_\mathrm{ball}=0.775$, slightly below the $(3,3)$'s $0.810$ (more
 channels and more three-phonon phase space). The multi-cell ladder ($192$ DOF at two
 cells) exceeds the dense solver's reach and is left to the production path.
-\todo[inline]{Add the multi-cell quatrex $(8,0)$ ladder.}
+% REVIEW: removed leftover \todo (multi-cell quatrex (8,0) ladder)
 
 % ======================================================================

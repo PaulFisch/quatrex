@@ -460,7 +460,7 @@
   \begin{center}
    %
    \begin{minipage}[b]{.45\linewidth}
-    \vspace{0pt}\includegraphics[width=.8\linewidth]{eth_logo.pdf}
+    \vspace{0pt}\includegraphics[width=.8\linewidth]{eth_logo_kurz_pos.pdf}
    \end{minipage}
    \hfill
    \begin{minipage}[b]{.45\textwidth}

@@ -43,12 +43,17 @@ $1/\omega$ --- this is the curve plotted in \cref{fig:res_eta0_ir} after divisio
 $\Delta n\sim1/\omega$, hence the flat ballistic transmission.
 
 \paragraph{Self-energy (no removal needed).}
+% REVIEW: each leg ~ sqrt(hbar/2 omega) ~ omega^{-1/2}, so the exponent sign was wrong
 In the harmonic mode basis the cubic matrix element is
-$V_3\propto(\omega_1\omega_2\omega_3)^{1/2}$ (each leg contributes the
+$V_3\propto(\omega_1\omega_2\omega_3)^{-1/2}$ (each leg contributes the
+% REVIEW: |V_3|^2 inherits the negative exponent
 displacement-to-mode factor $\sqrt{\hbar/2\omega}$), so the golden-rule rate
-\cref{eq:fgr} carries $|V_3|^2\propto\omega_1\omega_2\omega_3$ and the soft-leg
-factor offsets the $n(\omega')\sim1/\omega'$ of the absorption channel: the
-equilibrium linewidth is finite. In the displacement representation used by the
+\cref{eq:fgr} carries $|V_3|^2\propto1/(\omega_1\omega_2\omega_3)$ and the soft-leg
+% REVIEW: soft leg compounds (not offsets) the Bose pole; finiteness is from the acoustic phase-space DOS and vanishing spectral weight
+factor in fact \emph{compounds} the $n(\omega')\sim1/\omega'$ pole of the absorption
+channel: the equilibrium linewidth is finite instead because of the acoustic
+phase-space density of states ($\sim\omega'^2$ in 3D) together with the linearly
+vanishing acoustic spectral weight. In the displacement representation used by the
 solver this $\omega$-weight sits in the spectral function, $A(\omega')\to
 A'(0)\,\omega'$ as $\omega'\to0$ (the acoustic spectral weight vanishes linearly), so
 the lesser function $G^{<}_{\rm eq}=-i\,nA$ has the finite limit
@@ -75,6 +80,7 @@ conditioning without altering the conserving structure (\cref{sub:eta_zero}).
 
 In the ballistic limit $\mathcal{T}(\omega)\to N_{\rm ac}$ as $\omega\to0$ and the
 linear-response conductance \cref{eq:G_thermal} is
+% REVIEW: FLAG-ONLY notational deviation -- source uses the transverse-averaged bar-T(omega); written here as T(omega)
 \begin{equation}
   G=\frac{1}{A_c}\int_0^\infty\!\frac{d\omega}{2\pi}\,
     \mathcal{T}(\omega)\,\hbar\omega\,\frac{\partial n}{\partial T},
@@ -83,7 +89,9 @@ linear-response conductance \cref{eq:G_thermal} is
   \xrightarrow[\omega\to0]{}k_B,
 \end{equation}
 so the window $\hbar\omega\,\partial_Tn$ is finite at $\omega=0$ (it does \emph{not}
-vanish there) and a single perfectly-transmitting channel contributes
+% REVIEW: g0 is the per-channel conductance; the per-area G carries the 1/A_c prefactor, G = (1/A_c) sum_channels g0
+vanish there) and a single perfectly-transmitting channel contributes the
+per-channel conductance $g_0$ (so that the per-area $G=(1/A_c)\sum_{\rm ch}g_0$)
 \begin{equation}\label{eq:g0}
   g_0=\frac{1}{2\pi}\int_0^\infty\! d\omega\,\hbar\omega\,\frac{\partial n}{\partial T}
    =\frac{k_B^2T}{2\pi\hbar}\int_0^\infty\!\frac{x^2e^{x}}{(e^{x}-1)^2}\,dx
@@ -93,7 +101,8 @@ vanish there) and a single perfectly-transmitting channel contributes
 the universal quantum of thermal
 conductance~\cite{rego_quantized_1998,schwab_measurement_2000,jeong_analysis_2012}.
 The infrared plateau $\mathcal{T}(0)=N_{\rm ac}$ is thus a hard physical constraint:
-any regulator that drives $\mathcal{T}(\omega\to0)\to0$ --- as the taper
+% REVIEW: elastic T=Tr[Gamma_L G^R Gamma_R G^A] is occupation-independent; the taper attenuates the current/window, not T itself
+any regulator that suppresses the low-frequency current/window --- as the taper
 \cref{eq:ir_taper} does by multiplying the occupations by $\omega^2$ --- removes a
 finite, quantised piece of the conductance, which is why the taper is a stabiliser to
 be extrapolated away ($\omega_{\rm reg}\to0$), not a physical input.

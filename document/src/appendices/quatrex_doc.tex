@@ -17,10 +17,8 @@ transport parameters.
 This MATLAB \texttt{.mat} file stores the real-space blocks
 $H(\vc{R})$ in Convention~B, already converted to
 $(\mathrm{rad/s})^2$.  Each block is stored under a string key of the
-form
-\begin{equation}
-  \texttt{"[nx, ny, nz]"},
-\end{equation}
+% REVIEW: code/string literal does not belong in a numbered equation; use inline \texttt
+form \texttt{"[nx, ny, nz]"},
 mapping to a real matrix of dimension
 $(n_\mathrm{dof}\times n_\mathrm{dof})$, where
 $n_\mathrm{dof}=3N_b$ and $N_b$ is the number of atoms in the unit
@@ -28,12 +26,9 @@ cell.  For nearest-neighbour interactions extracted on a
 $3\times3\times3$ mesh, the file contains up to 27 blocks.
 
 The solver interprets these blocks as real-space couplings and, for
-periodic transverse directions, performs the Fourier sum
-\begin{equation}
-  D(\vc{k}_\perp)
-  = \sum_{(n_x,n_y)} M(n_x,n_y)\;
-    e^{2\pi i\,(k_x n_x + k_y n_y)}.
-\end{equation}
+% REVIEW: removed duplicate of eq:assemble; reference the single definition instead
+periodic transverse directions, performs the transverse Fourier sum
+given in \cref{eq:assemble}.
 
 \paragraph{\texttt{structure.xyz}}
 This is an extended XYZ file containing the lattice vectors in the
@@ -101,6 +96,7 @@ matrix_sparray = distributed_load(f"{matrix_name}.mat")
 assert (0, 0, 0) in matrix_sparray.keys()
 matrix_sparray = matrix_sparray[(0, 0, 0)]
 \end{lstlisting}
+% REVIEW: ambiguous notation; intended is a square matrix of linear size N_blocks*B (i.e. (N_blocks*B) x (N_blocks*B))
 The result is a single sparse matrix of size
 $(N_\mathrm{blocks}\times B)^2$, where $B$ is the block size and
 $N_\mathrm{blocks}$ is the number of transport cells.  No transverse
@@ -235,6 +231,20 @@ unit-cell expansion to allow different block dictionaries in different
 transport cells.  Two new functions were added to
 \texttt{quatrex/device/inputs.py}.
 
+% REVIEW: document the upper-triangular-half Hermitian-operator storage/assembly convention used by the device builder
+Throughout the device builder, operators are stored and assembled as a
+single upper-triangular half: \texttt{load\_matrices} keeps only the
+\texttt{triu} of each loaded block, and \texttt{\_construct\_transport\_cell}
+reconstructs each full block as
+\texttt{block + triu(block\_flipped, k=1).conj().T}, where
+\texttt{block\_flipped} is the block at the negated coordinate, so that
+Hermiticity is enforced by construction and the strictly-lower part is
+never stored redundantly.  When several blocks or $k$-points are combined
+(\texttt{assemble\_matrix}, \texttt{\_sum\_operator}), a common sparsity
+pattern is obtained as the union of the per-shift patterns (symmetrised
+via $S + S^\mathrm{T}$) so that no entry present in any contribution is
+dropped.
+
 \texttt{\_expand\_heterogeneous\_matrix} builds a BTD sparse matrix for
 a single transverse periodic shift $(n_x,n_y)$.  Each cell is assigned
 to one of the three regions according to its index.  The diagonal block
@@ -256,6 +266,7 @@ summed to determine the sparsity pattern.
 
 \subsubsection{Boundary coupling}
 
+% REVIEW: flag -- consistency assumes the supplied lead blocks already satisfy H_10 = H_01^dagger; state this prerequisite
 At the interfaces between the $L$, $D$, and $R$ regions, the
 off-diagonal couplings must be chosen consistently with Hermiticity.
 For harmonic real-space blocks, the relevant relation is

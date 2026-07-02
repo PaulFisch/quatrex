@@ -2,26 +2,37 @@
 \label{sec:res_scp}
 % ======================================================================
 
-Beyond the dynamic three-phonon bubble $\Sigma_B(\omega)$ (the only term
+% REVIEW: Sigma_B is undefined in the theory; identify it with the bubble Sigma_s of eq:sigma_guo
+Beyond the dynamic three-phonon bubble $\Sigma_B(\omega)$ (the bubble
+self-energy $\Sigma_s$ of \cref{eq:sigma_guo}; the only term
 with an imaginary part, hence the linewidth), the lowest-order diagrammatic expansion
+% REVIEW: renamed loop SE Sigma_L -> Sigma_loop to avoid collision with the left-lead SE Sigma_L
 adds two static, real, Hermitian self-energies: the quartic loop
-$\Sigma_L=\tfrac12\,\Phi_4\!:\!\langle uu\rangle$ (needs FC4) and the cubic tadpole
+$\Sigma_\mathrm{loop}=\tfrac12\,\Phi_4\!:\!\langle uu\rangle$ (needs FC4) and the cubic tadpole
+% REVIEW: ':' here is a single-index contraction Phi_3:<u>, inconsistent with the double-dot (double contraction) used elsewhere
 $\Sigma_T=\Phi_3\!:\!\langle u\rangle$ with
+% REVIEW: define Phi_eff = effective/renormalised harmonic (second-order) force-constant matrix (curvature D + static correction)
 $\langle u\rangle=-\Phi_\mathrm{eff}^{-1}\,\tfrac12\Phi_3\!:\!\langle
-uu\rangle$ (internal-coordinate relaxation, needs FC3). We computed all
+uu\rangle$, where $\Phi_\mathrm{eff}$ is the effective (renormalised)
+harmonic, i.e.\ second-order, force-constant matrix---the bare curvature
+$D$ plus the static self-energy correction---(internal-coordinate
+relaxation, needs FC3). We computed all
 three contributions across temperature for the soft-mode
 \texttt{d5a} nanowire and the stiff (3,3) carbon nanotube
 (\cref{fig:res_scp_mag}). The CNT FC4 was obtained from the existing
 rattled set with a short ($2.0$~\AA) quartic cutoff,
+% REVIEW: cross-ref mismatch -- sec:res_fc (10_ballistic_fc) has no 'rfe'/'refit'; the rfe refit lives in 20_nanowires/appendices, fix the \cref target
 the \texttt{d5a} FC4 from the \texttt{rfe} refit of \cref{sec:res_fc}.
 
 For the CNT, the dynamic bubble dominates,
-$\max|\mathrm{Re}\,\Sigma_B|:\|\Sigma_L\|:\|\Sigma_T\|\approx 8:1:0.5$
+% REVIEW: renamed Sigma_L -> Sigma_loop (left-lead collision)
+$\max|\mathrm{Re}\,\Sigma_B|:\|\Sigma_\mathrm{loop}\|:\|\Sigma_T\|\approx 8:1:0.5$
 at $300$~K, all growing with $T$ as $\langle uu\rangle$ grows. For the
 \texttt{d5a} wire, the ordering inverts: the bubble is weak
 ($\max|\mathrm{Re}\,\Sigma_B|\!\approx\!670$~THz$^2$ at $300$~K), while the
 loop is the largest correction
-($\|\Sigma_L\|\!\approx\!1045$~THz$^2$). In both structures, the loop
+% REVIEW: renamed Sigma_L -> Sigma_loop (left-lead collision)
+($\|\Sigma_\mathrm{loop}\|\!\approx\!1045$~THz$^2$). In both structures, the loop
 exceeds the tadpole at every temperature.
 
 \begin{figure}[htb]
@@ -36,16 +47,28 @@ exceeds the tadpole at every temperature.
 For the CNT, the loop is a $\sim10\%$ renormalisation that does not improve the
 ($10^{-4}$) conservation, so it is unnecessary. For \texttt{d5a}, it is the
 dominant static term. It makes the high-temperature SCBA converge, and it improves the
-heat-flow conservation (halving it from $2.98\%$ to $1.34\%$ at $30$~K,
+% REVIEW: 2.98% -> 1.34% is a 2.22x reduction (>halving)
+heat-flow conservation (more than halving it from $2.98\%$ to $1.34\%$ at $30$~K,
 and reaching $0.45\%$ at $100$~K with the loop$+$tadpole). The loop is the
 physical cure for a soft mode: stiffening it lifts the propagator out of
 the near-singular region.
+% REVIEW: document the actual code regularisation (floored pseudo-inverse) per static_self_energy.py:mean_displacement
+Numerically, the relaxation $\langle u\rangle=-\Phi_\mathrm{eff}^{-1}(\dots)$
+is not formed by a bare inverse. The symmetrised $\Phi_\mathrm{eff}$ is
+eigendecomposed and inverted with an eigenvalue floor: only modes above a
+cutoff $\max(\texttt{omega2\_floor\_rel}\cdot\lambda_\mathrm{max},\,\texttt{scp\_floor})$
+are kept (a relative floor $10^{-3}$ together with an absolute
+$\texttt{scp\_floor}$ in THz$^2$), giving a floored pseudo-inverse. This
+eigenvalue floor---not the FC4 loop---is the code's actual cure for the
+singular inversion of a soft $\Phi_\mathrm{eff}$.
 
 Run in isolation, the tadpole diverges: for \texttt{d5a} the
-tadpole-only self-energy reaches $\|\Sigma_T\|=1298$~THz$^2$ at $300$~K and drives the lowest mode imaginary ($\omega^2=-2.10$), with the SCBA failing and the heat-flow
+% REVIEW: add units (THz^2) to omega^2
+tadpole-only self-energy reaches $\|\Sigma_T\|=1298$~THz$^2$ at $300$~K and drives the lowest mode imaginary ($\omega^2=-2.10$~THz$^2$), with the SCBA failing and the heat-flow
+% REVIEW: define T_O (gradient/force on internal coords, vanishes at relaxation) and remove wrong cite -- paulatto_anharmonic_2013 contains no tadpole
 conservation increasing. The optical tadpole
-$T_O$ is the gradient that relaxes the internal coordinates and
-vanishes at the relaxed structure~\cite{paulatto_anharmonic_2013}.
+$T_O$ is the gradient (force on the internal coordinates) that relaxes the
+internal coordinates and vanishes at the relaxed structure.
 With coupled self-consistency, the quartic loop
 stiffens the modes, which lowers $\langle uu\rangle$, which shrinks
 $\langle u\rangle$ and hence $\Sigma_T$. Running loop and tadpole together
@@ -61,6 +84,7 @@ destabilises.
   \caption{Tadpole magnitudes versus temperature for the CNT and
   \texttt{d5a}. Circled points mark where the tadpole-only self-energy
   drives an imaginary renormalised mode and the SCBA does not converge.}
+  % REVIEW: orphan figure -- fig:res_scp_tadpole is never \cref'd in the body; add a \cref or remove
   \label{fig:res_scp_tadpole}
 \end{figure}
 
