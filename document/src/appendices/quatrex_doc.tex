@@ -58,7 +58,7 @@ broadening, and the open-boundary-condition algorithm.  Important fields are
   \texttt{kpoint\_grid}               & \texttt{[4,4,1]}        & transverse mesh \\
   \texttt{kpoint\_shift}              & \texttt{[0,0,0]}        & Monkhorst--Pack shift \\
   \texttt{num\_orbitals\_per\_atom.Si}& 3                       & DOFs per atom \\
-  \texttt{phonon.eta}                 & \texttt{1e-8}           & broadening $(\mathrm{rad/s})^2$ \\
+  \texttt{phonon.eta}                 & \texttt{0.45}           & broadening $\eta$ (THz), cf.\ \cref{eq:regulator_impl} \\
   \texttt{phonon.obc.algorithm}       & \texttt{"sancho-rubio"} & OBC method \\
   \bottomrule
 \end{tabular}

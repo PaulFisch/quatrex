@@ -24,7 +24,7 @@ in the orbital pair $(i,j)$, whereas the phonon bubble couples
 $y_1,\dots,y_4$ across the supercell. In what follows we omit the
 $\gtrless$ superscripts unless the distinction matters; all
 derivations apply unchanged to lesser, greater, and (via the
-fluctuation--dissipation construction of \cref{eq:sigma_r}) retarded
+retarded reconstruction of \cref{eq:sigma_r}) retarded
 self-energies.
 
 % ----------------------------------------------------------------------
@@ -108,8 +108,8 @@ visible window. The bubble then carries large spurious contributions
 that fake a strong-coupling self-energy and drive the SCBA loop
 unstable. The required grid size is therefore set by the stiffest
 mode of the device, not by the thermally populated bands; in
-particular, an H-terminated wire with $\omega_{\max}/2\pi\sim 64$\,THz
-from the Si--H stretch needs $f_{\max}\gtrsim 130$\,THz, well above the
+particular, an H-terminated wire with $\omega_{\max}/2\pi\sim 63$\,THz
+from the Si--H stretch needs $f_{\max}\gtrsim 126$\,THz, well above the
 $\sim 32$\,THz a bulk-Si device ($\omega_{\max}/2\pi\sim 16$\,THz) would require. \Cref{sec:phonon_solver_pkg}
 documents the runtime safety net that enforces this condition.
 
@@ -504,6 +504,15 @@ cost reduces to
                C_a^{3}\bigr).
 \end{equation}
 
+\paragraph{Dense-kernel caveat (forward note).} Layers (a)--(c) are
+implemented in the production kernel of \cref{ssec:phph_dist_impl};
+the intra-block layer (d) is an \emph{available} optimisation, not an
+implemented one: the production kernel stores each block densely,
+which corresponds to setting $C_a=\NBS$ in the bounds above. The
+comparisons against the decomposed kernels in
+\cref{ssec:phph_separable} and \cref{sec:phph_decomp} refer back to
+this caveat.
+
 % ----------------------------------------------------------------------
 \subsection{Separable FC3 approximation}
 \label{ssec:phph_separable}
@@ -650,13 +659,10 @@ form
     \label{eq:phph_step_S}
 \end{align}
 where $w$ enumerates the padded $\tau$-grid of size
-$N_\mathrm{fft}=2N_\omega-1$, $\Phi_L \equiv \Phi^{(3)}_{I,K_1,K_2}$
-and $\Phi_R \equiv \Phi^{(3)}_{J,K_2,K_1}$ are the FC3 blocks for
-the working triplet, and $g_a \equiv \mathcal{F}_\omega^{-1}\bigl[
-G^{\gtrless}_{K_1\bullet}\bigr]$,
-$g_b \equiv \mathcal{F}_\omega^{-1}\bigl[G^{\gtrless}_{K_2\bullet}\bigr]$
-are the FFTs of the relevant blocks of $G$ along the transport
-direction. The intermediates $A,B$ are stored only on the joint
+$N_\mathrm{fft}=2N_\omega-1$ and $g_a,g_b$ are the
+$\omega\to\tau$ transforms (Stage~1,
+\cref{ssec:phph_distribution}) of the corresponding band blocks of
+$G^{\gtrless}$. The intermediates $A,B$ are stored only on the joint
 sparse support of their inputs: $A$ on
 $\mathrm{supp}(\Phi_L)\cap\mathrm{supp}(g_b)$ (which has nnz
 $\cO(\NBS\,C_a^{2})$ per $\tau$ at fixed $(I,K_1,K_2)$), and

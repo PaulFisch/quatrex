@@ -289,7 +289,9 @@ numerics~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_20
 Applied to the bubble legs this is both unnecessary and harmful.
 The acoustic spectral weight vanishes
 linearly, $A(\omega')\to A'(0)\,\omega'$, so the equilibrium lesser function
-$G^{<}_{\rm eq}=-i\,nA$ stays finite despite $n(\omega')\sim1/\omega'$. Out of equilibrium the bosonic fold
+$G^{<}_{\rm eq}=-i\,nA$ (textbook sign; the solver stores the
+occupation-positive opposite, \cref{sec:solver_units}) stays finite despite
+$n(\omega')\sim1/\omega'$. Out of equilibrium the bosonic fold
 $G^{<}(-\omega)=G^{>}(\omega)^T$ together with the bounded spectral function forces
 the $1/\omega$ parts of $G^{<}$ and $G^{>}$ to be equal and opposite, hence both
 zero; and the contact broadening $\Gamma_\ell(\omega)$, being the bosonic (odd)
@@ -322,7 +324,7 @@ floors at the ghost-reservoir term of \cref{eq:sumrule}
 pairing-exact bubble balance $P_{\rm in}=P_{\rm out}$, with (iii) reserved as
 an $\eta$-budget diagnostic.
 
-\subsubsection{Lowest-order approximation.}
+\subsubsection{Lowest-order approximation}
 
 An attractive alternative to direct SCBA is the
 lowest-order approximation (LOA), introduced for inelastic quantum transport
@@ -418,7 +420,7 @@ the number of decimated layers at each step, with iterates obeying
 $\|\alpha_n\|, \|\beta_n\| \sim \rho^{2^n}$ inside gaps and
 $e^{-c\eta\cdot 2^n}$ on bands. The practical implication is that
 \emph{doubling the tolerance roughly costs one extra iteration}; total
-cost is $\mathcal{O}(N_\omega\,N_q\,N_{\mathrm{DOF}}^3\,N_{\mathrm{iter}})$
+cost is $\mathcal{O}(N_\omega\,N_q\,\ndof^3\,N_{\mathrm{iter}})$
 with $N_{\mathrm{iter}}$ essentially constant (and small,
 $\sim 10\text{--}30$).
 

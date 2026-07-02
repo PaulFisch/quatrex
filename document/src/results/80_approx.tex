@@ -15,19 +15,28 @@ the conserving conductance is defined only as $\eta\to0$ (\cref{sec:res_eta0}).
 Finite-$\eta$ transport numbers are reported nowhere in this chapter as a result;
 they are collected here only to show that they are biased and, crucially, that the
 bias cannot be removed by extrapolation. Its systematic is much larger than the
-lead-balance residual suggests: on the \texttt{cnt33} tube at matched $\eta$ the
+lead-balance residual suggests: on the $(3,3)$ tube at matched $\eta$ the
 lead balance stays $\sim10^{-5}$ throughout, yet the anharmonic ratio
 % REVIEW(open): per-solver eta-unit conventions (production Dyson 2i*eta|omega|, eta in THz, vs the dense additive i*eta in THz^2) still need one reconciliation in app:finite_analysis.
 $G_{\rm anh}/G_{\rm ball}$ swings $0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz
-(\cref{fig:res_cnt_T}), so a single broadening over-broadens the spectral function
+(\cref{tab:cons_ratio}), so a single broadening over-broadens the spectral function
 and \emph{under}-estimates the scattering (a single point at $\eta=0.45$\,THz
 reads only a $\sim16\%$ reduction). Worse, the extrapolation overshoots: the
 % REVIEW(verified): conservation_figs.py -- eta->0 fits give linear 0.739 / quadratic 0.682 (was "0.70--0.73"); vs the direct 0.574 that is +19% (quadratic) to +29% (linear).
 $\eta\ge0.30$ window extrapolates to $G_{\rm anh}/G_{\rm ball}\approx0.68$--$0.74$
-(quadratic--linear), whereas the directly converged $\eta\to0$ fixed point gives
+(quadratic--linear, \cref{fig:cons_ratio}), whereas the directly converged
+$\eta\to0$ fixed point gives
 $0.574$ (\cref{sec:res_eta0}) --- the finite-$\eta$ family does not connect smoothly
 to the $\eta=0$ limit, so even an $\eta\to0$ fit of finite-$\eta$ data overestimates
-the ratio by $19$--$29\%$. The same lesson is
+the ratio by $19$--$29\%$. The bias is equally visible across temperature
+(\cref{fig:res_cnt_T}): at $\eta_w=0.05$~THz the one-cell ratio falls
+monotonically $0.92\to0.709$ over $30$--$300$~K, the same $300$~K point moves to
+$0.810$ at $\eta_w=0.206$~THz, and the over-broadened sweep misses the
+non-monotonic maximum near $100$~K of the conserving $\eta=0$ result entirely.
+Finite $\eta$ also attenuates coherent transmission with device length: even the
+\emph{ballistic} conductance decays with the number of cells
+(\cref{fig:res_ballistic_curves}), although the exact $\eta\to0$ Caroli
+transmission is length-independent. The same lesson is
 sharper on the soft \texttt{d5a} wire, where a single cell at finite $\eta$ returns
 the unphysical $G_{\rm anh}/G_{\rm ball}>1$ (\cref{tab:res_anh_T}): finite broadening
 can violate the resistive bound outright. The only defensible transport number is the

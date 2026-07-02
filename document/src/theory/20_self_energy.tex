@@ -11,7 +11,7 @@ We give a derivation below.
 
 Let $\hat{V}_3(\tau) = \tfrac{1}{3!}\sum_{\mu\nu\lambda}
 \Phi_{\mu\nu\lambda}\,\tilde{u}_\mu(\tau)\,\tilde{u}_\nu(\tau)\,\tilde{u}_\lambda(\tau)$
-be the cubic interaction in the interaction picture (With respect to the harmonic operators). For the interaction
+be the cubic interaction in the interaction picture (with respect to the harmonic operators). For the interaction
 we compute the S-matrix~\cite{rammer_quantum_1986,haug_quantum_2008}
 \begin{equation}\label{eq:S_matrix}
   S_{\mathcal{C}} = T_{\mathcal{C}}\exp\!\left[-\frac{i}{\hbar}\oint_{\mathcal{C}}d\tau\,\hat{V}_3(\tau)\right].
@@ -119,7 +119,7 @@ re-included diagram-by-diagram in the iteration.
 The factor $1/2$ above corresponds to the fully-symmetric FC3
 $\Phi_{\mu\nu\lambda}$ defined by
 $\Phi_{\mu\nu\lambda} = \partial^3 V/(\partial u_\mu \partial u_\nu \partial u_\lambda)$,
-divided by $3!$ in \cref{eq:H_phonon}. ~\citet{mingo_anharmonic_2006} obtains an extra factor of $\pi/9$
+divided by $3!$ in \cref{eq:H_phonon}. \Citet{mingo_anharmonic_2006} obtains an extra factor of $\pi/9$
 which~\citet{guo_quantum_2020} attribute to a different convention in
 the symmetrization of the cubic vertex.
 
@@ -314,13 +314,11 @@ $(\Phi^{(3)})^4$ that lie beyond bubble-SCBA.}
 
 \Cref{eq:sigma_guo} captures the leading three-phonon process. Higher
 orders include~\cite{wang_nonequilibrium_2014,guo_quantum_2020}:
-(i) the four-phonon tadpole from $\Phi^{(4)}$,
-$\Sigma^{(4),\mathrm{HF}}_{\mu\mu'} = \tfrac{i\hbar}{2}\sum_{\nu\lambda}
-\Phi^{(4)}_{\mu\mu'\nu\lambda}\,G^<_{\nu\lambda}(\tau,\tau)$,
-which is real, frequency-independent, and renormalizes
-$D \mapsto D + \Sigma^{(4),\mathrm{HF}}$, contributing the
+(i) the four-phonon Hartree--Fock tadpole
+$\Sigma^{(4),\mathrm{HF}}$ from $\Phi^{(4)}$ already discussed above
+(\cref{fig:fc4_tadpole}), which contributes the
 temperature-dependent thermal expansion and frequency
-shifts~\cite{wang_nonequilibrium_2014} (\cref{fig:fc4_tadpole}),
+shifts~\cite{wang_nonequilibrium_2014},
 (ii) the two-loop $\Phi^{(3)}$ vertex correction, relevant at high
 $T$ where $\hbar\omega_{\max}/k_B T \lesssim 1$ and three-phonon
 processes saturate (\cref{fig:vertex_correction}) and
@@ -374,8 +372,8 @@ transverse wavevector, the cubic tensor depends on two: the
 $\qp{}'$ sum couples all transverse wavevectors, so evaluating
 $\Sigma_s(\qp)$ requires Green's functions at every $\qp{}'$, destroying
 the embarrassing parallelism of the ballistic problem. The arithmetic
-complexity scales as $\mathcal{O}(N_q^2 N_\omega^2 N_{\mathrm{DOF}}^4)$
-(the $N_{\mathrm{DOF}}^4$, rather than the naive $N_{\mathrm{DOF}}^6$ of the
+complexity scales as $\mathcal{O}(N_q^2 N_\omega^2 \ndof^4)$
+(the $\ndof^4$, rather than the naive $\ndof^6$ of the
 four-index ring, already assumes the FC3 block-locality of
 \cref{ssec:phph_sparsity})
 before any low-rank or stochastic acceleration. This is the dominant
@@ -482,13 +480,13 @@ and $j = i + 1$,
 \end{equation}
 with $H_{i,i+1}$ the inter-slab coupling block. In a converged SCBA
 solution the steady-state continuity equation enforces $I_{i,i+1}$
-independent of $i$ throughout the device, providing physically meaningful convergence test:
+independent of $i$ throughout the device, providing a physically meaningful convergence test:
 \begin{equation}
   \delta I = \max_i I_{i,i+1} - \min_i I_{i,i+1}
 \end{equation}
 measures the violation of energy conservation by approximations in
 $\Sigma_s$ (incomplete SCBA iteration, Hilbert-transform truncation,
-finite frequency grid). A convergence criteron for SCBA can be
+finite frequency grid). A convergence criterion for SCBA can be
 $\delta I/\bar I \lesssim \varepsilon$~\cite{luisier_atomistic_2012,guo_quantum_2020} for
 appropriate $\varepsilon$ (e.g. $10^{-3}$ in \cite{guo_quantum_2020}).
 

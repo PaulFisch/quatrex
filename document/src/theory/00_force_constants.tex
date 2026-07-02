@@ -109,7 +109,7 @@ The resulting linear relations among the entries of $\Phi$
 typically reduce the number of independent parameters by one or two
 orders of magnitude, and are exploited systematically by software
 packages such as phonopy \cite{togo_first_2015} and symfc
-\cite{seko_projector-based_2024}, and are discussed in-depth in \citet{fu_group_2019}.
+\cite{seko_projector-based_2024}, and are discussed in depth in \citet{fu_group_2019}.
 
 Phonon frequencies and polarisation vectors are obtained as
 eigenpairs of the mass-weighted Fourier transform of $\Phi$, the
@@ -432,8 +432,8 @@ pattern and combined with the possible symmetry constraints on the factor matric
 families yield five canonical ans\"atze, ordered here from least to most
 tensor-structure-aware:
 \begin{enumerate}
-  \item Truncated matricization SVD, i.e.\ the classical matrix SVD applied to an matricization of
-        the tensor. fully algebraic and Eckart--Young optimal in the chosen matricization, but
+  \item Truncated matricisation SVD, i.e.\ the classical matrix SVD applied to a matricisation of
+        the tensor: fully algebraic and Eckart--Young optimal in the chosen matricisation, but
         separating only one leg from the other two.
   \item Truncated HOSVD (Tucker), with independent factor matrices per mode and a small dense core.
   \item CP, obtained by restricting the Tucker core to be diagonal, with three
@@ -459,7 +459,7 @@ parameter --- the transport observable converges faster than the Frobenius
 residual the fitters minimise.
 
 % ----------------------------------------------------------------------
-\subsubsection{Truncated matricization SVD}
+\subsubsection{Truncated matricisation SVD}
 \label{sub:fc3_matsvd}
 % ----------------------------------------------------------------------
 Stack the $3\nprim$ slices $M_\mu = \Phi_{\mu,:,:}\in\mathbb{R}^{\ndof\times\ndof}$
@@ -540,8 +540,8 @@ unfolding.
 \end{equation}
 where the $S_2$ constraint halves the nominal core cost $R_1 R_2^{2}$ to $R_1 R_2(R_2+1)/2$.
 The $R_2^{2}$-scaling core term makes Tucker the most parameter-heavy of the five ans\"atze
-when $R_2$ is not small compared to $\ndof^{1/2}$. for strongly anharmonic systems where the
-effective rank is moderate this is mitigated by allowing $R_1\ll R_2$.
+when $R_2$ is not small compared to $\ndof^{1/2}$. For strongly anharmonic systems where the
+effective rank is moderate, this is mitigated by allowing $R_1\ll R_2$.
 
 \paragraph{Self-energy kernel.} The self-energy contraction factorises into three mode-wise
 contractions against $A$ and $B$, leaving the $R_1\times R_2\times R_2$ core as a small dense

@@ -7,7 +7,7 @@ The production distributed solver is validated against the dense reference and
 benchmarked on the two axes that matter for anharmonic transport: the
 block-tridiagonal recursion along the device and the energy-point parallelism
 across MPI ranks. The two solvers follow the structure of the self-energy
-(\cref{ssec:phph_distribution,ssec:phph_qdist}): Gamma-only conductors ($k{=}1$,
+(\cref{ssec:phph_distribution,ssec:phph_qdist}): $\Gamma$-only conductors ($k{=}1$,
 % REVIEW(verified): terminology aligned with the theory chapter -- comm.block (P_S), comm.stack (P_E), comm.q (P_q); the config keys block_comm_size/q_comm_size kept as parenthetical code names.
 the nanowires and tubes) scale on
 $\texttt{comm.block}\times\texttt{comm.stack}$ ($P_S\times P_E$; production
@@ -15,7 +15,7 @@ config key \texttt{block\_comm\_size}),
 while the transversely-periodic systems ($k{>}1$, films and perovskites) scale on
 $\texttt{comm.q}\times\texttt{comm.stack}$ ($P_q\times P_E$; production config
 key \texttt{q\_comm\_size}) with $P_S{=}1$;
-for the large-block Gamma-only regime the inner-ring contraction additionally
+for the large-block $\Gamma$-only regime the inner-ring contraction additionally
 threads over the frequency axis (\cref{ssec:phph_ring}).
 
 \paragraph{Machine-precision agreement with the dense reference.} The production

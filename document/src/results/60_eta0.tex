@@ -95,9 +95,9 @@ so it is not identical to the flat band-integrated suppression quoted above)
 rises modestly from $0.75$ at $30$~K to $\approx 0.81$ near $100$~K and then falls
 to $0.57$ at $300$~K as the three-phonon scattering rate grows with the thermal
 phonon population, and it deepens with device length, $0.57\to0.51$ from two to
-three transport cells at $300$~K (the four-cell anharmonic run reached
-best-iterate conservation $4\times10^{-6}$ at ratio $0.479$ but did not close
-the residual gate and is excluded). These production-NEGF values at
+three transport cells at $300$~K (the four-cell anharmonic run did not close
+the residual gate and is excluded; its best iterate gives ratio $0.479$ at a
+lead imbalance of $1.3\times10^{-4}$). These production-NEGF values at
 $\eta=10^{-12}$ are obtained with a different solver and broadening than the
 dense-reference numbers of \cref{sec:res_cnt} (a monotonic $0.92\to0.709$ at
 $\eta_w=0.05$~THz, one cell); they show a stronger reduction
@@ -120,7 +120,7 @@ single-broadening number is quantified in \cref{app:conservation}.
 \end{figure}
 
 \paragraph{Infrared behaviour.}
-The low-frequency end deserves a separate word. The ballistic transmission
+The low-frequency end warrants separate discussion. The ballistic transmission
 plateaus at the four acoustic channels of the tube,
 $\mathcal{T}(\omega\to0)\to N_{\rm ac}=4$, so the heat-current density
 $\hbar\omega\,I(\omega)$ tends to a constant --- the Bose factor's $1/\omega$ is

@@ -233,7 +233,7 @@ device-side Dyson solve.  The five public entry points:
         $\Sigma^R_\mathrm{tot} = \Sigma^R_L + \Sigma^R_R + \Sigma^R_\mathrm{ph\text{-}ph}$
         and the total lesser/greater self-energies, solves the device
         Dyson equation
-        $G^R(\omega) = [(\omega+i\eta)^2 - H_\mathrm{dev} - \Sigma^R_\mathrm{tot}]^{-1}$
+        $G^R(\omega) = [(\omega+i\eta)^2 - D - \Sigma^R_\mathrm{tot}]^{-1}$
         and the Keldysh equation
         $G^{<,>}(\omega) = G^R \Sigma^{<,>}_\mathrm{tot} G^A$.
 
@@ -678,7 +678,7 @@ far-off-diagonal $\Sigma_{IJ}$ blocks --- invisible to a global 2-norm
 The 3-phonon bubble is not guaranteed to satisfy a discrete acoustic
 sum rule on $\Sigma$: $\mathrm{Re}\,\Sigma^{R}$ generally has a
 nonzero projection onto every near-zero mode of the cell dynamical
-matrix at $\Gamma$. Added to $H_{D}$ in the Dyson denominator this
+matrix at $\Gamma$. Added to $D$ in the Dyson denominator this
 projection shifts the affected $\omega^{2}$ --- possibly negative,
 which puts a $G^{R}$ pole on the real axis. A more insidious failure
 mode for an H-terminated wire is the IR side: at $T=300$\,K the Bose
@@ -714,7 +714,7 @@ relative threshold is $\epsilon=10^{-4}$, matching
 captures the three translations and the twist, four modes in total.
 The mass-weighted construction $t_{\alpha}[\,l,i,\beta\,]=\sqrt{m_{i}}\,
 \delta_{\alpha\beta}$ used by \texttt{build\_translation\_projector}
-is preserved as a fallback for harnesses that build $H_{D}$ directly
+is preserved as a fallback for harnesses that build $D$ directly
 without a periodic cell.
 
 The SCBA loop applies $\Sigma^{\gtrless}\leftarrow Q\Sigma^{\gtrless}Q$
@@ -778,7 +778,7 @@ implements this as \texttt{enforce\_causality\_psd}; the option
 \texttt{causality\_diagnostic} reports the worst PSD violation and
 the frequency where it lives, and
 \texttt{dynamical\_stability\_diagnostic} reports the smallest
-eigenvalue of $H_{D}+\mathrm{Re}\,\Sigma^{R}(\omega)$ across the grid
+eigenvalue of $D+\mathrm{Re}\,\Sigma^{R}(\omega)$ across the grid
 -- a value $<0$ signals that the self-consistent self-energy has
 driven a mode's $\omega^{2}$ past zero and the next Dyson denominator
 is singular.
@@ -810,7 +810,7 @@ $\alpha\in\{0.10,0.05,0.02\}$, pure JFNK, \texttt{anderson+jfnk},
 lowest-order Born, and the Pad\'e sweep --- on the same system in one
 invocation. Each run writes a per-iteration trajectory CSV
 (residual, $|\Sigma^{R}|_{\max}$, conservation, causality violation,
-$\min\lambda(H_{D}+\mathrm{Re}\,\Sigma^{R})$), a \texttt{result.npz}
+$\min\lambda(D+\mathrm{Re}\,\Sigma^{R})$), a \texttt{result.npz}
 with the observable arrays, and a summary JSON; the driver then
 produces a four-panel overlay (\texttt{trajectory\_overlay.pdf})
 showing how each method behaves across the same iterations. This is
@@ -887,7 +887,7 @@ whether they agree.
 \paragraph{$\eta_{w}\!\to\!0$ at fixed $\lambda=1$.}
 Sweeping $\eta_{w}\in\{\eta_{1},\eta_{2},\ldots\}$ from a safely large
 value (large enough to broaden any anharmonically renormalised soft
-mode, i.e.\ $\eta_{w}\!\gtrsim\!\sqrt{\,|\min\lambda(H_{D}+\mathrm{Re}\,\Sigma^{R})|\,}$\!\!,
+mode, i.e.\ $\eta_{w}\!\gtrsim\!\sqrt{\,|\min\lambda(D+\mathrm{Re}\,\Sigma^{R})|\,}$\!\!,
 see \texttt{dynamical\_stability\_diagnostic}) down to the
 limit of stable SCBA convergence, and extrapolating
 $G_{\rm anh}(\eta_{w})$ linearly to $\eta_{w}\!=\!0$, isolates the

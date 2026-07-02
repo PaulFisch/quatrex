@@ -262,6 +262,18 @@ $0.05$~THz; \texttt{DEFAULT\_ETA\_THZ\_TRANSPORT}).  The lead
 self-energy is built by Sancho--Rubio decimation on the first/last
 transport slab (\cref{ap:fa_obs_lead}).
 
+Three $\eta$ conventions coexist in this report and should not be
+confused.  The dense reference (this package and
+\cref{sec:phonon_solver_pkg}) damps through $(\omega+i\eta)^2$ with
+$\eta$ in THz, set by the \texttt{eta\_factor} conventions of
+\cref{sec:solver_units_grid} (linear in $\Delta\omega$); the
+production solver uses the frequency-proportional regulator
+$\omega^2+2i\eta|\omega|$ of \cref{eq:regulator_impl}, also with
+$\eta$ in THz; and the additive $i\eta$ of the theory-chapter Dyson
+equation \cref{eq:system} is an idealisation whose $\eta$ carries
+THz$^2$.  All quoted broadenings in this document are in THz unless
+the $\omega^2$-additive form is written explicitly.
+
 \subsection{Eigenmode synthetic Green's function}
 \label{ap:fa_obs_synthetic}
 

@@ -51,10 +51,9 @@ retain almost none of the bulk anharmonic-limited $\kappa$.
   \label{fig:res_modephysics}
 \end{figure}
 
-At physical broadening and moderate vertex strength the SCBA converges
-cleanly and gives the physical $G_\mathrm{anh}<G_\mathrm{ball}$.
-
-\paragraph{What the open-wire SCBA requires.} Two conditions are necessary for the
+\paragraph{What the open-wire SCBA requires.} At physical broadening and
+moderate vertex strength the SCBA converges cleanly and gives the physical
+$G_\mathrm{anh}<G_\mathrm{ball}$. Two conditions are necessary for the
 nanowire self-consistency to reach this physical value. First, the three-phonon
 vertex must be built from an \emph{acoustic-sum-rule-projected} FC3: the raw
 mass-weighted FC3 violates translational invariance on the open device and couples
@@ -71,7 +70,8 @@ $\eta_w$ the resistive ordering is restored.
 
 \Cref{tab:res_asr_compare} makes the projection effect quantitative on a single
 representative \texttt{d5a} point (one cell, $\eta_w\approx0.11$~THz, full coupling
-$\lambda=1$): the raw vertex diverges --- residual past $10^2$, $620$ causality-%
+$\lambda=1$): the raw vertex diverges --- the residual spiking past $10^2$ in the
+course of the iteration ($1.2$ at the abort), $620$ causality-%
 violating frequency points, the guard aborting after ten iterations --- while the
 projected vertex converges monotonically in thirty iterations to residual
 $8.8\times10^{-4}$ with a bounded $\max|\Sigma^R|\approx136$~THz$^2$ and no causality

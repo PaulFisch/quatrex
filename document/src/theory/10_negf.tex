@@ -80,8 +80,8 @@ $G^{\lessgtr},\, G^{R/A},\, G^t$, with the standard relations
 \begin{align}
   G^R(t,t') &= \theta(t-t')\bigl[G^>(t,t') - G^<(t,t')\bigr], &
   G^A &= (G^R)^\dagger,\\
-  G^R - G^A &= G^> - G^<. &
-  G^t &= G^< + G^R
+  G^R - G^A &= G^> - G^<, &
+  G^t &= G^< + G^R.
 \end{align}
 At equilibrium, the fluctuation--dissipation theorem can be written as~\cite[Eq. 24]{wang_nonequilibrium_2014}
 \begin{equation}\label{eq:phonon_fdt}
@@ -127,7 +127,7 @@ the transverse wave vector
 $\qp$ (we use $q$ for phonons, $k$ for electrons) is sampled on a uniform
 Monkhorst--Pack mesh
 \begin{equation}
-  k_i = \frac{n_i + 0.5}{N_i} - 0.5 + \mathrm{shift}_i,
+  q_i = \frac{n_i + 0.5}{N_i} - 0.5 + \mathrm{shift}_i,
   \qquad n_i = 0,\ldots,N_i-1,
 \end{equation}
 with total count $N_q$ chosen to converge the transverse Brillouin-zone
@@ -212,7 +212,7 @@ self-energies follow from
 with $D_{10}=D_{01}^\dagger$ the device--lead coupling block (the off-diagonal of
 the full mass-weighted dynamical matrix linking the device edge to the first lead
 layer; equal to the $H_{01}$ block when device and lead are the same material).
-and the broadening matrices, which set the rate at which lead $\ell$
+The broadening matrices, which set the rate at which lead $\ell$
 injects phonons into the device, are
 \begin{equation}\label{eq:gamma_def}
   \Gamma_\ell(\omega^2) = i[\Sigma_\ell^R(\omega^2) - \Sigma_\ell^A(\omega^2)].

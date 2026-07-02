@@ -12,7 +12,8 @@ consistent with $f_\mathrm{Ge}=f_\mathrm{Si}\sqrt{m_\mathrm{Si}/m_\mathrm{Ge}}$.
 On a $20\times20$ transverse mesh, the interfacial conductance at
 $300$~K is $G=196$~MW\,m$^{-2}$K$^{-1}$, within $\sim7\%$ of the
 literature values ($210$, Latour 2017; $209$, Tian 2012). The
-remaining gap is consistent with the coarser transverse mesh and DFT calculations.
+remaining gap is consistent with the coarser transverse mesh and the
+different underlying DFT inputs.
 
 % ======================================================================
 \section{Force Constants}
@@ -89,8 +90,8 @@ minimise: the symmetric ans\"atze (INDSCAL, Waring) reach a $\sim15\%$
 conductance error at rank $16$ ($\sim3600$--$4500\times$ fewer
 parameters) while their Frobenius residual is still $52$--$67\%$. The
 relevant fitting target for phonon NEGF is therefore a transport
-residual, not the tensor norm. Second, the current compression approach
-has distinct failure modes: the
+residual, not the tensor norm. Second, the compression families have
+distinct failure modes: the
 matricised SVD is both far denser (its factor count is up to ${\sim}110\times$
 the symmetric methods' at equal rank) and unphysical at higher rank, with its
 rank-8 fit violating heat-flow conservation and its rank-16 fit giving a

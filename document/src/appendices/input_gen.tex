@@ -60,7 +60,7 @@ Third order FCs can be generated efficiently directly from density-functional
 perturbation theory (DFPT) due to the $2n+1$ theorem.  One possibility is to obtain FC2 from QE's linear-response phonon code \texttt{ph.x} and compute FC3 with the D3Q plugin,
 which implements third-order DFPT.  In contrast to the
 finite-displacement method, the DFPT route works directly on the unit
-cell and avoids supercell calculations. However, QE does only supports a restricted set of
+cell and avoids supercell calculations. However, QE only supports a restricted set of
 norm-conserving potentials for third-order DFPT calculations, limiting the achievable accuracy.
 
 The DFPT workflow does the following:
@@ -1115,8 +1115,10 @@ preserving backward compatibility.
 
 The reading
 \texttt{physical/physical.json["fc3\_asr\_legs"]["leg\_j\_rel"]}
-$\approx 0.80$ appears in every SiNW hiphive fit and is structural,
-not a fit defect.  The metric measures
+$\approx 0.80$ appears for every SiNW hiphive reap processed by the
+pipeline and is structural, not a fit defect: it is a property of the
+truncation to the open device, not of the fit itself.  The metric
+measures
 \begin{equation}
   \mathrm{leg\_j\_rel} =
   \frac{\bigl\| \sum_j \Phi^3_{ijk,\alpha\beta\gamma} \bigr\|_F}{\| \Phi^3 \|_F},
@@ -1127,15 +1129,20 @@ construction enforces the axis-$i$ ASR by including the orbit-symmetry
 projector at basis-construction time, but it does \emph{not} enforce
 the analogous constraint along axes $j$ or $k$ -- those would require
 either a constrained cluster-space basis or an explicit post-fit
-projection on the FC tensor itself.
+projection on the FC tensor itself.  In practice the raw
+(periodic-supercell) hiphive fits nevertheless come out ASR-exact on
+all legs (residual $\sim10^{-14}$); the finite reading arises once the
+tensor is truncated to the open device, whose leg sums then run over
+the kept atoms only (\cref{ap:fa_validation}).
 
 Bulk-Si reaps with full octahedral point symmetry yield
 $\mathrm{leg\_j\_rel} = 0.000$ to floating-point precision
 (\path{pass3_bulk_si_leg_j.json}); quasi-1D SiNW reaps with a single
-mirror symmetry yield $\approx 0.80$ regardless of $\mathrm{fit\_method}$,
-$n_\mathrm{structures}$, or cutoffs.  The metric is therefore a
-structural feature of hiphive's cluster-space construction on a
-low-symmetry quasi-1D system, not a fit defect.
+mirror symmetry yield $\approx 0.80$ on the device-truncated tensor
+($0.796$ measured for \texttt{d5a}) regardless of
+$\mathrm{fit\_method}$, $n_\mathrm{structures}$, or cutoffs.  The
+metric is therefore a structural feature of the open-device truncation
+of a low-symmetry quasi-1D system, not a fit defect.
 
 A practical consequence: the SSE bubble in
 \texttt{phonon/finite\_analysis/} integrates FC3 along axis $j$

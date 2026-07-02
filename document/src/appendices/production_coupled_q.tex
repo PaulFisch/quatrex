@@ -235,8 +235,10 @@ investigation; it is not asserted here as established.
 
 \paragraph{Small-broadening instability --- needs a solver-level fix.} The
 production film is numerically stable only for $\eta\gtrsim0.4$\,THz; at
-$\eta\leq0.2$ the Dyson solve $[(\omega+i\eta)^2 I - D - \Sigma^R]$ becomes
-singular and the block recursion returns NaN, where the dense solver's
+$\eta\leq0.2$ the Dyson solve
+$[(\omega^2 + 2i\eta|\omega|)\,I - D - \Sigma^R]$ (the production
+frequency-proportional regulator of \cref{eq:regulator_impl}, $\eta$ in THz)
+becomes singular and the block recursion returns NaN, where the dense solver's
 dense factorisation stays finite. The config-level remedies were
 exhausted without success: retarded method \texttt{fft},
 large $\eta_{\rm obc}$ ($0.4$--$0.8$ with bulk $\eta\in[0.15,0.2]$), and
