@@ -108,6 +108,13 @@ def fit_decomposition(
     for method, ranks in ranks_per_method.items():
         fitter = FITTERS[method]
         kwargs = extra.get(method, {})
+        # Diagnostic sweep: report the RAW approximation error of each
+        # (method, rank) -- no ASR projection (the production default since
+        # 2026-07 would fold the target's own ASR violation into frob_err
+        # and break the full-rank-exactness bound). Conserving production
+        # fits go through fc3_compression.fit_production instead.
+        if method != "PCP":
+            kwargs = {"enforce_asr": False, **kwargs}
         for rank in ranks:
             if verbose:
                 print(f"[decomp] {method} rank={rank} ...", flush=True)

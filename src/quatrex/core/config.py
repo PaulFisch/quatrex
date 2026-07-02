@@ -877,6 +877,38 @@ class PhononConfig(BaseModel):
     ``model == "negf"``; ignored for the Gamma-only (k==1) device.
     """
 
+    decomposed_vertices_path: Path | None = None
+    """Path to the TENSOR-DECOMPOSED coupled-q device vertex factors.
+
+    A ``.npz`` written by
+    :func:`quatrex.phonon.vertex_factors.save_decomposed` (built offline
+    from a CP/INDSCAL factorisation of the bulk FC3 via
+    ``phonon/phonon_inputs/fc3_factor_device.py``). The exact per-leg
+    factorisation of the same q-folded blocks ``qfold_path`` holds densely
+    -- O(n_off * N_q * n_dof * R) instead of O(N_q^2) dense block dicts.
+    Mutually exclusive with ``qfold_path``.
+    """
+
+    sse_vertex_rank: int = 0
+    """Truncate the decomposed vertex to the leading ``rank`` components.
+
+    ``0`` (default) keeps the full stored rank. Columns are weight-sorted
+    at export, so this makes an R-sweep a config-only knob against one
+    high-rank factor file. Requires ``decomposed_vertices_path``.
+    """
+
+    decomposed_kernel: Literal["gram", "reconstruct"] = "reconstruct"
+    """How the SSE consumes the decomposed vertex.
+
+    ``"reconstruct"`` (default): materialise the rank-local slice of the
+    dense q-folded dict from the factors once at first compute and run the
+    dense contraction at full speed -- the factored win is memory + build
+    time. ``"gram"``: the skinny-Gram factored contraction
+    (``quatrex.phonon.bubble_factored``); fewer flops than dense only at
+    small rank or large block sizes (it is memory-bound in R^2 and loses to
+    the dense path beyond R ~ 16 on small-block films).
+    """
+
     retarded_method: Literal["half", "fft"] = "fft"
     """How to reconstruct ``Sigma^R`` from ``Sigma^{<,>}``.
 
@@ -1183,6 +1215,25 @@ class PhononConfig(BaseModel):
                 "sse_smooth_window, whose C^1 window replaces the hard masks; "
                 "enable only one."
             )
+        return self
+
+    @model_validator(mode="after")
+    def check_vertex_source_exclusivity(self):
+        """Dense q-folded dict and tensor-decomposed factors are two
+        representations of the SAME coupled-q vertex -- exactly one may be
+        configured."""
+        if self.qfold_path is not None and self.decomposed_vertices_path is not None:
+            raise ValueError(
+                "qfold_path and decomposed_vertices_path are mutually "
+                "exclusive coupled-q vertex sources; configure one."
+            )
+        if self.sse_vertex_rank and self.decomposed_vertices_path is None:
+            raise ValueError(
+                "sse_vertex_rank truncates the decomposed vertex; it "
+                "requires decomposed_vertices_path."
+            )
+        if self.sse_vertex_rank < 0:
+            raise ValueError("sse_vertex_rank must be >= 0.")
         return self
 
 

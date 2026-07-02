@@ -55,7 +55,8 @@ KB_EV = 8.617333262e-5
 THZ_TO_RAD = 2.0 * np.pi * 1e12
 
 GEOM_FILES = ("dynamical_matrix.mat", "fc3_blocks.hdf5", "structure.xyz",
-              "phonon_energies.npy", "qfold_vertices.npz", "kshift.npy")
+              "phonon_energies.npy", "qfold_vertices.npz", "kshift.npy",
+              "decomposed_vertices.npz")
 
 
 # --------------------------- study matrices ---------------------------

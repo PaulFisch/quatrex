@@ -159,6 +159,15 @@ block_sections = 1
 {tail_block(a)}"""  # noqa: E501  (left/right temperature set below from --temperature/--dt)
 
 
+def _vertex_source(a):
+    """[phonon] coupled-q vertex source: dense qfold (default) or the
+    tensor-decomposed factors (mutually exclusive in the solver config)."""
+    if getattr(a, "decomposed_vertices", None):
+        return (f'decomposed_vertices_path = "{a.decomposed_vertices}"\n'
+                f"sse_vertex_rank = {a.vertex_rank}")
+    return f'qfold_path = "{a.work}/qfold_vertices.npz"'
+
+
 def film_config(a):
     if a.bcs != 1:
         raise SystemExit("film (k>1 coupled-q) requires block_comm_size==1 "
@@ -231,7 +240,7 @@ left_temperature = {a.tL}
 right_temperature = {a.tR}
 model = "negf"
 fc3_path = "{a.work}/fc3_blocks.hdf5"
-qfold_path = "{a.work}/qfold_vertices.npz"
+{_vertex_source(a)}
 retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
@@ -278,6 +287,13 @@ def main():
     p.add_argument("--nk", type=int, default=8)
     p.add_argument("--tdir", default=None)
     p.add_argument("--shift", type=float, default=0.0, help="film kpoint_shift (from kshift.npy)")
+    p.add_argument("--decomposed-vertices", default=None,
+                   help="path to the tensor-decomposed vertex factors "
+                        "(.npz from vertex_factors.save_decomposed); emits "
+                        "decomposed_vertices_path INSTEAD of qfold_path")
+    p.add_argument("--vertex-rank", type=int, default=0,
+                   help="sse_vertex_rank truncation (0 = full stored rank); "
+                        "only with --decomposed-vertices")
     p.add_argument("--temperature", type=float, default=300.0,
                    help="mean device temperature T (K); leads at T +/- dt/2")
     p.add_argument("--dt", type=float, default=10.0, help="lead temperature drop (K)")

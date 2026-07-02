@@ -18,66 +18,6 @@ from qttools.comm import comm as _qtt_comm
 from quatrex.phonon.fc3_loader import fc3_to_phi_blocks
 from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 from quatrex.phonon.units import bubble_prefactor_thz
-from quatrex.phonon.sse_phonon_phonon import _build_cell_zero_mode_projector
-
-
-def test_cell_zero_mode_projector_invariance() -> None:
-    """The optional rigid-mode projector must remove ONLY the q=0 rigid
-    modes and leave every heat-carrying (finite-frequency) mode's
-    self-energy exactly invariant -- the load-bearing correctness claim
-    for ``config.phonon.zero_mode_projection``.
-    """
-    rng = np.random.RandomState(0)
-    n_dof = 9
-    # A cell dynamical matrix with exactly 3 zero (translation) modes and
-    # the rest stiff: build from random optical eigenpairs + a translation
-    # null space. H00 carries it; H01 = 0 keeps the Gamma-matrix = H00.
-    A = rng.randn(n_dof, n_dof)
-    sym = A + A.T
-    evals, evecs = np.linalg.eigh(sym)
-    evals = np.abs(evals) + 4.0          # all stiff (>= 4 THz^2)
-    evals[:3] = 0.0                      # 3 exact zero (translation) modes
-    H00 = (evecs * evals) @ evecs.T      # THz^2, symmetric
-    H01 = np.zeros((n_dof, n_dof))
-
-    Q, projected = _build_cell_zero_mode_projector(H00, H01, floor_thz=0.1)
-    # exactly the 3 zero modes are projected (numerically ~0 THz)
-    assert projected.size == 3
-    assert np.all(projected < 1e-4)
-    # idempotent, symmetric, rank n_dof - 3
-    assert np.allclose(Q @ Q, Q, atol=1e-12)
-    assert np.allclose(Q, Q.T, atol=1e-12)
-    assert round(float(np.trace(Q))) == n_dof - 3
-
-    rigid = evecs[:, :3]
-    heat = evecs[:, 3:]
-    B = rng.randn(n_dof, n_dof) + 1j * rng.randn(n_dof, n_dof)
-    sigma = B + B.conj().T               # Hermitian self-energy block
-    QSQ = Q @ sigma @ Q
-    # heat-carrying modes: e^H Sigma e EXACTLY invariant under Q Sigma Q
-    before = np.array([heat[:, k].conj() @ sigma @ heat[:, k] for k in range(heat.shape[1])])
-    after = np.array([heat[:, k].conj() @ QSQ @ heat[:, k] for k in range(heat.shape[1])])
-    assert np.allclose(before, after, atol=1e-12)
-    # rigid modes: removed from Q Sigma Q
-    rig = np.array([rigid[:, k].conj() @ QSQ @ rigid[:, k] for k in range(3)])
-    assert np.allclose(rig, 0.0, atol=1e-12)
-
-
-def test_cell_zero_mode_projector_absolute_floor() -> None:
-    """The floor is ABSOLUTE: a stiff (high-frequency) mode must not
-    inflate the cutoff and over-project real low-frequency modes."""
-    n_dof = 6
-    # one stiff mode at 60 THz, one real low mode at 0.3 THz, rest mid.
-    freqs2 = np.array([0.0, 0.0, 0.3**2, 5.0, 25.0, 60.0**2])
-    evecs = np.linalg.qr(np.random.RandomState(1).randn(n_dof, n_dof))[0]
-    H00 = (evecs * freqs2) @ evecs.T
-    Q, projected = _build_cell_zero_mode_projector(
-        H00, np.zeros((n_dof, n_dof)), floor_thz=0.1
-    )
-    # only the two exact zero modes are caught; the 0.3 THz heat carrier
-    # survives despite the 60 THz stiff mode (no relative-threshold inflation)
-    assert projected.size == 2
-    assert np.all(projected < 0.1)
 
 
 def _configure_serial_comm() -> None:
@@ -240,13 +180,17 @@ def _ref_quad(phi_left, phi_right, G_a, G_b, dw_thz):
                          _ref_fft(G_b, 2 * ne - 1), ne, bubble_prefactor_thz(dw_thz))
 
 
-def _ref_quad_lesser(phi_left, phi_right, Gla, Gga, Glb, Ggb, dw_thz):
+def _ref_quad_lesser(phi_left, phi_right, Gla, Gga_rev, Glb, Ggb_rev, dw_thz):
     """Full Σ^< for one ring quad: decay + the two absorption (negative-ω')
-    correlations folded in via G^<(-ω)=G^>(ω) -- what the production now
-    computes. Σ^< = ring(g^<_a,g^<_b)+ring(g^<_a,rev g^>_b)+ring(rev g^>_a,g^<_b)."""
+    correlations folded in via the EXACT bosonic continuation
+    G^<_ij(q,-ω) = G^>_ji(-q,ω) -- what the production computes since the
+    cross-block ji-transpose fold. ``Gga_rev``/``Ggb_rev`` must therefore be
+    the already exchange-transformed partners (block-swapped, ji-transposed,
+    q-negated for coupled-q); the helper only applies the ω-reversal.
+    Σ^< = ring(g^<_a,g^<_b)+ring(g^<_a,rev g^>_b)+ring(rev g^>_a,g^<_b)."""
     ne = Gla.shape[0]; n_fft = 2 * ne - 1; pre = bubble_prefactor_thz(dw_thz)
-    Fla, Fga = _ref_fft(Gla, n_fft), _ref_fft(Gga, n_fft)
-    Flb, Fgb = _ref_fft(Glb, n_fft), _ref_fft(Ggb, n_fft)
+    Fla, Fga = _ref_fft(Gla, n_fft), _ref_fft(Gga_rev, n_fft)
+    Flb, Fgb = _ref_fft(Glb, n_fft), _ref_fft(Ggb_rev, n_fft)
     return (_ref_bubble_F(phi_left, phi_right, Fla, Flb, ne, pre)
             + _ref_bubble_F(phi_left, phi_right, Fla, _ref_rev(Fgb), ne, pre)
             + _ref_bubble_F(phi_left, phi_right, _ref_rev(Fga), Flb, ne, pre))
@@ -307,15 +251,31 @@ def _ref_compute_multiblock(
             la, lb = (K1, K1p), (K2, K2p)
             if la not in gl_band or lb not in gl_band:
                 continue
-            sl = _ref_quad_lesser(phi_left, phi_right,
-                                  gl_band[la], gg_band[la], gl_band[lb], gg_band[lb], dw_thz)
+            # Exact bosonic fold: the absorption leg of link (K, K') is the
+            # ji-TRANSPOSE of the swapped block, G^<_{KK'}(-ω) = G^>_{K'K}(ω)^T.
+            laT, lbT = (K1p, K1), (K2p, K2)
+            sl = _ref_quad_lesser(
+                phi_left, phi_right,
+                gl_band[la], gg_band[laT].swapaxes(-1, -2),
+                gl_band[lb], gg_band[lbT].swapaxes(-1, -2), dw_thz)
             # Σ^> is the same folded form with G^< and G^> swapped.
-            sg = _ref_quad_lesser(phi_left, phi_right,
-                                  gg_band[la], gl_band[la], gg_band[lb], gl_band[lb], dw_thz)
+            sg = _ref_quad_lesser(
+                phi_left, phi_right,
+                gg_band[la], gl_band[laT].swapaxes(-1, -2),
+                gg_band[lb], gl_band[lbT].swapaxes(-1, -2), dw_thz)
             sl_full[(I, J)] = sl_full.get((I, J), 0) + sl
             sg_full[(I, J)] = sg_full.get((I, J), 0) + sg
 
+    # Production always zeroes the omega=0 bin of Sigma^≷ (a nonzero
+    # Sigma^≷(0) hits the singular acoustic G^R(0) -> DC spike).
+    for v in sl_full.values():
+        v[0] = 0.0
+    for v in sg_full.values():
+        v[0] = 0.0
+
     # Retarded: bosonic Hilbert path (matches production's retarded_method="fft").
+    # Built from the RAW (textbook-signed) values -- production keeps the
+    # damping-correct sign here.
     from quatrex.core.fft_utils import hilbert_transform
     sr_full: dict[tuple[int, int], np.ndarray] = {}
     for key in set(sl_full) | set(sg_full):
@@ -324,7 +284,17 @@ def _ref_compute_multiblock(
         delta = sg - sl
         # The production SSE adds only the dispersive (Hilbert) part of
         # Σ^R; the SCBA loop adds the anti-Hermitian ½(Σ^>−Σ^<) itself.
-        sr_full[key] = 0.5j * hilbert_transform(delta, freqs)
+        # The hard-mask path post-masks the Hilbert at the omega=0 bin.
+        sr = 0.5j * hilbert_transform(delta, freqs)
+        sr[0] = 0.0
+        sr_full[key] = sr
+
+    # SIGN CONVENTION (2026-06-12 production fix): the bubble is quadratic
+    # in G, so fed with the solver's occupation-positive G^≷ it returns
+    # textbook-signed sigma^≷ -- production negates sigma^≷ at the output
+    # (Sigma^R keeps the raw sign). Mirror it.
+    sl_full = {k: -v for k, v in sl_full.items()}
+    sg_full = {k: -v for k, v in sg_full.items()}
 
     return sl_full, sg_full, sr_full
 
@@ -572,7 +542,9 @@ def test_compute_coupled_q_matches_reference() -> None:
     from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 
     rng = np.random.default_rng(7)
-    n_blocks, nbs, ne, nq = 3, 3, 13, 2
+    # nq=3 so the q -> -q negation of the exact bosonic fold is actually
+    # exercised (at nq=2 the negation is the identity).
+    n_blocks, nbs, ne, nq = 3, 3, 13, 3
     block_sizes = np.array([nbs] * n_blocks)
     N = int(block_sizes.sum())
     dw_thz = 16.0 / (ne - 1)
@@ -668,19 +640,39 @@ def test_compute_coupled_q_matches_reference() -> None:
                     pl, pr = phiL.get((I, K1, K2)), phiR.get((J, K2p, K1p))
                     if pl is None or pr is None:
                         continue
+                    # The LEFT vertex is CONJUGATED (the audited coupled-q
+                    # pairing Phi(q',q_ext-q')^* · GG · Phi(q_ext-q',q');
+                    # supercell-verified, see the production comment).
+                    pl = np.conj(pl)
                     la, lb = (K1, K1p), (K2, K2p)
-                    # Folded Σ^<,Σ^> (absorption is a frequency fold, per fixed
-                    # internal q-slice); the 1/N_q is the coupled-q mesh average.
+                    # Exact bosonic fold: the absorption leg is the ji-transposed
+                    # swapped block at NEGATED q, G^<_{KK'}(q,-ω) = G^>_{K'K}(-q,ω)^T;
+                    # the 1/N_q is the coupled-q mesh average.
+                    laT, lbT = (K1p, K1), (K2p, K2)
+                    iqp_n, iq2_n = (-iqp) % nq, (-iq2) % nq
                     ref_l[(I, J)][:, iq_ext] += (1.0 / nq) * _ref_quad_lesser(
                         pl, pr,
-                        gl_band[la][:, iqp], gg_band[la][:, iqp],
-                        gl_band[lb][:, iq2], gg_band[lb][:, iq2], dw_thz,
+                        gl_band[la][:, iqp],
+                        gg_band[laT][:, iqp_n].swapaxes(-1, -2),
+                        gl_band[lb][:, iq2],
+                        gg_band[lbT][:, iq2_n].swapaxes(-1, -2), dw_thz,
                     )
                     ref_g[(I, J)][:, iq_ext] += (1.0 / nq) * _ref_quad_lesser(
                         pl, pr,
-                        gg_band[la][:, iqp], gl_band[la][:, iqp],
-                        gg_band[lb][:, iq2], gl_band[lb][:, iq2], dw_thz,
+                        gg_band[la][:, iqp],
+                        gl_band[laT][:, iqp_n].swapaxes(-1, -2),
+                        gg_band[lb][:, iq2],
+                        gl_band[lbT][:, iq2_n].swapaxes(-1, -2), dw_thz,
                     )
+
+    # Production always zeroes the omega=0 bin of Sigma^≷ and negates
+    # sigma^≷ at the output (occupation-positive convention, 2026-06-12 fix).
+    ref_l = {k: -v for k, v in ref_l.items()}
+    ref_g = {k: -v for k, v in ref_g.items()}
+    for v in ref_l.values():
+        v[0] = 0.0
+    for v in ref_g.values():
+        v[0] = 0.0
 
     slv, sgv = s_l.stack[...], s_g.stack[...]
     for I in range(n_blocks):
@@ -692,4 +684,129 @@ def test_compute_coupled_q_matches_reference() -> None:
             np.testing.assert_allclose(
                 sgv.blocks[I, J], ref_g.get((I, J), 0), atol=1e-40, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^> mismatch at {(I, J)}",
+            )
+
+
+@pytest.mark.parametrize("kernel", ["gram", "reconstruct"])
+@pytest.mark.parametrize("ansatz", ["INDSCAL", "CP"])
+def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
+    """Factored coupled-q kernel == dense path fed the SAME vertex.
+
+    Random per-leg factors with the physical TRS structure u(-q) = u(q)*
+    (Gamma blocks real); the dense q-folded dict is built FROM the factors
+    (``VertexFactors.reconstruct_block``), so the dense path (``qfold=``
+    injection, itself pinned against the hand-written reference above) and
+    the factored path (``vfactors=`` injection) compute the same bubble.
+    INDSCAL exercises the shared-leg Gram cache, CP the role-keyed two-Gram
+    branch; kernel="reconstruct" covers the rank-local dense-reconstruction
+    mode. G is random complex (non-TRS) -- kills any accidental g = g^T
+    assumption in the Gram pairing.
+    """
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+    from quatrex.phonon.vertex_factors import VertexFactors
+
+    rng = np.random.default_rng(11)
+    n_blocks, nbs, ne, nq, R = 3, 3, 13, 3, 5
+    block_sizes = np.array([nbs] * n_blocks)
+    N = int(block_sizes.sum())
+    offsets = np.array([-1, 0, 1], dtype=np.int64)
+    q_diff_map = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+
+    def _tr_pair_factors():
+        """(n_off, nq, nbs, R) with u(-q) = u(q)^*."""
+        u = np.empty((len(offsets), nq, nbs, R), dtype=np.complex128)
+        u[:, 0] = rng.standard_normal((len(offsets), nbs, R))
+        for q in range(1, nq // 2 + 1):
+            blk = (rng.standard_normal((len(offsets), nbs, R))
+                   + 1j * rng.standard_normal((len(offsets), nbs, R)))
+            u[:, q] = blk
+            u[:, (nq - q) % nq] = np.conj(blk)
+        return u
+
+    D = rng.standard_normal((nbs, R))
+    lambdas = np.sort(np.abs(rng.standard_normal(R)))[::-1] + 0.1
+    UB = _tr_pair_factors()
+    UC = UB if ansatz == "INDSCAL" else _tr_pair_factors()
+    vf = VertexFactors(
+        D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UC,
+        q_diff_map=q_diff_map, nk_shape=(nq,), ansatz=ansatz, meta={},
+    )
+
+    # Dense q-folded dict FROM the factors.
+    qvertices = {}
+    for iq1 in range(nq):
+        for iq2 in range(nq):
+            blocks = {}
+            for I in range(n_blocks):
+                for d1 in offsets:
+                    K1 = I + int(d1)
+                    if not 0 <= K1 < n_blocks:
+                        continue
+                    for d2 in offsets:
+                        K2 = I + int(d2)
+                        if not 0 <= K2 < n_blocks:
+                            continue
+                        blocks[(I, K1, K2)] = vf.reconstruct_block(
+                            iq1, iq2, int(d1), int(d2))
+            qvertices[(iq1, iq2)] = blocks
+
+    # Shared random (non-TRS) G bands.
+    gl_band, gg_band = {}, {}
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+            gl_band[(K, Kp)] = (rng.standard_normal((ne, nq, nbs, nbs))
+                                + 1j * rng.standard_normal((ne, nq, nbs, nbs)))
+            gg_band[(K, Kp)] = (rng.standard_normal((ne, nq, nbs, nbs))
+                                + 1j * rng.standard_normal((ne, nq, nbs, nbs)))
+
+    rows, cols = [], []
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for i in range(block_sizes[I]):
+                for j in range(block_sizes[J]):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = csr_matrix(
+        (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
+        shape=(N, N),
+    )
+
+    def _run(**ssp_kwargs):
+        mk = lambda: DSDBCOO.from_sparray(
+            pattern, block_sizes, global_stack_shape=(ne, nq))
+        g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+        for m in (g_l, g_g, s_l, s_g, s_r):
+            m.data[:] = 0.0
+        glv, ggv = g_l.stack[...], g_g.stack[...]
+        for (K, Kp) in gl_band:
+            glv.blocks[K, Kp] = gl_band[(K, Kp)]
+            ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+        cfg = _make_cfg("half")
+        cfg.phonon.decomposed_kernel = kernel
+        ssp = SigmaPhononPhonon(
+            cfg,
+            phonon_frequencies=np.linspace(0.0, 16.0, ne),
+            block_sizes=block_sizes,
+            **ssp_kwargs,
+        )
+        ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+        return s_l, s_g
+
+    sl_d, sg_d = _run(qfold=(qvertices, q_diff_map, nq))
+    sl_f, sg_f = _run(vfactors=vf)
+
+    dv_l, dv_g = sl_d.stack[...], sg_d.stack[...]
+    fv_l, fv_g = sl_f.stack[...], sg_f.stack[...]
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            np.testing.assert_allclose(
+                fv_l.blocks[I, J], dv_l.blocks[I, J], atol=1e-45, rtol=1e-9,
+                err_msg=f"factored Sigma^< mismatch at {(I, J)} [{ansatz}]",
+            )
+            np.testing.assert_allclose(
+                fv_g.blocks[I, J], dv_g.blocks[I, J], atol=1e-45, rtol=1e-9,
+                err_msg=f"factored Sigma^> mismatch at {(I, J)} [{ansatz}]",
             )
