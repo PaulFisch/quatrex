@@ -33,7 +33,8 @@ OUT = pipeline.OUT / "convergence"
 
 
 def _cell(tag: str, work: Path, *, env: dict, ring_threads: int,
-          warm_from: Path | None = None, sigma_scale: float = 1.0) -> dict:
+          warm_from: Path | None = None, sigma_scale: float = 1.0,
+          check_idle: bool = True) -> dict:
     """Run one convergence cell; returns its trace summary."""
     cell_env = dict(env)
     sigma_out = OUT / f"{tag}_sigma.npz"
@@ -44,7 +45,15 @@ def _cell(tag: str, work: Path, *, env: dict, ring_threads: int,
     rc = pipeline.launch_cell(
         work / "quatrex_config.toml", OUT / f"{tag}.npz", OUT / f"{tag}.log",
         nranks=1, ring_threads=ring_threads, env=cell_env,
+        check_idle=check_idle,
     )
+    return _cell_summary(tag, rc)
+
+
+def _cell_summary(tag: str, rc: int) -> dict:
+    """Parse a finished cell's log into the trace summary (shared by the
+    sequential and socket-pinned-concurrent ``mix`` paths)."""
+    sigma_out = OUT / f"{tag}_sigma.npz"
     trace = pipeline.parse_scba_trace(OUT / f"{tag}.log")
     res = trace["residual"]
     summary = {
@@ -59,6 +68,13 @@ def _cell(tag: str, work: Path, *, env: dict, ring_threads: int,
           f"final={summary['final_residual']:.3e} "
           f"converged={summary['converged']}", flush=True)
     return summary
+
+
+def _mix_job(tag: str, work: Path, ring_threads: int) -> dict:
+    """A launch_cells_concurrent job dict for one independent ``mix`` cell."""
+    return dict(config=work / "quatrex_config.toml", npz=OUT / f"{tag}.npz",
+                log=OUT / f"{tag}.log", ring_threads=ring_threads, nranks=1,
+                env={"QX_SAVE_SIGMA": str(OUT / f"{tag}_sigma.npz")}, tag=tag)
 
 
 def _prepare_work(args, tag: str, **config_kwargs) -> Path:
@@ -87,9 +103,11 @@ def run(argv=None) -> int:
     p.add_argument("--nfreq", type=int, default=121)
     p.add_argument("--fmax", type=float, default=55.0)
     p.add_argument("--temperature", type=float, default=300.0)
+    p.add_argument("--dt", type=float, default=10.0,
+                   help="lead temperature drop (K)")
     p.add_argument("--max-iter", type=int, default=60)
     p.add_argument("--mix", type=float, default=0.1)
-    p.add_argument("--mix-grid", type=float, nargs="+",
+    p.add_argument("--mix-grid", type=float, nargs="*",
                    default=[0.02, 0.05, 0.1, 0.4])
     p.add_argument("--lambdas", type=float, nargs="+",
                    default=[0.25, 0.5, 0.75, 1.0])
@@ -97,31 +115,89 @@ def run(argv=None) -> int:
                    default=[100.0, 200.0, 300.0])
     p.add_argument("--anderson", action="store_true",
                    help="mix strategy: also run Anderson(m) at each factor")
-    p.add_argument("--ring-threads", type=int, default=32)
+    p.add_argument("--anderson-grid", nargs="+", default=[],
+                   metavar="DEPTH:BETA",
+                   help="mix strategy: explicit Anderson cells, e.g. "
+                        "'5:0.05 8:0.1' (independent of --mix-grid)")
+    p.add_argument("--ring-threads", type=int, default=64)  # cnt33 w=241 sweet spot (56x); SSE floors at n_tau//4
+    p.add_argument("--allow-concurrent", action="store_true",
+                   help="skip the node-idle check (the cell budget is on you)")
+    p.add_argument("--no-concurrent", action="store_true",
+                   help="'mix' strategy: run cells one at a time instead of "
+                        "one-per-NUMA-socket (the default fills both sockets; "
+                        "lambda/anneal are warm-start chains and stay sequential)")
+    p.add_argument("--tag-prefix", default="",
+                   help="prefix for cell tags/logs (namespace per system, "
+                        "e.g. 'd5a_')")
+    p.add_argument("--sse-cutoff", type=float, default=0.0,
+                   help="SSE low-frequency cutoff in THz (soft-mode systems)")
+    p.add_argument("--retarded", default="half", choices=["half", "fft"],
+                   help="Sigma^R rule: 'half' (anti-Hermitian only, drops the "
+                        "real part) or 'fft' (causal Kramers-Kronig real part "
+                        "via the Hilbert transform)")
+    p.add_argument("--band-limit", action="store_true",
+                   help="band-limit the SSE above the harmonic band top (eta->0)")
+    p.add_argument("--broyden", action="store_true",
+                   help="mix strategy: also run type-I Broyden at each factor")
+    p.add_argument("--anderson-period", type=int, default=1,
+                   help="anderson periodic-Pulay stride (prod L3 used 4)")
     args = p.parse_args(argv)
 
     OUT.mkdir(parents=True, exist_ok=True)
     base_cfg = dict(ncells=args.ncells, eta=args.eta, nfreq=args.nfreq,
                     fmax=args.fmax, temperature=args.temperature,
-                    max_iter=args.max_iter)
+                    dt=args.dt, max_iter=args.max_iter, retarded=args.retarded)
+    if args.sse_cutoff > 0.0:
+        base_cfg["sse_cutoff"] = args.sse_cutoff
+    if args.band_limit:
+        base_cfg["band_limit"] = True
     results = []
 
     if args.strategy == "mix":
+        # The mix cells are INDEPENDENT -> fill both NUMA sockets concurrently
+        # (one cell/socket). Prepare them all, then launch.
+        jobs = []
         for mix in args.mix_grid:
-            work = _prepare_work(args, f"mix_lin{mix:g}",
-                                 **base_cfg, mix=mix)
-            results.append(_cell(f"mix_lin{mix:g}", work, env={},
-                                 ring_threads=args.ring_threads))
+            tag = f"{args.tag_prefix}mix_lin{mix:g}"
+            jobs.append(_mix_job(tag, _prepare_work(args, tag, **base_cfg, mix=mix),
+                                 args.ring_threads))
             if args.anderson:
-                work = _prepare_work(args, f"mix_and{mix:g}", **base_cfg,
-                                     mix=mix, mixing_method="anderson")
-                results.append(_cell(f"mix_and{mix:g}", work, env={},
-                                     ring_threads=args.ring_threads))
+                tag = f"{args.tag_prefix}mix_and{mix:g}"
+                jobs.append(_mix_job(tag, _prepare_work(
+                    args, tag, **base_cfg, mix=mix, mixing_method="anderson",
+                    anderson_period=args.anderson_period),
+                    args.ring_threads))
+            if args.broyden:
+                tag = f"{args.tag_prefix}mix_broy{mix:g}"
+                jobs.append(_mix_job(tag, _prepare_work(
+                    args, tag, **base_cfg, mix=mix, mixing_method="broyden"),
+                    args.ring_threads))
+        for spec in args.anderson_grid:
+            depth, beta = spec.split(":")
+            tag = f"{args.tag_prefix}mix_and_d{int(depth)}_b{float(beta):g}"
+            jobs.append(_mix_job(tag, _prepare_work(
+                args, tag, **base_cfg, mix=float(beta),
+                mixing_method="anderson", anderson_depth=int(depth)),
+                args.ring_threads))
+
+        if not args.no_concurrent and not args.allow_concurrent and len(jobs) > 1:
+            rcs = pipeline.launch_cells_concurrent(jobs)
+            results.extend(_cell_summary(j["tag"], rcs.get(str(j["npz"]), -1))
+                           for j in jobs)
+        else:  # sequential (single cell, --no-concurrent, or --allow-concurrent)
+            for j in jobs:
+                rc = pipeline.launch_cell(
+                    j["config"], j["npz"], j["log"], nranks=1,
+                    ring_threads=j["ring_threads"], env=j["env"],
+                    check_idle=not args.allow_concurrent)
+                results.append(_cell_summary(j["tag"], rc))
 
     elif args.strategy == "lambda":
+        if args.anderson:
+            base_cfg["mixing_method"] = "anderson"
         warm, lam_prev = None, None
         for lam in args.lambdas:
-            tag = f"lam{lam:g}_T{args.temperature:g}"
+            tag = f"{args.tag_prefix}lam{lam:g}_T{args.temperature:g}"
             work = _prepare_work(args, tag, **base_cfg, mix=args.mix,
                                  vertex_scale=lam)
             scale = 1.0 if lam_prev is None else (lam / lam_prev) ** 2
@@ -139,7 +215,7 @@ def run(argv=None) -> int:
     elif args.strategy == "anneal":
         warm = None
         for temp in args.temps:
-            tag = f"anneal_T{temp:g}"
+            tag = f"{args.tag_prefix}anneal_T{temp:g}"
             cfg = dict(base_cfg, temperature=temp, mix=args.mix)
             work = _prepare_work(args, tag, **cfg)
             summary = _cell(tag, work, env={}, warm_from=warm,
@@ -149,7 +225,7 @@ def run(argv=None) -> int:
             if summary["sigma_snapshot"]:
                 warm = Path(summary["sigma_snapshot"])
 
-    (OUT / f"{args.strategy}_summary.json").write_text(
+    (OUT / f"{args.tag_prefix}{args.strategy}_summary.json").write_text(
         json.dumps(results, indent=2))
     n_conv = sum(r["converged"] for r in results)
     print(f"[convergence] {args.strategy}: {n_conv}/{len(results)} "
@@ -161,9 +237,12 @@ def run(argv=None) -> int:
 def plot(argv=None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--name", default="convergence_traces")
+    p.add_argument("--glob", default="*.log",
+                   help="log-file pattern under the convergence out dir "
+                        "(e.g. 'mix_*.log' for the mixing sweep)")
     args = p.parse_args(argv)
 
-    logs = sorted(OUT.glob("*.log"))
+    logs = sorted(OUT.glob(args.glob))
     if not logs:
         print(f"no convergence logs under {OUT}")
         return 1

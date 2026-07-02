@@ -26,7 +26,7 @@ against G^n, checked BEFORE mixing and BEFORE the skew-Hermitian projection via
 bosonic reflection G^<_ij(-w) = G^>_ji(w).
 
 A standalone replica of the production discrete pipeline
-(`phonon/scripts/verify/balance_roundoff_test.py`) proves the identity holds to
+(`phonon.studies.conservation.replica_check`) proves the identity holds to
 machine eps in float64 *and* float128 — **iff the vertex carries full S3
 (triplet-permutation) symmetry**. No partial symmetry suffices: random Phi
 violates at O(0.25); symmetrizing any single leg 2-cycle still leaves O(0.2-0.6);
@@ -80,7 +80,7 @@ relabeling partners cancel pairwise).
 ## 3. Root cause of the S3 violation: the ASR projection (NOT the folding)
 
 Systematic reconstruction from the saved hiphive FCP
-(`phonon/scripts/verify/plain_truncation_vertex.py`):
+(now `phonon.studies.conservation.s3_violation`):
 
 - **The minimum-image device folding is exact and S3-preserving.** Folded
   (1,1,3) cnt33 blocks at `enforce_asr=False`: S3 violation 0.0. A plain
@@ -111,7 +111,7 @@ Systematic reconstruction from the saved hiphive FCP
 
 ## 4. Physics validation: linewidths vs phono3py
 
-`phonon/scripts/verify/cnt33_linewidth_vertex_check.py` — single-shot NEGF
+`phonon.studies.linewidths` — single-shot NEGF
 bubble (= Fermi golden rule) vs phono3py on the same FC2/FC3 and q-mesh:
 
 - **raw / plain-truncation vertex: order-unity agreement** (R ~ 0.3-1.5 over
@@ -163,21 +163,75 @@ the current candidates.
    well-resolved grid (eta/d-omega ~ 1), and slow mixing/ramp — not from
    vertex mutilation.
 
+## 5b. 2026-06-12 (later): why the corrected vertex would not converge -- two real bugs
+
+The post-cleanup convergence hunt (cold start diverged at every mixing AND
+at lambda=0.25, i.e. weaker than the old suppressed vertex) exposed two
+solver bugs, both invisible to the bubble energy balance:
+
+1. **SSE sign-convention mismatch.** The production solver stores
+   occupation-positive Green's functions (-iG^< >= 0 AND -iG^> >= 0, the
+   same convention as the lead injection sigma^≷ = +i n(+1) gamma; verified
+   numerically, exact Bose ratio n/(n+1)). The bubble assumes textbook
+   G^< = -i n A and is QUADRATIC in G, so it returns textbook-signed
+   sigma^≷ -- the exact NEGATIVE of the solver's convention. The Keldysh
+   feedback G^≷ = G^R sigma^≷ G^A therefore injected negative occupation
+   (anti-dissipation -> runaway), while the retarded feedback had the
+   right damping sign all along (which is why single-shot linewidths
+   matched phono3py). The energy balance is sign-blind (P_in and P_out
+   flip together): it stayed 1e-16 through every divergence. The climbing
+   "conservation" in the convergence plots was the LEAD balance of the
+   non-converged transient -- the lead balance only closes at the fixed
+   point. Fix: negate sigma^≷ at the SSE output; sigma^R built from the
+   raw values (unchanged).
+2. **OBC contamination by Sigma.** The spectral-NEVP contacts were fed
+   system-matrix boundary blocks that already contained the scattering
+   sigma^R; as sigma grew the right-contact NEVP intermittently failed
+   (recursion error ~1 -> residual spikes that reset convergence).
+   Contacts are ideal harmonic reservoirs (Luisier PRB 86, 245407): the
+   OBC is now computed from the bare harmonic blocks, sigma subtracted
+   into the device Dyson afterwards. Ballistic results byte-identical.
+
+After both fixes (commit f7613b5), cnt33 L2/300 K/eta 0.45 at FULL
+corrected coupling, cold start: linear 0.1 contracts smoothly
+1.0 -> 1.1e-2 in 40 iterations (no spikes); plain Anderson(5), beta 0.2,
+**converges in 10 iterations** to residual 2.7e-4 with lead balance
+1.2e-6 and bubble balance 3e-16. G_anh/G_ball(L2, 300 K) = 0.838 --
+below ballistic, and a stronger reduction than the old ASR-suppressed
+0.88, exactly as the 4-5x stronger scattering predicts. Continuation
+(lambda warm starts) is no longer needed for cnt33; it remains available
+for the soft-mode d5a. NB every pre-fix anharmonic number was already
+superseded by the ASR findings; the sign bug additionally affected them.
+
 ## 6. Verification artifacts
 
-- `verify/balance_roundoff_test.py` — discrete-identity replica (S3
-  requirement, fold layout, DC masking, precision scaling).
-- `verify/plain_truncation_vertex.py` — FCP-based plain rebuild, S3 checks,
-  folded-vs-plain equivalence, ASR-projection forensics.
-- `verify/cnt33_linewidth_vertex_check.py` — golden-rule linewidths vs
-  phono3py, raw vs ASR-projected vertex (logs:
-  `out/prod/audit_conv/cnt33_linewidth_check{,_fine}.log`).
-- `verify/cnt33_scba_linewidth_plot.py` — SCBA-level linewidth comparison.
-- Runs in `out/prod/audit_conv/`: `baltest_presym` (pre/post-sym split),
-  `baltest_wide` (window), `baltest_noproj` (projector A/B),
-  `baltest_s3fix` (exact-S3 hook), `baltest_conserving` (S3 + no projector,
-  1.5e-15), `baltest_plain` (natural vertex, 2.5e-16, no hooks),
-  `conv_*` / `lbcnt_plain_*` (mixing study, in progress).
-- `geom/cnt33_L2/fc3_blocks_plain.hdf5` — the conserving cnt33 L2 vertex.
+Reorganized 2026-06-12 into the `phonon/studies` package (the one-off verify
+scripts and the raw audit run directories were retired in the great cleanup;
+every number above is reproducible from the package):
+
+- `phonon.studies.conservation` — `replica_check()` (discrete-identity
+  replica: S3 requirement, fold layout, DC masking, precision scaling;
+  verified bit-identical to the original script) and `s3_violation()` (the
+  device-vertex S3 gate with the correct group transport). 2026-06-12 gate
+  sweep: EVERY Gamma-only production vertex was ASR-poisoned (worst S3
+  violation cnt33 1.28, cnt80 1.45, d11a 2.34, d5a 4.00, srtio3 2.00 — so
+  the srtio3 anharmonic numbers are superseded too), every film vertex
+  S3-exact (2e-16) — film numbers stand.
+- `phonon.studies.linewidths` — phono3py vs single-shot vs SCBA comparison
+  (median R: single-shot 1.11, SCBA 0.72 at mesh 8 / eta 0.2 / 300 K, raw
+  vertex). Figure: `phonon/studies/out/fig/cnt33_scba_linewidths.png`.
+- `phonon.studies.convergence` — the mixing/continuation study. Cold-start
+  record (figure `phonon/studies/out/fig/plain_convergence.png`, logs in
+  `phonon/studies/out/convergence/`): linear 0.02/0.05/0.1 diverge, linear
+  0.4 diverges hardest (residual 1e3-1e4), ramp diverges, Anderson d3/d5/d8
+  limit-cycle at ~0.55 — while the equilibrium periodic SCBA contracts
+  steadily at mix 0.1. The fixed point exists; the cold-start transport map
+  is non-contractive => continuation (vertex-scale warm starts via
+  QX_SIGMA_INIT/QX_VSCALE, temperature annealing), not mixing tuning.
+- `geom/cnt33_L2/fc3_blocks_plain.hdf5` — the conserving cnt33 L2 vertex
+  (bit-match reference for the regenerated builders).
+- The merged production loop checks the bubble balance on the raw SSE
+  output every iteration with NO hooks (5e-16 on the cnt33 smoke run); the
+  skew-Hermitian Sigma^<> projection is gone from the phonon path.
 - Audit history: `phonon/docs/solver_audit.md` (balance sections, including
   the superseded intermediate hypotheses, kept for the record).

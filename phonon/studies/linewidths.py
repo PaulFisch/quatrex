@@ -197,11 +197,28 @@ def run(argv) -> int:
                 gp_of_iq[iq] = n
                 break
     probe_iqs = sorted(set([NM // 4, NM // 3, NM // 2]))
-    out = ph3.run_imag_self_energy(
-        grid_points=[gp_of_iq[i] for i in probe_iqs], temperatures=[T_KELVIN])
-    g3 = np.asarray(out.gammas).reshape(len(probe_iqs), -1, nd)[:, -1, :] \
-        if np.asarray(out.gammas).ndim > 2 \
-        else np.asarray(out.gammas).reshape(len(probe_iqs), nd)
+    # On-shell Gamma_b extracted CORRECTLY. phono3py returns gammas of shape
+    # (sigma, temp, grid, band, freqpt) -- even with NO frequency_points it builds
+    # a ~201-pt auto grid -- so the previous reshape(nprobe,-1,nd)[:, -1, :]
+    # SCRAMBLED the band/freqpt axes (it took Gamma at ~max frequency, mixed
+    # across bands; its "median R~1.1" was a coincidence, NOT a verification, see
+    # memory phonon-sse-phono3py-verification). Evaluate Gamma_b(omega) on an
+    # explicit grid and interpolate at the band frequency omega_b.
+    fp = np.linspace(0.3, FMAX, 400)
+    gps = [gp_of_iq[i] for i in probe_iqs]
+    out = ph3.run_imag_self_energy(grid_points=gps, temperatures=[T_KELVIN],
+                                   frequency_points=fp)
+    gfr = np.asarray(out.gammas)[0, 0]          # (probe, band, freqpt)
+    g3 = np.array([[np.interp(om[iq, b], fp, gfr[c, b]) for b in range(nd)]
+                   for c, iq in enumerate(probe_iqs)])
+    if np.nanmedian(g3[g3 > 1e-3]) > 10.0:
+        print("WARNING: phono3py on-shell gamma median > 10 THz is UNPHYSICAL -- "
+              "phono3py mis-computes this quasi-1D/vacuum-cell CNT FC3 (both the "
+              "imag-self-energy and RTA tc.gamma paths). This CNT linewidth "
+              "comparison is NOT a valid SSE prefactor check; use bulk Si (where "
+              "phono3py is standard) or the analytic golden rule. The SSE itself "
+              "is verified by theory.tex eq(fgr) + the supercell ground truth + "
+              "the convention-free bulk-Si kappa ~110 W/mK match.", flush=True)
 
     # ---- snapshot + figure -------------------------------------------------
     args.npz.parent.mkdir(parents=True, exist_ok=True)
