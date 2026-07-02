@@ -1,0 +1,2783 @@
+launch: NRANKS=128 QX_CONFIG=/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/conv1e10/work/sinw_d5a_L2_eta0_jfnk_ptc01/quatrex_config.toml BCS=cfg QCS=cfg ballistic=0
+/usr/scratch/mont-fort11/pfischill/quatrex/src/qttools/__init__.py:56: UserWarning: 'cupy' is unavailable or not working, defaulting to 'numpy'. (No module named 'cupy')
+  warnings.warn(
+/usr/scratch/mont-fort11/pfischill/quatrex/src/quatrex/core/config.py:1817: UserWarning: The CPU code will run sequentially which may impact performance.
+  warnings.warn(
+Max Interaction Cutoff: 10.0
+Energy window: 0.0 to 66.0 eV with 181 grid points.
+Resolution is 0.366667 eV.
+comm.stack size: 128, comm.block size: 1
+Each comm.block has 1 grid points.
+/usr/scratch/mont-fort11/pfischill/quatrex/src/quatrex/core/statistics.py:42: RuntimeWarning: divide by zero encountered in divide
+  return 1 / (xp.exp(energy / (k_B * temperature)) - 1)
+IR occupation subtraction ON: full physical Bose occupation (no omega^2 taper); Gamma~omega keeps the injection finite as omega->0.
+WARNING: phonon_energies.npy (181 pts, dw=0.3667) does not match the solver energy grid (2 pts); using the solver grid for the scattering self-energy.
+SSE band-limit: harmonic band top 64.081 THz (fixed above-band mask)
+Max Interaction Cutoff: 10.0
+RUN config=/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/conv1e10/work/sinw_d5a_L2_eta0_jfnk_ptc01/quatrex_config.toml phonon=True eta=1e-12 retarded=fft nblk=2 ne=181 bcs=1 qcs=1 nranks=128
+Entering SCBA loop...
+Iteration 0
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+SSE band-limit: masking 5 bin(s) above 64.081 THz
+SSE band-limit: harmonic-support mask -> 96/181 empty bins masked (margin 1.5 THz)
+SSE band-limit: occupation-freeze mask -> 61/181 frozen bins (n<0.001, T_hot=305K)
+SSE band-limit: SMOOTH window (support ramp 4*dw, freeze n<0.001) -> mean w=0.429, 102/181 bins below 0.5
+[it  0] energy J(local)=[0.0385 0.036  0.0385]
+SigmaR resid-by-omega: peak w=25.67THz val=9.493e+02 in-band(<=46.4)=0.957 low(<=5)=0.121
+Maximum Self-Energy Update: 949.2690484514422
+Contact Current Difference: 0.0
+Current Conservation abs: 0.9611294860842463
+Current Conservation rel: 6.329345680338001e-05
+Phonon: rel Sigma^R residual 1.0000e+00; lead balance 2.8532e-13 (best inf; internal spread 2.7467e-03)
+Bubble energy balance: P_in=-5.206725e+03 P_out=-5.206725e+03 resid=1.009e-15
+Writing output for iteration 0...
+Iteration 1
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  1] energy J(local)=[0.0724 0.0519 0.0615]
+SigmaR resid-by-omega: peak w=26.03THz val=1.071e+03 in-band(<=46.4)=0.956 low(<=5)=0.127
+Maximum Self-Energy Update: 1071.2560975405588
+Contact Current Difference: 0.0
+Current Conservation abs: 0.15936256748500455
+Current Conservation rel: 1.94042983711804e-05
+Phonon: rel Sigma^R residual 9.3518e-01; lead balance 1.0101e-03 (best inf; internal spread 7.1454e-03)
+Bubble energy balance: P_in=-4.243255e+03 P_out=-4.243255e+03 resid=3.607e-15
+Writing output for iteration 1...
+Iteration 2
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  2] energy J(local)=[0.0706 0.051  0.0581]
+SigmaR resid-by-omega: peak w=23.10THz val=1.450e+03 in-band(<=46.4)=0.960 low(<=5)=0.162
+Maximum Self-Energy Update: 1450.341310799203
+Contact Current Difference: 0.0
+Current Conservation abs: 0.010553593850090692
+Current Conservation rel: 1.8407000327327228e-06
+Phonon: rel Sigma^R residual 9.4835e-01; lead balance 2.5240e-03 (best inf; internal spread 1.4218e-02)
+Bubble energy balance: P_in=-4.125964e+03 P_out=-4.125964e+03 resid=2.255e-15
+Writing output for iteration 2...
+Iteration 3
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  3] energy J(local)=[0.0661 0.0456 0.0541]
+SigmaR resid-by-omega: peak w=6.60THz val=2.286e+03 in-band(<=46.4)=0.966 low(<=5)=0.199
+Maximum Self-Energy Update: 2285.6368037473235
+Contact Current Difference: 0.0
+Current Conservation abs: 0.024147604357494856
+Current Conservation rel: 3.977468048596855e-06
+Phonon: rel Sigma^R residual 9.5762e-01; lead balance 1.4674e-03 (best 1.4674e-03; internal spread 4.5374e-03)
+Bubble energy balance: P_in=-6.329511e+03 P_out=-6.329511e+03 resid=3.215e-15
+Writing output for iteration 3...
+Iteration 4
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  4] energy J(local)=[0.059  0.0381 0.0489]
+SigmaR resid-by-omega: peak w=14.67THz val=1.226e+03 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 1226.2207882275795
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005034951732341142
+Current Conservation rel: 7.496196025388991e-07
+Phonon: rel Sigma^R residual 8.0404e-01; lead balance 1.3140e-03 (best 1.3140e-03; internal spread 5.2941e-02)
+Bubble energy balance: P_in=-7.442353e+03 P_out=-7.442353e+03 resid=9.757e-16
+Writing output for iteration 4...
+Iteration 5
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  5] energy J(local)=[0.0538 0.0317 0.0452]
+SigmaR resid-by-omega: peak w=13.93THz val=1.402e+03 in-band(<=46.4)=0.965 low(<=5)=0.237
+Maximum Self-Energy Update: 1401.6142256871271
+Contact Current Difference: 0.0
+Current Conservation abs: 0.015737397415250598
+Current Conservation rel: 1.422236638928511e-06
+Phonon: rel Sigma^R residual 8.1418e-01; lead balance 1.7417e-03 (best 1.3140e-03; internal spread 8.7531e-02)
+Bubble energy balance: P_in=-1.280905e+04 P_out=-1.280905e+04 resid=2.027e-16
+Writing output for iteration 5...
+Iteration 6
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  6] energy J(local)=[0.0633 0.0271 0.0469]
+SigmaR resid-by-omega: peak w=0.37THz val=3.037e+03 in-band(<=46.4)=0.968 low(<=5)=0.293
+Maximum Self-Energy Update: 3037.0720892357967
+Contact Current Difference: 0.0
+Current Conservation abs: 0.24662940777125186
+Current Conservation rel: 5.519246554831234e-06
+Phonon: rel Sigma^R residual 8.6506e-01; lead balance 2.0303e-03 (best 1.3140e-03; internal spread 1.3461e-01)
+Bubble energy balance: P_in=-4.223026e+04 P_out=-4.223026e+04 resid=8.056e-16
+Writing output for iteration 6...
+Iteration 7
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  7] energy J(local)=[0.1362 0.0612 0.0835]
+SigmaR resid-by-omega: peak w=0.73THz val=9.828e+03 in-band(<=46.4)=0.970 low(<=5)=0.302
+Maximum Self-Energy Update: 9827.607157832863
+Contact Current Difference: 0.0
+Current Conservation abs: 4.521262811962515
+Current Conservation rel: 2.911604377727689e-06
+Phonon: rel Sigma^R residual 9.3601e-01; lead balance 2.1662e-02 (best 1.3140e-03; internal spread 1.7405e-01)
+Bubble energy balance: P_in=-6.369920e+05 P_out=-6.369920e+05 resid=4.673e-16
+Writing output for iteration 7...
+Iteration 8
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  8] energy J(local)=[0.0537 0.0177 0.0435]
+SigmaR resid-by-omega: peak w=0.37THz val=1.317e+03 in-band(<=46.4)=0.979 low(<=5)=0.274
+Maximum Self-Energy Update: 1316.7060049143927
+Contact Current Difference: 0.0
+Current Conservation abs: 0.054295610804274475
+Current Conservation rel: 1.1386981814550173e-05
+Phonon: rel Sigma^R residual 2.4252e+00; lead balance 2.5768e-02 (best 1.3140e-03; internal spread 1.8904e-01)
+Bubble energy balance: P_in=-6.855879e+03 P_out=-6.855879e+03 resid=9.018e-16
+Writing output for iteration 8...
+Iteration 9
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it  9] energy J(local)=[0.053  0.0165 0.0436]
+SigmaR resid-by-omega: peak w=0.37THz val=1.169e+03 in-band(<=46.4)=0.979 low(<=5)=0.275
+Maximum Self-Energy Update: 1168.5981499587717
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05027349781266821
+Current Conservation rel: 9.807276820088856e-06
+Phonon: rel Sigma^R residual 2.1676e+00; lead balance 2.5149e-02 (best 1.3140e-03; internal spread 1.9522e-01)
+Bubble energy balance: P_in=-7.434311e+03 P_out=-7.434311e+03 resid=5.567e-16
+Writing output for iteration 9...
+Iteration 10
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 10] energy J(local)=[0.053  0.0158 0.044 ]
+SigmaR resid-by-omega: peak w=0.37THz val=1.036e+03 in-band(<=46.4)=0.980 low(<=5)=0.276
+Maximum Self-Energy Update: 1036.3092770433432
+Contact Current Difference: 0.0
+Current Conservation abs: 0.045621270412084414
+Current Conservation rel: 8.149196908885138e-06
+Phonon: rel Sigma^R residual 1.9182e+00; lead balance 2.4454e-02 (best 1.3140e-03; internal spread 2.0102e-01)
+Bubble energy balance: P_in=-8.091367e+03 P_out=-8.091367e+03 resid=4.223e-16
+Writing output for iteration 10...
+Iteration 11
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 11] energy J(local)=[0.0536 0.0155 0.0447]
+SigmaR resid-by-omega: peak w=0.37THz val=9.186e+02 in-band(<=46.4)=0.981 low(<=5)=0.276
+Maximum Self-Energy Update: 918.5606416881764
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0402432515406872
+Current Conservation rel: 6.480181485057618e-06
+Phonon: rel Sigma^R residual 1.6680e+00; lead balance 2.3773e-02 (best 1.3140e-03; internal spread 2.0654e-01)
+Bubble energy balance: P_in=-8.847974e+03 P_out=-8.847974e+03 resid=4.441e-16
+Writing output for iteration 11...
+Iteration 12
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 12] energy J(local)=[0.0549 0.0156 0.0455]
+SigmaR resid-by-omega: peak w=0.37THz val=8.140e+02 in-band(<=46.4)=0.981 low(<=5)=0.275
+Maximum Self-Energy Update: 813.9810768465388
+Contact Current Difference: 0.0
+Current Conservation abs: 0.033867853231640765
+Current Conservation rel: 4.823913701869711e-06
+Phonon: rel Sigma^R residual 1.4478e+00; lead balance 2.3189e-02 (best 1.3140e-03; internal spread 2.1189e-01)
+Bubble energy balance: P_in=-9.745457e+03 P_out=-9.745457e+03 resid=4.905e-16
+Writing output for iteration 12...
+Iteration 13
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 13] energy J(local)=[0.0573 0.0161 0.0466]
+SigmaR resid-by-omega: peak w=0.37THz val=7.209e+02 in-band(<=46.4)=0.982 low(<=5)=0.272
+Maximum Self-Energy Update: 720.9007428691136
+Contact Current Difference: 0.0
+Current Conservation abs: 0.025712750408274587
+Current Conservation rel: 3.1497042358032446e-06
+Phonon: rel Sigma^R residual 1.2522e+00; lead balance 2.2774e-02 (best 1.3140e-03; internal spread 2.1719e-01)
+Bubble energy balance: P_in=-1.086443e+04 P_out=-1.086443e+04 resid=2.542e-16
+Writing output for iteration 13...
+Iteration 14
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 14] energy J(local)=[0.061  0.0168 0.0479]
+SigmaR resid-by-omega: peak w=0.37THz val=6.370e+02 in-band(<=46.4)=0.983 low(<=5)=0.265
+Maximum Self-Energy Update: 636.9894306073866
+Contact Current Difference: 0.0
+Current Conservation abs: 0.013691731768631143
+Current Conservation rel: 1.3770751731577876e-06
+Phonon: rel Sigma^R residual 1.0335e+00; lead balance 2.2553e-02 (best 1.3140e-03; internal spread 2.2264e-01)
+Bubble energy balance: P_in=-1.235593e+04 P_out=-1.235593e+04 resid=7.505e-17
+Writing output for iteration 14...
+Iteration 15
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 15] energy J(local)=[0.0661 0.0168 0.0493]
+SigmaR resid-by-omega: peak w=0.37THz val=5.587e+02 in-band(<=46.4)=0.983 low(<=5)=0.254
+Maximum Self-Energy Update: 558.722672651315
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005998167352117889
+Current Conservation rel: 4.637271043326712e-07
+Phonon: rel Sigma^R residual 7.9952e-01; lead balance 2.2414e-02 (best 1.3140e-03; internal spread 2.2869e-01)
+Bubble energy balance: P_in=-1.442428e+04 P_out=-1.442428e+04 resid=3.166e-16
+Writing output for iteration 15...
+Iteration 16
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 16] energy J(local)=[0.0715 0.0146 0.0507]
+SigmaR resid-by-omega: peak w=0.37THz val=4.876e+02 in-band(<=46.4)=0.984 low(<=5)=0.238
+Maximum Self-Energy Update: 487.6089954528679
+Contact Current Difference: 0.0
+Current Conservation abs: 0.031469365780139924
+Current Conservation rel: 1.8043690423038705e-06
+Phonon: rel Sigma^R residual 6.0755e-01; lead balance 2.1983e-02 (best 1.3140e-03; internal spread 2.3574e-01)
+Bubble energy balance: P_in=-1.697630e+04 P_out=-1.697630e+04 resid=4.334e-16
+Writing output for iteration 16...
+Iteration 17
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 17] energy J(local)=[0.0745 0.0119 0.0515]
+SigmaR resid-by-omega: peak w=0.00THz val=4.193e+02 in-band(<=46.4)=0.985 low(<=5)=0.223
+Maximum Self-Energy Update: 419.3489020477165
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04675269461222342
+Current Conservation rel: 2.0925133237174683e-06
+Phonon: rel Sigma^R residual 4.6939e-01; lead balance 2.1032e-02 (best 1.3140e-03; internal spread 2.4266e-01)
+Bubble energy balance: P_in=-1.930734e+04 P_out=-1.930734e+04 resid=3.869e-16
+Writing output for iteration 17...
+Iteration 18
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 18] energy J(local)=[0.0739 0.013  0.0521]
+SigmaR resid-by-omega: peak w=0.00THz val=3.627e+02 in-band(<=46.4)=0.979 low(<=5)=0.204
+Maximum Self-Energy Update: 362.7153890135948
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04272059134382289
+Current Conservation rel: 1.592623038238287e-06
+Phonon: rel Sigma^R residual 3.7237e-01; lead balance 2.0210e-02 (best 1.3140e-03; internal spread 2.4761e-01)
+Bubble energy balance: P_in=-2.109489e+04 P_out=-2.109489e+04 resid=2.231e-16
+Writing output for iteration 18...
+Iteration 19
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 19] energy J(local)=[0.0725 0.0176 0.0532]
+SigmaR resid-by-omega: peak w=1.10THz val=3.306e+02 in-band(<=46.4)=0.971 low(<=5)=0.180
+Maximum Self-Energy Update: 330.6343851439694
+Contact Current Difference: 0.0
+Current Conservation abs: 0.015640997457012418
+Current Conservation rel: 4.881706352580696e-07
+Phonon: rel Sigma^R residual 3.0513e-01; lead balance 2.0448e-02 (best 1.3140e-03; internal spread 2.5117e-01)
+Bubble energy balance: P_in=-2.295780e+04 P_out=-2.295780e+04 resid=8.640e-17
+Writing output for iteration 19...
+Iteration 20
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 20] energy J(local)=[0.0762 0.0265 0.0572]
+SigmaR resid-by-omega: peak w=22.73THz val=4.084e+02 in-band(<=46.4)=0.963 low(<=5)=0.146
+Maximum Self-Energy Update: 408.3811153738208
+Contact Current Difference: 0.0
+Current Conservation abs: 0.03841096326505067
+Current Conservation rel: 9.3380655179036e-07
+Phonon: rel Sigma^R residual 3.2074e-01; lead balance 2.4638e-02 (best 1.3140e-03; internal spread 2.5513e-01)
+Bubble energy balance: P_in=-2.602003e+04 P_out=-2.602003e+04 resid=1.515e-16
+Writing output for iteration 20...
+Iteration 21
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 21] energy J(local)=[0.0887 0.0442 0.0658]
+SigmaR resid-by-omega: peak w=0.73THz val=5.174e+02 in-band(<=46.4)=0.962 low(<=5)=0.145
+Maximum Self-Energy Update: 517.3610574400846
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051104436242894735
+Current Conservation rel: 9.806240962961932e-07
+Phonon: rel Sigma^R residual 3.4515e-01; lead balance 3.5559e-02 (best 1.3140e-03; internal spread 2.5999e-01)
+Bubble energy balance: P_in=-2.930708e+04 P_out=-2.930708e+04 resid=4.557e-17
+Writing output for iteration 21...
+Iteration 22
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 22] energy J(local)=[0.0962 0.0591 0.0699]
+SigmaR resid-by-omega: peak w=22.73THz val=3.944e+02 in-band(<=46.4)=0.962 low(<=5)=0.141
+Maximum Self-Energy Update: 394.4122076067296
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0235262851601874
+Current Conservation rel: 5.13040824471359e-07
+Phonon: rel Sigma^R residual 2.8679e-01; lead balance 4.7560e-02 (best 1.3140e-03; internal spread 2.6151e-01)
+Bubble energy balance: P_in=-2.691507e+04 P_out=-2.691507e+04 resid=1.546e-16
+Writing output for iteration 22...
+Iteration 23
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 23] energy J(local)=[0.0995 0.0688 0.0731]
+SigmaR resid-by-omega: peak w=22.73THz val=2.937e+02 in-band(<=46.4)=0.965 low(<=5)=0.142
+Maximum Self-Energy Update: 293.69693810435035
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02849397328827763
+Current Conservation rel: 7.202277945860983e-07
+Phonon: rel Sigma^R residual 2.4230e-01; lead balance 5.3238e-02 (best 1.3140e-03; internal spread 2.5706e-01)
+Bubble energy balance: P_in=-2.474023e+04 P_out=-2.474023e+04 resid=2.946e-16
+Writing output for iteration 23...
+Iteration 24
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 24] energy J(local)=[0.1016 0.0766 0.0781]
+SigmaR resid-by-omega: peak w=22.73THz val=3.207e+02 in-band(<=46.4)=0.961 low(<=5)=0.132
+Maximum Self-Energy Update: 320.7357811925546
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005112318274768768
+Current Conservation rel: 1.3179118018613267e-07
+Phonon: rel Sigma^R residual 2.8130e-01; lead balance 5.3386e-02 (best 1.3140e-03; internal spread 2.4837e-01)
+Bubble energy balance: P_in=-2.446190e+04 P_out=-2.446190e+04 resid=1.060e-16
+Writing output for iteration 24...
+Iteration 25
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 25] energy J(local)=[0.1044 0.0844 0.0847]
+SigmaR resid-by-omega: peak w=22.73THz val=3.722e+02 in-band(<=46.4)=0.961 low(<=5)=0.145
+Maximum Self-Energy Update: 372.19193494858445
+Contact Current Difference: 0.0
+Current Conservation abs: 0.017996452646912076
+Current Conservation rel: 4.311375105107967e-07
+Phonon: rel Sigma^R residual 2.9231e-01; lead balance 5.0222e-02 (best 1.3140e-03; internal spread 2.3708e-01)
+Bubble energy balance: P_in=-2.544014e+04 P_out=-2.544014e+04 resid=1.329e-16
+Writing output for iteration 25...
+Iteration 26
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 26] energy J(local)=[0.1084 0.0921 0.0906]
+SigmaR resid-by-omega: peak w=22.73THz val=2.730e+02 in-band(<=46.4)=0.961 low(<=5)=0.153
+Maximum Self-Energy Update: 273.0030370939101
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0017466383505961858
+Current Conservation rel: 4.500053223076309e-08
+Phonon: rel Sigma^R residual 2.2376e-01; lead balance 4.5623e-02 (best 1.3140e-03; internal spread 2.2432e-01)
+Bubble energy balance: P_in=-2.456505e+04 P_out=-2.456505e+04 resid=1.344e-16
+Writing output for iteration 26...
+Iteration 27
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 27] energy J(local)=[0.1117 0.0973 0.0946]
+SigmaR resid-by-omega: peak w=1.10THz val=1.995e+02 in-band(<=46.4)=0.965 low(<=5)=0.168
+Maximum Self-Energy Update: 199.45429215080455
+Contact Current Difference: 0.0
+Current Conservation abs: 0.011691259307553992
+Current Conservation rel: 3.36812491845955e-07
+Phonon: rel Sigma^R residual 1.7675e-01; lead balance 4.1167e-02 (best 1.3140e-03; internal spread 2.1408e-01)
+Bubble energy balance: P_in=-2.326193e+04 P_out=-2.326193e+04 resid=1.675e-16
+Writing output for iteration 27...
+Iteration 28
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 28] energy J(local)=[0.114  0.1008 0.0979]
+SigmaR resid-by-omega: peak w=1.10THz val=1.979e+02 in-band(<=46.4)=0.970 low(<=5)=0.194
+Maximum Self-Energy Update: 197.87464217611628
+Contact Current Difference: 0.0
+Current Conservation abs: 0.016851870554091875
+Current Conservation rel: 5.153699796977393e-07
+Phonon: rel Sigma^R residual 1.7334e-01; lead balance 3.7091e-02 (best 1.3140e-03; internal spread 2.0638e-01)
+Bubble energy balance: P_in=-2.258172e+04 P_out=-2.258172e+04 resid=3.335e-16
+Writing output for iteration 28...
+Iteration 29
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 29] energy J(local)=[0.1157 0.1034 0.1007]
+SigmaR resid-by-omega: peak w=1.10THz val=1.967e+02 in-band(<=46.4)=0.974 low(<=5)=0.214
+Maximum Self-Energy Update: 196.7335111982488
+Contact Current Difference: 0.0
+Current Conservation abs: 0.019490937202135683
+Current Conservation rel: 6.230833109822311e-07
+Phonon: rel Sigma^R residual 1.6961e-01; lead balance 3.3200e-02 (best 1.3140e-03; internal spread 2.0015e-01)
+Bubble energy balance: P_in=-2.207293e+04 P_out=-2.207293e+04 resid=2.352e-16
+Writing output for iteration 29...
+Iteration 30
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 30] energy J(local)=[0.1168 0.1051 0.103 ]
+SigmaR resid-by-omega: peak w=1.10THz val=1.948e+02 in-band(<=46.4)=0.976 low(<=5)=0.228
+Maximum Self-Energy Update: 194.8087352829848
+Contact Current Difference: 0.0
+Current Conservation abs: 0.021246522410365287
+Current Conservation rel: 7.041334970629531e-07
+Phonon: rel Sigma^R residual 1.6474e-01; lead balance 2.9426e-02 (best 1.3140e-03; internal spread 1.9510e-01)
+Bubble energy balance: P_in=-2.166354e+04 P_out=-2.166354e+04 resid=2.655e-16
+Writing output for iteration 30...
+Iteration 31
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 31] energy J(local)=[0.1171 0.1059 0.1046]
+SigmaR resid-by-omega: peak w=1.10THz val=1.922e+02 in-band(<=46.4)=0.972 low(<=5)=0.230
+Maximum Self-Energy Update: 192.16515688125085
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02312762281871983
+Current Conservation rel: 7.878333954278048e-07
+Phonon: rel Sigma^R residual 1.5865e-01; lead balance 2.5742e-02 (best 1.3140e-03; internal spread 1.9103e-01)
+Bubble energy balance: P_in=-2.136214e+04 P_out=-2.136214e+04 resid=3.783e-16
+Writing output for iteration 31...
+Iteration 32
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 32] energy J(local)=[0.1164 0.1057 0.1055]
+SigmaR resid-by-omega: peak w=0.37THz val=1.922e+02 in-band(<=46.4)=0.968 low(<=5)=0.228
+Maximum Self-Energy Update: 192.15749603744143
+Contact Current Difference: 0.0
+Current Conservation abs: 0.025943310218281113
+Current Conservation rel: 8.978141009372089e-07
+Phonon: rel Sigma^R residual 1.5380e-01; lead balance 2.2133e-02 (best 1.3140e-03; internal spread 1.8776e-01)
+Bubble energy balance: P_in=-2.120209e+04 P_out=-2.120209e+04 resid=1.797e-16
+Writing output for iteration 32...
+Iteration 33
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 33] energy J(local)=[0.1146 0.1045 0.1056]
+SigmaR resid-by-omega: peak w=0.73THz val=1.983e+02 in-band(<=46.4)=0.963 low(<=5)=0.220
+Maximum Self-Energy Update: 198.32675307832628
+Contact Current Difference: 0.0
+Current Conservation abs: 0.03047471252102696
+Current Conservation rel: 1.0508912799253852e-06
+Phonon: rel Sigma^R residual 1.5227e-01; lead balance 1.8584e-02 (best 1.3140e-03; internal spread 1.8506e-01)
+Bubble energy balance: P_in=-2.126539e+04 P_out=-2.126539e+04 resid=6.111e-17
+Writing output for iteration 33...
+Iteration 34
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 34] energy J(local)=[0.1117 0.1025 0.1049]
+SigmaR resid-by-omega: peak w=0.73THz val=2.530e+02 in-band(<=46.4)=0.961 low(<=5)=0.223
+Maximum Self-Energy Update: 253.0392546978092
+Contact Current Difference: 0.0
+Current Conservation abs: 0.03801412908251223
+Current Conservation rel: 1.259427327328724e-06
+Phonon: rel Sigma^R residual 1.8323e-01; lead balance 1.5103e-02 (best 1.3140e-03; internal spread 1.8269e-01)
+Bubble energy balance: P_in=-2.174797e+04 P_out=-2.174797e+04 resid=9.825e-17
+Writing output for iteration 34...
+Iteration 35
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 35] energy J(local)=[0.1081 0.1002 0.1036]
+SigmaR resid-by-omega: peak w=0.37THz val=3.732e+02 in-band(<=46.4)=0.961 low(<=5)=0.228
+Maximum Self-Energy Update: 373.16652449544273
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05214774687192403
+Current Conservation rel: 1.547422765505464e-06
+Phonon: rel Sigma^R residual 2.4882e-01; lead balance 1.1783e-02 (best 1.3140e-03; internal spread 1.8032e-01)
+Bubble energy balance: P_in=-2.306386e+04 P_out=-2.306386e+04 resid=1.789e-16
+Writing output for iteration 35...
+Iteration 36
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 36] energy J(local)=[0.1047 0.0994 0.1023]
+SigmaR resid-by-omega: peak w=0.37THz val=6.955e+02 in-band(<=46.4)=0.962 low(<=5)=0.235
+Maximum Self-Energy Update: 695.4889783894068
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0892224182280188
+Current Conservation rel: 2.07186034468232e-06
+Phonon: rel Sigma^R residual 4.1203e-01; lead balance 9.0602e-03 (best 1.3140e-03; internal spread 1.7749e-01)
+Bubble energy balance: P_in=-2.617891e+04 P_out=-2.617891e+04 resid=7.161e-17
+Writing output for iteration 36...
+Iteration 37
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 37] energy J(local)=[0.1051 0.1062 0.1021]
+SigmaR resid-by-omega: peak w=0.73THz val=1.630e+03 in-band(<=46.4)=0.962 low(<=5)=0.243
+Maximum Self-Energy Update: 1630.3136986440145
+Contact Current Difference: 0.0
+Current Conservation abs: 0.22811406861728756
+Current Conservation rel: 3.7526335837637156e-06
+Phonon: rel Sigma^R residual 6.1167e-01; lead balance 8.4082e-03 (best 1.3140e-03; internal spread 1.7388e-01)
+Bubble energy balance: P_in=-3.159349e+04 P_out=-3.159349e+04 resid=4.611e-16
+Writing output for iteration 37...
+Iteration 38
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 38] energy J(local)=[0.0994 0.0983 0.0974]
+SigmaR resid-by-omega: peak w=1.10THz val=5.791e+02 in-band(<=46.4)=0.961 low(<=5)=0.241
+Maximum Self-Energy Update: 579.0715949609706
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1096848819652223
+Current Conservation rel: 4.044361350305731e-06
+Phonon: rel Sigma^R residual 3.2405e-01; lead balance 7.7519e-03 (best 1.3140e-03; internal spread 1.7729e-01)
+Bubble energy balance: P_in=-2.016639e+04 P_out=-2.016639e+04 resid=2.922e-16
+Writing output for iteration 38...
+Iteration 39
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 39] energy J(local)=[0.0975 0.0945 0.0961]
+SigmaR resid-by-omega: peak w=1.10THz val=4.323e+02 in-band(<=46.4)=0.961 low(<=5)=0.243
+Maximum Self-Energy Update: 432.30778602249126
+Contact Current Difference: 0.0
+Current Conservation abs: 0.09793527250621992
+Current Conservation rel: 3.912502624172653e-06
+Phonon: rel Sigma^R residual 2.6531e-01; lead balance 6.6452e-03 (best 1.3140e-03; internal spread 1.8300e-01)
+Bubble energy balance: P_in=-1.963964e+04 P_out=-1.963964e+04 resid=1.373e-16
+Writing output for iteration 39...
+Iteration 40
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 40] energy J(local)=[0.0962 0.0915 0.0953]
+SigmaR resid-by-omega: peak w=1.10THz val=3.500e+02 in-band(<=46.4)=0.961 low(<=5)=0.249
+Maximum Self-Energy Update: 350.04608461768925
+Contact Current Difference: 0.0
+Current Conservation abs: 0.09389683553490613
+Current Conservation rel: 3.7764158861617627e-06
+Phonon: rel Sigma^R residual 2.2445e-01; lead balance 5.4915e-03 (best 1.3140e-03; internal spread 1.8801e-01)
+Bubble energy balance: P_in=-1.987536e+04 P_out=-1.987536e+04 resid=2.994e-16
+Writing output for iteration 40...
+Iteration 41
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 41] energy J(local)=[0.0951 0.0891 0.0947]
+SigmaR resid-by-omega: peak w=1.10THz val=2.884e+02 in-band(<=46.4)=0.961 low(<=5)=0.259
+Maximum Self-Energy Update: 288.41619988784856
+Contact Current Difference: 0.0
+Current Conservation abs: 0.09097967696288833
+Current Conservation rel: 3.601003164447991e-06
+Phonon: rel Sigma^R residual 1.8856e-01; lead balance 4.3574e-03 (best 1.3140e-03; internal spread 1.9208e-01)
+Bubble energy balance: P_in=-2.034829e+04 P_out=-2.034829e+04 resid=2.023e-16
+Writing output for iteration 41...
+Iteration 42
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 42] energy J(local)=[0.0942 0.0872 0.0945]
+SigmaR resid-by-omega: peak w=1.10THz val=2.381e+02 in-band(<=46.4)=0.966 low(<=5)=0.247
+Maximum Self-Energy Update: 238.06974836725797
+Contact Current Difference: 0.0
+Current Conservation abs: 0.08781300272858061
+Current Conservation rel: 3.3843473428781317e-06
+Phonon: rel Sigma^R residual 1.5742e-01; lead balance 3.3407e-03 (best 1.3140e-03; internal spread 1.9508e-01)
+Bubble energy balance: P_in=-2.093585e+04 P_out=-2.093585e+04 resid=4.933e-16
+Writing output for iteration 42...
+Iteration 43
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 43] energy J(local)=[0.0936 0.0857 0.0944]
+SigmaR resid-by-omega: peak w=0.73THz val=2.015e+02 in-band(<=46.4)=0.965 low(<=5)=0.223
+Maximum Self-Energy Update: 201.4959176245542
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0839991069133248
+Current Conservation rel: 3.1386473794806856e-06
+Phonon: rel Sigma^R residual 1.3433e-01; lead balance 2.5314e-03 (best 1.3140e-03; internal spread 1.9695e-01)
+Bubble energy balance: P_in=-2.157032e+04 P_out=-2.157032e+04 resid=8.768e-17
+Writing output for iteration 43...
+Iteration 44
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 44] energy J(local)=[0.0932 0.0849 0.0945]
+SigmaR resid-by-omega: peak w=0.73THz val=1.821e+02 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 182.10800911140623
+Contact Current Difference: 0.0
+Current Conservation abs: 0.07960717775131343
+Current Conservation rel: 2.8839604836128154e-06
+Phonon: rel Sigma^R residual 1.2216e-01; lead balance 1.9946e-03 (best 1.3140e-03; internal spread 1.9767e-01)
+Bubble energy balance: P_in=-2.219914e+04 P_out=-2.219914e+04 resid=1.462e-16
+Writing output for iteration 44...
+Iteration 45
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 45] energy J(local)=[0.0931 0.0845 0.0948]
+SigmaR resid-by-omega: peak w=0.73THz val=1.644e+02 in-band(<=46.4)=0.960 low(<=5)=0.183
+Maximum Self-Energy Update: 164.41529601783196
+Contact Current Difference: 0.0
+Current Conservation abs: 0.07496022930536128
+Current Conservation rel: 2.640763902510901e-06
+Phonon: rel Sigma^R residual 1.1084e-01; lead balance 1.7615e-03 (best 1.3140e-03; internal spread 1.9732e-01)
+Bubble energy balance: P_in=-2.278114e+04 P_out=-2.278114e+04 resid=8.123e-17
+Writing output for iteration 45...
+Iteration 46
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 46] energy J(local)=[0.0932 0.0846 0.0951]
+SigmaR resid-by-omega: peak w=0.73THz val=1.475e+02 in-band(<=46.4)=0.960 low(<=5)=0.184
+Maximum Self-Energy Update: 147.51065338169255
+Contact Current Difference: 0.0
+Current Conservation abs: 0.07041617320101068
+Current Conservation rel: 2.4232960445606945e-06
+Phonon: rel Sigma^R residual 9.9848e-02; lead balance 1.8285e-03 (best 1.3140e-03; internal spread 1.9603e-01)
+Bubble energy balance: P_in=-2.328778e+04 P_out=-2.328778e+04 resid=8.019e-17
+Writing output for iteration 46...
+Iteration 47
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 47] energy J(local)=[0.0934 0.085  0.0955]
+SigmaR resid-by-omega: peak w=1.10THz val=1.407e+02 in-band(<=46.4)=0.960 low(<=5)=0.188
+Maximum Self-Energy Update: 140.73284973730767
+Contact Current Difference: 0.0
+Current Conservation abs: 0.06619524070811167
+Current Conservation rel: 2.236447434567535e-06
+Phonon: rel Sigma^R residual 9.5574e-02; lead balance 2.1613e-03 (best 1.3140e-03; internal spread 1.9393e-01)
+Bubble energy balance: P_in=-2.370310e+04 P_out=-2.370310e+04 resid=6.199e-16
+Writing output for iteration 47...
+Iteration 48
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 48] energy J(local)=[0.0937 0.0856 0.0959]
+SigmaR resid-by-omega: peak w=1.10THz val=1.321e+02 in-band(<=46.4)=0.960 low(<=5)=0.194
+Maximum Self-Energy Update: 132.11521870669196
+Contact Current Difference: 0.0
+Current Conservation abs: 0.062327656474735704
+Current Conservation rel: 2.0769186418685088e-06
+Phonon: rel Sigma^R residual 8.9962e-02; lead balance 2.6999e-03 (best 1.3140e-03; internal spread 1.9121e-01)
+Bubble energy balance: P_in=-2.402235e+04 P_out=-2.402235e+04 resid=2.449e-16
+Writing output for iteration 48...
+Iteration 49
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 49] energy J(local)=[0.0939 0.0863 0.0963]
+SigmaR resid-by-omega: peak w=1.10THz val=1.217e+02 in-band(<=46.4)=0.961 low(<=5)=0.196
+Maximum Self-Energy Update: 121.69747336183694
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05871267028123839
+Current Conservation rel: 1.9371203128841906e-06
+Phonon: rel Sigma^R residual 8.3054e-02; lead balance 3.3674e-03 (best 1.3140e-03; internal spread 1.8801e-01)
+Bubble energy balance: P_in=-2.424936e+04 P_out=-2.424936e+04 resid=2.464e-17
+  JFNK: warmup done at it=50, ||R||=2.433e+04 -> engaging Newton-Krylov
+Writing output for iteration 49...
+Iteration 50
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 50] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05839943144875
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521526839584112
+Current Conservation rel: 1.8092081366695235e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=2.424e-16
+Writing output for iteration 50...
+Iteration 51
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 51] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05849854900642
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521530425721721
+Current Conservation rel: 1.809209359731196e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=5.243e-16
+Writing output for iteration 51...
+Iteration 52
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 52] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.0584137019824
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215312451764476
+Current Conservation rel: 1.8092092109536053e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=4.482e-16
+Writing output for iteration 52...
+Iteration 53
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 53] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05802028417943
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521530569603783
+Current Conservation rel: 1.8092105475199533e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439319e+04 P_out=-2.439319e+04 resid=1.631e-16
+Writing output for iteration 53...
+Iteration 54
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 54] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05821226080215
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521528714780288
+Current Conservation rel: 1.8092086445313478e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.784e-16
+Writing output for iteration 54...
+Iteration 55
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 55] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05887458423291
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215208918525605
+Current Conservation rel: 1.809206726603066e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0831e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439319e+04 P_out=-2.439319e+04 resid=1.533e-16
+Writing output for iteration 55...
+Iteration 56
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 56] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05873422289974
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521525196672883
+Current Conservation rel: 1.8092065672423645e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=8.543e-17
+Writing output for iteration 56...
+Iteration 57
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 57] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05735537431214
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521539737310377
+Current Conservation rel: 1.8092139873319238e-06
+Phonon: rel Sigma^R residual 7.5945e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439318e+04 P_out=-2.439318e+04 resid=1.502e-16
+Writing output for iteration 57...
+Iteration 58
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 58] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.0585235872647
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215265823790105
+Current Conservation rel: 1.8092072894317728e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=2.546e-16
+Writing output for iteration 58...
+Iteration 59
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 59] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05815506824494
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215315451278
+Current Conservation rel: 1.809210240108332e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439319e+04 P_out=-2.439319e+04 resid=2.265e-16
+Writing output for iteration 59...
+Iteration 60
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 60] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05819056606583
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521522859635297
+Current Conservation rel: 1.8092070652850089e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439319e+04 P_out=-2.439319e+04 resid=2.596e-16
+Writing output for iteration 60...
+Iteration 61
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 61] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05810461465394
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215361522641615
+Current Conservation rel: 1.8092116827520712e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439319e+04 P_out=-2.439319e+04 resid=1.202e-16
+Writing output for iteration 61...
+Iteration 62
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 62] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05853472138494
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055214993073605
+Current Conservation rel: 1.8091990828538537e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0831e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=2.476e-16
+Writing output for iteration 62...
+Iteration 63
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 63] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.0582041064541
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215554601090844
+Current Conservation rel: 1.8092173350580968e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.498e-16
+Writing output for iteration 63...
+Iteration 64
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 64] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.0586291898068
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521486891666427
+Current Conservation rel: 1.8091943064752779e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0831e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.438e-16
+Writing output for iteration 64...
+Iteration 65
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 65] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05840782030661
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521548212709604
+Current Conservation rel: 1.8092151893236042e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.623e-16
+Writing output for iteration 65...
+Iteration 66
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 66] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05842811976714
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215514277733746
+Current Conservation rel: 1.8092163057357272e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.540e-16
+Writing output for iteration 66...
+Iteration 67
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 67] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05883479330348
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521492278603546
+Current Conservation rel: 1.809196341264243e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0830e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.562e-16
+Writing output for iteration 67...
+Iteration 68
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 68] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05828129677026
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521532280181418
+Current Conservation rel: 1.8092100510963533e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=2.073e-16
+Writing output for iteration 68...
+Iteration 69
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 69] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05835755530187
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215327980477014
+Current Conservation rel: 1.8092101909717584e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=8.136e-17
+Writing output for iteration 69...
+Iteration 70
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 70] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.0586745109042
+Contact Current Difference: 0.0
+Current Conservation abs: 0.055215235232026316
+Current Conservation rel: 1.8092068120343335e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0830e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.524e-16
+Writing output for iteration 70...
+Iteration 71
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 71] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05845354534969
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521534598847211
+Current Conservation rel: 1.8092101062629849e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0832e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=9.725e-17
+Writing output for iteration 71...
+Iteration 72
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 72] energy J(local)=[0.0941 0.087  0.0967]
+SigmaR resid-by-omega: peak w=1.10THz val=1.111e+02 in-band(<=46.4)=0.963 low(<=5)=0.190
+Maximum Self-Energy Update: 111.05860658561298
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05521521600167034
+Current Conservation rel: 1.8092063308510098e-06
+Phonon: rel Sigma^R residual 7.5946e-02; lead balance 4.0831e-03 (best 1.3140e-03; internal spread 1.8449e-01)
+Bubble energy balance: P_in=-2.439320e+04 P_out=-2.439320e+04 resid=1.531e-16
+  JFNK newton#1: gmres_m=22 inner_res/||R||=9.75e-02 ||R||=2.170e+04 ||delta||=1.043e+04 trust=0.05 mu=1.00e-01
+Writing output for iteration 72...
+Iteration 73
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 73] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35615525768063
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199921801526216
+Current Conservation rel: 1.696000868090915e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1704e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392701e+04 P_out=-2.392701e+04 resid=2.064e-16
+Writing output for iteration 73...
+Iteration 74
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 74] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35626512485162
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199959953009966
+Current Conservation rel: 1.6960020981696202e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1704e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392701e+04 P_out=-2.392701e+04 resid=1.153e-16
+Writing output for iteration 74...
+Iteration 75
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 75] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35615234518903
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199969107983634
+Current Conservation rel: 1.696002216058374e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1705e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392701e+04 P_out=-2.392701e+04 resid=9.366e-17
+Writing output for iteration 75...
+Iteration 76
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 76] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35563099491752
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199965349951526
+Current Conservation rel: 1.6960031738481016e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1705e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392700e+04 P_out=-2.392700e+04 resid=4.140e-16
+Writing output for iteration 76...
+Iteration 77
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 77] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35635189332444
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199899418861605
+Current Conservation rel: 1.695999814419601e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1704e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392701e+04 P_out=-2.392701e+04 resid=2.348e-16
+Writing output for iteration 77...
+Iteration 78
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 78] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35668202981678
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05119987665420922
+Current Conservation rel: 1.6959999614784382e-06
+Phonon: rel Sigma^R residual 6.8306e-02; lead balance 8.1704e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392700e+04 P_out=-2.392700e+04 resid=2.011e-16
+Writing output for iteration 78...
+Iteration 79
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 79] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35642745598068
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05119990873026836
+Current Conservation rel: 1.695999187613503e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1704e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392702e+04 P_out=-2.392702e+04 resid=7.610e-17
+Writing output for iteration 79...
+Iteration 80
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 80] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35521752189509
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051200041383708594
+Current Conservation rel: 1.6960062045699236e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1705e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392700e+04 P_out=-2.392700e+04 resid=7.602e-17
+Writing output for iteration 80...
+Iteration 81
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 81] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35649644620895
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199882982473355
+Current Conservation rel: 1.6959986178675065e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1704e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392701e+04 P_out=-2.392701e+04 resid=2.337e-16
+Writing output for iteration 81...
+Iteration 82
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 82] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35592880143014
+Contact Current Difference: 0.0
+Current Conservation abs: 0.051199997373259976
+Current Conservation rel: 1.6960037069492138e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1705e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392700e+04 P_out=-2.392700e+04 resid=1.037e-16
+Writing output for iteration 82...
+Iteration 83
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 83] energy J(local)=[0.0941 0.0877 0.0957]
+SigmaR resid-by-omega: peak w=1.10THz val=9.836e+01 in-band(<=46.4)=0.963 low(<=5)=0.196
+Maximum Self-Energy Update: 98.35598249826295
+Contact Current Difference: 0.0
+Current Conservation abs: 0.05119984354132612
+Current Conservation rel: 1.6959983857933318e-06
+Phonon: rel Sigma^R residual 6.8305e-02; lead balance 8.1705e-03 (best 1.3140e-03; internal spread 2.0076e-01)
+Bubble energy balance: P_in=-2.392701e+04 P_out=-2.392701e+04 resid=3.358e-16
+  JFNK newton#2: gmres_m=10 inner_res/||R||=3.74e-01 ||R||=1.878e+04 ||delta||=1.346e+04 trust=0.065 mu=8.66e-02
+Writing output for iteration 83...
+Iteration 84
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 84] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02526960045297
+Contact Current Difference: 0.0
+Current Conservation abs: 0.043199893734708894
+Current Conservation rel: 1.4333567501806996e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362713e+04 P_out=-2.362713e+04 resid=1.168e-16
+Writing output for iteration 84...
+Iteration 85
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 85] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02543440722656
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0431999206157343
+Current Conservation rel: 1.4333573856494649e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=1.287e-16
+Writing output for iteration 85...
+Iteration 86
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 86] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02520012016771
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04319994663819671
+Current Conservation rel: 1.4333587294047894e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362713e+04 P_out=-2.362713e+04 resid=1.574e-16
+Writing output for iteration 86...
+Iteration 87
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 87] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02516769627381
+Contact Current Difference: 0.0
+Current Conservation abs: 0.043199894862482324
+Current Conservation rel: 1.4333560866447971e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=8.185e-17
+Writing output for iteration 87...
+Iteration 88
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 88] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02506436590336
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04319989911164157
+Current Conservation rel: 1.433357788974012e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362713e+04 P_out=-2.362713e+04 resid=2.310e-16
+Writing output for iteration 88...
+Iteration 89
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 89] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02608293562113
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04319986248447094
+Current Conservation rel: 1.4333549754226645e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3730e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=3.005e-17
+Writing output for iteration 89...
+Iteration 90
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 90] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02557129560988
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04319987059716368
+Current Conservation rel: 1.433355812410949e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=2.311e-16
+Writing output for iteration 90...
+Iteration 91
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 91] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.0250659677457
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04319990668773244
+Current Conservation rel: 1.4333564886923383e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=5.459e-17
+Writing output for iteration 91...
+Iteration 92
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 92] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.102e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02471229995064
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04320000753796194
+Current Conservation rel: 1.4333612890173368e-06
+Phonon: rel Sigma^R residual 5.6608e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362713e+04 P_out=-2.362713e+04 resid=1.547e-16
+Writing output for iteration 92...
+Iteration 93
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 93] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02584610911389
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04319977938939701
+Current Conservation rel: 1.4333519248289158e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=2.069e-16
+Writing output for iteration 93...
+Iteration 94
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 94] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.102e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02492540693684
+Contact Current Difference: 0.0
+Current Conservation abs: 0.04320006907437346
+Current Conservation rel: 1.4333629212237912e-06
+Phonon: rel Sigma^R residual 5.6608e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362713e+04 P_out=-2.362713e+04 resid=2.376e-16
+Writing output for iteration 94...
+Iteration 95
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 95] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.0251942201297
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0431998184776603
+Current Conservation rel: 1.4333540568431822e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=1.603e-16
+Writing output for iteration 95...
+Iteration 96
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 96] energy J(local)=[0.093  0.0876 0.0929]
+SigmaR resid-by-omega: peak w=1.10THz val=8.103e+01 in-band(<=46.4)=0.962 low(<=5)=0.200
+Maximum Self-Energy Update: 81.02532502804124
+Contact Current Difference: 0.0
+Current Conservation abs: 0.043199648383961176
+Current Conservation rel: 1.4333485117134684e-06
+Phonon: rel Sigma^R residual 5.6609e-02; lead balance 8.3731e-03 (best 1.3140e-03; internal spread 1.9594e-01)
+Bubble energy balance: P_in=-2.362714e+04 P_out=-2.362714e+04 resid=8.558e-17
+  JFNK newton#3: gmres_m=12 inner_res/||R||=4.48e-01 ||R||=1.447e+04 ||delta||=1.755e+04 trust=0.085 mu=6.67e-02
+Writing output for iteration 96...
+Iteration 97
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 97] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50631148990166
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350219201252912
+Current Conservation rel: 9.193667158702572e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=2.180e-16
+Writing output for iteration 97...
+Iteration 98
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 98] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50654546125604
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350195188773796
+Current Conservation rel: 9.193654871028605e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320411e+04 P_out=-2.320411e+04 resid=8.510e-17
+Writing output for iteration 98...
+Iteration 99
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 99] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50618381915015
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350294218194904
+Current Conservation rel: 9.19369823610734e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320409e+04 P_out=-2.320409e+04 resid=1.032e-16
+Writing output for iteration 99...
+Iteration 100
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 100] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50613019401692
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02735024717549095
+Current Conservation rel: 9.193673852284971e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=1.621e-16
+Writing output for iteration 100...
+Iteration 101
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 101] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50605170412868
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02735022494562145
+Current Conservation rel: 9.193676333905597e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320409e+04 P_out=-2.320409e+04 resid=2.365e-16
+Writing output for iteration 101...
+Iteration 102
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 102] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50717437095243
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350258140359074
+Current Conservation rel: 9.193676875615997e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1283e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=8.245e-17
+Writing output for iteration 102...
+Iteration 103
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 103] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50635433577959
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350105967343552
+Current Conservation rel: 9.193624569432177e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320411e+04 P_out=-2.320411e+04 resid=3.643e-17
+Writing output for iteration 103...
+Iteration 104
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 104] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50600178699591
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350271979230456
+Current Conservation rel: 9.193687668153219e-07
+Phonon: rel Sigma^R residual 5.2813e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320409e+04 P_out=-2.320409e+04 resid=1.267e-16
+Writing output for iteration 104...
+Iteration 105
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 105] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50555378000503
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350477494110237
+Current Conservation rel: 9.193757836015559e-07
+Phonon: rel Sigma^R residual 5.2813e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320409e+04 P_out=-2.320409e+04 resid=1.578e-16
+Writing output for iteration 105...
+Iteration 106
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 106] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50677290833157
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027349941912689246
+Current Conservation rel: 9.19356864359192e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1283e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320411e+04 P_out=-2.320411e+04 resid=1.164e-16
+Writing output for iteration 106...
+Iteration 107
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 107] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50611777264999
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0273505124678195
+Current Conservation rel: 9.193767155386096e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=3.446e-16
+Writing output for iteration 107...
+Iteration 108
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 108] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50610568778805
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027350411231964245
+Current Conservation rel: 9.193732113606608e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=9.856e-17
+Writing output for iteration 108...
+Iteration 109
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 109] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50674528986181
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027349572575985803
+Current Conservation rel: 9.193448113613445e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1283e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=8.479e-17
+Writing output for iteration 109...
+Iteration 110
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 110] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50619775858604
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02735060703707859
+Current Conservation rel: 9.193799504991205e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=8.051e-17
+Writing output for iteration 110...
+Iteration 111
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 111] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50650495070893
+Contact Current Difference: 0.0
+Current Conservation abs: 0.027349763569873176
+Current Conservation rel: 9.193513830447987e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1283e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=1.896e-16
+Writing output for iteration 111...
+Iteration 112
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 112] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.5065515429504
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02734970476376475
+Current Conservation rel: 9.193492365587779e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1283e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=1.341e-16
+Writing output for iteration 112...
+Iteration 113
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 113] energy J(local)=[0.0912 0.0874 0.0899]
+SigmaR resid-by-omega: peak w=1.10THz val=7.451e+01 in-band(<=46.4)=0.961 low(<=5)=0.214
+Maximum Self-Energy Update: 74.50622513431186
+Contact Current Difference: 0.0
+Current Conservation abs: 0.02735079229933035
+Current Conservation rel: 9.193857371841572e-07
+Phonon: rel Sigma^R residual 5.2814e-02; lead balance 8.1284e-03 (best 1.3140e-03; internal spread 1.8777e-01)
+Bubble energy balance: P_in=-2.320410e+04 P_out=-2.320410e+04 resid=1.406e-16
+  JFNK newton#4: gmres_m=16 inner_res/||R||=4.91e-01 ||R||=1.107e+04 ||delta||=2.312e+04 trust=0.11 mu=5.10e-02
+Writing output for iteration 113...
+Iteration 114
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 114] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.883056889434975
+Contact Current Difference: 0.0
+Current Conservation abs: 0.001893357582957833
+Current Conservation rel: 6.540664681724924e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=2.471e-16
+Writing output for iteration 114...
+Iteration 115
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 115] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88336244019468
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018932080965896603
+Current Conservation rel: 6.540143041609115e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264198e+04 P_out=-2.264198e+04 resid=3.185e-16
+Writing output for iteration 115...
+Iteration 116
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 116] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88314794296157
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018933734027086757
+Current Conservation rel: 6.540722731480563e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=8.839e-17
+Writing output for iteration 116...
+Iteration 117
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 117] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88265490136423
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018935191565105924
+Current Conservation rel: 6.541225049748734e-08
+Phonon: rel Sigma^R residual 4.3108e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=1.561e-16
+Writing output for iteration 117...
+Iteration 118
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 118] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88268124275951
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018933735100290505
+Current Conservation rel: 6.540726118119068e-08
+Phonon: rel Sigma^R residual 4.3108e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264196e+04 P_out=-2.264196e+04 resid=1.449e-16
+Writing output for iteration 118...
+Iteration 119
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 119] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88374555931063
+Contact Current Difference: 0.0
+Current Conservation abs: 0.001893516837299103
+Current Conservation rel: 6.54121451601927e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=4.941e-17
+Writing output for iteration 119...
+Iteration 120
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 120] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88357659879841
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018933590727101546
+Current Conservation rel: 6.540667169278067e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264198e+04 P_out=-2.264198e+04 resid=8.201e-17
+Writing output for iteration 120...
+Iteration 121
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 121] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88288543880137
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018930352871393552
+Current Conservation rel: 6.53954902725864e-08
+Phonon: rel Sigma^R residual 4.3108e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264198e+04 P_out=-2.264198e+04 resid=2.411e-16
+Writing output for iteration 121...
+Iteration 122
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 122] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88219480634585
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018940188601845875
+Current Conservation rel: 6.54295323545443e-08
+Phonon: rel Sigma^R residual 4.3108e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264196e+04 P_out=-2.264196e+04 resid=1.357e-16
+Writing output for iteration 122...
+Iteration 123
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 123] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88309447908222
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018930902569991304
+Current Conservation rel: 6.539740325751672e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=7.320e-17
+Writing output for iteration 123...
+Iteration 124
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 124] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88336981571393
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018928010958916275
+Current Conservation rel: 6.538739032270584e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264198e+04 P_out=-2.264198e+04 resid=1.108e-16
+Writing output for iteration 124...
+Iteration 125
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 125] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.882325222179695
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018945195915875956
+Current Conservation rel: 6.544679767835076e-08
+Phonon: rel Sigma^R residual 4.3108e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=1.755e-16
+Writing output for iteration 125...
+Iteration 126
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 126] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.883252346637214
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018924712530861143
+Current Conservation rel: 6.537602882764063e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=8.168e-17
+Writing output for iteration 126...
+Iteration 127
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 127] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.883340123678174
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018934710933535825
+Current Conservation rel: 6.541056986183689e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=1.516e-16
+Writing output for iteration 127...
+Iteration 128
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 128] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88331945961188
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018935507723654155
+Current Conservation rel: 6.541332394760884e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=7.115e-18
+Writing output for iteration 128...
+Iteration 129
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 129] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88300848770454
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018920818456535926
+Current Conservation rel: 6.536257220473126e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=7.112e-17
+Writing output for iteration 129...
+Iteration 130
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 130] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.882860456599765
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018949462046293775
+Current Conservation rel: 6.546154189223287e-08
+Phonon: rel Sigma^R residual 4.3108e-02; lead balance 8.6949e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=2.410e-16
+Writing output for iteration 130...
+Iteration 131
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 131] energy J(local)=[0.0897 0.087  0.0877]
+SigmaR resid-by-omega: peak w=1.10THz val=5.988e+01 in-band(<=46.4)=0.960 low(<=5)=0.215
+Maximum Self-Energy Update: 59.88325590983427
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018904332318925299
+Current Conservation rel: 6.53056345055987e-08
+Phonon: rel Sigma^R residual 4.3109e-02; lead balance 8.6948e-03 (best 1.3140e-03; internal spread 1.7709e-01)
+Bubble energy balance: P_in=-2.264197e+04 P_out=-2.264197e+04 resid=1.448e-16
+  JFNK newton#5: gmres_m=17 inner_res/||R||=4.90e-01 ||R||=9.831e+03 ||delta||=3.068e+04 trust=0.14 mu=4.53e-02
+Writing output for iteration 131...
+Iteration 132
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 132] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71982258060368
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876236489497387
+Current Conservation rel: 6.860575632856801e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=8.103e-17
+Writing output for iteration 132...
+Iteration 133
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 133] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.720261315645175
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762515030175564
+Current Conservation rel: 6.860624122352745e-06
+Phonon: rel Sigma^R residual 2.6654e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174380e+04 P_out=-2.174380e+04 resid=4.570e-16
+Writing output for iteration 133...
+Iteration 134
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 134] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71968529402741
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762428530317266
+Current Conservation rel: 6.860601563425307e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=8.557e-17
+Writing output for iteration 134...
+Iteration 135
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 135] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719609038329025
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762219234304212
+Current Conservation rel: 6.860525365042446e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=3.202e-16
+Writing output for iteration 135...
+Iteration 136
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 136] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71947188164534
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762340498142294
+Current Conservation rel: 6.860574179227828e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174377e+04 P_out=-2.174377e+04 resid=1.691e-16
+Writing output for iteration 136...
+Iteration 137
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 137] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71998507654298
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762228560444782
+Current Conservation rel: 6.860525289168401e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.735e-16
+Writing output for iteration 137...
+Iteration 138
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 138] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.7194058719714
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762257010530448
+Current Conservation rel: 6.860533831137269e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.825e-16
+Writing output for iteration 138...
+Iteration 139
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 139] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.72012496678769
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762676152437052
+Current Conservation rel: 6.860684247715833e-06
+Phonon: rel Sigma^R residual 2.6654e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=2.761e-16
+Writing output for iteration 139...
+Iteration 140
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 140] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719655422694586
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18761927888954233
+Current Conservation rel: 6.8604188761004554e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.754e-16
+Writing output for iteration 140...
+Iteration 141
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 141] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.720070184033176
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876252006750292
+Current Conservation rel: 6.860633186284123e-06
+Phonon: rel Sigma^R residual 2.6654e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.677e-16
+Writing output for iteration 141...
+Iteration 142
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 142] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71960192531457
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18763241291708255
+Current Conservation rel: 6.8608954868018985e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=2.522e-16
+Writing output for iteration 142...
+Iteration 143
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 143] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71987413380285
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18761905422070413
+Current Conservation rel: 6.860408435773279e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.624e-16
+Writing output for iteration 143...
+Iteration 144
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 144] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719832875684666
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18763199347995396
+Current Conservation rel: 6.860879994143262e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=8.985e-17
+Writing output for iteration 144...
+Iteration 145
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 145] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.7200369768864
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762199169941596
+Current Conservation rel: 6.8605137340241505e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.046e-16
+Writing output for iteration 145...
+Iteration 146
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 146] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719969734706396
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18761560823622858
+Current Conservation rel: 6.860279612796e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.704e-16
+Writing output for iteration 146...
+Iteration 147
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 147] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71989715765851
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876392061367369
+Current Conservation rel: 6.861142481021356e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.743e-16
+Writing output for iteration 147...
+Iteration 148
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 148] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719661142988116
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18760088562885358
+Current Conservation rel: 6.859745419647708e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.673e-16
+Writing output for iteration 148...
+Iteration 149
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 149] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71946271469509
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876489270143793
+Current Conservation rel: 6.861504303827952e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174377e+04 P_out=-2.174377e+04 resid=1.056e-16
+Writing output for iteration 149...
+Iteration 150
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 150] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71986161452137
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1875880364623299
+Current Conservation rel: 6.859273799714867e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.159e-16
+Writing output for iteration 150...
+Iteration 151
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 151] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719855642628865
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876621502378839
+Current Conservation rel: 6.861984198339281e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=3.347e-16
+Writing output for iteration 151...
+Iteration 152
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 152] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.72009753527567
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18753395531712158
+Current Conservation rel: 6.857291901245517e-06
+Phonon: rel Sigma^R residual 2.6654e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=9.689e-17
+Writing output for iteration 152...
+Iteration 153
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 153] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71959248551944
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18781215603121382
+Current Conservation rel: 6.8674727355771485e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.052e-16
+Writing output for iteration 153...
+Iteration 154
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 154] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71972600270043
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18750031063245842
+Current Conservation rel: 6.856063150504641e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.450e-16
+Writing output for iteration 154...
+Iteration 155
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 155] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.7195559436724
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1877697485651879
+Current Conservation rel: 6.865924251544264e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174377e+04 P_out=-2.174377e+04 resid=1.121e-16
+Writing output for iteration 155...
+Iteration 156
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 156] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.720177105485035
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18735903330161818
+Current Conservation rel: 6.850890274803501e-06
+Phonon: rel Sigma^R residual 2.6654e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174380e+04 P_out=-2.174380e+04 resid=8.470e-17
+Writing output for iteration 156...
+Iteration 157
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 157] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71969739544816
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18774869987100828
+Current Conservation rel: 6.865153815279123e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174377e+04 P_out=-2.174377e+04 resid=1.065e-16
+Writing output for iteration 157...
+Iteration 158
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 158] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.720060110875835
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18749097604086273
+Current Conservation rel: 6.855718989219314e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=9.219e-17
+Writing output for iteration 158...
+Iteration 159
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 159] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71984776974643
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18775148585336865
+Current Conservation rel: 6.865252463469165e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.373e-16
+Writing output for iteration 159...
+Iteration 160
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 160] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71966157760389
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18758822404015518
+Current Conservation rel: 6.8592796224319755e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.115e-16
+Writing output for iteration 160...
+Iteration 161
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 161] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71973294436116
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18762759532546625
+Current Conservation rel: 6.860720586299974e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.718e-16
+Writing output for iteration 161...
+Iteration 162
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 162] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719972218806774
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18760245977136947
+Current Conservation rel: 6.85980003888773e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=5.523e-18
+Writing output for iteration 162...
+Iteration 163
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 163] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71993207579977
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876541035144328
+Current Conservation rel: 6.86168950729216e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.422e-16
+Writing output for iteration 163...
+Iteration 164
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 164] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71988260322784
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18752882839908125
+Current Conservation rel: 6.857106291029093e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=8.726e-17
+Writing output for iteration 164...
+Iteration 165
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 165] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.719748205624704
+Contact Current Difference: 0.0
+Current Conservation abs: 0.187612947433081
+Current Conservation rel: 6.860184549926909e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.283e-16
+Writing output for iteration 165...
+Iteration 166
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 166] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.720104291682944
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1875558145729883
+Current Conservation rel: 6.858091485762117e-06
+Phonon: rel Sigma^R residual 2.6654e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=2.520e-16
+Writing output for iteration 166...
+Iteration 167
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 167] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.7198365950508
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18768335534514335
+Current Conservation rel: 6.862759802211731e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=4.215e-16
+Writing output for iteration 167...
+Iteration 168
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 168] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71948713436478
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18771160584765312
+Current Conservation rel: 6.863795345635964e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.679e-16
+Writing output for iteration 168...
+Iteration 169
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 169] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71982927467938
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1876321593135799
+Current Conservation rel: 6.8608882174055684e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=2.522e-16
+Writing output for iteration 169...
+Iteration 170
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 170] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71982967445127
+Contact Current Difference: 0.0
+Current Conservation abs: 0.1875920743605093
+Current Conservation rel: 6.85942028996536e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1151e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=9.008e-17
+Writing output for iteration 170...
+Iteration 171
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 171] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71995124084052
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18760764917897177
+Current Conservation rel: 6.859988985690117e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=2.547e-16
+Writing output for iteration 171...
+Iteration 172
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 172] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71971029083297
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18761150197678944
+Current Conservation rel: 6.860131995451172e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=7.814e-18
+Writing output for iteration 172...
+Iteration 173
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 173] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.7200066440311
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18765033067393233
+Current Conservation rel: 6.861553541419636e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174378e+04 P_out=-2.174378e+04 resid=1.445e-16
+Writing output for iteration 173...
+Iteration 174
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 174] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.71980587936433
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18756194637717272
+Current Conservation rel: 6.858315749934352e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1150e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.534e-16
+Writing output for iteration 174...
+Iteration 175
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 175] energy J(local)=[0.0896 0.0883 0.0879]
+SigmaR resid-by-omega: peak w=1.83THz val=3.672e+01 in-band(<=46.4)=0.968 low(<=5)=0.189
+Maximum Self-Energy Update: 36.720033957623826
+Contact Current Difference: 0.0
+Current Conservation abs: 0.18756900392145326
+Current Conservation rel: 6.858574087085634e-06
+Phonon: rel Sigma^R residual 2.6653e-02; lead balance 1.1151e-02 (best 1.3140e-03; internal spread 1.6096e-01)
+Bubble energy balance: P_in=-2.174379e+04 P_out=-2.174379e+04 resid=1.098e-16
+  JFNK newton#6: gmres_m=43 inner_res/||R||=4.46e-01 ||R||=7.083e+03 ||delta||=3.652e+04 trust=0.19 mu=3.26e-02
+Writing output for iteration 175...
+Iteration 176
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 176] energy J(local)=[0.1254 0.0647 0.0782]
+SigmaR resid-by-omega: peak w=0.73THz val=1.483e+02 in-band(<=46.4)=0.961 low(<=5)=0.217
+Maximum Self-Energy Update: 148.33514621656477
+Contact Current Difference: 0.0
+Current Conservation abs: 5.2268409193584375
+Current Conservation rel: 0.00019287029887106772
+Phonon: rel Sigma^R residual 9.6752e-02; lead balance 3.8268e-02 (best 1.3140e-03; internal spread 1.6001e-01)
+Bubble energy balance: P_in=-2.169434e+04 P_out=-2.169434e+04 resid=7.715e-18
+Writing output for iteration 176...
+Iteration 177
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 177] energy J(local)=[0.1254 0.0647 0.0782]
+SigmaR resid-by-omega: peak w=0.73THz val=1.483e+02 in-band(<=46.4)=0.961 low(<=5)=0.217
+Maximum Self-Energy Update: 148.336502202653
+Contact Current Difference: 0.0
+Current Conservation abs: 5.226863326179227
+Current Conservation rel: 0.00019287096563771493
+Phonon: rel Sigma^R residual 9.6753e-02; lead balance 3.8268e-02 (best 1.3140e-03; internal spread 1.6001e-01)
+Bubble energy balance: P_in=-2.169435e+04 P_out=-2.169435e+04 resid=9.101e-17
+  JFNK newton#7: gmres_m=1 inner_res/||R||=2.41e-01 ||R||=2.193e+04 ||delta||=1.668e+03 trust=0.093 mu=1.01e-01
+Writing output for iteration 177...
+Iteration 178
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 178] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88661685615487
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806959976651342
+Current Conservation rel: 0.00014885913332942096
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.587e-17
+Writing output for iteration 178...
+Iteration 179
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 179] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.886237848616695
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069995753012336
+Current Conservation rel: 0.00014886068213909468
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.075e-17
+Writing output for iteration 179...
+Iteration 180
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 180] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.887325703543226
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806953911906021
+Current Conservation rel: 0.00014885882169625336
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=2.001e-16
+Writing output for iteration 180...
+Iteration 181
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 181] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.488e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.884853325640044
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806908381788162
+Current Conservation rel: 0.0001488573370279679
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092486e+04 P_out=-2.092486e+04 resid=9.004e-17
+Writing output for iteration 181...
+Iteration 182
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 182] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88585946911347
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806972230411702
+Current Conservation rel: 0.00014885970878229218
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092486e+04 P_out=-2.092486e+04 resid=1.201e-16
+Writing output for iteration 182...
+Iteration 183
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 183] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88818323964656
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806953963034175
+Current Conservation rel: 0.00014885885248134764
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=1.325e-16
+Writing output for iteration 183...
+Iteration 184
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 184] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.488e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88459305516732
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8068950048800616
+Current Conservation rel: 0.0001488566005179515
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=9.878e-17
+Writing output for iteration 184...
+Iteration 185
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 185] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88867416312241
+Contact Current Difference: 0.0
+Current Conservation abs: 3.807032588765651
+Current Conservation rel: 0.0001488617383594796
+Phonon: rel Sigma^R residual 3.8428e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092489e+04 P_out=-2.092489e+04 resid=2.829e-16
+Writing output for iteration 185...
+Iteration 186
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 186] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88746709838394
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069013905242173
+Current Conservation rel: 0.00014885687051642725
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.739e-16
+Writing output for iteration 186...
+Iteration 187
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 187] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.488e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88491852540988
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806912095995358
+Current Conservation rel: 0.00014885731427432454
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=9.669e-17
+Writing output for iteration 187...
+Iteration 188
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 188] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.8887861401721
+Contact Current Difference: 0.0
+Current Conservation abs: 3.80716604353438
+Current Conservation rel: 0.000148867091415772
+Phonon: rel Sigma^R residual 3.8428e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=2.612e-16
+Writing output for iteration 188...
+Iteration 189
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 189] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.488e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88493056174696
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8068431240062637
+Current Conservation rel: 0.00014885465805342511
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.898e-16
+Writing output for iteration 189...
+Iteration 190
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 190] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88677909445106
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806983925291206
+Current Conservation rel: 0.00014886004860334087
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=3.255e-16
+Writing output for iteration 190...
+Iteration 191
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 191] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.889170036480266
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8071151412659674
+Current Conservation rel: 0.0001488650731445793
+Phonon: rel Sigma^R residual 3.8428e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=9.742e-17
+Writing output for iteration 191...
+Iteration 192
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 192] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88765438913269
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069453293410334
+Current Conservation rel: 0.00014885846547418895
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=1.915e-16
+Writing output for iteration 192...
+Iteration 193
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 193] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88715361218113
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806963293844092
+Current Conservation rel: 0.00014885924624768234
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=1.155e-16
+Writing output for iteration 193...
+Iteration 194
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 194] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88622958806385
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806902101066953
+Current Conservation rel: 0.0001488568833220388
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.113e-16
+Writing output for iteration 194...
+Iteration 195
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 195] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.886634209607436
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806947536071675
+Current Conservation rel: 0.00014885867018199394
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.606e-16
+Writing output for iteration 195...
+Iteration 196
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 196] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.488e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88488530631462
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806870999313105
+Current Conservation rel: 0.0001488557390276318
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.813e-16
+Writing output for iteration 196...
+Iteration 197
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 197] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88862454779142
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8071024823238986
+Current Conservation rel: 0.0001488645758037803
+Phonon: rel Sigma^R residual 3.8428e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=4.247e-16
+Writing output for iteration 197...
+Iteration 198
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 198] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.885758231984674
+Contact Current Difference: 0.0
+Current Conservation abs: 3.80690282528667
+Current Conservation rel: 0.0001488569503240613
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.013e-16
+Writing output for iteration 198...
+Iteration 199
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 199] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.886819032622405
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069991444208426
+Current Conservation rel: 0.00014886066094696224
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.036e-16
+Writing output for iteration 199...
+Iteration 200
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 200] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.886225850145046
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069183261759463
+Current Conservation rel: 0.00014885753619854776
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.349e-16
+Writing output for iteration 200...
+Iteration 201
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 201] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88671652575984
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069821807821427
+Current Conservation rel: 0.0001488599978144469
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.652e-16
+Writing output for iteration 201...
+Iteration 202
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 202] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88679066206451
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806943801791931
+Current Conservation rel: 0.00014885850551786005
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.612e-16
+Writing output for iteration 202...
+Iteration 203
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 203] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.888044708469515
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8070481695995113
+Current Conservation rel: 0.00014886246893009897
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=4.795e-17
+Writing output for iteration 203...
+Iteration 204
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 204] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88604206391588
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8068469024728984
+Current Conservation rel: 0.0001488547909667407
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6299e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=9.852e-17
+Writing output for iteration 204...
+Iteration 205
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 205] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.887271295879806
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8070449164388265
+Current Conservation rel: 0.000148862398608553
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=9.337e-17
+Writing output for iteration 205...
+Iteration 206
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 206] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88606383496722
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806894949737398
+Current Conservation rel: 0.0001488566538130422
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=4.355e-16
+Writing output for iteration 206...
+Iteration 207
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 207] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88668183081537
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069918286037137
+Current Conservation rel: 0.00014886036558213228
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=3.569e-17
+Writing output for iteration 207...
+Iteration 208
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 208] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88644095573449
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069613488551113
+Current Conservation rel: 0.00014885918236519775
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.242e-16
+Writing output for iteration 208...
+Iteration 209
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 209] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.886269850281764
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806942242787045
+Current Conservation rel: 0.00014885844393874026
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.549e-16
+Writing output for iteration 209...
+Iteration 210
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 210] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88633066234095
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806951586726427
+Current Conservation rel: 0.0001488588099631591
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=8.705e-17
+Writing output for iteration 210...
+Iteration 211
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 211] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88582626970613
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069033533884067
+Current Conservation rel: 0.00014885699672010267
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6299e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=7.359e-17
+Writing output for iteration 211...
+Iteration 212
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 212] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.887075474042305
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806958529026815
+Current Conservation rel: 0.00014885909758964428
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=8.847e-17
+Writing output for iteration 212...
+Iteration 213
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 213] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88836893382248
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8070231933234027
+Current Conservation rel: 0.00014886151097875122
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=1.352e-16
+Writing output for iteration 213...
+Iteration 214
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 214] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.885512352272755
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806917629464806
+Current Conservation rel: 0.0001488575113225055
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.609e-16
+Writing output for iteration 214...
+Iteration 215
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 215] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88630921312966
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806918571493952
+Current Conservation rel: 0.0001488575653163221
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=2.066e-17
+Writing output for iteration 215...
+Iteration 216
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 216] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88642039121513
+Contact Current Difference: 0.0
+Current Conservation abs: 3.807068230513323
+Current Conservation rel: 0.00014886330424565553
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=2.615e-16
+Writing output for iteration 216...
+Iteration 217
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 217] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.8856797295914
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069184816704364
+Current Conservation rel: 0.00014885756971059016
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.194e-16
+Writing output for iteration 217...
+Iteration 218
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 218] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88681406849969
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8070455502020195
+Current Conservation rel: 0.00014886242163249152
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=4.455e-16
+Writing output for iteration 218...
+Iteration 219
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 219] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.887958714307764
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806904219676653
+Current Conservation rel: 0.0001488570036671852
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=9.035e-17
+Writing output for iteration 219...
+Iteration 220
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 220] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.885477844424244
+Contact Current Difference: 0.0
+Current Conservation abs: 3.80701900886379
+Current Conservation rel: 0.0001488613962397516
+Phonon: rel Sigma^R residual 3.8425e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=2.813e-16
+Writing output for iteration 220...
+Iteration 221
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 221] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88593560313398
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806874702888308
+Current Conservation rel: 0.00014885586672256068
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.107e-16
+Writing output for iteration 221...
+Iteration 222
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 222] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88573963564701
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069246386239683
+Current Conservation rel: 0.00014885777792344158
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.871e-16
+Writing output for iteration 222...
+Iteration 223
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 223] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88729025778202
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806949186251586
+Current Conservation rel: 0.00014885871231722254
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.782e-16
+Writing output for iteration 223...
+Iteration 224
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 224] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.8877701496018
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069356217383756
+Current Conservation rel: 0.00014885814375764747
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=1.782e-16
+Writing output for iteration 224...
+Iteration 225
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 225] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88836084013455
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806997150695679
+Current Conservation rel: 0.00014886057323219005
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=1.799e-16
+Writing output for iteration 225...
+Iteration 226
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 226] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.8864193639915
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806961808748383
+Current Conservation rel: 0.00014885921020345132
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092487e+04 P_out=-2.092487e+04 resid=3.049e-16
+Writing output for iteration 226...
+Iteration 227
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 227] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88689133223773
+Contact Current Difference: 0.0
+Current Conservation abs: 3.8069829395917623
+Current Conservation rel: 0.00014886000984613767
+Phonon: rel Sigma^R residual 3.8426e-02; lead balance 3.6300e-02 (best 1.3140e-03; internal spread 1.5657e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=1.403e-16
+Writing output for iteration 227...
+Iteration 228
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 228] energy J(local)=[0.1194 0.0697 0.0801]
+SigmaR resid-by-omega: peak w=0.73THz val=5.489e+01 in-band(<=46.4)=0.968 low(<=5)=0.210
+Maximum Self-Energy Update: 54.88745619743688
+Contact Current Difference: 0.0
+Current Conservation abs: 3.806981211671882
+Current Conservation rel: 0.00014885994288507359
+Phonon: rel Sigma^R residual 3.8427e-02; lead balance 3.6299e-02 (best 1.3140e-03; internal spread 1.5656e-01)
+Bubble energy balance: P_in=-2.092488e+04 P_out=-2.092488e+04 resid=2.616e-16
+  JFNK newton#8: gmres_m=50 inner_res/||R||=3.13e-01 ||R||=5.216e+03 ||delta||=2.968e+04 trust=0.12 mu=2.40e-02
+Writing output for iteration 228...
+Iteration 229
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 229] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.235611413977985
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160580329575168
+Current Conservation rel: 3.959849912236634e-05
+Phonon: rel Sigma^R residual 3.2117e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=3.425e-16
+Writing output for iteration 229...
+Iteration 230
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 230] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23633773663788
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160711357984837
+Current Conservation rel: 3.9599004478276004e-05
+Phonon: rel Sigma^R residual 3.2118e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=4.523e-16
+Writing output for iteration 230...
+Iteration 231
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 231] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23369432429264
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160555157708586
+Current Conservation rel: 3.959839808332036e-05
+Phonon: rel Sigma^R residual 3.2116e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=3.617e-16
+Writing output for iteration 231...
+Iteration 232
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 232] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.236561935687014
+Contact Current Difference: 0.0
+Current Conservation abs: 1.016046569808168
+Current Conservation rel: 3.959805506538248e-05
+Phonon: rel Sigma^R residual 3.2118e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=2.743e-16
+Writing output for iteration 232...
+Iteration 233
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 233] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23542451138423
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160666291176312
+Current Conservation rel: 3.9598845442325193e-05
+Phonon: rel Sigma^R residual 3.2117e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082846e+04 P_out=-2.082846e+04 resid=1.927e-16
+Writing output for iteration 233...
+Iteration 234
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 234] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23746667615437
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160520661193004
+Current Conservation rel: 3.9598230330399924e-05
+Phonon: rel Sigma^R residual 3.2118e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082848e+04 P_out=-2.082848e+04 resid=1.801e-16
+Writing output for iteration 234...
+Iteration 235
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 235] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.234426749767096
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160346969951206
+Current Conservation rel: 3.959757126447276e-05
+Phonon: rel Sigma^R residual 3.2116e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082848e+04 P_out=-2.082848e+04 resid=2.289e-17
+Writing output for iteration 235...
+Iteration 236
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 236] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.236654800515865
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160832517576637
+Current Conservation rel: 3.9599475714010384e-05
+Phonon: rel Sigma^R residual 3.2118e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=4.376e-16
+Writing output for iteration 236...
+Iteration 237
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 237] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23326545369996
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160008738093893
+Current Conservation rel: 3.959631656065472e-05
+Phonon: rel Sigma^R residual 3.2115e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082846e+04 P_out=-2.082846e+04 resid=8.897e-17
+Writing output for iteration 237...
+Iteration 238
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 238] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23706584302547
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0160648683195177
+Current Conservation rel: 3.959874341441429e-05
+Phonon: rel Sigma^R residual 3.2118e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082848e+04 P_out=-2.082848e+04 resid=2.811e-16
+Writing output for iteration 238...
+Iteration 239
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 239] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.237048333243585
+Contact Current Difference: 0.0
+Current Conservation abs: 1.016167732197573
+Current Conservation rel: 3.9602760349933736e-05
+Phonon: rel Sigma^R residual 3.2118e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=9.915e-17
+Writing output for iteration 239...
+Iteration 240
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 240] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23487365468412
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0159710154384811
+Current Conservation rel: 3.959509426226676e-05
+Phonon: rel Sigma^R residual 3.2117e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=1.750e-16
+Writing output for iteration 240...
+Iteration 241
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 241] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23371605280225
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0159816614286683
+Current Conservation rel: 3.95955712643589e-05
+Phonon: rel Sigma^R residual 3.2116e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082845e+04 P_out=-2.082845e+04 resid=2.677e-16
+Writing output for iteration 241...
+Iteration 242
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 242] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.2386564718612
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0161802847778745
+Current Conservation rel: 3.960321391753988e-05
+Phonon: rel Sigma^R residual 3.2119e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082848e+04 P_out=-2.082848e+04 resid=3.088e-16
+Writing output for iteration 242...
+Iteration 243
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 243] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.232695242166045
+Contact Current Difference: 0.0
+Current Conservation abs: 1.015925304927805
+Current Conservation rel: 3.9593368836018915e-05
+Phonon: rel Sigma^R residual 3.2115e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082846e+04 P_out=-2.082846e+04 resid=2.014e-16
+Writing output for iteration 243...
+Iteration 244
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 244] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23799203863087
+Contact Current Difference: 0.0
+Current Conservation abs: 1.016170448890989
+Current Conservation rel: 3.9602857970732964e-05
+Phonon: rel Sigma^R residual 3.2119e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082848e+04 P_out=-2.082848e+04 resid=1.129e-16
+Writing output for iteration 244...
+Iteration 245
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 245] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23285851515006
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0159481973114453
+Current Conservation rel: 3.9594262043284716e-05
+Phonon: rel Sigma^R residual 3.2115e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082846e+04 P_out=-2.082846e+04 resid=2.631e-16
+Writing output for iteration 245...
+Iteration 246
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 246] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23764827645403
+Contact Current Difference: 0.0
+Current Conservation abs: 1.01614056147082
+Current Conservation rel: 3.960169650033222e-05
+Phonon: rel Sigma^R residual 3.2119e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=1.700e-16
+Writing output for iteration 246...
+Iteration 247
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 247] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23309467308218
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0159501504167565
+Current Conservation rel: 3.959430776299582e-05
+Phonon: rel Sigma^R residual 3.2115e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082846e+04 P_out=-2.082846e+04 resid=1.758e-16
+Writing output for iteration 247...
+Iteration 248
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 248] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.224e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.23769506143497
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0161339109527034
+Current Conservation rel: 3.960144149632893e-05
+Phonon: rel Sigma^R residual 3.2119e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082847e+04 P_out=-2.082847e+04 resid=2.542e-16
+Writing output for iteration 248...
+Iteration 249
+eta IR floor ON: Gamma_floor=0.5378 THz^2 (eta_ir_floor_cells=2, omega_c=2*dw=0.733 THz) on the unresolved soft modes.
+[it 249] energy J(local)=[0.0994 0.0828 0.085 ]
+SigmaR resid-by-omega: peak w=0.73THz val=4.223e+01 in-band(<=46.4)=0.972 low(<=5)=0.206
+Maximum Self-Energy Update: 42.232558450415766
+Contact Current Difference: 0.0
+Current Conservation abs: 1.0159757472083584
+Current Conservation rel: 3.959531603406152e-05
+Phonon: rel Sigma^R residual 3.2115e-02; lead balance 1.7173e-02 (best 1.3140e-03; internal spread 1.3705e-01)
+Bubble energy balance: P_in=-2.082846e+04 P_out=-2.082846e+04 resid=2.875e-16
+Writing output for iteration 249...
+SCBA did not converge after 249 iterations.
+SAVED /usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/conv1e10/sinw_d5a_L2_eta0_jfnk_ptc01.npz  final_heat=[0.099 0.083 0.085]  best=[5.222 4.957 5.229]  best_cons=0.001314023882077381

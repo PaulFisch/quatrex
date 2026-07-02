@@ -29,7 +29,10 @@ from phonon.studies import style
 
 PROD = ROOT / "phonon/scripts/out/prod/cnt33_eta0"
 GEOM = ROOT / "phonon/scripts/out/prod/geom/cnt33_L2"
-FIGDIR = ROOT / "document/fig/transport_sweeps"
+# Supplementary audit figure -- its content is folded into the in-document
+# figures (N(omega) staircase in eta0_cnt33_transmission, quantised plateau in
+# eta0_cnt33_ir_plateau), so it lands in the attic, not transport_sweeps.
+FIGDIR = ROOT / "document/fig/attic"
 HBAR = 1.054571817e-34
 KB = 1.380649e-23
 

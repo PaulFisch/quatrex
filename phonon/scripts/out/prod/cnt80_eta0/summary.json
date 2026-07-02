@@ -1,0 +1,30 @@
+[
+  {
+    "tag": "L2",
+    "system": "cnt80",
+    "sweep": "length",
+    "t_mean": 300,
+    "n_slabs": 2,
+    "G_ball_W_per_m2_K": 770990918.8937571,
+    "A_c": 2.89e-18,
+    "dw_THz": 0.4166666666666667,
+    "G_anh_W_per_m2_K": 603912787.8012832,
+    "G_anh": 603912787.8012832,
+    "ratio": 0.7832942943968743,
+    "anh_converged": true,
+    "anh_n_iter": 37,
+    "lead_conservation": 4.142265315280092e-05,
+    "best_cons": 4.142234776631728e-05,
+    "eta_dip": 0.00010496204874882203
+  },
+  {
+    "tag": "L3",
+    "system": "cnt80",
+    "sweep": "length",
+    "t_mean": 300,
+    "n_slabs": 3,
+    "G_ball_W_per_m2_K": 770990918.8928635,
+    "A_c": 2.89e-18,
+    "dw_THz": 0.4166666666666667
+  }
+]

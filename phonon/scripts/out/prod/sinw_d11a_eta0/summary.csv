@@ -1,0 +1,5 @@
+tag,system,sweep,t_mean,n_slabs,G_ball_W_per_m2_K,G_anh_W_per_m2_K,G_anh,ratio,anh_converged,anh_n_iter,lead_conservation,best_cons,eta_dip,A_c,dw_THz
+L2,sinw_d11a,length,300,2,75052176.94935252,,,,,,,,,7.163052909520561e-18,0.1125
+T200,sinw_d11a,temperature,200,2,63610562.30685465,,,,,,,,,7.163052909520561e-18,0.1125
+T300,sinw_d11a,temperature,300,2,75052176.94935252,,,,,,,,,7.163052909520561e-18,0.1125
+T400,sinw_d11a,temperature,400,2,80370322.2064875,,,,,,,,,7.163052909520561e-18,0.1125
