@@ -107,20 +107,36 @@ def fig_methods():
     ax.legend(fontsize=7, loc="upper right"); ax.set_ylim(1e-17, 5)
 
     ax = axes[1]
+    lin_res, _, _ = parse_trace(CONV / "sinw_d5a_L2_eta0_diag.log")
+    tg_res, tg_lead, _ = parse_trace(CONV / "sinw_d5a_L2_eta0_jfnk_tgrow.log")
+    ax.semilogy(np.arange(1, lin_res.size + 1), lin_res, "-", color="0.55",
+                lw=1.1, label=r"linear $\beta{=}0.1$ (limit cycle)")
     ax.semilogy(np.arange(1, rpm_res.size + 1), rpm_res, "-", color="C3", lw=1.3,
                 label="RPM (diverges)")
-    ax.semilogy(np.arange(1, j25_res.size + 1), j25_res, "-", color="C0", lw=1.3,
-                label="JFNK $k{=}25$")
-    ax.semilogy(np.arange(1, j50_res.size + 1), j50_res, "-", color="C1", lw=1.3,
-                label="JFNK $k{=}50$")
-    ax.axhline(1e-10, color="k", ls="--", lw=0.7)
+    if rpm_res.size:
+        ax.plot(rpm_res.size, rpm_res[-1], "x", ms=8, color="C3")
+    ax.semilogy(np.arange(1, j25_res.size + 1), j25_res, "-", color="C1", lw=1.2,
+                label="bare JFNK $k{=}25$ (stalls)")
+    ax.semilogy(np.arange(1, j50_res.size + 1), j50_res, "-", color="0.8", lw=0.9,
+                label="bare JFNK $k{=}50$")
+    ax.semilogy(np.arange(1, tg_res.size + 1), tg_res, "-", color="C0", lw=1.6,
+                label=r"$\Gamma_{\rm floor}$-stabilised JFNK")
+    floor = float(np.median(tg_res[-20:]))
+    ax.axhline(floor, color="C0", ls=":", lw=0.9)
+    ax.annotate(rf"marginal floor $\approx{floor:.3f}$"
+                "\n" + r"$G=2.61$ (method-invariant $1\%$)",
+                (0.03, floor * 0.82), xycoords=("axes fraction", "data"),
+                fontsize=7, color="C0", va="top")
     if rpm_lam:
         lam0 = rpm_lam[0][1]
         ax.annotate(rf"RPM $|\lambda|{{\approx}}{lam0:.0f}$ (nf181)$\to$199 (nf361)",
-                    (0.5, 0.06), xycoords="axes fraction", fontsize=7, ha="center")
+                    (0.98, 0.93), xycoords="axes fraction", fontsize=7, ha="right")
     ax.set_xlabel("SCBA iteration"); ax.set_ylabel(r"rel $\Sigma^R$ residual")
-    ax.legend(fontsize=7, loc="upper right"); ax.set_ylim(5e-2, 5)
+    ax.legend(fontsize=6.5, loc="center right", framealpha=0.95)
+    ax.set_ylim(3e-3, 30)
+    ax.set_xlim(0, 260)
     style.save(fig, "eta0_convergence_methods", directory=FIGDIR)
+    print(f"[d5a tgrow] floor(last20 median)={floor:.4f}  final lead={tg_lead[-1]:.2e}")
 
     print("\n[cnt33 convergence]  final resid={:.3e}  final lead={:.3e}  "
           "final bubble={:.3e}  iters={}".format(
@@ -152,8 +168,8 @@ def fig_cutoff():
         ax.plot(*zip(*best), "o", ms=7, mfc="none", color="C0",
                 label="best-iterate")
     x = np.linspace(0, 3.3, 60)
-    ax.plot(x, G0 - b * x ** 2, "k--", lw=1.0,
-            label=rf"$G_0-b\,\omega_{{\rm reg}}^2$")
+    ax.plot(x, G0 + b * x ** 2, "k--", lw=1.0,
+            label=rf"$G_0+b\,\omega_{{\rm reg}}^2$ fit")
     ax.plot(0, G0, "k*", ms=13)
     ax.set_xlabel(r"IR regularisation $\omega_{\rm reg}=C\,d\omega$ (THz)")
     ax.set_ylabel(r"$G\cdot d\omega$ (d$\omega$-weighted heat)")

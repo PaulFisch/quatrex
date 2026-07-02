@@ -76,7 +76,7 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
             jfnk_eps=1e-7, jfnk_trust=0.5, jfnk_trust_max=0.0,
             jfnk_newton_damp=1.0, jfnk_ptc=0.0,
             diag_spectral=False, ir_subtraction=False, eta_ir_floor=0.0,
-            eta_ir_floor_final=0.0, eta_ir_floor_ramp=0):
+            eta_ir_floor_final=0.0, eta_ir_floor_ramp=0, ring_threads=1):
     work = OUT / "work" / tag
     work.mkdir(parents=True, exist_ok=True)
     geom = pipeline.GEOM / f"{system}_L{L}"
@@ -125,8 +125,8 @@ def run_one(tag, L, nf, a_low, mix_thz, mix, sigma_tol, max_iter, cutoff,
     if diag_spectral:
         _env["QX_DIAG_SPECTRAL"] = "1"
     rc = pipeline.launch_cell(
-        work / "quatrex_config.toml", npz, log, nranks=nranks, ring_threads=1,
-        check_idle=False, env=_env)
+        work / "quatrex_config.toml", npz, log, nranks=nranks,
+        ring_threads=ring_threads, check_idle=False, env=_env)
     wall = (time.perf_counter() - t0) / 60.0
     tr = pipeline.parse_scba_trace(log)
     res, lead, bub = tr["residual"], tr["lead_balance"], tr["bubble_balance"]
