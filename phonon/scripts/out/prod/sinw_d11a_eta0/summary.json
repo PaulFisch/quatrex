@@ -1,0 +1,42 @@
+[
+  {
+    "tag": "L2",
+    "system": "sinw_d11a",
+    "sweep": "length",
+    "t_mean": 300,
+    "n_slabs": 2,
+    "G_ball_W_per_m2_K": 75052176.94935252,
+    "A_c": 7.163052909520561e-18,
+    "dw_THz": 0.1125
+  },
+  {
+    "tag": "T200",
+    "system": "sinw_d11a",
+    "sweep": "temperature",
+    "t_mean": 200,
+    "n_slabs": 2,
+    "G_ball_W_per_m2_K": 63610562.30685465,
+    "A_c": 7.163052909520561e-18,
+    "dw_THz": 0.1125
+  },
+  {
+    "tag": "T300",
+    "system": "sinw_d11a",
+    "sweep": "temperature",
+    "t_mean": 300,
+    "n_slabs": 2,
+    "G_ball_W_per_m2_K": 75052176.94935252,
+    "A_c": 7.163052909520561e-18,
+    "dw_THz": 0.1125
+  },
+  {
+    "tag": "T400",
+    "system": "sinw_d11a",
+    "sweep": "temperature",
+    "t_mean": 400,
+    "n_slabs": 2,
+    "G_ball_W_per_m2_K": 80370322.2064875,
+    "A_c": 7.163052909520561e-18,
+    "dw_THz": 0.1125
+  }
+]

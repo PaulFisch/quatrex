@@ -148,9 +148,11 @@ momentum-undersampling effect and is treated as an open issue in
 \includegraphics[width=0.6\linewidth]{transport_sweeps/prod_qfilm_conservation.pdf}
 \caption{Lead-to-lead heat non-conservation of the production film. It is
 flat in the transverse mesh and is reduced, but not removed, by zero-mode
-projection. The dense solver reaches $\sim10^{-5}$ on the same physical
-system at small broadening; the gap is the open issue of
-\cref{sec:prod_open}.}
+projection; the dense solver at the matched coarse mesh and broadening is
+comparably non-conserving ($17\%$, \cref{tab:prod_dense}). At small
+broadening on the converged mesh the dense solver reaches $\sim10^{-5}$
+on the same physical system (dashed); that four-decade gap is the open
+issue of \cref{sec:prod_open}.}
 \label{fig:prod_qfilm_conservation}
 \end{figure}
 

@@ -1,0 +1,31 @@
+{
+  "study": "cnt80",
+  "cells": [
+    {
+      "tag": "L2",
+      "system": "cnt80",
+      "sweep": "length",
+      "t_mean": 300,
+      "n_slabs": 2,
+      "tdir": "z",
+      "fmax": 50.0,
+      "nfreq": 121,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt80_L3"
+    },
+    {
+      "tag": "L3",
+      "system": "cnt80",
+      "sweep": "length",
+      "t_mean": 300,
+      "n_slabs": 3,
+      "tdir": "z",
+      "fmax": 50.0,
+      "nfreq": 121,
+      "emin": 0.0,
+      "dt": 10.0,
+      "work": "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/scripts/out/prod/geom/cnt80_L2"
+    }
+  ]
+}
