@@ -17,16 +17,19 @@ they are collected here only to show that they are biased and, crucially, that t
 bias cannot be removed by extrapolation. Its systematic is much larger than the
 lead-balance residual suggests: on the \texttt{cnt33} tube at matched $\eta$ the
 lead balance stays $\sim10^{-5}$ throughout, yet the anharmonic ratio
-$G_{\rm anh}/G_{\rm ball}$ swings $0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz
+% REVIEW(kept from remote): eta enters as i*eta added to omega^2, so its unit is THz^2 -- applied here
+$G_{\rm anh}/G_{\rm ball}$ swings $0.79\to0.92$ across $\eta=0.30$--$0.90$\,THz$^2$
 (\cref{fig:res_cnt_T}), so a single broadening over-broadens the spectral function
-and \emph{under}-estimates the scattering. Worse, the extrapolation overshoots: the
+and \emph{under}-estimates the scattering (a single point at $\eta=0.45$\,THz$^2$
+reads only a $\sim16\%$ reduction). Worse, the extrapolation overshoots: the
 $\eta\ge0.30$ window extrapolates to $G_{\rm anh}/G_{\rm ball}\approx0.70$, whereas
-the directly converged $\eta\to0$ fixed point gives $0.57$ (\cref{sec:res_eta0}) ---
+the directly converged $\eta\to0$ fixed point gives $0.574$ (\cref{sec:res_eta0}) ---
 the finite-$\eta$ family does not connect smoothly to the $\eta=0$ limit, so even an
 $\eta\to0$ fit of finite-$\eta$ data is wrong by $\sim20\%$. The same lesson is
 sharper on the soft \texttt{d5a} wire, where a single cell at finite $\eta$ returns
 the unphysical $G_{\rm anh}/G_{\rm ball}>1$ (\cref{tab:res_anh_T}): finite broadening
 can violate the resistive bound outright. The only defensible transport number is the
+% REVIEW(merge): remote text claimed the window extrapolates to 0.57; our sweep gives ~0.70 vs direct 0.574 -- verify the extrapolation number from the eta-sweep npz in the claims pass, and align sec:cons_ratio in app:conservation to the same story
 $\eta=0$ fixed point; the mechanism and step-by-step verification are in
 \cref{app:conservation}.
 
@@ -38,18 +41,21 @@ $\eta=0$ fixed point; the mechanism and step-by-step verification are in
   carbon nanotube versus temperature at a single transport cell, shown to quantify
   the broadening bias. \emph{Left}: ballistic and anharmonic per-area conductance.
   \emph{Right}: the finite-$\eta$ ratio $G_\mathrm{anh}/G_\mathrm{ball}$ (falling
-  $0.92\to0.71$ over $30$--$300$~K) sits well above the conserving $\eta\to0$ result
+  % REVIEW(merge): 0.810 per the remote 0.71->0.810 reconciliation at 1 cell/300 K; confirm against the regenerated figure data
+  $0.92\to0.810$ over $30$--$300$~K) sits well above the conserving $\eta\to0$ result
   of \cref{sec:res_eta0} ($0.75\to0.57$); the gap is the over-broadening systematic.}
   \label{fig:res_cnt_T}
 \end{figure}
 
 \paragraph{Frequency grid.}
 The bubble convolution \cref{eq:sigma_phph_tau} has support up to
+% REVIEW: [FLAG-ONLY] mixed omega convention -- f_max >= 2*omega_max/2pi carries an explicit 1/2pi (angular) while |Sigma^R|/omega_max^2 and the THz^2 magnitudes treat omega as ordinary THz
 $2\omega_{\max}$, so the grid must satisfy $f_{\max}\ge2\omega_{\max}/2\pi$
 (\cref{eq:conv_support}). An under-ranged grid aliases the truncated tail back
 into the band as a spurious strong-coupling self-energy that destabilises the
 SCBA: for the \texttt{d5a} wire the historical $f_{\max}=18$\,THz, far below the
-$\sim129$\,THz convolution support set by the $63$\,THz Si--H stretch, inflates
+% REVIEW: 2*63 = 126, not 129
+$\sim126$\,THz convolution support set by the $63$\,THz Si--H stretch, inflates
 $|\Sigma^R|$ by $\sim25\times$ and diverges the multi-slab iteration, whereas the
 properly-ranged grid returns it to the
 perturbative regime ($|\Sigma^R|/\omega_{\max}^2\approx0.2\%$). The one-shot
@@ -73,4 +79,5 @@ unphysical at higher rank while the symmetric ans\"atze degrade gracefully.
 
 \todo[inline]{Consolidate the three sweeps above into one approximation-cost figure
 (conductance / $G_{\rm anh}-G_{\rm ball}$ vs.\ each approximation, across
-\texttt{cnt33}/\texttt{d5a}/\texttt{d11a}/film) -- see \texttt{document/MISSING.md} (A,B).}
+% REVIEW: removed dangling reference to non-existent document/MISSING.md
+\texttt{cnt33}/\texttt{d5a}/\texttt{d11a}/film).}

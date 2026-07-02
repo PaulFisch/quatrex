@@ -9,7 +9,8 @@ perturbation theory, while the QuaTrEx solver uses its own internal
 frequency-squared convention.  Since the later extraction, transport,
 and anharmonic self-energy steps all rely on consistent units and phase
 conventions, we summarize them here once and refer back to this section
-throughout the chapter.
+% REVIEW: this file IS the chapter; refer to the document, not the chapter
+throughout the document.
 
 % ----------------------------------------------------------------------
 \section{Units in phonopy and Quantum ESPRESSO}
@@ -23,6 +24,7 @@ have units
   [\lambda] = \frac{\mathrm{eV}}{\mathrm{amu}\cdot\mathrm{\si{\angstrom}}^2}.
 \end{equation}
 Phonopy converts these eigenvalues to frequencies in THz via
+% REVIEW: the appended ~15.633 THz is the VaspToTHz prefactor alone (lambda-independent), not the value of f
 \begin{equation}\label{eq:VaspToTHz}
   f\;[\mathrm{THz}]
   = \mathrm{sgn}(\lambda)\,\sqrt{|\lambda|}
@@ -31,7 +33,8 @@ Phonopy converts these eigenvalues to frequencies in THz via
 \end{equation}
 where $e = 1.602\times 10^{-19}$\,J is the elementary charge,
 $m_u = 1.661\times 10^{-27}$\,kg is the atomic mass unit, and
-$A = 10^{-10}$\,m is the metre-to-\AA\ conversion factor.
+% REVIEW: 1e-10 m is the Angstrom-to-metre factor, not metre-to-Angstrom
+$A = 10^{-10}$\,m is the \AA-to-metre conversion factor.
 
 When phonopy is used together with the QE interface, the internal
 representation inherited from QE uses atomic units: lattice vectors are
@@ -107,7 +110,22 @@ which converts
 eV/(\AA$^3\cdot$amu$^{3/2}$) to the SI units required in the
 phonon--phonon self-energy expressions.
 
+% REVIEW: code->doc -- the production phonon-phonon stack (quatrex/phonon/units.py; static_self_energy.py device_fc3_mass_weighted; bubble_prefactor_thz = i*hbar*dOmega/(4 pi)) actually runs in a THz^2 / plain-THz internal system, not (rad/s)^2; reconcile
+\paragraph{THz-based internal unit system.}
+The $(\mathrm{rad/s})^2$ statement above is the SI-facing equivalent.  In
+practice the production phonon--phonon stack
+(\texttt{quatrex/phonon/units.py},
+\texttt{static\_self\_energy.py:\,device\_fc3\_mass\_weighted}) works in a
+\emph{THz-based} internal system: the dynamical matrix $D$ and all
+self-energies are carried in $\mathrm{THz}^2$, while the frequency axis
+$\omega$ is in plain THz, with the bubble assembled using
+$\texttt{bubble\_prefactor\_thz} = i\hbar\,\Delta\Omega/(4\pi)$.  The
+$\mathrm{THz}^2$ convention and this prefactor are documented in
+\cref{ap:fa_overview}; the $(\mathrm{rad/s})^2$ form and
+\cref{eq:conversion_fc3} provide the SI-facing equivalents.
+
 \paragraph{Green's-function sign convention.}
+% REVIEW: labeling tension -- theory/30_scba_eta0.tex and infrared.tex write G^<_eq=-i n A (textbook sign) while invoking "occupation-positive"; the stored solver sign is +i n A. Those two appendix statements should cite the textbook sign G^<=-inA explicitly. (FLAG-ONLY: no math changed here.)
 The solver stores the phonon Green's functions and self-energies
 \emph{occupation-positive}: $-iG^{\lessgtr}(\omega)\succeq0$ for $\omega>0$, the
 same sign as the lead injection
@@ -146,7 +164,8 @@ We first collect the symbols used throughout this work.
 Here $\Ncell$ is the total number of supercells (e.g.\ $3^3 = 27$),
 $\nprim$ the number of atoms in the primitive cell (e.g.\ $2$ for
 bulk Si), and
-$\ndof = 3\nsuper = 3\Ncell^3\nprim$ the total number of degrees of
+% REVIEW: Ncell is the TOTAL cell count (=27), so total DOF = 3 Ncell nprim; drop the spurious cube
+$\ndof = 3\nsuper = 3\Ncell\nprim$ the total number of degrees of
 freedom in the simulation.  $\ntrans$ is the total number of DOFs in
 the transport direction (i.e.\ when transverse cells are not
 included), and $N_\mathrm{transport}$ is the number of transport
@@ -158,8 +177,14 @@ cell $l$ along direction $\alpha$ is written $u_\alpha(l\kappa)$.
 The lattice vector of cell $l$ is $\vR_l$, while $\vc{\tau}_\kappa$
 denotes the basis-atom position within the unit cell.  Unless stated
 otherwise, $\vc{\tau}_\kappa$ and $\vq$ are expressed in fractional
-crystal coordinates, so that factors of $2\pi$ appear explicitly in
-all Fourier phases.
+% REVIEW: two phase conventions actually coexist; the blanket "2pi in all phases" claim contradicts eq:dft_fwd/eq:dft_inv -- state both explicitly
+crystal coordinates.  Two distinct phase conventions are used in this
+work: the dynamical-matrix transforms
+(\cref{eq:DA_conv,eq:DB_conv,eq:fourier_series_conv}) carry an explicit
+$2\pi$, i.e.\ $e^{+2\pi i\,\vq\cdot\vR}$, whereas the
+Green's-function/self-energy discrete Fourier pair
+(\cref{eq:dft_fwd,eq:dft_inv}) absorbs the $2\pi$ into $\vq$ and uses the
+opposite forward sign, $e^{-i\,\vq\cdot\vR}$.
 
 The harmonic force constants are written as
 \begin{equation}
@@ -201,6 +226,13 @@ series,
   D^{(\mathrm{B})}(\vq)
   = \sum_{\vR} H(\vR)\,e^{2\pi i\,\vq\cdot\vR}.
 \end{equation}
+% REVIEW: symbol overloading -- H(R) here is the (rad/s)^2 block of eq:conversion (= C*Phi/sqrt(mm')), i.e. it carries the C conversion, unlike the bare mass-weighted Phi/sqrt(mm') used in eq:DB_conv
+Here $H(\vR)$ is the SI-converted mass-weighted block introduced in
+\cref{eq:conversion}, $H(\vR) = C\,\Phi(0,\vR)/\sqrt{m\,m'}$, so that it
+already carries the conversion factor $C$; the $D^{(\mathrm{B})}$ of
+\cref{eq:DB_conv} instead uses the bare mass-weighted force constants
+$\Phi/\sqrt{m_\kappa m_{\kappa'}}$ and therefore differs from
+\cref{eq:fourier_series_conv} by the overall factor $C$.
 
 For the transverse directions we write $\vq_\perp$ for the
 two-dimensional transverse wavevector.  A partial Fourier sum over

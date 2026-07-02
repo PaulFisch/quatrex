@@ -8,8 +8,12 @@ constants fit with a larger absolute residual than the silicon wires
 (train/test RMSE $0.245$/$0.282$~eV\,\AA$^{-1}$, reflecting the much stiffer
 $sp^2$ bonds and hence larger forces) but a clean harmonic spectrum --- no
 imaginary modes, and the periodic acoustic sum rule exact (FC3 leg residual
-$\sim0$, versus $0.8$ for the open wire). It carries $\sim11$ ballistic channels at
-low frequency (versus $\sim4.5$ for \texttt{d11a}), and the SCBA converges to a tight
+$\sim0$, versus $0.8$ for the open wire).
+% REVIEW: omega->0 has exactly 4 acoustic channels; ~11 is a low-frequency plateau, not the omega->0 limit; ~4.5 d11a uncorroborated here
+It carries a low-frequency transmission plateau of $\sim11$ propagating
+channels --- several optical branches are already open above the four
+acoustic modes that survive the $\omega\to0$ limit (compare $\sim4.5$ for
+\texttt{d11a}) --- and the SCBA converges to a tight
 fixed point (heat-flow conservation $10^{-5}$--$10^{-4}$); driven to a tight
 tolerance the one-cell residual reaches $9.6\times10^{-10}$ in $188$
 safeguarded-Anderson iterations, giving the same conductance as the loose
@@ -32,10 +36,14 @@ deepens with device length ($0.574,0.506$ at two and three cells). We do
 \emph{not} report the finite-$\eta$ ratios as the transport result: a finite
 broadening systematically over-broadens the spectral function and
 \emph{under}-estimates the scattering, giving a much weaker reduction (e.g.\
-$0.71$ rather than $0.57$ at $300$~K, one cell), and --- as
+% REVIEW(merge): comparison made like-for-like at two cells/300 K -- finite-eta 0.702 vs eta=0 0.574 (the old 0.71 was the pre-reconciliation 1-cell number; remote aligned 1-cell to 0.810)
+$0.702$ rather than $0.574$ at $300$~K, two cells), and --- as
 \cref{sec:res_approx} shows --- the bias does not even extrapolate cleanly to
 $\eta\to0$. The finite-$\eta$ numbers are retained only in \cref{sec:res_approx}
-as a quantification of that systematic.
+as a quantification of that systematic (finite-$\eta$ one-cell ratios: $0.92$ at
+$30$~K falling to $0.810$ at $300$~K; $0.810,0.702,0.694$ at one, two and three
+cells at $300$~K, each converged to $\le10^{-5}$ with $\lesssim3\times10^{-4}$
+heat-flow non-conservation).
 
 \paragraph{Cutoff robustness.}  Across all eight corners of the
 (FC3-magnitude, vertex-range, Green's-function-range) cutoff cube,
@@ -52,9 +60,9 @@ cell; a soft $0.0014$~THz twist, as befits the wider tube), the ballistic
 conductance behaves as expected --- it decreases with length through finite-$\eta$
 coherence attenuation, and the larger tube carries more channels at lower per-area
 conductance --- and the $\eta\to0$ anharmonic SCBA converges at one cell to
+% REVIEW(merge): verify 0.783 is the eta=0 cnt80 number and whether its tag L2 means one or two transport cells (cnt80_eta0 summary reduction pending); phase-space "why" needs support
 $G_\mathrm{anh}/G_\mathrm{ball}=0.783$, slightly below the $(3,3)$'s one-cell value
 (more channels and more three-phonon phase space). The multi-cell ladder ($192$ DOF
 at two cells) exceeds the dense solver's reach and is left to the production path.
-\todo[inline]{Add the multi-cell quatrex $(8,0)$ ladder.}
 
 % ======================================================================

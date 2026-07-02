@@ -9,6 +9,7 @@ ghost-reservoir reading of $\eta$, \cref{eq:ghost}), and quantifies the
 finite-$\eta$ floor on production devices. The standalone gate lives in
 \texttt{phonon.studies.conservation} (\texttt{replica\_check} for the bubble
 energy balance, \texttt{s3\_violation} for the vertex symmetry,
+% REVIEW: FLAG coverage gap -- the sigma_convention positivity gate (-i Sigma^{><} >= 0) is named here but never exercised/quantified in the body
 \texttt{sigma\_convention} for the SSE sign/positivity check); the production
 attributions are reproduced from cached run artifacts under
 \texttt{phonon/studies/out/}. The motivating observation is that on the
@@ -67,8 +68,9 @@ conservation, where the full Kramers--Kronig retarded is mandatory
     \midrule
     S1 & $\eta=0$, consistent half rule                       & $6.9\mathrm{e}{-13}$\\
     S2 & $+$ Hermitian (Kramers--Kronig) part in $\Sigma_s^R$ & $1.6\mathrm{e}{-12}$\\
-    S4 & $+$ $\omega$-mask (cutoff) on $\Sigma_s^{\lessgtr,R}$ & $7.0\mathrm{e}{-14}$\\
+    % REVIEW: reordered case rows to S1..S5 (S3 was listed after S4)
     S3 & $\eta=0.1$ / $\eta=0.4$                              & $3.8\mathrm{e}{-12}$ / $1.5\mathrm{e}{-12}$\\
+    S4 & $+$ $\omega$-mask (cutoff) on $\Sigma_s^{\lessgtr,R}$ & $7.0\mathrm{e}{-14}$\\
     S5 & deliberately inconsistent $\Sigma^R$ (skew $\times0.6$) & $1.7\mathrm{e}{-12}$\\
     \bottomrule
   \end{tabular}
@@ -83,7 +85,8 @@ for all $\eta$. This is the finite-$\eta$, broken-reciprocity term of
 
 The $\hbar\omega$-weighted anatomy makes the diagnostic concrete. At $\eta=0.1$
 the identity \cref{eq:sumrule} holds, $J_L+J_R+J_s=-4.4\times10^{-14}$, while
-the bare \emph{lead} balance is $|J_L+J_R|=2.9\times10^{-1}$, carried entirely
+% REVIEW: lead balance must equal |J_s|=0.306 by J_L+J_R+J_s~=0; 2.9e-1 was ~5% off
+the bare \emph{lead} balance is $|J_L+J_R|=3.1\times10^{-1}$, carried entirely
 by $J_s=+0.306$ of the (non-self-consistent, hence non-$\Phi$-derivable) toy
 $\Sigma_s$. The lead balance \emph{is} $|J_s|$: it measures distance from the
 fixed point, not a violation of the formulation.
@@ -119,6 +122,7 @@ $O(0.1\text{--}1)$.
 plain truncation to the device degrees of freedom) gate at worst $S_3$
 violation $\le3.9\times10^{-16}$ after the force-constant regeneration, whereas
 the retired acoustic-sum-rule projection broke $S_3$ at $O(1)$ --- confirming
+% REVIEW: FLAG over-generalisation -- a permutation-symmetric ASR projection preserves S3; the O(1) breaking is specific to the non-symmetric projection used here
 that the vertex must be left as a genuine third derivative
 (\cref{eq:H_phonon}) rather than post-projected.
 
@@ -240,6 +244,7 @@ extrapolation}
 \label{sec:cons_ratio}
 % ======================================================================
 
+% REVIEW: FLAG inconsistent statement -- eta-window extrapolation (0.68-0.74) vs directly-converged 0.57 differ by ~13 pts (as large as the systematic removed); "13-22 point" mixes two undefined figures, make consistent
 The practical consequence is that a single-$\eta$ production number
 underestimates the anharmonic effect. At \emph{matched} $\eta$
 (\cref{tab:cons_ratio}) the \texttt{cnt33} lead balance stays $\sim10^{-5}$

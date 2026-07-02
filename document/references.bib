@@ -60,8 +60,6 @@
   doi = {10.1103/PhysRevB.96.014111},
 }
 
-% --- Energy conservation / conserving approximations / probes (App. conservation) ---
-
 @article{lu_coupled_2007,
   title = {Coupled electron and phonon transport in one-dimensional atomic junctions},
   author = {L{\"u}, Jing-Tao and Wang, Jian-Sheng},
@@ -162,19 +160,6 @@
   doi = {10.1615/AnnualRevHeatTransfer.2014006986},
 }
 
-% --- Self-consistent-iteration solvers / Krylov root-finders (eta->0 SCBA) ---
-@article{anderson_iterative_1965,
-  title = {Iterative Procedures for Nonlinear Integral Equations},
-  author = {Anderson, Donald G.},
-  journal = {Journal of the ACM},
-  volume = {12},
-  number = {4},
-  pages = {547--560},
-  year = {1965},
-  publisher = {Association for Computing Machinery},
-  doi = {10.1145/321296.321305},
-}
-
 @article{shroff_stabilization_1993,
   title = {Stabilization of Unstable Procedures: The Recursive Projection Method},
   author = {Shroff, Gautam M. and Keller, Herbert B.},
@@ -185,18 +170,6 @@
   year = {1993},
   publisher = {Society for Industrial and Applied Mathematics},
   doi = {10.1137/0730057},
-}
-
-@article{saad_gmres_1986,
-  title = {{GMRES}: A Generalized Minimal Residual Algorithm for Solving Nonsymmetric Linear Systems},
-  author = {Saad, Youcef and Schultz, Martin H.},
-  journal = {SIAM Journal on Scientific and Statistical Computing},
-  volume = {7},
-  number = {3},
-  pages = {856--869},
-  year = {1986},
-  publisher = {Society for Industrial and Applied Mathematics},
-  doi = {10.1137/0907058},
 }
 
 @article{eisenstat_choosing_1996,
@@ -242,11 +215,6 @@
   address = {Philadelphia},
 }
 
-% ---------------------------------------------------------------------------
-% Infrared / Bose-singularity treatment (exact subtraction) -- see app:infrared
-% ---------------------------------------------------------------------------
-
-% (C) Quantized thermal conductance / omega->0 ballistic plateau
 @article{rego_quantized_1998,
   title = {Quantized Thermal Conductance of Dielectric Quantum Wires},
   author = {Rego, Luis G. C. and Kirczenow, George},
@@ -280,7 +248,6 @@
   doi = {10.1063/1.4726111},
 }
 
-% (A) Singularity-subtraction / Cauchy-PV quadrature (numerics)
 @article{helsing_higher_2013,
   title = {A higher-order singularity subtraction technique for the discretization of singular integral operators on curved surfaces},
   author = {Helsing, Johan},
@@ -307,7 +274,7 @@
   volume = {60},
   issue = {1},
   pages = {e13073},
-  year = {2023},
+  year = {2024},
   doi = {10.1049/ell2.13073},
 }
 
@@ -321,7 +288,6 @@
   doi = {10.2528/PIER06051901},
 }
 
-% (B) Phonon NEGF / atomistic Green's-function transport
 @article{lemus_modespace_2020,
   title = {Mode-space-compatible inelastic scattering in atomistic nonequilibrium Green's function implementations},
   author = {Lemus, Daniel A. and Charles, James and Kubis, Tillmann},
@@ -343,7 +309,7 @@
 
 @article{xu_nonequilibrium_2008,
   title = {Nonequilibrium Green's function method for phonon-phonon interactions and ballistic-diffusive thermal transport},
-  author = {Xu, Yong and Wang, Jian-Sheng and Duan, Wenhui and Gu, Bing-Lin and Dong, Baowen},
+  author = {Xu, Yong and Wang, Jian-Sheng and Duan, Wenhui and Gu, Bing-Lin and Li, Baowen},
   journal = {Physical Review B},
   volume = {78},
   issue = {22},
@@ -363,7 +329,6 @@
   doi = {10.1126/sciadv.adi7439},
 }
 
-% (E) Bosonic-pole / 1/omega subtraction in Eliashberg theory
 @article{wu_special_2019,
   title = {Special role of the first {Matsubara} frequency for superconductivity near a quantum critical point: Nonlinear gap equation below $T_c$ and spectral properties in real frequencies},
   author = {Wu, Yi-Ming and Abanov, Artem and Wang, Yuxuan and Chubukov, Andrey V.},
@@ -385,10 +350,9 @@
   doi = {10.1016/j.aop.2020.168102},
 }
 
-% (D) Phonon BTE infrared / acoustic three-phonon Gamma scaling
 @article{ma_examining_2014,
   title = {Examining the {Callaway} model for lattice thermal conductivity},
-  author = {Ma, Jie and Li, Wu and Luo, Xiaobing},
+  author = {Ma, Jinlong and Li, Wu and Luo, Xiaobing},
   journal = {Physical Review B},
   volume = {90},
   issue = {3},
@@ -414,4 +378,122 @@
   journal = {arXiv preprint arXiv:2105.12154},
   year = {2021},
   doi = {10.48550/arXiv.2105.12154},
+}
+
+@article{Donadio2010thermal,
+  title = {Temperature Dependence of the Thermal Conductivity of Thin Silicon Nanowires},
+  author = {Donadio, Davide and Galli, Giulia},
+  journal = {Nano Letters},
+  volume = {10},
+  issue = {3},
+  pages = {847--851},
+  year = {2010},
+  doi = {10.1021/nl903268y},
+}
+
+@article{Markussen2007anisotropic,
+  title = {Heat Conductance Is Strongly Anisotropic for Pristine Silicon Nanowires},
+  author = {Markussen, Troels and Jauho, Antti-Pekka and Brandbyge, Mads},
+  journal = {Nano Letters},
+  volume = {8},
+  issue = {11},
+  pages = {3771--3775},
+  year = {2008},
+  % REVIEW: cite key says 2007 but the paper is 2008; confirm DOI (10.1021/nl8023824?)
+}
+
+@article{Peelaers2009sinw,
+  title = {Phonon Band Structure of {Si} Nanowires: A Stability Analysis},
+  author = {Peelaers, H. and Partoens, B. and Peeters, F. M.},
+  journal = {Nano Letters},
+  volume = {9},
+  issue = {1},
+  pages = {107--111},
+  year = {2009},
+  % REVIEW: confirm DOI
+}
+
+@article{Vo2008atomistic,
+  title = {Atomistic Design of Thermoelectric Properties of Silicon Nanowires},
+  author = {Vo, Trinh T. M. and Williamson, Andrew J. and Lordi, Vincenzo and Galli, Giulia},
+  journal = {Nano Letters},
+  volume = {8},
+  issue = {4},
+  pages = {1111--1114},
+  year = {2008},
+  % REVIEW: confirm DOI
+}
+
+@article{Karamitaheri2013mvff,
+  title = {Calculation of Confined Phonon Spectrum in Narrow Silicon Nanowires Using the Valence Force Field Method},
+  author = {Karamitaheri, Hossein and Neophytou, Neophytos and Karami Taheri, Mahdi and Faez, Rahim and Kosina, Hans},
+  journal = {Journal of Electronic Materials},
+  year = {2013},
+  note = {arXiv:1304.1401},
+  % REVIEW: confirm volume/pages/DOI
+}
+
+@article{Rurali2010colloquium,
+  title = {Colloquium: Structural, electronic, and transport properties of silicon nanowires},
+  author = {Rurali, Riccardo},
+  journal = {Reviews of Modern Physics},
+  volume = {82},
+  issue = {1},
+  pages = {427--449},
+  year = {2010},
+  doi = {10.1103/RevModPhys.82.427},
+}
+
+@article{han_fourphonon_2021,
+  title = {{FourPhonon}: An extension module to {ShengBTE} for computing four-phonon scattering rates and thermal conductivity},
+  author = {Han, Zherui and Yang, Xiaolong and Li, Wu and Feng, Tianli and Ruan, Xiulin},
+  journal = {Computer Physics Communications},
+  volume = {270},
+  pages = {108179},
+  year = {2022},
+  doi = {10.1016/j.cpc.2021.108179},
+  % REVIEW: arXiv preprint 2021; journal version 2022 -- key year is the preprint year
+}
+
+@article{roy_migdal_2014,
+  title = {{Migdal's} theorem and electron-phonon vertex corrections in {Dirac} materials},
+  author = {Roy, Bitan and Sau, Jay D. and Das Sarma, S.},
+  journal = {Physical Review B},
+  volume = {89},
+  issue = {16},
+  pages = {165119},
+  year = {2014},
+  doi = {10.1103/PhysRevB.89.165119},
+}
+
+@article{dahlen_LW_2006,
+  title = {Variational energy functionals of the {Green} function and of the density tested on molecules},
+  author = {Dahlen, Nils Erik and van Leeuwen, Robert and von Barth, Ulf},
+  journal = {Physical Review A},
+  volume = {73},
+  pages = {012511},
+  year = {2006},
+  doi = {10.1103/PhysRevA.73.012511},
+}
+
+@article{debernardi_PRB_1995,
+  title = {Anharmonic Phonon Lifetimes in Semiconductors from Density-Functional Perturbation Theory},
+  author = {Debernardi, Alberto and Baroni, Stefano and Molinari, Elisa},
+  journal = {Physical Review Letters},
+  volume = {75},
+  issue = {9},
+  pages = {1819--1822},
+  year = {1995},
+  doi = {10.1103/PhysRevLett.75.1819},
+  % REVIEW: key string says "PRB" but the venue is Phys. Rev. Lett. (corrected here)
+}
+
+@book{pourfath_negf_2014,
+  title = {The Non-Equilibrium {Green's} Function Method for Nanoscale Device Simulation},
+  author = {Pourfath, Mahdi},
+  series = {Computational Microelectronics},
+  year = {2014},
+  publisher = {Springer},
+  address = {Vienna},
+  doi = {10.1007/978-3-7091-1800-9},
 }

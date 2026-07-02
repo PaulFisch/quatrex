@@ -19,11 +19,16 @@ The simplest scheme,
 with damping parameter $\alpha \in (0,1]$. Linear mixing converges if
 the fixed-point Jacobian
 $J = \partial\mathcal{F}/\partial\Sigma_s$ has spectral radius
-$\sigma(I - \alpha J) < 1$, i.e.\ $\alpha < 2/(1+|\sigma(J)|_{\max})$.
+% REVIEW: the linear-mixing map is M=(1-alpha)I+alpha J=I-alpha(I-J), so the
+% convergence condition is sigma((1-alpha)I+alpha J)<1 (was sigma(I-alpha J)<1).
+% The final bound alpha < 2/(1+|sigma(J)|_max) is correct.
+$\sigma\bigl((1-\alpha) I + \alpha J\bigr) < 1$, i.e.\ $\alpha < 2/(1+|\sigma(J)|_{\max})$.
 For weak anharmonicity ($|\sigma(J)|<1$) any $\alpha \le 1$ works; for
 strong anharmonicity the spectrum of $J$ extends close to $-1$ in
 some directions and small $\alpha\sim 0.1\text{--}0.3$ is required, with
-linear convergence rate $1-\alpha$ in the slowest mode.
+linear convergence rate $\max_\lambda|1-\alpha+\alpha\lambda|$ set by the
+eigenvalue of $J$ nearest $+1$ (which tends to $1$ as the iteration approaches
+marginal stability).
 
 \subsubsection{Anderson mixing}
 
@@ -47,9 +52,14 @@ least-squares problem
 For linear problems Anderson mixing is
 essentially equivalent to GMRES applied to the residual
 equation~\cite{walker_anderson_2011,rohwedder_analysis_2011}, with provable
-$q$-linear convergence with $q$-factor $q = 3c - c^2$ for depth-1
-Anderson when the underlying iteration is a contraction with constant
-$c < 2-\sqrt{3}$~\cite{toth_convergence_2015,bian_anderson_2021}. Local
+% REVIEW: removed the explicit "q = 3c - c^2 for c < 2-sqrt(3)" -- it was
+% internally inconsistent (2-sqrt(3) is the root of c^2-4c+1, unrelated to
+% 3c-c^2; and 3c-c^2 > c for c in (0,2) is not an acceleration). The depth-1
+% q-factor and its validity threshold are given explicitly by Bian-Chen-Kelley;
+% reinsert the exact closed form from that reference if a number is wanted.
+local $q$-linear convergence for depth-1
+Anderson when the underlying iteration is a
+contraction~\cite{toth_convergence_2015,bian_anderson_2021}. Local
 convergence in nonlinear electronic-structure problems is well
 established under mild Lipschitz assumptions on the
 fixed-point map~\cite{rohwedder_analysis_2011,toth_convergence_2015}. In
@@ -68,13 +78,19 @@ $|\sigma(G')|<1$. As the numerical broadening is taken to zero
 (\cref{sub:eta_zero}) this fails for sharp, weakly damped resonances: a few
 eigenvalues of $G'$ acquire modulus $\geq 1$ and no contraction-based scheme
 converges. Three progressively stronger tools target this regime, all
-MPI-distributed over the energy grid.
+MPI-distributed over the energy grid; their global reductions (the residual
+inner products and norms, the RRE/RPM Gram solves $Z^{H}G'Z$, and the JFNK
+trust-region cap) are carried by the collective primitives in
+\texttt{quatrex.core.mpi\_linalg} (\texttt{global\_dot}, \texttt{global\_norm},
+\texttt{global\_gram}, \texttt{trust\_cap}), so the serial linear algebra written
+below is evaluated across the distributed energy grid.
 
 \paragraph{Reduced-rank extrapolation (RRE).}
 RRE~\cite{sidi_vector_2017} forms the affine combination
 $\Sigma=\sum_i\gamma_i\,\Sigma^{(i)}$, $\sum_i\gamma_i=1$, of a short window of
 iterates that minimises the residual norm
-$\bigl\|\sum_i\gamma_i\,\vc{f}_i\bigr\|$ (minimal-polynomial extrapolation).
+$\bigl\|\sum_i\gamma_i\,\vc{f}_i\bigr\|$ (a minimal-residual vector extrapolation;
+distinct from minimal-polynomial extrapolation, MPE).
 Restarted every few iterates, it recovers a mildly unstable fixed point from the
 algebra of the residual history rather than by contraction, at the cost of one
 small real Gram solve per cycle and no extra map evaluations.
@@ -83,10 +99,14 @@ small real Gram solve per cycle and no extra map evaluations.
 When the unstable subspace is low-dimensional, the RPM of
 \citet{shroff_stabilization_1993} applies Newton on that subspace and Picard on
 its contractive complement,
+% REVIEW: corrected to the canonical Shroff-Keller RPM update. The correction
+% term is +Z(I_k-H)^{-1} H Z^H f, whose modal gain on an unstable mode is
+% lambda/(1-lambda) (matching phi(lambda) in the text below); the previous
+% -Z(I_k-H)^{-1} Z^H f dropped the H factor and carried the wrong sign.
 \begin{equation}\label{eq:rpm}
   \Sigma^{(n+1)}
   =\mathcal{F}[\Sigma^{(n)}]
-   -Z\,(\mathbb{I}_k-H)^{-1}Z^{H}\vc{f}^{(n)},
+   +Z\,(\mathbb{I}_k-H)^{-1} H\,Z^{H}\vc{f}^{(n)},
   \qquad \vc{f}^{(n)}=\mathcal{F}[\Sigma^{(n)}]-\Sigma^{(n)},
 \end{equation}
 where the columns of $Z$ span the $k$-dimensional unstable invariant subspace and
@@ -184,6 +204,41 @@ little conductance --- and, as \cref{sub:ir_subtraction} shows, the bare untaper
 bubble is itself exactly conserving; the taper is therefore a stabiliser of the
 marginal $\eta=0$ iteration, not a correction to the physics.
 
+\paragraph{Frequency-proportional regulator and the sub-grid soft-mode floor.}
+The constant broadening $(\omega^2+i\eta)\mathbb{I}$ of \cref{eq:system} is a
+convenient idealisation; the production solver instead uses a
+\emph{frequency-proportional} regulator
+\begin{equation}\label{eq:regulator_impl}
+  [G^R]^{-1} = \bigl(\omega^2 + 2i\eta|\omega|\bigr)\mathbb{I} - D - \Sigma^R,
+\end{equation}
+i.e.\ $\omega^2$ shifted by $2i\eta|\omega|$ rather than by $i\eta$ or
+$(\omega+i\eta)^2$. The $(\omega+i\eta)^2$ form carries a spurious $-\eta^2$
+band-edge shift that makes modes with $\omega\lesssim\eta$ artificially evanescent
+and suppresses the acoustic plateau; the linear-in-$|\omega|$ damping avoids this
+and vanishes as $\omega\to0$, so it does not pollute the infrared. The price is
+that the acoustic \emph{soft} modes ($D\to0$ as $\omega\to0$) are then left
+unregularised at $\eta\to0$ ($G^R\sim1/\omega^2$) and the marginal SCBA diverges.
+We restore conditioning with a DC-concentrated soft-mode broadening floor added to
+the \emph{device} system matrix only (never to the ideal-lead OBC),
+\begin{equation}\label{eq:eta_floor}
+  \Delta z^2(\omega) = i\,\Gamma_{\rm floor}\,\frac{\omega_c^2}{\omega^2+\omega_c^2},
+  \qquad \Gamma_{\rm floor}=(c_{\rm floor}\,\Delta\omega)^2,\quad
+  \omega_c = 2\Delta\omega,
+\end{equation}
+a Lorentzian low-pass that damps only the lowest, grid-unresolved (and essentially
+heat-free) bins while leaving the resolved low-$\omega$ physics and the plateau
+untouched. Since $\Gamma_{\rm floor}\propto(\Delta\omega)^2\to0$ under grid
+refinement, it is grid-consistent and removed in the same limit as the taper
+\cref{eq:ir_taper}. The floor is \emph{annealed} during the SCBA: $c_{\rm floor}$
+ramps from a larger start to its target over the first iterations
+(the config knobs \texttt{eta\_ir\_floor\_cells}~$\to$~%
+\texttt{eta\_ir\_floor\_final\_cells} over
+\texttt{eta\_ir\_floor\_ramp\_iterations}), so the soft modes are damped while
+$\Sigma$ develops and the broadening is then relaxed toward zero at the converged
+fixed point. This floor-plus-anneal --- not the spectral window or the occupancy
+taper alone --- is what makes the $\eta=0$ fixed point of soft systems such as the
+\texttt{d5a} nanowire reachable (\cref{sec:res_eta0}).
+
 \paragraph{Linewidth feasibility criterion.}
 Whether $\eta=0$ is reachable on a given grid can be decided a~priori, without any
 SCBA, by evaluating the golden-rule linewidth $\Gamma_{\rm anh}(\omega)$
@@ -243,11 +298,16 @@ target; a regulator that multiplies the occupations by $\omega^2$, as the taper
 It is tempting to remove the $1/\omega$ from the scattering self-energy by the
 singularity-subtraction device of boundary-integral
 numerics~\cite{helsing_higher_2013,hanninen_singularity_2006,wang_logarithmic_2023}.
-Applied to the bubble legs this is both unnecessary and harmful. The cubic matrix
-element carries $|V_3|^2\propto\omega_1\omega_2\omega_3$, so the soft-leg factor
-offsets the absorption pole; equivalently the acoustic spectral weight vanishes
+Applied to the bubble legs this is both unnecessary and harmful.
+% REVIEW: removed "|V_3|^2 propto omega_1 omega_2 omega_3, so the soft-leg factor
+% offsets the absorption pole". In the harmonic mode basis each leg carries
+% sqrt(hbar/2 omega) ~ omega^{-1/2}, so |V_3|^2 propto 1/(omega_1 omega_2 omega_3),
+% which COMPOUNDS the n(omega')~1/omega' pole rather than offsetting it. Finiteness
+% comes from the linearly vanishing acoustic spectral weight (the same omega-factors,
+% carried by A) together with the acoustic phase space (~omega'^2 in 3D).
+The acoustic spectral weight vanishes
 linearly, $A(\omega')\to A'(0)\,\omega'$, so the equilibrium lesser function
-$G^{<}_{\rm eq}=-i\,nA$ stays finite. Out of equilibrium the bosonic fold
+$G^{<}_{\rm eq}=-i\,nA$ stays finite despite $n(\omega')\sim1/\omega'$. Out of equilibrium the bosonic fold
 $G^{<}(-\omega)=G^{>}(\omega)^T$ together with the bounded spectral function forces
 the $1/\omega$ parts of $G^{<}$ and $G^{>}$ to be equal and opposite, hence both
 zero; and the contact broadening $\Gamma_\ell(\omega)$, being the bosonic (odd)
@@ -282,8 +342,13 @@ an $\eta$-budget diagnostic.
 
 \subsubsection{Lowest-order approximation.}
 
-An attractive alternative to direct SCBA, developed by~\citet{lee_anharmonic_2018,lee_quantum_2019}, is the
-lowest-order approximation (LOA) implemented through Padé
+% REVIEW: re-attributed. The one-shot current-conserving lowest-order
+% approximation is due to Mera et al.; the lee_* papers apply/extend it to
+% anharmonic phonon transport in 3D nanostructures.
+An attractive alternative to direct SCBA is the
+lowest-order approximation (LOA), introduced for inelastic quantum transport
+by~\citet{mera_inelastic_2012} and applied to anharmonic phonon transport
+by~\citet{lee_anharmonic_2018,lee_quantum_2019}, implemented through Padé
 resummation. LOA collects only the conserving ($\Phi$-derivable) diagrams
 at each order in $\Phi^{(3)}$, ensuring exact current conservation
 at every iteration, then accelerates the resulting series by
@@ -342,9 +407,14 @@ of order
   \quad\text{(metals, exponential)},
 \end{equation}
 or, in polar insulators, $\sim 1/R_c^3$ for the bare truncation, but
-$\sim e^{-R_c/\xi_e}$ if the short-range part once the
+exponential, $\sim e^{-R_c/\xi_g}$, once the
 $1/r^3$ Cochran--Cowley tail has been subtracted analytically and added
 back exactly via Ewald summation~\cite{gonze_dynamical_1997}.
+% REVIEW: the insulator short-range decay length xi_g is set by the electronic
+% band gap, NOT by the metal thermal length xi_e = hbar v_F/(k_B T_el) of
+% eq:fc2_metal (an insulator at T=0 has no Fermi velocity). Also the geometric
+% tail in eq:fc2_error_metal is the 1D form; in d dimensions a shell degeneracy
+% multiplies the summand by ~R_c^{d-1}.
 
 \subsubsection{Transverse $\qp$-mesh convergence}
 \label{subsub:qp_decay}
@@ -357,8 +427,12 @@ Hove singularities, convergence degrades to $\mathcal{O}(N_q^{-1})$;
 a Gaussian smearing or tetrahedron method may then be preferable. The
 self-energy convolution \cref{eq:sigma_phph} couples $\qp$ and $\qp{}'$,
 so the effective integrand has $N_q^{-1/2}$ statistical-noise structure
-under random sampling, but adaptive importance sampling can recover
-$\mathcal{O}(N_q^{-1})$ ~\cite{lee_anharmonic_2018}.
+% REVIEW: importance sampling lowers the variance prefactor but not the
+% N_q^{-1/2} Monte-Carlo exponent; approaching O(N_q^{-1}) needs quasi-Monte-Carlo
+% / low-discrepancy sequences.
+under random sampling, and reducing this toward $\mathcal{O}(N_q^{-1})$ requires
+variance reduction beyond plain importance sampling, e.g.\ quasi-Monte-Carlo /
+low-discrepancy sampling~\cite{lee_anharmonic_2018}.
 
 \subsubsection{Convergence rate of Sancho-Rubio decimation revisited}
 

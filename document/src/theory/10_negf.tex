@@ -14,7 +14,7 @@ $\omega^2$ because the lattice equation of motion is second-order in
 time, and the particles are bosons whose vacuum-fluctuation
 contributions persist at $T = 0$. The phonon-NEGF strategy was developed
 by Mingo and Yang for ballistic transport~\cite{mingo_calculation_2003, mingo_phonon_2003},
-extended to anharmonicity by~\citet{mingo_anharmonic_2006, wang_nonequilibrium_2007,wang_nonequilibrium_2007},
+extended to anharmonicity by~\citet{mingo_anharmonic_2006, wang_nonequilibrium_2007},
 and by~\cite{luisier_atomistic_2012,lee_anharmonic_2018}. An explicit derivation
 of the SCBA self-energy at the diagrammatic level is given by~\citet{guo_quantum_2020}.
 
@@ -81,12 +81,15 @@ $G^{\lessgtr},\, G^{R/A},\, G^t$, with the standard relations
   G^R(t,t') &= \theta(t-t')\bigl[G^>(t,t') - G^<(t,t')\bigr], &
   G^A &= (G^R)^\dagger,\\
   G^R - G^A &= G^> - G^<. &
-  G^t &= G^< + G^r
+  G^t &= G^< + G^R
 \end{align}
 At equilibrium, the fluctuation--dissipation theorem can be written as~\cite[Eq. 24]{wang_nonequilibrium_2014}
+% REVIEW: sign corrected. This file's own eq:spectral gives A=i[G^R-G^A]=-2 Im G^R
+% and G^R-G^A=G^>-G^< (relations above), so G^>-G^<=-iA=+2i Im G^R; the FDT must
+% therefore read G^{<}=-i n A=+2i n Im G^R (was -2i, internally inconsistent).
 \begin{equation}\label{eq:phonon_fdt}
-  G^<(\omega) = -2 i\,n_{\mathrm{BE}}(\omega,T)\,\mathrm{Im}\,G^R(\omega),\qquad
-  G^>(\omega) = -2 i\,[1 + n_{\mathrm{BE}}(\omega,T)]\,\mathrm{Im}\,G^R(\omega).
+  G^<(\omega) = 2 i\,n_{\mathrm{BE}}(\omega,T)\,\mathrm{Im}\,G^R(\omega),\qquad
+  G^>(\omega) = 2 i\,[1 + n_{\mathrm{BE}}(\omega,T)]\,\mathrm{Im}\,G^R(\omega).
 \end{equation}
 Out of
 equilibrium, \cref{eq:phonon_fdt} does not hold and one must solve the
@@ -103,6 +106,10 @@ The retarded Green's function can be computed from the Dyson equation
 \end{equation}
 with $D$ the dynamical matrix, $\eta>0$ a numerical broadening matched
 to the frequency grid, and the total retarded self-energy decomposed as
+% REVIEW: the constant i*eta here is the idealised regulator; the production
+% solver uses the frequency-proportional form (omega^2 + 2i*eta*|omega|) plus a
+% DC-concentrated soft-mode broadening floor on the device matrix only -- see the
+% eta->0 discussion (eq:regulator_impl, eq:eta_floor in sub:eta_zero).
 \begin{equation}
   \Sigma^R(\omega^2) = \Sigma_L^R(\omega^2) + \Sigma_R^R(\omega^2)
                       + \Sigma_s^R(\omega^2).
@@ -145,16 +152,19 @@ over the $q_z$ mesh:
 \begin{align}
   H_{00}(\qp)
     &= \frac{C}{N_{q_z}}
-       \sum_{q=0}^{N_{q_z}-1}
-       D^{(\mathrm{B})}\!\left(q_x,q_y,\frac{q}{N_{q_z}}\right),
+       \sum_{m=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(q_x,q_y,\frac{m}{N_{q_z}}\right),
   \label{eq:H00}\\
   H_{01}(\qp)
     &= \frac{C}{N_{q_z}}
-       \sum_{q=0}^{N_{q_z}-1}
-       D^{(\mathrm{B})}\!\left(q_x,q_y,\frac{q}{N_{q_z}}\right)\,
-       e^{-2\pi i q / N_{q_z}}.
+       \sum_{m=0}^{N_{q_z}-1}
+       D^{(\mathrm{B})}\!\left(q_x,q_y,\frac{m}{N_{q_z}}\right)\,
+       e^{-2\pi i m / N_{q_z}}.
   \label{eq:H01}
 \end{align}
+Here $D^{(\mathrm{B})}$ is the bulk mass-weighted dynamical-matrix block and
+$C$ is the force-constant-to-$(\text{THz})^2$ conversion constant of
+\cref{sec:solver_units} (the sum index $m$ runs over the $q_z$ mesh).
 At nonzero $\qp$, these blocks are generally complex and may equivalently
 be written as the 2D Fourier transform of the real-space FC2:
 \begin{equation}
@@ -186,7 +196,9 @@ initialize
   \qquad
   \beta  = -H_{01},
 \end{equation}
-and iterate
+and iterate (within each sweep all four right-hand sides are evaluated with the
+$\epsilon$ from the previous sweep, i.e.\ the updates are simultaneous, not
+sequential)
 \begin{align}
   \epsilon_s &\leftarrow \epsilon_s - \alpha\,\epsilon^{-1}\beta, \label{eq:sr_eps_s}\\
   \epsilon   &\leftarrow \epsilon - \alpha\,\epsilon^{-1}\beta
@@ -204,6 +216,9 @@ self-energies follow from
   \qquad
   \Sigma_R^R = D_{01}\,g_R\,D_{10},
 \end{equation}
+with $D_{10}=D_{01}^\dagger$ the device--lead coupling block (the off-diagonal of
+the full mass-weighted dynamical matrix linking the device edge to the first lead
+layer; equal to the $H_{01}$ block when device and lead are the same material).
 and the broadening matrices, which set the rate at which lead $\ell$
 injects phonons into the device, are
 \begin{equation}\label{eq:gamma_def}
@@ -221,8 +236,11 @@ $n$ decimation steps,
   \qquad
   T_0 = -\epsilon_0^{-1} H_{01}.
 \end{equation}
-The eigenvalues of $T_0$ are $\lambda_j = e^{i k_j a}$ with $k_j$ the
-complex band wavevectors at energy $\omega^2$. In a bulk gap,
+The relevant decay rates $\lambda_j = e^{i k_j a}$, with $k_j$ the complex band
+wavevectors at energy $\omega^2$, are the eigenvalues of the $2N\times2N$
+companion linearisation of the quadratic eigenproblem
+$(\lambda^2 H_{10}+\lambda(H_{00}-\omega^2\mathbb{I})+H_{01})\xi=0$ (not of the
+$N\times N$ operator $T_0$ alone). In a bulk gap,
 $|\lambda_j| < 1$ strictly for evanescent solutions and
 $|\lambda_j|\to\infty$ for those that grow into the lead; only the
 former survive the iteration. After $n$ steps,
@@ -240,7 +258,8 @@ $|\lambda_j(\omega^2 + i\eta)| = 1 - c_j \eta + \mathcal{O}(\eta^2)$,
 \end{equation}
 which is still exponential in $2^n$ but with a small effective rate.
 At van Hove singularities where $v_g \to 0$, $c_j \to 0$ and the
-decay degenerates to algebraic.
+convergence becomes arbitrarily slow (the effective exponential rate
+$c_j\eta$ collapses), so many more decimation steps are needed.
 
 \paragraph{Alternative algorithms.}
 Several alternatives exist. Direct eigenvalue methods solve the

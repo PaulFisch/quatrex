@@ -6,11 +6,13 @@ As a heterogeneous test, we model a ballistic Si/Ge interface in the
 mass-mismatch approximation, as done in \cite{latour_ab_2017, tian_enhancing_2012, guo_quantum_2020}: bulk-Si force constants in the whole device, with
 the Si/Ge distinction entering only through the atomic masses
 ($m_\mathrm{Si}=28.09$, $m_\mathrm{Ge}=72.64$~amu). At $\Gamma$, the Si
-optical maximum is $15.55$~THz and the Ge mass-clone gives $9.67$~THz,
+% REVIEW: reconcile zone-centre f with FC cross-check (Sec.~res_fc gives 15.12-15.37 THz); state this is the device FC set
+optical maximum is $15.55$~THz (device force-constant set; cf.\ the
+$15.12$--$15.37$~THz primitive-cell cross-check of \cref{sec:res_fc}) and the Ge mass-clone gives $9.67$~THz,
 consistent with $f_\mathrm{Ge}=f_\mathrm{Si}\sqrt{m_\mathrm{Si}/m_\mathrm{Ge}}$.
 On a $20\times20$ transverse mesh, the interfacial conductance at
 $300$~K is $G=196$~MW\,m$^{-2}$K$^{-1}$, within $\sim7\%$ of the
-literature values ($210$, Latour 2017; $209$, Tian 2012). the
+literature values ($210$, Latour 2017; $209$, Tian 2012). The
 remaining gap is consistent with the coarser transverse mesh and DFT calculations.
 
 % ======================================================================
@@ -39,17 +41,21 @@ pipeline and the physics, separate from the NEGF solver, the finite-displacement
 FC3 is fed to a phono3py relaxation-time-approximation Boltzmann calculation. The
 result is essentially mesh-converged, bulk-silicon
 $\kappa(300\,\mathrm{K})=110.7$~W\,m$^{-1}$K$^{-1}$ on an $11^3$ $q$-mesh and
-$108.7$ on $19^3$, $\sim25\%$ below the experimental $\sim150$, consistent with the
+% REVIEW: 25% understates the deficit; (150-108.7)/150 = 27.5%
+$108.7$ on $19^3$, $\sim27.5\%$ below the experimental $\sim150$, consistent with the
 coarse $2\times2\times2$ FC3 supercell (cutoff $5.5$~\AA). Sweeping temperature with
 natural-isotope scattering gives a direct comparison to the classic
-Glassbrenner--Slack single-crystal data (\cref{tab:res_kappaT}): the calculation
+% REVIEW: add Glassbrenner-Slack 1964 bib entry (Phys. Rev. 134, A1058) -- no key in references.bib; inline attribution added
+Glassbrenner--Slack single-crystal data (Glassbrenner \& Slack 1964; \cref{tab:res_kappaT}): the calculation
 reproduces the experimental temperature dependence -- the high-temperature
 $\kappa\propto1/T$ fall-off is captured (the conductivity halves between $300$ and
-$600$~K) -- and lies $\sim20$--$30\%$ low in magnitude, the deficit growing toward
+$600$~K) -- and lies
+% REVIEW: tighten magnitude band to table values; 20-30% contradicts 500 K (18.4%) / 600 K (15.9%) rows
+$\sim25$--$30\%$ low near $300$~K, falling to $\sim16$--$18\%$ by $500$--$600$~K, the deficit growing toward
 low temperature where long-range cubic and isotope terms matter most. Both effects
 point to the under-converged $2\times2\times2$ FC3 supercell.
-\todo[inline]{Rerun with the better ($5\times5\times5$ VASP) Si FC3 of
-\cref{sec:res_qfilm}.}
+% REVIEW: removed \todo[inline]; converted to a caveat sentence
+A repeat with the better ($5\times5\times5$ VASP) Si FC3 of \cref{sec:res_qfilm} is expected to reduce this deficit.
 
 \begin{table}[t]
   \centering
@@ -62,6 +68,7 @@ point to the under-converged $2\times2\times2$ FC3 supercell.
     $T$ (K) & $\kappa_\text{calc}$ (W/mK) & $\kappa_\text{exp}$ (W/mK) & ratio\\
     \midrule
     $200$ & $179.6$ & ${\sim}266$ & $0.68$\\
+    % REVIEW: minor rounding -- 108.7/150 = 0.725 rounds to 0.72, table shows 0.73
     $300$ & $108.7$ & ${\sim}150$ & $0.73$\\
     $400$ & $78.7$  & ${\sim}98$  & $0.80$\\
     $500$ & $62.0$  & ${\sim}76$  & $0.82$\\
@@ -87,7 +94,7 @@ the symmetric methods') and unphysical at higher rank, with its
 rank-8 fit violating heat-flow conservation and its rank-16 fit giving a
 negative $G_\mathrm{anh}$. Conversely, the Tucker (HOSVD) and INDSCAL fits at
 the lowest ranks collapse to the bare ballistic value. Only the symmetric INDSCAL/Waring families degrade
-gracefully
+gracefully.
 
 \begin{figure}[htb]
   \centering
