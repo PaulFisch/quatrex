@@ -209,9 +209,11 @@ class FC3Target:
     n_dof: int
     dim_sc: int
     target_norm: float
+    s2_residual: float = 0.0      # ||T - T^(j<->k)|| / ||T|| of the INPUT
 
 
-def build_fc3_target(fc3_raw: np.ndarray, phonon) -> FC3Target:
+def build_fc3_target(fc3_raw: np.ndarray, phonon,
+                     build_lift: bool = True) -> FC3Target:
     """Build the mass-weighted FC3 target tensor and its S3-lifted version.
 
     Parameters
@@ -220,6 +222,10 @@ def build_fc3_target(fc3_raw: np.ndarray, phonon) -> FC3Target:
         FC3 tensor in compact (nat_prim, n_super, n_super, 3, 3, 3) or full
         (n_super, n_super, n_super, 3, 3, 3) format.
     phonon : Phonopy
+    build_lift : bool
+        The S3 lift is a (dim_sc)^3 array -- 91 GB for a 5^3 bulk supercell.
+        Pass False to skip it (only Waring needs the lift); T_lifted is then
+        a zero-size placeholder and fit_waring will raise.
     """
     nat_prim = len(phonon.primitive.masses)
     n_super = len(phonon.supercell.masses)
@@ -235,10 +241,24 @@ def build_fc3_target(fc3_raw: np.ndarray, phonon) -> FC3Target:
 
     # Translation-invariant S3-symmetric lift to (dim_sc, dim_sc, dim_sc).
     # By construction this tensor is exactly S3-symmetric (no averaging needed).
-    T_lifted, _ = _build_s3_symmetric_lift(T_compact, phonon)
+    if build_lift:
+        T_lifted, _ = _build_s3_symmetric_lift(T_compact, phonon)
+    else:
+        T_lifted = np.zeros((0, 0, 0))
     T_lifted_sym = T_lifted  # already S3-symmetric by physical identity
 
     target_norm = float(np.linalg.norm(T))
+
+    # A physical FC3 is exactly S2-symmetric in (j,k) even in the compact
+    # primitive-row convention; a violation means a broken input tensor.
+    s2_residual = float(
+        np.linalg.norm(T - T.transpose(0, 2, 1)) / (target_norm or 1.0))
+    if s2_residual > 1e-10:
+        import warnings
+        warnings.warn(
+            f"FC3 target violates S2 leg symmetry: rel residual "
+            f"{s2_residual:.3e} > 1e-10 -- the input tensor is suspect.",
+            stacklevel=2)
 
     return FC3Target(
         T=T,
@@ -250,7 +270,28 @@ def build_fc3_target(fc3_raw: np.ndarray, phonon) -> FC3Target:
         n_dof=n_dof,
         dim_sc=dim_sc,
         target_norm=target_norm,
+        s2_residual=s2_residual,
     )
+
+
+def target_from_dense(T: np.ndarray, n_super: int) -> FC3Target:
+    """FC3Target from a dense (n_dof, dim_sc, dim_sc) tensor, no phonopy.
+
+    Used by the production factor pipeline, which fits the SAME mass-weighted
+    ``M_stacked`` (solver units, ``build_supercell_mapping`` gauge) that the
+    q-folded vertices are built from -- so the factorisation matches the dense
+    vertex chain exactly, modulo the fit error. No S3 lift (Waring excluded).
+    """
+    n_dof, dim_sc, dim_sc2 = T.shape
+    assert dim_sc == dim_sc2 == 3 * n_super
+    target_norm = float(np.linalg.norm(T))
+    s2_residual = float(
+        np.linalg.norm(T - T.transpose(0, 2, 1)) / (target_norm or 1.0))
+    return FC3Target(
+        T=T, T_lifted=np.zeros((0, 0, 0)), T_lifted_sym=np.zeros((0, 0, 0)),
+        p2s_map=np.arange(n_dof // 3), nat_prim=n_dof // 3, n_super=n_super,
+        n_dof=n_dof, dim_sc=dim_sc, target_norm=target_norm,
+        s2_residual=s2_residual)
 
 
 def _symmetrise_s3(A: np.ndarray) -> np.ndarray:
@@ -300,7 +341,7 @@ class CompressionResult:
 
 
 def fit_msvd(
-    target: FC3Target, rank: int, enforce_asr: bool = False,
+    target: FC3Target, rank: int, enforce_asr: bool = True,
 ) -> CompressionResult:
     """Truncated (mu,j)|k matricization SVD.
 
@@ -373,7 +414,7 @@ def fit_hosvd(
     R2: int,
     refine: bool = True,
     hooi_iters: int = 6,
-    enforce_asr: bool = False,
+    enforce_asr: bool = True,
 ) -> CompressionResult:
     """S2-symmetric Tucker decomposition via HOSVD + optional HOOI refinement.
 
@@ -490,7 +531,7 @@ def fit_cp(
     lbfgs_refine: bool = True,
     lbfgs_iters: int = 200,
     verbose: bool = False,
-    enforce_asr: bool = False,
+    enforce_asr: bool = True,
 ) -> CompressionResult:
     """Unconstrained CP via tensorly ALS with ELS + optional L-BFGS refinement.
 
@@ -654,7 +695,7 @@ def fit_indscal(
     seed: int = 0,
     use_algebraic_init: bool = True,
     verbose: bool = False,
-    enforce_asr: bool = False,
+    enforce_asr: bool = True,
 ) -> CompressionResult:
     """INDSCAL: T[mu, j, k] ~ sum_r D[mu, r] * V[j, r] * V[k, r].
 
@@ -679,7 +720,7 @@ def fit_indscal(
 
     for trial in range(n_restarts + (1 if use_algebraic_init else 0)):
         if use_algebraic_init and trial == 0:
-            D0, V0 = _indscal_algebraic_init(T_sym, rank)
+            D0, V0 = _indscal_algebraic_init(T_sym, rank, rng=rng)
         else:
             D0 = rng.normal(0, 1.0 / np.sqrt(rank), (n_dof, rank))
             V0 = rng.normal(0, 1.0 / np.sqrt(rank), (dim_sc, rank))
@@ -712,6 +753,11 @@ def fit_indscal(
     T_approx = np.einsum("mr,jr,kr->mjk", best_D, best_V, best_V, optimize=True)
     rel_err = float(np.linalg.norm(T - T_approx) / (target.target_norm or 1.0))
 
+    # The irreducible floor from fitting the (j,k)-symmetrised target: any
+    # S2-asymmetric content of T cannot be represented by the ansatz.
+    s2_dropped = float(
+        np.linalg.norm(T - T_sym) / (target.target_norm or 1.0))
+
     return CompressionResult(
         name="INDSCAL",
         rank=rank,
@@ -720,13 +766,22 @@ def fit_indscal(
         fit_time_s=time.time() - t0,
         factors={"D": best_D, "V": best_V},
         info={"restart_errs": restart_errs, "sym_err": best_err,
-              "enforce_asr": enforce_asr},
+              "enforce_asr": enforce_asr, "seed": seed,
+              "best_trial": int(np.argmin(restart_errs)),
+              "s2_asymmetry_dropped": s2_dropped},
     )
 
 
-def _indscal_algebraic_init(T_sym: np.ndarray, rank: int):
+def _indscal_algebraic_init(T_sym: np.ndarray, rank: int,
+                            rng: np.random.Generator | None = None):
     """Algebraic init: SVD of T_sym.reshape(n_dof, dim_sc**2), then
-    eigendecompose each right-singular slice (Carroll-Chang / ten Berge)."""
+    eigendecompose each right-singular slice (Carroll-Chang / ten Berge).
+
+    ``rng`` seeds the (rare) padding when the algebraic spectrum yields fewer
+    than ``rank`` components; threaded from the caller for determinism.
+    """
+    if rng is None:
+        rng = np.random.default_rng(0)
     n_dof, dim_sc, _ = T_sym.shape
     Phi_flat = T_sym.reshape(n_dof, dim_sc * dim_sc)
     U, S, Vt = np.linalg.svd(Phi_flat, full_matrices=False)
@@ -752,10 +807,10 @@ def _indscal_algebraic_init(T_sym: np.ndarray, rank: int):
     if d_arr.shape[1] < rank:
         pad = rank - d_arr.shape[1]
         d_arr = np.concatenate(
-            [d_arr, 1e-3 * np.random.default_rng(0).normal(size=(n_dof, pad))], axis=1
+            [d_arr, 1e-3 * rng.normal(size=(n_dof, pad))], axis=1
         )
         v_arr = np.concatenate(
-            [v_arr, 1e-3 * np.random.default_rng(1).normal(size=(dim_sc, pad))], axis=1
+            [v_arr, 1e-3 * rng.normal(size=(dim_sc, pad))], axis=1
         )
     return d_arr, v_arr
 
@@ -863,7 +918,7 @@ def fit_waring(
     cp_init: bool = True,
     power_init: bool = True,
     loss: str = "primitive",
-    enforce_asr: bool = False,
+    enforce_asr: bool = True,
     early_stop_rel_err: float = 1e-8,
     max_time_s: float | None = None,
 ) -> CompressionResult:
@@ -913,6 +968,10 @@ def fit_waring(
         raise RuntimeError("Waring refinement requires torch.")
     if loss not in ("primitive", "lift"):
         raise ValueError(f"loss must be 'primitive' or 'lift', got {loss!r}")
+    if target.T_lifted_sym.size == 0:
+        raise RuntimeError(
+            "Waring needs the S3 lift; rebuild the target with "
+            "build_fc3_target(..., build_lift=True)")
     t0 = time.time()
     T_lifted = target.T_lifted_sym
     T_lifted_norm = float(np.linalg.norm(T_lifted))
@@ -1067,10 +1126,20 @@ def fit_waring(
 
 
 def _waring_power_init(T_lifted, rank, n_repeats, n_iters, seed):
-    """Tensorly's shifted symmetric power iteration."""
+    """Tensorly's shifted symmetric power iteration.
+
+    tensorly's symmetric power iteration has no random_state argument, so the
+    global numpy RNG state is saved/seeded/restored around the call --
+    deterministic without leaking the seed into the caller's RNG stream.
+    """
     T_tl = tl.tensor(T_lifted, dtype=tl.float64)
-    np.random.seed(seed)
-    lam, V = _tl_sym_cp(T_tl, rank=rank, n_repeat=n_repeats, n_iteration=n_iters)
+    state = np.random.get_state()
+    try:
+        np.random.seed(seed)
+        lam, V = _tl_sym_cp(T_tl, rank=rank, n_repeat=n_repeats,
+                            n_iteration=n_iters)
+    finally:
+        np.random.set_state(state)
     return np.asarray(lam), np.asarray(V)
 
 
@@ -1083,7 +1152,7 @@ def _waring_cp_init(T_lifted, rank, seed):
     average to obtain a symmetric initialisation.
     """
     T_tl = tl.tensor(T_lifted, dtype=tl.float64)
-    np.random.seed(seed)
+    # random_state=seed fully determines the init; no global np.random.seed.
     weights, factors = _tl_parafac(
         T_tl,
         rank=rank,
@@ -1328,11 +1397,32 @@ FITTERS: dict[str, Callable[..., CompressionResult]] = {
 }
 
 
+def annotate_result(
+    result: CompressionResult, target: FC3Target, phonon=None
+) -> CompressionResult:
+    """Attach the ASR and S2 residuals of the RECONSTRUCTION to result.info.
+
+    Every production decision reads these — a fit is only conserving if the
+    reconstructed tensor's ASR legs vanish, regardless of what the fitter
+    claims it enforced.
+    """
+    T_hat = reconstruct(result, target, phonon=phonon)
+    asr = asr_residual(T_hat, target.n_super)
+    result.info["asr"] = asr
+    result.info["s2_recon"] = float(
+        np.linalg.norm(T_hat - T_hat.transpose(0, 2, 1))
+        / (target.target_norm or 1.0)
+    )
+    return result
+
+
 def compute_all(
     target: FC3Target,
     ranks_per_method: dict[str, list[int] | list[tuple[int, int]]],
     extra_kwargs: dict[str, dict] | None = None,
     verbose: bool = True,
+    enforce_asr: bool = True,
+    phonon=None,
 ) -> list[CompressionResult]:
     """Fit every (method, rank) combination requested.
 
@@ -1344,13 +1434,22 @@ def compute_all(
         (R1, R2) tuple.
     extra_kwargs : dict, optional
         Per-method keyword arguments (e.g. ``{"CP": {"n_restarts": 3}}``).
+    enforce_asr : bool
+        Threaded to every fitter (top-level, so a study cannot silently run
+        ASR-off as the d11a transport-quality sweep did).  PCP has no
+        factor-ASR hook and is skipped by this switch (it receives only its
+        own ``extra_kwargs``); it is not a production candidate.
+    phonon : Phonopy, optional
+        Needed only to annotate PCP reconstructions.
     """
     extra_kwargs = extra_kwargs or {}
     results: list[CompressionResult] = []
 
     for method, ranks in ranks_per_method.items():
         fitter = FITTERS[method]
-        kwargs = extra_kwargs.get(method, {})
+        kwargs = dict(extra_kwargs.get(method, {}))
+        if method != "PCP":
+            kwargs.setdefault("enforce_asr", enforce_asr)
         for rank in ranks:
             if verbose:
                 print(f"[{method}] rank={rank} ...", flush=True)
@@ -1360,16 +1459,121 @@ def compute_all(
                     res = fitter(target, R1=R1, R2=R2, **kwargs)
                 else:
                     res = fitter(target, rank=rank, **kwargs)
+                annotate_result(res, target, phonon=phonon)
             except Exception as exc:
                 print(f"  {method} rank={rank} failed: {exc}")
                 continue
             results.append(res)
             if verbose:
+                asr = res.info.get("asr", {})
                 print(
                     f"    n_params={res.n_params}, rel_err={res.rel_err:.4e}, "
+                    f"asr_j={asr.get('leg_j', float('nan')):.2e}, "
                     f"t={res.fit_time_s:.1f}s"
                 )
     return results
+
+
+def fit_production(
+    target: FC3Target,
+    rank: int,
+    ansatz: str = "INDSCAL",
+    n_restarts: int = 16,
+    seed: int = 0,
+    leg_weights: np.ndarray | None = None,
+    verbose: bool = False,
+    **kwargs,
+) -> CompressionResult:
+    """Production fit: INDSCAL (CP fallback), ASR-on, restart-rich, gated.
+
+    Hard-fails when the reconstruction violates the acoustic sum rule
+    (legs j,k) beyond 1e-10 of the target norm — a non-conserving vertex must
+    never reach the solver.
+
+    ``leg_weights`` (optional, off by default): diagonal per-DOF weights
+    applied to legs 2,3 of the target before fitting (fit T·w_j·w_k, factors
+    divided by w afterwards); the ASR projection is applied in the UNSCALED
+    metric after rescaling, so conservation is unaffected.
+    """
+    if ansatz not in ("INDSCAL", "CP"):
+        raise ValueError("production ansatz must be INDSCAL or CP")
+    fitter = FITTERS[ansatz]
+    enforce_asr = kwargs.pop("enforce_asr", True)
+
+    if leg_weights is not None:
+        w = np.asarray(leg_weights, dtype=np.float64)
+        assert w.shape == (target.dim_sc,) and np.all(w > 0)
+        T_w = target.T * w[None, :, None] * w[None, None, :]
+        target_w = FC3Target(
+            T=T_w, T_lifted=target.T_lifted, T_lifted_sym=target.T_lifted_sym,
+            p2s_map=target.p2s_map, nat_prim=target.nat_prim,
+            n_super=target.n_super, n_dof=target.n_dof, dim_sc=target.dim_sc,
+            target_norm=float(np.linalg.norm(T_w)),
+        )
+        res = fitter(target_w, rank=rank, n_restarts=n_restarts, seed=seed,
+                     enforce_asr=False, verbose=verbose, **kwargs)
+        # Unscale legs 2,3, project ASR in the physical metric, refresh error.
+        for key in ("V", "B", "C"):
+            if key in res.factors:
+                res.factors[key] = asr_project_factor(
+                    res.factors[key] / w[:, None], target.n_super)
+        annotate_result(res, target)
+        T_hat = reconstruct(res, target)
+        res.rel_err = float(
+            np.linalg.norm(target.T - T_hat) / (target.target_norm or 1.0))
+    else:
+        res = fitter(target, rank=rank, n_restarts=n_restarts, seed=seed,
+                     enforce_asr=enforce_asr, verbose=verbose, **kwargs)
+        annotate_result(res, target)
+
+    asr = res.info["asr"]
+    tol = 1e-10 * (asr["norm"] or 1.0)
+    if asr["leg_j"] > tol or asr["leg_k"] > tol:
+        raise RuntimeError(
+            f"production fit is not conserving: ASR legs "
+            f"j={asr['leg_j']:.3e}, k={asr['leg_k']:.3e} exceed "
+            f"1e-10*norm={tol:.3e}")
+    res.info["production"] = {"ansatz": ansatz, "n_restarts": n_restarts,
+                              "seed": seed,
+                              "leg_weighted": leg_weights is not None}
+    return res
+
+
+def export_production_factors(
+    result: CompressionResult, target: FC3Target
+) -> dict:
+    """The content contract consumed by the solver-side factor pipeline.
+
+    Returns {D (n_dof,R), V (dim_sc,R), lambdas (R,), meta}.  INDSCAL stores
+    the CP weight inside D (columns unnormalised), so lambdas is ones; CP
+    exports (A,B,C) with its weights.  Columns are sorted by descending
+    contribution so rank truncation at load time keeps the leading terms.
+    """
+    meta = {
+        "method": result.name, "rank": int(result.rank),
+        "rel_err": float(result.rel_err),
+        "asr": dict(result.info.get("asr", {})),
+        "s2_recon": float(result.info.get("s2_recon", np.nan)),
+        "seed": result.info.get("production", {}).get("seed", None),
+        "n_dof": target.n_dof, "dim_sc": target.dim_sc,
+        "n_super": target.n_super,
+    }
+    if result.name == "INDSCAL":
+        D, V = result.factors["D"], result.factors["V"]
+        contrib = np.linalg.norm(D, axis=0) * np.linalg.norm(V, axis=0) ** 2
+        order = np.argsort(-contrib)
+        return {"D": D[:, order].copy(), "V": V[:, order].copy(),
+                "lambdas": np.ones(D.shape[1]), "meta": meta}
+    if result.name == "CP":
+        A, B, C = (result.factors[k] for k in ("A", "B", "C"))
+        lam = result.factors.get("lambdas", np.ones(A.shape[1]))
+        contrib = (np.abs(lam) * np.linalg.norm(A, axis=0)
+                   * np.linalg.norm(B, axis=0) * np.linalg.norm(C, axis=0))
+        order = np.argsort(-contrib)
+        return {"A": A[:, order].copy(), "B": B[:, order].copy(),
+                "C": C[:, order].copy(), "lambdas": lam[order].copy(),
+                "meta": meta}
+    raise ValueError(f"no production export for ansatz {result.name}")
 
 
 # =====================================================================

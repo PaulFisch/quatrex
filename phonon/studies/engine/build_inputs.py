@@ -157,7 +157,79 @@ def _load_bulk_si(fc3_subdir):
     return phonon, str(d / "fc3.hdf5")
 
 
-def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1):
+def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
+                             q_points, q_diff_map, nk, tdir, ranks, ansatz,
+                             cache_dir, out, dense_vertices=None):
+    """Fit the bulk FC3 (cached per (ansatz, rank, tensor-hash)), gather the
+    per-(offset, q) device factor arrays and write
+    ``decomposed_vertices[_r{R}].npz``. Self-check: reconstruct sample folded
+    blocks from the factors against the dense qfold entries (or a directly
+    folded sample pair when the dense dict is not built) -- pins the phase
+    conventions; agreement is bounded by the fit rel_err."""
+    from phonon.phonon_inputs.fc3_factor_device import (
+        build_device_factor_arrays,
+        fit_film_fc3_factors,
+    )
+    from phonon.solver.se_q import _qfold_device_blocks
+    from quatrex.phonon.vertex_factors import VertexFactors, save_decomposed
+
+    n_super = len(prim_idx)
+    paths = []
+    for rank in ranks:
+        export = fit_film_fc3_factors(
+            M_stacked, nat, n_super, rank, ansatz=ansatz, cache_dir=cache_dir)
+        arrays = build_device_factor_arrays(
+            export, prim_idx, cell_frac, slab_idx, nat, q_points, tdir)
+        vf = VertexFactors(
+            D=arrays["D"], lambdas=arrays["lambdas"],
+            offsets=arrays["offsets"], UB=arrays["UB"], UC=arrays["UC"],
+            q_diff_map=np.asarray(q_diff_map, dtype=np.int64),
+            nk_shape=(nk, nk), ansatz=ansatz,
+            meta={**arrays["meta"], "fc3_rank": int(rank)},
+        )
+        rel_err = float(vf.meta.get("rel_err", np.nan))
+
+        # Phase-convention self-check on sample (q1, q2) pairs.
+        n_kpts = len(q_points)
+        pos = vf.offset_index()
+        worst = 0.0
+        for (iq1, iq2) in {(0, 0), (1, min(2, n_kpts - 1)),
+                           (n_kpts - 1, min(3, n_kpts - 1))}:
+            if dense_vertices is not None and (iq1, iq2) in dense_vertices:
+                sample = dense_vertices[(iq1, iq2)]
+            else:
+                sample = _qfold_device_blocks(
+                    M_stacked, prim_idx, cell_frac, slab_idx, nat,
+                    int(slab_idx.max()) + 1, q_points[iq1], q_points[iq2],
+                    tdir)
+            for (I, K, Kp), dense_blk in sample.items():
+                dK, dKp = K - I, Kp - I
+                if dK not in pos or dKp not in pos:
+                    continue
+                rec = vf.reconstruct_block(iq1, iq2, dK, dKp)
+                num = float(np.abs(rec - dense_blk).max())
+                den = float(np.abs(dense_blk).max()) + 1e-30
+                worst = max(worst, num / den)
+        print(f"[decompose r{rank}] fit rel_err={rel_err:.4f}; sample-block "
+              f"reconstruction max rel err={worst:.3e}", flush=True)
+        if worst > 10.0 * max(rel_err, 1e-12) + 1e-10:
+            raise RuntimeError(
+                f"decomposed-vertex self-check FAILED at rank {rank}: sample "
+                f"max rel err {worst:.3e} >> fit rel_err {rel_err:.3e} -- "
+                "phase-convention mismatch, not fit error.")
+
+        tag = "" if rank == max(ranks) else f"_r{rank}"
+        path = out / f"decomposed_vertices{tag}.npz"
+        save_decomposed(path, vf)
+        print(f"{path.name}: R={vf.rank} ansatz={ansatz} "
+              f"({path.stat().st_size / 1e6:.1f} MB)", flush=True)
+        paths.append(path)
+    return paths
+
+
+def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
+                 decompose_ranks=(), decompose_ansatz="INDSCAL",
+                 decompose_only=False):
     """Transversely-periodic (k>1) Si film. Port of /tmp/build_sifilm_inputs.py."""
     from phonon.solver.se_q import _build_folded_vertices
     from quatrex.phonon.qfold import save_qfold
@@ -175,6 +247,21 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1):
     q_points = [(qa, qb) for qa in q_1d for qb in q_1d]
     q_diff_map = build_q_diff_map(nk, nk)
     n_kpts = nk * nk
+
+    if decompose_only:
+        # Add the factor file(s) to an ALREADY-BUILT geometry dir without
+        # redoing the O(nk^2) dense fold (or touching any other input file).
+        prim_idx, cell_frac, slab_idx, ref_sc = build_supercell_mapping(
+            phonon, tdir)
+        with h5py.File(fc3_path, "r") as f:
+            fc3 = f["fc3"][:]
+        M_stacked = build_realspace_fc3_matrices(
+            fc3, nat, phonon.supercell.masses, ref_sc)
+        _decompose_film_vertices(
+            M_stacked, prim_idx, cell_frac, slab_idx, nat, q_points,
+            q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
+            Path(fc3_path).parent, out, dense_vertices=None)
+        return
 
     H00 = np.zeros((n_kpts, nd, nd), complex)
     H01 = np.zeros((n_kpts, nd, nd), complex)
@@ -242,6 +329,12 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1):
     print(f"  folded vertex pairs: {len(vertices)}", flush=True)
     save_qfold(out / "qfold_vertices.npz", vertices, q_diff_map, (nk, nk))
 
+    if decompose_ranks:
+        _decompose_film_vertices(
+            M_stacked, prim_idx, cell_frac, slab_idx, nat, q_points,
+            q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
+            Path(fc3_path).parent, out, dense_vertices=vertices)
+
     gamma = {k: np.ascontiguousarray(v.astype(complex)) for k, v in vertices[(0, 0)].items()}
     write_fc3_blocks(gamma, np.array([nd] * nslabs), out / "fc3_blocks.hdf5", units="THz^2")
     print(f"fc3_blocks.hdf5: {len(gamma)} Gamma device blocks", flush=True)
@@ -277,6 +370,19 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--nproc", type=int, default=1,
                    help="parallel workers for the O(nk^2) folded-vertex build")
+    p.add_argument("--decompose-ranks", default="",
+                   help="comma-separated CP ranks; fit the bulk FC3 and write "
+                        "decomposed_vertices[_r{R}].npz next to the qfold "
+                        "(highest rank gets the untagged name; truncate at "
+                        "runtime via sse_vertex_rank)")
+    p.add_argument("--decompose-ansatz", default="INDSCAL",
+                   choices=["INDSCAL", "CP"],
+                   help="factorisation ansatz (INDSCAL = shared contracted "
+                        "legs, the production default)")
+    p.add_argument("--decompose-only", action="store_true",
+                   help="only add the factor file(s) to an already-built "
+                        "geometry dir (skips the dense O(nk^2) fold and all "
+                        "other input files)")
     a = p.parse_args()
 
     out = Path(a.out)
@@ -299,7 +405,11 @@ def main():
         tdir = a.tdir or "x"
         nfreq = a.nfreq or 121
         fmax = a.fmax or 15.0
-        build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, a.fc3_subdir, out, a.nproc)
+        ranks = tuple(int(r) for r in a.decompose_ranks.split(",") if r)
+        build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, a.fc3_subdir,
+                     out, a.nproc, decompose_ranks=ranks,
+                     decompose_ansatz=a.decompose_ansatz,
+                     decompose_only=a.decompose_only)
     print(f"inputs -> {out}", flush=True)
 
 

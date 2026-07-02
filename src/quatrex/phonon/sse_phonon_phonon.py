@@ -80,6 +80,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         phi_blocks: PhiBlocks | None = None,
         dynamical_matrix: DSDBSparse | None = None,
         qfold: tuple | None = None,
+        vfactors=None,
     ) -> None:
         self.local_frequencies = np.asarray(phonon_frequencies)
 
@@ -199,6 +200,65 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if phi_blocks is None:
                 phi_blocks = vertices[(0, 0)]
 
+        # TENSOR-DECOMPOSED coupled-q vertex (exact per-leg factorisation of
+        # the q-folded blocks, see quatrex.phonon.vertex_factors). Mutually
+        # exclusive with the dense qfold dict; the factored kernel replaces
+        # the per-(q', q2) triple-GEMM loop by skinny Grams + a sandwich.
+        self._vfactors = None
+        if vfactors is None:
+            dv_path = getattr(config.phonon, "decomposed_vertices_path", None)
+            if dv_path is not None:
+                from quatrex.phonon.vertex_factors import load_decomposed
+
+                vfactors = load_decomposed(
+                    Path(dv_path),
+                    rank=int(getattr(config.phonon, "sse_vertex_rank", 0)),
+                )
+        if vfactors is not None:
+            if self._qvertices is not None:
+                raise ValueError(
+                    "decomposed_vertices_path and qfold_path/qfold are "
+                    "mutually exclusive -- pick the dense or the factored "
+                    "coupled-q vertex."
+                )
+            if np.unique(self.block_sizes).size != 1:
+                raise ValueError(
+                    "The factored coupled-q SSE requires uniform block "
+                    f"sizes; got {np.unique(self.block_sizes)}."
+                )
+            if int(self.block_sizes[0]) != int(vfactors.D.shape[0]):
+                raise ValueError(
+                    f"Factored vertex n_dof={int(vfactors.D.shape[0])} does "
+                    f"not match the device block size "
+                    f"{int(self.block_sizes[0])}."
+                )
+            self._vfactors = vfactors
+            self._q_diff_map = np.asarray(vfactors.q_diff_map, dtype=int)
+            self._n_kpts = int(vfactors.n_kpts)
+            # Kernel choice for consuming the factors:
+            #   "reconstruct" (default): materialise the RANK-LOCAL slice of
+            #     the dense q-folded dict from the factors once at first
+            #     compute (the vertex is fixed) and run the dense path at
+            #     full speed. The factored win here is MEMORY + build time
+            #     (~MBs vs the GB-scale replicated qfold dict), not flops.
+            #   "gram": the skinny-Gram contraction (bubble_factored) --
+            #     fewer flops than dense only while R^2 < ~3*b^4, i.e. small
+            #     R or LARGE blocks; on small-block films it is memory-bound
+            #     in R^2 and loses to dense beyond R ~ 16 (2026-07-02
+            #     micro-benchmark, phonon/studies/_bench_factored_sse.py).
+            self._vf_kernel = str(getattr(
+                config.phonon, "decomposed_kernel", "reconstruct"))
+            if self._vf_kernel not in ("gram", "reconstruct"):
+                raise ValueError(
+                    f"Unknown decomposed_kernel={self._vf_kernel!r}; "
+                    "use 'gram' or 'reconstruct'.")
+            self._vf_dense_cache: tuple | None = None
+            if phi_blocks is None:
+                # Gamma-point dense blocks reconstructed from the factors --
+                # feeds the (nq-independent) pair index and any Gamma-only
+                # consumer; the coupled-q contraction itself stays factored.
+                phi_blocks = self._phi_blocks_from_factors(vfactors)
+
         if phi_blocks is None:
             fc3_path = getattr(config.phonon, "fc3_path", None)
             if fc3_path is None:
@@ -268,6 +328,69 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._sigma_static: NDArray | None = None
         if self._scp_tadpole:
             self._setup_scp_tadpole(config, dynamical_matrix)
+
+    def _phi_blocks_from_factors(self, vf) -> dict:
+        """Dense Gamma-point (iq1 = iq2 = 0) vertex blocks reconstructed from
+        the factors, over the factor offset window -- feeds the pair index."""
+        offs = [int(d) for d in vf.offsets]
+        blocks: dict[tuple[int, int, int], np.ndarray] = {}
+        for I in range(self.n_blocks):
+            for d1 in offs:
+                K1 = I + d1
+                if not 0 <= K1 < self.n_blocks:
+                    continue
+                for d2 in offs:
+                    K2 = I + d2
+                    if not 0 <= K2 < self.n_blocks:
+                        continue
+                    blocks[(I, K1, K2)] = vf.reconstruct_block(0, 0, d1, d2)
+        return blocks
+
+    def _reconstructed_qvertices(self, q_lo: int, q_hi: int, nq: int) -> dict:
+        """RANK-LOCAL slice of the dense q-folded vertex dict, reconstructed
+        from the factors (decomposed_kernel="reconstruct").
+
+        Only the (q', q2) pairs this rank's external-q slice [q_lo, q_hi)
+        touches are materialised, and the per-(d1, d2) offset table is shared
+        across the (bulk-homogeneous) block index I -- MBs instead of the
+        GB-scale full dict. Built lazily on first compute (after any
+        ballistic lambda-zeroing) and cached; the vertex is fixed.
+        """
+        key = (q_lo, q_hi, nq)
+        if self._vf_dense_cache is not None and self._vf_dense_cache[0] == key:
+            return self._vf_dense_cache[1]
+        vf = self._vfactors
+        qdm = self._q_diff_map
+        pairs = {(0, 0)}
+        for iq_ext in range(q_lo, q_hi):
+            for iqp in range(nq):
+                iq2 = int(qdm[iq_ext, iqp])
+                pairs.add((iqp, iq2))
+                pairs.add((iq2, iqp))
+        offs = [int(d) for d in vf.offsets]
+        pos = vf.offset_index()
+        lam_D = vf.D * vf.lambdas[None, :]          # (b, R)
+        qv: dict = {}
+        for (iq1, iq2) in pairs:
+            # One offset-table einsum per pair; blocks are I-independent
+            # (bulk vertex, minimum-image offsets), shared across I.
+            table = np.einsum(
+                "ar,dbr,ecr->deabc", lam_D,
+                vf.UB[:, iq1], vf.UC[:, iq2], optimize=True)
+            blocks = {}
+            for I in range(self.n_blocks):
+                for d1 in offs:
+                    K1 = I + d1
+                    if not 0 <= K1 < self.n_blocks:
+                        continue
+                    for d2 in offs:
+                        K2 = I + d2
+                        if not 0 <= K2 < self.n_blocks:
+                            continue
+                        blocks[(I, K1, K2)] = table[pos[d1], pos[d2]]
+            qv[(iq1, iq2)] = blocks
+        self._vf_dense_cache = (key, qv)
+        return qv
 
     @staticmethod
     def _compute_band_top(dynamical_matrix, n_k: int = 512) -> float:
@@ -514,11 +637,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
         nq = int(np.prod(nk)) if len(nk) else 1
-        if nq > 1 and self._qvertices is None:
+        if nq > 1 and self._qvertices is None and self._vfactors is None:
             raise ValueError(
                 f"Transverse-q device (mesh {nk}, n_kpts={nq}) requires the "
-                "q-folded vertices; set config.phonon.qfold_path (see "
-                "quatrex.phonon.qfold)."
+                "q-folded vertices (config.phonon.qfold_path, see "
+                "quatrex.phonon.qfold) or the tensor-decomposed factors "
+                "(config.phonon.decomposed_vertices_path)."
             )
         if nq > 1 and self._n_kpts != nq:
             raise ValueError(
@@ -903,81 +1027,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             q_lo = ranks.q.rank * nq // ranks.q.size
             q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
 
-            # Resolve the per-(I, J) vertex-pair task list once. The LEFT
-            # vertex is CONJUGATED: the bubble at external q pairs
-            # Phi(q', q_ext-q')^* with Phi(q_ext-q', q'); the unconjugated
-            # pairing breaks momentum bookkeeping (Sigma(-q) != Sigma(q)^T
-            # under time reversal) and disagrees with a real-space supercell
-            # ground truth, see phonon/scripts/verify/audit_qfold_trs.py.
-            # At Gamma the vertices are real, so the Gamma-only (nq==1)
-            # path is unaffected.
-            qtasks: dict[tuple[int, int], list] = {}
-            for iq_ext in range(q_lo, q_hi):
-                for iqp in range(nq):
-                    iq2 = int(qdm[iq_ext, iqp])
-                    phiL = qv.get((iqp, iq2))   # legs (q', q_ext−q')
-                    phiR = qv.get((iq2, iqp))   # legs (q_ext−q', q')
-                    if phiL is None or phiR is None:
-                        continue
-                    for (I, J) in owned:
-                        for K1, K2, K1p, K2p, _pl, _pr in self._phi_pair_index[(I, J)]:
-                            pl = phiL.get((I, K1, K2))
-                            pr = phiR.get((J, K2p, K1p))
-                            if pl is None or pr is None:
-                                continue
-                            qtasks.setdefault((I, J), []).append(
-                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p)
-                                + phi_perms(xp.conj(pl), pr, xp))
-
-            # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
-            # nq==1 _contract_tau so the omega/tau batch parallelises across
-            # the ring pool (the coupled-q path previously ran serial).
-            def _contract_tau_q(lo, hi):
-                res = {}
-                for (I, J), tasks in qtasks.items():
-                    bs_I = int(self.block_sizes[I])
-                    bs_J = int(self.block_sizes[J])
-                    out_l = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
-                    out_g = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
-                    for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, *pre) in tasks:
-                        out_l[:, iq_ext] += _fold_l(
-                            pre,
-                            gl_q[(K1, K1p)][lo:hi, iqp],
-                            gl_q[(K2, K2p)][lo:hi, iq2],
-                            ggr_q[(K1, K1p)][lo:hi, iqp],
-                            ggr_q[(K2, K2p)][lo:hi, iq2],
-                        )
-                        out_g[:, iq_ext] += _fold_g(
-                            pre,
-                            gg_q[(K1, K1p)][lo:hi, iqp],
-                            gg_q[(K2, K2p)][lo:hi, iq2],
-                            glr_q[(K1, K1p)][lo:hi, iqp],
-                            glr_q[(K2, K2p)][lo:hi, iq2],
-                        )
-                    res[(I, J)] = (out_l, out_g)
-                return res
-
-            def _write_q(I, J, out_l, out_g):
-                bs_I = int(self.block_sizes[I])
-                bs_J = int(self.block_sizes[J])
-                blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
-                stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
-                stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
-
-            nt = min(_RING_THREADS, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
-            if _RING_POOL is not None and xp is np and nt > 1:
-                bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
-                        for i in range(nt)]
-                chunks = list(_RING_POOL.map(lambda b: _contract_tau_q(*b), bnds))
-                for (I, J) in qtasks:
-                    _write_q(
-                        I, J,
-                        xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
-                        xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
-                    )
+            if self._vfactors is not None and self._vf_kernel == "gram":
+                self._contract_factored_q(
+                    owned, qdm, q_lo, q_hi, nq, nk, n_tau, dtype,
+                    gl_q, gg_q, glr_q, ggr_q, stlv, stgv, start, xp,
+                )
             else:
-                for (I, J), (out_l, out_g) in _contract_tau_q(0, n_tau).items():
-                    _write_q(I, J, out_l, out_g)
+                if self._vfactors is not None:
+                    # decomposed_kernel="reconstruct": dense path fed the
+                    # factor-reconstructed rank-local vertex slice.
+                    qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
+                self._contract_dense_q(
+                    owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+                    gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
+                    stlv, stgv, start, xp,
+                )
 
         # Assemble the external-q distribution: each comm.q rank computed a
         # disjoint subset of iq_ext (others left zero), so sum over comm.q.
@@ -1037,6 +1101,155 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
             self._apply_scp_tadpole(g_lesser, sigma_retarded)
+
+    def _contract_dense_q(
+        self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+        gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
+        stlv, stgv, start, xp,
+    ):
+        """DENSE coupled-q vertex-pair contraction (the reference path).
+
+        Extracted verbatim from ``_compute_fft_first``; consumes the dense
+        q-folded vertex dict ``qv`` and the q-flattened tau-domain Green's
+        function band dicts, writes the per-(I, J) Sigma^{<,>} tau blocks
+        into the stack views. See ``_contract_factored_q`` for the
+        tensor-decomposed equivalent.
+        """
+        # Resolve the per-(I, J) vertex-pair task list once. The LEFT
+        # vertex is CONJUGATED: the bubble at external q pairs
+        # Phi(q', q_ext-q')^* with Phi(q_ext-q', q'); the unconjugated
+        # pairing breaks momentum bookkeeping (Sigma(-q) != Sigma(q)^T
+        # under time reversal) and disagrees with a real-space supercell
+        # ground truth, see phonon/scripts/verify/audit_qfold_trs.py.
+        # At Gamma the vertices are real, so the Gamma-only (nq==1)
+        # path is unaffected.
+        qtasks: dict[tuple[int, int], list] = {}
+        for iq_ext in range(q_lo, q_hi):
+            for iqp in range(nq):
+                iq2 = int(qdm[iq_ext, iqp])
+                phiL = qv.get((iqp, iq2))   # legs (q', q_ext−q')
+                phiR = qv.get((iq2, iqp))   # legs (q_ext−q', q')
+                if phiL is None or phiR is None:
+                    continue
+                for (I, J) in owned:
+                    for K1, K2, K1p, K2p, _pl, _pr in self._phi_pair_index[(I, J)]:
+                        pl = phiL.get((I, K1, K2))
+                        pr = phiR.get((J, K2p, K1p))
+                        if pl is None or pr is None:
+                            continue
+                        qtasks.setdefault((I, J), []).append(
+                            (iq_ext, iqp, iq2, K1, K1p, K2, K2p)
+                            + phi_perms(xp.conj(pl), pr, xp))
+
+        # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
+        # nq==1 _contract_tau so the omega/tau batch parallelises across
+        # the ring pool (the coupled-q path previously ran serial).
+        def _contract_tau_q(lo, hi):
+            res = {}
+            for (I, J), tasks in qtasks.items():
+                bs_I = int(self.block_sizes[I])
+                bs_J = int(self.block_sizes[J])
+                out_l = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                out_g = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, *pre) in tasks:
+                    out_l[:, iq_ext] += _fold_l(
+                        pre,
+                        gl_q[(K1, K1p)][lo:hi, iqp],
+                        gl_q[(K2, K2p)][lo:hi, iq2],
+                        ggr_q[(K1, K1p)][lo:hi, iqp],
+                        ggr_q[(K2, K2p)][lo:hi, iq2],
+                    )
+                    out_g[:, iq_ext] += _fold_g(
+                        pre,
+                        gg_q[(K1, K1p)][lo:hi, iqp],
+                        gg_q[(K2, K2p)][lo:hi, iq2],
+                        glr_q[(K1, K1p)][lo:hi, iqp],
+                        glr_q[(K2, K2p)][lo:hi, iq2],
+                    )
+                res[(I, J)] = (out_l, out_g)
+            return res
+
+        def _write_q(I, J, out_l, out_g):
+            bs_I = int(self.block_sizes[I])
+            bs_J = int(self.block_sizes[J])
+            blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
+            stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
+            stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+
+        nt = min(_RING_THREADS, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+        if _RING_POOL is not None and xp is np and nt > 1:
+            bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
+                    for i in range(nt)]
+            chunks = list(_RING_POOL.map(lambda b: _contract_tau_q(*b), bnds))
+            for (I, J) in qtasks:
+                _write_q(
+                    I, J,
+                    xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
+                    xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
+                )
+        else:
+            for (I, J), (out_l, out_g) in _contract_tau_q(0, n_tau).items():
+                _write_q(I, J, out_l, out_g)
+
+    def _contract_factored_q(
+        self, owned, qdm, q_lo, q_hi, nq, nk, n_tau, dtype,
+        gl_q, gg_q, glr_q, ggr_q, stlv, stgv, start, xp,
+    ):
+        """Coupled-q contraction with the TENSOR-DECOMPOSED vertex.
+
+        Exact factored equivalent of ``_contract_dense_q`` (same fold terms,
+        same left-vertex conjugation -- applied to the row factors inside the
+        Grams, see ``quatrex.phonon.bubble_factored``): per (g-variant, band
+        link, offset pair, q) one skinny Gram replaces the per-(q', q2)
+        vertex-pair triple-GEMMs; the q'-convolution runs entrywise on the
+        rank-R Gram tables and a small sandwich restores the band block.
+        """
+        from quatrex.phonon.bubble_factored import contract_tau_q_factored
+
+        vf = self._vfactors
+        quads_by_pair = {
+            (I, J): [
+                (K1, K2, K1p, K2p)
+                for (K1, K2, K1p, K2p, _pl, _pr) in self._phi_pair_index[(I, J)]
+            ]
+            for (I, J) in owned
+            if (I, J) in self._phi_pair_index
+        }
+        off_pos = vf.offset_index()
+        # lambda folded into the external leg ONCE per vertex: the sandwich
+        # is Dt @ H @ Dt^T with Dt = D diag(lambda) (D, lambda real).
+        Dt = xp.asarray(vf.D * vf.lambdas[None, :])
+        UB = xp.asarray(vf.UB)
+        UC = UB if vf.UB is vf.UC else xp.asarray(vf.UC)
+        g_dicts = {"l": gl_q, "g": gg_q, "lr": glr_q, "gr": ggr_q}
+        shared = str(vf.ansatz).upper() == "INDSCAL"
+
+        def _run(lo, hi):
+            return contract_tau_q_factored(
+                quads_by_pair, self.block_sizes, qdm, q_lo, q_hi, nq,
+                g_dicts, Dt, UB, UC, off_pos, lo, hi, xp, shared, dtype,
+            )
+
+        def _write(I, J, out_l, out_g):
+            bs_I = int(self.block_sizes[I])
+            bs_J = int(self.block_sizes[J])
+            blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
+            stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
+            stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+
+        nt = min(_RING_THREADS, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+        if _RING_POOL is not None and xp is np and nt > 1:
+            bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
+            chunks = list(_RING_POOL.map(lambda b: _run(*b), bnds))
+            for (I, J) in quads_by_pair:
+                _write(
+                    I, J,
+                    xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
+                    xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
+                )
+        else:
+            for (I, J), (out_l, out_g) in _run(0, n_tau).items():
+                _write(I, J, out_l, out_g)
 
     def _fold_reversed_legs(self, gtlr, gtgr, g: DSDBSparse) -> None:
         """Apply the exact bosonic ji-transpose ``X_ij -> X_ji`` to the reversed

@@ -56,12 +56,12 @@ def load():
         # coupled-tadpole norm needs the matrices; store it, drop the matrices
         payload = {}
         for (s, T, m), rec in d.items():
-            key = f"{s}|{T:g}|{m}"
             zl = d.get((s, T, "loop"))
             if m == "loop_tadpole" and zl is not None:
-                rec = dict(rec)
                 rec["coupled_tadpole_norm"] = float(np.linalg.norm(
                     rec["sigma_static"] - zl["sigma_static"]))
+        for (s, T, m), rec in d.items():
+            key = f"{s}|{T:g}|{m}"
             for k, v in rec.items():
                 if k != "sigma_static":
                     payload[f"{key}|{k}"] = v

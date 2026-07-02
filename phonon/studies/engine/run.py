@@ -81,6 +81,13 @@ if os.environ.get("QX_BALLISTIC") == "1":
             for blocks in qv.values():
                 for k in list(blocks):
                     blocks[k][...] = 0.0
+        # Tensor-decomposed vertex: zeroing the CP weights kills every
+        # factored contraction (the sandwich carries lambda once per side)
+        # and the phi_blocks reconstructed from the factors are zeroed
+        # above/below like any dense vertex.
+        vf = getattr(sse, "_vfactors", None)
+        if vf is not None:
+            vf.lambdas[...] = 0.0
         # belt-and-suspenders: zero the precomputed pair-index phi arrays too.
         ppi = getattr(sse, "_phi_pair_index", None)
         if ppi is not None:
