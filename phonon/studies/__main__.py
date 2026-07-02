@@ -5,7 +5,7 @@ import importlib
 import sys
 
 INVESTIGATIONS = ("conservation", "linewidths", "ballistic",
-                  "convergence", "transport")
+                  "convergence", "transport", "sse_verify", "bte_linewidths")
 
 
 def main() -> int:

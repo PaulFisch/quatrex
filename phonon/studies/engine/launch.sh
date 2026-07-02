@@ -20,19 +20,40 @@ NRANKS="${NRANKS:-1}"
 
 # BLAS stays SINGLE-threaded; the 3-phonon bubble (~99% of a step) instead
 # parallelises its omega/tau batch over a thread pool inside ring_contract
-# (QUATREX_PHPH_RING_THREADS) -- the per-omega matmuls are too small for BLAS
-# threading (~1.5x@8) but the batch scales near-linearly (~15x@32, bit-exact).
-# So per rank: 1 BLAS thread x QX_RING_THREADS pool threads. Budget
-# NRANKS * QX_RING_THREADS * concurrent_cells <= cores.
+# (QUATREX_PHPH_RING_THREADS). The per-omega matmuls are too small for BLAS
+# threading, but the per-ring loop is cache-bound per chunk and the omega/tau
+# BATCH scales near-linearly with the pool -- measured cnt33 L2 (w=241): 56x at
+# 64 threads (1232 GF/s); it regresses past the sweet spot (~min(64, n_tau//4),
+# floored in the SSE). So per rank: 1 BLAS thread x QX_RING_THREADS pool threads.
+# Default: a single rank FILLS the node (~min(64,nproc)); MPI runs keep 1 (ranks
+# own cores). Budget for sweeps: NRANKS * QX_RING_THREADS * concurrent <= cores.
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OPENMP_NUM_THREADS=1 \
        MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
-export QUATREX_PHPH_RING_THREADS="${QX_RING_THREADS:-1}"
+if [ -n "${QX_RING_THREADS:-}" ]; then
+  export QUATREX_PHPH_RING_THREADS="$QX_RING_THREADS"
+elif [ "$NRANKS" -gt 1 ]; then
+  export QUATREX_PHPH_RING_THREADS=1
+else
+  _ncpu="$(nproc 2>/dev/null || echo 8)"
+  export QUATREX_PHPH_RING_THREADS="$(( _ncpu < 64 ? _ncpu : 64 ))"
+fi
 export QTX_PROFILE_LEVEL="${QTX_PROFILE_LEVEL:-default}"
 [ "${PROFILE_SYNC:-0}" = "1" ] && export QTX_PROFILE_COMM_SYNC=1
 
 echo "launch: NRANKS=$NRANKS QX_CONFIG=$QX_CONFIG BCS=${QX_BCS:-cfg} QCS=${QX_QCS:-cfg} ballistic=${QX_BALLISTIC:-0}"
 if [ "$NRANKS" -gt 1 ]; then
-  exec mpirun --bind-to core --map-by core -np "$NRANKS" python -u "$HERE/run.py"
+  # Default: 1 rank/core across both sockets. Override QX_MPI_BIND for hybrid
+  # MPI x ring-pool layouts (e.g. "--map-by numa --bind-to numa" = 1 rank/socket
+  # each running a ring pool) or SMT oversubscription ("--map-by hwthread
+  # --bind-to hwthread --oversubscribe" for NRANKS>128).
+  _bind="${QX_MPI_BIND:---bind-to core --map-by core}"
+  exec mpirun $_bind -np "$NRANKS" python -u "$HERE/run.py"
+elif [ "${QX_INTERLEAVE:-0}" = "1" ] && command -v numactl >/dev/null 2>&1; then
+  # Single rank spanning BOTH NUMA sockets: interleave the bubble's buffers
+  # across nodes so a >64-thread pool isn't first-touch-bound to one socket.
+  # Marginal (~1.15x) and noisy -- a single cell is ~capped at one socket; the
+  # node-fill lever is one cell PER socket (launch_cells_concurrent), not this.
+  exec numactl --interleave=all python -u "$HERE/run.py"
 else
   exec python -u "$HERE/run.py"
 fi
