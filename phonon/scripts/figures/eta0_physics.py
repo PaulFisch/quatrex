@@ -54,12 +54,19 @@ def _transmission(npz):
 
 
 def fig_transmission():
-    """Ballistic vs anharmonic transmission at L2 and L3."""
+    """Ballistic vs anharmonic transmission at L2 and L3, against the analytic
+    integer channel count N(omega) of the periodic lead (same lead for both)."""
+    from transmission_physicality import channel_count
+
     fig, ax = style.figure(ncols=2, width=4.4, height=3.4)
+    wN = np.load(PROD / "L2_ball.npz", allow_pickle=True)["energies"]
+    N, _btop = channel_count(wN)
     for col, L in enumerate(("L2", "L3")):
         wa, Ta = _transmission(PROD / f"{L}_anh.npz")
         wb, Tb = _transmission(PROD / f"{L}_ball.npz")
         a = ax[col]
+        a.step(wN, N, where="mid", color="0.65", lw=1.0,
+               label=r"channels $N(\omega)$")
         a.plot(wb, Tb, "-", color="C0", lw=1.4, label="ballistic")
         a.plot(wa, Ta, "-", color="C3", lw=1.4, label="anharmonic")
         a.set_xlabel("frequency (THz)")
@@ -147,12 +154,19 @@ def fig_ir_plateau():
     a.legend(fontsize=7, loc="upper left")
 
     a = ax[1]
-    a.plot(w, w * Ib, "-o", color="C0", ms=3, label="ballistic")
-    a.plot(w, w * Ia, "-o", color="C3", ms=3, label=r"anharmonic ($\eta=0$)")
-    a.set_xlim(0, 5); a.set_ylim(0, None)
+    # quantised units: hbar*w*I / (kB*dT/2pi) -> the ballistic plateau is
+    # EXACTLY N_ac (the quantum of thermal conductance per channel).
+    dT = float(db["t_left"]) - float(db["t_right"])
+    q = HBAR * (w * 1e12 * 2 * np.pi) / (2 * np.pi) / (KB * dT / (2 * np.pi))
+    a.plot(w, q * Ib, "-o", color="C0", ms=3, label="ballistic")
+    a.plot(w, q * Ia, "-o", color="C3", ms=3, label=r"anharmonic ($\eta=0$)")
+    a.axhline(Nac, color="C0", ls=":", lw=0.8)
+    a.annotate(rf"quantised plateau $N_{{\rm ac}}={Nac}$", (2.2, Nac + 0.15),
+               fontsize=7, color="C0")
+    a.set_xlim(0, 7); a.set_ylim(0, 6.5)
     a.set_xlabel("frequency (THz)")
-    a.set_ylabel(r"heat-current density $\propto\hbar\omega\,I(\omega)$ (arb.)")
-    a.legend(fontsize=7, loc="upper right")
+    a.set_ylabel(r"$\hbar\omega\,I(\omega)\,/\,(k_B\Delta T/2\pi)$")
+    a.legend(fontsize=7, loc="lower right")
     style.save(fig, "eta0_cnt33_ir_plateau", directory=FIGDIR)
 
     print(f"\n[ir plateau] ballistic low-w T = {float(np.nanmedian(Tb[lowb])):.3f} "

@@ -65,7 +65,7 @@ def fig_conservation_iter():
     fig, axes = style.figure(ncols=1, width=5.0, height=3.6)
     ax = axes[0] if hasattr(axes, "__len__") else axes
     ax.semilogy(np.arange(2, nit + 1), np.maximum(res, 1e-18), "-", color="C0",
-                lw=1.4, label=r"rel.\ $\Sigma^R$ change")
+                lw=1.4, label=r"rel. $\Sigma^R$ change")
     ax.semilogy(np.arange(1, nit + 1), np.maximum(imbal, 1e-18), "-", color="C3",
                 lw=1.3, label=r"lead imbalance $|J_L-J_R|/\bar J$")
     ax.semilogy(np.arange(1, nit + 1), np.maximum(bub, 1e-19), "-", color="C2",
@@ -173,7 +173,7 @@ def fig_bubble_replica():
                     xytext=(0, 3), ha="center", fontsize=8)
     ax.axhline(1e-6, color="C3", ls="--", lw=0.9)
     ax.annotate(r"production accumulation floor $\sim10^{-6}$", (len(labels) - 1, 1e-6),
-                textcoords="offset points", xytext=(-4, 4), ha="right",
+                textcoords="offset points", xytext=(-4, -11), ha="right",
                 fontsize=7, color="C3")
     ax.set_yscale("log"); ax.set_xticks(x); ax.set_xticklabels(labels)
     ax.set_ylabel(r"$|P_{\rm in}-P_{\rm out}|/|P|$ (replica)")

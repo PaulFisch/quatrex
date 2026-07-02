@@ -844,3 +844,50 @@ def separable_anharmonic_transmission(
         "svd_singular_values": svals,
         "svd_reconstruction_error": recon_err,
     }
+def enforce_asr_fc3_matrices(M_stacked, nat_prim, prim_indices):
+    """Enforce acoustic sum rule on FC3 matrices via projection.
+
+    For each M_a (dim_sc x dim_sc), removes the component that couples
+    to uniform translations by projecting out the null space of T(Gamma).
+
+    The ASR requires sum_{l,b} Phi(0b1, lb2, l'b3) = 0, which in
+    Fourier space means Phi(q=0, q') = 0.  This is equivalent to
+    T(Gamma) @ M_a = 0 and M_a @ T(Gamma)^T = 0.
+
+    Parameters
+    ----------
+    M_stacked : ndarray, shape (n_dof * dim_sc, dim_sc)
+    nat_prim : int
+    prim_indices : ndarray, shape (n_super,)
+
+    Returns
+    -------
+    M_corrected : ndarray, same shape as M_stacked
+    """
+    n_dof = nat_prim * 3
+    n_super = len(prim_indices)
+    dim_sc = n_super * 3
+
+    counts = np.zeros(nat_prim)
+    for s in range(n_super):
+        counts[prim_indices[s]] += 1
+
+    P = np.zeros((dim_sc, n_dof))
+    for s in range(n_super):
+        kappa = prim_indices[s]
+        w = 1.0 / np.sqrt(counts[kappa])
+        for beta in range(3):
+            P[s * 3 + beta, kappa * 3 + beta] = w
+
+    PPt = P @ P.T  # (dim_sc, dim_sc)
+    I_minus_PPt = np.eye(dim_sc) - PPt
+
+    M_corrected = np.zeros_like(M_stacked)
+    for a in range(n_dof):
+        M_a = M_stacked[a * dim_sc:(a + 1) * dim_sc, :]
+        M_corrected[a * dim_sc:(a + 1) * dim_sc, :] = I_minus_PPt @ M_a @ I_minus_PPt
+
+    return M_corrected
+
+
+
