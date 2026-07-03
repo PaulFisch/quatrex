@@ -205,8 +205,9 @@ for the conserving vertex --- binned and unbinned agree to $8\times10^{-16}$)
 and $D_k$ the finite-$\eta$ ghost absorption. \Cref{fig:cons_local_mw}
 verifies the identity on the three-cell CNT: at $\eta=10^{-12}$ the
 reconstruction $J_0+\sum_{j<k}P_{\rm abs}(j)$ reproduces the measured
-interior bond currents to $3\times10^{-3}$ (the SCBA residual level of that
-run) --- the interior dip below the leads is \emph{not} broadening but the
+interior bond currents to the SCBA residual level of each run
+($2\times10^{-4}$ on the two-cell device, $3\times10^{-3}$ at three cells)
+--- the interior dip below the leads is \emph{not} broadening but the
 energy the three-phonon interaction extracts near one contact and re-injects
 near the other ($P_{\rm abs}=(-3.13,+0.00,+3.13)$), flowing through the
 interaction channel that the harmonic bond current does not count. At
@@ -217,6 +218,21 @@ balance survives. One cannot ``sum'' local currents into the Meir--Wingreen
 current --- in steady state every interface would carry the \emph{same}
 current if energy flowed only through the harmonic bonds; the telescoped
 absorption is exactly what reconstructs the lead values from the interior.
+
+A caveat isolated by an L2 recipe ablation: the \emph{infrared occupancy
+taper} (\cref{app:infrared}) breaks this \emph{interior} bookkeeping
+while leaving every global gate intact. With the taper the identity misses
+by $\approx2.9$ ($5\%$ of $J$; the smooth spectral window adds nothing,
+$-2.94\to-2.98$), because the tapered $\Sigma_s$ is no longer the
+$\Phi$-derivable functional of the \emph{actual} $G$ below
+$\omega_{\rm reg}$ --- the interaction down-converts current spectrally
+(the interior bond current \emph{exceeds} the leads below $\sim10$~THz and
+deficits above), and the taper's modified infrared occupancy leaves part of
+that redistribution unaccounted in $\mathrm{Tr}_k$. The $S_3$/fold symmetry
+still telescopes the total to zero ($\sum_kP_{\rm abs}=10^{-12}$, lead
+balance $6\times10^{-11}$), so all lead-based observables and gates are
+untouched; only the \emph{interpretation} of the interior profile on
+tapered runs mixes physics with the regulariser.
 
 \begin{figure}[t]
   \centering
