@@ -845,14 +845,24 @@ class SCBA:
         perm, ok = self._bal_perm
         if getattr(self, "_slab_onehot", None) is None:
             r = np.asarray(get_host(rows)).astype(np.int64)
+            c = np.asarray(get_host(cols)).astype(np.int64)
             offs = np.concatenate(
                 ([0], np.cumsum(np.asarray(get_host(g_l.block_sizes)))))
-            slab = np.searchsorted(offs, r, side="right") - 1
+            slab_r = np.searchsorted(offs, r, side="right") - 1
+            slab_c = np.searchsorted(offs, c, side="right") - 1
             n_blocks = offs.size - 1
+            # Row-binned attribution (the full local trace Tr_k[Sigma G])
+            # and the block-DIAGONAL-only attribution (Sigma_kk G_kk): the
+            # off-diagonal Sigma_{k,k+-1} entries are the interaction-channel
+            # flow the RGF embedding current already routes THROUGH the
+            # interface -- the local sink of the partitioned current is the
+            # diagonal-only trace, the row-binned one double-counts the
+            # straddling flow (empirically distinguished on the film smoke).
             onehot = np.zeros((r.size, n_blocks))
-            onehot[np.arange(r.size), slab] = 1.0
-            self._slab_onehot = xp.asarray(onehot)
-        onehot = self._slab_onehot
+            onehot[np.arange(r.size), slab_r] = 1.0
+            onehot_diag = np.where((slab_r == slab_c)[:, None], onehot, 0.0)
+            self._slab_onehot = (xp.asarray(onehot), xp.asarray(onehot_diag))
+        onehot, onehot_diag = self._slab_onehot
         solver = self.subsystems.get("phonon")
         w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
 
@@ -861,15 +871,18 @@ class SCBA:
             gd = g.data.reshape(g.data.shape[0], -1, g.data.shape[-1])
             gt = gd[..., perm] * ok          # G_ji paired with Sigma_ij
             per_nnz = xp.sum(w[:, None, None] * (sd * gt), axis=(0, 1))
-            return per_nnz @ onehot          # (n_blocks,)
+            return per_nnz @ onehot, per_nnz @ onehot_diag
 
-        p_out_k = weighted_by_slab(s_g, g_l)   # Sigma^> G^<
-        p_in_k = weighted_by_slab(s_l, g_g)    # Sigma^< G^>
-        p_abs = np.asarray(get_host(p_out_k - p_in_k))
+        og_row, og_diag = weighted_by_slab(s_g, g_l)   # Sigma^> G^<
+        il_row, il_diag = weighted_by_slab(s_l, g_g)   # Sigma^< G^>
+        p_abs = np.stack([np.asarray(get_host(og_row - il_row)),
+                          np.asarray(get_host(og_diag - il_diag))])
         if comm.stack.size > 1:
             recv = np.empty_like(p_abs)
             comm.stack.all_reduce(np.ascontiguousarray(p_abs), recv, op="sum")
             p_abs = recv
+        # (2, n_blocks): [0] = row-binned (sums to the global balance),
+        # [1] = block-diagonal-only (the partitioned-current local sink).
         return p_abs
 
     def _phonon_heat_flow_conservation(self):
