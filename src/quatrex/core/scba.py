@@ -812,6 +812,66 @@ class SCBA:
         resid = abs(p_in - p_out) / max(abs(p_in) + abs(p_out), 1e-300)
         return p_in, p_out, resid
 
+    def _phonon_slab_absorption(self):
+        """Per-SLAB scattering energy absorption -- the block-resolved bubble
+        balance,
+
+            P_abs(k) = sum_w hbar*w * Tr_k[Sigma_s^>(w) G^<(w)
+                                           - Sigma_s^<(w) G^>(w)],
+
+        the local (slab-k) energy sink of the 3-phonon self-energy. This is
+        the term that connects adjacent interface heat currents by energy
+        continuity: J_{k,k+1} - J_{k-1,k} = -P_abs(k) up to the finite-eta
+        ordering-commutator absorption, and telescoping over the device
+        reproduces the global P_in - P_out (= the whole-device bubble
+        balance, machine-zero for the conserving vertex). Same transpose
+        pairing (Sigma_ij G_ji), hbar*w weighting and one-sided grid as
+        :meth:`_phonon_bubble_energy_balance`, binned by the ROW block of
+        each nnz entry. Returns a complex (n_blocks,) array (real part is
+        the physical power) or None if unavailable.
+        """
+        if comm.block.size > 1:
+            return None
+        g_l, g_g = self.data.g_lesser, self.data.g_greater
+        s_l, s_g = self.data.sigma_lesser, self.data.sigma_greater
+        rows = getattr(g_l, "rows", None)
+        cols = getattr(g_l, "cols", None)
+        if rows is None or cols is None:
+            return None
+        # Reuse (or build) the transpose-pairing permutation of the balance.
+        if getattr(self, "_bal_perm", None) is None:
+            if self._phonon_bubble_energy_balance() is None:
+                return None
+        perm, ok = self._bal_perm
+        if getattr(self, "_slab_onehot", None) is None:
+            r = np.asarray(get_host(rows)).astype(np.int64)
+            offs = np.concatenate(
+                ([0], np.cumsum(np.asarray(get_host(g_l.block_sizes)))))
+            slab = np.searchsorted(offs, r, side="right") - 1
+            n_blocks = offs.size - 1
+            onehot = np.zeros((r.size, n_blocks))
+            onehot[np.arange(r.size), slab] = 1.0
+            self._slab_onehot = xp.asarray(onehot)
+        onehot = self._slab_onehot
+        solver = self.subsystems.get("phonon")
+        w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
+
+        def weighted_by_slab(sig, g):
+            sd = sig.data.reshape(sig.data.shape[0], -1, sig.data.shape[-1])
+            gd = g.data.reshape(g.data.shape[0], -1, g.data.shape[-1])
+            gt = gd[..., perm] * ok          # G_ji paired with Sigma_ij
+            per_nnz = xp.sum(w[:, None, None] * (sd * gt), axis=(0, 1))
+            return per_nnz @ onehot          # (n_blocks,)
+
+        p_out_k = weighted_by_slab(s_g, g_l)   # Sigma^> G^<
+        p_in_k = weighted_by_slab(s_l, g_g)    # Sigma^< G^>
+        p_abs = np.asarray(get_host(p_out_k - p_in_k))
+        if comm.stack.size > 1:
+            recv = np.empty_like(p_abs)
+            comm.stack.all_reduce(np.ascontiguousarray(p_abs), recv, op="sum")
+            p_abs = recv
+        return p_abs
+
     def _phonon_heat_flow_conservation(self):
         """Heat-flow conservation of the anharmonic phonon SCBA.
 
