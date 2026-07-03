@@ -190,6 +190,48 @@ below the conductance systematic of \cref{fig:cons_ratio}.
   \label{fig:cons_T}
 \end{figure}
 
+\paragraph{The local (bond) current and the Meir--Wingreen current.}
+The per-interface current array holds the same structural form
+$\mathrm{Tr}[\Sigma^>G^<-G^>\Sigma^<]$ at every entry: the first and last
+entries insert the lead (OBC) self-energy --- the Meir--Wingreen contact
+current --- while the interior entries insert the dynamical-matrix embedding
+self-energy, the operational form of the Hardy bond current. The two are
+related by steady-state energy continuity per slab,
+$J_{k+1}=J_k+P_{\rm abs}(k)+D_k(\eta)$, with the \emph{slab-resolved}
+scattering absorption $P_{\rm abs}(k)=\sum_\omega\hbar\omega\,
+\mathrm{Tr}_k[\Sigma_s^>G^<-\Sigma_s^<G^>]$ (the block-resolved bubble
+balance; its device sum is the $J_s$ of \cref{tab:cons_cnt33}, machine-zero
+for the conserving vertex --- binned and unbinned agree to $8\times10^{-16}$)
+and $D_k$ the finite-$\eta$ ghost absorption. \Cref{fig:cons_local_mw}
+verifies the identity on the three-cell CNT: at $\eta=10^{-12}$ the
+reconstruction $J_0+\sum_{j<k}P_{\rm abs}(j)$ reproduces the measured
+interior bond currents to $3\times10^{-3}$ (the SCBA residual level of that
+run) --- the interior dip below the leads is \emph{not} broadening but the
+energy the three-phonon interaction extracts near one contact and re-injects
+near the other ($P_{\rm abs}=(-3.13,+0.00,+3.13)$), flowing through the
+interaction channel that the harmonic bond current does not count. At
+$\eta=0.7$~THz the same scattering term explains only $\sim9\%$ of the dip;
+the remaining gap \emph{is} the slab-resolved $\eta$-ghost absorption
+($D_k\approx-1.76$ per contact slab), which cancels left--right so the lead
+balance survives. One cannot ``sum'' local currents into the Meir--Wingreen
+current --- in steady state every interface would carry the \emph{same}
+current if energy flowed only through the harmonic bonds; the telescoped
+absorption is exactly what reconstructs the lead values from the interior.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{transport_sweeps/local_vs_mw_current.pdf}
+  \caption{Per-interface heat current of the three-cell (3,3) CNT (points;
+    interfaces $0$ and $3$ are the lead Meir--Wingreen currents, stars)
+    versus the energy-continuity reconstruction from the slab-resolved
+    scattering absorption (line). \emph{Left}: at the $\eta=10^{-12}$
+    conserving fixed point the reconstruction matches the interior bond
+    currents --- the dip is interaction-channel energy transport.
+    \emph{Right}: at $\eta=0.7$~THz the gap between reconstruction and
+    measurement is the slab-resolved finite-$\eta$ ghost absorption.}
+  \label{fig:cons_local_mw}
+\end{figure}
+
 \paragraph{Side finding.}
 The RGF \texttt{selected\_solve} retarded output is the \emph{left-connected}
 $g^R$ except at the last diagonal block, and must not be mistaken for the

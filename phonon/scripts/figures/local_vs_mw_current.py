@@ -49,24 +49,31 @@ def main() -> None:
             return
         heat = np.asarray(z["last_heat"], dtype=float).reshape(-1)
         pa = np.real(np.asarray(z["slab_absorption"]))
+        if pa.ndim > 1:
+            pa = pa[0]      # row-binned = the verified attribution
         panels.append((tag, title, heat, pa))
 
     fig, axes = style.figure(ncols=2, width=4.6, height=3.4)
     for ax, (tag, title, heat, pa) in zip(np.atleast_1d(axes), panels):
         k = np.arange(heat.size)
-        recon = np.concatenate(([heat[0]], heat[0] - np.cumsum(pa)))
+        recon = np.concatenate(([heat[0]], heat[0] + np.cumsum(pa)))
         ax.plot(k, heat, "o", ms=8, color="C0", label="measured $J_k$")
         ax.plot(k, recon, "-s", ms=4, lw=1.2, color="C3",
-                label=r"$J_0-\sum_{j<k} P_{\rm abs}(j)$")
+                label=r"$J_0+\sum_{j<k} P_{\rm abs}(j)$")
         ax.plot([k[0], k[-1]], [heat[0], heat[-1]], "*", ms=13, color="C0",
                 mfc="none", label="lead Meir--Wingreen")
         resid = np.abs(heat[1:] - recon[1:]).max() / np.abs(heat).mean()
-        ax.annotate(rf"max identity residual ${resid:.1e}$",
+        ax.annotate((rf"max residual ${resid:.1e}$" "\n"
+                     r"(interior gap $=$ $\eta$-ghost absorption)"
+                     if resid > 1e-2 else rf"max residual ${resid:.1e}$"),
                     (0.5, 0.04), xycoords="axes fraction", ha="center",
                     fontsize=7.5)
         ax.set_title(title, fontsize=9)
         ax.set_xlabel("interface $k$ (0 = left lead)")
         ax.set_xticks(k)
+        lo = min(heat.min(), recon.min())
+        hi = max(heat.max(), recon.max())
+        ax.set_ylim(lo - 0.18 * (hi - lo), hi + 0.06 * (hi - lo))
         print(f"[{tag}] J = {np.round(heat, 4)}  P_abs = {np.round(pa, 4)}  "
               f"resid = {resid:.2e}")
     np.atleast_1d(axes)[0].set_ylabel(r"heat current $\sum_\omega \hbar\omega\,I_k(\omega)$")
