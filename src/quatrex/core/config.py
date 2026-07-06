@@ -897,6 +897,14 @@ class PhononConfig(BaseModel):
     high-rank factor file. Requires ``decomposed_vertices_path``.
     """
 
+    sse_zero_bands_thz: list[list[float]] = []
+    """DIAGNOSTIC frequency ablation: hard-zero the scattering self-energy
+    (bubble input G legs, output Sigma^<>, post-Hilbert Sigma^R) in the given
+    ``[lo, hi]`` THz windows. NOT a physical treatment -- it deletes real
+    two-phonon spectral weight like any hard mask (spectral-deformation
+    audit); use it to BISECT which spectral region seeds an eta=0 runaway.
+    """
+
     decomposed_kernel: Literal["gram", "reconstruct"] = "reconstruct"
     """How the SSE consumes the decomposed vertex.
 
