@@ -235,6 +235,18 @@ if _mw is not None:
 if cfg.outputs.save_profiling_results:
     Profiler().dump_stats()
 
+# Per-slab scattering absorption + same-instant global balance: COLLECTIVE
+# (stack all-reduce inside) -- must run on ALL ranks, before the rank-0
+# snapshot gate (rank-0-only invocation deadlocks any stack>1 run).
+_slab_pa, _final_bal = None, None
+try:
+    _slab_pa = scba._phonon_slab_absorption()
+    if _slab_pa is not None:
+        _final_bal = scba._phonon_bubble_energy_balance()
+except Exception as exc:  # noqa: BLE001 -- diagnostic, never fatal
+    if ranks.rank == 0:
+        print(f"slab_absorption failed: {exc!r}", flush=True)
+
 if ranks.rank == 0:
     npz = os.environ.get("QX_NPZ") or str(Path(cfg.output_dir).parent / "run.npz")
     Path(npz).parent.mkdir(parents=True, exist_ok=True)
@@ -282,22 +294,17 @@ if ranks.rank == 0:
         # (P_in, P_out, resid) per iteration -- the Phi-derivable energy
         # balance of the bubble; resid ~roundoff = conserving SSE.
         out["iter_bubble_balance"] = np.asarray(bb, dtype=float)
-    # Per-slab scattering energy absorption at the final iterate: the
-    # block-resolved bubble balance connecting adjacent interface heat
-    # currents by energy continuity (J_k - J_{k-1} = -P_abs(k) + eta term).
-    try:
-        pa = scba._phonon_slab_absorption()
-        if pa is not None:
-            out["slab_absorption"] = np.asarray(pa)
-            # Same-instant global balance (same Sigma/G pairing as the slab
-            # binning): sum(slab_absorption) == P_out - P_in to roundoff.
-            bal = scba._phonon_bubble_energy_balance()
-            if bal is not None:
-                out["final_bubble_balance"] = np.asarray(
-                    [bal[0], bal[1]], dtype=complex)
-    except Exception as exc:  # noqa: BLE001 -- diagnostic, never fatal
-        if ranks.rank == 0:
-            print(f"slab_absorption failed: {exc!r}", flush=True)
+    # Per-slab scattering energy absorption at the final iterate (computed
+    # COLLECTIVELY above the rank-0 gate; written here): the block-resolved
+    # bubble balance connecting adjacent interface heat currents by energy
+    # continuity (J_k - J_{k-1} = -P_abs(k) + eta term).
+    if _slab_pa is not None:
+        out["slab_absorption"] = np.asarray(_slab_pa)
+    if _final_bal is not None:
+        # Same-instant global balance (same Sigma/G pairing as the slab
+        # binning): sum(slab_absorption) == P_out - P_in to roundoff.
+        out["final_bubble_balance"] = np.asarray(
+            [_final_bal[0], _final_bal[1]], dtype=complex)
     if _iter_sigma_max:
         out["iter_sigma_max"] = np.asarray(_iter_sigma_max)
     if _DIAG and _iter_gin_dos:

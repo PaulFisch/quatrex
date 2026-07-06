@@ -133,9 +133,10 @@ def main() -> int:
         print(f"[done ] nf{nf}: rc={rc} npz={'yes' if ok else 'MISSING'} "
               f"wall={dt / 60:.1f} min", flush=True)
         if not ok:
-            print(f"[abort] nf{nf} produced no snapshot -- stopping the "
-                  "ladder for inspection", flush=True)
-            return 1
+            # A diverged rung is a RESULT here (the residual trace lives in
+            # the log); keep climbing -- finer grids are the hypothesis.
+            print(f"[warn ] nf{nf} produced no snapshot (diverged?) -- "
+                  "continuing with the next rung", flush=True)
     print("[done ] d5a grid ladder complete.", flush=True)
     return 0
 
