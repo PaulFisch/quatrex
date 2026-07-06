@@ -999,30 +999,6 @@ class PhononConfig(BaseModel):
     spectral_support_tol: NonNegativeFloat = 1e-4
     """Threshold (relative to the per-frequency spectral-weight peak) below which
     a frequency is treated as outside the band support by ``band_limit_sse``."""
-    sse_smooth_window: bool = False
-    """Replace the HARD band-limit masks (band-top / band-support / occupation-
-    freeze, which set Sigma=0 abruptly) with a SMOOTH, grid-consistent
-    multiplicative window w(omega) in [0,1] applied to the SSE input G legs AND
-    output Sigma AND -- crucially -- the Hilbert (Kramers-Kronig) INPUT, dropping
-    the post-Hilbert masking. RATIONALE (general eta=0 fix): a hard Sigma=0 edge
-    is a step discontinuity whose Hilbert partner is ~ln|omega-omega_edge| and
-    rings (Gibbs) at the edge bin -- an infinitely-sharp feature that the eta=0
-    SCBA amplifies into a marginal eigenmode pinned at the mask boundary (e.g. the
-    SiNW d5a residual stuck at the kept-band edge). A discontinuity cannot be
-    cured by another discontinuity. The window is w_supp(omega)*w_occ(omega):
-    w_supp is a raised-cosine ramp (width ``support_taper_cells``*dw) on the
-    distance to the harmonic spectral support (subsumes the band-top + gap masks);
-    w_occ is a smooth logistic in the Bose occupation (subsumes the freeze mask).
-    Frozen + G-independent (no live A(omega) threshold -> no limit cycle), applied
-    symmetrically (conserving), grid-consistent (ramps ~dw -> the exact band
-    indicator as dw->0). Pair with a grid-consistent broadening eta = c*dw (the
-    resolvent floor that raises every sub-grid-sharp pole's linewidth to the grid
-    -- the IR taper handles omega=0 where eta*|omega| vanishes)."""
-    support_taper_cells: NonNegativeFloat = 4.0
-    """``sse_smooth_window`` raised-cosine ramp width in grid cells (dw units) for
-    the harmonic-support window edge. ~3-5: wide enough that the Sigma transition
-    is smooth on the grid (no Gibbs ring), narrow enough to collapse to the exact
-    band indicator as dw->0."""
     band_support_margin_thz: NonNegativeFloat = 0.0
     """With ``band_limit_sse``: HARMONIC spectral-support masking (0 = off, use
     only the single above-band-top mask). The bulk dispersion
@@ -1208,12 +1184,6 @@ class PhononConfig(BaseModel):
                 "sse_ir_subtraction and ir_taper_cells are mutually-exclusive "
                 "IR occupation treatments: set ir_taper_cells = 0 when using "
                 "the exact Bose subtraction."
-            )
-        if self.sse_smooth_window and self.spectral_sharp_cap > 0.0:
-            raise ValueError(
-                "spectral_sharp_cap (a hard live-A mask) conflicts with "
-                "sse_smooth_window, whose C^1 window replaces the hard masks; "
-                "enable only one."
             )
         return self
 

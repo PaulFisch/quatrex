@@ -160,19 +160,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._T_hot = max(float(getattr(config.phonon, "left_temperature", 300.0)),
                           float(getattr(config.phonon, "right_temperature", 300.0)))
         self._freeze_mask = None
-        # SMOOTH band-limit window (sse_smooth_window): replace the hard masks
-        # with a smooth multiplicative window -> no Sigma discontinuity -> no
-        # Hilbert/Gibbs edge ring -> no manufactured eta=0 marginal mode.
-        self._smooth_window = bool(getattr(config.phonon, "sse_smooth_window",
-                                           False))
-        self._support_taper_cells = float(
-            getattr(config.phonon, "support_taper_cells", 4.0))
+        # NB the former SMOOTH band-limit window (sse_smooth_window) was
+        # REMOVED 2026-07-06: it enforced the HARMONIC support on Sigma,
+        # whose true support is the TWO-PHONON (sum/difference) spectrum --
+        # it deleted physical combination continua (measured on d5a: the
+        # divergence drivers sat on the half-suppressed window ramp, with
+        # zero one-phonon but large two-phonon DOS). See
+        # phonon/docs/spectral_deformation_audit.md.
         # NB: the IR Bose-singularity subtraction (sse_ir_subtraction) is handled
         # in phonon/solver.py at the LEAD OCCUPATION level, not in the bubble --
         # the device G^< has no 1/omega pole to subtract (the bosonic fold +
         # bounded spectral A force it to cancel), so a bubble-leg subtraction
         # both does nothing physical AND breaks the Phi-derivable conservation.
-        self._sse_window = None  # cached (ne_full, 1, ...) float window
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
             raise ValueError(
@@ -449,45 +448,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             ev = np.linalg.eigvalsh(Dk)
             out.append(np.sqrt(np.clip(ev.real, 0.0, None)))
         return np.unique(np.concatenate(out))
-
-    def _build_sse_window(self, full_freqs):
-        """SMOOTH band-limit window w(omega) in [0,1] (1D, cached). Replaces the
-        hard support+freeze masks: w_supp (raised-cosine ramp of width
-        support_taper_cells*dw on the GLOBAL distance to the harmonic support --
-        subsumes band-top + gaps) times w_occ (smooth logistic in the Bose
-        occupation at T_hot -- subsumes the freeze). G-independent + frozen, so
-        no live-A limit cycle; C^1 smooth, so its Hilbert partner has no edge
-        ring; ramps ~dw, so -> the exact band indicator as dw->0."""
-        af = np.abs(np.asarray(full_freqs).real).astype(float)
-        dw = float(abs(full_freqs[1] - full_freqs[0])) if af.size > 1 else 1.0
-        w = np.ones(af.shape, dtype=float)
-        if self._support_margin > 0.0:
-            sf = self._support_freqs
-            if sf is not None and sf.size:
-                dist = np.min(np.abs(af[:, None] - sf[None, :]), axis=1)
-            else:
-                dist = np.full(af.shape, np.inf)
-            # global nearest-harmonic-mode distance (support is the union of ranks)
-            comm.Allreduce(MPI.IN_PLACE, dist, op=MPI.MIN)
-            ramp = max(self._support_taper_cells * dw, 1e-30)
-            s = np.clip((dist - self._support_margin) / ramp, 0.0, 1.0)
-            w *= 0.5 * (1.0 + np.cos(np.pi * s))  # 1 at dist<=m, 0 at dist>=m+ramp
-        if self._freeze_n > 0.0:
-            x = _THZ_OVER_K * af / max(self._T_hot, 1e-30)
-            with np.errstate(over="ignore", divide="ignore"):
-                n_bose = 1.0 / np.expm1(np.clip(x, 1e-30, None))
-            w *= 1.0 / (1.0 + (self._freeze_n
-                               / np.maximum(n_bose, 1e-300)) ** 3)
-        # The omega=0 bin is always zeroed (a nonzero Sigma^≷(0) hits the singular
-        # acoustic G^R(0) -> DC spike). The IR occupancy taper (ir_taper_cells)
-        # makes the approach ~omega^2 smooth, so this single-bin zero does not ring.
-        w[af < 1e-6] = 0.0
-        if comm.rank == 0:
-            print(f"SSE band-limit: SMOOTH window (support ramp "
-                  f"{self._support_taper_cells:g}*dw, freeze n<{self._freeze_n:g})"
-                  f" -> mean w={float(w.mean()):.3f}, {int((w < 0.5).sum())}/"
-                  f"{w.size} bins below 0.5", flush=True)
-        return xp.asarray(w)
 
     def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
         """Prepare the self-consistent SCP cubic-tadpole static self-energy:
@@ -791,16 +751,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                   f"near-singular bin(s) (A > {self._sharp_cap:g}"
                                   f"x median, hysteresis)", flush=True)
                         sse_mask = sse_mask | self._sharp_state
-        if self._smooth_window:
-            # SMOOTH window (replaces the hard masks). The reversed/absorption
-            # legs are built from gl_in/gg_in below, so they inherit it -> the
-            # bosonic fold stays exact (w is a function of |omega|).
-            if self._sse_window is None:
-                self._sse_window = self._build_sse_window(full_freqs)
-            _w = self._sse_window.reshape((-1,) + (1,) * (gl_in.ndim - 1))
-            gl_in = gl_in * _w
-            gg_in = gg_in * _w
-        elif bool(sse_mask.any()):
+        if bool(sse_mask.any()):
             gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
             gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
         # NOTE: the IR Bose subtraction is NOT applied to the bubble legs -- the
@@ -1063,11 +1014,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # ballistic), and never at the omega=0 bin (a nonzero Sigma^≷(0)
         # hits the near-singular acoustic G^R(0) and produces a x1e5 DC
         # spike in I(0) on soft wires; the bin carries zero heat anyway).
-        if self._smooth_window:
-            _w = self._sse_window.reshape((-1,) + (1,) * (sl_data.ndim - 1))
-            sl_data = sl_data * _w
-            sg_data = sg_data * _w
-        elif bool(sse_mask.any()):
+        if bool(sse_mask.any()):
             sl_data[sse_mask] = 0.0
             sg_data[sse_mask] = 0.0
         # SIGN CONVENTION (2026-06-12 fix): the bubble formula (textbook
@@ -1090,11 +1037,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if self.retarded_method == "fft":
             delta = sg_data - sl_data
             hil = 0.5j * hilbert_transform(delta, full_freqs)
-            if not self._smooth_window and bool(sse_mask.any()):
-                # HARD path: post-mask the retarded too. (SMOOTH path: sl/sg are
-                # already windowed -> delta is C^1 smooth -> the Hilbert has NO
-                # edge ring; post-masking here would RE-INTRODUCE the step after
-                # the global KK transform -- the Gibbs source -- so we skip it.)
+            if bool(sse_mask.any()):
+                # post-mask the retarded consistently with Sigma^<>
                 hil[sse_mask] = 0.0
             sigma_retarded.data[:] = sigma_retarded.data + hil
 

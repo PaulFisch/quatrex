@@ -142,9 +142,7 @@ band_limit_sse = {str(a.band_limit).lower()}
 spectral_sharp_cap = {a.sharp_cap}
 band_support_margin_thz = {a.band_support_margin}
 sse_freeze_occupation = {a.sse_freeze_occupation}
-sse_smooth_window = {str(a.sse_smooth_window).lower()}
 sse_ir_subtraction = {str(a.sse_ir_subtraction).lower()}
-support_taper_cells = {a.support_taper_cells}
 sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
@@ -260,9 +258,7 @@ band_limit_sse = {str(a.band_limit).lower()}
 spectral_sharp_cap = {a.sharp_cap}
 band_support_margin_thz = {a.band_support_margin}
 sse_freeze_occupation = {a.sse_freeze_occupation}
-sse_smooth_window = {str(a.sse_smooth_window).lower()}
 sse_ir_subtraction = {str(a.sse_ir_subtraction).lower()}
-support_taper_cells = {a.support_taper_cells}
 sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
@@ -382,13 +378,6 @@ def main():
     p.add_argument("--band-limit", action="store_true",
                    help="band-limit the SSE: scatter only where A(w) has weight "
                         "(generic auto cutoff at both band edges; for eta->0)")
-    p.add_argument("--sse-smooth-window", dest="sse_smooth_window",
-                   action="store_true",
-                   help="replace the HARD band-limit masks with a SMOOTH "
-                        "multiplicative window (raised-cosine support ramp + "
-                        "logistic freeze) applied to SSE input/output AND the "
-                        "Hilbert input -- no Sigma discontinuity -> no eta=0 "
-                        "mask-edge marginal mode (general fix)")
     p.add_argument("--eta-ir-floor-cells", dest="eta_ir_floor_cells", type=float,
                    default=0.0,
                    help="sub-grid soft-mode broadening floor (grid cells); a "
@@ -406,9 +395,6 @@ def main():
                         "singularity subtraction in the bubble (preserves the "
                         "quantised ballistic plateau T(0)=N_ac; set ir-taper-"
                         "cells=0 with this)")
-    p.add_argument("--support-taper-cells", dest="support_taper_cells",
-                   type=float, default=4.0,
-                   help="smooth-window support ramp width in grid cells (~3-5)")
     p.add_argument("--sse-freeze-occupation", dest="sse_freeze_occupation",
                    type=float, default=0.0,
                    help="with --band-limit: mask SSE bins with Bose occupation "

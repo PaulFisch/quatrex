@@ -3,9 +3,10 @@
 Hypothesis (flat bands): d5a's flat branches are sharp Lorentzian resonances
 whose self-consistent linewidth Gamma must be RESOLVED by the frequency grid
 (d_omega < Gamma) -- the eta=0 non-convergence may be a resolution problem,
-not a physics one. Two experiments, all rungs BARE (ir_taper_cells = 0; the
-harmonic support machinery -- band_support_margin, smooth window -- stays, it
-is a G-independent support mask shown interior-continuity-innocent):
+not a physics one. Two experiments, all rungs fully RAW (ir_taper_cells = 0,
+NO spectral window/mask -- the smooth support window was REMOVED 2026-07-06:
+it deleted the physical two-phonon combination continua; see
+phonon/docs/spectral_deformation_audit.md):
 
   (1) RESOLUTION ladder: nfreq in {181, 361, 721, 1441} at fmax = 66 THz
       (d_omega 0.367 -> 0.046 THz). Does the residual floor / limit cycle
@@ -50,9 +51,9 @@ NRANKS = 64
 MAX_ITER = 150
 GEOM = ("dynamical_matrix.mat", "fc3_blocks.hdf5", "structure.xyz")
 
-# resolution ladder first (181 calibrates), then the cheap alignment trio,
-# then the expensive fine rungs.
-RUNGS = [181, 185, 189, 193, 361, 721, 1441]
+# resolution rungs first (the does-the-large-grid-fix-it question), the
+# alignment trio between the medium and the heaviest rung.
+RUNGS = [181, 361, 721, 185, 189, 193, 1441]
 
 ENV = dict(os.environ,
            OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
@@ -76,6 +77,15 @@ def prep(nf: int) -> Path:
                  f"max_iterations = {MAX_ITER}", cfg)
     cfg = re.sub(r"(?m)^ir_taper_cells = [0-9.eE+-]+",
                  "ir_taper_cells = 0.0", cfg)
+    # keys REMOVED from the schema (smooth window deleted 2026-07-06)
+    cfg = re.sub(r"(?m)^sse_smooth_window = .*\n", "", cfg)
+    cfg = re.sub(r"(?m)^support_taper_cells = .*\n", "", cfg)
+    # fully RAW: no hard masks either (see the spectral-deformation audit)
+    cfg = re.sub(r"(?m)^band_limit_sse = .*", "band_limit_sse = false", cfg)
+    cfg = re.sub(r"(?m)^band_support_margin_thz = .*",
+                 "band_support_margin_thz = 0.0", cfg)
+    cfg = re.sub(r"(?m)^sse_freeze_occupation = .*",
+                 "sse_freeze_occupation = 0.0", cfg)
     # Migrate pre-namespace mixer keys (the diag config predates the
     # [scba.experimental_mixer] move; the current schema forbids extras).
     moved, keep = [], []
