@@ -223,16 +223,23 @@ A caveat isolated by an L2 recipe ablation: the \emph{infrared occupancy
 taper} (\cref{app:infrared}) breaks this \emph{interior} bookkeeping
 while leaving every global gate intact. With the taper the identity misses
 by $\approx2.9$ ($5\%$ of $J$; the smooth spectral window adds nothing,
-$-2.94\to-2.98$), because the tapered $\Sigma_s$ is no longer the
-$\Phi$-derivable functional of the \emph{actual} $G$ below
-$\omega_{\rm reg}$ --- the interaction down-converts current spectrally
-(the interior bond current \emph{exceeds} the leads below $\sim10$~THz and
-deficits above), and the taper's modified infrared occupancy leaves part of
-that redistribution unaccounted in $\mathrm{Tr}_k$. The $S_3$/fold symmetry
-still telescopes the total to zero ($\sum_kP_{\rm abs}=10^{-12}$, lead
-balance $6\times10^{-11}$), so all lead-based observables and gates are
-untouched; only the \emph{interpretation} of the interior profile on
-tapered runs mixes physics with the regulariser.
+$-2.94\to-2.98$). Mechanistically the taper multiplies the \emph{contact
+injection occupancies} by $\omega^2/(\omega^2+\omega_{\rm reg}^2)$
+(\texttt{solver.py}) --- a Lorentzian-tailed deformation of the lead
+boundary condition that still suppresses scattering by $10\%$ at
+$3\,\omega_{\rm reg}$ --- so the tapered device answers a modified-contact
+problem whose interior current redistribution (the interaction
+down-converts: the interior bond current \emph{exceeds} the leads below
+$\sim10$~THz and deficits above) is not fully accounted by
+$\mathrm{Tr}_k[\Sigma_s^\lessgtr G^\gtrless]$; the residual attribution of
+the missing $2.9$ is under investigation. The $S_3$/fold symmetry still
+telescopes the total to zero ($\sum_kP_{\rm abs}=10^{-12}$, lead balance
+$6\times10^{-11}$), so all lead-based gates are untouched --- but the
+untapered (bare) bubble is the only variant that satisfies the
+per-interface ledger, and the bare-vs-tapered conductance difference
+($13.6$ vs $17.0$ at $181$ points) is resolved by the bare grid-refinement
+ladder, not by the taper family's own $\omega_{\rm reg}\to0$
+extrapolation.
 
 \begin{figure}[t]
   \centering
