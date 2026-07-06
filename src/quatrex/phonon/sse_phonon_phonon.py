@@ -93,6 +93,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._vertex_scale = float(getattr(config.phonon, "sse_vertex_scale", 1.0))
         self._sse_cutoff = float(
             getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
+        self._zero_bands = [
+            (float(lo), float(hi)) for lo, hi in
+            getattr(config.phonon, "sse_zero_bands_thz", []) or []]
         # Band-limited SSE: scatter only where there are phonon states (mask the
         # bubble where the spectral function A(w)=i(G^>-G^<) is negligible). The
         # generic, automatic cutoff that fixes the eta->0 divergence (spurious
@@ -646,6 +649,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # participate in the SSE at all -- with the matching OUTPUT mask in
         # step (5), transport below the cutoff is purely ballistic.
         sse_mask = xp.abs(xp.asarray(full_freqs)) < max(self._sse_cutoff, 1e-6)
+        # DIAGNOSTIC frequency ablation (sse_zero_bands_thz): hard-zero the
+        # SSE in arbitrary [lo, hi] THz windows -- input G legs, output
+        # Sigma^<> and the post-Hilbert Sigma^R all inherit it through this
+        # mask. NOT a physical treatment (it deletes real two-phonon weight
+        # like any hard mask; see the spectral-deformation audit): the tool
+        # for BISECTING which spectral region seeds an eta=0 runaway.
+        if self._zero_bands:
+            af_zb = xp.abs(xp.asarray(full_freqs))
+            for lo, hi in self._zero_bands:
+                sse_mask = sse_mask | ((af_zb >= float(lo))
+                                       & (af_zb <= float(hi)))
         if self._band_limit:
             af = xp.abs(xp.asarray(full_freqs))
             low = xp.zeros(af.shape, dtype=bool)
