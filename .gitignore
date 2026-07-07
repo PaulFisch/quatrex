@@ -230,3 +230,6 @@ CLAUDE.md
 CLAUDE.local.md
 **/CLAUDE.local.md
 phonon/scripts/out/snapshots/
+
+# report lives in its own Overleaf repo (see memory: overleaf-report-repo)
+document/
