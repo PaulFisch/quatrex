@@ -438,17 +438,28 @@ class SCBA:
                 # only warn about a stale npy.
                 solver_freqs = np.asarray(self.phonon_solver.local_frequencies)
                 npy_freqs = np.asarray(self.phonon_energies)
-                if npy_freqs.shape != solver_freqs.shape or not np.allclose(
-                    npy_freqs, solver_freqs
+                # Compare against the GLOBAL configured window -- NOT the
+                # rank-local slice (which is len(global)/stack points and
+                # made this warning fire spuriously on every stack>1 run).
+                el = self.config.electron
+                global_freqs = np.linspace(
+                    float(el.energy_window_min),
+                    float(el.energy_window_max),
+                    int(el.energy_window_num),
+                )
+                if npy_freqs.shape != global_freqs.shape or not np.allclose(
+                    npy_freqs, global_freqs
                 ):
                     if comm.rank == 0:
                         print(
                             "WARNING: phonon_energies.npy "
                             f"({npy_freqs.shape[0]} pts, dw="
                             f"{float(npy_freqs[1] - npy_freqs[0]):.4g}) does "
-                            "not match the solver energy grid "
-                            f"({solver_freqs.shape[0]} pts); using the "
-                            "solver grid for the scattering self-energy.",
+                            "not match the configured solver energy grid "
+                            f"({global_freqs.shape[0]} pts, dw="
+                            f"{float(global_freqs[1] - global_freqs[0]):.4g})"
+                            "; using the solver grid for the scattering "
+                            "self-energy.",
                             flush=True,
                         )
                 self._phonon_phonon_interaction = PhononPhononInteraction(
