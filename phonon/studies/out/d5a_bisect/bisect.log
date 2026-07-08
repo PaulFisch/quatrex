@@ -1,0 +1,46 @@
+[run  ] ircut (cutoff=1.5, bands=[])
+[done ] ircut: rc=0 its=150 budget wall=605.3 min
+[ircut] top growth bins (it8 -> end):
+    w= 64.167 THz  x1.4e+01  |Sig|end=1.26e-02
+    w= 63.800 THz  x1.4e+01  |Sig|end=2.37e-02
+    w= 63.433 THz  x8.3e+00  |Sig|end=2.86e-02
+    w= 56.467 THz  x8.0e+00  |Sig|end=3.07e-02
+    w= 57.933 THz  x7.2e+00  |Sig|end=1.76e-02
+    w= 57.567 THz  x7.0e+00  |Sig|end=1.91e-02
+[run  ] gapzero (cutoff=0.0, bands=[[28.0, 45.0]])
+[done ] gapzero: rc=0 its=62 ABORTED wall=303.9 min
+[gapzero] top growth bins (it8 -> end):
+    w= 56.100 THz  x9.4e+16  |Sig|end=3.31e+15
+    w= 55.000 THz  x7.5e+16  |Sig|end=2.25e+15
+    w= 64.900 THz  x6.6e+16  |Sig|end=2.12e+15
+    w= 49.500 THz  x5.2e+16  |Sig|end=1.89e+15
+    w= 45.467 THz  x3.9e+16  |Sig|end=1.73e+15
+    w= 46.933 THz  x2.7e+16  |Sig|end=1.77e+15
+[run  ] flatzero (cutoff=0.0, bands=[[16.5, 28.0]])
+[done ] flatzero: rc=0 its=143 ABORTED wall=682.0 min
+[flatzero] top growth bins (it8 -> end):
+    w= 39.600 THz  x1.4e+17  |Sig|end=2.26e+14
+    w= 37.767 THz  x9.4e+16  |Sig|end=1.89e+14
+    w= 39.233 THz  x5.1e+16  |Sig|end=8.62e+13
+    w= 41.067 THz  x3.3e+16  |Sig|end=5.66e+13
+    w= 38.133 THz  x3.0e+16  |Sig|end=5.67e+13
+    w= 41.800 THz  x2.9e+16  |Sig|end=7.90e+13
+[run  ] ir_gap (cutoff=1.5, bands=[[28.0, 45.0]])
+[done ] ir_gap: rc=0 its=150 budget wall=510.7 min
+[ir_gap] top growth bins (it8 -> end):
+    w= 63.067 THz  x3.3e+00  |Sig|end=3.20e-02
+    w= 27.867 THz  x2.9e+00  |Sig|end=8.69e+00
+    w=  3.667 THz  x2.8e+00  |Sig|end=4.03e+02
+    w= 62.700 THz  x2.8e+00  |Sig|end=4.25e-02
+    w= 27.500 THz  x1.7e+00  |Sig|end=3.78e+00
+    w= 52.067 THz  x1.6e+00  |Sig|end=7.49e-02
+[run  ] ir_flat (cutoff=1.5, bands=[[16.5, 28.0]])
+[done ] ir_flat: rc=0 its=150 budget wall=232.9 min
+[ir_flat] top growth bins (it8 -> end):
+    w= 63.067 THz  x1.5e+01  |Sig|end=1.64e-02
+    w= 62.700 THz  x1.4e+01  |Sig|end=3.69e-02
+    w= 45.467 THz  x1.4e+01  |Sig|end=3.59e-03
+    w= 46.200 THz  x1.4e+01  |Sig|end=4.34e-03
+    w= 44.733 THz  x1.4e+01  |Sig|end=2.96e-03
+    w= 45.100 THz  x1.3e+01  |Sig|end=3.25e-03
+[run  ] ir_gap_flat (cutoff=1.5, bands=[[16.5, 45.0]])

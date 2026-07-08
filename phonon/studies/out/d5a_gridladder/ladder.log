@@ -1,0 +1,6 @@
+[run  ] nf181 (d_omega=0.3667 THz, 64 ranks, max_iter=150)
+[done ] nf181: rc=0 npz=yes wall=107.1 min
+[run  ] nf361 (d_omega=0.1833 THz, 64 ranks, max_iter=150)
+[done ] nf361: rc=-9 npz=MISSING wall=222.6 min
+[warn ] nf361 produced no snapshot (diverged?) -- continuing with the next rung
+[run  ] nf721 (d_omega=0.0917 THz, 64 ranks, max_iter=150)

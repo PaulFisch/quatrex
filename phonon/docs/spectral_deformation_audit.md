@@ -55,6 +55,7 @@ figure `d5a_grid_ladder`, `eta0_knob_{ablation,sensitivity}`.
 cnt33-class (dispersive): **fully raw** — fft retarded, plain linear, no masks, no
 taper, grid-refine (bare G·dω Cauchy at 12.86: 181→361→541 = 13.62/12.91/12.86, and
 convergence gets FASTER on finer grids).
-d5a-class (flat bands): pending the raw grid ladder; if the flat-band marginality is
-physical (Γ→0 modes), the citable fallback is the η_floor = c·dω adaptive smearing —
-NOT the support window, NOT the occupancy taper.
+d5a-class (soft modes): SETTLED by the ablation bisection (d5a_eta0_bisection.md) —
+raw + `sse_low_freq_cutoff_thz` ≈ 1.5 THz (the citable phono3py-style exclusion of the
+sub-grid soft twist modes, the proven necessary-and-sufficient seed treatment) + RRE.
+The flat bands/stretch island are amplifiers only; grids do not fix the seed.

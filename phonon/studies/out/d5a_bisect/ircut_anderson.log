@@ -1,0 +1,1368 @@
+/usr/scratch/mont-fort11/pfischill/quatrex/src/qttools/__init__.py:56: UserWarning: 'cupy' is unavailable or not working, defaulting to 'numpy'. (No module named 'cupy')
+  warnings.warn(
+/usr/scratch/mont-fort11/pfischill/quatrex/src/quatrex/core/config.py:1885: UserWarning: The CPU code will run sequentially which may impact performance.
+  warnings.warn(
+Max Interaction Cutoff: 10.0
+Energy window: 0.0 to 66.0 eV with 181 grid points.
+Resolution is 0.366667 eV.
+comm.stack size: 32, comm.block size: 1
+Each comm.block has 5 grid points.
+/usr/scratch/mont-fort11/pfischill/quatrex/src/quatrex/core/statistics.py:42: RuntimeWarning: divide by zero encountered in divide
+  return 1 / (xp.exp(energy / (k_B * temperature)) - 1)
+WARNING: phonon_energies.npy (181 pts, dw=0.3667) does not match the solver energy grid (6 pts); using the solver grid for the scattering self-energy.
+Max Interaction Cutoff: 10.0
+RUN config=/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/d5a_bisect/ircut_anderson/quatrex_config.toml phonon=True eta=1e-12 retarded=fft nblk=2 ne=181 bcs=1 qcs=1 nranks=32
+Entering SCBA loop...
+Iteration 0
+[it  0] energy J(local)=[2.2879 2.2879 2.2879]
+Maximum Self-Energy Update: 1471.5500930387602
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00039571426657580844
+Current Conservation rel: 1.3531675324068713e-05
+Phonon: rel Sigma^R residual 1.0000e+00; lead balance 4.8274e-13 (best inf; internal spread 8.6664e-13)
+Bubble energy balance: P_in=-7.373024e+01 P_out=-7.373024e+01 resid=1.358e-13
+Writing output for iteration 0...
+Iteration 1
+[it  1] energy J(local)=[2.2873 2.2873 2.2873]
+Maximum Self-Energy Update: 3719.210121080312
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003808754626980715
+Current Conservation rel: 3.678249265924214e-05
+Phonon: rel Sigma^R residual 9.2836e-01; lead balance 6.8418e-05 (best inf; internal spread 8.2318e-03)
+Bubble energy balance: P_in=-4.314495e+02 P_out=-4.314495e+02 resid=1.626e-14
+Writing output for iteration 1...
+Iteration 2
+[it  2] energy J(local)=[2.2861 2.2853 2.2861]
+Maximum Self-Energy Update: 398482.068452303
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0017706634912428858
+Current Conservation rel: 7.392727352018198e-06
+Phonon: rel Sigma^R residual 9.9988e-01; lead balance 9.6574e-04 (best inf; internal spread 6.4087e-03)
+Bubble energy balance: P_in=-1.179703e+03 P_out=-1.179703e+03 resid=4.097e-13
+Writing output for iteration 2...
+Iteration 3
+[it  3] energy J(local)=[2.2846 2.284  2.2845]
+Maximum Self-Energy Update: 79562.56993727642
+Contact Current Difference: 0.0
+Current Conservation abs: 0.3555468782852813
+Current Conservation rel: 0.00025552537325452065
+Phonon: rel Sigma^R residual 4.7209e+00; lead balance 2.7067e-03 (best 2.7067e-03; internal spread 2.2029e-02)
+Bubble energy balance: P_in=-4.309937e+03 P_out=-4.309937e+03 resid=1.577e-14
+Writing output for iteration 3...
+Iteration 4
+[it  4] energy J(local)=[2.2822 2.281  2.282 ]
+Maximum Self-Energy Update: 63592.263654769435
+Contact Current Difference: 0.0
+Current Conservation abs: 0.43779606755197165
+Current Conservation rel: 0.0001606450205924994
+Phonon: rel Sigma^R residual 1.4188e+01; lead balance 2.8395e-03 (best 2.7067e-03; internal spread 6.2765e-02)
+Bubble energy balance: P_in=-6.594028e+03 P_out=-6.594028e+03 resid=2.983e-15
+Writing output for iteration 4...
+Iteration 5
+[it  5] energy J(local)=[2.2749 2.2698 2.276 ]
+Maximum Self-Energy Update: 50964.085252394885
+Contact Current Difference: 0.0
+Current Conservation abs: 0.611361391093169
+Current Conservation rel: 0.000198353390320076
+Phonon: rel Sigma^R residual 2.0595e+01; lead balance 1.3627e-02 (best 2.7067e-03; internal spread 5.5804e-02)
+Bubble energy balance: P_in=-7.521974e+03 P_out=-7.521974e+03 resid=6.369e-15
+Writing output for iteration 5...
+Iteration 6
+[it  6] energy J(local)=[2.2756 2.2773 2.2732]
+Maximum Self-Energy Update: 40815.70277535374
+Contact Current Difference: 0.0
+Current Conservation abs: 0.13643852358109143
+Current Conservation rel: 8.206344143551393e-05
+Phonon: rel Sigma^R residual 1.5248e+01; lead balance 1.3254e-02 (best 2.7067e-03; internal spread 1.3955e-02)
+Bubble energy balance: P_in=-5.045025e+03 P_out=-5.045025e+03 resid=3.249e-15
+Writing output for iteration 6...
+Iteration 7
+[it  7] energy J(local)=[2.2694 2.2731 2.2662]
+Maximum Self-Energy Update: 32621.42215599768
+Contact Current Difference: 0.0
+Current Conservation abs: 0.018327943398276147
+Current Conservation rel: 1.568395178684527e-05
+Phonon: rel Sigma^R residual 3.0586e+01; lead balance 1.3345e-02 (best 2.7067e-03; internal spread 1.3345e-02)
+Bubble energy balance: P_in=-4.064000e+03 P_out=-4.064000e+03 resid=2.059e-15
+Writing output for iteration 7...
+Iteration 8
+[it  8] energy J(local)=[2.2757 2.2929 2.2731]
+Maximum Self-Energy Update: 26027.383681935436
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0309184194621821
+Current Conservation rel: 2.6769443691602296e-05
+Phonon: rel Sigma^R residual 2.9952e+01; lead balance 1.2829e-02 (best 2.7067e-03; internal spread 1.2829e-02)
+Bubble energy balance: P_in=-4.126427e+03 P_out=-4.126427e+03 resid=4.941e-15
+Writing output for iteration 8...
+Iteration 9
+[it  9] energy J(local)=[2.2731 2.3106 2.2691]
+Maximum Self-Energy Update: 20800.058783842793
+Contact Current Difference: 0.0
+Current Conservation abs: 0.024581553423217883
+Current Conservation rel: 1.733004979608989e-05
+Phonon: rel Sigma^R residual 2.2627e+01; lead balance 1.0231e-02 (best 2.7067e-03; internal spread 1.2229e-02)
+Bubble energy balance: P_in=-4.864390e+03 P_out=-4.864390e+03 resid=6.569e-16
+Writing output for iteration 9...
+Iteration 10
+[it 10] energy J(local)=[2.274  2.2743 2.2698]
+Maximum Self-Energy Update: 16631.82733561216
+Contact Current Difference: 0.0
+Current Conservation abs: 0.01699886709616294
+Current Conservation rel: 2.2785040466251307e-05
+Phonon: rel Sigma^R residual 1.9035e+01; lead balance 3.9213e-03 (best 2.7067e-03; internal spread 3.7234e-02)
+Bubble energy balance: P_in=-2.797744e+03 P_out=-2.797744e+03 resid=1.302e-15
+Writing output for iteration 10...
+Iteration 11
+[it 11] energy J(local)=[2.2744 2.2738 2.2699]
+Maximum Self-Energy Update: 13309.458466354115
+Contact Current Difference: 0.0
+Current Conservation abs: 0.007347586250148197
+Current Conservation rel: 1.2243984056338e-05
+Phonon: rel Sigma^R residual 1.5352e+01; lead balance 4.3269e-03 (best 2.7067e-03; internal spread 4.7788e-02)
+Bubble energy balance: P_in=-2.252100e+03 P_out=-2.252100e+03 resid=1.782e-15
+Writing output for iteration 11...
+Iteration 12
+[it 12] energy J(local)=[2.2749 2.2744 2.2702]
+Maximum Self-Energy Update: 10649.424420729398
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005172580999044385
+Current Conservation rel: 9.477982084466524e-06
+Phonon: rel Sigma^R residual 1.2275e+01; lead balance 4.7895e-03 (best 2.7067e-03; internal spread 4.9683e-02)
+Bubble energy balance: P_in=-2.035331e+03 P_out=-2.035331e+03 resid=3.303e-15
+Writing output for iteration 12...
+Iteration 13
+[it 13] energy J(local)=[2.2756 2.2751 2.2704]
+Maximum Self-Energy Update: 8520.279649764285
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004595153965112786
+Current Conservation rel: 9.015913898418448e-06
+Phonon: rel Sigma^R residual 9.7838e+00; lead balance 4.6047e-03 (best 2.7067e-03; internal spread 5.0081e-02)
+Bubble energy balance: P_in=-1.909124e+03 P_out=-1.909124e+03 resid=1.057e-15
+Writing output for iteration 13...
+Iteration 14
+[it 14] energy J(local)=[2.2762 2.2756 2.2703]
+Maximum Self-Energy Update: 6817.391190549038
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0021711750412123365
+Current Conservation rel: 4.244578441656987e-06
+Phonon: rel Sigma^R residual 7.7697e+00; lead balance 3.9411e-03 (best 2.7067e-03; internal spread 4.9558e-02)
+Bubble energy balance: P_in=-1.902468e+03 P_out=-1.902468e+03 resid=2.680e-15
+Writing output for iteration 14...
+Iteration 15
+[it 15] energy J(local)=[2.2764 2.2758 2.2696]
+Maximum Self-Energy Update: 5456.239295604582
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00224428368738927
+Current Conservation rel: 4.1814257358483935e-06
+Phonon: rel Sigma^R residual 6.1587e+00; lead balance 2.9185e-03 (best 2.7067e-03; internal spread 4.9156e-02)
+Bubble energy balance: P_in=-1.958343e+03 P_out=-1.958343e+03 resid=4.271e-15
+Writing output for iteration 15...
+Iteration 16
+[it 16] energy J(local)=[2.2759 2.2756 2.2681]
+Maximum Self-Energy Update: 4368.537233315221
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0051870523878392305
+Current Conservation rel: 9.316013313364522e-06
+Phonon: rel Sigma^R residual 4.8931e+00; lead balance 1.2065e-03 (best 1.2065e-03; internal spread 4.9481e-02)
+Bubble energy balance: P_in=-1.990128e+03 P_out=-1.990128e+03 resid=7.675e-15
+Writing output for iteration 16...
+Iteration 17
+[it 17] energy J(local)=[2.2752 2.2757 2.2667]
+Maximum Self-Energy Update: 3499.3981799107237
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003011239973375268
+Current Conservation rel: 5.196752491654305e-06
+Phonon: rel Sigma^R residual 3.9079e+00; lead balance 6.0621e-04 (best 6.0621e-04; internal spread 4.9964e-02)
+Bubble energy balance: P_in=-2.031257e+03 P_out=-2.031257e+03 resid=1.206e-14
+Writing output for iteration 17...
+Iteration 18
+[it 18] energy J(local)=[2.2748 2.2765 2.266 ]
+Maximum Self-Energy Update: 2804.440746296208
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0008926076784518955
+Current Conservation rel: 1.495449323226919e-06
+Phonon: rel Sigma^R residual 3.1406e+00; lead balance 1.0225e-03 (best 6.0621e-04; internal spread 4.9807e-02)
+Bubble energy balance: P_in=-2.061814e+03 P_out=-2.061814e+03 resid=3.046e-15
+Writing output for iteration 18...
+Iteration 19
+[it 19] energy J(local)=[2.2751 2.2779 2.2662]
+Maximum Self-Energy Update: 2248.4593280509725
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00011275022791323863
+Current Conservation rel: 1.856469030027245e-07
+Phonon: rel Sigma^R residual 2.5357e+00; lead balance 6.9039e-05 (best 6.9039e-05; internal spread 4.8088e-02)
+Bubble energy balance: P_in=-2.077083e+03 P_out=-2.077083e+03 resid=4.557e-15
+mixer: linear -> Anderson(m=5, period=1, beta=0.2) at iteration 20
+Writing output for iteration 19...
+Iteration 20
+[it 20] energy J(local)=[2.2756 2.2794 2.2669]
+Maximum Self-Energy Update: 1803.2279693912667
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0005848383934790036
+Current Conservation rel: 9.582651639004404e-07
+Phonon: rel Sigma^R residual 2.0544e+00; lead balance 1.5389e-03 (best 6.9039e-05; internal spread 4.7000e-02)
+Bubble energy balance: P_in=-2.076945e+03 P_out=-2.076945e+03 resid=1.049e-14
+Writing output for iteration 20...
+Iteration 21
+[it 21] energy J(local)=[2.2781 2.2846 2.2704]
+Maximum Self-Energy Update: 98.33158911690175
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00276574689746667
+Current Conservation rel: 4.715475735729491e-06
+Phonon: rel Sigma^R residual 1.1652e-01; lead balance 9.6142e-03 (best 6.9039e-05; internal spread 4.1484e-02)
+Bubble energy balance: P_in=-1.997159e+03 P_out=-1.997159e+03 resid=2.940e-15
+Writing output for iteration 21...
+Iteration 22
+[it 22] energy J(local)=[2.2778 2.2842 2.2698]
+Maximum Self-Energy Update: 95.02021945250648
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0005253948683048293
+Current Conservation rel: 8.737635893803644e-07
+Phonon: rel Sigma^R residual 1.1084e-01; lead balance 9.1770e-03 (best 6.9039e-05; internal spread 4.0264e-02)
+Bubble energy balance: P_in=-2.035790e+03 P_out=-2.035790e+03 resid=5.025e-16
+Writing output for iteration 22...
+Iteration 23
+[it 23] energy J(local)=[2.2761 2.2824 2.2674]
+Maximum Self-Energy Update: 137.16538324750832
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0011746063904638504
+Current Conservation rel: 1.98078094090783e-06
+Phonon: rel Sigma^R residual 1.6439e-01; lead balance 9.9183e-03 (best 6.9039e-05; internal spread 3.8332e-02)
+Bubble energy balance: P_in=-2.020475e+03 P_out=-2.020475e+03 resid=5.229e-15
+Writing output for iteration 23...
+Iteration 24
+[it 24] energy J(local)=[2.2714 2.2777 2.2615]
+Maximum Self-Energy Update: 110.81636072035775
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0021621874137736086
+Current Conservation rel: 3.6859961057266222e-06
+Phonon: rel Sigma^R residual 1.3406e-01; lead balance 9.3469e-03 (best 6.9039e-05; internal spread 3.6735e-02)
+Bubble energy balance: P_in=-2.007482e+03 P_out=-2.007482e+03 resid=3.542e-15
+Writing output for iteration 24...
+Iteration 25
+[it 25] energy J(local)=[2.2606 2.2666 2.248 ]
+Maximum Self-Energy Update: 186.2852892585809
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005357703919571577
+Current Conservation rel: 9.38592404517126e-06
+Phonon: rel Sigma^R residual 2.2556e-01; lead balance 8.6067e-03 (best 6.9039e-05; internal spread 3.5205e-02)
+Bubble energy balance: P_in=-1.973890e+03 P_out=-1.973890e+03 resid=4.230e-15
+Writing output for iteration 25...
+Iteration 26
+[it 26] energy J(local)=[2.2648 2.2731 2.2547]
+Maximum Self-Energy Update: 249.4378915662203
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002248756033736754
+Current Conservation rel: 3.926068997922335e-06
+Phonon: rel Sigma^R residual 2.9560e-01; lead balance 9.5707e-03 (best 6.9039e-05; internal spread 3.6241e-02)
+Bubble energy balance: P_in=-1.966952e+03 P_out=-1.966952e+03 resid=3.466e-15
+Writing output for iteration 26...
+Iteration 27
+[it 27] energy J(local)=[2.2763 2.2836 2.2686]
+Maximum Self-Energy Update: 194.07254351484247
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0011135842581211364
+Current Conservation rel: 1.8984523742451262e-06
+Phonon: rel Sigma^R residual 2.3837e-01; lead balance 1.0551e-02 (best 6.9039e-05; internal spread 3.7842e-02)
+Bubble energy balance: P_in=-1.992993e+03 P_out=-1.992993e+03 resid=7.873e-15
+Writing output for iteration 27...
+Iteration 28
+[it 28] energy J(local)=[2.2788 2.2885 2.2736]
+Maximum Self-Energy Update: 190.73573940358872
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002411027094524343
+Current Conservation rel: 4.039384256813431e-06
+Phonon: rel Sigma^R residual 2.3481e-01; lead balance 1.0470e-02 (best 6.9039e-05; internal spread 3.5532e-02)
+Bubble energy balance: P_in=-2.014717e+03 P_out=-2.014717e+03 resid=7.625e-15
+Writing output for iteration 28...
+Iteration 29
+[it 29] energy J(local)=[2.2784 2.2882 2.2731]
+Maximum Self-Energy Update: 217.28778508958135
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002274728576708185
+Current Conservation rel: 3.8098214974648253e-06
+Phonon: rel Sigma^R residual 2.6094e-01; lead balance 1.1162e-02 (best 6.9039e-05; internal spread 3.4086e-02)
+Bubble energy balance: P_in=-2.014815e+03 P_out=-2.014815e+03 resid=1.445e-15
+Writing output for iteration 29...
+Iteration 30
+[it 30] energy J(local)=[2.2783 2.2878 2.2726]
+Maximum Self-Energy Update: 240.4324881968632
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0008199954445444746
+Current Conservation rel: 1.374654831103467e-06
+Phonon: rel Sigma^R residual 2.9230e-01; lead balance 1.2545e-02 (best 6.9039e-05; internal spread 3.2983e-02)
+Bubble energy balance: P_in=-2.007848e+03 P_out=-2.007848e+03 resid=3.598e-15
+Writing output for iteration 30...
+Iteration 31
+[it 31] energy J(local)=[2.2754 2.2856 2.2702]
+Maximum Self-Energy Update: 206.5428565510386
+Contact Current Difference: 0.0
+Current Conservation abs: 0.000904198344528595
+Current Conservation rel: 1.5469079327124923e-06
+Phonon: rel Sigma^R residual 2.5034e-01; lead balance 1.3953e-02 (best 6.9039e-05; internal spread 3.4803e-02)
+Bubble energy balance: P_in=-1.974767e+03 P_out=-1.974767e+03 resid=7.469e-15
+Writing output for iteration 31...
+Iteration 32
+[it 32] energy J(local)=[2.2722 2.2851 2.2685]
+Maximum Self-Energy Update: 163.95793944892878
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002208066667719777
+Current Conservation rel: 3.750319524030849e-06
+Phonon: rel Sigma^R residual 1.9220e-01; lead balance 1.1622e-02 (best 6.9039e-05; internal spread 3.4971e-02)
+Bubble energy balance: P_in=-1.984799e+03 P_out=-1.984799e+03 resid=8.196e-15
+Writing output for iteration 32...
+Iteration 33
+[it 33] energy J(local)=[2.2731 2.2839 2.2677]
+Maximum Self-Energy Update: 157.00027279696658
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0026128444142159424
+Current Conservation rel: 4.448197654360572e-06
+Phonon: rel Sigma^R residual 1.8354e-01; lead balance 1.1174e-02 (best 6.9039e-05; internal spread 3.5106e-02)
+Bubble energy balance: P_in=-1.981937e+03 P_out=-1.981937e+03 resid=8.786e-15
+Writing output for iteration 33...
+Iteration 34
+[it 34] energy J(local)=[2.2735 2.282  2.2663]
+Maximum Self-Energy Update: 162.94398439462154
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00028905206931995053
+Current Conservation rel: 4.93241103995663e-07
+Phonon: rel Sigma^R residual 1.9042e-01; lead balance 1.2157e-02 (best 6.9039e-05; internal spread 3.3995e-02)
+Bubble energy balance: P_in=-1.975600e+03 P_out=-1.975600e+03 resid=1.775e-14
+Writing output for iteration 34...
+Iteration 35
+[it 35] energy J(local)=[2.2739 2.2825 2.2668]
+Maximum Self-Energy Update: 152.17003094904916
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0010559449085576489
+Current Conservation rel: 1.7933843165389998e-06
+Phonon: rel Sigma^R residual 1.8135e-01; lead balance 1.1659e-02 (best 6.9039e-05; internal spread 3.4220e-02)
+Bubble energy balance: P_in=-1.981126e+03 P_out=-1.981126e+03 resid=4.834e-15
+Writing output for iteration 35...
+Iteration 36
+[it 36] energy J(local)=[2.2734 2.2822 2.2664]
+Maximum Self-Energy Update: 157.37828267236745
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0006055378603946338
+Current Conservation rel: 1.026467525379794e-06
+Phonon: rel Sigma^R residual 1.9037e-01; lead balance 1.1747e-02 (best 6.9039e-05; internal spread 3.4092e-02)
+Bubble energy balance: P_in=-1.981605e+03 P_out=-1.981605e+03 resid=7.119e-15
+Writing output for iteration 36...
+Iteration 37
+[it 37] energy J(local)=[2.2735 2.2822 2.2665]
+Maximum Self-Energy Update: 158.0529223326945
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0030431609981746988
+Current Conservation rel: 5.246836816535489e-06
+Phonon: rel Sigma^R residual 1.9178e-01; lead balance 1.1403e-02 (best 6.9039e-05; internal spread 3.6597e-02)
+Bubble energy balance: P_in=-1.950474e+03 P_out=-1.950474e+03 resid=1.540e-14
+Writing output for iteration 37...
+Iteration 38
+[it 38] energy J(local)=[2.2711 2.281  2.264 ]
+Maximum Self-Energy Update: 111.87410206934901
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006092267910048577
+Current Conservation rel: 1.0444603954723554e-05
+Phonon: rel Sigma^R residual 1.3505e-01; lead balance 1.1673e-02 (best 6.9039e-05; internal spread 3.3193e-02)
+Bubble energy balance: P_in=-1.960167e+03 P_out=-1.960167e+03 resid=1.028e-14
+Writing output for iteration 38...
+Iteration 39
+[it 39] energy J(local)=[2.2744 2.2822 2.2666]
+Maximum Self-Energy Update: 69.8469419214913
+Contact Current Difference: 0.0
+Current Conservation abs: 0.008583067836980263
+Current Conservation rel: 1.4541802091712529e-05
+Phonon: rel Sigma^R residual 8.4955e-02; lead balance 1.1606e-02 (best 6.9039e-05; internal spread 3.1884e-02)
+Bubble energy balance: P_in=-1.985740e+03 P_out=-1.985740e+03 resid=1.840e-15
+Writing output for iteration 39...
+Iteration 40
+[it 40] energy J(local)=[2.2753 2.2828 2.2675]
+Maximum Self-Energy Update: 67.10045282943871
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00697163439696169
+Current Conservation rel: 1.1767804855130645e-05
+Phonon: rel Sigma^R residual 8.2148e-02; lead balance 1.1772e-02 (best 6.9039e-05; internal spread 3.1182e-02)
+Bubble energy balance: P_in=-1.991877e+03 P_out=-1.991877e+03 resid=1.409e-15
+Writing output for iteration 40...
+Iteration 41
+[it 41] energy J(local)=[2.2757 2.2832 2.2679]
+Maximum Self-Energy Update: 59.24086713924447
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006875477565415622
+Current Conservation rel: 1.1622032151615016e-05
+Phonon: rel Sigma^R residual 7.2409e-02; lead balance 1.1929e-02 (best 6.9039e-05; internal spread 3.0023e-02)
+Bubble energy balance: P_in=-1.994251e+03 P_out=-1.994251e+03 resid=5.794e-15
+Writing output for iteration 41...
+Iteration 42
+[it 42] energy J(local)=[2.2728 2.2825 2.2655]
+Maximum Self-Energy Update: 38.91864071685637
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00523291755706623
+Current Conservation rel: 8.65928156120642e-06
+Phonon: rel Sigma^R residual 4.7633e-02; lead balance 1.2424e-02 (best 6.9039e-05; internal spread 3.0310e-02)
+Bubble energy balance: P_in=-2.025336e+03 P_out=-2.025336e+03 resid=4.356e-15
+Writing output for iteration 42...
+Iteration 43
+[it 43] energy J(local)=[2.2718 2.2823 2.2649]
+Maximum Self-Energy Update: 44.91017173407507
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00558382154025594
+Current Conservation rel: 9.292037315962584e-06
+Phonon: rel Sigma^R residual 5.5388e-02; lead balance 1.2712e-02 (best 6.9039e-05; internal spread 2.9871e-02)
+Bubble energy balance: P_in=-2.014690e+03 P_out=-2.014690e+03 resid=5.358e-15
+Writing output for iteration 43...
+Iteration 44
+[it 44] energy J(local)=[2.2687 2.2814 2.2625]
+Maximum Self-Energy Update: 43.102272053491454
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0036316050944265044
+Current Conservation rel: 6.107350646902502e-06
+Phonon: rel Sigma^R residual 5.4041e-02; lead balance 1.2941e-02 (best 6.9039e-05; internal spread 2.9613e-02)
+Bubble energy balance: P_in=-1.992912e+03 P_out=-1.992912e+03 resid=5.530e-15
+Writing output for iteration 44...
+Iteration 45
+[it 45] energy J(local)=[2.2722 2.2795 2.265 ]
+Maximum Self-Energy Update: 49.447483828905376
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004321697725913509
+Current Conservation rel: 7.74602290365815e-06
+Phonon: rel Sigma^R residual 6.2329e-02; lead balance 1.2753e-02 (best 6.9039e-05; internal spread 3.0539e-02)
+Bubble energy balance: P_in=-1.908763e+03 P_out=-1.908763e+03 resid=2.027e-15
+Writing output for iteration 45...
+Iteration 46
+[it 46] energy J(local)=[2.2696 2.2759 2.2623]
+Maximum Self-Energy Update: 48.41310603980118
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00448403996011848
+Current Conservation rel: 8.211228921566278e-06
+Phonon: rel Sigma^R residual 6.1030e-02; lead balance 1.3276e-02 (best 6.9039e-05; internal spread 3.0687e-02)
+Bubble energy balance: P_in=-1.883102e+03 P_out=-1.883102e+03 resid=3.788e-15
+Writing output for iteration 46...
+Iteration 47
+[it 47] energy J(local)=[2.2731 2.2819 2.2658]
+Maximum Self-Energy Update: 66.25398254541834
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0013499987765044352
+Current Conservation rel: 2.372421611143096e-06
+Phonon: rel Sigma^R residual 8.4024e-02; lead balance 1.2636e-02 (best 6.9039e-05; internal spread 3.1283e-02)
+Bubble energy balance: P_in=-1.932447e+03 P_out=-1.932447e+03 resid=7.566e-15
+Writing output for iteration 47...
+Iteration 48
+[it 48] energy J(local)=[2.2756 2.2849 2.268 ]
+Maximum Self-Energy Update: 61.247135892318916
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0011435080569981437
+Current Conservation rel: 1.951190129408562e-06
+Phonon: rel Sigma^R residual 7.7420e-02; lead balance 1.2562e-02 (best 6.9039e-05; internal spread 3.1226e-02)
+Bubble energy balance: P_in=-1.966915e+03 P_out=-1.966915e+03 resid=7.516e-16
+Writing output for iteration 48...
+Iteration 49
+[it 49] energy J(local)=[2.275  2.2818 2.2668]
+Maximum Self-Energy Update: 56.89492856003133
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002287306602454464
+Current Conservation rel: 3.956559125181703e-06
+Phonon: rel Sigma^R residual 6.9874e-02; lead balance 1.2741e-02 (best 6.9039e-05; internal spread 3.1395e-02)
+Bubble energy balance: P_in=-1.951865e+03 P_out=-1.951865e+03 resid=1.147e-14
+Writing output for iteration 49...
+Iteration 50
+[it 50] energy J(local)=[2.2744 2.2838 2.2669]
+Maximum Self-Energy Update: 67.5074065520783
+Contact Current Difference: 0.0
+Current Conservation abs: 0.001280103355668416
+Current Conservation rel: 2.13639017722798e-06
+Phonon: rel Sigma^R residual 8.3083e-02; lead balance 1.2744e-02 (best 6.9039e-05; internal spread 3.1406e-02)
+Bubble energy balance: P_in=-1.998145e+03 P_out=-1.998145e+03 resid=4.662e-15
+Writing output for iteration 50...
+Iteration 51
+[it 51] energy J(local)=[2.2753 2.2845 2.2679]
+Maximum Self-Energy Update: 80.784796889738
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002500943426298363
+Current Conservation rel: 4.169649472900712e-06
+Phonon: rel Sigma^R residual 9.9064e-02; lead balance 1.2778e-02 (best 6.9039e-05; internal spread 3.1323e-02)
+Bubble energy balance: P_in=-1.999980e+03 P_out=-1.999980e+03 resid=1.023e-14
+Writing output for iteration 51...
+Iteration 52
+[it 52] energy J(local)=[2.2738 2.282  2.2665]
+Maximum Self-Energy Update: 40.29361443319828
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0031802939000726838
+Current Conservation rel: 5.560899078257014e-06
+Phonon: rel Sigma^R residual 4.9758e-02; lead balance 1.3061e-02 (best 6.9039e-05; internal spread 3.1520e-02)
+Bubble energy balance: P_in=-1.934311e+03 P_out=-1.934311e+03 resid=3.598e-15
+Writing output for iteration 52...
+Iteration 53
+[it 53] energy J(local)=[2.2729 2.2824 2.266 ]
+Maximum Self-Energy Update: 55.741403268130966
+Contact Current Difference: 0.0
+Current Conservation abs: 0.001854678762867934
+Current Conservation rel: 3.1944950498897736e-06
+Phonon: rel Sigma^R residual 6.6025e-02; lead balance 1.2881e-02 (best 6.9039e-05; internal spread 3.0603e-02)
+Bubble energy balance: P_in=-1.957080e+03 P_out=-1.957080e+03 resid=2.697e-15
+Writing output for iteration 53...
+Iteration 54
+[it 54] energy J(local)=[2.2721 2.2824 2.2653]
+Maximum Self-Energy Update: 49.59457089838009
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002678735988297376
+Current Conservation rel: 4.606962146942376e-06
+Phonon: rel Sigma^R residual 5.9261e-02; lead balance 1.3656e-02 (best 6.9039e-05; internal spread 3.1177e-02)
+Bubble energy balance: P_in=-1.960104e+03 P_out=-1.960104e+03 resid=9.296e-15
+Writing output for iteration 54...
+Iteration 55
+[it 55] energy J(local)=[2.272  2.2828 2.2653]
+Maximum Self-Energy Update: 63.48042472528021
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003990264364915674
+Current Conservation rel: 6.86432765610878e-06
+Phonon: rel Sigma^R residual 7.4124e-02; lead balance 1.2416e-02 (best 6.9039e-05; internal spread 3.0617e-02)
+Bubble energy balance: P_in=-1.956819e+03 P_out=-1.956819e+03 resid=6.620e-15
+Writing output for iteration 55...
+Iteration 56
+[it 56] energy J(local)=[2.2726 2.2838 2.2661]
+Maximum Self-Energy Update: 51.905730473460075
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004501672555818459
+Current Conservation rel: 7.772575368811109e-06
+Phonon: rel Sigma^R residual 6.2023e-02; lead balance 1.1603e-02 (best 6.9039e-05; internal spread 3.0819e-02)
+Bubble energy balance: P_in=-1.946123e+03 P_out=-1.946123e+03 resid=1.430e-14
+Writing output for iteration 56...
+Iteration 57
+[it 57] energy J(local)=[2.2724 2.2851 2.2662]
+Maximum Self-Energy Update: 58.25762713303436
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004458633356478003
+Current Conservation rel: 7.562137267787297e-06
+Phonon: rel Sigma^R residual 6.9565e-02; lead balance 1.1323e-02 (best 6.9039e-05; internal spread 3.0228e-02)
+Bubble energy balance: P_in=-1.970619e+03 P_out=-1.970619e+03 resid=1.930e-15
+Writing output for iteration 57...
+Iteration 58
+[it 58] energy J(local)=[2.272  2.2846 2.2659]
+Maximum Self-Energy Update: 68.63364337553799
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0059010960984551275
+Current Conservation rel: 1.0036640382305174e-05
+Phonon: rel Sigma^R residual 8.1607e-02; lead balance 1.1535e-02 (best 6.9039e-05; internal spread 2.8890e-02)
+Bubble energy balance: P_in=-1.971569e+03 P_out=-1.971569e+03 resid=1.162e-14
+Writing output for iteration 58...
+Iteration 59
+[it 59] energy J(local)=[2.2719 2.2844 2.2659]
+Maximum Self-Energy Update: 49.495777170629616
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004853712579404146
+Current Conservation rel: 8.272045382709817e-06
+Phonon: rel Sigma^R residual 5.9331e-02; lead balance 1.2055e-02 (best 6.9039e-05; internal spread 2.9151e-02)
+Bubble energy balance: P_in=-1.969886e+03 P_out=-1.969886e+03 resid=1.702e-14
+Writing output for iteration 59...
+Iteration 60
+[it 60] energy J(local)=[2.2721 2.2847 2.2661]
+Maximum Self-Energy Update: 94.20166029135531
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0035974150460447163
+Current Conservation rel: 6.0865531531954555e-06
+Phonon: rel Sigma^R residual 1.1266e-01; lead balance 1.2494e-02 (best 6.9039e-05; internal spread 2.9648e-02)
+Bubble energy balance: P_in=-1.983213e+03 P_out=-1.983213e+03 resid=1.048e-14
+Writing output for iteration 60...
+Iteration 61
+[it 61] energy J(local)=[2.2724 2.2842 2.2664]
+Maximum Self-Energy Update: 58.76463266091327
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004067923195691492
+Current Conservation rel: 7.065716398725605e-06
+Phonon: rel Sigma^R residual 7.0675e-02; lead balance 1.2196e-02 (best 6.9039e-05; internal spread 3.0036e-02)
+Bubble energy balance: P_in=-1.944933e+03 P_out=-1.944933e+03 resid=7.727e-15
+Writing output for iteration 61...
+Iteration 62
+[it 62] energy J(local)=[2.2719 2.2839 2.266 ]
+Maximum Self-Energy Update: 48.834773169375175
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003453197937631103
+Current Conservation rel: 6.010145438971288e-06
+Phonon: rel Sigma^R residual 5.8260e-02; lead balance 1.2070e-02 (best 6.9039e-05; internal spread 2.9913e-02)
+Bubble energy balance: P_in=-1.941276e+03 P_out=-1.941276e+03 resid=5.196e-15
+Writing output for iteration 62...
+Iteration 63
+[it 63] energy J(local)=[2.272  2.2843 2.2662]
+Maximum Self-Energy Update: 70.42179636470063
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002484090143582307
+Current Conservation rel: 4.28083223911042e-06
+Phonon: rel Sigma^R residual 8.3538e-02; lead balance 1.2250e-02 (best 6.9039e-05; internal spread 2.8165e-02)
+Bubble energy balance: P_in=-1.963905e+03 P_out=-1.963905e+03 resid=2.665e-15
+Writing output for iteration 63...
+Iteration 64
+[it 64] energy J(local)=[2.2721 2.2849 2.2662]
+Maximum Self-Energy Update: 67.93651842960274
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0021515519008517003
+Current Conservation rel: 3.6689120145906703e-06
+Phonon: rel Sigma^R residual 8.0375e-02; lead balance 1.2973e-02 (best 6.9039e-05; internal spread 2.9007e-02)
+Bubble energy balance: P_in=-1.976149e+03 P_out=-1.976149e+03 resid=7.030e-15
+Writing output for iteration 64...
+Iteration 65
+[it 65] energy J(local)=[2.2716 2.2855 2.2656]
+Maximum Self-Energy Update: 53.84533223878566
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0025031873916532277
+Current Conservation rel: 4.182920169107121e-06
+Phonon: rel Sigma^R residual 6.4989e-02; lead balance 1.2888e-02 (best 6.9039e-05; internal spread 2.9366e-02)
+Bubble energy balance: P_in=-1.997886e+03 P_out=-1.997886e+03 resid=7.913e-15
+Writing output for iteration 65...
+Iteration 66
+[it 66] energy J(local)=[2.2728 2.2847 2.2668]
+Maximum Self-Energy Update: 54.465882129685696
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0028125082832843873
+Current Conservation rel: 4.824084635429334e-06
+Phonon: rel Sigma^R residual 6.5478e-02; lead balance 1.4287e-02 (best 6.9039e-05; internal spread 3.0203e-02)
+Bubble energy balance: P_in=-1.970800e+03 P_out=-1.970800e+03 resid=5.351e-15
+Writing output for iteration 66...
+Iteration 67
+[it 67] energy J(local)=[2.2728 2.2854 2.2668]
+Maximum Self-Energy Update: 49.82034988811036
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003224334021069808
+Current Conservation rel: 5.4526553304127505e-06
+Phonon: rel Sigma^R residual 5.9619e-02; lead balance 1.3734e-02 (best 6.9039e-05; internal spread 2.9417e-02)
+Bubble energy balance: P_in=-1.988619e+03 P_out=-1.988619e+03 resid=1.041e-15
+Writing output for iteration 67...
+Iteration 68
+[it 68] energy J(local)=[2.2729 2.2851 2.2671]
+Maximum Self-Energy Update: 40.34996906199085
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0031024197024862588
+Current Conservation rel: 5.284162729090732e-06
+Phonon: rel Sigma^R residual 4.9174e-02; lead balance 1.2891e-02 (best 6.9039e-05; internal spread 2.8307e-02)
+Bubble energy balance: P_in=-1.980787e+03 P_out=-1.980787e+03 resid=6.122e-15
+Writing output for iteration 68...
+Iteration 69
+[it 69] energy J(local)=[2.2726 2.2847 2.2667]
+Maximum Self-Energy Update: 34.01597999593481
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0009815396204544413
+Current Conservation rel: 1.6732089886666684e-06
+Phonon: rel Sigma^R residual 4.1501e-02; lead balance 1.3047e-02 (best 6.9039e-05; internal spread 2.8058e-02)
+Bubble energy balance: P_in=-1.979714e+03 P_out=-1.979714e+03 resid=4.313e-15
+Writing output for iteration 69...
+Iteration 70
+[it 70] energy J(local)=[2.2721 2.2845 2.2661]
+Maximum Self-Energy Update: 32.46341623925793
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018946578875898012
+Current Conservation rel: 3.2305791644622765e-06
+Phonon: rel Sigma^R residual 3.9276e-02; lead balance 1.3016e-02 (best 6.9039e-05; internal spread 2.7987e-02)
+Bubble energy balance: P_in=-1.975616e+03 P_out=-1.975616e+03 resid=2.686e-15
+Writing output for iteration 70...
+Iteration 71
+[it 71] energy J(local)=[2.2723 2.2845 2.2661]
+Maximum Self-Energy Update: 42.606962912543736
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0031990389637712724
+Current Conservation rel: 5.460848807861723e-06
+Phonon: rel Sigma^R residual 5.1995e-02; lead balance 1.3053e-02 (best 6.9039e-05; internal spread 2.8602e-02)
+Bubble energy balance: P_in=-1.970405e+03 P_out=-1.970405e+03 resid=6.786e-15
+Writing output for iteration 71...
+Iteration 72
+[it 72] energy J(local)=[2.2726 2.2846 2.2663]
+Maximum Self-Energy Update: 38.60576372500618
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003025276881260197
+Current Conservation rel: 5.157375102125816e-06
+Phonon: rel Sigma^R residual 4.6933e-02; lead balance 1.3275e-02 (best 6.9039e-05; internal spread 2.8348e-02)
+Bubble energy balance: P_in=-1.973403e+03 P_out=-1.973403e+03 resid=4.513e-15
+Writing output for iteration 72...
+Iteration 73
+[it 73] energy J(local)=[2.2724 2.2845 2.2662]
+Maximum Self-Energy Update: 58.063613539066296
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0023807965085325122
+Current Conservation rel: 4.048641034816829e-06
+Phonon: rel Sigma^R residual 7.1603e-02; lead balance 1.2731e-02 (best 6.9039e-05; internal spread 2.7458e-02)
+Bubble energy balance: P_in=-1.975694e+03 P_out=-1.975694e+03 resid=9.924e-15
+Writing output for iteration 73...
+Iteration 74
+[it 74] energy J(local)=[2.2726 2.2847 2.2664]
+Maximum Self-Energy Update: 54.81575782258554
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0017467201581666814
+Current Conservation rel: 2.9674351042826706e-06
+Phonon: rel Sigma^R residual 6.7281e-02; lead balance 1.2670e-02 (best 6.9039e-05; internal spread 2.7040e-02)
+Bubble energy balance: P_in=-1.979521e+03 P_out=-1.979521e+03 resid=3.589e-15
+Writing output for iteration 74...
+Iteration 75
+[it 75] energy J(local)=[2.2729 2.2849 2.2666]
+Maximum Self-Energy Update: 44.85985411276342
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00236298394872847
+Current Conservation rel: 4.006053076200931e-06
+Phonon: rel Sigma^R residual 5.5045e-02; lead balance 1.2686e-02 (best 6.9039e-05; internal spread 2.6682e-02)
+Bubble energy balance: P_in=-1.981080e+03 P_out=-1.981080e+03 resid=9.803e-15
+Writing output for iteration 75...
+Iteration 76
+[it 76] energy J(local)=[2.2729 2.2849 2.2665]
+Maximum Self-Energy Update: 48.128307391827555
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0023262009221980406
+Current Conservation rel: 3.952464900677461e-06
+Phonon: rel Sigma^R residual 5.9282e-02; lead balance 1.2747e-02 (best 6.9039e-05; internal spread 2.6664e-02)
+Bubble energy balance: P_in=-1.976497e+03 P_out=-1.976497e+03 resid=5.508e-15
+Writing output for iteration 76...
+Iteration 77
+[it 77] energy J(local)=[2.2733 2.2852 2.2668]
+Maximum Self-Energy Update: 29.087707825903717
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004902665775944115
+Current Conservation rel: 8.354213190064401e-06
+Phonon: rel Sigma^R residual 3.5683e-02; lead balance 1.2920e-02 (best 6.9039e-05; internal spread 2.6661e-02)
+Bubble energy balance: P_in=-1.970978e+03 P_out=-1.970978e+03 resid=9.211e-15
+Writing output for iteration 77...
+Iteration 78
+[it 78] energy J(local)=[2.2733 2.2853 2.2669]
+Maximum Self-Energy Update: 35.76068518529591
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0025538957313528954
+Current Conservation rel: 4.363811582941232e-06
+Phonon: rel Sigma^R residual 4.4325e-02; lead balance 1.3022e-02 (best 6.9039e-05; internal spread 2.7370e-02)
+Bubble energy balance: P_in=-1.967437e+03 P_out=-1.967437e+03 resid=1.268e-14
+Writing output for iteration 78...
+Iteration 79
+[it 79] energy J(local)=[2.2734 2.2854 2.2669]
+Maximum Self-Energy Update: 31.668629913477147
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0035766443477882603
+Current Conservation rel: 6.128261727749064e-06
+Phonon: rel Sigma^R residual 3.9408e-02; lead balance 1.3022e-02 (best 6.9039e-05; internal spread 2.7226e-02)
+Bubble energy balance: P_in=-1.960101e+03 P_out=-1.960101e+03 resid=6.242e-15
+Writing output for iteration 79...
+Iteration 80
+[it 80] energy J(local)=[2.2733 2.2856 2.2668]
+Maximum Self-Energy Update: 32.841204943814
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003512159053116193
+Current Conservation rel: 5.964356314345843e-06
+Phonon: rel Sigma^R residual 4.0317e-02; lead balance 1.2922e-02 (best 6.9039e-05; internal spread 2.6935e-02)
+Bubble energy balance: P_in=-1.978358e+03 P_out=-1.978358e+03 resid=4.707e-15
+Writing output for iteration 80...
+Iteration 81
+[it 81] energy J(local)=[2.2737 2.286  2.267 ]
+Maximum Self-Energy Update: 53.08843384581501
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0030487254696822674
+Current Conservation rel: 5.153171223718431e-06
+Phonon: rel Sigma^R residual 6.3359e-02; lead balance 1.3043e-02 (best 6.9039e-05; internal spread 2.6914e-02)
+Bubble energy balance: P_in=-1.984699e+03 P_out=-1.984699e+03 resid=1.295e-14
+Writing output for iteration 81...
+Iteration 82
+[it 82] energy J(local)=[2.2736 2.2858 2.2669]
+Maximum Self-Energy Update: 54.54912983470481
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0009826140125142047
+Current Conservation rel: 1.6649179939327608e-06
+Phonon: rel Sigma^R residual 6.4905e-02; lead balance 1.3628e-02 (best 6.9039e-05; internal spread 2.7394e-02)
+Bubble energy balance: P_in=-1.979558e+03 P_out=-1.979558e+03 resid=1.028e-14
+Writing output for iteration 82...
+Iteration 83
+[it 83] energy J(local)=[2.2736 2.2861 2.2669]
+Maximum Self-Energy Update: 35.70375426596383
+Contact Current Difference: 0.0
+Current Conservation abs: 0.000345174076812782
+Current Conservation rel: 5.790531228510791e-07
+Phonon: rel Sigma^R residual 4.3615e-02; lead balance 1.3630e-02 (best 6.9039e-05; internal spread 2.7432e-02)
+Bubble energy balance: P_in=-1.993668e+03 P_out=-1.993668e+03 resid=9.557e-15
+Writing output for iteration 83...
+Iteration 84
+[it 84] energy J(local)=[2.2738 2.2861 2.267 ]
+Maximum Self-Energy Update: 32.146146172689456
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0009133383562129893
+Current Conservation rel: 1.5350325172809738e-06
+Phonon: rel Sigma^R residual 3.8596e-02; lead balance 1.3734e-02 (best 6.9039e-05; internal spread 2.7419e-02)
+Bubble energy balance: P_in=-1.990347e+03 P_out=-1.990347e+03 resid=5.977e-15
+Writing output for iteration 84...
+Iteration 85
+[it 85] energy J(local)=[2.2736 2.2862 2.267 ]
+Maximum Self-Energy Update: 24.762258463604443
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0016023833961753553
+Current Conservation rel: 2.6966734985427628e-06
+Phonon: rel Sigma^R residual 3.0180e-02; lead balance 1.3647e-02 (best 6.9039e-05; internal spread 2.6922e-02)
+Bubble energy balance: P_in=-1.987149e+03 P_out=-1.987149e+03 resid=4.110e-15
+Writing output for iteration 85...
+Iteration 86
+[it 86] energy J(local)=[2.2737 2.2861 2.267 ]
+Maximum Self-Energy Update: 24.698751347556765
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002810995464926691
+Current Conservation rel: 4.743811000616398e-06
+Phonon: rel Sigma^R residual 2.9889e-02; lead balance 1.4088e-02 (best 6.9039e-05; internal spread 2.7581e-02)
+Bubble energy balance: P_in=-1.981572e+03 P_out=-1.981572e+03 resid=1.827e-14
+Writing output for iteration 86...
+Iteration 87
+[it 87] energy J(local)=[2.2739 2.2863 2.2672]
+Maximum Self-Energy Update: 40.71285131992517
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005306652673539247
+Current Conservation rel: 8.91987652217518e-06
+Phonon: rel Sigma^R residual 4.9279e-02; lead balance 1.3797e-02 (best 6.9039e-05; internal spread 2.6359e-02)
+Bubble energy balance: P_in=-1.991263e+03 P_out=-1.991263e+03 resid=1.320e-14
+Writing output for iteration 87...
+Iteration 88
+[it 88] energy J(local)=[2.2743 2.287  2.2677]
+Maximum Self-Energy Update: 46.46778137117708
+Contact Current Difference: 0.0
+Current Conservation abs: 0.007896739716045431
+Current Conservation rel: 1.319084190701851e-05
+Phonon: rel Sigma^R residual 5.4622e-02; lead balance 1.3851e-02 (best 6.9039e-05; internal spread 2.5130e-02)
+Bubble energy balance: P_in=-2.002135e+03 P_out=-2.002135e+03 resid=2.091e-15
+Writing output for iteration 88...
+Iteration 89
+[it 89] energy J(local)=[2.2739 2.2866 2.2672]
+Maximum Self-Energy Update: 38.517836634941126
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0052473954328888794
+Current Conservation rel: 8.752572955404279e-06
+Phonon: rel Sigma^R residual 4.5256e-02; lead balance 1.4321e-02 (best 6.9039e-05; internal spread 2.5420e-02)
+Bubble energy balance: P_in=-2.005297e+03 P_out=-2.005297e+03 resid=1.397e-14
+Writing output for iteration 89...
+Iteration 90
+[it 90] energy J(local)=[2.2737 2.2867 2.2672]
+Maximum Self-Energy Update: 54.99670751920238
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003852856619857903
+Current Conservation rel: 6.4521660446184246e-06
+Phonon: rel Sigma^R residual 6.3615e-02; lead balance 1.4171e-02 (best 6.9039e-05; internal spread 2.6201e-02)
+Bubble energy balance: P_in=-1.999112e+03 P_out=-1.999112e+03 resid=3.695e-15
+Writing output for iteration 90...
+Iteration 91
+[it 91] energy J(local)=[2.2737 2.2866 2.2671]
+Maximum Self-Energy Update: 64.34398526482839
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004925056142610629
+Current Conservation rel: 8.252322061150767e-06
+Phonon: rel Sigma^R residual 7.4274e-02; lead balance 1.4091e-02 (best 6.9039e-05; internal spread 2.5392e-02)
+Bubble energy balance: P_in=-1.997132e+03 P_out=-1.997132e+03 resid=3.619e-15
+Writing output for iteration 91...
+Iteration 92
+[it 92] energy J(local)=[2.2734 2.2865 2.267 ]
+Maximum Self-Energy Update: 40.76511429547155
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0018777507914933267
+Current Conservation rel: 3.1564608337409453e-06
+Phonon: rel Sigma^R residual 4.8417e-02; lead balance 1.4284e-02 (best 6.9039e-05; internal spread 2.6187e-02)
+Bubble energy balance: P_in=-1.992611e+03 P_out=-1.992611e+03 resid=6.090e-15
+Writing output for iteration 92...
+Iteration 93
+[it 93] energy J(local)=[2.2732 2.2863 2.2667]
+Maximum Self-Energy Update: 143.21513156799134
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006825803132244346
+Current Conservation rel: 1.1445954066432555e-05
+Phonon: rel Sigma^R residual 1.5621e-01; lead balance 1.3360e-02 (best 6.9039e-05; internal spread 2.3734e-02)
+Bubble energy balance: P_in=-1.999621e+03 P_out=-1.999621e+03 resid=2.331e-15
+Writing output for iteration 93...
+Iteration 94
+[it 94] energy J(local)=[2.2732 2.2865 2.2667]
+Maximum Self-Energy Update: 53.69656228759598
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0029105043753361315
+Current Conservation rel: 4.882615448872236e-06
+Phonon: rel Sigma^R residual 6.2919e-02; lead balance 1.4681e-02 (best 6.9039e-05; internal spread 2.5764e-02)
+Bubble energy balance: P_in=-1.996955e+03 P_out=-1.996955e+03 resid=1.201e-14
+Writing output for iteration 94...
+Iteration 95
+[it 95] energy J(local)=[2.2731 2.2865 2.2666]
+Maximum Self-Energy Update: 124.45703966405107
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004550871112712684
+Current Conservation rel: 7.614960319269132e-06
+Phonon: rel Sigma^R residual 1.3562e-01; lead balance 1.5565e-02 (best 6.9039e-05; internal spread 2.6500e-02)
+Bubble energy balance: P_in=-2.000726e+03 P_out=-2.000726e+03 resid=2.952e-15
+Writing output for iteration 95...
+Iteration 96
+[it 96] energy J(local)=[2.2732 2.2867 2.2667]
+Maximum Self-Energy Update: 67.75897118062053
+Contact Current Difference: 0.0
+Current Conservation abs: 0.007262388169294809
+Current Conservation rel: 1.21288453434393e-05
+Phonon: rel Sigma^R residual 7.7200e-02; lead balance 1.3778e-02 (best 6.9039e-05; internal spread 2.4330e-02)
+Bubble energy balance: P_in=-2.002454e+03 P_out=-2.002454e+03 resid=1.321e-14
+Writing output for iteration 96...
+Iteration 97
+[it 97] energy J(local)=[2.2731 2.2867 2.2668]
+Maximum Self-Energy Update: 48.713643747504776
+Contact Current Difference: 0.0
+Current Conservation abs: 0.007679956425931778
+Current Conservation rel: 1.2762001567570827e-05
+Phonon: rel Sigma^R residual 5.7160e-02; lead balance 1.4503e-02 (best 6.9039e-05; internal spread 2.5102e-02)
+Bubble energy balance: P_in=-2.009352e+03 P_out=-2.009352e+03 resid=1.437e-14
+Writing output for iteration 97...
+Iteration 98
+[it 98] energy J(local)=[2.2732 2.2866 2.2668]
+Maximum Self-Energy Update: 54.726418964739175
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00901678443358378
+Current Conservation rel: 1.4975573927156852e-05
+Phonon: rel Sigma^R residual 6.4109e-02; lead balance 1.2341e-02 (best 6.9039e-05; internal spread 2.2442e-02)
+Bubble energy balance: P_in=-2.011414e+03 P_out=-2.011414e+03 resid=7.866e-15
+Writing output for iteration 98...
+Iteration 99
+[it 99] energy J(local)=[2.2731 2.2867 2.2667]
+Maximum Self-Energy Update: 20.057682460373584
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0037696297010256785
+Current Conservation rel: 6.266714959118322e-06
+Phonon: rel Sigma^R residual 2.4484e-02; lead balance 1.2832e-02 (best 6.9039e-05; internal spread 2.4434e-02)
+Bubble energy balance: P_in=-2.008764e+03 P_out=-2.008764e+03 resid=4.925e-15
+Writing output for iteration 99...
+Iteration 100
+[it 100] energy J(local)=[2.2731 2.2867 2.2666]
+Maximum Self-Energy Update: 22.66358245753213
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005793686875165349
+Current Conservation rel: 9.626421633167866e-06
+Phonon: rel Sigma^R residual 2.7818e-02; lead balance 1.1454e-02 (best 6.9039e-05; internal spread 2.3156e-02)
+Bubble energy balance: P_in=-2.009443e+03 P_out=-2.009443e+03 resid=1.425e-14
+Writing output for iteration 100...
+Iteration 101
+[it 101] energy J(local)=[2.2731 2.2867 2.2666]
+Maximum Self-Energy Update: 26.693393327548165
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006053450931176485
+Current Conservation rel: 1.004014068971906e-05
+Phonon: rel Sigma^R residual 3.2682e-02; lead balance 1.0485e-02 (best 6.9039e-05; internal spread 2.2726e-02)
+Bubble energy balance: P_in=-2.012811e+03 P_out=-2.012811e+03 resid=2.589e-15
+Writing output for iteration 101...
+Iteration 102
+[it 102] energy J(local)=[2.2731 2.2867 2.2666]
+Maximum Self-Energy Update: 38.25331358750932
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00485061015467636
+Current Conservation rel: 8.029224334105734e-06
+Phonon: rel Sigma^R residual 4.4937e-02; lead balance 1.0508e-02 (best 6.9039e-05; internal spread 2.2870e-02)
+Bubble energy balance: P_in=-2.018171e+03 P_out=-2.018171e+03 resid=7.905e-15
+Writing output for iteration 102...
+Iteration 103
+[it 103] energy J(local)=[2.273  2.2868 2.2666]
+Maximum Self-Energy Update: 47.56121011069341
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0034514060828882975
+Current Conservation rel: 5.6720128019622635e-06
+Phonon: rel Sigma^R residual 5.5863e-02; lead balance 1.0333e-02 (best 6.9039e-05; internal spread 2.3305e-02)
+Bubble energy balance: P_in=-2.029615e+03 P_out=-2.029615e+03 resid=5.639e-15
+Writing output for iteration 103...
+Iteration 104
+[it 104] energy J(local)=[2.2733 2.2864 2.2666]
+Maximum Self-Energy Update: 44.96378761847154
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0023312340574079826
+Current Conservation rel: 3.876993521178104e-06
+Phonon: rel Sigma^R residual 5.2766e-02; lead balance 1.1185e-02 (best 6.9039e-05; internal spread 2.4899e-02)
+Bubble energy balance: P_in=-2.010583e+03 P_out=-2.010583e+03 resid=8.087e-15
+Writing output for iteration 104...
+Iteration 105
+[it 105] energy J(local)=[2.2733 2.2865 2.2666]
+Maximum Self-Energy Update: 43.5449934116256
+Contact Current Difference: 0.0
+Current Conservation abs: 0.000769395134284423
+Current Conservation rel: 1.2783955378180402e-06
+Phonon: rel Sigma^R residual 5.1059e-02; lead balance 1.2374e-02 (best 6.9039e-05; internal spread 2.4735e-02)
+Bubble energy balance: P_in=-2.012463e+03 P_out=-2.012463e+03 resid=4.600e-15
+Writing output for iteration 105...
+Iteration 106
+[it 106] energy J(local)=[2.2731 2.2864 2.2666]
+Maximum Self-Energy Update: 52.73030965838885
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003470550162546715
+Current Conservation rel: 5.769300279812172e-06
+Phonon: rel Sigma^R residual 6.0811e-02; lead balance 1.2403e-02 (best 6.9039e-05; internal spread 2.4723e-02)
+Bubble energy balance: P_in=-2.011901e+03 P_out=-2.011901e+03 resid=6.193e-15
+Writing output for iteration 106...
+Iteration 107
+[it 107] energy J(local)=[2.2732 2.2865 2.2666]
+Maximum Self-Energy Update: 53.505675829127675
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0009210651214175414
+Current Conservation rel: 1.5208812932289224e-06
+Phonon: rel Sigma^R residual 6.3098e-02; lead balance 1.2272e-02 (best 6.9039e-05; internal spread 2.5195e-02)
+Bubble energy balance: P_in=-2.022673e+03 P_out=-2.022673e+03 resid=8.591e-15
+Writing output for iteration 107...
+Iteration 108
+[it 108] energy J(local)=[2.2733 2.2862 2.2663]
+Maximum Self-Energy Update: 82.7978058736987
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0016259333452239844
+Current Conservation rel: 2.698977883695516e-06
+Phonon: rel Sigma^R residual 9.1995e-02; lead balance 1.1454e-02 (best 6.9039e-05; internal spread 2.4317e-02)
+Bubble energy balance: P_in=-2.016326e+03 P_out=-2.016326e+03 resid=8.973e-16
+Writing output for iteration 108...
+Iteration 109
+[it 109] energy J(local)=[2.2734 2.2863 2.2663]
+Maximum Self-Energy Update: 87.56977104631927
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0002288205528770959
+Current Conservation rel: 3.7843974389759463e-07
+Phonon: rel Sigma^R residual 9.7822e-02; lead balance 1.1897e-02 (best 6.9039e-05; internal spread 2.4561e-02)
+Bubble energy balance: P_in=-2.022586e+03 P_out=-2.022586e+03 resid=2.389e-15
+Writing output for iteration 109...
+Iteration 110
+[it 110] energy J(local)=[2.2738 2.2867 2.2672]
+Maximum Self-Energy Update: 75.53691483070561
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0025144308775679747
+Current Conservation rel: 4.149645283795358e-06
+Phonon: rel Sigma^R residual 8.4939e-02; lead balance 1.2250e-02 (best 6.9039e-05; internal spread 2.4749e-02)
+Bubble energy balance: P_in=-2.024011e+03 P_out=-2.024011e+03 resid=4.718e-15
+Writing output for iteration 110...
+Iteration 111
+[it 111] energy J(local)=[2.2733 2.2866 2.2667]
+Maximum Self-Energy Update: 62.76499600054815
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00021994181997797568
+Current Conservation rel: 3.6284582094288746e-07
+Phonon: rel Sigma^R residual 7.1796e-02; lead balance 1.2512e-02 (best 6.9039e-05; internal spread 2.5580e-02)
+Bubble energy balance: P_in=-2.024728e+03 P_out=-2.024728e+03 resid=7.074e-15
+Writing output for iteration 111...
+Iteration 112
+[it 112] energy J(local)=[2.2724 2.2866 2.2658]
+Maximum Self-Energy Update: 76.66379900853691
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0032896961663482216
+Current Conservation rel: 5.426655740584739e-06
+Phonon: rel Sigma^R residual 8.6896e-02; lead balance 1.2377e-02 (best 6.9039e-05; internal spread 2.5965e-02)
+Bubble energy balance: P_in=-2.025641e+03 P_out=-2.025641e+03 resid=1.047e-14
+Writing output for iteration 112...
+Iteration 113
+[it 113] energy J(local)=[2.2724 2.2863 2.2655]
+Maximum Self-Energy Update: 86.95381664650327
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0029187573423996582
+Current Conservation rel: 4.807078795434607e-06
+Phonon: rel Sigma^R residual 9.6745e-02; lead balance 1.1891e-02 (best 6.9039e-05; internal spread 2.5140e-02)
+Bubble energy balance: P_in=-2.031519e+03 P_out=-2.031519e+03 resid=3.206e-15
+Writing output for iteration 113...
+Iteration 114
+[it 114] energy J(local)=[2.2724 2.2864 2.2655]
+Maximum Self-Energy Update: 107.90303005396814
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0001293730024372053
+Current Conservation rel: 2.132539625482012e-07
+Phonon: rel Sigma^R residual 1.2158e-01; lead balance 1.1835e-02 (best 6.9039e-05; internal spread 2.4369e-02)
+Bubble energy balance: P_in=-2.028958e+03 P_out=-2.028958e+03 resid=6.457e-15
+Writing output for iteration 114...
+Iteration 115
+[it 115] energy J(local)=[2.2722 2.286  2.2651]
+Maximum Self-Energy Update: 95.45977689132889
+Contact Current Difference: 0.0
+Current Conservation abs: 0.002350005633445562
+Current Conservation rel: 3.902368368386839e-06
+Phonon: rel Sigma^R residual 1.1341e-01; lead balance 1.2739e-02 (best 6.9039e-05; internal spread 2.4740e-02)
+Bubble energy balance: P_in=-2.016692e+03 P_out=-2.016692e+03 resid=4.065e-15
+Writing output for iteration 115...
+Iteration 116
+[it 116] energy J(local)=[2.2724 2.2858 2.2651]
+Maximum Self-Energy Update: 52.390179251585764
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003886411378800858
+Current Conservation rel: 6.481067124791969e-06
+Phonon: rel Sigma^R residual 6.3605e-02; lead balance 1.2473e-02 (best 6.9039e-05; internal spread 2.4350e-02)
+Bubble energy balance: P_in=-2.010397e+03 P_out=-2.010397e+03 resid=2.025e-14
+Writing output for iteration 116...
+Iteration 117
+[it 117] energy J(local)=[2.2726 2.2859 2.2653]
+Maximum Self-Energy Update: 46.033300884545916
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003301656508085671
+Current Conservation rel: 5.500150064357012e-06
+Phonon: rel Sigma^R residual 5.5977e-02; lead balance 1.2872e-02 (best 6.9039e-05; internal spread 2.4751e-02)
+Bubble energy balance: P_in=-2.012035e+03 P_out=-2.012035e+03 resid=2.733e-15
+Writing output for iteration 117...
+Iteration 118
+[it 118] energy J(local)=[2.2726 2.2861 2.2654]
+Maximum Self-Energy Update: 39.133746872383576
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003943091591793291
+Current Conservation rel: 6.560575044678426e-06
+Phonon: rel Sigma^R residual 4.7822e-02; lead balance 1.2610e-02 (best 6.9039e-05; internal spread 2.4420e-02)
+Bubble energy balance: P_in=-2.013285e+03 P_out=-2.013285e+03 resid=6.124e-15
+Writing output for iteration 118...
+Iteration 119
+[it 119] energy J(local)=[2.2728 2.2861 2.2655]
+Maximum Self-Energy Update: 38.18095780539745
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00121182273511522
+Current Conservation rel: 2.0126736481428012e-06
+Phonon: rel Sigma^R residual 4.6817e-02; lead balance 1.3650e-02 (best 6.9039e-05; internal spread 2.5430e-02)
+Bubble energy balance: P_in=-2.017030e+03 P_out=-2.017030e+03 resid=8.186e-15
+Writing output for iteration 119...
+Iteration 120
+[it 120] energy J(local)=[2.2725 2.2861 2.2653]
+Maximum Self-Energy Update: 28.28255949666672
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0019442252720978104
+Current Conservation rel: 3.2326374833696294e-06
+Phonon: rel Sigma^R residual 3.4593e-02; lead balance 1.3940e-02 (best 6.9039e-05; internal spread 2.5346e-02)
+Bubble energy balance: P_in=-2.015571e+03 P_out=-2.015571e+03 resid=6.396e-15
+Writing output for iteration 120...
+Iteration 121
+[it 121] energy J(local)=[2.2726 2.2862 2.2652]
+Maximum Self-Energy Update: 24.278336058158814
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003790017848757543
+Current Conservation rel: 6.267503164207371e-06
+Phonon: rel Sigma^R residual 2.9394e-02; lead balance 1.4523e-02 (best 6.9039e-05; internal spread 2.4929e-02)
+Bubble energy balance: P_in=-2.024224e+03 P_out=-2.024224e+03 resid=5.396e-15
+Writing output for iteration 121...
+Iteration 122
+[it 122] energy J(local)=[2.2728 2.2861 2.2653]
+Maximum Self-Energy Update: 47.67875191514764
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00696227073154887
+Current Conservation rel: 1.1508638185442088e-05
+Phonon: rel Sigma^R residual 5.5685e-02; lead balance 1.4137e-02 (best 6.9039e-05; internal spread 2.3766e-02)
+Bubble energy balance: P_in=-2.024786e+03 P_out=-2.024786e+03 resid=5.205e-15
+Writing output for iteration 122...
+Iteration 123
+[it 123] energy J(local)=[2.2729 2.2862 2.2655]
+Maximum Self-Energy Update: 77.7630827777729
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00787732391171403
+Current Conservation rel: 1.3012510579652154e-05
+Phonon: rel Sigma^R residual 8.8315e-02; lead balance 1.3575e-02 (best 6.9039e-05; internal spread 2.3032e-02)
+Bubble energy balance: P_in=-2.026384e+03 P_out=-2.026384e+03 resid=6.569e-15
+Writing output for iteration 123...
+Iteration 124
+[it 124] energy J(local)=[2.2734 2.2863 2.266 ]
+Maximum Self-Energy Update: 101.39143776211668
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005631761128086055
+Current Conservation rel: 9.334408441674236e-06
+Phonon: rel Sigma^R residual 1.1170e-01; lead balance 1.3294e-02 (best 6.9039e-05; internal spread 2.3590e-02)
+Bubble energy balance: P_in=-2.022179e+03 P_out=-2.022179e+03 resid=2.772e-15
+Writing output for iteration 124...
+Iteration 125
+[it 125] energy J(local)=[2.2737 2.2864 2.2662]
+Maximum Self-Energy Update: 106.49590139537241
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006000799347418706
+Current Conservation rel: 9.930199024247925e-06
+Phonon: rel Sigma^R residual 1.1679e-01; lead balance 1.3743e-02 (best 6.9039e-05; internal spread 2.4214e-02)
+Bubble energy balance: P_in=-2.025689e+03 P_out=-2.025689e+03 resid=6.537e-15
+Writing output for iteration 125...
+Iteration 126
+[it 126] energy J(local)=[2.2734 2.2865 2.2662]
+Maximum Self-Energy Update: 95.39136709677778
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005977806604164471
+Current Conservation rel: 9.891696965132962e-06
+Phonon: rel Sigma^R residual 1.0597e-01; lead balance 1.3532e-02 (best 6.9039e-05; internal spread 2.3995e-02)
+Bubble energy balance: P_in=-2.025108e+03 P_out=-2.025108e+03 resid=1.254e-14
+Writing output for iteration 126...
+Iteration 127
+[it 127] energy J(local)=[2.2736 2.2865 2.2665]
+Maximum Self-Energy Update: 80.45247515786392
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005257171423693308
+Current Conservation rel: 8.71873647498946e-06
+Phonon: rel Sigma^R residual 9.1115e-02; lead balance 1.3551e-02 (best 6.9039e-05; internal spread 2.4101e-02)
+Bubble energy balance: P_in=-2.020979e+03 P_out=-2.020979e+03 resid=1.334e-14
+Writing output for iteration 127...
+Iteration 128
+[it 128] energy J(local)=[2.2738 2.2864 2.2666]
+Maximum Self-Energy Update: 69.9059793649018
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005626244511006462
+Current Conservation rel: 9.379327132693226e-06
+Phonon: rel Sigma^R residual 7.9821e-02; lead balance 1.3695e-02 (best 6.9039e-05; internal spread 2.3975e-02)
+Bubble energy balance: P_in=-2.013420e+03 P_out=-2.013420e+03 resid=2.657e-15
+Writing output for iteration 128...
+Iteration 129
+[it 129] energy J(local)=[2.2736 2.2866 2.2663]
+Maximum Self-Energy Update: 48.138292004972776
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005560808559380348
+Current Conservation rel: 9.234480735202434e-06
+Phonon: rel Sigma^R residual 5.6573e-02; lead balance 1.3592e-02 (best 6.9039e-05; internal spread 2.3709e-02)
+Bubble energy balance: P_in=-2.019068e+03 P_out=-2.019068e+03 resid=6.583e-15
+Writing output for iteration 129...
+Iteration 130
+[it 130] energy J(local)=[2.2739 2.2868 2.2666]
+Maximum Self-Energy Update: 90.50254727106619
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005646978666447922
+Current Conservation rel: 9.394572341790456e-06
+Phonon: rel Sigma^R residual 1.0214e-01; lead balance 1.3372e-02 (best 6.9039e-05; internal spread 2.3395e-02)
+Bubble energy balance: P_in=-2.015994e+03 P_out=-2.015994e+03 resid=3.515e-15
+Writing output for iteration 130...
+Iteration 131
+[it 131] energy J(local)=[2.2739 2.2868 2.2667]
+Maximum Self-Energy Update: 61.405674890141846
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005822351945198534
+Current Conservation rel: 9.704869148974469e-06
+Phonon: rel Sigma^R residual 7.0333e-02; lead balance 1.3337e-02 (best 6.9039e-05; internal spread 2.3101e-02)
+Bubble energy balance: P_in=-2.013245e+03 P_out=-2.013245e+03 resid=6.226e-15
+Writing output for iteration 131...
+Iteration 132
+[it 132] energy J(local)=[2.2738 2.2867 2.2666]
+Maximum Self-Energy Update: 72.8588073543917
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004635534467979596
+Current Conservation rel: 7.74899962177815e-06
+Phonon: rel Sigma^R residual 8.3247e-02; lead balance 1.3624e-02 (best 6.9039e-05; internal spread 2.3215e-02)
+Bubble energy balance: P_in=-2.010106e+03 P_out=-2.010106e+03 resid=3.092e-15
+Writing output for iteration 132...
+Iteration 133
+[it 133] energy J(local)=[2.2737 2.2867 2.2666]
+Maximum Self-Energy Update: 55.454143590801905
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004239856174081069
+Current Conservation rel: 7.080662376911541e-06
+Phonon: rel Sigma^R residual 6.4963e-02; lead balance 1.3277e-02 (best 6.9039e-05; internal spread 2.2864e-02)
+Bubble energy balance: P_in=-2.011987e+03 P_out=-2.011987e+03 resid=1.128e-14
+Writing output for iteration 133...
+Iteration 134
+[it 134] energy J(local)=[2.2735 2.2867 2.2665]
+Maximum Self-Energy Update: 43.61349979994484
+Contact Current Difference: 0.0
+Current Conservation abs: 0.00394441466517037
+Current Conservation rel: 6.578803396574326e-06
+Phonon: rel Sigma^R residual 5.1660e-02; lead balance 1.3305e-02 (best 6.9039e-05; internal spread 2.2729e-02)
+Bubble energy balance: P_in=-2.014057e+03 P_out=-2.014057e+03 resid=1.693e-15
+Writing output for iteration 134...
+Iteration 135
+[it 135] energy J(local)=[2.2737 2.287  2.2667]
+Maximum Self-Energy Update: 35.467447976999786
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003236961096945379
+Current Conservation rel: 5.3803312754052485e-06
+Phonon: rel Sigma^R residual 4.2904e-02; lead balance 1.3373e-02 (best 6.9039e-05; internal spread 2.2616e-02)
+Bubble energy balance: P_in=-2.017517e+03 P_out=-2.017517e+03 resid=6.873e-15
+Writing output for iteration 135...
+Iteration 136
+[it 136] energy J(local)=[2.2739 2.287  2.2669]
+Maximum Self-Energy Update: 47.35821444800776
+Contact Current Difference: 0.0
+Current Conservation abs: 0.003773275047194602
+Current Conservation rel: 6.288563111360455e-06
+Phonon: rel Sigma^R residual 5.6490e-02; lead balance 1.3725e-02 (best 6.9039e-05; internal spread 2.2853e-02)
+Bubble energy balance: P_in=-2.014006e+03 P_out=-2.014006e+03 resid=3.780e-15
+Writing output for iteration 136...
+Iteration 137
+[it 137] energy J(local)=[2.274  2.2871 2.267 ]
+Maximum Self-Energy Update: 56.16851327122204
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004537118750022273
+Current Conservation rel: 7.544559469122525e-06
+Phonon: rel Sigma^R residual 6.6782e-02; lead balance 1.3652e-02 (best 6.9039e-05; internal spread 2.2858e-02)
+Bubble energy balance: P_in=-2.016642e+03 P_out=-2.016642e+03 resid=3.297e-15
+Writing output for iteration 137...
+Iteration 138
+[it 138] energy J(local)=[2.2739 2.2872 2.2669]
+Maximum Self-Energy Update: 49.79200507966532
+Contact Current Difference: 0.0
+Current Conservation abs: 0.004861409995839949
+Current Conservation rel: 8.067113138035708e-06
+Phonon: rel Sigma^R residual 6.0247e-02; lead balance 1.3468e-02 (best 6.9039e-05; internal spread 2.2562e-02)
+Bubble energy balance: P_in=-2.019526e+03 P_out=-2.019526e+03 resid=2.158e-15
+Writing output for iteration 138...
+Iteration 139
+[it 139] energy J(local)=[2.2742 2.2872 2.2673]
+Maximum Self-Energy Update: 63.86601662978778
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005823663552689595
+Current Conservation rel: 9.6554546873428e-06
+Phonon: rel Sigma^R residual 7.3817e-02; lead balance 1.3260e-02 (best 6.9039e-05; internal spread 2.1994e-02)
+Bubble energy balance: P_in=-2.022645e+03 P_out=-2.022645e+03 resid=2.118e-15
+Writing output for iteration 139...
+Iteration 140
+[it 140] energy J(local)=[2.274  2.2871 2.267 ]
+Maximum Self-Energy Update: 62.32532396721482
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0064006265972693654
+Current Conservation rel: 1.0606173675966183e-05
+Phonon: rel Sigma^R residual 7.2577e-02; lead balance 1.3135e-02 (best 6.9039e-05; internal spread 2.1746e-02)
+Bubble energy balance: P_in=-2.023563e+03 P_out=-2.023563e+03 resid=4.319e-15
+Writing output for iteration 140...
+Iteration 141
+[it 141] energy J(local)=[2.2743 2.2873 2.2673]
+Maximum Self-Energy Update: 52.92658861635415
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005270871947061551
+Current Conservation rel: 8.71668028270807e-06
+Phonon: rel Sigma^R residual 6.2192e-02; lead balance 1.3465e-02 (best 6.9039e-05; internal spread 2.2132e-02)
+Bubble energy balance: P_in=-2.025619e+03 P_out=-2.025619e+03 resid=1.278e-14
+Writing output for iteration 141...
+Iteration 142
+[it 142] energy J(local)=[2.2744 2.2874 2.2674]
+Maximum Self-Energy Update: 22.491226547951943
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005091487961635721
+Current Conservation rel: 8.420298507671708e-06
+Phonon: rel Sigma^R residual 2.7548e-02; lead balance 1.3676e-02 (best 6.9039e-05; internal spread 2.2252e-02)
+Bubble energy balance: P_in=-2.025101e+03 P_out=-2.025101e+03 resid=2.577e-15
+Writing output for iteration 142...
+Iteration 143
+[it 143] energy J(local)=[2.2744 2.2873 2.2675]
+Maximum Self-Energy Update: 22.66615361540041
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006422861383327927
+Current Conservation rel: 1.0623442994411343e-05
+Phonon: rel Sigma^R residual 2.7911e-02; lead balance 1.3348e-02 (best 6.9039e-05; internal spread 2.1922e-02)
+Bubble energy balance: P_in=-2.025210e+03 P_out=-2.025210e+03 resid=7.983e-15
+Writing output for iteration 143...
+Iteration 144
+[it 144] energy J(local)=[2.2737 2.2873 2.2668]
+Maximum Self-Energy Update: 36.03650543151973
+Contact Current Difference: 0.0
+Current Conservation abs: 0.005425992235984722
+Current Conservation rel: 8.990478515388131e-06
+Phonon: rel Sigma^R residual 4.4492e-02; lead balance 1.3757e-02 (best 6.9039e-05; internal spread 2.2473e-02)
+Bubble energy balance: P_in=-2.021002e+03 P_out=-2.021002e+03 resid=9.322e-15
+Writing output for iteration 144...
+Iteration 145
+[it 145] energy J(local)=[2.2735 2.2874 2.2666]
+Maximum Self-Energy Update: 30.274520691373134
+Contact Current Difference: 0.0
+Current Conservation abs: 0.0058578286198098795
+Current Conservation rel: 9.68752206204825e-06
+Phonon: rel Sigma^R residual 3.7430e-02; lead balance 1.3296e-02 (best 6.9039e-05; internal spread 2.1951e-02)
+Bubble energy balance: P_in=-2.022951e+03 P_out=-2.022951e+03 resid=1.001e-14
+Writing output for iteration 145...
+Iteration 146
+[it 146] energy J(local)=[2.2737 2.2875 2.267 ]
+Maximum Self-Energy Update: 38.33132453645879
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006514119721430234
+Current Conservation rel: 1.0838078259813288e-05
+Phonon: rel Sigma^R residual 4.7376e-02; lead balance 1.3527e-02 (best 6.9039e-05; internal spread 2.1965e-02)
+Bubble energy balance: P_in=-2.014722e+03 P_out=-2.014722e+03 resid=4.754e-15
+Writing output for iteration 146...
+Iteration 147
+[it 147] energy J(local)=[2.274  2.2875 2.2673]
+Maximum Self-Energy Update: 31.111583306510184
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006416338560313761
+Current Conservation rel: 1.0680549649982629e-05
+Phonon: rel Sigma^R residual 3.8098e-02; lead balance 1.3892e-02 (best 6.9039e-05; internal spread 2.2249e-02)
+Bubble energy balance: P_in=-2.014700e+03 P_out=-2.014700e+03 resid=4.857e-15
+Writing output for iteration 147...
+Iteration 148
+[it 148] energy J(local)=[2.2737 2.2874 2.267 ]
+Maximum Self-Energy Update: 32.65194156119063
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006218705558183046
+Current Conservation rel: 1.0328016895381602e-05
+Phonon: rel Sigma^R residual 3.9924e-02; lead balance 1.3997e-02 (best 6.9039e-05; internal spread 2.2448e-02)
+Bubble energy balance: P_in=-2.017757e+03 P_out=-2.017757e+03 resid=7.705e-15
+Writing output for iteration 148...
+Iteration 149
+[it 149] energy J(local)=[2.2733 2.2872 2.2665]
+Maximum Self-Energy Update: 21.350842156940423
+Contact Current Difference: 0.0
+Current Conservation abs: 0.006104617667006096
+Current Conservation rel: 1.0124036477383507e-05
+Phonon: rel Sigma^R residual 2.6150e-02; lead balance 1.4284e-02 (best 6.9039e-05; internal spread 2.2816e-02)
+Bubble energy balance: P_in=-2.019431e+03 P_out=-2.019431e+03 resid=1.157e-14
+Writing output for iteration 149...
+SCBA did not converge after 149 iterations.
+SAVED /usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/d5a_bisect/ircut_anderson/run.npz  final_heat=[2.273 2.287 2.266]  best=[5.15  4.907 5.151]  best_cons=6.903874376437657e-05

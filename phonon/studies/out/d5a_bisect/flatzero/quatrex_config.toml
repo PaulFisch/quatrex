@@ -1,0 +1,99 @@
+simulation_dir = "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/d5a_bisect/flatzero"
+input_dir = "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/d5a_bisect/flatzero"
+output_dir = "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/d5a_bisect/flatzero/out"
+formalism = "negf"
+simulation_type = "phonon"
+
+[device]
+transport_direction = "z"
+construct_from_unit_cell = true
+num_transport_cells = 2
+neighbor_cell_cutoff = [0, 0, 1]
+kpoint_grid = [1, 1, 1]
+kpoint_shift = [0, 0, 0]
+[device.num_orbitals_per_atom]
+Si = 3
+H = 3
+
+[scba]
+max_iterations = 150
+min_iterations = 3
+mixing_factor = 0.1
+mixing_method = "linear"
+anderson_depth = 5
+anderson_period = 1
+anderson_warmup_iters = 0
+anderson_restart = 0
+anderson_ridge = 0.0
+phonon = true
+
+
+[scba.experimental_mixer]
+rre_cycle = 8
+broyden_warmup_iters = 0
+broyden_ridge = 1e-08
+broyden_trust = 0.3
+rpm_max_subspace = 6
+jfnk_warmup_iters = 10
+jfnk_max_krylov = 30
+jfnk_inner_tol = 0.1
+jfnk_forcing = "ew"
+jfnk_max_newton = 60
+jfnk_eps = 1e-07
+jfnk_trust = 0.5
+jfnk_newton_damp = 1.0
+jfnk_ptc = 0.0
+
+[electron]
+energy_window_min = 0.0
+energy_window_max = 66.0
+energy_window_num = 181
+fermi_level = 0.0
+
+[phonon]
+eta = 1e-12
+eta_obc = 0.0
+left_temperature = 305.0
+right_temperature = 295.0
+model = "negf"
+fc3_path = "/usr/scratch/mont-fort11/pfischill/quatrex/phonon/studies/out/d5a_bisect/flatzero/fc3_blocks.hdf5"
+retarded_method = "fft"
+scp_tadpole = false
+sse_ramp_iterations = 0
+sse_vertex_scale = 1.0
+eta_ramp_iterations = 0
+eta_final = 0.0
+eta_obc_ramp_iterations = 0
+eta_obc_final = 0.0
+sse_low_freq_cutoff_thz = 0.0
+sse_zero_bands_thz = [[16.5, 28.0]]
+ir_taper_cells = 0.0
+low_freq_mixing_thz = 0.0
+low_freq_mixing_factor = 0.1
+band_limit_sse = false
+spectral_sharp_cap = 0.0
+band_support_margin_thz = 0.0
+sse_freeze_occupation = 0.0
+sse_cutoff_zero_g = false
+sigma_convergence_tol = 1e-10
+heat_flow_conservation_tol = 1e-2
+[phonon.solver]
+compute_current = true
+max_batch_size = 100000
+algorithm = "rgf"
+[phonon.obc]
+algorithm = "spectral"
+nevp_solver = "full"
+block_sections = 1
+
+[outputs]
+save_profiling_results = false
+profiling_save_format = "json"
+
+[compute]
+numba_num_threads = 1
+blas_num_threads = 1
+
+[compute.comm]
+block_comm_size = 1
+q_comm_size = 1
