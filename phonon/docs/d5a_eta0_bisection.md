@@ -25,7 +25,7 @@ SUFFICIENT:
 | `gapzero` [[28,45]] | gap zeroed, IR live | ABORT it 62 (drivers relocate to 45–56 + 65) |
 | `flatzero` [[16.5,28]] | flat Si-H bending zeroed, IR live | ABORT it 143 — flat bands are an AMPLIFIER (delay 70→143) but not the seed |
 | **`ircut`** (cutoff 1.5 THz) | IR only | **descends monotonically**: 1.0 → 3.1e-4 in 150 its (≈3× per 25), heat [5.244, 5.139, 5.177], best lead balance 1.4e-5 |
-| `ir_gap`, `ir_flat` | IR + extra windows | stable (150 its) — everything is quiet once the IR is cut |
+| `ir_gap`, `ir_flat`, `ir_gap_flat` | IR + extra windows | all stable (150 its) — everything is quiet once the IR is cut |
 
 Divergence mechanism (from the per-iteration spectra, QX_DIAG_SPECTRAL): the unresolved
 IR weight compounds through the bubble; the growth shows up first in two-phonon
@@ -58,7 +58,7 @@ accelerator; Anderson still underperforms.
 ## Physics cost of the ablations (why only the IR cut is admissible)
 
 The extra windows CHANGE the conductance — they delete real two-phonon scattering:
-`ir_gap` G·dω = 2.066 (+7%), `ir_flat` = 2.271 (+18%) vs ircut 1.923. The IR cut itself
+`ir_gap` G·dω = 2.066 (+7%), `ir_flat` = 2.271 (+18%), `ir_gap_flat` = 2.331 (+21%) vs ircut 1.923 — monotone in the deleted scattering volume. The IR cut itself
 also removes real low-ω scattering; its cost is quantified the honest way — an
 ω_c → 0 sweep (the phono3py-style extrapolation), which is the designated follow-up.
 Alternative for the sub-ω_c physics: η_floor = c·dω adaptive smearing below ω_c only

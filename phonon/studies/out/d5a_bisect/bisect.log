@@ -44,3 +44,12 @@
     w= 44.733 THz  x1.4e+01  |Sig|end=2.96e-03
     w= 45.100 THz  x1.3e+01  |Sig|end=3.25e-03
 [run  ] ir_gap_flat (cutoff=1.5, bands=[[16.5, 45.0]])
+[done ] ir_gap_flat: rc=0 its=150 budget wall=232.0 min
+[ir_gap_flat] top growth bins (it8 -> end):
+    w= 62.700 THz  x2.9e+01  |Sig|end=3.19e-02
+    w= 54.633 THz  x2.8e+01  |Sig|end=3.60e-02
+    w= 55.000 THz  x2.2e+01  |Sig|end=3.15e-02
+    w= 54.267 THz  x1.8e+01  |Sig|end=3.61e-02
+    w= 45.467 THz  x1.7e+01  |Sig|end=3.06e-03
+    w= 46.200 THz  x1.6e+01  |Sig|end=3.77e-03
+[done ] bisection tree complete.
