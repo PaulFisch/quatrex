@@ -175,6 +175,52 @@ def spectral_function_qw(
     return A
 
 
+def mode_projected_spectral(dyn_q, omega_grid_thz, eta_w_thz, *,
+                            sigma_static=None, sigma_b=None):
+    """Mode-projected spectral function A_s(q, omega) (eq:spectral_mode).
+
+    Projects the retarded resolvent onto the HARMONIC eigenvectors e_s(q)
+    of (D + Sigma_static)(q):
+
+        A_s(q, omega) = -1/pi Im [e_s^H G^R(q, omega) e_s],
+
+    the per-branch Lorentzian whose peak is the renormalised frequency
+    and whose width the anharmonic linewidth (eq:lifetime). Same inputs
+    and units as :func:`spectral_function_qw`.
+
+    Returns
+    -------
+    A_s : (nq, nw, N) real array
+        Branch-projected spectral weight (branches sorted by the
+        harmonic eigenvalue).
+    omega_s : (nq, N) real array
+        The reference (static-renormalised) branch frequencies [THz].
+    """
+    dyn_q = np.asarray(dyn_q)
+    nq, N, _ = dyn_q.shape
+    omega = np.asarray(omega_grid_thz, dtype=float)
+    nw = omega.shape[0]
+    z2 = (omega + 1j * eta_w_thz) ** 2
+    eye = np.eye(N)
+    sig_s = _broadcast_static(sigma_static, nq, N)
+
+    A_s = np.zeros((nq, nw, N))
+    omega_s = np.zeros((nq, N))
+    for iq in range(nq):
+        d_eff = _hermitize(dyn_q[iq])
+        if sig_s is not None:
+            d_eff = d_eff + sig_s[iq]
+        w2, ev = np.linalg.eigh(d_eff)
+        omega_s[iq] = np.sqrt(np.clip(w2.real, 0.0, None))
+        M = z2[:, None, None] * eye[None] - d_eff[None]
+        if sigma_b is not None:
+            M = M - np.asarray(sigma_b)[iq]
+        G = np.linalg.inv(M)                        # (nw, N, N)
+        proj = np.einsum("as,wab,bs->ws", ev.conj(), G, ev)
+        A_s[iq] = -proj.imag / np.pi
+    return A_s, omega_s
+
+
 def onshell_quasiparticle_bands(
     dyn_q, sigma_b_diag_func, *, sigma_static=None, max_iter=50, tol=1e-6,
 ):

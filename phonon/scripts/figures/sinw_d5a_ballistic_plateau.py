@@ -66,10 +66,38 @@ def _load(path):
     return en, np.where(dn > 1e-9, cur / dn, np.nan)
 
 
+def _g0_check(en, T_of_w, temperature):
+    """Quantitative eq:g0 check: the cumulative linear-response conductance
+    of the ballistic transmission approaches N_ac * g0 as T -> 0, with
+    g0 = pi^2 kB^2 T / (3 h) the thermal conductance quantum."""
+    import sys as _sys
+    from pathlib import Path as _Path
+    _ph = _Path(__file__).resolve().parents[2]
+    if str(_ph) not in _sys.path:
+        _sys.path.insert(0, str(_ph))
+    from solver.observables import thermal_conductance
+
+    ok = np.isfinite(T_of_w)
+    G = thermal_conductance(np.where(ok, T_of_w, 0.0), en, temperature)
+    # Discrete ideal reference on the SAME grid (T(omega) = N_ac): cancels
+    # the coarse-grid quadrature error of the low-T thermal window, so the
+    # ratio isolates the plateau fidelity. The continuum quantum g0 is
+    # reported for scale.
+    G_ref = thermal_conductance(np.full_like(en, N_AC), en, temperature)
+    g0 = np.pi**2 * KB**2 * temperature / (3.0 * 2.0 * np.pi * HBAR)
+    print(f"g0 check (T={temperature:g} K): G = {G:.4e} W/K; discrete "
+          f"N_ac reference = {G_ref:.4e} W/K -> ratio {G / G_ref:.4f}; "
+          f"continuum N_ac*g0 = {N_AC * g0:.4e} W/K")
+    return G / G_ref
+
+
 def main():
     en, T_full = _load(NPZ_FULL)
     en_t, T_tap = _load(NPZ_TAPER)
     assert np.allclose(en, en_t)
+    # eq:g0: at low T only the acoustic plateau contributes, so the
+    # conductance of the full-Bose curve approaches N_ac quanta.
+    _g0_check(en, T_full, 10.0)
     dw = en[1] - en[0]
     w_reg = TAPER_CELLS * dw
     m = (en > 0) & (en <= WMAX + 0.5 * dw)
