@@ -64,16 +64,12 @@ for name, (cfg, _f) in CFGS.items():
     D = np.asarray(H_00, dtype=complex).real
     D = 0.5 * (D + D.T)
 
-    import h5py
+    from solver.dense import _load_mass_weighted_fc3
 
-    with h5py.File(b.meta["fc3_path"], "r") as f:
-        if "fc3_blocks" in f:
-            grp = f["fc3_blocks"]
-            M_stacked = np.asarray(grp["M_stacked"])
-            prim_indices = np.asarray(grp["prim_indices"])
-            slab_indices = np.asarray(grp["slab_indices"])
-        else:
-            raise SystemExit(f"{name}: fc3 file lacks 'fc3_blocks'")
+    M_stacked, mapping, _raw = _load_mass_weighted_fc3(
+        ph, b.meta["fc3_path"], None, "z", enforce_asr=True,
+        vertex_scale=1.0, verbose=False)
+    prim_indices, _cell_frac, slab_indices, _ref = mapping
     blocks = build_device_fc3_blocks(
         M_stacked, prim_indices, slab_indices, n_atoms, N_SLABS)
     fc3_mw = device_fc3_mass_weighted(blocks, N_SLABS, n_dof)
