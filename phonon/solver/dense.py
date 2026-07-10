@@ -488,6 +488,7 @@ def scba_loop(
     gate_on_conservation=False,
     divergence_guard=True,
     divergence_factor=10.0,
+    return_greens=False,
     divergence_patience=4,
     masses_primitive=None,
     causality_projection=False,
@@ -1020,7 +1021,7 @@ def scba_loop(
     _, _, _, info = _scba_step(Sigma_l, Sigma_g, Sigma_static)
     Sigma_R = info["Sigma_R"]
 
-    return {
+    out = {
         "spectral_J_L": info["spectral_J_L"],
         "spectral_J_R": info["spectral_J_R"],
         "Sigma_R": Sigma_R,
@@ -1035,6 +1036,14 @@ def scba_loop(
                          else Sigma_static.copy()),
         "static_residual": static_resid,
     }
+    if return_greens:
+        # The final _scba_step above refilled the G buffers with the
+        # consistent (G, Sigma) fixed-point pair; shape (n_kpts, nfreq,
+        # N_D, N_D) on the full frequency axis.
+        out["G_lesser"] = G_less_dev_q
+        out["G_greater"] = G_great_dev_q
+        out["G_retarded"] = G_ret_dev_q
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1301,6 +1310,7 @@ def transmission(
     fmax_margin: float = 1.05,
     causality_projection: bool = False,
     track_diagnostics: bool = False,
+    return_greens: bool = False,
     vertex_scale: float = 1.0,
     enforce_asr: bool = False,
     legacy_prefactor: bool = False,
@@ -1511,6 +1521,7 @@ def transmission(
         static_mixing=static_mixing,
         loop_propagator=loop_propagator,
         stage_loop_first=stage_loop_first,
+        return_greens=return_greens,
     )
 
     spectral_J_L = scba_result["spectral_J_L"]
@@ -1564,6 +1575,20 @@ def transmission(
         "self_energy_lesser": se_l,
         "self_energy_greater": se_g,
     }
+
+    if return_greens:
+        # Final fixed-point Green's functions (n_kpts, nfreq, N_D, N_D) on
+        # the FULL frequency axis, plus the q=0 lead quantities and the
+        # device dynamical matrix -- the inputs of the dense observables
+        # (phonon/solver/observables.py).
+        result["G_lesser"] = scba_result["G_lesser"]
+        result["G_greater"] = scba_result["G_greater"]
+        result["G_retarded"] = scba_result["G_retarded"]
+        result["obc"] = obc_all[0]
+        result["H_D"] = H_D_all[0]
+        result["btd_blocks"] = btd_blocks[0]
+        result["n_dof"] = n_dof
+        result["n_slabs"] = n_slabs
 
     if static_se_hook is not None:
         # Converged static (loop+tadpole) self-energy [THz^2] and the effective
