@@ -1235,14 +1235,6 @@ class PhononConfig(BaseModel):
     high-rank factor file. Requires ``decomposed_vertices_path``.
     """
 
-    sse_zero_bands_thz: list[list[float]] = []
-    """DIAGNOSTIC frequency ablation: hard-zero the scattering self-energy
-    (bubble input G legs, output Sigma^<>, post-Hilbert Sigma^R) in the given
-    ``[lo, hi]`` THz windows. NOT a physical treatment -- it deletes real
-    two-phonon spectral weight like any hard mask (spectral-deformation
-    audit); use it to BISECT which spectral region seeds an eta=0 runaway.
-    """
-
     decomposed_kernel: Literal["gram", "reconstruct"] = "reconstruct"
     """How the SSE consumes the decomposed vertex.
 
@@ -1280,7 +1272,7 @@ class PhononConfig(BaseModel):
         z^2(omega) += i * Gamma_floor * omega_c^2/(omega^2 + omega_c^2),
     Gamma_floor = (eta_ir_floor_cells*dw)^2 [THz^2], omega_c = 2*dw, so only the
     lowest few (unresolved) bins are damped and the resolved low-omega physics
-    (and the IR occupation plateau, see ``sse_ir_subtraction``) is untouched.
+    (and the IR occupation plateau) is untouched.
     Grid-consistent: Gamma_floor -> 0 as dw -> 0. Stabiliser for eta=0; does NOT
     crush the heat current like the omega^2 occupation taper."""
     eta_ir_floor_final_cells: NonNegativeFloat = 0.0
@@ -1292,95 +1284,6 @@ class PhononConfig(BaseModel):
     eta_ir_floor_ramp_iterations: int = 0
     """Number of SCBA solves over which to anneal ``eta_ir_floor_cells`` down to
     ``eta_ir_floor_final_cells`` (0 = off, hold the floor constant)."""
-    sse_low_freq_cutoff_thz: NonNegativeFloat = 0.0
-    """Low-frequency cutoff for the 3-phonon SSE (THz, 0 = off). Modes below
-    the cutoff are excluded from the bubble (masked on the INPUT Green's
-    functions fed to the convolution -- the Green's functions themselves are
-    untouched for Dyson/observables) AND the resulting Sigma is not applied
-    below the cutoff: transport below it stays purely BALLISTIC. The
-    omega=0 bin is always excluded regardless."""
-    ir_taper_cells: NonNegativeFloat = 0.0
-    """IR occupancy-taper width in GRID CELLS (0 = off). The Bose occupancy
-    n(omega) ~ kT/(hbar*omega) diverges as omega->0; sampled at the first grid
-    bin it injects a ~1/dw spike that makes the eta=0 SCBA Sigma^R limit-cycle
-    with an UNPHYSICAL IR linewidth Gamma ~ 1/omega (the acoustic sum rule forces
-    Gamma ~ omega^2 -> 0). The lead occupancy is multiplied by the smooth taper
-    ``t(omega) = omega^2 / (omega^2 + (ir_taper_cells * dw)^2)`` -- regularizing
-    the unresolved sharp eta=0 IR poles with a minimal effective width
-    ``omega_reg = ir_taper_cells * dw``. ``t ~ (omega/omega_reg)^2`` as omega->0
-    (exact ASR onset) and ``t -> 1`` smoothly at large omega (no kink, so the IR
-    instability is removed rather than relocated to the first un-tapered bin).
-    Applied identically to both leads, so every G^< leg inherits it consistently
-    and the Phi-derivable bubble energy balance is preserved. Tied to the grid
-    spacing dw: the tapered band [0, ir_taper_cells*dw] shrinks as the grid
-    refines, so the converged observable is taper-independent (a grid-consistent
-    IR regularization of the unresolved Bose pole, NOT a fixed-frequency cutoff
-    that would delete real low-omega channels)."""
-    sse_ir_subtraction: bool = False
-    """Replace the ``ir_taper_cells`` omega^2 IR taper with the physically-exact
-    IR treatment at the LEAD OCCUPATION level (phonon/solver.py). The lead
-    injection is Sigma^<_lead = i Gamma(omega) n(omega); the lead broadening
-    Gamma(omega) is ODD (Gamma(0)=0, ~omega for acoustic), so Gamma*n is FINITE
-    as omega->0 even though n ~ kT/(hbar*omega) diverges. The omega^2 taper
-    (omega_reg = ir_taper_cells*dw) therefore OVER-regularizes and unphysically
-    crushes the low-omega heat current (destroying the quantised plateau
-    omega*I(omega)->const; see document/src/appendices/infrared.tex). With this
-    flag the FULL physical Bose occupation is kept (Gamma~omega tames the pole;
-    only the omega=0 bin is clipped), applied identically to both leads so the
-    device G stays consistent and the Phi-derivable bubble energy balance is
-    preserved (~1e-15). NB the bubble itself is left as the bare conserving
-    convolution -- the device G^< has no 1/omega pole to subtract (the bosonic
-    fold + bounded spectral A cancel it). Off by default; sets ir_taper_cells=0.
-    Restores the low-omega physics but does NOT by itself stabilise the eta=0
-    SCBA iteration (a separate fixed-point problem)."""
-    band_limit_sse: bool = False
-    """Restrict the 3-phonon SSE to the phonon band support: mask the bubble
-    INPUT G and OUTPUT Sigma at frequencies with no (resolved) spectral weight,
-    A(omega)=i(G^>-G^<) < ``spectral_support_tol`` x max. 'Only scatter where
-    there are states.' This is the GENERIC, automatic replacement for a hand-set
-    cutoff: it auto-locates the band edges at BOTH ends (the empty above-band
-    grid region that makes eta=0 diverge for the CNT, and the sub-grid soft band
-    for d5a), with no per-system tuning. Physically exact (Sigma=0 where A=0).
-    Recommended for the eta->0 limit."""
-    spectral_support_tol: NonNegativeFloat = 1e-4
-    """Threshold (relative to the per-frequency spectral-weight peak) below which
-    a frequency is treated as outside the band support by ``band_limit_sse``."""
-    band_support_margin_thz: NonNegativeFloat = 0.0
-    """With ``band_limit_sse``: HARMONIC spectral-support masking (0 = off, use
-    only the single above-band-top mask). The bulk dispersion
-    D(k)=D0+D1 e^{ik}+D1^H e^{-ik} is diagonalized over k in [0,pi]; the union of
-    all eigenfrequencies is the phonon spectral support. A grid bin farther than
-    ``band_support_margin_thz`` from EVERY band frequency is empty (no states) and
-    is masked out of the SSE -- on BOTH sides AND in interior gaps. This is the
-    correct treatment for GAPPED / SPARSE spectra (e.g. SiNW: Si band 0-16 THz +
-    discrete Si-H surface modes 18-64 THz with empty bins between them) where the
-    eta->0 FFT convolution leaks Sigma into the empty bins with no spectral weight
-    to damp it -> divergence. The single band-top mask misses these interior
-    empties. Computed from the dynamical matrix only (G-independent, so robust to
-    the multi-cell corner-block padding that defeats a live A(omega) threshold)
-    and frozen. Set the margin to ~ the mode linewidth + a few grid spacings
-    (e.g. 1-2 THz) so real modes keep a scattering window but the gaps are masked."""
-    sse_freeze_occupation: NonNegativeFloat = 0.0
-    """With ``band_limit_sse``: also mask SSE bins whose thermal Bose occupation
-    ``n(omega, T_hot)`` is below this threshold (0 = off). These modes are
-    thermally FROZEN -- they carry negligible heat (heat ~ hbar*omega*n) -- so
-    masking them out of the SSE is transport-exact while removing their
-    contribution to the eta=0 iteration. Targets isolated, sharp, gapped
-    high-frequency modes that barely self-broaden at eta=0 (e.g. the SiNW Si-H
-    STRETCH island ~61-64 THz: n~1e-5 at 300 K, separated from the main band by a
-    ~30 THz gap, so almost no 3-phonon decay channels). ``T_hot`` is the warmer
-    lead temperature, so a mode is frozen only if frozen at the hot contact too.
-    Typical: 1e-3 (masks omega > ~43 THz at 300 K). Applied as an omega-diagonal
-    mask on the SSE input/output (conserving), like the band-limit."""
-    spectral_sharp_cap: NonNegativeFloat = 0.0
-    """With ``band_limit_sse``: also mask NEAR-SINGULAR (sharp) modes -- bins where
-    the spectral weight A(omega) exceeds this multiple of the in-band MEDIAN (a
-    sub-grid-linewidth resonance spikes A~1/Gamma). 0 = off. These bins are zeroed
-    from the bubble for THAT iteration (treated ballistic) and re-admitted once the
-    self-energy broadens them enough to drop below the cap -- a dynamic 'trim the
-    near-singular modes, reintroduce as they heal' that stabilises the eta->0 SCBA
-    on long devices where the anharmonic linewidth alone is sub-grid. ~20-50."""
-
     buttiker_probe: bool = False
     """Optional self-consistent Buttiker DEPHASING probe on the eta-broadening
     channel (default OFF). The numerical broadening ``eta`` adds a damping
@@ -1406,12 +1309,6 @@ class PhononConfig(BaseModel):
     nnz->stack back-transpose (free at stack=1; one extra all-to-all per
     iteration at stack>1)."""
 
-    sse_cutoff_zero_g: bool = False
-    """With ``sse_low_freq_cutoff_thz`` > 0: additionally zero the lead
-    occupancies below the cutoff, killing G^< (and hence ALL transport)
-    there -- the hard "totally zeroed" treatment. Default False = the
-    masked treatment (transport below the cutoff stays ballistic)."""
-
     sse_vertex_scale: PositiveFloat = 1.0
     """Uniform 3-phonon vertex scale lambda (Sigma scales as lambda^2).
     lambda < 1 = reduced-coupling runs for LOA-style extrapolation and for
@@ -1424,8 +1321,8 @@ class PhononConfig(BaseModel):
     ``scba.mixing_factor``. 0 = off (uniform mixing). This DAMPS the IR
     (Bose-divergent, n(omega)~kT/hbar.omega) marginal mode at the lowest
     frequency bins -- which limit-cycles the eta=0 SCBA Sigma^R -- WITHOUT
-    removing the low-omega anharmonic scattering (unlike
-    ``sse_low_freq_cutoff_thz``), so the iteration converges to the CORRECT
+    removing the low-omega anharmonic scattering, so the iteration
+    converges to the CORRECT
     conductance. The IR mode sits on the unit circle (|lambda|~1); a small
     mixing factor pulls it inside (|1+a(lambda-1)|<1)."""
     low_freq_mixing_factor: NonNegativeFloat = 0.02
@@ -1532,19 +1429,6 @@ class PhononConfig(BaseModel):
                 "'fc3_path' must be set for model='negf'."
             )
 
-        return self
-
-    @model_validator(mode="after")
-    def check_regularizer_exclusivity(self):
-        """Guard the mutually-exclusive eta=0 IR / mask regularizers: each
-        treats the same physics differently, so stacking them double-counts
-        and is almost always a config error."""
-        if self.sse_ir_subtraction and self.ir_taper_cells > 0.0:
-            raise ValueError(
-                "sse_ir_subtraction and ir_taper_cells are mutually-exclusive "
-                "IR occupation treatments: set ir_taper_cells = 0 when using "
-                "the exact Bose subtraction."
-            )
         return self
 
     @model_validator(mode="after")

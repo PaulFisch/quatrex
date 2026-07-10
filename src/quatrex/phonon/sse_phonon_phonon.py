@@ -97,90 +97,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             threads=int(getattr(config.phonon, "sse_ring_threads", 0)),
             min_w=getattr(config.phonon, "sse_ring_min_w", None),
         )
-        self._sse_cutoff = float(
-            getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
-        self._zero_bands = [
-            (float(lo), float(hi)) for lo, hi in
-            getattr(config.phonon, "sse_zero_bands_thz", []) or []]
-        # Band-limited SSE: scatter only where there are phonon states (mask the
-        # bubble where the spectral function A(w)=i(G^>-G^<) is negligible). The
-        # generic, automatic cutoff that fixes the eta->0 divergence (spurious
-        # self-energy in the empty above-band grid region amplifying with no
-        # damping) without a hand-set frequency.
-        self._band_limit = bool(getattr(config.phonon, "band_limit_sse", False))
-        self._band_tol = float(getattr(config.phonon, "spectral_support_tol", 1e-4))
-        self._sharp_cap = float(getattr(config.phonon, "spectral_sharp_cap", 0.0))
-        self._sharp_state = None  # persistent hysteresis mask of near-singular bins
-        self._band_support_mask = None  # FROZEN empty-region mask (A-threshold fallback)
-        # Fixed harmonic band top (THz) for the above-band mask. The eta->0
-        # divergence lives in the empty grid region ABOVE the phonon band; the
-        # band top is a G-independent property of the dynamical matrix, so the
-        # masked set never moves (flicker-free). This supersedes the A(w)-
-        # threshold support, which is unreliable for multi-cell devices: the
-        # full n_cells x n_cells block nnz pattern pads the physically-zero
-        # corner blocks with 1.0, flooring max_nnz|G^>-G^<| and hiding the
-        # above-band emptiness (cnt33 L3 masked 0 bins -> eta=0 diverged).
-        self._band_top = None
-        self._band_top_announced = False
-        if self._band_limit and dynamical_matrix is not None:
-            bt_local = 0.0
-            try:
-                bt_local = self._compute_band_top(dynamical_matrix)
-            except Exception as exc:  # noqa: BLE001 - fall back, never fatal
-                if ranks.rank == 0:
-                    print(f"SSE band-limit: band-top computation failed "
-                          f"({exc!r}); falling back to A-threshold support",
-                          flush=True)
-            # Agree across ranks: the dynamical matrix may be block-distributed,
-            # so only the rank(s) owning blocks (0,0)/(0,1) get a real value.
-            bt = np.array(float(bt_local), dtype=float)
-            comm.Allreduce(MPI.IN_PLACE, bt, op=MPI.MAX)
-            if float(bt) > 0.0:
-                self._band_top = float(bt)
-                if comm.rank == 0:
-                    print(f"SSE band-limit: harmonic band top "
-                          f"{self._band_top:.3f} THz (fixed above-band mask)",
-                          flush=True)
-        # HARMONIC spectral-support masking (band_support_margin_thz > 0): mask
-        # SSE bins far from EVERY harmonic band frequency -- above-band AND
-        # interior gaps AND between sparse high-freq modes (the single band-top
-        # mask misses the latter two). G-independent + frozen. self._support_freqs
-        # is local (only the rank(s) owning blocks (0,0)/(0,1) get a real value);
-        # the per-bin empty mask is OR-reduced across ranks at first use.
-        self._support_margin = float(
-            getattr(config.phonon, "band_support_margin_thz", 0.0))
-        self._support_freqs = None
-        self._support_empty = None
-        if (self._band_limit and self._support_margin > 0.0
-                and dynamical_matrix is not None):
-            try:
-                self._support_freqs = self._compute_band_support_freqs(
-                    dynamical_matrix)
-            except Exception as exc:  # noqa: BLE001 - never fatal
-                if ranks.rank == 0:
-                    print(f"SSE band-limit: band-support computation failed "
-                          f"({exc!r}); harmonic-support mask off", flush=True)
-        # Occupation-freeze mask (sse_freeze_occupation > 0): mask SSE bins whose
-        # Bose occupation n(omega, T_hot) is below the threshold -- thermally
-        # frozen spectator modes that carry ~zero heat (e.g. the isolated Si-H
-        # stretch island). T_hot = warmer lead, so a mode is frozen only if
-        # frozen at the hot contact too. x = hbar*omega/(kB*T_hot).
-        self._freeze_n = float(getattr(config.phonon, "sse_freeze_occupation", 0.0))
-        self._T_hot = max(float(getattr(config.phonon, "left_temperature", 300.0)),
-                          float(getattr(config.phonon, "right_temperature", 300.0)))
-        self._freeze_mask = None
-        # NB the former SMOOTH band-limit window (sse_smooth_window) was
-        # REMOVED 2026-07-06: it enforced the HARMONIC support on Sigma,
-        # whose true support is the TWO-PHONON (sum/difference) spectrum --
-        # it deleted physical combination continua (measured on d5a: the
-        # divergence drivers sat on the half-suppressed window ramp, with
-        # zero one-phonon but large two-phonon DOS). See
-        # phonon/docs/spectral_deformation_audit.md.
-        # NB: the IR Bose-singularity subtraction (sse_ir_subtraction) is handled
-        # in phonon/solver.py at the LEAD OCCUPATION level, not in the bubble --
-        # the device G^< has no 1/omega pole to subtract (the bosonic fold +
-        # bounded spectral A force it to cancel), so a bubble-leg subtraction
-        # both does nothing physical AND breaks the Phi-derivable conservation.
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
             raise ValueError(
@@ -429,64 +345,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._vf_dense_cache = (key, qv)
         return qv
 
-    @staticmethod
-    def _compute_band_top(dynamical_matrix, n_k: int = 512) -> float:
-        """Harmonic phonon band top (THz) from the dynamical matrix.
-
-        The device matrix is block-tridiagonal in the (nearest-neighbour) unit
-        cells, so the bulk dispersion is ``D(k) = D0 + D1 e^{ik} + D1^H
-        e^{-ik}`` with the on-site block ``D0 = blocks[0,0]`` and the coupling
-        ``D1 = blocks[0,1]``; its eigenvalues are ``omega^2(k)``. The band top
-        ``max_k sqrt(eig D(k))`` is the highest frequency with phonon states --
-        above it the grid is empty (the eta->0 divergence region). This is a
-        fixed property of D (no Green's function), so it is robust to the
-        constant-1.0 corner-block padding that corrupts the A(w) support.
-        """
-        D0 = np.asarray(dynamical_matrix.blocks[0, 0])
-        if D0.ndim == 3:
-            D0 = D0[0]
-        D1 = np.asarray(dynamical_matrix.blocks[0, 1])
-        if D1.ndim == 3:
-            D1 = D1[0]
-        D0 = 0.5 * (D0 + D0.conj().T)
-        ks = np.linspace(0.0, np.pi, int(n_k))
-        w_top = 0.0
-        for k in ks:
-            phase = np.exp(1j * k)
-            Dk = D0 + D1 * phase + D1.conj().T * np.conj(phase)
-            Dk = 0.5 * (Dk + Dk.conj().T)
-            ev_max = float(np.linalg.eigvalsh(Dk)[-1])
-            if ev_max > w_top:
-                w_top = ev_max
-        return float(np.sqrt(max(w_top, 0.0)))
-
-    @staticmethod
-    def _compute_band_support_freqs(dynamical_matrix, n_k: int = 512):
-        """ALL harmonic mode frequencies (THz) of the bulk dispersion
-        ``D(k)=D0+D1 e^{ik}+D1^H e^{-ik}``, k in [0, pi] -- the union over k and
-        bands is the phonon spectral SUPPORT. Grid bins far from every band
-        frequency are EMPTY (no states); masking them out of the SSE removes the
-        eta->0 FFT-leakage divergence in the above-band AND the interior gaps,
-        including for SPARSE high-frequency modes (e.g. discrete Si-H surface
-        modes) that the single band-top cutoff misses. Like
-        ``_compute_band_top`` but keeps the full spectrum; G-independent (robust
-        to corner-block padding). Returns sorted unique frequencies (THz)."""
-        D0 = np.asarray(dynamical_matrix.blocks[0, 0])
-        if D0.ndim == 3:
-            D0 = D0[0]
-        D1 = np.asarray(dynamical_matrix.blocks[0, 1])
-        if D1.ndim == 3:
-            D1 = D1[0]
-        D0 = 0.5 * (D0 + D0.conj().T)
-        out = []
-        for k in np.linspace(0.0, np.pi, int(n_k)):
-            phase = np.exp(1j * k)
-            Dk = D0 + D1 * phase + D1.conj().T * np.conj(phase)
-            Dk = 0.5 * (Dk + Dk.conj().T)
-            ev = np.linalg.eigvalsh(Dk)
-            out.append(np.sqrt(np.clip(ev.real, 0.0, None)))
-        return np.unique(np.concatenate(out))
-
     def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
         """Prepare the self-consistent SCP cubic-tadpole static self-energy:
         the dense device FC3 + dynamical matrix, the mixing/floor, and the
@@ -699,139 +557,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if m.distribution_state != "nnz":
                 m.dtranspose(discard=True)
         gl_in, gg_in = g_lesser.data, g_greater.data
-        # Low-frequency masking of the bubble INPUT: the Green's functions
+        # The omega=0 bin never enters the bubble (Bose divergence at DC;
+        # the zero-measure convention of the theory). The Green's functions
         # stay intact for Dyson/observables; only the copies fed into the
-        # 3-phonon convolution are masked. The omega=0 bin is always
-        # excluded (Bose divergence at DC); below
-        # config.phonon.sse_low_freq_cutoff_thz (0 = off) the modes do not
-        # participate in the SSE at all -- with the matching OUTPUT mask in
-        # step (5), transport below the cutoff is purely ballistic.
-        sse_mask = xp.abs(xp.asarray(full_freqs)) < max(self._sse_cutoff, 1e-6)
-        # DIAGNOSTIC frequency ablation (sse_zero_bands_thz): hard-zero the
-        # SSE in arbitrary [lo, hi] THz windows -- input G legs, output
-        # Sigma^<> and the post-Hilbert Sigma^R all inherit it through this
-        # mask. NOT a physical treatment (it deletes real two-phonon weight
-        # like any hard mask; see the spectral-deformation audit): the tool
-        # for BISECTING which spectral region seeds an eta=0 runaway.
-        if self._zero_bands:
-            af_zb = xp.abs(xp.asarray(full_freqs))
-            for lo, hi in self._zero_bands:
-                sse_mask = sse_mask | ((af_zb >= float(lo))
-                                       & (af_zb <= float(hi)))
-        if self._band_limit:
-            af = xp.abs(xp.asarray(full_freqs))
-            low = xp.zeros(af.shape, dtype=bool)
-            if self._band_top is not None:
-                # PRIMARY: fixed harmonic band-top mask. The eta->0 divergence
-                # lives in the empty grid region ABOVE the phonon band (no states
-                # there -> the resolvent is real -> the SCBA amplifies
-                # convolution leakage with no damping). omega_top is a fixed,
-                # G-independent property of the dynamical matrix, so the masked
-                # set never moves: a LIVE A(w) threshold instead makes the SCBA
-                # map discontinuous and it limit-cycles (Anderson on cnt33 L2
-                # converges to 9e-5 with no mask but cycles 0.09<->0.38 with a
-                # live mask). It also dodges the constant-1.0 corner-block
-                # padding of the full n_cells x n_cells nnz pattern, which floors
-                # max_nnz|G^>-G^<| at 1.0 on multi-cell devices and hides the
-                # above-band emptiness (cnt33 L3 masked 0 bins -> eta=0 diverged).
-                margin = (float(abs(full_freqs[1] - full_freqs[0]))
-                          if full_freqs.size > 1 else 0.0)
-                low = af > (self._band_top + margin)
-                if comm.rank == 0 and not self._band_top_announced:
-                    self._band_top_announced = True
-                    print(f"SSE band-limit: masking {int(low.sum())} bin(s) "
-                          f"above {self._band_top:.3f} THz", flush=True)
-            else:
-                # FALLBACK (no dynamical matrix passed): freeze the empty-region
-                # A(w)-threshold mask at the first (ballistic) call so the masked
-                # set does not flicker as the modes shift under Sigma. Unreliable
-                # on multi-cell devices (corner-block padding) -- prefer the band
-                # top above whenever the dynamical matrix is available.
-                a_w = xp.abs(gg_in - gl_in)
-                spec = a_w.reshape(a_w.shape[0], -1).max(axis=1)
-                spec_peak = float(spec.max())
-                if spec_peak > 0.0:
-                    if (self._band_support_mask is None
-                            or self._band_support_mask.shape != spec.shape):
-                        self._band_support_mask = spec < self._band_tol * spec_peak
-                        if ranks.rank == 0:
-                            print(f"SSE: froze band-support mask "
-                                  f"({int(self._band_support_mask.sum())}/"
-                                  f"{spec.size} empty bins, "
-                                  f"tol={self._band_tol:g})", flush=True)
-                    low = self._band_support_mask
-            if self._support_margin > 0.0:
-                # HARMONIC spectral-support empty-bin mask (above-band + interior
-                # gaps + between sparse high-freq modes). Computed once, frozen.
-                if self._support_empty is None:
-                    af_h = np.abs(np.asarray(full_freqs).real).astype(float)
-                    sf = self._support_freqs
-                    if sf is not None and sf.size:
-                        dist = np.min(np.abs(af_h[:, None] - sf[None, :]), axis=1)
-                        loc_sup = (dist <= self._support_margin).astype(np.int32)
-                    else:
-                        loc_sup = np.zeros(af_h.shape, dtype=np.int32)
-                    # OR across ranks: the block-owning rank holds the support.
-                    comm.Allreduce(MPI.IN_PLACE, loc_sup, op=MPI.MAX)
-                    self._support_empty = xp.asarray(loc_sup == 0)
-                    if comm.rank == 0:
-                        print(f"SSE band-limit: harmonic-support mask -> "
-                              f"{int((loc_sup == 0).sum())}/{loc_sup.size} empty "
-                              f"bins masked (margin {self._support_margin:g} THz)",
-                              flush=True)
-                low = low | self._support_empty
-            if self._freeze_n > 0.0:
-                # Occupation-freeze: mask thermally-frozen spectator bins
-                # (n(omega, T_hot) < threshold). Frozen once (T-fixed).
-                if self._freeze_mask is None:
-                    af_h = np.abs(np.asarray(full_freqs).real).astype(float)
-                    # hbar*omega/(kB*T): omega in THz -> 47.99 * f / T
-                    x = _THZ_OVER_K * af_h / max(self._T_hot, 1e-30)
-                    with np.errstate(over="ignore", divide="ignore"):
-                        n_bose = 1.0 / np.expm1(np.clip(x, 1e-30, None))
-                    frozen = (n_bose < self._freeze_n) & (af_h > 0.0)
-                    self._freeze_mask = xp.asarray(frozen)
-                    if comm.rank == 0:
-                        print(f"SSE band-limit: occupation-freeze mask -> "
-                              f"{int(frozen.sum())}/{frozen.size} frozen bins "
-                              f"(n<{self._freeze_n:g}, T_hot={self._T_hot:g}K)",
-                              flush=True)
-                low = low | self._freeze_mask
-            sse_mask = sse_mask | low
-            if self._sharp_cap > 0.0:
-                # Near-singular (sharp) modes: A spikes far above the in-band
-                # median (sub-grid linewidth). Zero them for THIS iteration with
-                # HYSTERESIS (flag at cap x median, un-flag below cap/4) so the
-                # mask itself does not flicker; they re-enter once Sigma broadens
-                # them. (The in-band median is corrupted by corner-block padding
-                # on multi-cell devices -- this knob is for single-cell soft
-                # modes; default spectral_sharp_cap=0 keeps it off.)
-                a_w = xp.abs(gg_in - gl_in)
-                spec = a_w.reshape(a_w.shape[0], -1).max(axis=1)
-                inband = spec[(~low) & (spec > 0.0)]
-                if inband.size:
-                    med = float(xp.median(inband))
-                    if med > 0.0:
-                        newly = spec > self._sharp_cap * med
-                        healed = spec < 0.25 * self._sharp_cap * med
-                        if self._sharp_state is None or \
-                                self._sharp_state.shape != spec.shape:
-                            self._sharp_state = xp.zeros_like(spec, dtype=bool)
-                        self._sharp_state = (self._sharp_state & ~healed) | newly
-                        if ranks.rank == 0 and bool(self._sharp_state.any()):
-                            print(f"SSE: masked {int(self._sharp_state.sum())} "
-                                  f"near-singular bin(s) (A > {self._sharp_cap:g}"
-                                  f"x median, hysteresis)", flush=True)
-                        sse_mask = sse_mask | self._sharp_state
+        # 3-phonon convolution are masked, with the matching output mask in
+        # step (5).
+        sse_mask = xp.abs(xp.asarray(full_freqs)) < 1e-6
         if bool(sse_mask.any()):
             gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
             gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
-        # NOTE: the IR Bose subtraction is NOT applied to the bubble legs -- the
-        # device G^< has no 1/omega pole (the bosonic fold + bounded spectral A
-        # force it to cancel; data confirm |G^<|~omega^-0.5 bounded). The pole is
-        # real only in the lead OCCUPATION; the sse_ir_subtraction treatment
-        # lives there (phonon/solver.py: use the full physical occupation instead
-        # of the omega^2 taper). The bubble stays the bare (conserving) convolution.
+        # NOTE: no IR treatment is applied to the bubble legs -- the device
+        # G^< has no 1/omega pole (the bosonic fold and the bounded spectral
+        # function force it to cancel). The Bose pole is real only in the
+        # lead occupation, where the odd lead broadening Gamma(omega) keeps
+        # the injection finite. The bubble is the bare conserving convolution.
         if os.environ.get("QX_DIAG_SPECTRAL") == "1":
             # eta=0 convergence diagnostic: per-omega magnitude of the bubble
             # INPUT G^<, RAW (g_lesser.data) vs WINDOWED/masked (gl_in, what is

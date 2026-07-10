@@ -137,59 +137,11 @@ class PhononSolver(SubsystemSolver):
             xp.isfinite(self.left_occupancies), self.left_occupancies, 0.0)
         self.right_occupancies = xp.where(
             xp.isfinite(self.right_occupancies), self.right_occupancies, 0.0)
-        # Hard low-frequency cutoff (sse_cutoff_zero_g): no lead injection
-        # below the SSE cutoff -> G^< = 0 there -> zero current below the
-        # cutoff in BOTH ballistic and anharmonic runs (the "totally
-        # zeroed" treatment, vs. the default masked/ballistic-below one).
-        _cut = float(getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
-        if _cut > 0.0 and bool(getattr(config.phonon, "sse_cutoff_zero_g", False)):
-            _m = xp.abs(xp.asarray(self.local_frequencies)) < _cut
-            self.left_occupancies = xp.where(_m, 0.0, self.left_occupancies)
-            self.right_occupancies = xp.where(_m, 0.0, self.right_occupancies)
-
-        # IR-consistent occupancy taper -- grid-resolution regularization of the
-        # unresolved Bose pole. n(omega) ~ kT/(hbar*omega) diverges as omega->0;
-        # sampled at the first grid bin it injects a ~1/dw spike that makes the
-        # eta=0 SCBA Sigma^R limit-cycle with an unphysical IR linewidth
-        # Gamma ~ 1/omega (the acoustic sum rule forces Gamma ~ omega^2 -> 0).
-        # Multiply the lead occupancy by the SMOOTH taper
-        #     t(omega) = omega^2 / (omega^2 + omega_reg^2),  omega_reg = C * dw,
-        # i.e. regularize the unresolved sharp eta=0 IR poles with a minimal
-        # effective width omega_reg. t ~ (omega/omega_reg)^2 as omega->0 (exact
-        # ASR onset), t -> 1 smoothly at large omega (no kink -> the instability
-        # is removed, not relocated to the first un-tapered bin as a hard
-        # min(1,.) cutoff does; high-omega physics untouched). Applied identically
-        # to both leads, so every G^< leg inherits it consistently and the
-        # Phi-derivable bubble energy balance is preserved (verified ~1e-16). dw
-        # is the global grid spacing; as dw->0, omega_reg = C*dw -> 0 and t -> 1,
-        # so the converged observable is taper-free (grid-consistent IR
-        # regularization, NOT a fixed-THz cutoff that deletes real channels).
-        # IR singularity SUBTRACTION (sse_ir_subtraction): the physically-correct
-        # alternative to the omega^2 taper. The lead injection is
-        # Sigma^<_lead = i Gamma(omega) n(omega); the lead broadening Gamma(omega)
-        # is ODD (Gamma(0)=0, ~omega for acoustic), so Gamma*n is FINITE as
-        # omega->0 even though n ~ kT/(hbar*omega) diverges -- the omega^2 taper
-        # (omega_reg = C*dw, C~6 -> crushes everything below ~2 THz) is therefore
-        # OVER-regularizing and unphysically kills the low-omega heat current.
-        # With the flag we keep the FULL physical occupation (Gamma~omega tames
-        # the pole) and only set the omega=0 bin to its finite limit (n is already
-        # clipped to 0 there; Gamma(0)=0 -> the bin injects ~0, negligible).
-        # Applied identically to both leads -> conserving (device G consistent).
-        _ir_sub = bool(getattr(config.phonon, "sse_ir_subtraction", False))
-        _taper_C = float(getattr(config.phonon, "ir_taper_cells", 0.0))
-        if _ir_sub:
-            if comm.rank == 0:
-                print("IR occupation subtraction ON: full physical Bose "
-                      "occupation (no omega^2 taper); Gamma~omega keeps the "
-                      "injection finite as omega->0.", flush=True)
-        elif _taper_C > 0.0 and self.energies.size > 1:
-            _dw = float(abs(get_host(self.energies[1] - self.energies[0])))
-            if _dw > 0.0:
-                _w2 = xp.asarray(self.local_frequencies, dtype=float) ** 2
-                _wreg2 = (_taper_C * _dw) ** 2
-                _t = _w2 / (_w2 + _wreg2)
-                self.left_occupancies = self.left_occupancies * _t
-                self.right_occupancies = self.right_occupancies * _t
+        # NOTE: the full physical Bose occupation is kept at all omega > 0:
+        # the lead broadening Gamma(omega) is odd (Gamma(0) = 0, ~omega for
+        # acoustic modes), so Gamma*n stays finite as omega -> 0 even though
+        # n ~ kT/(hbar*omega) diverges. Only the omega = 0 bin is clipped
+        # above (its injection is ~0 since Gamma(0) = 0).
 
         self.eta = config.phonon.eta
         self.eta_obc = config.phonon.eta_obc

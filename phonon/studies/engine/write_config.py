@@ -130,19 +130,11 @@ eta_ramp_iterations = {a.eta_ramp_iters}
 eta_final = {a.eta_final}
 eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
 eta_obc_final = {a.eta_obc_final}
-sse_low_freq_cutoff_thz = {a.sse_cutoff}
-ir_taper_cells = {a.ir_taper_cells}
 eta_ir_floor_cells = {a.eta_ir_floor_cells}
 eta_ir_floor_final_cells = {a.eta_ir_floor_final_cells}
 eta_ir_floor_ramp_iterations = {a.eta_ir_floor_ramp_iterations}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
-band_limit_sse = {str(a.band_limit).lower()}
-spectral_sharp_cap = {a.sharp_cap}
-band_support_margin_thz = {a.band_support_margin}
-sse_freeze_occupation = {a.sse_freeze_occupation}
-sse_ir_subtraction = {str(a.sse_ir_subtraction).lower()}
-sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
 [phonon.solver]
@@ -245,19 +237,11 @@ eta_ramp_iterations = {a.eta_ramp_iters}
 eta_final = {a.eta_final}
 eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
 eta_obc_final = {a.eta_obc_final}
-sse_low_freq_cutoff_thz = {a.sse_cutoff}
-ir_taper_cells = {a.ir_taper_cells}
 eta_ir_floor_cells = {a.eta_ir_floor_cells}
 eta_ir_floor_final_cells = {a.eta_ir_floor_final_cells}
 eta_ir_floor_ramp_iterations = {a.eta_ir_floor_ramp_iterations}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
-band_limit_sse = {str(a.band_limit).lower()}
-spectral_sharp_cap = {a.sharp_cap}
-band_support_margin_thz = {a.band_support_margin}
-sse_freeze_occupation = {a.sse_freeze_occupation}
-sse_ir_subtraction = {str(a.sse_ir_subtraction).lower()}
-sse_cutoff_zero_g = {str(a.sse_zero_g).lower()}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
 [phonon.solver]
@@ -371,11 +355,6 @@ def main():
                    help="SCBA cap; the conductance (best-iterate) converges well "
                         "before the Sigma residual (F30), so 50 bounds wall-time")
     p.add_argument("--retarded", default="half", choices=["half", "fft"])
-    p.add_argument("--sse-zero-g", action="store_true",
-                   help="hard cutoff: zero lead injection below --sse-cutoff")
-    p.add_argument("--band-limit", action="store_true",
-                   help="band-limit the SSE: scatter only where A(w) has weight "
-                        "(generic auto cutoff at both band edges; for eta->0)")
     p.add_argument("--eta-ir-floor-cells", dest="eta_ir_floor_cells", type=float,
                    default=0.0,
                    help="sub-grid soft-mode broadening floor (grid cells); a "
@@ -387,29 +366,6 @@ def main():
     p.add_argument("--eta-ir-floor-ramp-iterations",
                    dest="eta_ir_floor_ramp_iterations", type=int, default=0,
                    help="solves over which to anneal the soft-mode floor down")
-    p.add_argument("--sse-ir-subtraction", dest="sse_ir_subtraction",
-                   action="store_true",
-                   help="replace the omega^2 IR taper with an EXACT Bose-pole "
-                        "singularity subtraction in the bubble (preserves the "
-                        "quantised ballistic plateau T(0)=N_ac; set ir-taper-"
-                        "cells=0 with this)")
-    p.add_argument("--sse-freeze-occupation", dest="sse_freeze_occupation",
-                   type=float, default=0.0,
-                   help="with --band-limit: mask SSE bins with Bose occupation "
-                        "n(omega,T_hot) below this (0=off). Masks thermally-frozen "
-                        "spectator modes (carry ~0 heat), e.g. the SiNW Si-H "
-                        "stretch island; ~1e-3 masks omega>~43 THz at 300 K")
-    p.add_argument("--band-support-margin", dest="band_support_margin",
-                   type=float, default=0.0,
-                   help="with --band-limit: HARMONIC spectral-support mask width "
-                        "in THz (0=off). Masks SSE bins farther than this from "
-                        "every harmonic band frequency -- above-band AND interior "
-                        "gaps AND between sparse high-freq modes (Si-H). Needed "
-                        "for gapped spectra where the single band-top mask leaves "
-                        "empty bins that blow up the eta=0 FFT")
-    p.add_argument("--sharp-cap", type=float, default=0.0,
-                   help="with --band-limit: also zero near-singular sharp modes "
-                        "(A > N x in-band median) per iteration (eta->0 stability)")
     p.add_argument("--low-freq-mix-thz", dest="low_freq_mix_thz", type=float,
                    default=0.0,
                    help="frequency-dependent mixing: bins below this THz get "
@@ -418,15 +374,6 @@ def main():
     p.add_argument("--low-freq-mix-factor", dest="low_freq_mix_factor",
                    type=float, default=0.02,
                    help="gentle mixing factor for the low-omega bins")
-    p.add_argument("--sse-cutoff", type=float, default=0.0,
-                   help="low-frequency 3ph-SSE cutoff in THz (ballistic below)")
-    p.add_argument("--ir-taper-cells", dest="ir_taper_cells", type=float,
-                   default=0.0,
-                   help="IR occupancy-taper width in GRID CELLS (0=off): "
-                        "n(omega)*min(1,(|omega|/(C*dw))^2) enforces the ASR "
-                        "omega^2 onset on the unresolved low-freq bins (removes "
-                        "the 1/dw first-bin spike that limit-cycles the eta=0 "
-                        "SCBA); grid-tied, so it vanishes as dw->0")
     p.add_argument("--sigma-tol", type=float, default=1e-3,
                    help="relative Sigma^R residual tolerance")
     p.add_argument("--vertex-scale", type=float, default=1.0,

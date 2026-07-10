@@ -41,10 +41,7 @@ if os.environ.get("QX_ETAOBC"):   cfg.phonon.eta_obc = float(os.environ["QX_ETAO
 if os.environ.get("QX_ETA_RAMP_ITERS"): cfg.phonon.eta_ramp_iterations = int(os.environ["QX_ETA_RAMP_ITERS"])
 if os.environ.get("QX_ETA_FINAL"):      cfg.phonon.eta_final = float(os.environ["QX_ETA_FINAL"])
 if os.environ.get("QX_ALGORITHM"):      cfg.phonon.solver.algorithm = os.environ["QX_ALGORITHM"]
-if os.environ.get("QX_BAND_LIMIT"):     cfg.phonon.band_limit_sse = os.environ["QX_BAND_LIMIT"] == "1"
-if os.environ.get("QX_IR_SUB"):         cfg.phonon.sse_ir_subtraction = os.environ["QX_IR_SUB"] == "1"
 if os.environ.get("QX_ETA_IR_FLOOR"):   cfg.phonon.eta_ir_floor_cells = float(os.environ["QX_ETA_IR_FLOOR"])
-if os.environ.get("QX_SHARP_CAP"):      cfg.phonon.spectral_sharp_cap = float(os.environ["QX_SHARP_CAP"])
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
 if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
@@ -323,13 +320,6 @@ if ranks.rank == 0:
         if _iter_graw_w:
             out["iter_graw_w"] = np.asarray(_iter_graw_w)
             out["iter_gwin_w"] = np.asarray(_iter_gwin_w)
-        if _sse_diag is not None:
-            _bt = getattr(_sse_diag, "_band_top", None)
-            if _bt is not None:
-                out["band_top"] = float(_bt)
-            _win = getattr(_sse_diag, "_sse_window", None)
-            if _win is not None:
-                out["sse_window"] = np.asarray(_win)
     if _iter_heat:
         # SCBA convergence trace: heat per interface per iteration. At
         # stack>1 this is the rank-0-local frequency slice (relative
