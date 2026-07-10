@@ -67,7 +67,3 @@ need the listed run:
 | si_film_vs_guo, si_film_conductance_b | notebook F23/F29 | film ballistic/anharmonic sweeps (days; coupled-q) |
 | prod_qfilm_qconv/conservation | appendix tables | coupled-q film nk-sweep (± zero-mode projection) |
 | solver_scaling (right panel), phph_* scaling literals | retired benchmark logs (git) | re-run the benchmark drivers (hours) |
-
-The conserving-vertex fix (2026-06-10) postdates several archived sweeps, so a
-re-measurement can legitimately drift from the archived values; the text marks
-each such number with its provenance.
