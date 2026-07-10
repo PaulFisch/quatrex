@@ -76,8 +76,12 @@ def _build(dsdb, nfreq, bs, rng):
 def _current(solver_cls, dsdb, max_batch_size, nfreq, bs):
     rng = np.random.default_rng(0)  # identical system regardless of batching
     Am, Blm, Bgm, obc = _build(dsdb, nfreq, bs, rng)
-    Xl = dsdb.zeros_like(Am)
-    Xg = dsdb.zeros_like(Am)
+    Xl = dsdb.empty_like(Am)
+    Xl.allocate_data()
+    Xl.data[:] = 0.0
+    Xg = dsdb.empty_like(Am)
+    Xg.allocate_data()
+    Xg.data[:] = 0.0
     cur = solver_cls(max_batch_size=max_batch_size).selected_solve(
         Am, Blm, Bgm, obc_blocks=obc, out=[Xl, Xg], return_current=True
     )

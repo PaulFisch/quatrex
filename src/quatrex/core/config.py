@@ -5,7 +5,6 @@ import re
 import subprocess
 import tomllib
 import warnings
-from math import isclose
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +28,7 @@ from qttools import xp
 from qttools.comm import comm
 from qttools.datastructures import DSDBCOO, DSDBSparse
 from qttools.profiling import Profiler
+from quatrex.electrostatics.geometry_config import GeometryConfig, parse_geometry_config
 
 profiler = Profiler()
 
@@ -39,10 +39,85 @@ class SCSPConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     min_iterations: PositiveInt = 1
-    max_iterations: PositiveInt = 100
-    convergence_tol: PositiveFloat = 1e-5
+    """The minimum number of Schrödinger-Poisson iterations to perform."""
 
-    mixing_factor: PositiveFloat = Field(default=0.1, le=1.0)
+    max_iterations: PositiveInt = 100
+    """The maximum number of Schrödinger-Poisson iterations to perform."""
+
+    convergence_tol: PositiveFloat = 1e-3
+    r"""The convergence tolerance for the potential in the
+    Schrödinger-Poisson loop.
+
+    This is defined as the infinity norm of the difference between the
+    potential in the current iteration and the previous iteration.
+
+    \[
+        \lVert V_{n} - V_{n-1} \rVert_{\infty} < \texttt{convergence_tol}
+    \]
+
+    """
+
+    # Parameters for potential mixing.
+    mixer: Literal["under-relaxation", "diis"] = "under-relaxation"
+    """The mixing scheme to use for the self-consistent solution of the
+    Poisson equation.
+
+    - `"under-relaxation"`: Simple under-relaxation scheme where the new
+      potential is a weighted average of the previous potential and the
+      newly computed potential. The weight is given by the
+      `mixing_factor` parameter.
+    - `"diis"`: Direct inversion in the iterative subspace (DIIS) method
+      which constructs the new potential as a linear combination of the
+      previous potentials and the newly computed potential. The
+      coefficients of the linear combination are determined by
+      minimizing the residuals of the previous potentials.
+
+    """
+
+    mixing_factor: PositiveFloat = Field(default=0.75, le=1.0)
+    """Under-relaxation factor for the under-relaxation mixer. Should be
+    between 0 and 1.
+
+    """
+
+    adaptive_mixing: bool = False
+    """Whether to adaptively adjust the mixing factor based on the
+    convergence behavior.
+
+    If `True`, the mixing factor is adjusted based on the convergence
+    behavior. If the residual between two potential iterations is larger
+    than the previous iteration, the mixing factor is reduced by 50%. If
+    it is smaller, the mixing factor is increased by 10%.
+
+    """
+
+    max_history: PositiveInt = 3
+    """Maximum number of previous potentials and residuals to store for
+    the DIIS extrapolation.
+
+    Only used if `mixer` is set to "diis".
+
+    """
+
+    epsilon: PositiveFloat = 1e-5
+    """Regularization parameter for the least-squares problem in the
+    DIIS method to ensure numerical stability.
+
+    Only used if `mixer` is set to "diis".
+
+    """
+
+    extrapolation_interval: PositiveInt = 1
+    """Number of iterations between DIIS extrapolation steps.
+
+    For example, if set to 3, the mixer will perform two
+    under-relaxation steps followed by a DIIS extrapolation step, and
+    then repeat this cycle. If set to 1 (the default), the Pulay mixing
+    is performed at every iteration.
+
+    Only used if `mixer` is set to "diis".
+
+    """
 
 
 class QTBMConfig(BaseModel):
@@ -50,8 +125,24 @@ class QTBMConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # The maximum number of energies per batch.
     max_batch_size: PositiveInt = 10
+    """The maximum number of energies per OBC batch."""
+
+    low_rank_obc: bool = False
+    """Whether to use reduced rank for the boundary self-energies.
+    
+    If set to True, boundary self-energies are moved to the
+    right-hand-side of linear system, which greatly reduces fill-in
+    during factorization.
+
+    The system matrix becomes Hermitian or even real symmetric in
+    gamma-only simulations. Therefore, the low_rank_obc parameter can
+    only be used in combination with direct solvers that can exploit the
+    symmetry, i.e., `direct_solver="cudss"` on GPU,
+    `direct_solver="pardiso"` on CPU, and `direct_solver="thomas"` on
+    both CPU and GPU.
+
+    """
 
 
 class ExperimentalMixerConfig(BaseModel):
@@ -234,21 +325,111 @@ class SCBAConfig(BaseModel):
     """
 
 
-class PoissonConfig(BaseModel):
+class ElectrostaticsConfig(BaseModel):
     """Options for the Poisson solver."""
 
     model_config = ConfigDict(extra="forbid")
 
-    model: Literal["point-charge", "orbital"] = "point-charge"
-    max_iterations: PositiveInt = 100
-    convergence_tol: PositiveFloat = 1e-5
-    mixing_factor: PositiveFloat = Field(default=0.1, le=1.0)
+    orbital_basis: Literal["point-charge"] = "point-charge"
+    """The orbital basis to use to transform between the real-space and
+    orbital-space representations of the potential and charge density.
 
-    rho_shift: NonNegativeFloat = 1e-8
-    cg_tol: PositiveFloat = 1e-5
-    cg_max_iter: PositiveInt = 100
+    Currently, only the "point-charge" basis is supported. Each orbital
+    is represented as a point charge located at the corresponding atomic
+    position.
 
-    num_orbitals_per_atom: dict[str, int] = Field(default_factory=dict)
+    """
+
+    solving_scheme: Literal["root-finding", "direct"] = "root-finding"
+    """The scheme to solve the non-linear Poisson equation.
+
+    - `"root-finding"`: Solves the Poisson equation using an iterative
+      predictor-corrector scheme where the charge density response is
+      computed from the potential using a density model and the Poisson
+      equation is solved iteratively until convergence.
+    - `"direct"`: Solves the Poisson equation directly using a linear
+      solver. Due to the non-linearity of the Schrödinger-Poisson
+      problem, this scheme is not recommended and should only be used
+      with very cautious mixing and a good initial guess.
+
+    """
+
+    max_iterations: PositiveInt = 20
+    """The maximum number of inner iterations for the root-finding scheme.
+
+    Only used if `solving_scheme` is set to "root-finding".
+
+    """
+
+    convergence_tol: PositiveFloat = 1e-3
+    """The convergence tolerance for the root-finding scheme.
+
+    This is defined as the infinity norm of the potential update in the
+    root-finding scheme.
+
+    Only used if `solving_scheme` is set to "root-finding".
+
+    """
+
+    density_model: Literal["single-band", "omen"] = "single-band"
+    """The density model to use for the root-finding scheme.
+
+    - `"single-band"`: Uses a simple single-band density model where the
+      charge density is computed from the potential using a single-band
+      approximation.
+    - `"omen"`: Uses the density model from the OMEN code. This is
+      almost identical to the single-band model with `density_model_dim
+      = 2`. However, it uses slightly different physical constants,
+      i.e., not the CODATA values used everywhere else in `quatrex`.
+
+    Only used if `solving_scheme` is set to "root-finding".
+
+    """
+
+    density_model_dim: Literal[1, 2, 3] = 2
+    """The dimensionality of the system to use for the single-band
+    density model.
+
+    The density model does not have to match the actual dimensionality
+    of the system. For example, a 2D density model might actually work
+    best for systems of all dimensionalities.
+
+    Only used if `solving_scheme` is set to "root-finding" and
+    `density_model` is set to "single-band".
+
+    """
+
+    initial_guess: Literal["zero", "constraints", "file"] = "zero"
+    """The strategy to generate the initial guess for the potential.
+
+    - `"zero"`: Uses a zero potential as the initial guess.
+    - `"constraints"`: Solves a linear Poisson equation with the
+        potential constraints to generate the initial guess. This is
+        expected to work best at regimes close to equilibrium where the
+        potential does not vary too much.
+    - `"file"`: Loads the initial guess from a file. The file should be
+        located in the `input_dir` and named `potential.npy`.
+
+    """
+
+    default_epsilon_r: PositiveFloat = 1.0
+    """The default relative permittivity to use for the Poisson solver.
+
+    This is used as a fallback for regions that do not have a specified
+    relative permittivity.
+
+    """
+
+    electron_affinity: float | None = None
+    """The electron affinity of the semiconductor channel.
+
+    This is used to align the voltage levels of any gates to the
+    semiconductor channel levels in SCSP runs. If not set, the voltages
+    of the gates are taken as absolute values without any alignment,
+    i.e. they are directly used as the Dirichlet boundary conditions for
+    the Poisson equation.
+
+    """
 
 
 class MemoizerConfig(BaseModel):
@@ -323,7 +504,34 @@ class SolverConfig(BaseModel):
 
     """
 
-    direct_solver: Literal["superlu", "mumps", "cudss"] = "superlu"
+    direct_solver: Literal[
+        "superlu",
+        "mumps",
+        "cudss",
+        "pardiso",
+        "thomas",
+        "auto",
+    ] = "auto"
+    """The direct solver to use in `wf` simulations.
+
+    If set to `"auto"`, the solver is automatically chosen based on the
+    matrix type and the available direct solver libraries.
+
+    In runs with `low_rank_obc = true`, the system matrix will be
+    Hermitian or even real and symmetric in gamma-only simulations. In
+    those cases, libraries that can exploit the symmetry are preferred,
+    i.e., cuDSS on GPU and PARDISO on CPU.
+
+    On GPU, SuperLU is the only fallback option if cuDSS is not
+    available. On CPU, if PARDISO is not available, the fallback options
+    are MUMPS and then SuperLU.
+
+    The Thomas solver involves a straight-forward tiling of the system
+    matrix into blocks without reordering. It is therefore important
+    that the Hamiltonian is ordered in a way that results in a
+    block-tridiagonal structure.
+
+    """
 
     @model_validator(mode="after")
     def set_compute_current(self) -> Self:
@@ -588,6 +796,123 @@ class LyapunovConfig(BaseModel):
     memoizer: MemoizerConfig = MemoizerConfig()
     """Options for memoizing the Lyapunov solver."""
 
+
+class ContactConfig(BaseModel):
+    """Configuration for a contact.
+
+    !!! warning
+
+        Many contact parameters are currently only used in the
+        `"wf"` formalism.
+
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    """A unique name for the contact."""
+
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    """The origin of the contact region in Å.
+
+    This is used to automatically determine the orbitals that belong to
+    this contact.
+
+    !!! warning
+
+        This parameter is currently only used in the `"wf"` formalism.
+
+
+    """
+
+    lattice_vectors: list[list[float]] = Field(
+        default_factory=lambda: [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    """The lattice vectors of the contact cell in Å.
+
+    In `"wf"` simulations this is used to automatically determine the
+    orbitals that belong to this contact.
+
+    The volume of the contact cell is also used to determine the Fermi
+    level of the contact from its doping density and the density of
+    states of its band structure.
+
+    """
+
+    direction: Literal["a", "b", "c"] | None = None
+    """The direction from contact to the device.
+
+    This is used to find periodic images of the contact in transport
+    direction.
+
+    !!! warning
+
+        This parameter is currently only used in the `"wf"` formalism.
+
+    """
+
+    fermi_level: float | None = None
+    """The Fermi level of the contact.
+
+    If not set, the Fermi level is automatically determined from the
+    band structure of the contact via the `mid_gap_energy` parameter.
+
+    When set explicitly, this may lead to physically inconsistent
+    results, especially in the context of Schrödinger-Poisson
+    simulations.
+
+    """
+
+    mid_gap_energy: float | None = None
+    """An energy lying somewhere in the band gap of the contact.
+
+    This is used to separate conduction from valence band states, which
+    is necessary to automatically determine a contact's Fermi level, and
+    to compute the excess carrier density that is used in computing the
+    electrostatic potential in the Poisson solver.
+
+    This is also necessary when band-edge tracking is enabled in
+    `"negf"` simulations, since the band edges, and their initial
+    distance to the Fermi level, are determined via the mid-gap energy.
+
+    """
+
+    num_kpoints_transport: int = 50
+    """Number of k-points to use for contact band structure calculation.
+
+    This is used when automatically determining the Fermi level of the
+    contact from its band structure. The k-point grid along the
+    transverse directions are determined from the `kpoint_grid`
+    parameter.
+
+    """
+
+    temperature: NonNegativeFloat = 300.0  # K
+    """The temperature of the contact."""
+
+    voltage: float = 0.0
+    """The voltage applied to the contact.
+
+    At least one contact needs to be grounded (i.e. have zero voltage)
+    to serve as a reference for the other voltages.
+
+    The voltage and the Fermi level of the contact are used to determine
+    its chemical potential.
+
+    """
+
+    @model_validator(mode="after")
+    def to_array(self) -> Self:
+        """Transforms origin and size to arrays."""
+        self.origin = np.array(self.origin, dtype=float)
+        self.lattice_vectors = np.array(self.lattice_vectors, dtype=float)
+        return self
+
+
 class ElectronConfig(BaseModel):
     """Options for the electronic subsystem solver."""
 
@@ -600,12 +925,27 @@ class ElectronConfig(BaseModel):
     eta_obc: NonNegativeFloat = 0  # eV
     eta: NonNegativeFloat = 1e-12  # eV
 
-    fermi_level: float | None = None
-    conduction_band_edge: float | None = None
-    valence_band_edge: float | None = None
+    left_contact: ContactConfig | None = None
+    """Configuration for the left contact.
 
-    left_fermi_level: float | None = None
-    right_fermi_level: float | None = None
+    This must be provided for any `"negf"` simulation.
+
+    !!! note
+
+        In `"wf"` simulations, the left and right contacts are not used.
+
+    """
+
+    right_contact: ContactConfig | None = None
+    """Configuration for the right contact.
+
+    This must be provided for any `"negf"` simulation.
+
+    !!! note
+
+        In `"wf"` simulations, the left and right contacts are not used.
+
+    """
 
     band_edge_tracking: bool = False
     """Whether to track the band edges during the SCBA iterations.
@@ -626,11 +966,6 @@ class ElectronConfig(BaseModel):
 
     """
 
-    temperature: PositiveFloat = 300.0  # K
-
-    left_temperature: PositiveFloat | None = None
-    right_temperature: PositiveFloat | None = None
-
     energy_window_min: float | None = None
     energy_window_max: float | None = None
     energy_window_num: PositiveInt | None = None
@@ -642,46 +977,36 @@ class ElectronConfig(BaseModel):
 
     filtering_iteration_limit: PositiveInt = 1
 
-    @model_validator(mode="after")
-    def set_left_right_fermi_levels(self) -> Self:
-        """Sets the left and right Fermi levels if not already set."""
-        if (self.left_fermi_level is None) != (self.right_fermi_level is None):
-            warnings.warn(
-                "Either both left and right Fermi levels must be set or neither."
-            )
+    max_batch_size: PositiveInt | None = None
+    """The maximum number of energies to batch together in the solution
+    of the electronic subsystem.
 
-        if self.left_fermi_level is None and self.right_fermi_level is None:
-            if self.fermi_level is None:
-                warnings.warn("Fermi level must be set.")
+    This controls how many energies are treated together when computing boundary
+    conditions and electron Green's functions. If not set, all energies are
+    computed at once.
 
-            self.left_fermi_level = self.fermi_level
-            self.right_fermi_level = self.fermi_level
+    This can help mitigate memory bottlenecks.
 
-        return self
+    """
 
     @model_validator(mode="after")
-    def set_left_right_temperatures(self) -> Self:
-        """Sets the left and right temperatures if not already set."""
-        if (self.left_temperature is None) != (self.right_temperature is None):
-            raise ValueError(
-                "Either both left and right temperatures must be set or neither."
-            )
-
-        if self.left_temperature is None and self.right_temperature is None:
-            self.left_temperature = self.temperature
-            self.right_temperature = self.temperature
-
-        return self
-
-    @model_validator(mode="after")
-    def set_flatband(self) -> Self:
-        """Sets the flatband flags if not already set."""
-        if self.left_fermi_level is not None or self.right_fermi_level is not None:
-            if self.flatband is None:
-                if isclose(self.left_fermi_level, self.right_fermi_level):
-                    self.flatband = True
-                else:
-                    self.flatband = False
+    def check_mid_gap_energy_band_edge_tracking(self) -> Self:
+        """Checks that the mid-gap-energy is set if band edge tracking is enabled."""
+        if self.band_edge_tracking:
+            if (
+                self.left_contact is not None
+                and self.left_contact.mid_gap_energy is None
+            ):
+                raise ValueError(
+                    "When band edge tracking is enabled, the `mid_gap_energy` of the left contact must be set."
+                )
+            if (
+                self.right_contact is not None
+                and self.right_contact.mid_gap_energy is None
+            ):
+                raise ValueError(
+                    "When band edge tracking is enabled, the `mid_gap_energy` of the right contact must be set."
+                )
 
         return self
 
@@ -803,6 +1128,18 @@ class CoulombScreeningConfig(BaseModel):
             )
 
         return self
+
+    max_batch_size: PositiveInt | None = None
+    """The maximum number of energies to batch together in the solution
+    of the screened Coulomb interaction.
+
+    This controls how many energies are treated together when computing boundary
+    conditions and screened Coulomb interactions. If not set, all energies are
+    computed at once.
+
+    This can help mitigate memory bottlenecks.
+
+    """
 
 
 class PhotonConfig(BaseModel):
@@ -1279,34 +1616,18 @@ class OutputConfig(BaseModel):
         return self
 
 
-class ContactConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    fermi_level: float
-    name: str
-    type: Literal["ohmic"] = "ohmic"
-    origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    lattice_vectors: list[list[float]] = Field(
-        default_factory=lambda: [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ]
-    )
-    direction: Literal["a", "b", "c"]
-
-    @model_validator(mode="after")
-    def to_array(self) -> Self:
-        """Transforms origin and size to arrays."""
-        self.origin = np.array(self.origin, dtype=float)
-        self.lattice_vectors = np.array(self.lattice_vectors, dtype=float)
-        return self
-
-
 class DeviceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     construct_from_unit_cell: bool = False
+
+    geometry: GeometryConfig
+    """The geometry configuration of the device.
+
+    This contains a defintion of all regions in the device, such as
+    doping, material constants and gates.
+
+    """
 
     # --- Device geometry ---------------------------------------------
     neighbor_cell_cutoff: (
@@ -1316,8 +1637,8 @@ class DeviceConfig(BaseModel):
 
     If set to `None`, all neighbor cells are considered. A
     `neighbor_cell_cutoff` of zero means that only the unit cell itself
-    is considered. 
-    
+    is considered.
+
     Along the transport direction, at least one neighboring cell must be
     included if `construct_from_unit_cell` is `True`. If
     `construct_from_unit_cell` is `False`, no neighboring cells should be
@@ -1630,7 +1951,6 @@ class QuatrexConfig(BaseModel):
     # --- Simulation parameters ---------------------------------------
     device: DeviceConfig
     formalism: Literal["wf", "negf"]
-    simulation_type: Literal["electron", "phonon"] = "electron"
     """The transport formalism to use.
 
     There are two supported formalisms:
@@ -1644,12 +1964,18 @@ class QuatrexConfig(BaseModel):
         consistent.
 
     """
-    scsp: SCSPConfig = SCSPConfig()
+    simulation_type: Literal["electron", "phonon"] = "electron"
+    """Which subsystem carries the transport: the electronic one (with
+    optional scattering interactions) or the phononic one (thermal
+    transport, with optional 3-phonon scattering)."""
+
+    scsp: SCSPConfig | None = None
     scba: SCBAConfig = SCBAConfig()
     qtbm: QTBMConfig = QTBMConfig()
-    poisson: PoissonConfig = PoissonConfig()
+    electrostatics: ElectrostaticsConfig = ElectrostaticsConfig()
 
-    electron: ElectronConfig  | None = None
+    electron: ElectronConfig
+
     phonon: PhononConfig | None = None
     coulomb_screening: CoulombScreeningConfig | None = None
     photon: PhotonConfig | None = None
@@ -1748,6 +2074,85 @@ class QuatrexConfig(BaseModel):
 
         return self
 
+    @model_validator(mode="after")
+    def check_device_contact_voltages(self) -> Self:
+        """Checks that at least one contact exists and is grounded."""
+        # TODO: Contacts should be unified between the two formalisms.
+        if self.simulation_type == "phonon":
+            # Phonon transport defines its leads via temperatures, not
+            # electronic contacts.
+            return self
+        if self.formalism == "negf":
+            if (
+                self.electron.left_contact is None
+                or self.electron.right_contact is None
+            ):
+                raise ValueError("Both left and right contacts must be defined.")
+            contacts = [self.electron.left_contact, self.electron.right_contact]
+        elif self.formalism == "wf":
+            contacts = self.device.contacts
+        else:
+            raise ValueError(f"Invalid formalism '{self.formalism}'.")
+
+        if len(contacts) < 2:
+            raise ValueError("At least two contacts must be defined.")
+
+        if not any(contact.voltage == 0 for contact in contacts):
+            raise ValueError(
+                "At least one contact must be grounded (i.e. have zero voltage)."
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_either_fermi_or_midgap(self) -> Self:
+        """Checks that either the Fermi level or the mid-gap energy is set."""
+        if self.simulation_type == "phonon":
+            return self
+        if self.formalism == "negf":
+            contacts = [self.electron.left_contact, self.electron.right_contact]
+        elif self.formalism == "wf":
+            contacts = self.device.contacts
+        else:
+            raise ValueError(f"Invalid formalism '{self.formalism}'.")
+
+        for contact in contacts:
+            if contact.fermi_level is None and contact.mid_gap_energy is None:
+                raise ValueError(
+                    "Either `fermi_level` or `mid_gap_energy` must be set."
+                )
+
+            if (
+                contact.fermi_level is not None
+                and contact.mid_gap_energy is not None
+                and not (self.electron.band_edge_tracking or self.scsp is not None)
+            ):
+                raise ValueError(
+                    "Both `fermi_level` and `mid_gap_energy` cannot be set "
+                    "simultaneously, unless band edge tracking is active "
+                    "or the Schrödinger-Poisson solver is enabled."
+                )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_contact_direction(self) -> Self:
+        """Checks that the contact direction is set in "wf" formalism."""
+
+        if self.formalism == "negf":
+            # NOTE: The contact direction is not used in the NEGF
+            # formalism.
+            return self
+
+        for contact in self.device.contacts:
+            if contact.direction is None:
+                raise ValueError(
+                    "The `direction` parameter of each contact must be "
+                    "set in the 'wf' formalism."
+                )
+
+        return self
+
 
 def parse_config(config_file: Path) -> QuatrexConfig:
     """Reads the TOML config file.
@@ -1784,6 +2189,9 @@ def parse_config(config_file: Path) -> QuatrexConfig:
         config["config_dir"] = config_file.parent
 
     config = mpi_comm_world.bcast(config, root=0)
+
+    # Resolve the geometry config.
+    config["device"]["geometry"] = parse_geometry_config(config["device"])
 
     return QuatrexConfig(**config)
 
@@ -1843,6 +2251,7 @@ def _setup_comm(comm_config: CommConfig) -> None:
         "all_gather": comm_config.q_all_gather or default_backend,
         "all_reduce": comm_config.q_all_reduce or default_backend,
         "bcast": comm_config.q_bcast or default_backend,
+        "send_recv": default_backend,
     }
 
     comm.configure(

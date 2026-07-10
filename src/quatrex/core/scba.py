@@ -9,6 +9,7 @@ from mpi4py.MPI import COMM_WORLD as global_comm
 
 from qttools import NDArray, xp
 from qttools.comm import comm
+from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
 from qttools.utils.mpi_utils import distributed_load, get_section_sizes
@@ -108,46 +109,55 @@ class SCBAData:
 
         dsdbsparse_type = config.compute.dsdbsparse_type
 
+        def _zeros_like(dsdbsparse: DSDBSparse) -> DSDBSparse:
+            # These buffers live for the whole SCBA (no allocate/free
+            # choreography) and must start zeroed (Sigma = 0 at iteration 0).
+            out = dsdbsparse_type.empty_like(dsdbsparse)
+            out.allocate_data()
+            out.data[:] = 0.0
+            return out
+
         self.g_retarded = dsdbsparse_type.from_sparray(
-            self.sparsity_pattern.astype(xp.complex128),
+            sparray=self.sparsity_pattern.astype(xp.complex128),
             block_sizes=block_sizes,
             global_stack_shape=electron_energies.shape
-                               + tuple([k for k in kpoint_grid if k > 1]),
+            + tuple([k for k in kpoint_grid if k > 1]),
         )
         self.g_retarded.data[:] = 0.0  # Initialize to zero.
 
         self.g_lesser = dsdbsparse_type.from_sparray(
-            self.sparsity_pattern.astype(xp.complex128),
+            sparray=self.sparsity_pattern.astype(xp.complex128),
             block_sizes=block_sizes,
             global_stack_shape=electron_energies.shape
-                               + tuple([k for k in kpoint_grid if k > 1]),
-            symmetry=config.scba.symmetric,
-            symmetry_op=lambda a: -a.conj(),
+            + tuple([k for k in kpoint_grid if k > 1]),
+            symmetry="skew-hermitian" if config.scba.symmetric else None,
         )
-        self.g_greater = dsdbsparse_type.zeros_like(self.g_lesser)
+        self.g_lesser.data[:] = 0.0
+        self.g_greater = _zeros_like(self.g_lesser)
 
-        self.sigma_lesser_prev = dsdbsparse_type.zeros_like(self.g_lesser)
-        self.sigma_lesser = dsdbsparse_type.zeros_like(self.g_lesser)
-        self.sigma_greater_prev = dsdbsparse_type.zeros_like(self.g_lesser)
-        self.sigma_greater = dsdbsparse_type.zeros_like(self.g_lesser)
+        self.sigma_lesser_prev = _zeros_like(self.g_lesser)
+        self.sigma_lesser = _zeros_like(self.g_lesser)
+        self.sigma_greater_prev = _zeros_like(self.g_lesser)
+        self.sigma_greater = _zeros_like(self.g_lesser)
 
-        self.sigma_retarded_hermitian_prev = dsdbsparse_type.zeros_like(self.g_lesser)
-        self.sigma_retarded_hermitian = dsdbsparse_type.zeros_like(self.g_lesser)
+        self.sigma_retarded_hermitian_prev = _zeros_like(self.g_lesser)
+        self.sigma_retarded_hermitian = _zeros_like(self.g_lesser)
         if config.scba.symmetric:
-            self.sigma_retarded_hermitian.symmetry_op = lambda a: a.conj()
-            self.sigma_retarded_hermitian_prev.symmetry_op = lambda a: a.conj()
+            self.sigma_retarded_hermitian.symmetry = "hermitian"
+            self.sigma_retarded_hermitian_prev.symmetry = "hermitian"
 
         if config.scba.coulomb_screening:
             # NOTE: The polarization has the same sparsity pattern as
             # the electronic system (the interactions are local in real
             # space). However, we need to change the block sizes of the
-            # screened Coulomb interaction.
-            self.p_retarded_hermitian = dsdbsparse_type.zeros_like(self.g_lesser)
-            self.p_lesser = dsdbsparse_type.zeros_like(self.g_lesser)
-            self.p_greater = dsdbsparse_type.zeros_like(self.g_lesser)
+            # screened Coulomb interaction. These buffers follow the
+            # allocate/free choreography in the interaction compute.
+            self.p_retarded_hermitian = dsdbsparse_type.empty_like(self.g_lesser)
+            self.p_lesser = dsdbsparse_type.empty_like(self.g_lesser)
+            self.p_greater = dsdbsparse_type.empty_like(self.g_lesser)
 
             if config.scba.symmetric:
-                self.p_retarded_hermitian.symmetry_op = lambda a: a.conj()
+                self.p_retarded_hermitian.symmetry = "hermitian"
 
             num_connected_blocks = config.coulomb_screening.num_connected_blocks
             if num_connected_blocks == "auto":
@@ -165,14 +175,14 @@ class SCBAData:
             )
 
             self.w_lesser = dsdbsparse_type.from_sparray(
-                self.sparsity_pattern.astype(xp.complex128),
+                sparray=self.sparsity_pattern.astype(xp.complex128),
                 block_sizes=coulomb_screening_block_sizes,
                 global_stack_shape=electron_energies.shape
-                                   + tuple([k for k in kpoint_grid if k > 1]),
-                symmetry=config.scba.symmetric,
-                symmetry_op=lambda a: -a.conj(),
+                + tuple([k for k in kpoint_grid if k > 1]),
+                symmetry="skew-hermitian" if config.scba.symmetric else None,
+                allocate=False,
             )
-            self.w_greater = dsdbsparse_type.zeros_like(self.w_lesser)
+            self.w_greater = dsdbsparse_type.empty_like(self.w_lesser)
 
         # TODO: The interactions with photons and phonons are not yet
         # implemented.

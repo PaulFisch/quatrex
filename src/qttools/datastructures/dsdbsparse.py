@@ -1,6 +1,8 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the qttools package.
 
 import itertools
+import numbers
+import warnings
 from abc import ABC, abstractmethod
 from typing import Callable
 
@@ -10,6 +12,13 @@ from qttools import ArrayLike, NDArray, sparse, xp
 from qttools.comm import comm
 from qttools.utils.gpu_utils import free_mempool, synchronize_device
 from qttools.utils.mpi_utils import get_section_sizes
+
+symmetry_ops = {
+    "symmetric": lambda x: x,
+    "hermitian": xp.conj,
+    "skew-symmetric": lambda x: -x,
+    "skew-hermitian": lambda x: -xp.conj(x),
+}
 
 
 def _flatten_list(nested_lists: list[list]) -> list:
@@ -79,7 +88,11 @@ class BlockConfig(object):
         The size of each block in the sparse matrix.
     block_offsets : NDArray
         The block offsets of the block-sparse matrix.
-    inds_canonical2lock : NDArray, optional
+    index_type : xp.int32 | xp.int64
+        The index type to use for the sparse matrix.
+        This is relevant for the low level kernels to avoid
+        unnecessary type conversions.
+    inds_canonical2block : NDArray, optional
         A mapping from canonical to block-sorted indices. Default is
         None.
     rowptr_map : dict, optional
@@ -94,92 +107,142 @@ class BlockConfig(object):
         self,
         block_sizes: NDArray,
         block_offsets: NDArray,
-        inds_canonical2bcoo: NDArray | None = None,
+        index_type: xp.int32 | xp.int64,
+        inds_canonical2block: NDArray | None = None,
         rowptr_map: dict | None = None,
         block_slice_cache: dict | None = None,
     ):
         """Initializes the block config."""
-        self.block_sizes = block_sizes
-        self.block_offsets = block_offsets
-        self.inds_canonical2block = inds_canonical2bcoo
+        self.block_sizes = block_sizes.astype(index_type)
+        self.block_offsets = block_offsets.astype(index_type)
+        self.inds_canonical2block = (
+            inds_canonical2block.astype(index_type)
+            if inds_canonical2block is not None
+            else None
+        )
         self.rowptr_map = rowptr_map or {}
         self.block_slice_cache = block_slice_cache or {}
 
 
 class DSDBSparse(ABC):
-    """Base class for Distributed Stack of Distributed Block-accessible Sparse matrices.
+    """Base class for Distributed Stack of Distributed Block-accessible
+    Sparse matrices.
 
     Parameters
     ----------
-    data : NDArray
-        The local slice of the data. This should be an array of shape
-        `(*local_stack_shape, local_nnz)`. It is the caller's
-        responsibility to ensure that the data is distributed correctly
-        across the ranks.
+    dtype : xp.dtype[xp.generic]
+        The data type of the matrix.
     block_sizes : NDArray
         The size of each block in the sparse matrix.
+    nnz : int
+        The number of non-zero elements in the sparse matrix.
+    local_stack_shape : tuple or int
+        The local shape of the stack. If this is an integer, it is
+        interpreted as a one-dimensional stack.
     global_stack_shape : tuple or int
         The global shape of the stack. If this is an integer, it is
         interpreted as a one-dimensional stack.
-    return_dense : bool, optional
-        Whether to return dense arrays when accessing the blocks.
-        Default is True.
+    index_type : xp.int32 | xp.int64
+        The index type to use for the sparse matrix. This is relevant
+        for the low level kernels to avoid unnecessary type conversions.
+    symmetry : str | None, optional
+        The symmetry of the matrix. This can be "symmetric",
+        "hermitian", "skew-symmetric", "skew-hermitian", or None.
+        Default is None.
 
     """
 
     def __init__(
         self,
-        data: NDArray,
+        dtype: xp.dtype[xp.generic],
         block_sizes: NDArray,
+        nnz: int,
+        local_stack_shape: tuple | int,
         global_stack_shape: tuple | int,
-        return_dense: bool = True,
-        symmetry: bool | None = False,
-        symmetry_op: Callable = xp.conj,
+        index_type: xp.int32 | xp.int64,
+        symmetry: str | None = None,
     ):
         """Initializes a DSBDSparse matrix."""
-
-        # --- Things concerning stack distribution ---------------------
-
-        if isinstance(global_stack_shape, int):
-            global_stack_shape = (global_stack_shape,)
-
-        if global_stack_shape[0] < comm.stack.size:
-            raise ValueError(
-                f"Number of MPI ranks in stack communicator {comm.stack.size} "
-                f"exceeds stack shape {global_stack_shape}."
-            )
-
-        self.global_stack_shape = global_stack_shape
-        self.symmetry = symmetry
-        self.symmetry_op = symmetry_op
 
         # Set the block and stack communicators.
         if comm.block is None or comm.stack is None:
             raise ValueError(
                 "Block and stack communicators must be initialized via "
-                "the BLOCK_COMM_SIZE environment variable."
+                "the `setup_context` method."
             )
+
+        if symmetry not in list(symmetry_ops.keys()) + [None]:
+            raise ValueError(
+                f"Invalid symmetry '{symmetry}'."
+                f"Must be one of {list(symmetry_ops.keys()) + [None]}."
+            )
+
+        # Type of the data
+        self.dtype = dtype
+        # Type of the indices
+        self.index_type = index_type
+        self.symmetry = symmetry
+        # Per default, we have the data is distributed in stack format.
+        self.distribution_state = "stack"
+        self._data = None
+
+        if not isinstance(local_stack_shape, type(global_stack_shape)):
+            raise ValueError(
+                "local_stack_shape and global_stack_shape must be of the same type."
+            )
+
+        if isinstance(global_stack_shape, int):
+            global_stack_shape = (global_stack_shape,)
+
+        if isinstance(local_stack_shape, int):
+            local_stack_shape = (local_stack_shape,)
+
+        if global_stack_shape[0] < comm.stack.size:
+            raise ValueError(
+                f"Number of MPI ranks in stack communicator {comm.stack.size} "
+                f"exceeds stack shape {global_stack_shape[0]}."
+            )
+
+        self.local_stack_shape = local_stack_shape
+        self.global_stack_shape = global_stack_shape
+
+        # This is the shape of this matrix in the comm.stack.
+        # NOTE: This is the local shape of the stack.
+        self.shape = self.local_stack_shape + (
+            int(sum(block_sizes)),
+            int(sum(block_sizes)),
+        )
+
+        # --- Things concerning stack distribution ---------------------
 
         # Determine how the data is distributed across the stack.
         stack_section_sizes, total_stack_size = get_section_sizes(
             global_stack_shape[0], comm.stack.size, strategy="balanced"
         )
-        self.stack_section_sizes_offset = stack_section_sizes[comm.stack.rank]
         self.stack_section_sizes = stack_section_sizes
         self.total_stack_size = total_stack_size
 
+        self.stack_section_offsets = xp.hstack(
+            ([0], np.cumsum(stack_section_sizes))
+        ).astype(index_type)
+
+        # --- Things concerning nnz distribution ---------------------
+
+        # Determine how the data is distributed across the nnz.
         nnz_section_sizes, total_nnz_size = get_section_sizes(
-            data.shape[-1], comm.stack.size, strategy="greedy"
+            nnz, comm.stack.size, strategy="greedy"
         )
         self.nnz_section_sizes = nnz_section_sizes
-        self.nnz_section_offsets = xp.hstack(([0], np.cumsum(nnz_section_sizes)))
         self.total_nnz_size = total_nnz_size
 
-        # Per default, we have the data is distributed in stack format.
-        self.distribution_state = "stack"
+        self.nnz_section_offsets = xp.hstack(
+            ([0], np.cumsum(nnz_section_sizes))
+        ).astype(index_type)
+
+        # --- Things concerning both distributions ---------------------
 
         self.data_slice_stack = (
-            slice(None, int(self.stack_section_sizes_offset)),
+            slice(None, int(self.stack_section_sizes[comm.stack.rank])),
             ...,
             slice(None, int(self.nnz_section_offsets[-1])),
         )
@@ -188,14 +251,6 @@ class DSDBSparse(ABC):
             ...,
             slice(None, int(self.nnz_section_sizes[comm.stack.rank])),
         )
-
-        # Pad local data with zeros to ensure that all ranks have the
-        # same data size for the all-to-all communication.
-        self._data = xp.zeros(
-            (max(stack_section_sizes), *global_stack_shape[1:], total_nnz_size),
-            dtype=data.dtype,
-        )
-        self._data[: data.shape[0], ..., : data.shape[-1]] = data
 
         # For the weird padding convention we use, we need to keep track
         # of this padding mask.
@@ -206,12 +261,8 @@ class DSDBSparse(ABC):
             offset = i * max(stack_section_sizes)
             self._stack_padding_mask[offset : offset + size] = True
 
-        self.stack_shape = data.shape[:-1]
-        self.local_nnz = data.shape[-1]
-        # This is the shape of this matrix in the comm.stack.
-        self.shape = self.stack_shape + (int(sum(block_sizes)), int(sum(block_sizes)))
-
         # --- Things concerning block distribution ---------------------
+
         # Block-sizes is an settable property.
         self.num_blocks = len(block_sizes)
 
@@ -231,15 +282,20 @@ class DSDBSparse(ABC):
         self.global_block_offset = sum(
             block_sizes[: self.block_section_offsets[comm.block.rank]]
         )
+        self.num_local_diag = sum(
+            block_sizes[
+                self.block_section_offsets[
+                    comm.block.rank
+                ] : self.block_section_offsets[comm.block.rank + 1]
+            ]
+        )
+
+        # --- Things concerning block indexing and slicing --------------
 
         self._block_config: dict[int, BlockConfig] = {}
         self._add_block_config(self.num_blocks, block_sizes, block_offsets)
 
-        self.dtype = data.dtype
-        self.return_dense = return_dense
-
         self._block_indexer = _DSDBlockIndexer(self)
-        self._sparse_block_indexer = _DSDBlockIndexer(self, return_dense=False)
         self._stack_indexer = _DStackIndexer(self)
 
         # Diagonal indices.
@@ -271,7 +327,10 @@ class DSDBSparse(ABC):
 
         """
         self._block_config[num_blocks] = BlockConfig(
-            block_sizes, block_offsets, block_slice_cache
+            block_sizes,
+            block_offsets,
+            self.index_type,
+            block_slice_cache=block_slice_cache,
         )
 
     @property
@@ -331,11 +390,6 @@ class DSDBSparse(ABC):
     def blocks(self) -> "_DSDBlockIndexer":
         """Returns a block indexer."""
         return self._block_indexer
-
-    @property
-    def sparse_blocks(self) -> "_DSDBlockIndexer":
-        """Returns a block indexer."""
-        return self._sparse_block_indexer
 
     @property
     def stack(self) -> "_DStackIndexer":
@@ -477,45 +531,7 @@ class DSDBSparse(ABC):
         -------
         block : NDArray | tuple[NDArray, NDArray, NDArray]
             The block at the requested index. This is an array of shape
-            `(*local_stack_shape, block_sizes[row], block_sizes[col])` if
-            `return_dense` is True, otherwise it is a tuple of arrays
-            `(rows, cols, data)`.
-
-        """
-        ...
-
-    @abstractmethod
-    def _get_sparse_block(
-        self,
-        arg: tuple | NDArray,
-        row: int,
-        col: int,
-        is_index: bool = True,
-    ) -> sparse.spmatrix | tuple:
-        """Gets a block from the data structure in a sparse representation.
-
-        This is supposed to be a low-level method that does not perform
-        any checks on the input. These are handled by the block indexer.
-        The index is assumed to already be renormalized.
-
-        Parameters
-        ----------
-        arg : tuple | NDArray
-            The index of the stack or a view of the data stack. The
-            is_index flag indicates whether the argument is an index or
-            a view.
-        row : int
-            Row index of the block.
-        col : int
-            Column index of the block.
-        is_index : bool, optional
-            Whether the argument is an index or a view. Default is True.
-
-        Returns
-        -------
-        block : spmatrix | tuple
-            The block at the requested index. It is a sparse
-            representation of the block.
+            `(*local_stack_shape, block_sizes[row], block_sizes[col])`.
 
         """
         ...
@@ -525,77 +541,18 @@ class DSDBSparse(ABC):
         """Checks if two DSDBSparse matrices are commensurable."""
         ...
 
-    def __imul__(self, other: "DSDBSparse") -> "DSDBSparse":
-        """In-place multiplication of two DSDBSparse matrices."""
-        if self.symmetry or other.symmetry:
-            raise ValueError(
-                "In-place multiplication is not supported for symmetric " "matrices."
-            )
-
-        self._check_commensurable(other)
-        self._data *= other._data
-        return self
-
-    @abstractmethod
-    def __iadd__(self, other: "DSDBSparse | sparse.spmatrix") -> "DSDBSparse":
-        """In-place addition of two DSDBSparse matrices."""
-        ...
-
-    @abstractmethod
-    def __isub__(self, other: "DSDBSparse | sparse.spmatrix") -> "DSDBSparse":
-        """In-place subtraction of two DSDBSparse matrices."""
-        ...
-
-    @abstractmethod
-    def __neg__(self) -> "DSDBSparse":
-        """Negation of the data."""
-        ...
-
-    def block_diagonal(self, offset: int = 0) -> list[NDArray]:
-        """Returns the block diagonal of the matrix.
-
-        Note that this will cause communication in the
-        block-communicator.
-
-        Parameters
-        ----------
-        offset : int, optional
-            Offset from the main diagonal. Positive values indicate
-            superdiagonals, negative values indicate subdiagonals.
-            Default is 0.
-
-        Returns
-        -------
-        blocks : list
-            List of block diagonal elements. The length of the list is
-            the number of blocks on the main diagonal minus the offset.
-            Depending on return_dense, the elements are either sparse
-            or dense arrays.
-
-        """
-        local_blocks = []
-        stack_view = self.stack[...]
-        if comm.block.rank != comm.block.size - 1:
-            # Only the last rank in the block-communicator needs to make
-            # sure that the offset does not exceed the number of local
-            # blocks.
-            num_blocks = self.num_local_blocks
-        else:
-            num_blocks = self.num_local_blocks - abs(offset)
-
-        col_offset = offset if offset > 0 else 0
-        row_offset = abs(offset) if offset < 0 else 0
-
-        for b in range(num_blocks):
-            local_blocks.append(stack_view.local_blocks[b + row_offset, b + col_offset])
-
-        return _flatten_list(comm.block._mpi_comm.allgather(local_blocks))
-
     def diagonal(self, stack_index: tuple = (Ellipsis,)) -> NDArray:
         """Returns or sets the diagonal elements of the matrix.
 
-        This temporarily sets the return_dense state to True. Note that
-        this will cause communication in the block-communicator.
+        Note
+        ----
+        In the block distributed case, this returns the local
+        diagonal elements.
+
+        Parameters
+        ----------
+        stack_index : tuple, optional
+            The index in the stack. Default is (Ellipsis,).
 
         Returns
         -------
@@ -622,9 +579,7 @@ class DSDBSparse(ABC):
             local_diagonal[..., self._diag_value_inds] = data_stack[
                 ..., self._diag_inds
             ]
-            return xp.concatenate(
-                comm.block._mpi_comm.allgather(local_diagonal), axis=-1
-            )
+            return local_diagonal
         else:
             if self._diag_inds_nnz is not None:
                 return data_stack[..., self._diag_inds_nnz]
@@ -633,8 +588,12 @@ class DSDBSparse(ABC):
     def fill_diagonal(self, val: NDArray, stack_index: tuple = (Ellipsis,)) -> NDArray:
         """Returns or sets the diagonal elements of the matrix.
 
-        This temporarily sets the return_dense state to True. Note that
-        this will cause communication in the block-communicator.
+        Parameters
+        ----------
+        val : NDArray
+            The value(s) to set along the diagonal.
+        stack_index : tuple, optional
+            The index in the stack. Default is (Ellipsis,).
 
         Returns
         -------
@@ -764,6 +723,11 @@ class DSDBSparse(ABC):
         to coordinate format. The returned sparsity pattern is not
         sorted.
 
+        Note
+        ----
+        In the block distributed case, this returns the local
+        sparsity pattern including the offset.
+
         Returns
         -------
         rows : NDArray
@@ -827,13 +791,58 @@ class DSDBSparse(ABC):
         self._data = None
         free_mempool()
 
-    def allocate_data(self) -> None:
-        """Allocates the local data."""
+    def allocate_data(self, stack_size: int | None = None) -> None:
+        """Allocates the local data.
+
+        Note
+        ----
+        This should not be called with a non-None stack size if the
+        data will be dtransposed.
+        The data is not zeroed. It is the user responsibility to
+        ensure that the data is initialized correctly.
+
+        Parameters
+        ----------
+        stack_size : int, optional
+            The size of the stack dimension to allocate. If None, the
+            full stack size is used. Default is None.
+
+        """
         free_mempool()
+
+        # NOTE: Dangerous
+        # but we assume there is no padding
+        # and no all-to-all will be performed
+        # TODO: We should have a non distributed
+        # version without padding and cheaper initialization
+        if stack_size is not None:
+            self.data_slice_stack = (
+                slice(None, int(stack_size)),
+                ...,
+                slice(None, int(self.nnz_section_offsets[-1])),
+            )
+
+        if stack_size == 0:
+            warnings.warn(
+                "Stack size of 0 is not valid."
+                "Allocating data with a unit stack section size."
+            )
+            stack_size = 1
+
+        if stack_size is None:
+            stack_size = int(max(self.stack_section_sizes))
+        # NOTE: Edge case for when the stack size is 0
+        if stack_size == 0:
+            warnings.warn(
+                "Stack size of 0 is not valid."
+                "Allocating data with a unit stack section size."
+            )
+            stack_size = 1
+
         if self._data is None:
             self._data = xp.empty(
                 (
-                    int(max(self.stack_section_sizes)),
+                    stack_size,
                     *self.global_stack_shape[1:],
                     self.total_nnz_size,
                 ),
@@ -844,23 +853,35 @@ class DSDBSparse(ABC):
     @abstractmethod
     def from_sparray(
         cls,
-        arr: sparse.spmatrix,
+        sparray: sparse.spmatrix,
         block_sizes: NDArray,
         global_stack_shape: tuple,
-        symmetry: bool | None = False,
-        symmetry_op: Callable = xp.conj,
+        symmetry: str | None = None,
+        dtype: xp.dtype[xp.generic] = xp.complex128,
+        allocate: bool = True,
     ) -> "DSDBSparse":
         """Creates a new DSDBSparse matrix from a scipy.sparse array.
 
+        This essentially distributed the matrix across the stack and
+        block communicators.
+
         Parameters
         ----------
-        arr : sparse.spmatrix
-            The sparse array to convert.
+        sparray : sparse.spmatrix
+            The sparse matrix from which to use the sparsity pattern.
         block_sizes : NDArray
-            The size of all the blocks in the matrix.
+            The block sizes of the block-sparse matrix.
         global_stack_shape : tuple
-            The global shape of the stack of matrices. The provided
-            sparse matrix is replicated across the stack.
+            The global shape of the stack.
+        symmetry : str | None, optional
+            The symmetry of the matrix. This can be "symmetric",
+            "hermitian", "skew-symmetric", "skew-hermitian", or None.
+            Default is None.
+        dtype : xp.dtype, optional
+            The data type of the matrix. Default is `xp.complex128`.
+        allocate : bool, optional
+            Whether to allocate the data of the resulting matrix.
+            Default is True.
 
         Returns
         -------
@@ -872,11 +893,14 @@ class DSDBSparse(ABC):
 
     @classmethod
     @abstractmethod
-    def zeros_like(cls, dsdbsparse: "DSDBSparse") -> "DSDBSparse":
-        """Creates a new DSDBSparse matrix with the same shape and dtype.
+    def empty_like(cls, dsdbsparse: "DSDBSparse") -> "DSDBSparse":
+        """Creates a new DSDBSparse matrix with the same shape and
+        dtype.
 
-        All non-zero elements are set to zero, but the sparsity pattern
-        is preserved.
+        Note
+        ----
+        There is no data allocated in the new matrix. The sparsity
+        pattern is the same as the original matrix.
 
         Parameters
         ----------
@@ -916,6 +940,10 @@ def _replace_ellipsis(stack_index: tuple, ndim: int) -> tuple:
         The stack index with the ellipsis replaced.
 
     """
+
+    if not isinstance(stack_index, tuple):
+        stack_index = (stack_index,)
+
     is_ellipsis = [i for i, ind in enumerate(stack_index) if ind is Ellipsis]
     if is_ellipsis:
         if len(is_ellipsis) > 1:
@@ -933,6 +961,76 @@ def _replace_ellipsis(stack_index: tuple, ndim: int) -> tuple:
     return stack_index
 
 
+def _compose_single(lhs: int | slice, rhs: int | slice, length: int) -> int | slice:
+    """Composes two unidimensional indices or slices.
+
+    Example:
+        length = 30  # dimension of length 30
+        lhs = slice(2, 27, 2)  # selects indices [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26]
+        rhs = slice(1, 11, 3)  # selects indices [1, 4, 7, 10] from the previous selection,
+                               # i.e., [4, 10, 16, 22] from the original dimension
+        result = _compose_single(lhs, rhs, 30)
+        # result is slice(4, 22, 6), which selects indices [4, 10, 16, 22] from the original dimension.
+
+    Parameters
+    ----------
+    lhs : int | slice
+        The first index or slice.
+    rhs : int | slice
+        The second index or slice.
+    length : int
+        The length of the dimension being indexed.
+
+    Returns
+    -------
+    int | slice
+        The composed index or slice.
+    """
+    out = range(length)[lhs][rhs]
+    return out if isinstance(out, int) else slice(out.start, out.stop, out.step)
+
+
+def _compose(
+    shape: tuple[int, ...],
+    first: tuple[int, ...] | int | slice,
+    second: tuple[int, ...] | int | slice,
+) -> tuple[int | slice, ...]:
+    """Composes two multidimensional indices or slices.
+
+    Parameters
+    ----------
+    shape : tuple
+        The shape of the array being indexed.
+    first : tuple | int | slice
+        The first index or slice.
+    second : tuple | int | slice
+        The second index or slice.
+
+    Returns
+    -------
+    tuple
+        The composed index or slice.
+    """
+
+    def ensure_tuple(ndslice):
+        return ndslice if isinstance(ndslice, tuple) else (ndslice,)
+
+    # Ensure both are tuples for easier processing
+    first = ensure_tuple(first)
+    second = ensure_tuple(second)
+
+    # Initialize output with first index/slice and fill the rest with full slices
+    out = list(first) + [slice(None)] * (len(shape) - len(first))
+
+    # We only need to compose the slice dimensions (not the indices).
+    # NOTE: It is implied that for any dimensions excluded here, the corresponding index in `second` is 0.
+    remaining_dims = [i for i, s in enumerate(out) if isinstance(s, slice)]
+
+    for i, rhs in zip(remaining_dims, second):
+        out[i] = _compose_single(out[i], rhs, length=shape[i])
+    return tuple(out)
+
+
 class _DStackIndexer:
     """A utility class to locate substacks in the distributed stack.
 
@@ -943,29 +1041,43 @@ class _DStackIndexer:
 
     """
 
-    def __init__(self, dsdbsparse: DSDBSparse) -> None:
+    def __init__(self, dsdbsparse: "DSDBSparse | _DStackView") -> None:
         """Initializes the stack indexer."""
-        self._dsdbsparse = dsdbsparse
+        if isinstance(dsdbsparse, _DStackView):
+            self._dsdbsparse = dsdbsparse._dsdbsparse
+            self._base_index = dsdbsparse._stack_index
+        else:
+            self._dsdbsparse = dsdbsparse
+            self._base_index = None
 
     def __getitem__(self, index: tuple) -> "_DStackView":
         """Gets a substack view."""
-        return _DStackView(self._dsdbsparse, index)
+        if self._base_index is not None:
+            index = _replace_ellipsis(index, self._dsdbsparse.data.ndim)
+            composition = _compose(
+                self._dsdbsparse.local_stack_shape, self._base_index, index
+            )
+        else:
+            composition = index
+        return _DStackView(self._dsdbsparse, composition)
 
     def __setitem__(
         self, stack_index: tuple, other: "DSDBSparse | sparse.spmatrix"
     ) -> None:
         """Sets a substack."""
 
+        if self._base_index is not None:
+            raise NotImplementedError(
+                "Setting a substack of a substack is not supported."
+            )
+
         stack_index = _replace_ellipsis(stack_index, self._dsdbsparse.data.ndim)
 
         if sparse.issparse(other):
             csr = other.tocsr()
-            self._dsdbsparse.data[stack_index] = csr[self._dsdbsparse.spy()]
+            self._dsdbsparse.data[stack_index] = csr[self._dsdbsparse._local_spy()]
             return None
-            # return self._dsdbsparse
 
-        # Not sure what the expected behavior should be here
-        # self._dsdbsparse.data[stack_index] = other.data[:]
         self._dsdbsparse.data[stack_index] = other.data[stack_index]
 
 
@@ -985,16 +1097,26 @@ class _DStackView:
         """Initializes the stack indexer."""
         self._dsdbsparse = dsdbsparse
         self.symmetry = dsdbsparse.symmetry
-        if not isinstance(stack_index, tuple):
-            stack_index = (stack_index,)
         stack_index = _replace_ellipsis(stack_index, self._dsdbsparse.data.ndim)
         self._stack_index = stack_index
         self._block_indexer = _DSDBlockIndexer(
             self._dsdbsparse, self._stack_index, cache_stack=True
         )
-        self._sparse_block_indexer = _DSDBlockIndexer(
-            self._dsdbsparse, self._stack_index, return_dense=False, cache_stack=True
-        )
+
+        shape = self._dsdbsparse.shape
+        stack_size = []
+        for i, s in enumerate(stack_index):
+            if isinstance(s, slice):
+                start = s.start if s.start is not None else 0
+                stop = s.stop if s.stop is not None else shape[i]
+                stack_size.append(stop - start)
+            elif isinstance(s, (int, numbers.Integral)):
+                stack_size.append(1)
+            else:
+                raise IndexError(
+                    f"Expected slice or int in stack index but got {type(s)} ({s=})."
+                )
+        self.shape = tuple(stack_size) + shape[len(stack_index) :]
 
     def __getitem__(self, index: tuple[ArrayLike, ArrayLike]) -> NDArray:
         """Gets the requested data from the substack."""
@@ -1006,47 +1128,40 @@ class _DStackView:
         rows, cols = self._dsdbsparse._normalize_index(index)
         self._dsdbsparse._set_items(self._stack_index, rows, cols, values)
 
-    def __iadd__(self, other: "DSDBSparse | sparse.spmatrix") -> "DSDBSparse":
-        """In-place addition of sparse matrix."""
-        if sparse.issparse(other):
-            csr = other.tocsr()
-            self._dsdbsparse.data[self._stack_index] += xp.squeeze(
-                xp.asarray(csr[self._dsdbsparse._local_spy()])
-            )
-            return self._dsdbsparse
-        try:
-            # TODO: Lots more checks should be done here.
-            # For example, the nnz sizes should match.
-            self._dsdbsparse.data[self._stack_index] += xp.squeeze(
-                xp.asarray(other.data[:])
-            )
-        except ValueError as e:
-            raise ValueError(
-                "In-place addition requires the shapes of the two "
-                "DSDBSparse matrices to match."
-            ) from e
-        return self._dsdbsparse
+    @property
+    def distribution_state(self):
+        """Returns the distribution state of the substack."""
+        return self._dsdbsparse.distribution_state
 
-    def __isub__(self, other: "DSDBSparse | sparse.spmatrix") -> "DSDBSparse":
-        """In-place subtraction of two DSDBSparse matrices."""
-        if sparse.issparse(other):
-            csr = other.tocsr()
-            self._dsdbsparse.data[self._stack_index] -= xp.squeeze(
-                xp.asarray(csr[self._dsdbsparse._local_spy()])
-            )
-            return self._dsdbsparse
-        try:
-            # TODO: Lots more checks should be done here.
-            # For example, the nnz sizes should match.
-            self._dsdbsparse.data[self._stack_index] -= xp.squeeze(
-                xp.asarray(other.data[:])
-            )
-        except ValueError as e:
-            raise ValueError(
-                "In-place subtraction requires the shapes of the two "
-                "DSDBSparse matrices to match."
-            ) from e
-        return self._dsdbsparse
+    @property
+    def dtype(self):
+        """Returns the dtype."""
+        return self._dsdbsparse.dtype
+
+    @property
+    def stack(self) -> "_DStackIndexer":
+        """Returns the stack indexer on the substack."""
+        return _DStackIndexer(self)
+
+    @property
+    def num_blocks(self) -> int:
+        """Returns the number of global (?) blocks."""
+        return self._dsdbsparse.num_blocks
+
+    @property
+    def block_sizes(self) -> list[int]:
+        """Returns the global block sizes."""
+        return self._dsdbsparse.block_sizes
+
+    @property
+    def data(self) -> NDArray:
+        """Returns the local slice of the data, masking the padding."""
+        return self._dsdbsparse.data[self._stack_index]
+
+    @data.setter
+    def data(self, value: NDArray) -> None:
+        """Sets the local slice of the data."""
+        self._dsdbsparse.data[self._stack_index] = value
 
     @property
     def num_local_blocks(self) -> int:
@@ -1059,19 +1174,9 @@ class _DStackView:
         return self._block_indexer
 
     @property
-    def sparse_local_blocks(self) -> "_DSDBlockIndexer":
-        """Returns a sparse block indexer on the substack."""
-        return self._sparse_block_indexer
-
-    @property
     def blocks(self) -> "_DSDBlockIndexer":
         """Returns a block indexer on the substack."""
         return self._block_indexer
-
-    @property
-    def sparse_blocks(self) -> "_DSDBlockIndexer":
-        """Returns a sparse block indexer on the substack."""
-        return self._sparse_block_indexer
 
 
 class _DSDBlockIndexer:
@@ -1090,9 +1195,6 @@ class _DSDBlockIndexer:
     stack_index : tuple, optional
         The stack index to slice the blocks from. Default is Ellipsis,
         i.e. we return the whole stack of blocks.
-    return_dense : bool, optional
-        Whether to return dense arrays when accessing the blocks.
-        Default is True.
     cache_stack : bool, optional
         Whether to propagate only the stack index to the block
         access methods, or to provide the data stack outright. Default
@@ -1104,7 +1206,6 @@ class _DSDBlockIndexer:
         self,
         dsdbsparse: DSDBSparse,
         stack_index: tuple = (Ellipsis,),
-        return_dense: bool = True,
         cache_stack: bool = False,
     ) -> None:
         """Initializes the block indexer."""
@@ -1117,7 +1218,6 @@ class _DSDBlockIndexer:
         else:
             self._arg = stack_index
             self._is_index = True
-        self._return_dense = return_dense
 
     def _normalize_index(self, index: tuple) -> tuple:
         """Normalizes the block index."""
@@ -1145,9 +1245,7 @@ class _DSDBlockIndexer:
     def __getitem__(self, index: tuple) -> NDArray | tuple:
         """Gets the requested block from the data structure."""
         row, col = self._normalize_index(index)
-        if self._return_dense:
-            return self._dsdbsparse._get_block(self._arg, row, col, self._is_index)
-        return self._dsdbsparse._get_sparse_block(self._arg, row, col, self._is_index)
+        return self._dsdbsparse._get_block(self._arg, row, col, self._is_index)
 
     def __setitem__(self, index: tuple, block: NDArray) -> None:
         """Sets the requested block in the data structure."""

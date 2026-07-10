@@ -259,7 +259,7 @@ def _expand_tight_binding_matrix(
         temp_list[transport_ind] = b * transport_cell_size
         block_inds.append(tuple(int(i) for i in temp_list))
 
-    if block_inds[-1] not in matrix_dict.keys():
+    if block_inds[-1] not in matrix_dict:
         warnings.warn(
             "Periodic shift is outside the available range. Interaction will be zero."
         )
@@ -322,10 +322,10 @@ def _expand_tight_binding_matrix(
 
 
 def _sum_operator(
-    matrix_dict: dict[tuple, sparse.csr_matrix | NDArray],
-    symmetric: bool,
+    matrix_dict: dict[tuple, sparse.csr_matrix],
+    symmetry: str | None = None,
     phases: dict | None = None,
-):
+) -> sparse.csr_matrix:
     """Sums up periodic image contributions for a specific k-point.
 
     This takes a Hermitian operator (e.g., Hamiltonian, overlap) and performs a weighted
@@ -333,27 +333,31 @@ def _sum_operator(
 
     Parameters
     ----------
-    matrix_dict : dict[tuple, sparse.csr_matrix | NDArray]
+    matrix_dict : dict[tuple, sparse.csr_matrix]
         The dictionary of matrices corresponding to different periodic
         repetitions. It is assumed that only the upper parts are present.
-    symmetric : bool
-        Whether the resulting matrix should be symmetric. If `True`, only
-        construct the upper triangular part.
+    symmetry : str | None, optional
+        The symmetry of the resulting matrix. If `None`, the matrix is not symmetric.
     phases : dict, optional
         A dictionary mapping the different image indices to their weight.
         If not provided, this performs an unweighted sum.
 
+    Returns
+    -------
+    sparse.csr_matrix
+        The summed matrix for the specific k-point.
+
     """
 
     if phases is None:
-        phases = {coord: 1.0 for coord in matrix_dict.keys()}
+        phases = {coord: 1.0 for coord in matrix_dict}
 
     # NOTE: Sparse matrix addition is slow
     # but unavoidable due to memory constraints.
     # TODO: Could still be optimized
     summed_matrix = sum(phases[coord] * matrix for coord, matrix in matrix_dict.items())
 
-    if not symmetric:
+    if symmetry is None:
         summed_matrix = summed_matrix + summed_matrix.T.conj()
         summed_matrix.setdiag(summed_matrix.diagonal() / 2)
 
@@ -392,7 +396,7 @@ def _assemble_kpoint(
     if not matrix_dict:
         raise ValueError("No matrices found in matrix_dict.")
 
-    for cell in matrix_dict.keys():
+    for cell in matrix_dict:
         if len(cell) != num_dimensions:
             raise ValueError(
                 f"Cell {cell} has incorrect dimensionality. "
@@ -400,7 +404,9 @@ def _assemble_kpoint(
             )
 
     if all(kpoint_grid == 1):
-        out_matrix.stack[(...,)] += _sum_operator(matrix_dict, out_matrix.symmetry)
+        out_matrix.data += _sum_operator(matrix_dict, out_matrix.symmetry)[
+            out_matrix._local_spy()
+        ]
     else:
 
         kpoints = monkhorst_pack(kpoint_grid, kpoint_shift).reshape(
@@ -416,12 +422,12 @@ def _assemble_kpoint(
 
             phases = {
                 coord: xp.exp(2j * np.pi * (np.asarray(coord) @ kpoint))
-                for coord in matrix_dict.keys()
+                for coord in matrix_dict
             }
 
-            out_matrix.stack[(...,) + stack_index] += _sum_operator(
+            out_matrix.data[(...,) + stack_index + (slice(None),)] += _sum_operator(
                 matrix_dict, out_matrix.symmetry, phases=phases
-            )
+            )[out_matrix._local_spy()]
 
 
 def _create_matrix_from_unit_cells(
@@ -459,7 +465,7 @@ def _create_matrix_from_unit_cells(
     out_matrix_dict = {}
 
     transport_ind = "xyz".index(config.device.transport_direction)
-    for coord in matrix_dict.keys():
+    for coord in matrix_dict:
 
         # Do not expand multiple time in
         # transport direction
@@ -482,6 +488,7 @@ def _create_matrix_from_unit_cells(
 def load_matrices(
     config: QuatrexConfig,
     matrix_name: str,
+    force_complex: bool = True,
 ):
     """Loads a Hermitian matrix from file
 
@@ -491,7 +498,9 @@ def load_matrices(
         The quatrex configuration.
     matrix_name : str
         The name of the matrix ('hamiltonian', 'overlap', etc.).
-
+    force_complex : bool
+        Whether to force the loaded matrices to be complex. If `True`,
+        the loaded matrices will be cast to `xp.complex128`.
 
     Returns
     -------
@@ -502,9 +511,9 @@ def load_matrices(
     """
 
     # load the matrices
-    matrix_dict = distributed_load(config.input_dir / f"{matrix_name}.mat")
+    matrix_dict = distributed_load(config.input_dir / f"{matrix_name}.h5")
 
-    if (0, 0, 0) not in matrix_dict.keys():
+    if (0, 0, 0) not in matrix_dict:
         raise ValueError(
             f"Expected to find a key [0,0,0] in the matrix file, but it was not found. "
             f"Available keys: {list(matrix_dict.keys())}"
@@ -530,12 +539,13 @@ def load_matrices(
         )
 
     # assert that more than the neighbor cell cutoff is available if the cutoff is requested
-    if config.device.neighbor_cell_cutoff is not None:
-        if any(max_coords[i] < config.device.neighbor_cell_cutoff[i] for i in range(3)):
-            raise ValueError(
-                "Matrix contains fewer neighbor cells than requested."
-                f"({max_coords=}, {config.device.neighbor_cell_cutoff=})"
-            )
+    if config.device.neighbor_cell_cutoff is not None and any(
+        max_coords[i] < config.device.neighbor_cell_cutoff[i] for i in range(3)
+    ):
+        raise ValueError(
+            "Matrix contains fewer neighbor cells than requested."
+            f"({max_coords=}, {config.device.neighbor_cell_cutoff=})"
+        )
 
     # drop half the matrices
     # NOTE: this is done on the CPU
@@ -554,7 +564,7 @@ def load_matrices(
                 f"but expected shape is {matrix_shape}."
             )
         if not isinstance(matrix, matrix_type):
-            raise ValueError(
+            raise TypeError(
                 f"Matrix at coordinate {coord} has type {type(matrix)}, "
                 f"but expected type is {matrix_type}."
             )
@@ -573,13 +583,16 @@ def load_matrices(
     # transfer the matrix_dict to the GPU
     if isinstance(matrix_dict[(0, 0, 0)], np.ndarray):
         matrix_dict = {
-            coord: xp.asarray(matrix).astype(xp.complex128)
-            for coord, matrix in matrix_dict.items()
+            coord: xp.asarray(matrix) for coord, matrix in matrix_dict.items()
         }
     elif isinstance(matrix_dict[(0, 0, 0)], sps.spmatrix):
         matrix_dict = {
-            coord: sparse.csr_matrix(matrix).astype(xp.complex128)
-            for coord, matrix in matrix_dict.items()
+            coord: sparse.csr_matrix(matrix) for coord, matrix in matrix_dict.items()
+        }
+
+    if force_complex:
+        matrix_dict = {
+            coord: matrix.astype(xp.complex128) for coord, matrix in matrix_dict.items()
         }
 
     # expand potentially if the system is periodic
@@ -675,12 +688,11 @@ def assemble_matrix(
         sparsity_pattern = sparsity_pattern + sparsity_pattern.T
 
     matrix = config.compute.dsdbsparse_type.from_sparray(
-        sparsity_pattern.astype(xp.complex128),
+        sparray=sparsity_pattern.astype(xp.complex128),
         block_sizes=block_sizes,
         global_stack_shape=(comm.stack.size,)
         + tuple([k for k in config.device.kpoint_grid if k > 1]),
-        symmetry=config.scba.symmetric,
-        symmetry_op=xp.conj,
+        symmetry="hermitian" if config.scba.symmetric else None,
     )
     matrix.data[:] = 0.0  # Initialize to zero.
 
@@ -1111,7 +1123,8 @@ def _assemble_kpoint_full(
     kpoints = np.roll(kpoints, shift=kshift, axis=tuple(range(num_dimensions)))
 
     if all(kpoint_grid == 1):
-        out_matrix.stack[(...,)] += sum(matrix_dict.values())
+        summed = sparse.csr_matrix(sum(matrix_dict.values()))
+        out_matrix.data += xp.asarray(summed[out_matrix._local_spy()]).squeeze()
     else:
         index = np.argwhere(kpoint_grid > 1).flatten()
         for stack_index in np.ndindex(kpoints.shape[:-1]):
@@ -1126,10 +1139,15 @@ def _assemble_kpoint_full(
             # NOTE: Sparse matrix addition is slow
             # but unavoidable due to memory constraints.
             # TODO: Could still be optimized
-            matrix_contribution = sum(
-                [phase * matrix for phase, matrix in zip(phases, matrix_dict.values())]
+            matrix_contribution = sparse.csr_matrix(
+                sum(
+                    phase * matrix
+                    for phase, matrix in zip(phases, matrix_dict.values())
+                )
             )
-            out_matrix.stack[(...,) + stack_index] += matrix_contribution
+            out_matrix.data[(...,) + stack_index + (slice(None),)] += xp.asarray(
+                matrix_contribution[out_matrix._local_spy()]
+            ).squeeze()
 
 
 def _create_matrix_from_unit_cells_full(
@@ -1659,16 +1677,16 @@ def load_matrix(
     matrix_sparray = 0.5 * (matrix_sparray + matrix_sparray.T.conj())
 
     matrix = config.compute.dsdbsparse_type.from_sparray(
-        sparsity_pattern.astype(xp.complex128),
+        sparray=sparsity_pattern.astype(xp.complex128),
         block_sizes=block_sizes,
         global_stack_shape=(comm.stack.size,)
         + tuple([k for k in config.device.kpoint_grid if k > 1]),
-        symmetry=config.scba.symmetric,
-        symmetry_op=xp.conj,
+        symmetry="hermitian" if config.scba.symmetric else None,
     )
     matrix.data[:] = 0.0  # Initialize to zero.
     if matrix_dict is None:
-        matrix += matrix_sparray
+        csr = sparse.csr_matrix(matrix_sparray)
+        matrix.data += xp.asarray(csr[matrix._local_spy()]).squeeze()
     else:
         transport_idx = "xyz".index(config.device.transport_direction)
 

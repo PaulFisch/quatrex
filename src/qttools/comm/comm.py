@@ -123,6 +123,8 @@ def pad_buffer(buffer: NDArray, global_size: int, comm_size: int, axis: int) -> 
     NDArray
         The padded buffer.
     """
+    if axis < 0:
+        axis = buffer.ndim + axis
 
     padding_width = global_size // comm_size - buffer.shape[axis]
 
@@ -527,9 +529,9 @@ class _SubCommunicator:
                 )
             global_size = mask.size
         else:
-            counts = np.zeros(self.size, dtype=xp.int32)
+            counts = np.zeros(self.size, dtype=xp.int64)
             self.all_gather(
-                np.array(sendbuf.shape[axis], dtype=xp.int32),
+                np.array(sendbuf.shape[axis], dtype=xp.int64),
                 counts,
                 backend="device_mpi",
             )

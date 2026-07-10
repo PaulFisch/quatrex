@@ -114,7 +114,6 @@ jfnk_ptc = {a.jfnk_ptc}
 energy_window_min = {a.emin}
 energy_window_max = {a.fmax}
 energy_window_num = {a.nfreq}
-fermi_level = 0.0
 
 [phonon]
 eta = {a.eta}
@@ -229,7 +228,6 @@ jfnk_ptc = {a.jfnk_ptc}
 energy_window_min = {a.emin}
 energy_window_max = {a.fmax}
 energy_window_num = {a.nfreq}
-fermi_level = 0.0
 
 [phonon]
 eta = {a.eta}

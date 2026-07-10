@@ -10,13 +10,49 @@ from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import free_mempool
 from qttools.utils.mpi_utils import get_section_sizes
 from quatrex.core.config import QuatrexConfig
-from quatrex.core.fft_utils import hilbert_transform
 from quatrex.core.sse import ScatteringSelfEnergy
 
 profiler = Profiler()
 
 if xp.__name__ == "cupy":
     cache = xp.fft.config.get_plan_cache()
+
+
+def hilbert_transform(a: NDArray, energies: NDArray) -> NDArray:
+    """Computes the Hilbert transform of the array a, assuming the symmetries of the
+    polarization, i.e \([P^{\lessgtr}_{ij}(\omega)]^{\dagger} = -P^{\gtrless}_{ij}(-\omega)\).
+    This becomes \(a(-\omega)=a^{*}(\omega)\), where a is \(a=P^>-P^<\).
+
+    Assumes that the first axis corresponds to the energy axis.
+
+    Parameters
+    ----------
+    a : NDArray
+        The array to transform.
+    energies : NDArray
+        The energy values corresponding to the first axis of a.
+
+    Returns
+    -------
+    NDArray
+         The Hilbert transform of a.
+
+    """
+    # eta for removing the singularity. See Cauchy principal value.
+    energy_differences = xp.expand_dims(energies - energies[0], tuple(range(1, a.ndim)))
+    # Set energy differences to inf at the singularity to avoid division by zero.
+    energy_differences[0] = xp.inf
+    ne = energies.size
+
+    hilbert_kernel = 1 / energy_differences
+    b = fft_convolve(a, hilbert_kernel)[:ne]
+    # Negative frequencies of a
+    b += fft_convolve(a[::-1].conj(), hilbert_kernel)[-ne:]
+    # Negative frequencies of the kernel
+    hilbert_kernel = -hilbert_kernel[::-1]
+    b += fft_convolve(a, hilbert_kernel)[-ne:]
+
+    return b
 
 
 class PCoulombScreening(ScatteringSelfEnergy):
@@ -152,21 +188,18 @@ class PCoulombScreening(ScatteringSelfEnergy):
                     # Note that only the hermitian part is computed here.
 
                     if self.include_energy_renormalization:
-                        # P^R = 0.5*(P^> - P^<) + 0.5j*H[P^> - P^<]; the
-                        # anti-Hermitian half is added in the SCBA loop.
-                        # hilbert_transform is the (1/pi)-normalised PV
-                        # transform incl. the dE quadrature weight, so no
-                        # prefactor is needed here (the previous
-                        # -(prefactor/2)*kvol == i*dE/2pi supplied exactly
-                        # the weight that the raw-kernel implementation
-                        # lacked; same scale, better PV kernel now).
                         p_retarded_hermitian.data[..., batch] = (
-                            0.5j
-                            * hilbert_transform(
-                                p_greater.data[..., batch]
-                                - p_lesser.data[..., batch],
-                                self.energies,
+                            -(self.prefactor / 2)
+                            * (
+                                hilbert_transform(
+                                    (
+                                        p_greater.data[..., batch]
+                                        - p_lesser.data[..., batch]
+                                    ),
+                                    self.energies,
+                                )
                             )
+                            * self.kpoint_volume
                         )
 
         with profiler.profile_range(
@@ -190,7 +223,7 @@ class PCoulombScreening(ScatteringSelfEnergy):
         with profiler.profile_range(
             label="PCoulombScreening: Symmetrization", level="default", comm=comm
         ):
-            if not p_lesser.symmetry:
+            if p_lesser.symmetry is None:
                 p_lesser.symmetrize(xp.subtract)
                 p_greater.symmetrize(xp.subtract)
                 p_retarded_hermitian.symmetrize(xp.add)
