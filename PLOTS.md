@@ -67,3 +67,8 @@ need the listed run:
 | si_film_vs_guo, si_film_conductance_b | notebook F23/F29 | film ballistic/anharmonic sweeps (days; coupled-q) |
 | prod_qfilm_qconv/conservation | appendix tables | coupled-q film nk-sweep (± zero-mode projection) |
 | solver_scaling (right panel), phph_* scaling literals | retired benchmark logs (git) | re-run the benchmark drivers (hours) |
+
+Run-summary overlays from `phonon/studies/transport.py` (`fig_sinw`,
+`fig_film`) now save under their own `prod_sinw_*` / `prod_si_film_vs_guo`
+names so a stale production sweep can never overwrite the curated
+generators above.

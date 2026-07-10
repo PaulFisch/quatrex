@@ -1,5 +1,34 @@
 # Missing plots, data, and calculations for the report
 
+## 2026-07-10 review-pass addendum (upstream merge + deep review)
+
+1. **`cluster/snapshots/d5a_T*_bubble_fft.npz` and every dense
+   `retarded="fft"` result on a symmetric grid are TAINTED**: the
+   bosonic-mirror Hilbert kernel double-counted the stored negative
+   half (~200% error in Re Sigma^R; fixed in `phonon/solver/retarded.py`).
+   Regenerate the affected spectral-SE snapshots with the fixed kernel
+   before quoting Re Sigma^R / QP shifts from them (Im Sigma^R and all
+   `retarded="half"`/`"pv"` results are unaffected).
+2. **Removed knobs**: the IR occupancy taper and the whole spectral-mask
+   family (`ir_taper_cells`, `sse_ir_subtraction`, `band_limit_sse`,
+   `spectral_support_tol`, `band_support_margin_thz`,
+   `sse_freeze_occupation`, `spectral_sharp_cap`, `sse_zero_bands_thz`,
+   `sse_low_freq_cutoff_thz`, `sse_cutoff_zero_g`) no longer exist;
+   archived TOMLs that set them need those lines stripped before rerun.
+   The knob-ablation figures document stored data and remain valid as
+   negative results.
+3. **New observables** (`phonon/solver/observables.py`,
+   `transmission(..., return_greens=True)`, production NPZ keys
+   `gr_diag_imag`/`gl_diag_imag`/`bubble_balance_spectrum`,
+   `phonon/postproc/local_observables.py`, `mode_projected_spectral`):
+   every theory-chapter observable now has a compute path; existing
+   production NPZ lack the new diagonal keys until rerun.
+4. **Run-summary figures renamed** `prod_*` (transport.py) so they can
+   no longer clobber the curated `ballistic_vs_*`/`si_film_vs_guo`
+   figures.
+5. The `sigma_convention` positivity gate named in conservation.tex is
+   still unquantified (open REVIEW).
+
 Working ledger for the report overhaul. Updated 2026-07-02 after the merge of the
 report-update, the figure regeneration campaign (all document figures now have a
 `phonon/studies/style.py` generator under `phonon/scripts/figures/` or
