@@ -30,6 +30,7 @@ for p in (str(_REPO / "phonon"), str(_REPO)):
         sys.path.insert(0, p)
 
 from phonon.finite_analysis.loader import load_system  # noqa: E402
+from phonon_inputs.constants import CONVERSION_THZ2  # noqa: E402
 from phonon_inputs.convention import get_btd_blocks  # noqa: E402
 from solver.fc3_device import build_device_fc3_blocks  # noqa: E402
 from solver.static_se import (  # noqa: E402
@@ -57,7 +58,9 @@ for name, (cfg, _f) in CFGS.items():
     n_dof = 3 * n_atoms
     masses_dof = np.repeat(np.asarray(ph.primitive.masses, float), 3)
 
-    H_00, H_01 = get_btd_blocks(ph, transport_direction="z")
+    H_00, H_01 = get_btd_blocks(
+        ph, (0.0, 0.0), transport_direction="z",
+        conversion_factor=CONVERSION_THZ2)
     D = np.asarray(H_00, dtype=complex).real
     D = 0.5 * (D + D.T)
 
