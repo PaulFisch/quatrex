@@ -249,6 +249,28 @@ except Exception as exc:  # noqa: BLE001 -- diagnostic, never fatal
     if ranks.rank == 0:
         print(f"slab_absorption failed: {exc!r}", flush=True)
 
+# Final-iterate G diagonals (per-DOF LDOS proxy -Im G^R and occupation
+# numerator Im G^<) and the per-omega bubble-balance spectra. Collective
+# gathers; cheap ((ne, N_D) reals). QX_SAVE_DIAG_G=0 disables.
+_gr_diag = _gl_diag = _bb_spec = None
+try:
+    if os.environ.get("QX_SAVE_DIAG_G", "1") == "1" and cfg.scba.phonon:
+        _mask = scba.data.g_lesser._stack_padding_mask
+        _gr_diag = ranks.stack.all_gather_v(
+            np.asarray(-scba.data.g_retarded.diagonal().imag), axis=0,
+            mask=_mask)
+        _gl_diag = ranks.stack.all_gather_v(
+            np.asarray(scba.data.g_lesser.diagonal().imag), axis=0,
+            mask=_mask)
+    _spectra = getattr(scba, "_bubble_balance_spectra", None)
+    if _spectra is not None:
+        _bb_spec = np.stack([
+            ranks.stack.all_gather_v(np.ascontiguousarray(sp), axis=0)
+            for sp in _spectra])
+except Exception as exc:  # noqa: BLE001 -- diagnostic, never fatal
+    if ranks.rank == 0:
+        print(f"G-diagonal gather failed: {exc!r}", flush=True)
+
 if ranks.rank == 0:
     npz = os.environ.get("QX_NPZ") or str(Path(cfg.output_dir).parent / "run.npz")
     Path(npz).parent.mkdir(parents=True, exist_ok=True)
@@ -324,6 +346,16 @@ if ranks.rank == 0:
         # stack>1 this is the rank-0-local frequency slice (relative
         # convergence is still meaningful); at stack==1 it is the full heat.
         out["iter_heat"] = np.asarray(_iter_heat)
+    if _gr_diag is not None:
+        # (ne, *nk, N_D): per-DOF -Im G^R (LDOS proxy) and Im G^< of the
+        # final iterate -> post-hoc n_i(omega), T_eff and LDOS
+        # (phonon/postproc/local_observables.py).
+        out["gr_diag_imag"] = np.asarray(_gr_diag)
+        out["gl_diag_imag"] = np.asarray(_gl_diag)
+    if _bb_spec is not None:
+        # (2, ne): per-omega (P_in, P_out) spectra of the bubble balance;
+        # with current_spectrum this resolves the energy sum rule D(omega).
+        out["bubble_balance_spectrum"] = np.asarray(_bb_spec)
     if spec_full is not None:
         # (ne, *nk, n_interfaces) real Meir-Wingreen number-current spectrum;
         # together with energies + lead temperatures this gives T_eff(w) and

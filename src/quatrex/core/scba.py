@@ -838,10 +838,15 @@ class SCBA:
                       f"|g|={float(get_host(xp.abs(g.data).max())):.3e} "
                       f"G-asym={g_asym:.3e} S-asym={s_asym:.3e} "
                       f"|tr|max={float(get_host(xp.abs(tr).max())):.3e}", flush=True)
-            return complex(get_host(xp.sum(w * tr)))
+            return np.asarray(get_host(w * tr))  # per local omega
 
-        p_in = weighted(s_l, g_g)
-        p_out = weighted(s_g, g_l)
+        spec_in = weighted(s_l, g_g)
+        spec_out = weighted(s_g, g_l)
+        # Cache the per-omega spectra (rank-local frequency slice) for the
+        # engine's bubble_balance_spectrum output key.
+        self._bubble_balance_spectra = (spec_in, spec_out)
+        p_in = complex(spec_in.sum())
+        p_out = complex(spec_out.sum())
         if comm.stack.size > 1:
             buf = np.array([p_in, p_out], dtype=complex)
             recv = np.empty_like(buf)
