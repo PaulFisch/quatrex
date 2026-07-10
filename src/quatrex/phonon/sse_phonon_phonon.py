@@ -25,6 +25,7 @@ from qttools import NDArray, xp
 from qttools.comm import comm as ranks
 from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
+from qttools.utils.gpu_utils import get_host
 
 from scipy import sparse
 
@@ -488,8 +489,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         D = np.zeros((N_D, N_D), dtype=float)
         for I in range(n_blocks):
             for J in range(max(0, I - 1), min(n_blocks, I + 2)):
-                blk = np.asarray(dynamical_matrix.blocks[I, J])
-                if blk.ndim == 3:
+                blk = np.asarray(get_host(dynamical_matrix.blocks[I, J]))
+                while blk.ndim > 2:
+                    # Leading stack / transverse-q axes: take the first
+                    # stack entry and the Gamma point (index 0).
                     blk = blk[0]
                 D[I * n_dof:(I + 1) * n_dof, J * n_dof:(J + 1) * n_dof] = blk.real
         self._scp_D = 0.5 * (D + D.T)
@@ -504,32 +507,51 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 flush=True,
             )
 
-    def _apply_scp_tadpole(self, g_lesser, sigma_retarded) -> None:
+    def _apply_scp_tadpole(self, g_lesser, g_greater, sigma_retarded) -> None:
         """Self-consistent cubic tadpole, in the nnz state.
 
-        Forms <uu> from the omega-integral of the device G^< (full omega-
-        local per nnz slice), solves the regularised mean_displacement
-        against Phi_eff = D + Sigma_static, mixes the resulting static
-        Sigma_T, and broadcasts it into Sigma^R at every frequency.
+        Forms <uu> from the omega-integral of the device G^{<,>} on the
+        one-sided grid: the negative-frequency half enters via the bosonic
+        fold G^<_ij(-w) = G^>_ji(w) (w=0 counted once), and the solver's
+        occupation-positive G (= -G_textbook) is negated. Solves the
+        regularised mean_displacement against Phi_eff = D + Sigma_static,
+        mixes the resulting static Sigma_T, and broadcasts it into Sigma^R
+        at every frequency.
         """
         from quatrex.phonon.static_self_energy import (
             equal_time_uu_from_sum, mean_displacement, sigma_tadpole)
 
         N_D = self._sigma_static.shape[0]
-        # omega-integral of G^< summed over every stack axis.
+        # omega-integral over every stack axis (full omega local per nnz
+        # slice); the w=0 bin is excluded from the folded G^> half.
         ax = tuple(range(g_lesser.data.ndim - 1))
-        g_sum_local = g_lesser.data.sum(axis=ax)             # (local_nnz,)
-        rows = np.asarray(g_lesser.rows) + int(g_lesser.global_block_offset)
-        cols = np.asarray(g_lesser.cols) + int(g_lesser.global_block_offset)
-        g_sum = np.zeros((N_D, N_D), dtype=g_sum_local.dtype)
-        g_sum[rows, cols] = np.asarray(g_sum_local)
-        # nnz is split over comm.stack (full ω local, spatial elements split).
+        gl_sum_local = g_lesser.data.sum(axis=ax)            # (local_nnz,)
+        full_freqs = self._full_frequencies(int(g_lesser.data.shape[0]))
+        pos = xp.abs(xp.asarray(full_freqs)) > 1e-12
+        gg_sum_local = g_greater.data[pos].sum(axis=ax)
+        # Transverse-momentum mesh average (1/N_q).
+        nq = int(np.prod(g_lesser.data.shape[1:-1])) or 1
+        rows = xp.asarray(g_lesser.rows_nnz)
+        cols = xp.asarray(g_lesser.cols_nnz)
+        g_sum = xp.zeros((N_D, N_D), dtype=gl_sum_local.dtype)
+        g_sum[rows, cols] = gl_sum_local / nq
+        gg_sum = xp.zeros((N_D, N_D), dtype=gg_sum_local.dtype)
+        gg_sum[rows, cols] = gg_sum_local / nq
+        # nnz is split over comm.stack (full omega local, elements split).
         if ranks.stack.size > 1:
-            recv = xp.zeros_like(g_sum)
-            ranks.stack.all_reduce(g_sum, recv, op="sum")
-            g_sum = recv
+            for buf in (g_sum, gg_sum):
+                recv = xp.empty_like(buf)
+                ranks.stack.all_reduce(xp.ascontiguousarray(buf), recv, op="sum")
+                buf[:] = recv
         dw = float(self.local_frequencies[1] - self.local_frequencies[0])
-        uu = equal_time_uu_from_sum(g_sum, dw)
+        # Textbook convention (G^< = -i n A) is the NEGATIVE of the solver's
+        # occupation-positive storage; the transpose is the ji fold.
+        g_total = np.asarray(get_host(-(g_sum + gg_sum.T)))
+        uu = equal_time_uu_from_sum(g_total, dw)
+        if float(np.trace(uu)) <= 0.0 and comm.rank == 0:
+            warnings.warn(
+                "SCP tadpole: Tr<uu> <= 0 -- sign-convention violation?",
+                stacklevel=2)
         phi_eff = self._scp_D + self._sigma_static
         w_mean = mean_displacement(
             self._fc3_dev_mw, uu, phi_eff,
@@ -538,7 +560,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._sigma_static = (
             (1.0 - self._scp_mix) * self._sigma_static + self._scp_mix * sig_new)
         # Broadcast the static self-energy into Sigma^R at every frequency.
-        sr_static = self._sigma_static[rows, cols].astype(sigma_retarded.data.dtype)
+        sr_static = xp.asarray(
+            self._sigma_static[get_host(rows), get_host(cols)]
+        ).astype(sigma_retarded.data.dtype)
         sigma_retarded.data[:] = sigma_retarded.data + sr_static
 
     # ------------------------------------------------------------------
@@ -812,16 +836,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # (nnz split over comm.stack -> partner non-local) and silently fell back
         # to the no-transpose equilibrium continuation, breaking the
         # Phi-derivable energy balance (~1e-5) for every multi-rank run.
-        gl_rev_src, gg_rev_src = gl_in, gg_in
+        # Reuse the already-FFT'd decay legs: the q-negation (middle axes)
+        # commutes element-exactly with the axis-0 FFT, so no second FFT of
+        # the reversed source is needed.
+        Xl, Xg = gtl.data, gtg.data
         if nq > 1:
             # negate the transverse momentum axes (Gamma-centered IDFT
             # meshes are closed under q -> -q)
             for ax, k in enumerate(nk, start=1):
                 neg = (-xp.arange(k)) % k
-                gl_rev_src = xp.take(gl_rev_src, neg, axis=ax)
-                gg_rev_src = xp.take(gg_rev_src, neg, axis=ax)
-        Xl = self._fft_pad(gl_rev_src, n_fft)
-        Xg = self._fft_pad(gg_rev_src, n_fft)
+                Xl = xp.take(Xl, neg, axis=ax)
+                Xg = xp.take(Xg, neg, axis=ax)
         gtlr.data[0] = Xl[0]
         gtlr.data[1:] = Xl[:0:-1]
         gtgr.data[0] = Xg[0]
@@ -1013,7 +1038,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if nq > 1 and ranks.q.size > 1:
             for m in (stl, stg):
                 recv = xp.empty_like(m.data)
-                ranks.q.all_reduce(np.ascontiguousarray(m.data), recv, op="sum")
+                ranks.q.all_reduce(xp.ascontiguousarray(m.data), recv, op="sum")
                 m.data[:] = recv
 
         # (4) sigma(tau) stack->nnz
@@ -1050,7 +1075,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # damping sign -- unchanged by the convention flip above).
         if self.retarded_method == "fft":
             delta = sg_data - sl_data
-            hil = 0.5j * hilbert_transform(delta, full_freqs)
+            # transverse_shape: the exact bosonic mirror carries q -> -q on
+            # the transverse axes (exact off equilibrium, unlike the plain
+            # conjugate shortcut).
+            hil = 0.5j * hilbert_transform(delta, full_freqs,
+                                           transverse_shape=nk)
             if bool(sse_mask.any()):
                 # post-mask the retarded consistently with Sigma^<>
                 hil[sse_mask] = 0.0
@@ -1058,7 +1087,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
-            self._apply_scp_tadpole(g_lesser, sigma_retarded)
+            self._apply_scp_tadpole(g_lesser, g_greater, sigma_retarded)
 
     def _contract_dense_q(
         self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
@@ -1502,5 +1531,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "energy window (write_config.py does this) or pass the "
                 "solver grid."
             )
+        # The FFT bin arithmetic (forward convolution bin n = k + m and the
+        # index-reversal fold bin l -> -l) represents omega sums only on a
+        # UNIFORM grid ANCHORED AT ZERO; anything else runs silently shifted.
+        if int(freqs.shape[0]) > 1:
+            df = float(freqs[1] - freqs[0])
+            if abs(float(freqs[0])) > 1e-9 * abs(df) or bool(
+                xp.max(xp.abs(xp.diff(freqs) - df)) > 1e-9 * abs(df)
+            ):
+                raise ValueError(
+                    "The bubble FFT requires a uniform frequency grid "
+                    f"starting at 0 (got start {float(freqs[0]):g}, spacing "
+                    f"{df:g}). Set energy_window_min = 0."
+                )
         self._full_freqs = freqs
         return freqs

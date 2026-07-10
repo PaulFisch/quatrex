@@ -1,4 +1,4 @@
-"""Unit tests for the safeguarded Anderson/Pulay SCBA mixer."""
+"""Unit tests for the Anderson/Pulay SCBA mixer."""
 
 from __future__ import annotations
 
@@ -35,12 +35,12 @@ def test_anderson_converges_oscillating_map_where_linear_fails():
         lin_err.append(np.linalg.norm(x - x_star))
     assert min(lin_err) > 1e-2  # linear stalls/oscillates
 
-    # Safeguarded Anderson converges to the fixed point.
-    mix = AndersonMixer(depth=10, beta=0.5, step_cap=10.0)
+    # Anderson converges to the fixed point.
+    mix = AndersonMixer(depth=10, beta=0.5)
     x = np.zeros(n, complex)
     and_err = []
     for _ in range(80):
-        x, fnorm = mix.step(x, g(x))
+        x = mix.step(x, g(x))
         and_err.append(np.linalg.norm(x - x_star))
     assert and_err[-1] < 1e-8
     assert and_err[-1] < lin_err[-1] * 1e-4  # vastly better than linear
@@ -52,7 +52,7 @@ def test_anderson_first_step_is_damped_linear():
     g, _ = _oscillating_map(n=12, seed=1)
     mix = AndersonMixer(depth=5, beta=0.3)
     x0 = np.zeros(12, complex)
-    x1, _ = mix.step(x0, g(x0))
+    x1 = mix.step(x0, g(x0))
     np.testing.assert_allclose(x1, x0 + 0.3 * (g(x0) - x0), rtol=1e-12)
 
 
@@ -61,6 +61,6 @@ def test_anderson_fixed_point_is_invariant():
     returns the fixed point unchanged."""
     mix = AndersonMixer(depth=5, beta=0.5)
     x = np.arange(8, dtype=complex) + 1j
-    xm, fnorm = mix.step(x, x.copy())
-    assert fnorm == 0.0
+    xm = mix.step(x, x.copy())
+    assert np.linalg.norm(x.copy() - x) == 0.0
     np.testing.assert_allclose(xm, x, rtol=1e-12)

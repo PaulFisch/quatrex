@@ -82,15 +82,20 @@ from .zero_modes import (
 
 
 def _device_omega_max(H_00, H_01):
-    """Largest phonon frequency (in THz) of the periodic Gamma-point
-    dynamical matrix ``H_00 + H_01 + H_01^\\dagger``. Used to size the
-    bubble-convolution frequency grid: the 3-phonon convolution has
-    support ``[-2 omega_max, 2 omega_max]``.
+    """Largest phonon frequency (in THz) of the periodic dynamical matrix
+    ``H_00 + H_01 e^{iq} + h.c.``, maximised over transport-q samples (the
+    band top need not sit at Gamma; a monatomic chain peaks at q=pi). Used
+    to size the bubble-convolution frequency grid: the 3-phonon convolution
+    has support ``[-2 omega_max, 2 omega_max]``.
     """
-    dyn = H_00 + H_01 + H_01.conj().T
-    dyn = 0.5 * (dyn + dyn.conj().T)
-    eigs = np.linalg.eigvalsh(dyn)
-    return float(np.sqrt(max(eigs.max().real, 0.0)))
+    w2_max = 0.0
+    for q in (0.0, 0.25 * np.pi, 0.5 * np.pi, 0.75 * np.pi, np.pi):
+        phase = np.exp(1j * q)
+        dyn = H_00 + H_01 * phase + H_01.conj().T * np.conj(phase)
+        dyn = 0.5 * (dyn + dyn.conj().T)
+        eigs = np.linalg.eigvalsh(dyn)
+        w2_max = max(w2_max, float(eigs.max().real))
+    return float(np.sqrt(max(w2_max, 0.0)))
 
 
 def _ensure_fmax(freq_range_thz, H_00, H_01, *, name, auto_extend,
@@ -1356,6 +1361,9 @@ def transmission(
     """
     if hilbert_retarded:
         retarded = "fft"
+    # NOTE: solver=None is resolved AFTER the static-self-energy block below
+    # (loop/tadpole runs default to Anderson); track the caller's choice.
+    solver_explicit = solver is not None
     if solver is None:
         solver = "anderson" if anderson_mixing else "linear"
 
@@ -1474,7 +1482,7 @@ def transmission(
         # vector; linear mixing converges it slowly, so default to the
         # safeguarded Anderson accelerator (with the loosened static step cap)
         # unless the caller chose a solver explicitly.
-        if solver is None and not anderson_mixing:
+        if not solver_explicit:
             solver = "anderson"
         if verbose:
             print(f"  Static self-energy: loop={loop}, tadpole={tadpole}, "
@@ -1582,15 +1590,16 @@ def transmission_q(
     fc3_hdf5=None,
     q_mesh_transverse: tuple[int, int] = (4, 4),
     *,
-    retarded: str = "half",
+    retarded: str = "fft",
     zero_mode_projection: bool = False,
     **kwargs,
 ) -> dict:
     """Transversely-periodic device: :func:`transmission` on ``q_mesh``.
 
-    Keeps the historical q-path defaults (``retarded="half"``, no zero-mode
-    projection). ``q_mesh_transverse=(1,1)`` reproduces
-    :func:`transmission_finite`; pass ``sigma_cutoff=0`` for Guo's cheap
+    Defaults match :func:`transmission` (full Kramers-Kronig ``Sigma^R``,
+    ``retarded="fft"``), so ``q_mesh_transverse=(1,1)`` reproduces
+    :func:`transmission_finite` exactly; pass ``retarded="half"`` for the
+    historical q-path behavior and ``sigma_cutoff=0`` for Guo's cheap
     slab-diagonal approximation (III).
     """
     return transmission(

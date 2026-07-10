@@ -531,9 +531,12 @@ class SCBA:
         # eta=0 causal-Sigma^R map is well-linearized and Anderson no longer
         # limit-cycles on its marginal mode. (warmup == 0 already built it in
         # __init__; broyden is unaffected -- its mixer is non-None from the start.)
+        # NOTE: _scba_iteration is already incremented (in _has_converged)
+        # when the first update runs, so strict ">" gives exactly
+        # anderson_warmup_iters linear updates before the hand-off.
         if (self._anderson_mixer is None
                 and self.config.scba.mixing_method == "anderson"
-                and self._scba_iteration >= getattr(
+                and self._scba_iteration > getattr(
                     self.config.scba, "anderson_warmup_iters", 0)):
             from quatrex.core.anderson import AndersonMixer
             self._anderson_mixer = AndersonMixer(
@@ -694,15 +697,31 @@ class SCBA:
         # criterion is the hbar-omega-weighted HEAT flow (Guo/Luisier).
         if (self.config.scba.phonon
                 and getattr(self.config.phonon, "model", "") == "negf"):
-            # Relative Sigma^R residual = ||Sigma_new - Sigma_old||_inf / ||Sigma||_inf
-            local_smag = get_host(xp.max(xp.abs(self.data.sigma_retarded_hermitian.data)))
+            # Relative residual ||Sigma_new - Sigma_old||_inf / ||Sigma||_inf
+            # over ALL components (lesser, greater, retarded-Hermitian): the
+            # Sigma^R part alone is blind to a common lesser+greater drift.
+            local_diff = local_max_diff
+            local_smag = get_host(
+                xp.max(xp.abs(self.data.sigma_retarded_hermitian.data)))
+            for cur, prev in (
+                (self.data.sigma_lesser, self.data.sigma_lesser_prev),
+                (self.data.sigma_greater, self.data.sigma_greater_prev),
+            ):
+                local_diff = np.maximum(
+                    local_diff, get_host(xp.max(xp.abs(cur.data - prev.data))))
+                local_smag = np.maximum(
+                    local_smag, get_host(xp.max(xp.abs(cur.data))))
+            max_diff_all = np.empty_like(local_diff)
+            global_comm.Allreduce(local_diff, max_diff_all, op=MPI.MAX)
             smag = np.empty_like(local_smag)
             global_comm.Allreduce(local_smag, smag, op=MPI.MAX)
-            rel_sigma = float(max_diff) / (float(smag) + 1e-300)
+            rel_sigma = float(max_diff_all) / (float(smag) + 1e-300)
             # Divergence guard: an exploded update never recovers -- abort
-            # instead of burning the remaining iterations. QX_ABORT_RESIDUAL
-            # overrides the threshold (0 disables).
-            abort_at = float(os.environ.get("QX_ABORT_RESIDUAL", "1e3") or 0)
+            # instead of burning the remaining iterations. Config option
+            # scba.abort_residual (0 disables); QX_ABORT_RESIDUAL overrides.
+            abort_at = getattr(self.config.scba, "abort_residual", 1e3)
+            if os.environ.get("QX_ABORT_RESIDUAL"):
+                abort_at = float(os.environ["QX_ABORT_RESIDUAL"])
             if (abort_at > 0 and self._scba_iteration > 3
                     and rel_sigma > abort_at):
                 self._diverged = True
@@ -733,17 +752,23 @@ class SCBA:
                           f"lead balance {balance:.4e} "
                           f"(best {self._best_heat_conservation:.4e}; "
                           f"internal spread {spread:.4e})", flush=True)
-                bal = self._phonon_bubble_energy_balance()
-                if bal is not None:
-                    p_in, p_out, bres = bal
-                    if not hasattr(self, "_bubble_balance_history"):
-                        self._bubble_balance_history = []
-                    self._bubble_balance_history.append(
-                        (p_in.real, p_out.real, bres))
-                    if comm.rank == 0:
-                        print(f"Bubble energy balance: P_in={p_in.real:.6e} "
-                              f"P_out={p_out.real:.6e} resid={bres:.3e}",
-                              flush=True)
+                # NOTE: G survives the back-transpose only when
+                # bubble_balance_check keeps it; on discarded G the traces
+                # would evaluate to a spurious machine-perfect 0 == 0.
+                bubble_resid = None
+                if getattr(self.config.phonon, "bubble_balance_check", False):
+                    bal = self._phonon_bubble_energy_balance()
+                    if bal is not None:
+                        p_in, p_out, bres = bal
+                        bubble_resid = bres
+                        if not hasattr(self, "_bubble_balance_history"):
+                            self._bubble_balance_history = []
+                        self._bubble_balance_history.append(
+                            (p_in.real, p_out.real, bres))
+                        if comm.rank == 0:
+                            print(f"Bubble energy balance: P_in={p_in.real:.6e} "
+                                  f"P_out={p_out.real:.6e} resid={bres:.3e}",
+                                  flush=True)
                 # Conservation gate = LEAD balance |J_L - J_R| / |J|: in steady
                 # state the in/out lead currents must match; this is what the
                 # dense reference checks (dense.py conservation_err) and what a
@@ -754,9 +779,18 @@ class SCBA:
                 # length, 3-17% on the production setups even BALLISTICALLY) --
                 # gating on it made convergence unreachable. It is still
                 # reported as a diagnostic above.
+                # Optional additional gate on the Phi-derivable bubble balance
+                # (conservation appendix recommendation); 0 disables (legacy).
+                bb_tol = getattr(self.config.phonon, "bubble_balance_tol", 0.0)
+                bubble_ok = (
+                    bb_tol <= 0.0
+                    or (bubble_resid is not None and bubble_resid < bb_tol)
+                )
                 if (self._scba_iteration >= self.config.scba.min_iterations
                         and rel_sigma < self.config.phonon.sigma_convergence_tol
-                        and balance < self.config.phonon.heat_flow_conservation_tol):
+                        and balance < self.config.phonon.heat_flow_conservation_tol
+                        and bubble_ok):
+                    self._converged = True
                     return True
 
         return False
@@ -936,8 +970,11 @@ class SCBA:
             recv = np.empty_like(heat)
             comm.stack.all_reduce(np.ascontiguousarray(local_heat), recv, op="sum")
             heat = recv
-        denom = abs(float(heat.mean())) + 1e-300
-        spread = float((heat.max() - heat.min()) / denom)
+        # NOTE: The "inv" solver and the distributed RGF fill internal
+        # interfaces with NaN (only the lead currents are computed), so
+        # the denominator uses the leads and the spread must be NaN-aware.
+        denom = 0.5 * (abs(float(heat[0])) + abs(float(heat[-1]))) + 1e-300
+        spread = float((np.nanmax(heat) - np.nanmin(heat)) / denom)
         balance = float(abs(abs(heat[0]) - abs(heat[-1])) / denom)
         return heat, balance, spread
 

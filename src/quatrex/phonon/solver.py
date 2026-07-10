@@ -72,7 +72,15 @@ class PhononSolver(SubsystemSolver):
         """Initializes the Phonon solver."""
         super().__init__(config, frequencies)
 
+        if float(np.min(frequencies)) < 0.0:
+            raise ValueError(
+                "The phonon solver requires a non-negative frequency grid: "
+                "lead occupancies and damping are built as even functions "
+                "of omega (the negative axis is handled by the bosonic fold "
+                "in the SSE, not by the grid)."
+            )
         self.local_frequencies = get_local_slice(frequencies, comm.stack)
+        self._ir_floor_diag = None
 
         # Load the dynamical matrix
         self.dynamical_matrix, dynamical_matrix_sparsity_pattern = load_matrix(
@@ -237,15 +245,20 @@ class PhononSolver(SubsystemSolver):
     def _compute_obc(self) -> None:
         """Computes open boundary conditions."""
         if comm.block.rank == 0:
-            s_00 = 1j * self.eta_obc * xp.eye(
-                self.block_sizes[0], dtype=self.dynamical_matrix.dtype)
-
             m_10, m_00, m_01 = get_periodic_superblocks(
                 a_ii=self.system_matrix.blocks[0, 0],
                 a_ji=self.system_matrix.blocks[1, 0],
                 a_ij=self.system_matrix.blocks[0, 1],
                 block_sections=self.block_sections,
             )
+            s_00 = 1j * self.eta_obc * xp.eye(
+                m_00.shape[-1], dtype=self.dynamical_matrix.dtype)
+            if self._ir_floor_diag is not None:
+                # The IR floor regularises the DEVICE Dyson only; strip it
+                # from the lead blocks so the reservoirs stay bare harmonic.
+                s_00 = s_00 - self._ir_floor_diag.reshape(
+                    (-1,) + (1,) * (m_00.ndim - 1)
+                ) * xp.eye(m_00.shape[-1], dtype=self.dynamical_matrix.dtype)
 
             g_00, *__ = self.obc(
                 (m_00 + s_00, m_01, m_10),
@@ -272,9 +285,6 @@ class PhononSolver(SubsystemSolver):
                 gamma_00.copy(), self.left_occupancies + 1
             )
         if comm.block.rank == comm.block.size - 1:
-            s_nn = 1j * self.eta_obc * xp.eye(
-                self.block_sizes[0], dtype=self.dynamical_matrix.dtype)
-
             n = self.system_matrix.num_local_blocks - 1
             m = n - 1
 
@@ -289,6 +299,12 @@ class PhononSolver(SubsystemSolver):
             m_nn = xp.flip(m_nn, axis=(-2, -1))
             m_nm = xp.flip(m_nm, axis=(-2, -1))
             m_mn = xp.flip(m_mn, axis=(-2, -1))
+            s_nn = 1j * self.eta_obc * xp.eye(
+                m_nn.shape[-1], dtype=self.dynamical_matrix.dtype)
+            if self._ir_floor_diag is not None:
+                s_nn = s_nn - self._ir_floor_diag.reshape(
+                    (-1,) + (1,) * (m_nn.ndim - 1)
+                ) * xp.eye(m_nn.shape[-1], dtype=self.dynamical_matrix.dtype)
             g_nn, *__ = self.obc(
                 # Twist it, flip it, ...
                 (
@@ -411,12 +427,14 @@ class PhononSolver(SubsystemSolver):
         # low-omega physics and the IR plateau are untouched. Gamma_floor->0 as
         # dw->0 (grid-consistent). NOT applied to the OBC (ideal leads).
         _ir_floor_c = self._eta_ir_floor_c
+        self._ir_floor_diag = None
         if _ir_floor_c > 0.0 and self.energies.size > 1:
             _dw = float(abs(get_host(self.energies[1] - self.energies[0])))
             _w = xp.asarray(self.local_frequencies, dtype=float)
             _gamma = (_ir_floor_c * _dw) ** 2          # THz^2
             _wc2 = (2.0 * _dw) ** 2
-            z2 = z2 + 1j * _gamma * _wc2 / (_w ** 2 + _wc2)
+            self._ir_floor_diag = 1j * _gamma * _wc2 / (_w ** 2 + _wc2)
+            z2 = z2 + self._ir_floor_diag
             if comm.rank == 0:
                 print(f"eta IR floor ON: Gamma_floor={_gamma:.4g} THz^2 "
                       f"(eta_ir_floor_cells={_ir_floor_c:g}, omega_c=2*dw="

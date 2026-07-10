@@ -155,6 +155,10 @@ def hilbert_transform_bosonic(delta, omega_grid_thz, axis):
     ne = w.size
     de = float(w[1] - w[0])
     w0 = float(w[0])
+    # The bosonic mirror CONTINUES a positive-only grid; on a full
+    # symmetric grid the negative half is already stored and the mirror
+    # would double-count it (measured 200% error in Re Sigma^R).
+    use_mirror = w0 > -0.25 * de
 
     d = np.moveaxis(np.asarray(delta, dtype=complex), axis, 0)
     tail_shape = d.shape[1:]
@@ -178,12 +182,13 @@ def hilbert_transform_bosonic(delta, omega_grid_thz, axis):
     D = np.fft.fft(d2, n_conv, axis=0)
     out = np.fft.ifft(D * K[:, None], axis=0)[ne - 1: 2 * ne - 1]
 
-    dm = d2[::-1].conj()
-    if abs(w0) < 0.25 * de:
-        dm = dm.copy()
-        dm[-1] = 0.0  # the w=0 cell is already covered by the main kernel
-    Dm = np.fft.fft(dm, n_conv, axis=0)
-    out = out + np.fft.ifft(Dm * M[:, None], axis=0)[ne - 1: 2 * ne - 1]
+    if use_mirror:
+        dm = d2[::-1].conj()
+        if abs(w0) < 0.25 * de:
+            dm = dm.copy()
+            dm[-1] = 0.0  # the w=0 cell is already covered by the main kernel
+        Dm = np.fft.fft(dm, n_conv, axis=0)
+        out = out + np.fft.ifft(Dm * M[:, None], axis=0)[ne - 1: 2 * ne - 1]
 
     out = (out / np.pi).reshape((ne,) + tail_shape)
     return np.moveaxis(out, 0, axis)

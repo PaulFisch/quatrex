@@ -138,7 +138,11 @@ class RPMMixer:
         # Newton is needed ONLY for a mode that DEFEATS Picard (|lambda|>1, the
         # L6 band-edge), whose signature is exactly a stalled/limit-cycling
         # residual -- and that is also where the increment buffer is cleanest.
-        if len(self._fhist) > self.patience:
+        if self.patience > 0:
+            if len(self._fhist) <= self.patience:
+                # Not enough residual history to demonstrate a plateau --
+                # keep accumulating increments under damped Picard.
+                return x + self.beta * f
             ratio = fnorm / (self._fhist[0] + 1e-300)
             if ratio < self.progress_thresh:
                 return x + self.beta * f   # Picard is still making progress

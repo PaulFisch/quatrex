@@ -123,6 +123,7 @@ class AndersonMixer:
         self._dx: list[np.ndarray] = []
         self._df: list[np.ndarray] = []
         self._it = 0
+        self._comm, self._SUM = get_comm()
 
     def step(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
         """One Anderson update; ``x`` is the iterate, ``gx = g(x)``."""
@@ -148,14 +149,24 @@ class AndersonMixer:
         if (not self._dx) or (self._it % self.period != 0):
             return x + self.beta * f
 
-        dX = np.stack(self._dx, axis=1)  # (n, m)
+        dX = np.stack(self._dx, axis=1)  # (n_local, m)
         dF = np.stack(self._df, axis=1)
+        m = dF.shape[1]
+        # The least-squares coefficients contract the distributed rows, so the
+        # normal equations (dF^H dF) gamma = dF^H f are GLOBAL inner products:
+        # reduce them (one packed Allreduce(SUM)) and solve the replicated
+        # (m x m) system so gamma is identical on every rank.
+        A = dF.conj().T @ dF
+        rhs = dF.conj().T @ f
+        packed = allreduce_sum(
+            self._comm, self._SUM,
+            np.concatenate([np.ascontiguousarray(A).ravel(), rhs]))
+        A = packed[:m * m].reshape(m, m)
+        rhs = packed[m * m:]
         if self.ridge > 0.0:
-            # Scale-relative normal-equation solve with Tikhonov damping.
-            A = dF.conj().T @ dF
-            reg = self.ridge * (float(np.trace(A).real) / A.shape[0] + 1e-300)
-            gamma = np.linalg.solve(A + reg * np.eye(A.shape[0], dtype=A.dtype),
-                                    dF.conj().T @ f)
+            # Scale-relative Tikhonov damping on the reduced normal equations.
+            reg = self.ridge * (float(np.trace(A).real) / m + 1e-300)
+            gamma = np.linalg.solve(A + reg * np.eye(m, dtype=A.dtype), rhs)
         else:
-            gamma, *_ = np.linalg.lstsq(dF, f, rcond=None)
+            gamma = np.linalg.lstsq(A, rhs, rcond=None)[0]
         return x + self.beta * f - (dX + self.beta * dF) @ gamma

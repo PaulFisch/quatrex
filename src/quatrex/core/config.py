@@ -301,6 +301,11 @@ class SCBAConfig(BaseModel):
     fixed-point machinery out of the shared SCBA surface; see
     :class:`ExperimentalMixerConfig`."""
 
+    abort_residual: NonNegativeFloat = 1e3
+    """Divergence guard: abort the SCBA once the relative self-energy
+    residual exceeds this after iteration 3 (an exploded update never
+    recovers). 0 disables. QX_ABORT_RESIDUAL overrides."""
+
     output_interval: PositiveInt = 1
 
     coulomb_screening: bool = False
@@ -536,15 +541,11 @@ class SolverConfig(BaseModel):
     @model_validator(mode="after")
     def set_compute_current(self) -> Self:
         """Sets the `compute_current` parameter based on the algorithm."""
-        if self.compute_current is None:
-            if self.algorithm == "rgf":
-                self.compute_current = True
-            else:
-                self.compute_current = False
-
         # Both "rgf" and "inv" support the Meir-Wingreen boundary current.
         # ("inv" is the small-eta-stable path: its dense inverse pivots
         # through the near-singular Dyson matrix that NaNs the RGF recursion.)
+        if self.compute_current is None:
+            self.compute_current = True
 
         return self
 
@@ -1468,6 +1469,11 @@ class PhononConfig(BaseModel):
     continuation strategy (vertex-scale warm starts / annealing) -- we report
     it as non-converged rather than passing off the best-conserved transient
     as the answer."""
+
+    bubble_balance_tol: NonNegativeFloat = 0.0
+    """Optional third convergence gate on the Phi-derivable bubble energy
+    balance ``|P_in - P_out| / |P_in|`` (requires ``bubble_balance_check``).
+    0 disables (legacy: residual + lead heat balance only)."""
 
     scp_tadpole: bool = False
     """Optional self-consistent-phonon (SCP) cubic tadpole static

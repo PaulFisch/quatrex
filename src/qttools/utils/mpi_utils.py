@@ -6,6 +6,7 @@ import scipy.sparse as sps
 from mpi4py import MPI
 from mpi4py.MPI import COMM_WORLD as comm
 from mpi4py.util import pkl5
+from scipy.io import loadmat
 
 from qttools import NDArray, sparse, xp
 from qttools.utils.hdf5_utils import load_hdf5_dict
@@ -88,7 +89,7 @@ def distributed_load(path: Path) -> sparse.spmatrix | NDArray | dict:
     """
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
-    if path.suffix not in [".npz", ".npy", ".h5", ".txt"]:
+    if path.suffix not in [".npz", ".npy", ".mat", ".h5", ".txt"]:
         raise ValueError(f"Invalid file extension: {path.suffix}")
 
     if comm.rank == 0:
@@ -98,6 +99,13 @@ def distributed_load(path: Path) -> sparse.spmatrix | NDArray | dict:
             arr = sparse.coo_matrix(arr)
         elif path.suffix == ".npy":
             arr = xp.load(path)
+        elif path.suffix == ".mat":
+            arr = loadmat(path)
+            arr = {
+                tuple(map(int, r.strip("[]").split(","))): h_r
+                for r, h_r in arr.items()
+                if r.startswith("[")
+            }
         elif path.suffix == ".h5":
             arr = load_hdf5_dict(path)
             arr = {

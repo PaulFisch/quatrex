@@ -151,9 +151,12 @@ class BroydenMixer:
             self._fhist.append(global_norm(self._comm, self._SUM, f))
             if len(self._fhist) > self.patience + 2:
                 self._fhist.pop(0)
-            if len(self._fhist) > self.patience:
-                if self._fhist[-1] < self.progress_thresh * self._fhist[0]:
-                    return x + self.beta * f   # Picard still making progress
+            if len(self._fhist) <= self.patience:
+                # Not enough post-warmup residual history to demonstrate a
+                # plateau -- keep accumulating secants under damped Picard.
+                return x + self.beta * f
+            if self._fhist[-1] < self.progress_thresh * self._fhist[0]:
+                return x + self.beta * f   # Picard still making progress
 
         dX = np.stack(self._dx, axis=1)  # (n_local, m)
         dF = np.stack(self._df, axis=1)

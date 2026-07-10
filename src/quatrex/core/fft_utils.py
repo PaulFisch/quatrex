@@ -14,7 +14,9 @@ from qttools import NDArray, xp
 from qttools.fft import fft_convolve
 
 
-def hilbert_transform(a: NDArray, energies: NDArray) -> NDArray:
+def hilbert_transform(
+    a: NDArray, energies: NDArray, transverse_shape: tuple = ()
+) -> NDArray:
     r"""Standard Hilbert transform along the leading energy axis.
 
     Returns
@@ -52,6 +54,12 @@ def hilbert_transform(a: NDArray, energies: NDArray) -> NDArray:
     energies : NDArray
         The (uniform, ascending) energies corresponding to the first
         axis of ``a``.
+    transverse_shape : tuple, optional
+        Sizes of transverse-momentum axes following the energy axis
+        (Gamma-centered meshes). The exact bosonic continuation is
+        ``a(q, -omega) = a*(-q, omega)``; when given, the mirror is
+        q-negated on these axes so the transform stays exact for
+        current-carrying (non-complex-symmetric) ``a``.
 
     Returns
     -------
@@ -87,7 +95,11 @@ def hilbert_transform(a: NDArray, energies: NDArray) -> NDArray:
     den = 2.0 * w0 + m * de - 0.5 * de
     mir_kernel = xp.where(den > 0, xp.log(xp.where(den > 0, num, 1.0) /
                                           xp.where(den > 0, den, 1.0)), 0.0)
-    a_mirror = a[::-1].conj()
+    a_mirror = a
+    for ax, k in enumerate(transverse_shape, start=1):
+        neg = (-xp.arange(int(k))) % int(k)
+        a_mirror = xp.take(a_mirror, neg, axis=ax)
+    a_mirror = a_mirror[::-1].conj()
     if abs(w0) < 0.25 * de:
         # The omega=0 sample sits on both the positive grid and its mirror;
         # count its cell once (it is already covered by the kernel above).

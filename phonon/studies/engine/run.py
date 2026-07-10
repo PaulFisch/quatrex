@@ -96,6 +96,12 @@ if os.environ.get("QX_BALLISTIC") == "1":
                     q[4][...] = 0.0
                     q[5][...] = 0.0
         sse._tau_cache = None
+        # SCP tadpole holds its own dense FC3 copy (made at __init__, before
+        # this zeroing) -- disable it so the ballistic baseline is vertex-free.
+        if getattr(sse, "_scp_tadpole", False):
+            sse._scp_tadpole = False
+            if getattr(sse, "_sigma_static", None) is not None:
+                sse._sigma_static[...] = 0.0
     if ranks.rank == 0:
         print(f"BALLISTIC: zeroed {n_zeroed} phi_blocks in place", flush=True)
 
@@ -273,8 +279,10 @@ if ranks.rank == 0:
     # (all-reduced over stack + q-summed by the SCBA). Use this, NOT the
     # best-conserved transient. converged = the SCBA stopped before max_iter.
     out["diverged"] = bool(getattr(scba, "_diverged", False))
-    out["converged"] = (bool(_it["n"] < cfg.scba.max_iterations)
-                        and not out["diverged"])
+    # The SCBA sets _converged in the genuine convergence-return path;
+    # a crashed run (err set) must not be reported as converged.
+    out["converged"] = (bool(getattr(scba, "_converged", False))
+                        and not out["diverged"] and err is None)
     lh = getattr(scba, "_last_heat_current", None)
     if lh is not None:
         lh = np.asarray(lh)

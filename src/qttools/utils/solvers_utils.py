@@ -22,10 +22,13 @@ def get_batches(num_sections: int, max_batch_size: int) -> tuple[list, NDArray]:
         The offsets of each batch.
 
     """
-    # Get list of batches to perform
+    # Get list of batches to perform. Ceil division so that no batch
+    # exceeds max_batch_size (floor division let batches overshoot the
+    # cap by up to 2x, defeating the memory bound).
+    num_batches = -(num_sections // -min(max_batch_size, num_sections))
     batches_sizes, _ = get_section_sizes(
         num_elements=num_sections,
-        num_sections=num_sections // min(max_batch_size, num_sections),
+        num_sections=num_batches,
     )
     batches_slices = xp.hstack(([0], xp.cumsum(xp.array(batches_sizes))))
 
