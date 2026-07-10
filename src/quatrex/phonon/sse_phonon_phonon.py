@@ -33,9 +33,9 @@ from quatrex.core.config import QuatrexConfig
 from quatrex.core.fft_utils import hilbert_transform
 from quatrex.core.sse import ScatteringSelfEnergy
 from quatrex.phonon.bubble import (
-    _RING_POOL,
-    _RING_THREADS,
     _ring_contract_serial,
+    configure_ring_pool,
+    ring_pool,
     bubble_dense,
     phi_perms,
     ring_contract,
@@ -92,6 +92,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._ramp_n = int(getattr(config.phonon, "sse_ramp_iterations", 0))
         self._ramp_it = 0
         self._vertex_scale = float(getattr(config.phonon, "sse_vertex_scale", 1.0))
+        # Ring-contraction thread pool: config option, env vars as fallback.
+        configure_ring_pool(
+            threads=int(getattr(config.phonon, "sse_ring_threads", 0)),
+            min_w=getattr(config.phonon, "sse_ring_min_w", None),
+        )
         self._sse_cutoff = float(
             getattr(config.phonon, "sse_low_freq_cutoff_thz", 0.0))
         self._zero_bands = [
@@ -261,6 +266,35 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # feeds the (nq-independent) pair index and any Gamma-only
                 # consumer; the coupled-q contraction itself stays factored.
                 phi_blocks = self._phi_blocks_from_factors(vfactors)
+
+        device_cfg = getattr(config, "device", None)
+        if self._n_kpts > 1 and device_cfg is not None:
+            # The q-difference index arithmetic ((i-j) mod n), the q -> -q
+            # fold and the offline vertices all assume the GAMMA-CENTERED
+            # mesh q = k/n. Validate the configured Monkhorst-Pack mesh
+            # against it instead of failing silently.
+            from quatrex.grid.kpoints import monkhorst_pack
+
+            grid = np.asarray(device_cfg.kpoint_grid, dtype=int)
+            shift = np.asarray(device_cfg.kpoint_shift, dtype=float)
+            tr = grid > 1
+            mesh = np.asarray(monkhorst_pack(grid[tr], shift[tr])) % 1.0
+            want = np.stack(
+                np.meshgrid(*[np.arange(n) / n for n in grid[tr]],
+                            indexing="ij"), axis=-1).reshape(-1, int(tr.sum()))
+            # ORDERED comparison: the q-difference/negation index arithmetic
+            # requires q_k = k/n at index k, not merely the same point set.
+            if mesh.shape != want.shape or not np.allclose(
+                mesh % 1.0, want % 1.0, atol=1e-8
+            ):
+                raise ValueError(
+                    "Coupled-q vertices assume the Gamma-centered mesh "
+                    "q = k/n per transverse axis; the configured "
+                    f"kpoint_grid={tuple(grid)} with kpoint_shift="
+                    f"{tuple(shift)} does not produce it. Set "
+                    "kpoint_shift[i] = 1/2 - 1/(2*n_i) on the transverse "
+                    "axes."
+                )
 
         if phi_blocks is None:
             fc3_path = getattr(config.phonon, "fc3_path", None)
@@ -973,10 +1007,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # cnt33 L2 (w=241): 64 threads = 56x (1232 GF/s), 128 threads regress
             # to 791 GF/s purely from <2 tau/thread. n_tau//4 keeps us at the
             # sweet spot and lets large-w cells use proportionally more threads.
-            nt = min(_RING_THREADS, max(1, n_tau // 4))
-            if _RING_POOL is not None and nt > 1:
+            pool, n_threads = ring_pool()
+            nt = min(n_threads, max(1, n_tau // 4))
+            if pool is not None and nt > 1:
                 bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
-                chunks = list(_RING_POOL.map(lambda b: _contract_tau(*b), bnds))
+                chunks = list(pool.map(lambda b: _contract_tau(*b), bnds))
                 for (I, J) in owned:
                     parts = [c for c in chunks if (I, J) in c]
                     if parts:
@@ -1110,23 +1145,38 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # ground truth, see phonon/scripts/verify/audit_qfold_trs.py.
         # At Gamma the vertices are real, so the Gamma-only (nq==1)
         # path is unaffected.
-        qtasks: dict[tuple[int, int], list] = {}
-        for iq_ext in range(q_lo, q_hi):
-            for iqp in range(nq):
-                iq2 = int(qdm[iq_ext, iqp])
-                phiL = qv.get((iqp, iq2))   # legs (q', q_ext−q')
-                phiR = qv.get((iq2, iqp))   # legs (q_ext−q', q')
-                if phiL is None or phiR is None:
-                    continue
-                for (I, J) in owned:
-                    for K1, K2, K1p, K2p, _pl, _pr in self._phi_pair_index[(I, J)]:
-                        pl = phiL.get((I, K1, K2))
-                        pr = phiR.get((J, K2p, K1p))
-                        if pl is None or pr is None:
-                            continue
-                        qtasks.setdefault((I, J), []).append(
-                            (iq_ext, iqp, iq2, K1, K1p, K2, K2p)
-                            + phi_perms(xp.conj(pl), pr, xp))
+        # The task list depends only on the (fixed) vertex and mesh, so it
+        # is built once and cached; identical (pl, pr) vertex pairs share
+        # one pre-permuted copy (the bulk-homogeneous blocks repeat across
+        # I and across (iq_ext, iqp) with the same q-difference).
+        cache_key = (q_lo, q_hi, nq)
+        if getattr(self, "_qtasks_cache_key", None) == cache_key:
+            qtasks = self._qtasks_cache
+        else:
+            perm_cache: dict[tuple[int, int], tuple] = {}
+            qtasks = {}
+            for iq_ext in range(q_lo, q_hi):
+                for iqp in range(nq):
+                    iq2 = int(qdm[iq_ext, iqp])
+                    phiL = qv.get((iqp, iq2))   # legs (q', q_ext-q')
+                    phiR = qv.get((iq2, iqp))   # legs (q_ext-q', q')
+                    if phiL is None or phiR is None:
+                        continue
+                    for (I, J) in owned:
+                        for K1, K2, K1p, K2p, _pl, _pr in self._phi_pair_index[(I, J)]:
+                            pl = phiL.get((I, K1, K2))
+                            pr = phiR.get((J, K2p, K1p))
+                            if pl is None or pr is None:
+                                continue
+                            pkey = (id(pl), id(pr))
+                            pre = perm_cache.get(pkey)
+                            if pre is None:
+                                pre = phi_perms(xp.conj(pl), pr, xp)
+                                perm_cache[pkey] = pre
+                            qtasks.setdefault((I, J), []).append(
+                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p) + pre)
+            self._qtasks_cache_key = cache_key
+            self._qtasks_cache = qtasks
 
         # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
         # nq==1 _contract_tau so the omega/tau batch parallelises across
@@ -1163,11 +1213,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
-        nt = min(_RING_THREADS, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
-        if _RING_POOL is not None and xp is np and nt > 1:
+        pool, n_threads = ring_pool()
+        nt = min(n_threads, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+        if pool is not None and xp is np and nt > 1:
             bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
                     for i in range(nt)]
-            chunks = list(_RING_POOL.map(lambda b: _contract_tau_q(*b), bnds))
+            chunks = list(pool.map(lambda b: _contract_tau_q(*b), bnds))
             for (I, J) in qtasks:
                 _write_q(
                     I, J,
@@ -1224,10 +1275,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
-        nt = min(_RING_THREADS, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
-        if _RING_POOL is not None and xp is np and nt > 1:
+        pool, n_threads = ring_pool()
+        nt = min(n_threads, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+        if pool is not None and xp is np and nt > 1:
             bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
-            chunks = list(_RING_POOL.map(lambda b: _run(*b), bnds))
+            chunks = list(pool.map(lambda b: _run(*b), bnds))
             for (I, J) in quads_by_pair:
                 _write(
                     I, J,

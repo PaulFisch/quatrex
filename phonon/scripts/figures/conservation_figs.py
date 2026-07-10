@@ -9,7 +9,7 @@ Four figures, every number printed for the LaTeX, each from VALID cached data:
         phonon/scripts/out/prod/cnt33_eta0/L2_anh.npz  (iter_heat,
         iter_bubble_balance, iter_sigma_max) -- the production transport
         iteration: the bubble balance is pinned at machine precision every
-        step while the Sigma^R residual and the lead imbalance converge.
+        step while the Sigma^< residual proxy and the lead imbalance converge.
   F2/F3 conductance ratio + lead balance vs broadening eta and grid
         eta0_cnt33_ratio_eta
         the matched-eta sweep of tab:cons_ratio (conservation.ratio_eta) with
@@ -54,10 +54,10 @@ def fig_conservation_iter():
     d = np.load(PROD / "L2_anh.npz", allow_pickle=True)
     ih = d["iter_heat"]                       # (n_it, 3) = [J_L, J_dev, J_R]
     bub = d["iter_bubble_balance"][:, 2]      # relative |P_in - P_out|
-    sig = d["iter_sigma_max"]                 # (n_it, nfreq) |Sigma^R| per omega
+    sig = d["iter_sigma_max"]                 # (n_it, nfreq) |Sigma^<| per omega
     JL, JR = ih[:, 0], ih[:, 2]
     imbal = np.abs(JL - JR) / (0.5 * (np.abs(JL) + np.abs(JR)) + 1e-300)
-    # relative Sigma^R change between consecutive iterates (residual proxy)
+    # relative Sigma^< change between consecutive iterates (residual proxy)
     res = (np.linalg.norm(np.diff(sig, axis=0), axis=1)
            / (np.linalg.norm(sig[:-1], axis=1) + 1e-300))
     nit = ih.shape[0]
@@ -65,7 +65,7 @@ def fig_conservation_iter():
     fig, axes = style.figure(ncols=1, width=5.0, height=3.6)
     ax = axes[0] if hasattr(axes, "__len__") else axes
     ax.semilogy(np.arange(2, nit + 1), np.maximum(res, 1e-18), "-", color="C0",
-                lw=1.4, label=r"rel. $\Sigma^R$ change")
+                lw=1.4, label=r"rel. $\Sigma^<$ change")
     ax.semilogy(np.arange(1, nit + 1), np.maximum(imbal, 1e-18), "-", color="C3",
                 lw=1.3, label=r"lead imbalance $|J_L-J_R|/\bar J$")
     ax.semilogy(np.arange(1, nit + 1), np.maximum(bub, 1e-19), "-", color="C2",

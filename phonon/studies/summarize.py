@@ -88,12 +88,18 @@ def lead_heat(npz):
 
 
 def g_const(cell, run_dir):
-    """Analytic dense-matching constant C such that G[W/m^2/K] = C * lead0."""
+    """Analytic dense-matching constant C such that G[W/m^2/K] = C * lead0.
+
+    lead0 is the q-SUMMED heat current (the SCBA sums the transverse mesh),
+    while the dense reference and A_c are per primitive cell: divide by the
+    mesh size N_q (Gamma runs: 1).
+    """
     dw = (cell["fmax"] - cell.get("emin", 0.0)) / (cell["nfreq"] - 1)  # THz
     A_c = cross_section_area(Path(run_dir) / cell["tag_dir"] / "structure.xyz"
                              if cell.get("tag_dir") else
                              Path(cell["work"]) / "structure.xyz", cell["tdir"])
-    return (dw * 1e12 * HBAR_SI * THZ_TO_RAD) / (A_c * cell["dt"]), A_c, dw
+    n_q = int(np.prod(cell.get("nk", (1, 1)))) or 1
+    return (dw * 1e12 * HBAR_SI * THZ_TO_RAD) / (A_c * cell["dt"] * n_q), A_c, dw
 
 
 def summarize(run_dir, out_dir, do_plot):

@@ -305,7 +305,7 @@ if ranks.rank == 0:
     # Per-slab scattering energy absorption at the final iterate (computed
     # COLLECTIVELY above the rank-0 gate; written here): the block-resolved
     # bubble balance connecting adjacent interface heat currents by energy
-    # continuity (J_k - J_{k-1} = -P_abs(k) + eta term).
+    # continuity (J_k = J_{k-1} + P_abs(k) + eta term).
     if _slab_pa is not None:
         out["slab_absorption"] = np.asarray(_slab_pa)
     if _final_bal is not None:

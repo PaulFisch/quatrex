@@ -6,7 +6,7 @@ Checks the production MW transmission T(omega)=|I|/Delta n against ANALYTIC limi
   (2) acoustic plateau T_ball(omega->0) -> N_ac = 4 (armchair CNT: 2 flexural + LA + twist);
   (3) unitarity bound 0 <= T_ball <= N(omega) (the unbounded I/Delta n must not overshoot);
   (4) anharmonic bound T_anh(omega) <= T_ball(omega) (scattering only removes);
-  (5) quantised-conductance plateau hbar*omega*I(omega) -> N_ac * kB*dT/(2pi) as omega->0.
+  (5) quantised-conductance plateau hbar*omega*I(omega)/(kB*dT) -> N_ac as omega->0.
 
 Reads ONLY saved data:
   cnt33 eta=0:  phonon/scripts/out/prod/cnt33_eta0/L2_{ball,anh}.npz  (current_spectrum)
@@ -95,7 +95,7 @@ def main():
     print(f"max T_ball = {np.nanmax(Tb):.3f} = max N(w) = {N[m].max():d}")
     print(f"# bins T_ball > N(w)+0.5 (unitarity breach) = {over_uni}")
     print(f"# bins T_anh > T_ball     (gain, unphysical) = {over_anh}")
-    print(f"hbar*w*I plateau / (kB dT/2pi) -> {np.round(plateau,3)}  (-> N_ac=4)")
+    print(f"hbar*w*I plateau / (kB dT) -> {np.round(plateau,3)}  (-> N_ac=4)")
     print(f"G_anh/G_ball (lead) = "
           f"{float(da['lead_current'])/float(db['lead_current']):.3f}")
 

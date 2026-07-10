@@ -2,7 +2,7 @@
 
 Two panels (cnt33 L3): measured per-interface heat current (points; indices
 0/-1 are the lead Meir-Wingreen currents, interior are Hardy bond currents)
-vs the energy-continuity reconstruction J_0 - cumsum(P_abs) from the
+vs the energy-continuity reconstruction J_0 + cumsum(P_abs) from the
 per-slab scattering absorption (line). Left: eta=1e-12 conserving fixed
 point -- the reconstruction reproduces the interior profile exactly (the
 interior dip is the energy carried by the three-phonon interaction channel,

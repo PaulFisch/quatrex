@@ -876,7 +876,7 @@ class SCBA:
 
         the local (slab-k) energy sink of the 3-phonon self-energy. This is
         the term that connects adjacent interface heat currents by energy
-        continuity: J_{k,k+1} - J_{k-1,k} = -P_abs(k) up to the finite-eta
+        continuity: J_{k,k+1} = J_{k-1,k} + P_abs(k) up to the finite-eta
         ordering-commutator absorption, and telescoping over the device
         reproduces the global P_in - P_out (= the whole-device bubble
         balance, machine-zero for the conserving vertex). Same transpose
@@ -906,13 +906,12 @@ class SCBA:
             slab_r = np.searchsorted(offs, r, side="right") - 1
             slab_c = np.searchsorted(offs, c, side="right") - 1
             n_blocks = offs.size - 1
-            # Row-binned attribution (the full local trace Tr_k[Sigma G])
-            # and the block-DIAGONAL-only attribution (Sigma_kk G_kk): the
-            # off-diagonal Sigma_{k,k+-1} entries are the interaction-channel
-            # flow the RGF embedding current already routes THROUGH the
-            # interface -- the local sink of the partitioned current is the
-            # diagonal-only trace, the row-binned one double-counts the
-            # straddling flow (empirically distinguished on the film smoke).
+            # Row-binned attribution: the restricted trace Tr_k[Sigma G]
+            # of eq. P_abs (row of Sigma in slab k, all columns) -- the
+            # attribution verified to reconstruct the interior bond
+            # currents (conservation appendix). The block-DIAGONAL-only
+            # variant (Sigma_kk G_kk) is kept as an experimental
+            # alternative in slot [1].
             onehot = np.zeros((r.size, n_blocks))
             onehot[np.arange(r.size), slab_r] = 1.0
             onehot_diag = np.where((slab_r == slab_c)[:, None], onehot, 0.0)
@@ -937,7 +936,7 @@ class SCBA:
             comm.stack.all_reduce(np.ascontiguousarray(p_abs), recv, op="sum")
             p_abs = recv
         # (2, n_blocks): [0] = row-binned (sums to the global balance),
-        # [1] = block-diagonal-only (the partitioned-current local sink).
+        # [1] = block-diagonal-only (experimental alternative attribution).
         return p_abs
 
     def _phonon_heat_flow_conservation(self):

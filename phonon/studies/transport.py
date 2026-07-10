@@ -73,7 +73,7 @@ def matrix(study):
                           ring_threads=ring_threads))
         man.append(dict(tag=tag, system=system, sweep=sweep, t_mean=t_mean,
                         n_slabs=n_slabs, tdir=tdir, fmax=fmax, nfreq=nfreq,
-                        emin=emin, dt=dt))
+                        emin=emin, dt=dt, nk=list(nk)))
 
     # Parallelism: the 3-phonon bubble (~99% of a step) parallelises over its
     # omega batch via the ring_contract thread pool (QX_RING_THREADS) -- ~15-27x,
@@ -444,7 +444,9 @@ def lead_spectrum(npz):
     # sum any transverse-q axes -> (ne, n_int); average the two leads
     while spec.ndim > 2:
         spec = np.nansum(spec, axis=1)
-    lead = 0.5 * (np.abs(spec[:, 0]) + np.abs(spec[:, -1]))
+    # Signed hot-lead spectrum (eq. T_eff = J_L(w)/(n_L - n_R)); abs()
+    # would silently rectify negative (backscattered) bins.
+    lead = np.sign(np.nansum(spec[:, 0].real)) * spec[:, 0].real
     if freqs[0] < 1e-6:
         lead = lead.copy()
         lead[0] = 0.0  # omega=0 bin carries no heat; mask the DC artifact
@@ -565,7 +567,7 @@ def fig_cnt(rows):
 
 
 def fig_sinw(d5, d11):
-    """Overlay d5a + d11a: ballistic_vs_T_d5_d11, ballistic_vs_length_d5_d11."""
+    """Overlay d5a + d11a: prod_sinw_vs_T_d5_d11, prod_sinw_vs_length_d5_d11."""
     from phonon.studies import style
     import matplotlib.pyplot as plt
 
@@ -588,7 +590,7 @@ def fig_sinw(d5, d11):
         axg.set_xlabel("T (K)"); axg.set_ylabel(r"$G$ (W m$^{-2}$K$^{-1}$)")
         axg.set_title("SiNW (dashed ballistic, solid anharmonic)", fontsize=9); axg.legend()
         axr.set_xlabel("T (K)"); axr.set_ylabel(r"$G_{\rm anh}/G_{\rm ball}$"); axr.legend()
-        style.save(fig, "ballistic_vs_T_d5_d11", directory=DOC_FIG)
+        style.save(fig, "prod_sinw_vs_T_d5_d11", directory=DOC_FIG)
     plt.close(fig)
     # length
     fig, ax = style.figure(width=5.2, height=3.8)
@@ -603,13 +605,13 @@ def fig_sinw(d5, d11):
     if any_l:
         ax.set_xlabel("device length $L$ (cells)"); ax.set_ylabel(r"$G_{\rm anh}/G_{\rm ball}$")
         ax.legend(); ax.set_title("SiNW length ladder (production)", fontsize=9)
-        style.save(fig, "ballistic_vs_length_d5_d11", directory=DOC_FIG)
+        style.save(fig, "prod_sinw_vs_length_d5_d11", directory=DOC_FIG)
     plt.close(fig)
     print(f"  sinw figs: d5a={len(d5)} d11a={len(d11)} rows")
 
 
 def fig_film(rows):
-    """si_film_vs_guo: G vs thickness with the Guo reference points."""
+    """prod_si_film_vs_guo: G vs thickness with the Guo reference points."""
     from phonon.studies import style
     import matplotlib.pyplot as plt
 
@@ -621,14 +623,15 @@ def fig_film(rows):
     # 1 unit cell = 5.4018 A; thickness(nm) = n_slabs * 0.54018 (1 slab = 1 uc here)
     nm = [r["n_slabs"] * 0.54018 for r in th]
     fig, ax = style.figure(width=5.6, height=4.0)
-    ax.plot(nm, [r["G_ball_W_per_m2_K"] for r in th], "o-", color="C0", label=r"$G_{\rm ball}$ (prod)")
-    ax.plot(nm, [r["G_anh_W_per_m2_K"] for r in th], "s-", color="C1", label=r"$G_{\rm anh}$ (prod)")
+    # Production values are W/m^2/K; the Guo literals are MW/m^2/K.
+    ax.plot(nm, [r["G_ball_W_per_m2_K"] * 1e-6 for r in th], "o-", color="C0", label=r"$G_{\rm ball}$ (prod)")
+    ax.plot(nm, [r["G_anh_W_per_m2_K"] * 1e-6 for r in th], "s-", color="C1", label=r"$G_{\rm anh}$ (prod)")
     # Guo et al. PRB 102 195412 (2020) anharmonic reference points
     ax.plot([3 * 0.54018, 5 * 0.54018], [939.72, 890.97], "D", color="k",
             ms=7, label="Guo 2020 $G_{\\rm anh}$")
-    ax.set_xlabel("film thickness (nm)"); ax.set_ylabel(r"$G$ (MW m$^{-2}$K$^{-1}$ scale)")
+    ax.set_xlabel("film thickness (nm)"); ax.set_ylabel(r"$G$ (MW m$^{-2}$K$^{-1}$)")
     ax.legend(); ax.set_title("Si film cross-plane conductance vs Guo 2020", fontsize=9)
-    style.save(fig, "si_film_vs_guo", directory=DOC_FIG); plt.close(fig)
+    style.save(fig, "prod_si_film_vs_guo", directory=DOC_FIG); plt.close(fig)
     print(f"  film fig: {len(th)} thickness rows")
 
 

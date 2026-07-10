@@ -154,7 +154,7 @@ def fig_ir_plateau():
     a.legend(fontsize=7, loc="upper left")
 
     a = ax[1]
-    # quantised units: hbar*w*I / (kB*dT/2pi) -> the ballistic plateau is
+    # quantised units: hbar*w*I / (kB*dT) -> the ballistic plateau is
     # EXACTLY N_ac (the quantum of thermal conductance per channel).
     dT = float(db["t_left"]) - float(db["t_right"])
     q = HBAR * (w * 1e12 * 2 * np.pi) / (2 * np.pi) / (KB * dT / (2 * np.pi))

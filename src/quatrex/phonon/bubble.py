@@ -24,6 +24,31 @@ _RING_POOL = ThreadPoolExecutor(max_workers=_RING_THREADS) if _RING_THREADS > 1 
 _RING_MIN_W = int(os.environ.get("QUATREX_PHPH_RING_MIN_W", "48"))
 
 
+def configure_ring_pool(threads: int = 0, min_w: int | None = None) -> None:
+    """Reconfigure the omega/tau thread pool (config-driven; the env vars
+    QUATREX_PHPH_RING_THREADS / _MIN_W remain the initial defaults).
+
+    threads = 0 leaves the pool unchanged. Results are bit-identical for
+    any pool width (the per-w GEMMs are independent).
+    """
+    global _RING_THREADS, _RING_POOL, _RING_MIN_W
+    if threads > 0 and threads != _RING_THREADS:
+        if _RING_POOL is not None:
+            _RING_POOL.shutdown(wait=True)
+        _RING_THREADS = int(threads)
+        _RING_POOL = (
+            ThreadPoolExecutor(max_workers=_RING_THREADS)
+            if _RING_THREADS > 1 else None
+        )
+    if min_w is not None:
+        _RING_MIN_W = int(min_w)
+
+
+def ring_pool() -> tuple[ThreadPoolExecutor | None, int]:
+    """Current (pool, width) -- read at call time, not import time."""
+    return _RING_POOL, _RING_THREADS
+
+
 def bubble_dense(
     *,
     phi_left,

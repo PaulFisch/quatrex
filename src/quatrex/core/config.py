@@ -1166,22 +1166,22 @@ class PhononConfig(BaseModel):
     obc: OBCConfig = OBCConfig()
     lyapunov: LyapunovConfig = LyapunovConfig()
 
-    eta_obc: NonNegativeFloat = 0  # eV
-    eta: NonNegativeFloat = 1e-12  # eV
+    eta_obc: NonNegativeFloat = 0  # THz^2 (constant imaginary OBC shift)
+    eta: NonNegativeFloat = 1e-12  # THz (frequency-linear damping 2*eta*|omega|)
     eta_ramp_iterations: NonNegativeInt = 0
     """Anneal the broadening DOWN over the first N SCBA iterations: the solver's
     eta goes linearly from ``eta`` (iteration 0, while Sigma^R is still ~0) to
     ``eta_final`` by iteration N, then stays at ``eta_final``. Lets the anharmonic
     Sigma^R take over the broadening as it develops (the eta=0 limit). 0 = off
     (constant eta)."""
-    eta_final: NonNegativeFloat = 0.0  # eV: target broadening at the end of the ramp
+    eta_final: NonNegativeFloat = 0.0  # THz: target broadening at the end of the ramp
     eta_obc_ramp_iterations: NonNegativeInt = 0
     """Anneal the CONTACT broadening ``eta_obc`` DOWN over the first N SCBA iterations:
     eta_obc goes linearly from ``eta_obc`` (iteration 0, large enough to converge the
     cell cold) to ``eta_obc_final`` by iteration N, then holds. The MPI-compatible
     in-run analogue of the eta_obc warm-start chain for the eta=0 fixed point on longer
     cells (warm-start files are single-rank only). 0 = off (constant eta_obc)."""
-    eta_obc_final: NonNegativeFloat = 0.0  # target contact broadening at ramp end
+    eta_obc_final: NonNegativeFloat = 0.0  # THz^2: target contact broadening at ramp end
 
     model: Literal["pseudo-scattering", "negf"] = "pseudo-scattering"
     phonon_energy: NonNegativeFloat | None = None
@@ -1432,6 +1432,15 @@ class PhononConfig(BaseModel):
     """Gentle SCBA mixing factor applied to the |omega| < ``low_freq_mixing_thz``
     bins (see there). Small (~0.01-0.03) to damp the IR marginal mode; the rest
     of the spectrum keeps ``scba.mixing_factor``."""
+
+    sse_ring_threads: NonNegativeInt = 0
+    """Width of the omega/tau ring-contraction thread pool (bit-identical
+    results for any width). 0 = keep the QUATREX_PHPH_RING_THREADS env
+    default (1)."""
+
+    sse_ring_min_w: PositiveInt | None = None
+    """Minimum omega/tau batch per pool split; None = keep the
+    QUATREX_PHPH_RING_MIN_W env default (48)."""
 
     sse_ramp_iterations: NonNegativeInt = 0
     """Adiabatic switch-on of the 3-phonon bubble: scale the scattering
