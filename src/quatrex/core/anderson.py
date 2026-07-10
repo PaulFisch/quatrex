@@ -11,12 +11,9 @@ SIAM J. Numer. Anal. 49, 1715 (2011), Alg. AA / Eq. (3.1):
 
 where dX/dF hold the differences of the last ``m`` iterates/residuals
 and ``beta`` is the damping (mixing) factor. With an empty history this
-is exactly damped fixed-point iteration -- Anderson(0) in the language
-of Toth & Kelley, SIAM J. Numer. Anal. 53, 805 (2015), whose analysis
-guarantees local r-linear convergence on a contraction provided the
-least-squares coefficients stay bounded. No further safeguards are
-applied; ``numpy.linalg.lstsq`` resolves a (near-)rank-deficient history
-through its SVD cutoff.
+is exactly damped fixed-point iteration (Anderson(0)). No further
+safeguards are applied; ``numpy.linalg.lstsq`` resolves a
+(near-)rank-deficient history through its SVD cutoff.
 """
 
 import numpy as np
@@ -31,13 +28,12 @@ class RREMixer:
         s = sum_i gamma_i x_i ,   sum_i gamma_i = 1
     of the last ``cycle`` iterates that MINIMISES the residual combination
     ``|| sum_i gamma_i f_i ||`` (f_i = g(x_i) - x_i). This is RRE / minimal-
-    polynomial extrapolation (Sidi, *Vector Extrapolation Methods*, 2017): an
-    ALGEBRAIC extrapolation that locates an UNSTABLE fixed point which damped /
-    Picard / Anderson iteration cannot reach (Jacobian |lambda| > 1) -- the
-    cnt33 eta=0 band-edge optical mode on the longer cells. Damped Picard builds
-    the short sequence; every ``cycle`` steps it extrapolates and RESTARTS from
-    ``s`` (the restart breaks the complex-mode limit cycle that defeats windowed
-    Anderson, which the deep-Anderson sweep confirmed plateaus at ~0.08).
+    polynomial extrapolation: an ALGEBRAIC extrapolation that can locate an
+    UNSTABLE fixed point (Jacobian |lambda| > 1) which damped / Picard /
+    Anderson iteration cannot reach. Damped Picard builds the short
+    sequence; every ``cycle`` steps it extrapolates and RESTARTS from ``s``
+    (the restart breaks the complex-mode limit cycle that defeats windowed
+    Anderson).
 
     Real coefficients (the SCBA map is real on the complex Sigma): gamma from the
     real Gram ``Re(F^H F)``. Under MPI the Sigma is row-partitioned across ranks,
@@ -99,24 +95,19 @@ class AndersonMixer:
                  restart: int = 0, ridge: float = 0.0) -> None:
         self.depth = int(depth)
         self.beta = float(beta)
-        # Periodic-Pulay / alternating-Anderson stride (Banerjee, Suryanarayana &
-        # Pask, Chem. Phys. Lett. 647, 31 (2016)): extrapolate only every
-        # `period`-th step, plain damped linear mixing in between (history still
-        # accumulated). The damped steps stop the accelerator from locking onto a
-        # near-unit-modulus Jacobian eigenvector and limit-cycling -- the failure
-        # mode of plain Anderson/DIIS on a marginal/soft mode (the d5a soft-twist
-        # plateau at ~1e-3). period=1 reproduces ordinary Anderson(m).
+        # Periodic-Pulay / alternating-Anderson stride: extrapolate only every
+        # `period`-th step, plain damped linear mixing in between (history
+        # still accumulated). The damped steps stop the accelerator from
+        # locking onto a near-unit-modulus Jacobian eigenvector and
+        # limit-cycling. period=1 reproduces ordinary Anderson(m).
         self.period = max(1, int(period))
-        # `restart`: periodically forget the history (every `restart` steps) so the
-        # accelerator cannot lock into a limit cycle on a marginal (Jacobian
-        # eigenvalue ~1) mode -- the cnt33 eta=0 causal-Sigma^R band-edge mode,
-        # where periodic Pulay alone still oscillates (resid 0.05<->0.49). The
-        # canonical DIIS escape (Pratapa & Suryanarayana 2015; Walker & Ni 2011
-        # restarting). 0 = never restart.
+        # `restart`: periodically forget the history (every `restart` steps)
+        # so the accelerator cannot lock into a limit cycle on a marginal
+        # (Jacobian eigenvalue ~1) mode. 0 = never restart.
         self.restart = int(restart)
         # `ridge`: scale-relative Tikhonov regularisation of the least-squares
         # coefficients, suppressing the blow-ups from a near-rank-deficient
-        # history (the source of the overshoot spikes). 0 = plain lstsq (SVD).
+        # history. 0 = plain lstsq (SVD).
         self.ridge = float(ridge)
         self._x_prev: np.ndarray | None = None
         self._f_prev: np.ndarray | None = None

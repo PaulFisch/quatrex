@@ -1,11 +1,10 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 """Recursive Projection Method (RPM) for the iteration-unstable SCBA fixed point.
 
-Shroff & Keller, SIAM J. Numer. Anal. 30, 1099 (1993): a fixed-point iteration
-``x <- g(x)`` that diverges/limit-cycles because a FEW eigenvalues of the map
-Jacobian ``G' = dg/dx`` have ``|lambda| >= 1`` is stabilised by performing NEWTON
-on the small unstable invariant subspace ``P = ZZ^H`` and ordinary PICARD on the
-contractive complement ``Q = I - P``:
+A fixed-point iteration ``x <- g(x)`` that diverges/limit-cycles because a
+FEW eigenvalues of the map Jacobian ``G' = dg/dx`` have ``|lambda| >= 1`` is
+stabilised by performing NEWTON on the small unstable invariant subspace
+``P = ZZ^H`` and ordinary PICARD on the contractive complement ``Q = I - P``:
 
     x_{n+1} = g(x) + Z (I_k - H)^{-1} Z^H (x - g(x))
             = g(x) - Z (I_k - H)^{-1} (Z^H f),     f = g(x) - x,
@@ -17,21 +16,21 @@ multiplies ``f`` so the true fixed point (``f = 0``) is exactly preserved.
 condition that makes the full ``I - G'`` invertible -- and it is a TINY k x k
 solve done replicated on every rank.
 
-This is the targeted backstop to :class:`quatrex.core.broyden.BroydenMixer`: where
-Broyden builds the inverse-Jacobian action implicitly from a rolling secant
-window, RPM holds the unstable directions in an explicit, persistently
-re-identified subspace -- more robust when a complex band-edge pair sits on the
-unit circle (the cnt33 eta=0 instability) and the secant window proves too
+Where :class:`quatrex.core.broyden.BroydenMixer` builds the inverse-Jacobian
+action implicitly from a rolling secant window, RPM holds the unstable
+directions in an explicit, persistently re-identified subspace -- more robust
+when a complex pair sits on the unit circle and the secant window proves too
 forgetful.
 
-Identification (matrix-free, no extra map evaluations). The unstable directions
-are the increment directions that DO NOT contract under Picard. We keep a sliding
-buffer of increments ``dX = x_i - x_{i-1}`` and ``dG = g(x_i) - g(x_{i-1}) ~
-G' dX`` and, each step past the warm-up, extract ``Z`` from the leading singular
-vectors of the GLOBAL Gram ``dX^H dX`` (DMD on the increment buffer). A rotating
-complex pair appears as TWO comparable singular values, so a sigma-threshold
-keeps the conjugate pair automatically (the 2x2 ``H`` then carries the rotation).
-``H`` is the projected-secant fit ``Z^H dG = H (Z^H dX)``.
+Identification (matrix-free, no extra map evaluations). The unstable
+directions are the increment directions that do not contract under Picard. A
+sliding buffer of increments ``dX = x_i - x_{i-1}`` and ``dG = g(x_i) -
+g(x_{i-1}) ~ G' dX`` is kept and, each step past the warm-up, ``Z`` is
+extracted from the leading singular vectors of the GLOBAL Gram ``dX^H dX``
+(DMD on the increment buffer). A rotating complex pair appears as TWO
+comparable singular values, so a sigma-threshold keeps the conjugate pair
+automatically (the 2x2 ``H`` then carries the rotation). ``H`` is the
+projected-secant fit ``Z^H dG = H (Z^H dX)``.
 
 MPI. The iterate is ROW-PARTITIONED across ranks (disjoint slices, concatenation
 over ``MPI.COMM_WORLD`` = the global vector). Every quantity that contracts the
@@ -62,8 +61,8 @@ class RPMMixer:
     ----------
     max_subspace : int
         Cap on the unstable-subspace dimension ``k`` (Newton on ``k`` modes,
-        Picard on the complement). The cnt33 instability is one complex pair so
-        the effective ``k`` is ~2; 6 leaves margin.
+        Picard on the complement). A single complex pair needs ``k = 2``;
+        6 leaves margin.
     beta : float
         Damping of the Picard step (warm-up and the ``k = 0`` / fallback paths).
     ridge : float
@@ -129,15 +128,13 @@ class RPMMixer:
         if self._it <= self.warmup or len(self._dx) < 2:
             return x + self.beta * f
 
-        # STALL GATE. Only engage the Newton correction when plain Picard has
-        # PLATEAUED. While the residual keeps shrinking (a contractive cell, or
-        # the early descent of any cell) Picard is doing the right thing and the
-        # DMD H-estimate from the still-moving iterate is unreliable -- a blind
-        # Newton there hallucinates "unstable" modes (we saw |lambda(H)|~2.9,
-        # n_unstable=4 on the contractive L4) and kicks the residual back up.
-        # Newton is needed ONLY for a mode that DEFEATS Picard (|lambda|>1, the
-        # L6 band-edge), whose signature is exactly a stalled/limit-cycling
-        # residual -- and that is also where the increment buffer is cleanest.
+        # STALL GATE: only engage the Newton correction when plain Picard has
+        # PLATEAUED. While the residual keeps shrinking, Picard is doing the
+        # right thing and the DMD H-estimate from the still-moving iterate is
+        # unreliable (a blind Newton there hallucinates "unstable" modes).
+        # Newton is needed ONLY for a mode that DEFEATS Picard (|lambda|>1),
+        # whose signature is exactly a stalled/limit-cycling residual -- and
+        # that is also where the increment buffer is cleanest.
         if self.patience > 0:
             if len(self._fhist) <= self.patience:
                 # Not enough residual history to demonstrate a plateau --
@@ -171,15 +168,15 @@ class RPMMixer:
             Bhat = self._gram(Z, dG)          # (k, p)
             H = Bhat @ np.linalg.pinv(Ahat, rcond=1e-10)   # (k, k)
             Zf = self._gram(Z, f.reshape(-1, 1))[:, 0]     # (k,) global Z^H f
-            # SAFEGUARDED MODAL NEWTON. The eta=0 map has a near-marginal mode
-            # (lambda ~ 1, F'=I-G' near-singular) on which a blind Newton blows up
-            # but plain Picard converges (slowly) -- this is why linear works on
-            # L3/L4 and Broyden/Anderson plateau. So Newton ONLY on the genuinely
-            # UNSTABLE modes (|lambda(H)| > 1 + margin), Picard on the rest. In the
-            # eigenbasis H = W diag(lam) W^{-1}, the RPM correction
-            # (I_k-H)^{-1}-I_k has eigenvalues phi(lam)=lam/(1-lam); we zero it on
-            # contractive/marginal modes and cap |phi| (the trust region then caps
-            # the assembled step).
+            # SAFEGUARDED MODAL NEWTON: the map can have a near-marginal mode
+            # (lambda ~ 1, I - G' near-singular) on which a blind Newton
+            # blows up but plain Picard converges (slowly). So Newton ONLY on
+            # the genuinely UNSTABLE modes (|lambda(H)| > 1 + margin), Picard
+            # on the rest. In the eigenbasis H = W diag(lam) W^{-1}, the RPM
+            # correction (I_k-H)^{-1}-I_k has eigenvalues
+            # phi(lam) = lam/(1-lam); it is zeroed on contractive/marginal
+            # modes and |phi| is capped (the trust region then caps the
+            # assembled step).
             try:
                 lam, W = np.linalg.eig(H)
                 Winv = np.linalg.inv(W)

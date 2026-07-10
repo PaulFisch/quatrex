@@ -132,8 +132,14 @@ class ElectronSolver(SubsystemSolver):
 
         # Contacts.
         self.flatband = config.electron.flatband
-        if self.flatband and comm.rank == 0:
-            print("Flatband conditions detected", flush=True)
+        if self.flatband:
+            # Fail fast: the flatband homogenization
+            # (qttools.toeplitz.homogenize) is not implemented, and the
+            # solve would otherwise crash mid-run at the first call.
+            raise NotImplementedError(
+                "electron.flatband = true requires the (unimplemented) "
+                "system-matrix homogenization; disable flatband."
+            )
 
         self.compute_meir_wingreen_current = config.electron.solver.compute_current
 

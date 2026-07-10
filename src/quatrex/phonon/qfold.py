@@ -11,8 +11,8 @@ A transversely-periodic film couples the transverse momenta in the
 The q-folded device vertex ``Phi(q1, q2)`` (transverse Bloch phases on
 the two contracted legs) does not depend on G, so it is built once,
 offline, by the input builder (reusing ``phonon.solver.se_q``) and
-stored here. The production self-energy then only reads arrays
-
+stored here. The production self-energy then only reads the stored
+arrays.
 """
 
 from __future__ import annotations

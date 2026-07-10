@@ -10,13 +10,12 @@ folded device vertex factorised per leg (see ``quatrex.phonon.vertex_factors``),
 
 the dense ring  S[w,a,j] = conj(PhiL)[a,c,e] Ga[w,c,b] Gb[w,e,d] PhiR[j,d,b]
 (with PhiL = Phi~(q',q2)[(I,K1,K2)], PhiR = Phi~(q2,q')[(J,K2p,K1p)] and the
-audited LEFT-vertex conjugation, sse_phonon_phonon.py:906-930) collapses
-exactly to
+LEFT-vertex conjugation of the dense path) collapses exactly to
 
-    S[w] = Dt @ ( P_a[w] * P_b[w] ) @ Dt.T,        Dt = D · diag(lam)
+    S[w] = Dt @ ( P_a[w] * P_b[w] ) @ Dt.T,        Dt = D @ diag(lam)
 
-    P_a[w,r,s] = conj(UB[K1-I][q'])^T · Ga[w,q'] · UC[K1p-J][q']     (a-line)
-    P_b[w,r,s] = conj(UC[K2-I][q2])^T · Gb[w,q2] · UB[K2p-J][q2]     (b-line)
+    P_a[w,r,s] = conj(UB[K1-I][q'])^T @ Ga[w,q'] @ UC[K1p-J][q']     (a-line)
+    P_b[w,r,s] = conj(UC[K2-I][q2])^T @ Gb[w,q2] @ UB[K2p-J][q2]     (b-line)
 
 i.e. one skinny Gram per (g-variant, band link, row/col transport offsets,
 momentum) instead of one BS^3 triple-GEMM per (vertex pair, quad). The row
@@ -26,9 +25,8 @@ same gl/gg/glr/ggr buffers as the dense path; the bosonic fold, DC-zeroing
 and masks are inherited upstream and NOT re-derived here.
 
 The q'-convolution H[iq_ext] = sum_iqp P_a[iqp] * P_b[q_diff_map[iq_ext,iqp]]
-is evaluated as a vectorised gather + reduction over stacked-in-q Gram tables
-(the explicit-sum reference path; a per-(r,s) transverse FFT is a future hook
-for nk >= 13).
+is evaluated as a vectorised gather + reduction over stacked-in-q Gram
+tables.
 
 For the S2-symmetric INDSCAL ansatz UB is UC, so the a/b-line leg roles
 coincide and one Gram table serves both lines. For the CP fallback the roles

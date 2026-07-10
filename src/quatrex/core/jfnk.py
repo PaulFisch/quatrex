@@ -2,13 +2,11 @@
 """Jacobian-free Newton-Krylov (JFNK) for the STRONGLY-unstable SCBA fixed point.
 
 The anharmonic-phonon SCBA is one fixed-point map ``Sigma = F[Sigma] = B[G[Sigma]]``.
-On gapped wires with sharp, weakly-damped resonances (the SiNW d5a Si-H bending
-band, anharmonic linewidth ``Gamma_anh ~ 0.1-0.6 THz``) the eta=0 map Jacobian
-``J_F = dF/dSigma`` has a SMALL number of eigenvalues with ``|lambda| >> 1``
-(measured ``|lambda| = 28`` at nf181, ``200`` at nf361, ``n_unstable = 3-5``), so
-every contraction-based scheme -- Picard, Anderson, RRE -- diverges, and the
-DMD-subspace Newton (:class:`quatrex.core.rpm.RPMMixer`) also fails because it must
-explicitly identify that rank-noisy, high-``|lambda|`` outlier subspace.
+When the map Jacobian ``J_F = dF/dSigma`` has a SMALL number of eigenvalues
+with ``|lambda| >> 1``, every contraction-based scheme -- Picard, Anderson,
+RRE -- diverges, and the DMD-subspace Newton
+(:class:`quatrex.core.rpm.RPMMixer`) also fails because it must explicitly
+identify that rank-noisy, high-``|lambda|`` outlier subspace.
 
 JFNK never identifies the unstable subspace. It applies NEWTON to the residual
 ``R(Sigma) = F[Sigma] - Sigma`` -- ``J delta = -R`` with ``J = J_F - I`` -- and
@@ -19,9 +17,8 @@ formed matrix-free by a finite difference of the map::
 
 The Jacobian spectrum here is ideal for GMRES: a tight cluster near ``-1`` (the
 contractive bulk ``|lambda(J_F)| < 1`` -> ``lambda(J) ~ -1``) plus a few large
-real/complex outliers (``lambda(J) ~ 27..199``). GMRES converges in roughly
-``n_outliers`` + a few iterations regardless of how large the outliers are -- the
-exact regime where the subspace-tracking RPM struggles.
+real/complex outliers. GMRES converges in roughly ``n_outliers`` + a few
+iterations regardless of how large the outliers are.
 
 Real embedding (correctness). ``F`` is NOT complex-analytic in ``Sigma`` -- it
 conjugates (``Sigma^R`` via Kramers-Kronig/Hilbert, ``G^A = (G^R)^H``, the bubble
@@ -36,7 +33,7 @@ STATE MACHINE that emits exactly one next-iterate per call and carries the
 GMRES/Newton state across iterations:
 
   * ``warmup``  : a few damped-Picard steps to fall into the fixed point's basin
-                  (the unstable modes have not yet blown up in the first ~10 its).
+                  (the unstable modes have not yet blown up early on).
   * ``arnoldi`` : each call consumes ``F[x_k + eps v_j]`` to form ``J v_j``, takes
                   one Arnoldi/Givens step, and emits the next probe
                   ``x_k + eps v_{j+1}`` -- until the GMRES residual meets the
@@ -113,18 +110,17 @@ class JFNKMixer:
         self.max_newton = int(max_newton)
         self.eps = float(eps)
         self.trust = float(trust)
-        # The radius is allowed to GROW from the (small, safe) initial ``trust``
-        # up to ``trust_max`` as the residual descends -- the cure for the d5a
-        # marginal-mode crawl where the Newton step sits pinned at a fixed,
-        # too-small trust boundary. ``trust_max <= trust`` => no growth (legacy).
+        # The radius is allowed to GROW from the (small, safe) initial
+        # ``trust`` up to ``trust_max`` as the residual descends.
+        # ``trust_max <= trust`` => no growth.
         self.trust_max = max(float(trust_max), float(trust))
         self.newton_damp = float(newton_damp)
         # Pseudo-transient continuation / Levenberg-Marquardt shift: solve
-        # (J + mu I) delta = -R instead of J delta = -R, with mu annealed to 0 as
-        # the outer residual falls (switched-evolution-relaxation,
-        # mu_k = ptc * ||R_k||/||R_0||). The shift lifts the near-zero (marginal,
-        # Gamma_anh ~ dw) eigenvalues of J off the origin so GMRES no longer
-        # stalls on the near-null-space; -> 0 at the root recovers pure Newton.
+        # (J + mu I) delta = -R instead of J delta = -R, with mu annealed to
+        # 0 as the outer residual falls (mu_k = ptc * ||R_k||/||R_0||). The
+        # shift lifts the near-zero (marginal) eigenvalues of J off the
+        # origin so GMRES no longer stalls on the near-null-space; -> 0 at
+        # the root recovers pure Newton.
         self.ptc = float(ptc)
         self._mu = 0.0
         self.verbose = bool(verbose)
@@ -209,12 +205,9 @@ class JFNKMixer:
             self._R0_norm = rk
 
         # Trust-region adaptation from the previous Newton step's progress.
-        # Asymmetric, with hysteresis: shrink HARD on any worsening (overshoot of
-        # the unstable mode), but GROW on any solid monotone descent -- not only on
-        # a halving -- up to ``trust_max``. The d5a saddle descends ~10-15% per
-        # Newton step (rk ~ 0.85 Rprev), so the legacy "rk < 0.5 Rprev" gate never
-        # fired and the radius stayed pinned at the small initial value, capping
-        # every step at the trust boundary and stalling the descent.
+        # Asymmetric, with hysteresis: shrink HARD on any worsening
+        # (overshoot of the unstable mode), but GROW on any solid monotone
+        # descent up to ``trust_max``.
         if self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
                 self._trust_k = max(self._trust_k * 0.5, 1e-3)

@@ -141,7 +141,7 @@ def ring_contract(phi_left, phi_right, Ga_fft, Gb_fft, *, xp=None):
 
     Operates on already-transformed Green's functions Ga_fft on the
     (c, b) = (K1, K1') link and Gb_fft on the (e, d) = (K2, K2') link, each
-    shaped (w, bK, bK') with w the leading (frequency/τ) batch axis. Returns
+    shaped (w, bK, bK') with w the leading (frequency/tau) batch axis. Returns
     ``S_hat`` shaped (w, nI, nJ).
 
     When ``QUATREX_PHPH_RING_THREADS>1`` and on the CPU (numpy) backend, the
@@ -180,26 +180,20 @@ def _ring_contract_serial(phi_left, phi_right, Ga_fft, Gb_fft, xp):
     return ring_contract_pre(PL, PR, nI, bK2, nJ, Ga_fft, Gb_fft, xp)
 
 
-# NOTE: an earlier "quad-batched / w-folded" rewrite (bubble_contract_batched)
-# and an einsum variant (bubble_ij_einsum) were removed after direct
-# benchmarking on this node: gemm-batching the ring is a DEAD END. Single-core
-# it is bit-identical and the SAME speed (~22 GF/s) as the per-ring loop below;
-# under the omega/tau thread pool it is ~10x SLOWER and does not scale, because
-# materialising every ring's BS^3 intermediate at once blows the cache and turns
-# the kernel memory-bound. The per-ring loop (ring_contract / ring_contract_pre)
-# keeps each chunk's intermediate in cache and scales ~56x to 64 threads. The
-# real throughput lever is the POOL WIDTH (QUATREX_PHPH_RING_THREADS), not the
-# kernel shape -- do not reintroduce batching here.
+# NOTE: gemm-batching the ring (materialising every ring's BS^3 intermediate
+# at once) turns the kernel memory-bound and defeats the omega/tau thread
+# pool; the throughput lever is the pool width (QUATREX_PHPH_RING_THREADS),
+# not the kernel shape.
 
 
 def phi_perms(phi_left, phi_right, xp):
     """Pre-permute the (fixed) phi factors for :func:`ring_contract_pre`.
 
-    The phi permutes PL, PR are w-INDEPENDENT and the FC3 vertex is constant
-    across SCBA iterations, so they are computed ONCE and reused -- removing
+    The phi permutes PL, PR are w-independent and the FC3 vertex is constant
+    across SCBA iterations, so they are computed once and reused -- removing
     the per-call ``ascontiguousarray`` transpose copies that dominate the
-    bubble on small-block systems (the cnt33 36-DOF blocks: ~80 s/iter ->
-    a fraction). Returns ``(PL, PR, nI, bK2)`` for the contraction.
+    bubble on small-block systems. Returns ``(PL, PR, nI, bK2, nJ)`` for the
+    contraction.
     """
     nI, bK1, bK2 = phi_left.shape
     nJ = phi_right.shape[0]

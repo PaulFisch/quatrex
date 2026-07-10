@@ -162,14 +162,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # Kernel choice for consuming the factors:
             #   "reconstruct" (default): materialise the RANK-LOCAL slice of
             #     the dense q-folded dict from the factors once at first
-            #     compute (the vertex is fixed) and run the dense path at
-            #     full speed. The factored win here is MEMORY + build time
-            #     (~MBs vs the GB-scale replicated qfold dict), not flops.
+            #     compute (the vertex is fixed) and run the dense path; the
+            #     factored win is MEMORY + build time, not flops.
             #   "gram": the skinny-Gram contraction (bubble_factored) --
-            #     fewer flops than dense only while R^2 < ~3*b^4, i.e. small
-            #     R or LARGE blocks; on small-block films it is memory-bound
-            #     in R^2 and loses to dense beyond R ~ 16 (2026-07-02
-            #     micro-benchmark, phonon/studies/_bench_factored_sse.py).
+            #     fewer flops than dense only at small rank or large block
+            #     sizes (memory-bound in R^2 on small-block systems).
             self._vf_kernel = str(getattr(
                 config.phonon, "decomposed_kernel", "reconstruct"))
             if self._vf_kernel not in ("gram", "reconstruct"):
@@ -377,7 +374,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # Dense device FC3 in the tadpole mass-weighting
         self._fc3_dev_mw = device_fc3_mass_weighted(
             self.phi_blocks, n_blocks, n_dof)
-        # Dense device dynamical matrix D (THz²), omega-independent.
+        # Dense device dynamical matrix D (THz^2), omega-independent.
         D = np.zeros((N_D, N_D), dtype=float)
         for I in range(n_blocks):
             for J in range(max(0, I - 1), min(n_blocks, I + 2)):
@@ -474,7 +471,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         2. g(tau) nnz->stack so each comm.stack rank owns a
            tau-slice of the full band, block-accessible
         3. the off-diagonal ring contraction per tau-slice in stack
-        4. sgima(tau) stack->nnz
+        4. sigma(tau) stack->nnz
         5. sigma(tau)->Sigma(omega) by IFFT in nnz
 
         Parameters
@@ -589,29 +586,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._diag_full_freqs = np.abs(np.asarray(full_freqs).real)
         gtl.data[:] = self._fft_pad(gl_in, n_fft)
         gtg.data[:] = self._fft_pad(gg_in, n_fft)
-        # DFT index-reversal rev(X)[l]=X[(-l) mod n_fft] of the FFT'd G, for
-        # the absorption (negative-omega') terms. The exact bosonic
+        # Build the reversed (absorption) legs: DFT index-reversal
+        # rev(X)[l] = X[(-l) mod n_fft] of the FFT'd G. The exact bosonic
         # continuation carries the ji-TRANSPOSE (and -q for coupled-q):
         #     G^<_ij(q, -w) = G^>_ji(-q, w).
-        # The no-transpose shortcut is exact only for the EQUILIBRIUM
-        # (complex-symmetric) part of G; the current-carrying asymmetry of
-        # the nonequilibrium G^< (~2% on cnt33 at dT=10 K) was previously
-        # folded without it, breaking the Phi-derivable energy balance of
-        # the bubble at ~1e-5 (see SCBA._phonon_bubble_energy_balance).
-        # Build the reversed (absorption) legs. The q-negation (middle axes) and
-        # the FFT + tau reversal (axis 0) are state-independent and done here in
-        # the nnz state; the ji-TRANSPOSE (nnz/last axis) is applied AFTER the
-        # nnz->stack dtranspose below, where the FULL nnz pattern is local on
-        # every rank. The transpose (axis -1) commutes with the FFT/reversal
-        # (axis 0) and q-negation (middle axes), so this is EXACTLY the serial
-        # fold G^<_ij(q,-w)=G^>_ji(-q,w) -- now at ANY nranks (block_comm=1),
-        # not just nranks=1. The old code applied the transpose in the nnz state
-        # (nnz split over comm.stack -> partner non-local) and silently fell back
-        # to the no-transpose equilibrium continuation, breaking the
-        # Phi-derivable energy balance (~1e-5) for every multi-rank run.
-        # Reuse the already-FFT'd decay legs: the q-negation (middle axes)
-        # commutes element-exactly with the axis-0 FFT, so no second FFT of
-        # the reversed source is needed.
+        # NOTE: the no-transpose shortcut is exact only for the EQUILIBRIUM
+        # (complex-symmetric) part of G; skipping the transpose breaks the
+        # Phi-derivable energy balance of the bubble off equilibrium
+        # (see SCBA._phonon_bubble_energy_balance).
+        # The q-negation (middle axes) and the FFT + tau reversal (axis 0)
+        # are state-independent and done here in the nnz state; the
+        # ji-transpose (nnz/last axis) is applied AFTER the nnz->stack
+        # dtranspose below, where the FULL nnz pattern is local on every
+        # rank. The transpose commutes with the FFT/reversal (axis 0) and
+        # the q-negation (middle axes), so this is exactly the serial fold
+        # at any rank count. The q-negation also commutes with the axis-0
+        # FFT, so the already-FFT'd decay legs are reused without a second
+        # FFT of the reversed source.
         Xl, Xg = gtl.data, gtg.data
         if nq > 1:
             # negate the transverse momentum axes (Gamma-centered IDFT
@@ -682,16 +673,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 ggr_blk[(K, Kp)] = halo_gr[(K, Kp)]
 
         # The full bubble folds the negative-omega contribution
-        # into the one-sided grid via G^<(-ω)=G^>(ω): for each ring quad
+        # into the one-sided grid via G^<(-omega)=G^>(omega): per ring quad
         #   Sigma^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
         #   Sigma^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
-        # Serial ring contraction (single-thread BLAS); the omega/tau batch is
-        # parallelised ONCE over the whole (I,J)/phi-pair loop below, not per
-        # call, so the worker threads stay busy across the whole contraction
-        # instead of idling on the GIL-held Python between 100s of short calls.
-        # Pre-permute the (fixed) phi factors once: per (I,J) a list of
-        # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ). Removes the per-call transpose copy
-        # that dominates the bubble on small-block systems.
+        # The omega/tau batch is parallelised ONCE over the whole
+        # (I,J)/phi-pair loop below (single-thread BLAS per chunk), and the
+        # fixed phi factors are pre-permuted once -- per (I,J) a list of
+        # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ) -- to avoid per-call transpose
+        # copies.
         if self._phi_pre is None:
             self._phi_pre = {}
             for (I, J), quads in self._phi_pair_index.items():
@@ -739,13 +728,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 return res
 
             n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
-            # Cap the tau-split so each worker keeps >=~4 tau points. The per-ring
-            # contraction is cache-bound per chunk (the BS^3 ring intermediate
-            # stays in cache only while the chunk is small), so it scales near-
-            # linearly with threads UNTIL the chunk gets too short -- measured on
-            # cnt33 L2 (w=241): 64 threads = 56x (1232 GF/s), 128 threads regress
-            # to 791 GF/s purely from <2 tau/thread. n_tau//4 keeps us at the
-            # sweet spot and lets large-w cells use proportionally more threads.
+            # Cap the tau-split so each worker keeps >= ~4 tau points: the
+            # per-ring contraction scales with threads only while each
+            # chunk's BS^3 intermediate stays in cache; shorter chunks
+            # regress.
             pool, n_threads = ring_pool()
             nt = min(n_threads, max(1, n_tau // 4))
             if pool is not None and nt > 1:
@@ -768,7 +754,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             qv = self._qvertices
 
             def _qflat(d):
-                # (tau, *nk, b, b) → (tau, N_q, b, b); the q-axis is contiguous
+                # (tau, *nk, b, b) -> (tau, N_q, b, b); the q-axis is contiguous
                 # in the same C-order as global_stack_shape[1:].
                 return {
                     kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
@@ -819,29 +805,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         stl.dtranspose()
         stg.dtranspose()
 
-        # (5) IFFT sigma(τ)→Sigma(omega) in nnz; add into outputs; build Sigma^R.
+        # (5) IFFT sigma(tau)->Sigma(omega) in nnz; add into outputs; build Sigma^R.
         sl_data = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_full]
         sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
         # OUTPUT mask, completing the input masking above: the scattering
         # Sigma is NOT applied below the SSE cutoff (transport there stays
-        # ballistic), and never at the omega=0 bin (a nonzero Sigma^≷(0)
-        # hits the near-singular acoustic G^R(0) and produces a x1e5 DC
-        # spike in I(0) on soft wires; the bin carries zero heat anyway).
+        # ballistic), and never at the omega=0 bin (a nonzero Sigma^{<,>}(0)
+        # hits the near-singular acoustic G^R(0); the bin carries zero heat
+        # anyway).
         if bool(sse_mask.any()):
             sl_data[sse_mask] = 0.0
             sg_data[sse_mask] = 0.0
-        # SIGN CONVENTION (2026-06-12 fix): the bubble formula (textbook
-        # G^< = -i n A) is quadratic in G, so fed with this solver's
-        # occupation-positive Green's functions (-iG^≷ >= 0, the same
-        # convention as the lead injection sigma^≷ = +i n(+1) gamma) it
-        # returns TEXTBOOK-signed sigma^≷ (-i sigma^≷ <= 0) -- the exact
-        # NEGATIVE of what the Keldysh feedback G^≷ = G^R sigma^≷ G^A
-        # expects. Feeding it unflipped injects negative occupation
-        # (anti-dissipation): the SCBA then diverges at any coupling
-        # (2026-06-12: even lambda=0.25 diverged while the equilibrium
-        # textbook-convention loop converged). Negate sigma^≷ here; the
-        # retarded part below keeps its (damping-correct) sign by using
-        # the raw values.
+        # SIGN CONVENTION: fed with this solver's occupation-positive
+        # Green's functions (-i G^{<,>} >= 0, the same convention as the
+        # lead injection sigma^{<,>} = +i n(+1) gamma), the bubble returns
+        # TEXTBOOK-signed sigma^{<,>} (-i sigma^{<,>} <= 0) -- the exact
+        # negative of what the Keldysh feedback G^{<,>} = G^R sigma^{<,>} G^A
+        # expects (unflipped it injects anti-dissipation), so negate here.
         sigma_lesser.data[:] = sigma_lesser.data - sl_data
         sigma_greater.data[:] = sigma_greater.data - sg_data
         # Sigma^R contribution (from the RAW, textbook-signed values:
@@ -870,20 +850,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     ):
         """DENSE coupled-q vertex-pair contraction (the reference path).
 
-        Extracted verbatim from ``_compute_fft_first``; consumes the dense
-        q-folded vertex dict ``qv`` and the q-flattened tau-domain Green's
-        function band dicts, writes the per-(I, J) Sigma^{<,>} tau blocks
-        into the stack views. See ``_contract_factored_q`` for the
-        tensor-decomposed equivalent.
+        Consumes the dense q-folded vertex dict ``qv`` and the q-flattened
+        tau-domain Green's function band dicts, writes the per-(I, J)
+        Sigma^{<,>} tau blocks into the stack views. See
+        ``_contract_factored_q`` for the tensor-decomposed equivalent.
         """
         # Resolve the per-(I, J) vertex-pair task list once. The LEFT
         # vertex is CONJUGATED: the bubble at external q pairs
         # Phi(q', q_ext-q')^* with Phi(q_ext-q', q'); the unconjugated
         # pairing breaks momentum bookkeeping (Sigma(-q) != Sigma(q)^T
-        # under time reversal) and disagrees with a real-space supercell
-        # ground truth, see phonon/scripts/verify/audit_qfold_trs.py.
-        # At Gamma the vertices are real, so the Gamma-only (nq==1)
-        # path is unaffected.
+        # under time reversal). At Gamma the vertices are real, so the
+        # Gamma-only (nq==1) path is unaffected.
         # The task list depends only on the (fixed) vertex and mesh, so it
         # is built once and cached; identical (pl, pr) vertex pairs share
         # one pre-permuted copy (the bulk-homogeneous blocks repeat across
@@ -919,7 +896,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
         # nq==1 _contract_tau so the omega/tau batch parallelises across
-        # the ring pool (the coupled-q path previously ran serial).
+        # the ring pool.
         def _contract_tau_q(lo, hi):
             res = {}
             for (I, J), tasks in qtasks.items():
@@ -1269,7 +1246,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             and np.array_equal(np.asarray(cols), np.asarray(gt_cols))
         ):
             raise RuntimeError(
-                "τ-buffer sparsity does not match G; cannot FFT raw data."
+                "tau-buffer sparsity does not match G; cannot FFT raw data."
             )
         self._tau_cache = (key, bufs)
         return bufs
@@ -1288,7 +1265,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         n_fft: int,
         prefactor: complex,
     ) -> NDArray:
-        """FFT 3-phonon bubble for one block triplet pair (THz²)."""
+        """FFT 3-phonon bubble for one block triplet pair (THz^2)."""
         ne = G_inner_a.shape[0]
         return bubble_dense(
             phi_left=phi_left,

@@ -111,7 +111,7 @@ class PhononSolver(SubsystemSolver):
             global_stack_shape=self.energies.shape
                                + tuple([int(k) for k in config.device.kpoint_grid if k > 1]),
         )
-        self.system_matrix.free_data()  # Free any previously allocated data
+        self.system_matrix.free_data()  # Free any stale allocation.
         del sparsity_pattern
 
         self.block_offsets = np.hstack(([0], np.cumsum(self.block_sizes)))
@@ -147,11 +147,10 @@ class PhononSolver(SubsystemSolver):
         self.eta_obc = config.phonon.eta_obc
         self._eta_ir_floor_c = float(getattr(config.phonon,
                                              "eta_ir_floor_cells", 0.0))
-        # Optional in-SCBA ANNEAL of the sub-grid soft-mode floor: ramp
-        # eta_ir_floor_cells DOWN from its start value to eta_ir_floor_final_cells
-        # over eta_ir_floor_ramp_iterations solves, then hold. Tests whether the
-        # floor is only a crutch to REACH the basin (anneal->0 holds) or is
-        # load-bearing (re-diverges as floor->0).
+        # Optional in-SCBA anneal of the sub-grid soft-mode floor: ramp
+        # eta_ir_floor_cells DOWN from its start value to
+        # eta_ir_floor_final_cells over eta_ir_floor_ramp_iterations solves,
+        # then hold.
         self._eta_ir_floor_c0 = self._eta_ir_floor_c
         self._eta_ir_floor_final = float(getattr(config.phonon,
                                                  "eta_ir_floor_final_cells", 0.0))
@@ -165,12 +164,9 @@ class PhononSolver(SubsystemSolver):
         self._eta_final = float(getattr(config.phonon, "eta_final", 0.0))
         self._eta_ramp_n = int(getattr(config.phonon, "eta_ramp_iterations", 0))
         self._eta_it = 0
-        # Optional in-SCBA CONTACT-broadening ramp: ramp eta_obc DOWN from eta_obc0
-        # (large enough to converge the cell cold) to eta_obc_final over
-        # eta_obc_ramp_iterations solves, then hold. The MPI-compatible in-run
-        # analogue of the eta_obc warm-start chain for the eta=0 fixed point on the
-        # longer cells (warm-start files are single-rank only). lead(eta_obc_final)
-        # -> lead(0) via the ~L-independent universal bias factor.
+        # Optional in-SCBA CONTACT-broadening ramp: ramp eta_obc DOWN from
+        # eta_obc0 (large enough to converge the cell cold) to eta_obc_final
+        # over eta_obc_ramp_iterations solves, then hold.
         self._eta_obc0 = float(self.eta_obc)
         self._eta_obc_final = float(getattr(config.phonon, "eta_obc_final", self.eta_obc))
         self._eta_obc_ramp_n = int(getattr(config.phonon, "eta_obc_ramp_iterations", 0))
@@ -221,9 +217,9 @@ class PhononSolver(SubsystemSolver):
             if len(self.system_matrix.global_stack_shape) == 1:
                 # Gamma-only (real-symmetric D): the exact contact Sigma^R is
                 # complex-SYMMETRIC, but the NEVP eigenvector construction
-                # breaks it at ~1e-2, which propagates into G (measured
-                # G-asymmetry 1.8%) and breaks the bosonic no-transpose fold
-                # of the SSE. Project back onto the symmetric subspace.
+                # breaks the symmetry, which propagates into G and breaks
+                # the bosonic fold of the SSE. Project back onto the
+                # symmetric subspace.
                 sigma_00 = 0.5 * (sigma_00 + sigma_00.swapaxes(-2, -1))
             self.obc_blocks.retarded[0] = sigma_00
             gamma_00 = 1j * (sigma_00 - sigma_00.conj().swapaxes(-2, -1))
@@ -329,12 +325,11 @@ class PhononSolver(SubsystemSolver):
     def _apply_eta_obc_ramp(self) -> None:
         """In-SCBA contact-broadening ramp (no-op unless eta_obc_ramp_iterations>0).
 
-        Linearly ramps ``self.eta_obc`` from ``eta_obc0`` (iteration 0, large enough
-        to converge the cell cold) to ``eta_obc_final`` over ``eta_obc_ramp_iterations``
-        solves, then holds. The contact NEVP regularisation is strong while Sigma is
-        still developing and relaxes toward the (small) target -- the in-run,
-        MPI-compatible analogue of the eta_obc warm-start chain. The converged
-        lead(eta_obc_final) maps to lead(0) via the ~L-independent universal factor.
+        Linearly ramps ``self.eta_obc`` from ``eta_obc0`` (iteration 0, large
+        enough to converge the cell cold) to ``eta_obc_final`` over
+        ``eta_obc_ramp_iterations`` solves, then holds. The contact
+        regularisation is strong while Sigma is still developing and relaxes
+        toward the (small) target.
         """
         if self._eta_obc_ramp_n <= 0:
             return
@@ -356,8 +351,7 @@ class PhononSolver(SubsystemSolver):
         function must be built from the bare blocks. Including the device's
         scattering Sigma^R in the OBC input both extends the device
         scattering periodically into the semi-infinite lead (unphysical)
-        and intermittently breaks the spectral NEVP once Sigma grows
-        (recursion errors ~1 -> residual spikes in the SCBA).
+        and destabilises the spectral NEVP once Sigma grows.
         """
         self.system_matrix.allocate_data()
         self.system_matrix.data = 0.0
@@ -372,12 +366,11 @@ class PhononSolver(SubsystemSolver):
         z2 = (self.local_frequencies ** 2
               + 2j * self.eta * xp.abs(self.local_frequencies))
         # Sub-grid soft-mode broadening floor (eta_ir_floor_cells): the
-        # 2i*eta*omega damping vanishes as omega->0, leaving the acoustic soft
-        # modes (D->0) unregularised at eta=0 (G^R ~ 1/omega^2 -> SCBA diverges).
-        # Add a DC-CONCENTRATED constant broadening i*Gamma_floor*lowpass(omega)
-        # that damps only the lowest (unresolved, ~zero-heat) bins; the resolved
-        # low-omega physics and the IR plateau are untouched. Gamma_floor->0 as
-        # dw->0 (grid-consistent). NOT applied to the OBC (ideal leads).
+        # 2i*eta*omega damping vanishes as omega->0, leaving the acoustic
+        # soft modes (D->0) unregularised at eta=0. Add a DC-concentrated
+        # constant broadening i*Gamma_floor*lowpass(omega) that damps only
+        # the lowest (unresolved, ~zero-heat) bins; Gamma_floor->0 as dw->0
+        # (grid-consistent). NOT applied to the OBC (ideal leads).
         _ir_floor_c = self._eta_ir_floor_c
         self._ir_floor_diag = None
         if _ir_floor_c > 0.0 and self.energies.size > 1:
@@ -543,7 +536,7 @@ class PhononSolver(SubsystemSolver):
         self._apply_eta_ir_floor_ramp()
         self._assemble_system_matrix()
 
-        # TODO Band ege Tracking
+        # TODO: Band edge tracking
 
         # OBC from the bare harmonic blocks (ideal-reservoir contacts);
         # the scattering self-energy enters the device Dyson only.

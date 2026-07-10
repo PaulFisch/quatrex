@@ -247,9 +247,9 @@ class SCBA:
     The SCBA loop uses two registries:
     * self.subsystems: the physical Green's-function subsystems
       (currently electron or phonon)
-    * self.interactions: a list SSEs (Coulomb screening, phonon-phonon, ...). Each interaction
-      reads from one or more subsystems' Green's functions and writes
-      its contribution
+    * self.interactions: a list of SSEs (Coulomb screening, phonon-phonon,
+      ...). Each interaction reads from one or more subsystems' Green's
+      functions and writes its contribution
 
     Parameters
     ----------
@@ -267,10 +267,9 @@ class SCBA:
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
-        # Optional quasi-Newton mixing: Anderson(m) acceleration (Walker & Ni
-        # 2011) or the type-I "good" Broyden root finder (reaches an
-        # iteration-unstable fixed point that mixing limit-cycles around -- the
-        # eta->0 question; Žitko PRB 80, 125125 (2009)).
+        # Optional quasi-Newton mixing: Anderson(m) acceleration or the
+        # type-I "good" Broyden root finder (reaches an iteration-unstable
+        # fixed point that plain mixing limit-cycles around).
         self._anderson_mixer = None
         if (self.config.scba.mixing_method == "anderson"
                 and getattr(self.config.scba, "anderson_warmup_iters", 0) == 0):
@@ -293,9 +292,8 @@ class SCBA:
                 trust=xm.broyden_trust,
             )
         elif self.config.scba.mixing_method == "rpm":
-            # Recursive Projection Method (Shroff & Keller 1993): Newton on the
-            # small unstable invariant subspace, Picard on the contractive
-            # complement -- the targeted backstop for the eta=0 band-edge saddle.
+            # Recursive Projection Method: Newton on the small unstable
+            # invariant subspace, Picard on the contractive complement.
             from quatrex.core.rpm import RPMMixer
             xm = self.config.scba.experimental_mixer
             self._anderson_mixer = RPMMixer(
@@ -306,9 +304,9 @@ class SCBA:
                 trust=xm.broyden_trust,
             )
         elif self.config.scba.mixing_method == "rre":
-            # Restarted reduced-rank extrapolation: locates the UNSTABLE eta=0
-            # fixed point of the longer cells (Jacobian |lambda|>1), which contact
-            # regularisation + damped/Anderson mixing cannot reach.
+            # Restarted reduced-rank extrapolation: locates an UNSTABLE
+            # fixed point (Jacobian |lambda|>1) that damped/Anderson mixing
+            # cannot reach.
             from quatrex.core.anderson import RREMixer
             xm = self.config.scba.experimental_mixer
             self._anderson_mixer = RREMixer(
@@ -317,10 +315,9 @@ class SCBA:
                 ridge=getattr(self.config.scba, "anderson_ridge", 1e-6),
             )
         elif self.config.scba.mixing_method == "jfnk":
-            # Jacobian-free Newton-Krylov: GMRES on the matrix-free Newton system
-            # J delta = -R lands a STRONGLY-unstable fixed point (|lambda(J_F)| ~
-            # 100s, several unstable modes) where the subspace-tracking RPM fails
-            # -- the SiNW d5a Si-H bending eta=0 saddle.
+            # Jacobian-free Newton-Krylov: GMRES on the matrix-free Newton
+            # system J delta = -R lands a STRONGLY-unstable fixed point
+            # where the subspace-tracking RPM fails.
             from quatrex.core.jfnk import JFNKMixer
             xm = self.config.scba.experimental_mixer
             self._anderson_mixer = JFNKMixer(
@@ -337,9 +334,9 @@ class SCBA:
                 ptc=xm.jfnk_ptc,
             )
 
-        # Anharmonic-phonon convergence by HEAT-FLOW conservation (Guo/Luisier),
-        # with best-iterate capture (the Sigma residual is non-monotone on
-        # soft-mode structures, so we keep the most-conserved heat current).
+        # Anharmonic-phonon convergence by HEAT-FLOW conservation, with
+        # best-iterate capture (the Sigma residual is non-monotone on
+        # soft-mode structures, so the most-conserved heat current is kept).
         self._scba_iteration = 0
         self._best_heat_conservation = float("inf")
         self._best_heat_current = None
@@ -441,16 +438,14 @@ class SCBA:
                 self.phonon_energies = distributed_load(energies_path)
                 # The SSE MUST live on the grid the Green's functions live on
                 # (the solver grid): its bubble prefactor and the SCP <uu>
-                # carry the grid spacing d-omega. The npy file is an input
-                # artifact that can disagree with the configured window (it
-                # did: build-default nfreq vs config nfreq), which silently
-                # misscaled Sigma by d_npy/d_solver. Pass the solver grid and
-                # only warn about a stale npy.
+                # carry the grid spacing d-omega. A stale phonon_energies.npy
+                # that disagrees with the configured window would silently
+                # misscale Sigma, so pass the solver grid and only warn
+                # about the mismatch.
                 solver_freqs = np.asarray(self.phonon_solver.local_frequencies)
                 npy_freqs = np.asarray(self.phonon_energies)
                 # Compare against the GLOBAL configured window -- NOT the
-                # rank-local slice (which is len(global)/stack points and
-                # made this warning fire spuriously on every stack>1 run).
+                # rank-local slice (len(global)/stack points).
                 el = self.config.electron
                 global_freqs = np.linspace(
                     float(el.energy_window_min),
@@ -526,11 +521,11 @@ class SCBA:
     @profiler.profile(label="SCBA: Update Sigma", level="default", comm=comm)
     def _update_sigma(self) -> None:
         """Updates the self-energy: damped linear or Anderson(m) mixing."""
-        # Linear-warmup -> Anderson hand-off (anderson_warmup_iters > 0): build the
-        # accelerator once the iterate is past the cold-start transient, where the
-        # eta=0 causal-Sigma^R map is well-linearized and Anderson no longer
-        # limit-cycles on its marginal mode. (warmup == 0 already built it in
-        # __init__; broyden is unaffected -- its mixer is non-None from the start.)
+        # Linear-warmup -> Anderson hand-off (anderson_warmup_iters > 0):
+        # build the accelerator once the iterate is past the cold-start
+        # transient, where the map is well-linearized. (warmup == 0 already
+        # built it in __init__; broyden is unaffected -- its mixer is
+        # non-None from the start.)
         # NOTE: _scba_iteration is already incremented (in _has_converged)
         # when the first update runs, so strict ">" gives exactly
         # anderson_warmup_iters linear updates before the hand-off.
@@ -686,15 +681,12 @@ class SCBA:
 
         self._scba_iteration += 1
 
-        # Anharmonic phonon convergence: a GENUINE FIXED POINT. The scattering
-        # self-energy must reach self-consistency (relative Sigma^R residual
-        # small) AND the heat flow must be conserved. We do NOT accept a
-        # non-converged Sigma at merely-okay conservation -- that is a transient,
-        # not the fixed point; if Sigma oscillates the run does NOT converge and
-        # needs a continuation strategy (vertex-scale warm starts). NB the
-        # current_conservation above is the NUMBER-current G-R balance, which
-        # 3-phonon processes violate by design -- the physical conservation
-        # criterion is the hbar-omega-weighted HEAT flow (Guo/Luisier).
+        # Anharmonic phonon convergence requires a GENUINE fixed point: the
+        # scattering self-energy must reach self-consistency (relative Sigma
+        # residual small) AND the heat flow must be conserved. NB the
+        # current_conservation above is the NUMBER-current G-R balance,
+        # which 3-phonon processes violate by design -- the physical
+        # criterion is the hbar-omega-weighted HEAT flow.
         if (self.config.scba.phonon
                 and getattr(self.config.phonon, "model", "") == "negf"):
             # Relative residual ||Sigma_new - Sigma_old||_inf / ||Sigma||_inf
@@ -769,18 +761,14 @@ class SCBA:
                             print(f"Bubble energy balance: P_in={p_in.real:.6e} "
                                   f"P_out={p_out.real:.6e} resid={bres:.3e}",
                                   flush=True)
-                # Conservation gate = LEAD balance |J_L - J_R| / |J|: in steady
-                # state the in/out lead currents must match; this is what the
-                # dense reference checks (dense.py conservation_err) and what a
-                # genuine SCBA inconsistency violates. The max-min spread over
-                # ALL interfaces additionally contains the eta-absorption dip of
-                # the internal interfaces (finite (omega+i eta)^2 broadening
-                # soaks up flux inside the device; grows with eta and device
-                # length, 3-17% on the production setups even BALLISTICALLY) --
-                # gating on it made convergence unreachable. It is still
-                # reported as a diagnostic above.
-                # Optional additional gate on the Phi-derivable bubble balance
-                # (conservation appendix recommendation); 0 disables (legacy).
+                # Conservation gate = LEAD balance |J_L - J_R| / |J|: in
+                # steady state the in/out lead currents must match. The
+                # max-min spread over ALL interfaces additionally contains
+                # the eta-absorption dip of the internal interfaces (finite
+                # broadening soaks up flux inside the device), so it is
+                # reported as a diagnostic only, not gated on.
+                # Optional additional gate on the Phi-derivable bubble
+                # balance; 0 disables.
                 bb_tol = getattr(self.config.phonon, "bubble_balance_tol", 0.0)
                 bubble_ok = (
                     bb_tol <= 0.0
@@ -803,19 +791,14 @@ class SCBA:
             P_out = sum_w  hbar*w * Tr[Sigma^>(w) G^<(w)]
 
         must be EQUAL for the Phi-derivable 3-phonon bubble evaluated with
-        the same iterand G on all legs (Lu & Wang, arXiv:0704.0723 App. B;
-        the conserving identity Tr[Sigma^< G^> - Sigma^> G^<] = 0 of a
-        Luttinger-Ward skeleton, folded to the one-sided zero-based grid
-        via the bosonic reflection G^<_ij(w) = G^>_ji(-w)). The trace uses
-        the TRANSPOSE pairing Sigma_ij G_ji. A residual at roundoff is
-        healthy; O(0.1) means the fold/vertex/grid breaks the reflection
-        or permutation symmetry (e.g. a non-zero-based frequency grid).
+        the same iterand G on all legs. The trace uses the TRANSPOSE pairing
+        Sigma_ij G_ji; a residual at roundoff is healthy, O(0.1) means the
+        fold/vertex/grid breaks the reflection or permutation symmetry.
 
-        Returns (P_in, P_out, resid) or None if unavailable. Called between
-        the SSE evaluation and the mixing step, where data.sigma_* is the
-        raw new Sigma[G^[n]] and data.g_* is G^[n] -- the same-iterand
-        pairing the identity requires (a mixed-iterate pairing need not
-        balance).
+        Returns (P_in, P_out, resid) or None if unavailable.
+        NOTE: must be called between the SSE evaluation and the mixing step,
+        where data.sigma_* is the raw new Sigma[G^n] and data.g_* is G^n --
+        a mixed-iterate pairing need not balance.
         """
         if comm.block.size > 1:
             return None  # rows/cols are block-window-local; not wired up
@@ -874,16 +857,14 @@ class SCBA:
             P_abs(k) = sum_w hbar*w * Tr_k[Sigma_s^>(w) G^<(w)
                                            - Sigma_s^<(w) G^>(w)],
 
-        the local (slab-k) energy sink of the 3-phonon self-energy. This is
-        the term that connects adjacent interface heat currents by energy
-        continuity: J_{k,k+1} = J_{k-1,k} + P_abs(k) up to the finite-eta
-        ordering-commutator absorption, and telescoping over the device
-        reproduces the global P_in - P_out (= the whole-device bubble
-        balance, machine-zero for the conserving vertex). Same transpose
-        pairing (Sigma_ij G_ji), hbar*w weighting and one-sided grid as
-        :meth:`_phonon_bubble_energy_balance`, binned by the ROW block of
-        each nnz entry. Returns a complex (n_blocks,) array (real part is
-        the physical power) or None if unavailable.
+        the local (slab-k) energy sink of the 3-phonon self-energy. It
+        connects adjacent interface heat currents by energy continuity, and
+        telescoping over the device reproduces the global P_in - P_out. Same
+        transpose pairing (Sigma_ij G_ji), hbar*w weighting and one-sided
+        grid as :meth:`_phonon_bubble_energy_balance`, binned by the ROW
+        block of each nnz entry. Returns a complex (2, n_blocks) array
+        ([0] row-binned, [1] block-diagonal-only; real part is the physical
+        power) or None if unavailable.
         """
         if comm.block.size > 1:
             return None
@@ -907,11 +888,9 @@ class SCBA:
             slab_c = np.searchsorted(offs, c, side="right") - 1
             n_blocks = offs.size - 1
             # Row-binned attribution: the restricted trace Tr_k[Sigma G]
-            # of eq. P_abs (row of Sigma in slab k, all columns) -- the
-            # attribution verified to reconstruct the interior bond
-            # currents (conservation appendix). The block-DIAGONAL-only
-            # variant (Sigma_kk G_kk) is kept as an experimental
-            # alternative in slot [1].
+            # of eq. P_abs (row of Sigma in slab k, all columns). The
+            # block-DIAGONAL-only variant (Sigma_kk G_kk) is kept as an
+            # experimental alternative in slot [1].
             onehot = np.zeros((r.size, n_blocks))
             onehot[np.arange(r.size), slab_r] = 1.0
             onehot_diag = np.where((slab_r == slab_c)[:, None], onehot, 0.0)
@@ -1182,8 +1161,8 @@ class SCBA:
                         assert m.distribution_state == "stack"
 
             # The anharmonic phonon path keeps the raw SSE output: the
-            # skew-Hermitian projection of Sigma^<> breaks the Phi-derivable
-            # bubble energy balance (1e-15 -> 3e-6). The SSE writes only the
+            # skew-Hermitian projection of Sigma^{<,>} breaks the
+            # Phi-derivable bubble energy balance. The SSE writes only the
             # Hermitian part of Sigma^R ("half": nothing; "fft": the KK real
             # part), so the skew part is assembled here -- PhononSolver
             # consumes the buffer as the full retarded self-energy (the
@@ -1191,7 +1170,7 @@ class SCBA:
             if (self.config.scba.phonon
                     and getattr(self.config.phonon, "model", "") == "negf"):
                 # "half" retarded rule in the solver's occupation-positive
-                # convention (sigma^≷ = +i n(+1) Gamma_s, like the lead
+                # convention (sigma^{<,>} = +i n(+1) Gamma_s, like the lead
                 # injection): the damping skew part is (sigma^< - sigma^>)/2
                 # = -i Gamma_s / 2.
                 self.data.sigma_retarded_hermitian.data += 0.5 * (

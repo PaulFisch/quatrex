@@ -1,9 +1,8 @@
-"""PRODUCTION phonon-transport SCBA driver + snapshot (committed).
+"""Production phonon-transport SCBA driver + snapshot.
 
-Committed port of the /tmp runner. Unlike that script it honors the TOML
-``[compute.comm]`` rank grid via :func:`setup_context` (so a distributed
-scaling run actually uses ``block_comm_size`` x ``q_comm_size``), and it dumps
-the per-phase profiler JSON when the config enables it.
+Honors the TOML ``[compute.comm]`` rank grid via :func:`setup_context` (a
+distributed run uses ``block_comm_size`` x ``q_comm_size``) and dumps the
+per-phase profiler JSON when the config enables it.
 
 Env overrides (optional, on top of the TOML):
   QX_CONFIG (required, toml path), QX_NPZ (snapshot out, default <dir>/run.npz),

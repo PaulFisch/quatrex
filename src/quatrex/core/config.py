@@ -147,58 +147,47 @@ class QTBMConfig(BaseModel):
 
 class ExperimentalMixerConfig(BaseModel):
     """Experimental SCBA root-finders for the iteration-UNSTABLE eta->0 fixed
-    point (cnt33 / SiNW d5a soft-mode saddle), kept out of the shared SCBA
-    surface. These are NOT standard NEGF accelerators: damped/Anderson mixing
+    point, kept out of the shared SCBA surface. Damped/Anderson mixing
     accelerates a contractive iteration, whereas broyden/rpm/rre/jfnk LAND a
-    fixed point whose Jacobian has ``|lambda| > 1`` (which mixing provably cannot
-    reach). They target an η=0 self-energy fixed point whose existence on the
-    soft modes is itself marginal -- use only for that research path."""
+    fixed point whose Jacobian has ``|lambda| > 1`` (which mixing cannot
+    reach). Research use only."""
 
     model_config = ConfigDict(extra="forbid")
 
     rre_cycle: PositiveInt = 8
-    """For ``mixing_method = "rre"``: restart cycle length (number of iterates per
-    reduced-rank-extrapolation step). Locates an UNSTABLE fixed point that damped /
-    Anderson mixing cannot reach (the cnt33 eta=0 band-edge mode on longer cells);
-    cf. ``RREMixer`` in ``quatrex/core/anderson.py``."""
+    """For ``mixing_method = "rre"``: restart cycle length (number of iterates
+    per reduced-rank-extrapolation step). Cf. ``RREMixer`` in
+    ``quatrex/core/anderson.py``."""
 
     broyden_warmup_iters: NonNegativeInt = 0
     """For ``mixing_method = "broyden"`` / ``"rpm"``: run plain damped-LINEAR
     mixing for the first N SCBA iterations (still accumulating secant history),
-    then engage the quasi-Newton / projection step. The iteration-unstable map
-    limit-cycles in a BOUNDED neighbourhood of the saddle, so the warm-up parks
-    the iterate there -- where the Jacobian I-G' is nonsingular and the secant
-    buffer is clean -- before the local root finder takes over. 0 = engage from
-    the start."""
+    then engage the quasi-Newton / projection step. 0 = engage from the
+    start."""
     broyden_ridge: NonNegativeFloat = 1e-8
     """For ``mixing_method = "broyden"`` / ``"rpm"``: Tikhonov ridge on the small
-    multisecant / restricted-Jacobian solve, scaled by the matrix norm. Kept TINY
-    so it does not damp the Newton correction in the near-marginal band-edge
-    subspace (a fat ridge biases the step back toward limit-cycling Picard)."""
+    multisecant / restricted-Jacobian solve, scaled by the matrix norm. Kept
+    TINY so it does not damp the Newton correction in the near-marginal
+    subspace."""
     broyden_trust: NonNegativeFloat = 0.3
-    """For ``mixing_method = "broyden"`` / ``"rpm"``: trust-region step cap -- the
-    per-iteration update ``||Sigma_new - Sigma||`` is limited to
-    ``broyden_trust * ||Sigma||``. A full quasi-Newton step from a far-from-root /
-    stale secant model overshoots the nonlinear SCBA map (residual spikes > 2);
-    the cap forces gradual descent until the model is good, then deactivates near
-    the root. 0 disables it."""
+    """For ``mixing_method = "broyden"`` / ``"rpm"``: trust-region step cap --
+    the per-iteration update ``||Sigma_new - Sigma||`` is limited to
+    ``broyden_trust * ||Sigma||``. Guards against quasi-Newton overshoot far
+    from the root; 0 disables it."""
     rpm_max_subspace: PositiveInt = 6
     """For ``mixing_method = "rpm"``: cap on the dimension k of the unstable
     invariant subspace on which Newton is performed (Picard on the contractive
-    complement). The cnt33 instability is a single complex band-edge pair, so the
-    effective k is ~2; 6 leaves margin. cf. ``RPMMixer`` in ``quatrex/core/rpm.py``."""
+    complement). A single complex pair needs k = 2; 6 leaves margin. Cf.
+    ``RPMMixer`` in ``quatrex/core/rpm.py``."""
 
     # --- Jacobian-free Newton-Krylov (mixing_method = "jfnk") -----------------
-    # JFNK lands a STRONGLY-unstable fixed point (|lambda(J_F)| ~ 100s, several
-    # unstable modes) where the subspace-tracking RPM fails: GMRES on the matrix-
-    # free Newton system J delta = -R needs only finite-difference J*v products
-    # and converges on a cluster-plus-few-outliers spectrum. The Krylov solve runs
-    # in the real embedding [Re Sigma, Im Sigma] (the map is real- not complex-
-    # linear). cf. ``quatrex/core/jfnk.py``. The SiNW d5a Si-H bending eta=0 saddle.
+    # GMRES on the matrix-free Newton system J delta = -R (finite-difference
+    # J*v products), run in the real embedding [Re Sigma, Im Sigma]; lands
+    # strongly-unstable fixed points where the subspace-tracking RPM fails.
+    # Cf. ``quatrex/core/jfnk.py``.
     jfnk_warmup_iters: NonNegativeInt = 10
-    """For ``mixing_method = "jfnk"``: damped-LINEAR steps to fall into the fixed
-    point's basin before engaging Newton-Krylov (the unstable modes have not yet
-    blown up in the first ~10 iterations)."""
+    """For ``mixing_method = "jfnk"``: damped-LINEAR steps to fall into the
+    fixed point's basin before engaging Newton-Krylov."""
     jfnk_max_krylov: PositiveInt = 30
     """For ``mixing_method = "jfnk"``: maximum GMRES (Arnoldi) dimension per Newton
     step = max map evaluations per Newton step. ``n_unstable + a few`` suffices."""
@@ -217,29 +206,27 @@ class ExperimentalMixerConfig(BaseModel):
     """For ``mixing_method = "jfnk"``: relative finite-difference step for the
     matrix-free Jacobian-vector product, ``eps_used = jfnk_eps * (1 + ||Sigma||)``."""
     jfnk_trust: NonNegativeFloat = 0.5
-    """For ``mixing_method = "jfnk"``: INITIAL trust-region cap on the Newton step,
-    ``||delta|| <= jfnk_trust * ||Sigma||`` (global). Adapts down on a step that
-    raises the residual, up on good progress (toward ``jfnk_trust_max``). 0
-    disables. Start it SMALL (e.g. 0.05) so the early, far-from-root Newton steps
-    cannot overshoot the marginal flexural mode (the d5a blow-up); the radius then
-    breathes up as descent is demonstrated."""
+    """For ``mixing_method = "jfnk"``: INITIAL trust-region cap on the Newton
+    step, ``||delta|| <= jfnk_trust * ||Sigma||`` (global). Adapts down on a
+    step that raises the residual, up on good progress (toward
+    ``jfnk_trust_max``); 0 disables. Start it SMALL (e.g. 0.05) so the early,
+    far-from-root Newton steps cannot overshoot."""
     jfnk_trust_max: NonNegativeFloat = 0.0
-    """For ``mixing_method = "jfnk"``: MAXIMUM trust radius the adaptive growth may
-    reach (``<= 0`` -> use ``jfnk_trust``, i.e. no growth above the initial). Set
-    ``jfnk_trust_max > jfnk_trust`` to let the radius accelerate as the residual
-    descends monotonically -- the cure for the d5a marginal-mode crawl where the
-    Newton step is permanently pinned at a small fixed trust boundary."""
+    """For ``mixing_method = "jfnk"``: MAXIMUM trust radius the adaptive growth
+    may reach (``<= 0`` -> use ``jfnk_trust``, i.e. no growth above the
+    initial). Set ``jfnk_trust_max > jfnk_trust`` to let the radius grow as
+    the residual descends monotonically."""
     jfnk_newton_damp: PositiveFloat = 1.0
     """For ``mixing_method = "jfnk"``: damping of the (already trust-capped) Newton
     step, ``Sigma_{k+1} = Sigma_k + jfnk_newton_damp * delta``. < 1 globalises a
     far-from-root start."""
     jfnk_ptc: NonNegativeFloat = 0.0
-    """For ``mixing_method = "jfnk"``: pseudo-transient / Levenberg-Marquardt shift
-    -- solve ``(J + mu I) delta = -R`` with ``mu = jfnk_ptc * ||R_k||/||R_0||``
-    (annealed to 0 as the residual falls, recovering pure Newton at the root). The
-    shift lifts the near-zero (marginal, ``Gamma_anh ~ dw``) eigenvalues of
-    ``J = J_F - I`` off the origin so the inner GMRES no longer stalls on the
-    near-null-space. 0 = pure Newton (no shift); ~1 for the marginal d5a saddle."""
+    """For ``mixing_method = "jfnk"``: pseudo-transient / Levenberg-Marquardt
+    shift -- solve ``(J + mu I) delta = -R`` with
+    ``mu = jfnk_ptc * ||R_k||/||R_0||`` (annealed to 0 as the residual falls,
+    recovering pure Newton at the root). The shift lifts the near-zero
+    (marginal) eigenvalues of ``J = J_F - I`` off the origin so the inner
+    GMRES no longer stalls on the near-null-space. 0 = pure Newton."""
 
 
 class SCBAConfig(BaseModel):
@@ -258,41 +245,37 @@ class SCBAConfig(BaseModel):
 
     mixing_method: Literal["linear", "anderson", "broyden", "rre", "rpm", "jfnk"] = "linear"
     """Self-energy fixed-point mixer. ``"linear"`` is plain damped mixing;
-    ``"anderson"`` is plain Anderson(m) acceleration (Anderson 1965;
-    Walker & Ni, SIAM J. Numer. Anal. 49, 1715 (2011), Alg. AA in the
-    unconstrained least-squares form) -- cf. ``quatrex/core/anderson.py``.
-    Acceleration helps a convergent (contractive) iteration; it is NOT a
-    cure for a marginal / non-existent fixed point. ``"broyden"`` is the
-    MPI-aware type-I "good" Broyden ROOT FINDER and ``"rpm"`` the Recursive
-    Projection Method (Shroff & Keller 1993); both LAND an iteration-UNSTABLE
-    fixed point (Jacobian |lambda|>1, the cnt33 eta=0 band-edge mode on long
-    cells) that damped/Anderson/RRE provably cannot reach -- cf.
-    ``quatrex/core/broyden.py`` and ``quatrex/core/rpm.py``."""
+    ``"anderson"`` is Anderson(m) acceleration (helps a convergent iteration;
+    NOT a cure for a marginal / non-existent fixed point) -- cf.
+    ``quatrex/core/anderson.py``. ``"broyden"`` (type-I "good" Broyden root
+    finder), ``"rpm"`` (Recursive Projection Method), ``"rre"`` and
+    ``"jfnk"`` can LAND an iteration-UNSTABLE fixed point (Jacobian
+    |lambda|>1) that damped/Anderson mixing cannot reach -- cf.
+    ``quatrex/core/broyden.py``, ``quatrex/core/rpm.py`` and
+    ``quatrex/core/jfnk.py``."""
 
     anderson_depth: PositiveInt = 5
     """History size m for ``mixing_method = "anderson"`` (number of stored
     residual differences). Memory cost: 2*m copies of the full Sigma."""
     anderson_period: PositiveInt = 1
     """Periodic-Pulay stride: apply the Anderson extrapolation only every
-    ``anderson_period``-th iteration, plain damped linear mixing in between
-    (Banerjee et al. 2016). >1 breaks the marginal-mode limit cycle that stalls
-    plain Anderson on soft-mode systems (d5a). 1 = ordinary Anderson(m)."""
+    ``anderson_period``-th iteration, plain damped linear mixing in between.
+    >1 breaks the marginal-mode limit cycle that stalls plain Anderson on
+    soft-mode systems. 1 = ordinary Anderson(m)."""
     anderson_warmup_iters: NonNegativeInt = 0
-    """For ``mixing_method = "anderson"``: run plain damped LINEAR mixing for the
-    first ``anderson_warmup_iters`` SCBA iterations, then switch to Anderson.
-    Anderson limit-cycles when started cold on the eta=0 causal-Sigma^R map (the
-    early non-linear transient), but converges fast once the iterate is near the
-    fixed point where the map is well-linearized. 0 = Anderson from the start."""
+    """For ``mixing_method = "anderson"``: run plain damped LINEAR mixing for
+    the first ``anderson_warmup_iters`` SCBA iterations, then switch to
+    Anderson. Avoids the limit cycle of a cold-started Anderson on the early
+    non-linear transient. 0 = Anderson from the start."""
     anderson_restart: NonNegativeInt = 0
     """For ``mixing_method = "anderson"``: forget the Anderson history every N
-    steps (0 = never). Breaks the marginal-mode limit cycle that periodic Pulay
-    alone cannot escape on the eta=0 causal-Sigma^R band-edge mode (resid
-    oscillates 0.05<->0.49)."""
+    steps (0 = never). Breaks marginal-mode limit cycles that periodic Pulay
+    alone cannot escape."""
     anderson_ridge: NonNegativeFloat = 0.0
-    """For ``mixing_method = "anderson"``: scale-relative Tikhonov regularisation
-    of the least-squares coefficients (suppresses the overshoot spikes from a
-    near-rank-deficient history). 0 = plain SVD lstsq. Also reused as the Gram
-    ridge for ``mixing_method = "rre"``."""
+    """For ``mixing_method = "anderson"``: scale-relative Tikhonov
+    regularisation of the least-squares coefficients (suppresses overshoot
+    from a near-rank-deficient history). 0 = plain SVD lstsq. Also reused as
+    the Gram ridge for ``mixing_method = "rre"``."""
 
     experimental_mixer: ExperimentalMixerConfig = Field(
         default_factory=ExperimentalMixerConfig)
@@ -1176,11 +1159,10 @@ class PhononConfig(BaseModel):
     (constant eta)."""
     eta_final: NonNegativeFloat = 0.0  # THz: target broadening at the end of the ramp
     eta_obc_ramp_iterations: NonNegativeInt = 0
-    """Anneal the CONTACT broadening ``eta_obc`` DOWN over the first N SCBA iterations:
-    eta_obc goes linearly from ``eta_obc`` (iteration 0, large enough to converge the
-    cell cold) to ``eta_obc_final`` by iteration N, then holds. The MPI-compatible
-    in-run analogue of the eta_obc warm-start chain for the eta=0 fixed point on longer
-    cells (warm-start files are single-rank only). 0 = off (constant eta_obc)."""
+    """Anneal the CONTACT broadening ``eta_obc`` DOWN over the first N SCBA
+    iterations: eta_obc goes linearly from ``eta_obc`` (iteration 0, large
+    enough to converge the cell cold) to ``eta_obc_final`` by iteration N,
+    then holds. 0 = off (constant eta_obc)."""
     eta_obc_final: NonNegativeFloat = 0.0  # THz^2: target contact broadening at ramp end
 
     model: Literal["pseudo-scattering", "negf"] = "pseudo-scattering"
@@ -1199,9 +1181,8 @@ class PhononConfig(BaseModel):
     """Path to the FC3 source consumed by ``SigmaPhononPhonon``.
 
     Required when ``model == "negf"``. Format: HDF5 produced by the
-    ``phonon_inputs`` pipeline (phono3py / hiphive / DFPT). The Phase-2
-    sparse-block writer in ``phonon_inputs/quatrex_writer.py`` will
-    extend this to consume an on-disk block-sparse Phi.
+    ``phonon_inputs`` pipeline (block-sparse ``/fc3_blocks`` or dense
+    ``/fc3``).
     """
 
     qfold_path: Path | None = None
@@ -1240,11 +1221,10 @@ class PhononConfig(BaseModel):
 
     ``"reconstruct"`` (default): materialise the rank-local slice of the
     dense q-folded dict from the factors once at first compute and run the
-    dense contraction at full speed -- the factored win is memory + build
-    time. ``"gram"``: the skinny-Gram factored contraction
+    dense contraction -- the factored win is memory + build time.
+    ``"gram"``: the skinny-Gram factored contraction
     (``quatrex.phonon.bubble_factored``); fewer flops than dense only at
-    small rank or large block sizes (it is memory-bound in R^2 and loses to
-    the dense path beyond R ~ 16 on small-block films).
+    small rank or large block sizes.
     """
 
     retarded_method: Literal["half", "fft"] = "fft"
@@ -1262,45 +1242,32 @@ class PhononConfig(BaseModel):
 
     eta_ir_floor_cells: NonNegativeFloat = 0.0
     """Sub-grid soft-mode broadening floor for the eta=0 SCBA, in grid cells
-    (0 = off). At eta=0 the device retarded G^R = [omega^2 + 2i*eta*omega - D -
-    Sigma^R]^{-1} is UNREGULARISED at the acoustic soft modes (D->0): the
-    frequency-proportional damping 2i*eta*omega vanishes as omega->0, so G^R ~
-    1/omega^2 blows up and the SCBA diverges. d5a's twist modes (~0.01 THz) sit
-    far below the first grid bin -> unresolved, transport-irrelevant (they carry
-    ~zero heat), but they destabilise the iteration. This adds a DC-CONCENTRATED
-    constant broadening to the Dyson denominator,
+    (0 = off). Adds a DC-CONCENTRATED constant broadening to the Dyson
+    denominator,
         z^2(omega) += i * Gamma_floor * omega_c^2/(omega^2 + omega_c^2),
-    Gamma_floor = (eta_ir_floor_cells*dw)^2 [THz^2], omega_c = 2*dw, so only the
-    lowest few (unresolved) bins are damped and the resolved low-omega physics
-    (and the IR occupation plateau) is untouched.
-    Grid-consistent: Gamma_floor -> 0 as dw -> 0. Stabiliser for eta=0; does NOT
-    crush the heat current like the omega^2 occupation taper."""
+    Gamma_floor = (eta_ir_floor_cells*dw)^2 [THz^2], omega_c = 2*dw, damping
+    only the lowest (unresolved, ~zero-heat) bins that are otherwise
+    unregularised at eta=0 (G^R ~ 1/omega^2 at the acoustic soft modes).
+    Grid-consistent (Gamma_floor -> 0 as dw -> 0); not applied to the OBC."""
     eta_ir_floor_final_cells: NonNegativeFloat = 0.0
-    """Target for the in-SCBA anneal of ``eta_ir_floor_cells`` (grid cells). With
-    ``eta_ir_floor_ramp_iterations`` > 0 the soft-mode floor is ramped linearly
-    from its start value down to this over the ramp, then held. Tests whether the
-    floor is removable upon convergence (anneal -> 0 holds) or load-bearing (the
-    fixed point re-diverges as the floor -> 0)."""
+    """Target for the in-SCBA anneal of ``eta_ir_floor_cells`` (grid cells).
+    With ``eta_ir_floor_ramp_iterations`` > 0 the soft-mode floor is ramped
+    linearly from its start value down to this over the ramp, then held."""
     eta_ir_floor_ramp_iterations: int = 0
     """Number of SCBA solves over which to anneal ``eta_ir_floor_cells`` down to
     ``eta_ir_floor_final_cells`` (0 = off, hold the floor constant)."""
     buttiker_probe: bool = False
     """Optional self-consistent Buttiker DEPHASING probe on the eta-broadening
     channel (default OFF). The numerical broadening ``eta`` adds a damping
-    ``Gamma_eta = 4*eta*omega`` to G^R with NO matching fluctuation -- a
-    "damping without fluctuation" that violates the Baym-Kadanoff
-    (fluctuation-dissipation) balance and, under a thermal bias, injects a
-    spurious energy current (the finite-eta lead-balance floor). When True, a
-    matching fluctuation ``Sigma_probe^{<,>} = i*Gamma_eta*(n_p + 0/1)`` is
-    added to the device source, with the per-DOF, per-omega occupation
-    ``n_p = G^< / (G^> - G^<)`` updated self-consistently each SCBA iteration so
-    the LOCAL probe current vanishes at every energy. This restores exact
-    energy-current conservation at finite eta -- but it injects elastic
-    DEPHASING (it is physics, not a pure regularizer; Miao et al., APL 108,
-    113107 (2016); Roy & Dhar, PRB 75, 195110 (2007)). For the pure
-    coherent+anharmonic conductance use eta->0 extrapolation instead; use the
-    probe when an incoherent channel is physically intended. Single-block
-    (Gamma-only / coupled-q with block_comm_size==1) only."""
+    ``Gamma_eta = 4*eta*omega`` to G^R with NO matching fluctuation, which
+    violates the fluctuation-dissipation balance and, under a thermal bias,
+    injects a spurious energy current; when True, a matching fluctuation
+    ``Sigma_probe^{<,>} = i*Gamma_eta*(n_p + 0/1)`` is added to the device
+    source, with ``n_p = G^< / (G^> - G^<)`` updated self-consistently each
+    SCBA iteration so the LOCAL probe current vanishes at every energy.
+    NOTE: this injects elastic DEPHASING (physics, not a pure regularizer) --
+    for the pure coherent+anharmonic conductance use eta->0 extrapolation
+    instead. Single-block (block_comm_size==1) only."""
 
     bubble_balance_check: bool = True
     """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
@@ -1311,20 +1278,17 @@ class PhononConfig(BaseModel):
 
     sse_vertex_scale: PositiveFloat = 1.0
     """Uniform 3-phonon vertex scale lambda (Sigma scales as lambda^2).
-    lambda < 1 = reduced-coupling runs for LOA-style extrapolation and for
-    soft-mode structures whose full-coupling bubble-only SCBA is unstable
-    (cf. the dense reference's ``vertex_scale``; d5a F10 used 0.3)."""
+    lambda < 1 = reduced-coupling runs for extrapolation and for soft-mode
+    structures whose full-coupling bubble-only SCBA is unstable."""
 
     low_freq_mixing_thz: NonNegativeFloat = 0.0
     """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this
     (THz) are mixed with ``low_freq_mixing_factor`` instead of the global
     ``scba.mixing_factor``. 0 = off (uniform mixing). This DAMPS the IR
-    (Bose-divergent, n(omega)~kT/hbar.omega) marginal mode at the lowest
-    frequency bins -- which limit-cycles the eta=0 SCBA Sigma^R -- WITHOUT
-    removing the low-omega anharmonic scattering, so the iteration
-    converges to the CORRECT
-    conductance. The IR mode sits on the unit circle (|lambda|~1); a small
-    mixing factor pulls it inside (|1+a(lambda-1)|<1)."""
+    (Bose-divergent) marginal mode at the lowest frequency bins WITHOUT
+    removing the low-omega anharmonic scattering: the mode sits near the
+    unit circle (|lambda|~1) and a small mixing factor pulls it inside
+    (|1+a(lambda-1)|<1)."""
     low_freq_mixing_factor: NonNegativeFloat = 0.02
     """Gentle SCBA mixing factor applied to the |omega| < ``low_freq_mixing_thz``
     bins (see there). Small (~0.01-0.03) to damp the IR marginal mode; the rest
@@ -1347,59 +1311,39 @@ class PhononConfig(BaseModel):
 
     heat_flow_conservation_tol: PositiveFloat = 1e-2
     """Convergence tolerance for the anharmonic phonon SCBA: the relative
-    spread of the (hbar-omega-weighted) Meir-Wingreen HEAT current across
-    the device interfaces. This is the physically-correct criterion
-    (Guo-Bescond-Zhang 2020 / Luisier): the 3-phonon processes do NOT
-    conserve phonon NUMBER (1<->2 splitting/merging), so only the ENERGY
-    current is conserved, and SCBA convergence means the heat flow is the
-    same across all interfaces (~1%). The Sigma residual oscillates on
-    soft-mode structures and must NOT be used. The most-conserved (best)
+    lead balance of the (hbar-omega-weighted) Meir-Wingreen HEAT current.
+    3-phonon processes do NOT conserve phonon NUMBER (1<->2 splitting/
+    merging), so only the ENERGY current is conserved and SCBA convergence
+    means the heat flow matches across the leads. The most-conserved (best)
     iterate's heat current is captured even if the iteration later drifts."""
 
     sigma_convergence_tol: PositiveFloat = 1e-3
-    """Relative Sigma^R residual tolerance for the anharmonic phonon SCBA
-    fixed point, applied IN ADDITION to ``heat_flow_conservation_tol``.
-
-    Default 1e-3 (0.1%): 1e-2 is too loose to call a fixed point. Linear mixing
-    contracts the residual geometrically (~x0.6 / 5 iters), so 1e-3 is reached
-    in ~55 iters and 1e-4 in ~75.
-
-    Convergence requires a GENUINE fixed point, not a transient: the scattering
-    self-energy must be self-consistent -- the relative residual
-    ``||Sigma_new - Sigma_old||_inf / ||Sigma||_inf`` below this -- AND the heat
-    flow conserved. Heat-flow conservation alone is necessary but not
-    sufficient: at large broadening ``eta`` the heat flow conserves (its
-    elastic part dominates) before Sigma reaches self-consistency, so a
-    heat-flow-only stop accepts an under-scattered, non-converged Sigma. If
-    Sigma oscillates (a limit cycle) the run does NOT converge and needs a
-    continuation strategy (vertex-scale warm starts / annealing) -- we report
-    it as non-converged rather than passing off the best-conserved transient
-    as the answer."""
+    """Relative self-energy residual tolerance
+    (``||Sigma_new - Sigma_old||_inf / ||Sigma||_inf``) for the anharmonic
+    phonon SCBA fixed point, applied IN ADDITION to
+    ``heat_flow_conservation_tol``. Heat-flow conservation alone is
+    necessary but not sufficient: at large broadening ``eta`` the heat flow
+    conserves before Sigma reaches self-consistency, so a heat-flow-only
+    stop accepts an under-scattered, non-converged Sigma. If Sigma
+    oscillates (a limit cycle) the run is reported as non-converged."""
 
     bubble_balance_tol: NonNegativeFloat = 0.0
     """Optional third convergence gate on the Phi-derivable bubble energy
     balance ``|P_in - P_out| / |P_in|`` (requires ``bubble_balance_check``).
-    0 disables (legacy: residual + lead heat balance only)."""
+    0 disables (residual + lead heat balance only)."""
 
     scp_tadpole: bool = False
     """Optional self-consistent-phonon (SCP) cubic tadpole static
-    self-energy (``model == "negf"``).
+    self-energy (``model == "negf"``). The cubic tadpole
+    ``Sigma_T = Phi3 : <u>`` is a STATIC real self-energy that stiffens the
+    soft modes (the finite-T SCP renormalisation), stabilising the dynamic
+    bubble; it is recomputed every SCBA iteration from the current device
+    ``G^<`` and added to the dynamical matrix via ``Sigma^R``. Needs only
+    FC3 (the quartic loop, which would need FC4, is omitted). Default OFF;
+    cf. ``quatrex/phonon/static_self_energy.py``.
 
-    The dynamic 3-phonon bubble destabilises the SCBA on soft-mode
-    structures (the Bose-enhanced ``G^<`` IR singularity). The cubic
-    tadpole ``Sigma_T = Phi3 : <u>`` is a STATIC real self-energy that
-    *stiffens* the soft mode (raises its frequency) -- the physically
-    correct finite-T renormalisation (SCP / SSCHA; Paulatto-Errea-Calandra
-    2015) -- so the bubble becomes stable. It is recomputed every SCBA
-    iteration from the current device ``G^<`` (hence self-consistent and
-    self-limiting) and added to the dynamical matrix via ``Sigma^R``.
-    Needs only FC3 (the quartic loop, which would need FC4, is omitted).
-    Default OFF. Cf. ``quatrex/phonon/static_self_energy.py``.
-
-    NOTE: the current implementation assembles dense device-level arrays
-    (FC3 tensor + Phi_eff eigensolve); intended for single / few-cell
-    devices (the soft-mode regime). Large multi-cell / distributed use
-    needs the band-sparse variant (Phi_eff solve via the RGF)."""
+    NOTE: the implementation assembles dense device-level arrays (FC3
+    tensor + Phi_eff eigensolve); intended for single / few-cell devices."""
 
     scp_static_mixing: PositiveFloat = 0.1
     """Linear mixing factor for the self-consistent static (tadpole)
