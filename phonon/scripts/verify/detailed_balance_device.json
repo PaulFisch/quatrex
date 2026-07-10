@@ -1,0 +1,16 @@
+{
+  "temperature_K": 300.0,
+  "nfreq": 61,
+  "eta_factor": 0.5,
+  "config": "phonon/configs/sinw/sinw100_d5a_vasp_sc4_fc4.yaml",
+  "equilibrium_dT0": {
+    "max_rel_dev": 9.44894983235754e-05,
+    "n_samples": 238.0,
+    "scba_converged": true
+  },
+  "biased_dT10": {
+    "max_rel_dev": 0.004461608438767684,
+    "n_samples": 238.0,
+    "scba_converged": true
+  }
+}
