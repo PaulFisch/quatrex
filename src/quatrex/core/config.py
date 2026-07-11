@@ -1301,7 +1301,54 @@ class PhononConfig(BaseModel):
 
     sse_ring_min_w: PositiveInt | None = None
     """Minimum omega/tau batch per pool split; None = keep the
-    QUATREX_PHPH_RING_MIN_W env default (48)."""
+    QUATREX_PHPH_RING_MIN_W env default (48). NOTE: this governs only the
+    one-shot :func:`quatrex.phonon.bubble.ring_contract` wrapper (dense
+    reference / audits); the production SSE splits its tau batch itself,
+    see ``sse_tau_min_chunk``."""
+
+    sse_tau_min_chunk: PositiveInt = 4
+    """Minimum tau points per ring-pool task in the production SSE stage-3
+    split (the pool width is capped at ``n_tau // sse_tau_min_chunk``).
+    The default 4 reproduces the legacy split; larger chunks (32-48) give
+    each task fatter GEMMs and less dispatch/allocation churn. Results are
+    bit-identical for any value."""
+
+    sse_pool_scope: Literal["tau", "pair_tau"] = "tau"
+    """Task decomposition of the SSE stage-3 thread pool. ``"tau"``
+    (legacy): tasks are tau chunks, each sweeping all owned (I, J) pairs.
+    ``"pair_tau"``: tasks are (pair, tau-chunk) tiles, so fat tau chunks
+    (``sse_tau_min_chunk`` large) still fill the pool. Bit-identical."""
+
+    sse_ring_workspaces: bool = False
+    """Reuse thread-local T/U GEMM workspaces inside the ring contraction
+    (``out=`` matmuls) instead of allocating fresh temporaries per call.
+    Bit-identical; avoids allocator churn/contention at wide pools."""
+
+    sse_greater_from_lesser: bool = False
+    """Reconstruct the cross terms of Sigma^> from the Sigma^< ring pass via
+    the exact bosonic tau-domain identity (the ji-transposed, tau-reversed
+    cross terms of pair (J, I) are the absorption terms of pair (I, J)):
+    4 instead of 6 ring contractions per vertex quad, and the reversed-lesser
+    leg is never built. Construction-exact -- independent of any property of
+    G -- up to summation order (~1e-13 rel). Gamma-only (nq == 1); verify
+    with ``sse_fold_verify_iterations``."""
+
+    sse_fold_verify_iterations: NonNegativeInt = 0
+    """With ``sse_greater_from_lesser``: for the first N compute() calls run
+    the LEGACY 6-ring path, additionally accumulate the cross terms, and
+    report the max-abs/rel mismatch of the reconstruction identity per output
+    pair (rank 0; single-rank runs only -- multi-rank runs skip the gate with
+    a warning). The legacy result is shipped during these iterations (with
+    ``sse_hermitian_pairs`` the halving is also suspended during them)."""
+
+    sse_hermitian_pairs: bool = False
+    """Contract only the upper-triangle output pairs (I <= J) and fill the
+    (J, I) blocks via the anti-Hermiticity Sigma_JI(w) = -Sigma_IJ(w)^dagger
+    (conjugate-transpose in the stack state + tau reversal in the nnz state).
+    Exact only to the extent the input G is anti-Hermitian (solver precision,
+    NOT construction-exact) -- verify with a run-level A/B and watch the
+    bubble-balance residual. Single-rank runs only. Diagonal blocks are
+    always contracted fully (no projection is applied)."""
 
     sse_ramp_iterations: NonNegativeInt = 0
     """Adiabatic switch-on of the 3-phonon bubble: scale the scattering

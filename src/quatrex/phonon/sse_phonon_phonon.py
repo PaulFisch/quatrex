@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import warnings
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 from mpi4py import MPI
@@ -96,7 +97,24 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         configure_ring_pool(
             threads=int(getattr(config.phonon, "sse_ring_threads", 0)),
             min_w=getattr(config.phonon, "sse_ring_min_w", None),
+            workspaces=bool(getattr(config.phonon, "sse_ring_workspaces",
+                                    False)),
         )
+        self._tau_min_chunk = int(
+            getattr(config.phonon, "sse_tau_min_chunk", 4))
+        self._pool_scope = str(
+            getattr(config.phonon, "sse_pool_scope", "tau"))
+        # Sigma^> reconstruction from the Sigma^< cross terms (WP3): exact
+        # bosonic tau-domain identity, 4 instead of 6 ring calls per quad.
+        self._g_from_l = bool(
+            getattr(config.phonon, "sse_greater_from_lesser", False))
+        self._fold_verify = int(
+            getattr(config.phonon, "sse_fold_verify_iterations", 0))
+        self._fold_verify_done = 0
+        # Hermitian pair-halving (WP4): contract I <= J only, mirror the
+        # lower blocks via Sigma_JI = -Sigma_IJ^dagger.
+        self._herm_pairs = bool(
+            getattr(config.phonon, "sse_hermitian_pairs", False))
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
         if retarded_method not in ("half", "fft"):
             raise ValueError(
@@ -547,301 +565,557 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if nq > 1:
             prefactor = prefactor / nq
 
+        # Sigma^> reconstruction mode (sse_greater_from_lesser): during the
+        # first sse_fold_verify_iterations calls the LEGACY 6-ring path runs
+        # and the reconstruction identity is checked in place (single-rank
+        # runs only); afterwards the 4-ring fast path takes over and the
+        # reversed-lesser leg buffer (gtlr) is repurposed as the cross-term
+        # accumulator stx.
+        if self._g_from_l and nq > 1:
+            raise ValueError(
+                "sse_greater_from_lesser supports the Gamma-only device "
+                "(nq == 1); the coupled-q bookkeeping is not implemented."
+            )
+        verify_now = self._g_from_l and self._fold_verify_done < self._fold_verify
+        if verify_now and ranks.size > 1:
+            if ranks.rank == 0 and self._fold_verify_done == 0:
+                warnings.warn(
+                    "sse_fold_verify_iterations requires a single-rank run; "
+                    "skipping the in-process gate (verify with a run-level "
+                    "A/B against sse_greater_from_lesser=false instead)."
+                )
+            verify_now = False
+            self._fold_verify_done = self._fold_verify
+        fast_now = self._g_from_l and not verify_now
+        if self._herm_pairs and nq > 1:
+            raise ValueError(
+                "sse_hermitian_pairs supports the Gamma-only device "
+                "(nq == 1)."
+            )
+        if self._herm_pairs and ranks.size > 1:
+            raise NotImplementedError(
+                "sse_hermitian_pairs needs the full local nnz pattern for "
+                "the mirror masks; single-rank runs only."
+            )
+        # Halving is suspended during the fold-verify iterations (the gate
+        # needs both triangles contracted directly).
+        halve_now = self._herm_pairs and not verify_now
+
         gtl, gtg, stl, stg, gtlr, gtgr = self._ensure_tau_buffers(g_lesser, n_fft)
+        stx = gtlr  # fast mode: cross-term accumulator in the gtlr slot
 
         # (1) FFT G(omega)->g(tau) in nnz.
-        for m in (gtl, gtg, stl, stg, gtlr, gtgr):
-            if m.distribution_state != "nnz":
-                m.dtranspose(discard=True)
-        gl_in, gg_in = g_lesser.data, g_greater.data
-        # The omega=0 bin never enters the bubble (Bose divergence at DC;
-        # the zero-measure convention of the theory). The Green's functions
-        # stay intact for Dyson/observables; only the copies fed into the
-        # 3-phonon convolution are masked, with the matching output mask in
-        # step (5).
-        sse_mask = xp.abs(xp.asarray(full_freqs)) < 1e-6
-        if bool(sse_mask.any()):
-            gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
-            gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
-        # NOTE: no IR treatment is applied to the bubble legs -- the device
-        # G^< has no 1/omega pole (the bosonic fold and the bounded spectral
-        # function force it to cancel). The Bose pole is real only in the
-        # lead occupation, where the odd lead broadening Gamma(omega) keeps
-        # the injection finite. The bubble is the bare conserving convolution.
-        if os.environ.get("QX_DIAG_SPECTRAL") == "1":
-            # eta=0 convergence diagnostic: per-omega magnitude of the bubble
-            # INPUT G^<, RAW (g_lesser.data) vs WINDOWED/masked (gl_in, what is
-            # actually convolved). Full-omega axis here (nnz distribution);
-            # rank-local max over nnz is reduced to the global per-omega max
-            # over WORLD. Read on rank 0 in engine/run.py. No effect on the math.
-            nw = int(gl_in.shape[0])
-            graw = np.abs(np.asarray(g_lesser.data)).reshape(nw, -1).max(axis=1)
-            gwin = np.abs(np.asarray(gl_in)).reshape(nw, -1).max(axis=1)
-            graw = np.ascontiguousarray(graw, dtype=np.float64)
-            gwin = np.ascontiguousarray(gwin, dtype=np.float64)
-            comm.Allreduce(MPI.IN_PLACE, graw, op=MPI.MAX)
-            comm.Allreduce(MPI.IN_PLACE, gwin, op=MPI.MAX)
-            self._diag_graw_w = graw
-            self._diag_gwin_w = gwin
-            self._diag_full_freqs = np.abs(np.asarray(full_freqs).real)
-        gtl.data[:] = self._fft_pad(gl_in, n_fft)
-        gtg.data[:] = self._fft_pad(gg_in, n_fft)
-        # Build the reversed (absorption) legs: DFT index-reversal
-        # rev(X)[l] = X[(-l) mod n_fft] of the FFT'd G. The exact bosonic
-        # continuation carries the ji-TRANSPOSE (and -q for coupled-q):
-        #     G^<_ij(q, -w) = G^>_ji(-q, w).
-        # NOTE: the no-transpose shortcut is exact only for the EQUILIBRIUM
-        # (complex-symmetric) part of G; skipping the transpose breaks the
-        # Phi-derivable energy balance of the bubble off equilibrium
-        # (see SCBA._phonon_bubble_energy_balance).
-        # The q-negation (middle axes) and the FFT + tau reversal (axis 0)
-        # are state-independent and done here in the nnz state; the
-        # ji-transpose (nnz/last axis) is applied AFTER the nnz->stack
-        # dtranspose below, where the FULL nnz pattern is local on every
-        # rank. The transpose commutes with the FFT/reversal (axis 0) and
-        # the q-negation (middle axes), so this is exactly the serial fold
-        # at any rank count. The q-negation also commutes with the axis-0
-        # FFT, so the already-FFT'd decay legs are reused without a second
-        # FFT of the reversed source.
-        Xl, Xg = gtl.data, gtg.data
-        if nq > 1:
-            # negate the transverse momentum axes (Gamma-centered IDFT
-            # meshes are closed under q -> -q)
-            for ax, k in enumerate(nk, start=1):
-                neg = (-xp.arange(k)) % k
-                Xl = xp.take(Xl, neg, axis=ax)
-                Xg = xp.take(Xg, neg, axis=ax)
-        gtlr.data[0] = Xl[0]
-        gtlr.data[1:] = Xl[:0:-1]
-        gtgr.data[0] = Xg[0]
-        gtgr.data[1:] = Xg[:0:-1]
+        with profiler.profile_range(
+            "PhPh SSE: 1 FFT G->tau", level="default", comm=comm,
+        ):
+            for m in (gtl, gtg, stl, stg, gtlr, gtgr):
+                if m.distribution_state != "nnz":
+                    m.dtranspose(discard=True)
+            gl_in, gg_in = g_lesser.data, g_greater.data
+            # The omega=0 bin never enters the bubble (Bose divergence at DC;
+            # the zero-measure convention of the theory). The Green's functions
+            # stay intact for Dyson/observables; only the copies fed into the
+            # 3-phonon convolution are masked, with the matching output mask in
+            # step (5).
+            sse_mask = xp.abs(xp.asarray(full_freqs)) < 1e-6
+            if bool(sse_mask.any()):
+                gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
+                gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
+            # NOTE: no IR treatment is applied to the bubble legs -- the device
+            # G^< has no 1/omega pole (the bosonic fold and the bounded spectral
+            # function force it to cancel). The Bose pole is real only in the
+            # lead occupation, where the odd lead broadening Gamma(omega) keeps
+            # the injection finite. The bubble is the bare conserving convolution.
+            if os.environ.get("QX_DIAG_SPECTRAL") == "1":
+                # eta=0 convergence diagnostic: per-omega magnitude of the bubble
+                # INPUT G^<, RAW (g_lesser.data) vs WINDOWED/masked (gl_in, what is
+                # actually convolved). Full-omega axis here (nnz distribution);
+                # rank-local max over nnz is reduced to the global per-omega max
+                # over WORLD. Read on rank 0 in engine/run.py. No effect on the math.
+                nw = int(gl_in.shape[0])
+                graw = np.abs(np.asarray(g_lesser.data)).reshape(nw, -1).max(axis=1)
+                gwin = np.abs(np.asarray(gl_in)).reshape(nw, -1).max(axis=1)
+                graw = np.ascontiguousarray(graw, dtype=np.float64)
+                gwin = np.ascontiguousarray(gwin, dtype=np.float64)
+                comm.Allreduce(MPI.IN_PLACE, graw, op=MPI.MAX)
+                comm.Allreduce(MPI.IN_PLACE, gwin, op=MPI.MAX)
+                self._diag_graw_w = graw
+                self._diag_gwin_w = gwin
+                self._diag_full_freqs = np.abs(np.asarray(full_freqs).real)
+            gtl.data[:] = self._fft_pad(gl_in, n_fft)
+            gtg.data[:] = self._fft_pad(gg_in, n_fft)
+            # Build the reversed (absorption) legs: DFT index-reversal
+            # rev(X)[l] = X[(-l) mod n_fft] of the FFT'd G. The exact bosonic
+            # continuation carries the ji-TRANSPOSE (and -q for coupled-q):
+            #     G^<_ij(q, -w) = G^>_ji(-q, w).
+            # NOTE: the no-transpose shortcut is exact only for the EQUILIBRIUM
+            # (complex-symmetric) part of G; skipping the transpose breaks the
+            # Phi-derivable energy balance of the bubble off equilibrium
+            # (see SCBA._phonon_bubble_energy_balance).
+            # The q-negation (middle axes) and the FFT + tau reversal (axis 0)
+            # are state-independent and done here in the nnz state; the
+            # ji-transpose (nnz/last axis) is applied AFTER the nnz->stack
+            # dtranspose below, where the FULL nnz pattern is local on every
+            # rank. The transpose commutes with the FFT/reversal (axis 0) and
+            # the q-negation (middle axes), so this is exactly the serial fold
+            # at any rank count. The q-negation also commutes with the axis-0
+            # FFT, so the already-FFT'd decay legs are reused without a second
+            # FFT of the reversed source.
+            Xl, Xg = gtl.data, gtg.data
+            if nq > 1:
+                # negate the transverse momentum axes (Gamma-centered IDFT
+                # meshes are closed under q -> -q)
+                for ax, k in enumerate(nk, start=1):
+                    neg = (-xp.arange(k)) % k
+                    Xl = xp.take(Xl, neg, axis=ax)
+                    Xg = xp.take(Xg, neg, axis=ax)
+            if not fast_now:
+                # (skipped in fast mode: only Sigma^> consumed the
+                # reversed-lesser leg, and Sigma^> is reconstructed)
+                gtlr.data[0] = Xl[0]
+                gtlr.data[1:] = Xl[:0:-1]
+            gtgr.data[0] = Xg[0]
+            gtgr.data[1:] = Xg[:0:-1]
 
         # (2) g(tau) nnz->stack: tau-slice of the full band per stack rank
-        gtl.dtranspose()
-        gtg.dtranspose()
-        gtlr.dtranspose()
-        gtgr.dtranspose()
-        # ji-transpose of the reversed legs, applied in the "stack" state where
-        # the FULL nnz axis is local on every rank (the decay legs gtl/gtg are
-        # NOT transposed). The transpose (i,j)->(j,i) is a pure function of the
-        # sparsity pattern; with block_comm_size>1 the partner (j,i) of a
-        # block-boundary entry lives on a neighbour block rank and is fetched by
-        # an immediate-neighbour exchange (BT band => |I-J|<=1). Exact + conserving
-        # at any nranks AND any block_comm_size.
-        self._fold_reversed_legs(gtlr, gtgr, g_lesser)
-        if stl.distribution_state != "stack":
-            stl.dtranspose(discard=True)
-        if stg.distribution_state != "stack":
-            stg.dtranspose(discard=True)
-        stl.data[:] = 0.0
-        stg.data[:] = 0.0
-
-        gtlv, gtgv = gtl.stack[...], gtg.stack[...]
-        gtlrv, gtgrv = gtlr.stack[...], gtgr.stack[...]
-        stlv, stgv = stl.stack[...], stg.stack[...]
-
-        # (3) Ring contraction per tau-slice in stack. Under a comm.block
-        # split each rank owns outputs (I,J) with min(I,J) in its block
-        # window and fetches the off-window band links from its
-        # neighbours via a width-N_h halo
-        start = int(stl.block_section_offsets[ranks.block.rank])
-        end = int(stl.block_section_offsets[ranks.block.rank + 1])
-        owned = self._owned_outputs(start, end)
-
-        if ranks.block.size > 1:
-            halo_l, halo_g = self._exchange_band_halo(gtlv, gtgv, gtl, start, end)
-            halo_lr, halo_gr = self._exchange_band_halo(
-                gtlrv, gtgrv, gtlr, start, end)
-        else:
-            halo_l = halo_g = halo_lr = halo_gr = {}
-
-        # Materialise each distinct band link
-        gl_blk: dict[tuple[int, int], NDArray] = {}
-        gg_blk: dict[tuple[int, int], NDArray] = {}
-        glr_blk: dict[tuple[int, int], NDArray] = {}
-        ggr_blk: dict[tuple[int, int], NDArray] = {}
-        for (K, Kp) in self._links_for_range(start, end):
-            if start <= min(K, Kp) < end:
-                gl_blk[(K, Kp)] = gtlv.blocks[K - start, Kp - start]
-                gg_blk[(K, Kp)] = gtgv.blocks[K - start, Kp - start]
-                glr_blk[(K, Kp)] = gtlrv.blocks[K - start, Kp - start]
-                ggr_blk[(K, Kp)] = gtgrv.blocks[K - start, Kp - start]
+        with profiler.profile_range(
+            "PhPh SSE: 2 tau nnz->stack + fold", level="default", comm=comm,
+        ):
+            gtl.dtranspose()
+            gtg.dtranspose()
+            if fast_now:
+                stx.dtranspose(discard=True)
             else:
-                gl_blk[(K, Kp)] = halo_l[(K, Kp)]
-                gg_blk[(K, Kp)] = halo_g[(K, Kp)]
-                glr_blk[(K, Kp)] = halo_lr[(K, Kp)]
-                ggr_blk[(K, Kp)] = halo_gr[(K, Kp)]
+                gtlr.dtranspose()
+            gtgr.dtranspose()
+            # ji-transpose of the reversed legs, applied in the "stack" state where
+            # the FULL nnz axis is local on every rank (the decay legs gtl/gtg are
+            # NOT transposed). The transpose (i,j)->(j,i) is a pure function of the
+            # sparsity pattern; with block_comm_size>1 the partner (j,i) of a
+            # block-boundary entry lives on a neighbour block rank and is fetched by
+            # an immediate-neighbour exchange (BT band => |I-J|<=1). Exact + conserving
+            # at any nranks AND any block_comm_size.
+            self._fold_reversed_legs(
+                (gtgr,) if fast_now else (gtlr, gtgr), g_lesser)
+            if fast_now:
+                stx.data[:] = 0.0
+            if stl.distribution_state != "stack":
+                stl.dtranspose(discard=True)
+            if stg.distribution_state != "stack":
+                stg.dtranspose(discard=True)
+            stl.data[:] = 0.0
+            stg.data[:] = 0.0
 
-        # The full bubble folds the negative-omega contribution
-        # into the one-sided grid via G^<(-omega)=G^>(omega): per ring quad
-        #   Sigma^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
-        #   Sigma^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
-        # The omega/tau batch is parallelised ONCE over the whole
-        # (I,J)/phi-pair loop below (single-thread BLAS per chunk), and the
-        # fixed phi factors are pre-permuted once -- per (I,J) a list of
-        # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ) -- to avoid per-call transpose
-        # copies.
-        if self._phi_pre is None:
-            self._phi_pre = {}
-            for (I, J), quads in self._phi_pair_index.items():
-                self._phi_pre[(I, J)] = [
-                    (K1, K2, K1p, K2p) + phi_perms(pl, pr, xp)
-                    for (K1, K2, K1p, K2p, pl, pr) in quads
-                ]
+        with profiler.profile_range(
+            "PhPh SSE: 3 ring contraction", level="default", comm=comm,
+        ):
+            gtlv, gtgv = gtl.stack[...], gtg.stack[...]
+            gtlrv, gtgrv = gtlr.stack[...], gtgr.stack[...]
+            stlv, stgv = stl.stack[...], stg.stack[...]
 
-        def _fold_l(pre, gla, glb, ggra, ggrb):
-            PL, PR, nI, bK2, nJ = pre
-            return (ring_contract_pre(PL, PR, nI, bK2, nJ, gla, glb, xp)
-                    + ring_contract_pre(PL, PR, nI, bK2, nJ, gla, ggrb, xp)
-                    + ring_contract_pre(PL, PR, nI, bK2, nJ, ggra, glb, xp))
+            # (3) Ring contraction per tau-slice in stack. Under a comm.block
+            # split each rank owns outputs (I,J) with min(I,J) in its block
+            # window and fetches the off-window band links from its
+            # neighbours via a width-N_h halo
+            start = int(stl.block_section_offsets[ranks.block.rank])
+            end = int(stl.block_section_offsets[ranks.block.rank + 1])
+            owned = self._owned_outputs(start, end)
 
-        def _fold_g(pre, gga, ggb, glra, glrb):
-            PL, PR, nI, bK2, nJ = pre
-            return (ring_contract_pre(PL, PR, nI, bK2, nJ, gga, ggb, xp)
-                    + ring_contract_pre(PL, PR, nI, bK2, nJ, gga, glrb, xp)
-                    + ring_contract_pre(PL, PR, nI, bK2, nJ, glra, ggb, xp))
+            if ranks.block.size > 1:
+                halo_l, halo_g = self._exchange_band_halo(gtlv, gtgv, gtl, start, end)
+                halo_lr, halo_gr = self._exchange_band_halo(
+                    gtlrv, gtgrv, gtlr, start, end)
+            else:
+                halo_l = halo_g = halo_lr = halo_gr = {}
 
-        if nq == 1:
-            # Compute Sigma^{<,>}(I,J) for the tau slice [lo:hi]; returns
-            # the band blocks for that slice.
-            def _contract_tau(lo, hi):
-                res = {}
-                for (I, J) in owned:
-                    acc_l = None
-                    acc_g = None
-                    for (K1, K2, K1p, K2p, *pre
-                         ) in self._phi_pre[(I, J)]:
-                        sl = _fold_l(
-                            pre,
-                            gl_blk[(K1, K1p)][lo:hi], gl_blk[(K2, K2p)][lo:hi],
-                            ggr_blk[(K1, K1p)][lo:hi], ggr_blk[(K2, K2p)][lo:hi],
+            # Materialise each distinct band link
+            gl_blk: dict[tuple[int, int], NDArray] = {}
+            gg_blk: dict[tuple[int, int], NDArray] = {}
+            glr_blk: dict[tuple[int, int], NDArray] = {}
+            ggr_blk: dict[tuple[int, int], NDArray] = {}
+            for (K, Kp) in self._links_for_range(start, end):
+                if start <= min(K, Kp) < end:
+                    gl_blk[(K, Kp)] = gtlv.blocks[K - start, Kp - start]
+                    gg_blk[(K, Kp)] = gtgv.blocks[K - start, Kp - start]
+                    glr_blk[(K, Kp)] = gtlrv.blocks[K - start, Kp - start]
+                    ggr_blk[(K, Kp)] = gtgrv.blocks[K - start, Kp - start]
+                else:
+                    gl_blk[(K, Kp)] = halo_l[(K, Kp)]
+                    gg_blk[(K, Kp)] = halo_g[(K, Kp)]
+                    glr_blk[(K, Kp)] = halo_lr[(K, Kp)]
+                    ggr_blk[(K, Kp)] = halo_gr[(K, Kp)]
+
+            # The full bubble folds the negative-omega contribution
+            # into the one-sided grid via G^<(-omega)=G^>(omega): per ring quad
+            #   Sigma^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
+            #   Sigma^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
+            # The omega/tau batch is parallelised ONCE over the whole
+            # (I,J)/phi-pair loop below (single-thread BLAS per chunk), and the
+            # fixed phi factors are pre-permuted once -- per (I,J) a list of
+            # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ) -- to avoid per-call transpose
+            # copies.
+            if self._phi_pre is None:
+                self._phi_pre = {}
+                for (I, J), quads in self._phi_pair_index.items():
+                    self._phi_pre[(I, J)] = [
+                        (K1, K2, K1p, K2p) + phi_perms(pl, pr, xp)
+                        for (K1, K2, K1p, K2p, pl, pr) in quads
+                    ]
+
+            def _fold_l(pre, gla, glb, ggra, ggrb):
+                PL, PR, nI, bK2, nJ = pre
+                return (ring_contract_pre(PL, PR, nI, bK2, nJ, gla, glb, xp)
+                        + ring_contract_pre(PL, PR, nI, bK2, nJ, gla, ggrb, xp)
+                        + ring_contract_pre(PL, PR, nI, bK2, nJ, ggra, glb, xp))
+
+            def _fold_g(pre, gga, ggb, glra, glrb):
+                PL, PR, nI, bK2, nJ = pre
+                return (ring_contract_pre(PL, PR, nI, bK2, nJ, gga, ggb, xp)
+                        + ring_contract_pre(PL, PR, nI, bK2, nJ, gga, glrb, xp)
+                        + ring_contract_pre(PL, PR, nI, bK2, nJ, glra, ggb, xp))
+
+            if nq == 1:
+                _pair_debug = os.environ.get("QTX_PROFILE_LEVEL") == "debug"
+
+                # Hermitian pair-halving: contract only I <= J; the (J, I)
+                # blocks are mirrored below via Sigma_JI = -Sigma_IJ^dagger.
+                pairs_c = ([ij for ij in owned if ij[0] <= ij[1]]
+                           if halve_now else owned)
+
+                n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
+                _dt = next(iter(gl_blk.values())).dtype if gl_blk else complex
+                # Preallocated per-pair outputs: pool tasks write disjoint
+                # tau slices directly (race-free), removing the per-pair
+                # concatenate alloc+copy of the chunked path.
+                out_l = {ij: xp.empty(
+                    (n_tau, int(self.block_sizes[ij[0]]),
+                     int(self.block_sizes[ij[1]])), dtype=_dt)
+                    for ij in pairs_c}
+                out_g = {ij: xp.empty_like(out_l[ij]) for ij in pairs_c}
+                # Cross-term (t2+t3) accumulator for the Sigma^>
+                # reconstruction; in verify mode also the direct t5+t6 for
+                # the identity gate.
+                out_x = ({ij: xp.empty_like(out_l[ij]) for ij in pairs_c}
+                         if (fast_now or verify_now) else None)
+                out_t56 = ({ij: xp.empty_like(out_l[ij]) for ij in pairs_c}
+                           if verify_now else None)
+
+                def _rings3(pre, da, db, ra, rb):
+                    # The 3-term bosonic fold, pieces kept separate:
+                    # ring(decay, decay), ring(decay, rev), ring(rev, decay).
+                    PL, PR, nI, bK2, nJ = pre
+                    return (
+                        ring_contract_pre(PL, PR, nI, bK2, nJ, da, db, xp),
+                        ring_contract_pre(PL, PR, nI, bK2, nJ, da, rb, xp),
+                        ring_contract_pre(PL, PR, nI, bK2, nJ, ra, db, xp),
+                    )
+
+                # Compute Sigma^{<,>} for the tau slice [lo:hi] of the given
+                # pairs, writing into the preallocated outputs; returns the
+                # per-pair wall time under profile-level debug.
+                def _contract_tau(lo, hi, pairs):
+                    times = {} if _pair_debug else None
+                    for (I, J) in pairs:
+                        t0 = perf_counter() if _pair_debug else 0.0
+                        acc_l = acc_g = acc_x = acc_t56 = None
+                        for (K1, K2, K1p, K2p, *pre
+                             ) in self._phi_pre[(I, J)]:
+                            gl_a = gl_blk[(K1, K1p)][lo:hi]
+                            gl_b = gl_blk[(K2, K2p)][lo:hi]
+                            gg_a = gg_blk[(K1, K1p)][lo:hi]
+                            gg_b = gg_blk[(K2, K2p)][lo:hi]
+                            ggr_a = ggr_blk[(K1, K1p)][lo:hi]
+                            ggr_b = ggr_blk[(K2, K2p)][lo:hi]
+                            r1, r2, r3 = _rings3(pre, gl_a, gl_b, ggr_a, ggr_b)
+                            sl = (r1 + r2) + r3  # == legacy _fold_l order
+                            if fast_now:
+                                # Exact reconstruction: only the diagonal
+                                # term ring(g^>, g^>) is contracted; the
+                                # cross terms come from (J, I)'s t2+t3.
+                                PL, PR, nI, bK2, nJ = pre
+                                sg = ring_contract_pre(
+                                    PL, PR, nI, bK2, nJ, gg_a, gg_b, xp)
+                                tx = r2 + r3
+                            else:
+                                glr_a = glr_blk[(K1, K1p)][lo:hi]
+                                glr_b = glr_blk[(K2, K2p)][lo:hi]
+                                r4, r5, r6 = _rings3(
+                                    pre, gg_a, gg_b, glr_a, glr_b)
+                                sg = (r4 + r5) + r6  # == legacy _fold_g order
+                                tx = (r2 + r3) if verify_now else None
+                                if verify_now:
+                                    t56 = r5 + r6
+                            acc_l = sl if acc_l is None else acc_l + sl
+                            acc_g = sg if acc_g is None else acc_g + sg
+                            if tx is not None:
+                                acc_x = tx if acc_x is None else acc_x + tx
+                            if verify_now:
+                                acc_t56 = (t56 if acc_t56 is None
+                                           else acc_t56 + t56)
+                        if acc_l is not None:
+                            out_l[(I, J)][lo:hi] = acc_l
+                            out_g[(I, J)][lo:hi] = acc_g
+                            if acc_x is not None:
+                                out_x[(I, J)][lo:hi] = acc_x
+                            if acc_t56 is not None:
+                                out_t56[(I, J)][lo:hi] = acc_t56
+                        if _pair_debug:
+                            times[(I, J)] = perf_counter() - t0
+                    return times
+
+                # Cap the tau-split so each worker keeps >= sse_tau_min_chunk
+                # tau points: the per-ring contraction scales with threads
+                # only while each chunk's BS^3 intermediate stays in cache;
+                # shorter chunks regress into dispatch/allocator churn.
+                pool, n_threads = ring_pool()
+                nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))
+                self._print_ring_stats(pairs_c, n_tau, n_threads, nt,
+                                       rings_per_quad=4 if fast_now else 6)
+                pair_times: dict | None = {} if _pair_debug else None
+                if pool is not None and nt > 1:
+                    bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
+                    if self._pool_scope == "pair_tau":
+                        # (pair x tau-chunk) tiles: fat chunks still fill
+                        # the pool.
+                        tasks = [(ij, lo, hi)
+                                 for ij in pairs_c for (lo, hi) in bnds]
+                        tlists = list(pool.map(
+                            lambda t: _contract_tau(t[1], t[2], (t[0],)),
+                            tasks))
+                    else:
+                        tlists = list(pool.map(
+                            lambda b: _contract_tau(b[0], b[1], pairs_c),
+                            bnds))
+                    if _pair_debug:
+                        for t in tlists:
+                            for k, v in t.items():
+                                pair_times[k] = pair_times.get(k, 0.0) + v
+                else:
+                    pair_times = _contract_tau(0, n_tau, pairs_c)
+                for ij in pairs_c:
+                    stlv.blocks[ij[0] - start, ij[1] - start] = out_l[ij]
+                    stgv.blocks[ij[0] - start, ij[1] - start] = out_g[ij]
+                if halve_now:
+                    # Mirror the lower blocks: Sigma_JI = -Sigma_IJ^dagger
+                    # with sign -conj(pref)/pref = +1 (purely imaginary
+                    # bubble prefactor); the tau reversal that completes the
+                    # identity is applied in the nnz state before the IFFT.
+                    if abs(prefactor.real) > 1e-30 * abs(prefactor):
+                        raise RuntimeError(
+                            "sse_hermitian_pairs: the bubble prefactor is "
+                            "not purely imaginary; mirror sign undefined."
                         )
-                        sg = _fold_g(
-                            pre,
-                            gg_blk[(K1, K1p)][lo:hi], gg_blk[(K2, K2p)][lo:hi],
-                            glr_blk[(K1, K1p)][lo:hi], glr_blk[(K2, K2p)][lo:hi],
+                    for (I, J) in pairs_c:
+                        if I == J:
+                            continue
+                        stlv.blocks[J - start, I - start] = xp.conj(
+                            out_l[(I, J)].swapaxes(-1, -2))
+                        stgv.blocks[J - start, I - start] = xp.conj(
+                            out_g[(I, J)].swapaxes(-1, -2))
+                if fast_now:
+                    if self._build_fold_plan(g_lesser) is None:
+                        raise RuntimeError(
+                            "sse_greater_from_lesser needs the pattern-only "
+                            "fold plan (rows/cols on the Green's function)."
                         )
-                        acc_l = sl if acc_l is None else acc_l + sl
-                        acc_g = sg if acc_g is None else acc_g + sg
-                    if acc_l is not None:
-                        res[(I, J)] = (acc_l, acc_g)
-                return res
-
-            n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
-            # Cap the tau-split so each worker keeps >= ~4 tau points: the
-            # per-ring contraction scales with threads only while each
-            # chunk's BS^3 intermediate stays in cache; shorter chunks
-            # regress.
-            pool, n_threads = ring_pool()
-            nt = min(n_threads, max(1, n_tau // 4))
-            if pool is not None and nt > 1:
-                bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
-                chunks = list(pool.map(lambda b: _contract_tau(*b), bnds))
-                for (I, J) in owned:
-                    parts = [c for c in chunks if (I, J) in c]
-                    if parts:
-                        stlv.blocks[I - start, J - start] = xp.concatenate(
-                            [c[(I, J)][0] for c in parts], axis=0)
-                        stgv.blocks[I - start, J - start] = xp.concatenate(
-                            [c[(I, J)][1] for c in parts], axis=0)
+                    stxv = stx.stack[...]
+                    for ij in pairs_c:
+                        stxv.blocks[ij[0] - start, ij[1] - start] = out_x[ij]
+                    if halve_now:
+                        # Mirror the cross terms too; after the fold the
+                        # upper stx entries then hold conj((t2+t3)_IJ), and
+                        # the reversal in stage 5 (upper mask) makes the
+                        # merge deliver Sigma^>_IJ[l] += conj((t2+t3)_IJ[l]).
+                        for (I, J) in pairs_c:
+                            if I == J:
+                                continue
+                            stxv.blocks[J - start, I - start] = xp.conj(
+                                out_x[(I, J)].swapaxes(-1, -2))
+                    # ji-transpose the cross terms in the stack state; the
+                    # tau reversal happens after the stage-4 dtranspose (nnz
+                    # state, full tau axis), completing
+                    #   Sigma^>_IJ[l] = t4_IJ[l] + (t2+t3)_JI[(-l) mod n]^T.
+                    self._fold_reversed_legs((stx,), g_lesser)
+                if verify_now:
+                    # Identity gate (single rank: full tau + all pairs
+                    # local): (t5+t6)_IJ[l, a, b] == (t2+t3)_JI[-l, b, a].
+                    rev = (-np.arange(n_tau)) % n_tau
+                    worst = worst_rel = 0.0
+                    for (I, J) in owned:
+                        rec = out_x[(J, I)][rev].swapaxes(-1, -2)
+                        d = float(xp.max(xp.abs(out_t56[(I, J)] - rec)))
+                        scale = float(xp.max(xp.abs(out_t56[(I, J)]))) or 1.0
+                        worst = max(worst, d)
+                        worst_rel = max(worst_rel, d / scale)
+                    self._fold_verify_done += 1
+                    if ranks.rank == 0:
+                        print(
+                            "PhPh SSE fold-verify "
+                            f"[{self._fold_verify_done}/{self._fold_verify}]"
+                            f": max|d|={worst:.3e} rel={worst_rel:.3e} "
+                            f"({'OK' if worst_rel < 1e-10 else 'MISMATCH'})",
+                            flush=True,
+                        )
+                if _pair_debug and ranks.rank == 0 and pair_times:
+                    # Summed over pool chunks: CPU time per output pair (the
+                    # wall time of one chunk's pair-loop pass, accumulated).
+                    tot = sum(pair_times.values())
+                    per = "  ".join(
+                        f"({I},{J}):{t:.2f}s/{len(self._phi_pre[(I, J)])}q"
+                        for (I, J), t in sorted(pair_times.items()))
+                    print(f"PhPh SSE pairs [cpu-s/quads]: {per}  "
+                          f"total {tot:.2f}s", flush=True)
             else:
-                for (I, J), (acc_l, acc_g) in _contract_tau(0, n_tau).items():
-                    stlv.blocks[I - start, J - start] = acc_l
-                    stgv.blocks[I - start, J - start] = acc_g
-        else:
-            # Coupled-q convolution.
-            qdm = self._q_diff_map
-            qv = self._qvertices
+                # Coupled-q convolution.
+                qdm = self._q_diff_map
+                qv = self._qvertices
 
-            def _qflat(d):
-                # (tau, *nk, b, b) -> (tau, N_q, b, b); the q-axis is contiguous
-                # in the same C-order as global_stack_shape[1:].
-                return {
-                    kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
-                    for kk, v in d.items()
-                }
+                def _qflat(d):
+                    # (tau, *nk, b, b) -> (tau, N_q, b, b); the q-axis is contiguous
+                    # in the same C-order as global_stack_shape[1:].
+                    return {
+                        kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
+                        for kk, v in d.items()
+                    }
 
-            gl_q = _qflat(gl_blk)
-            gg_q = _qflat(gg_blk)
-            glr_q = _qflat(glr_blk)
-            ggr_q = _qflat(ggr_blk)
-            n_tau = next(iter(gl_q.values())).shape[0]
-            dtype = next(iter(gl_q.values())).dtype
-            # Distribute the EXTERNAL-q loop over comm.q. The q-folded
-            # internal q' Green's functions are kept whole/local on every
-            # rank (only the energy axis is split across comm.stack), so each
-            # q-rank computes a disjoint subset of iq_ext from the full local
-            # q' data -- no internal-q gather -- and the per-rank partial
-            # Sigma(q_ext) are summed over comm.q after the loop. This is the
-            # dedicated q axis: N_q-way parallelism on top of the energy axis.
-            q_lo = ranks.q.rank * nq // ranks.q.size
-            q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
+                gl_q = _qflat(gl_blk)
+                gg_q = _qflat(gg_blk)
+                glr_q = _qflat(glr_blk)
+                ggr_q = _qflat(ggr_blk)
+                n_tau = next(iter(gl_q.values())).shape[0]
+                dtype = next(iter(gl_q.values())).dtype
+                # Distribute the EXTERNAL-q loop over comm.q. The q-folded
+                # internal q' Green's functions are kept whole/local on every
+                # rank (only the energy axis is split across comm.stack), so each
+                # q-rank computes a disjoint subset of iq_ext from the full local
+                # q' data -- no internal-q gather -- and the per-rank partial
+                # Sigma(q_ext) are summed over comm.q after the loop. This is the
+                # dedicated q axis: N_q-way parallelism on top of the energy axis.
+                q_lo = ranks.q.rank * nq // ranks.q.size
+                q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
 
-            if self._vfactors is not None and self._vf_kernel == "gram":
-                self._contract_factored_q(
-                    owned, qdm, q_lo, q_hi, nq, nk, n_tau, dtype,
-                    gl_q, gg_q, glr_q, ggr_q, stlv, stgv, start, xp,
-                )
-            else:
-                if self._vfactors is not None:
-                    # decomposed_kernel="reconstruct": dense path fed the
-                    # factor-reconstructed rank-local vertex slice.
-                    qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
-                self._contract_dense_q(
-                    owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
-                    gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
-                    stlv, stgv, start, xp,
-                )
+                if self._vfactors is not None and self._vf_kernel == "gram":
+                    self._contract_factored_q(
+                        owned, qdm, q_lo, q_hi, nq, nk, n_tau, dtype,
+                        gl_q, gg_q, glr_q, ggr_q, stlv, stgv, start, xp,
+                    )
+                else:
+                    if self._vfactors is not None:
+                        # decomposed_kernel="reconstruct": dense path fed the
+                        # factor-reconstructed rank-local vertex slice.
+                        qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
+                    self._contract_dense_q(
+                        owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+                        gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
+                        stlv, stgv, start, xp,
+                    )
 
-        # Assemble the external-q distribution: each comm.q rank computed a
-        # disjoint subset of iq_ext (others left zero), so sum over comm.q.
-        if nq > 1 and ranks.q.size > 1:
-            for m in (stl, stg):
-                recv = xp.empty_like(m.data)
-                ranks.q.all_reduce(xp.ascontiguousarray(m.data), recv, op="sum")
-                m.data[:] = recv
+            # Assemble the external-q distribution: each comm.q rank computed a
+            # disjoint subset of iq_ext (others left zero), so sum over comm.q.
+            if nq > 1 and ranks.q.size > 1:
+                for m in (stl, stg):
+                    recv = xp.empty_like(m.data)
+                    ranks.q.all_reduce(xp.ascontiguousarray(m.data), recv, op="sum")
+                    m.data[:] = recv
 
         # (4) sigma(tau) stack->nnz
-        stl.dtranspose()
-        stg.dtranspose()
+        with profiler.profile_range(
+            "PhPh SSE: 4 tau stack->nnz", level="default", comm=comm,
+        ):
+            stl.dtranspose()
+            stg.dtranspose()
+            if fast_now:
+                stx.dtranspose()
 
         # (5) IFFT sigma(tau)->Sigma(omega) in nnz; add into outputs; build Sigma^R.
-        sl_data = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_full]
-        sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
-        # OUTPUT mask, completing the input masking above: the scattering
-        # Sigma is NOT applied below the SSE cutoff (transport there stays
-        # ballistic), and never at the omega=0 bin (a nonzero Sigma^{<,>}(0)
-        # hits the near-singular acoustic G^R(0); the bin carries zero heat
-        # anyway).
-        if bool(sse_mask.any()):
-            sl_data[sse_mask] = 0.0
-            sg_data[sse_mask] = 0.0
-        # SIGN CONVENTION: fed with this solver's occupation-positive
-        # Green's functions (-i G^{<,>} >= 0, the same convention as the
-        # lead injection sigma^{<,>} = +i n(+1) gamma), the bubble returns
-        # TEXTBOOK-signed sigma^{<,>} (-i sigma^{<,>} <= 0) -- the exact
-        # negative of what the Keldysh feedback G^{<,>} = G^R sigma^{<,>} G^A
-        # expects (unflipped it injects anti-dissipation), so negate here.
-        sigma_lesser.data[:] = sigma_lesser.data - sl_data
-        sigma_greater.data[:] = sigma_greater.data - sg_data
-        # Sigma^R contribution (from the RAW, textbook-signed values:
-        # Gamma = i(sigma^> - sigma^<)_raw >= 0, matching the lead OBC
-        # damping sign -- unchanged by the convention flip above).
-        if self.retarded_method == "fft":
-            delta = sg_data - sl_data
-            # transverse_shape: the exact bosonic mirror carries q -> -q on
-            # the transverse axes (exact off equilibrium, unlike the plain
-            # conjugate shortcut).
-            hil = 0.5j * hilbert_transform(delta, full_freqs,
-                                           transverse_shape=nk)
+        with profiler.profile_range(
+            "PhPh SSE: 5 IFFT + Hilbert", level="default", comm=comm,
+        ):
+            if halve_now:
+                # Complete the mirrored lower blocks (and, in fast mode, the
+                # folded upper cross terms) with their tau reversal: the
+                # stack-state fill could only conjugate-transpose (tau is
+                # split there); the reversal is local here (full tau axis).
+                # RHS advanced indexing copies first -- alias-safe.
+                ml, mu = self._herm_masks(g_lesser)
+                stl.data[1:, ..., ml] = stl.data[:0:-1, ..., ml]
+                stg.data[1:, ..., ml] = stg.data[:0:-1, ..., ml]
+                if fast_now:
+                    stx.data[1:, ..., mu] = stx.data[:0:-1, ..., mu]
+            if fast_now:
+                # Complete the Sigma^> reconstruction: add the ji-transposed
+                # cross terms with the tau axis reversed (circular; l = 0
+                # self-maps, n_fft odd so there is no Nyquist bin).
+                stg.data[0] += stx.data[0]
+                stg.data[1:] += stx.data[:0:-1]
+            sl_data = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_full]
+            sg_data = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_full]
+            # OUTPUT mask, completing the input masking above: the scattering
+            # Sigma is NOT applied below the SSE cutoff (transport there stays
+            # ballistic), and never at the omega=0 bin (a nonzero Sigma^{<,>}(0)
+            # hits the near-singular acoustic G^R(0); the bin carries zero heat
+            # anyway).
             if bool(sse_mask.any()):
-                # post-mask the retarded consistently with Sigma^<>
-                hil[sse_mask] = 0.0
-            sigma_retarded.data[:] = sigma_retarded.data + hil
+                sl_data[sse_mask] = 0.0
+                sg_data[sse_mask] = 0.0
+            # SIGN CONVENTION: fed with this solver's occupation-positive
+            # Green's functions (-i G^{<,>} >= 0, the same convention as the
+            # lead injection sigma^{<,>} = +i n(+1) gamma), the bubble returns
+            # TEXTBOOK-signed sigma^{<,>} (-i sigma^{<,>} <= 0) -- the exact
+            # negative of what the Keldysh feedback G^{<,>} = G^R sigma^{<,>} G^A
+            # expects (unflipped it injects anti-dissipation), so negate here.
+            sigma_lesser.data[:] = sigma_lesser.data - sl_data
+            sigma_greater.data[:] = sigma_greater.data - sg_data
+            # Sigma^R contribution (from the RAW, textbook-signed values:
+            # Gamma = i(sigma^> - sigma^<)_raw >= 0, matching the lead OBC
+            # damping sign -- unchanged by the convention flip above).
+            if self.retarded_method == "fft":
+                delta = sg_data - sl_data
+                # transverse_shape: the exact bosonic mirror carries q -> -q on
+                # the transverse axes (exact off equilibrium, unlike the plain
+                # conjugate shortcut).
+                hil = 0.5j * hilbert_transform(delta, full_freqs,
+                                               transverse_shape=nk)
+                if bool(sse_mask.any()):
+                    # post-mask the retarded consistently with Sigma^<>
+                    hil[sse_mask] = 0.0
+                sigma_retarded.data[:] = sigma_retarded.data + hil
 
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
             self._apply_scp_tadpole(g_lesser, g_greater, sigma_retarded)
+
+    def _print_ring_stats(self, owned, n_tau, n_threads, n_chunks,
+                          rings_per_quad=6):
+        """One-time (rank 0) stage-3 shape/cost summary: pair/quad counts,
+        tau geometry, pool layout, and the GEMM flop model of one full ring
+        pass -- divide by the measured 'PhPh SSE: 3' time for achieved GF/s."""
+        if getattr(self, "_ring_stats_printed", False) or ranks.rank != 0:
+            return
+        self._ring_stats_printed = True
+        n_quads = sum(len(self._phi_pre[p]) for p in owned)
+        flops = 0.0
+        for p in owned:
+            for (_, _, _, _, PL, PR, nI, bK2, nJ) in self._phi_pre[p]:
+                bK1 = PL.shape[1]
+                bK2p = PR.shape[0]
+                bK1p = PR.shape[1] // nJ
+                # 3 GEMMs per ring call; 6 ring calls per quad in the legacy
+                # 3-term fold for each of Sigma^{<,>}, 4 with the Sigma^>
+                # reconstruction; 8 real flops per complex MAC.
+                ring = 8 * n_tau * (
+                    nI * bK2 * bK1 * bK1p
+                    + bK2 * bK2p * bK1p * nJ
+                    + nI * bK2 * bK1p * nJ
+                )
+                flops += rings_per_quad * ring
+        print(
+            f"PhPh SSE ring: pairs={len(owned)} quads={n_quads} "
+            f"n_tau={n_tau} pool={n_threads} chunks={n_chunks} "
+            f"rings/quad={rings_per_quad} "
+            f"model={flops / 1e9:.1f} GFLOP/pass",
+            flush=True,
+        )
 
     def _contract_dense_q(
         self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
@@ -930,7 +1204,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
         pool, n_threads = ring_pool()
-        nt = min(n_threads, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+        nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))  # see nq==1
         if pool is not None and xp is np and nt > 1:
             bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
                     for i in range(nt)]
@@ -992,7 +1266,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
         pool, n_threads = ring_pool()
-        nt = min(n_threads, max(1, n_tau // 4))  # >=~4 tau/thread (see nq==1)
+        nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))  # see nq==1
         if pool is not None and xp is np and nt > 1:
             bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
             chunks = list(pool.map(lambda b: _run(*b), bnds))
@@ -1006,9 +1280,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             for (I, J), (out_l, out_g) in _run(0, n_tau).items():
                 _write(I, J, out_l, out_g)
 
-    def _fold_reversed_legs(self, gtlr, gtgr, g: DSDBSparse) -> None:
-        """Apply the exact bosonic ji-transpose ``X_ij -> X_ji`` to the reversed
-        (absorption) legs in place, at ANY ``comm.block`` size.
+    def _fold_reversed_legs(self, legs: tuple, g: DSDBSparse) -> None:
+        """Apply the exact bosonic ji-transpose ``X_ij -> X_ji`` to the given
+        stack-state buffers in place, at ANY ``comm.block`` size. Used on the
+        reversed (absorption) G legs, and in the Sigma^>-reconstruction mode
+        also on the cross-term accumulator (same pattern by construction).
 
         On the local nnz axis the partner ``(j,i)`` of an entry ``(i,j)`` is
         stored locally unless ``(i,j)`` straddles a block-rank boundary, in which
@@ -1021,7 +1297,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if plan is None:  # serial-equivalent (single nnz block / no pattern)
             return
         local_perm, recv_dest, send_src = plan
-        for leg in (gtlr, gtgr):
+        for leg in legs:
             data = leg.data
             folded = data[..., local_perm]
             for nbr in sorted(set(recv_dest) | set(send_src)):
@@ -1105,6 +1381,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         send_src = {nbr: xp.asarray(v) for nbr, v in send_src.items()}
         self._rev_perm = (local_perm, recv_dest, send_src)
         return self._rev_perm
+
+    def _herm_masks(self, g: DSDBSparse):
+        """Boolean masks over the (full, single-rank) nnz axis selecting the
+        strictly-lower and strictly-upper block-triangle entries -- the
+        mirrored placeholders of the Hermitian pair-halving. Cached."""
+        cached = getattr(self, "_herm_mask_cache", None)
+        if cached is None:
+            rows, cols = g.spy()
+            r = np.asarray(rows.get() if hasattr(rows, "get") else rows)
+            c = np.asarray(cols.get() if hasattr(cols, "get") else cols)
+            rb = np.searchsorted(self.block_offsets, r, side="right") - 1
+            cb = np.searchsorted(self.block_offsets, c, side="right") - 1
+            cached = self._herm_mask_cache = (
+                xp.asarray(rb > cb), xp.asarray(rb < cb))
+        return cached
 
     def _block_owner(self, orbital_row: int, g: DSDBSparse) -> int:
         """``comm.block`` rank owning the block that contains global ORBITAL

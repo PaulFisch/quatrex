@@ -14,6 +14,7 @@ omega axis. The prefactor is supplied by the caller (``0.5j * hbar * d_omega / (
 from __future__ import annotations
 
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -22,16 +23,23 @@ _RING_THREADS = max(1, int(os.environ.get("QUATREX_PHPH_RING_THREADS", "1")))
 _RING_POOL = ThreadPoolExecutor(max_workers=_RING_THREADS) if _RING_THREADS > 1 else None
 # Only worth the split + concatenate overhead when the batch is large enough.
 _RING_MIN_W = int(os.environ.get("QUATREX_PHPH_RING_MIN_W", "48"))
+# Thread-local T/U GEMM workspaces (config sse_ring_workspaces): avoids the
+# two fresh temporaries per ring call -- allocator churn/contention at wide
+# pools. Bit-identical (same GEMMs into recycled memory).
+_RING_WORKSPACES = os.environ.get("QUATREX_PHPH_RING_WORKSPACES", "0") == "1"
+_TLS = threading.local()
 
 
-def configure_ring_pool(threads: int = 0, min_w: int | None = None) -> None:
+def configure_ring_pool(threads: int = 0, min_w: int | None = None,
+                        workspaces: bool | None = None) -> None:
     """Reconfigure the omega/tau thread pool (config-driven; the env vars
-    QUATREX_PHPH_RING_THREADS / _MIN_W remain the initial defaults).
+    QUATREX_PHPH_RING_THREADS / _MIN_W / _WORKSPACES remain the initial
+    defaults).
 
     threads = 0 leaves the pool unchanged. Results are bit-identical for
     any pool width (the per-w GEMMs are independent).
     """
-    global _RING_THREADS, _RING_POOL, _RING_MIN_W
+    global _RING_THREADS, _RING_POOL, _RING_MIN_W, _RING_WORKSPACES
     if threads > 0 and threads != _RING_THREADS:
         if _RING_POOL is not None:
             _RING_POOL.shutdown(wait=True)
@@ -42,6 +50,21 @@ def configure_ring_pool(threads: int = 0, min_w: int | None = None) -> None:
         )
     if min_w is not None:
         _RING_MIN_W = int(min_w)
+    if workspaces is not None:
+        _RING_WORKSPACES = bool(workspaces)
+
+
+def _workspace(key: str, shape: tuple, dtype) -> np.ndarray:
+    """Per-thread reusable scratch of at least the requested size,
+    viewed to the exact shape."""
+    ws = getattr(_TLS, "ws", None)
+    if ws is None:
+        ws = _TLS.ws = {}
+    size = int(np.prod(shape))
+    buf = ws.get(key)
+    if buf is None or buf.size < size or buf.dtype != dtype:
+        buf = ws[key] = np.empty(size, dtype=dtype)
+    return buf[:size].reshape(shape)
 
 
 def ring_pool() -> tuple[ThreadPoolExecutor | None, int]:
@@ -209,6 +232,16 @@ def ring_contract_pre(PL, PR, nI, bK2, nJ, Ga_fft, Gb_fft, xp):
     ZERO per-call transpose/copy. Bit-exact with the un-cached path."""
     n_w = Ga_fft.shape[0]
     bK1p = Ga_fft.shape[2]
-    T = PL @ Ga_fft
-    U = Gb_fft @ PR
+    if _RING_WORKSPACES and xp is np:
+        # Recycled per-thread T/U scratch (out= GEMMs): same operations,
+        # no fresh temporaries -- see configure_ring_pool.
+        dt = np.result_type(PL, Ga_fft, Gb_fft, PR)
+        T = np.matmul(PL, Ga_fft,
+                      out=_workspace("T", (n_w, PL.shape[0], bK1p), dt))
+        U = np.matmul(Gb_fft, PR,
+                      out=_workspace("U", (n_w, Gb_fft.shape[1], PR.shape[1]),
+                                     dt))
+    else:
+        T = PL @ Ga_fft
+        U = Gb_fft @ PR
     return T.reshape(n_w, nI, bK2 * bK1p) @ U.reshape(n_w, bK2 * bK1p, nJ)
