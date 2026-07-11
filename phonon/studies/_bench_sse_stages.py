@@ -151,9 +151,52 @@ def parent(args) -> int:
     return 0 if worst < 1e-12 else 2
 
 
+def gemm_roofline() -> int:
+    """Single-thread zgemm ceiling for the ACTUAL ring shapes (b=36 CNT
+    blocks): the honest per-core roofline that the tau pool multiplies.
+    Run with OPENBLAS_NUM_THREADS=1."""
+    import time
+
+    import numpy as np
+
+    if os.environ.get("OPENBLAS_NUM_THREADS") != "1":
+        print("WARNING: OPENBLAS_NUM_THREADS != 1 -- per-core numbers off")
+    rng = np.random.default_rng(0)
+    b = 36
+    PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal((b * b, b))
+    PR = rng.standard_normal((b, b * b)) + 1j * rng.standard_normal((b, b * b))
+    print(f"{'w':>5} {'T=PL@Ga':>9} {'U=Gb@PR':>9} {'full ring':>10}"
+          f"   GF/s (1 thread)")
+    for w in (6, 45, 361):
+        Ga = rng.standard_normal((w, b, b)) + 1j * rng.standard_normal((w, b, b))
+        Gb = Ga.copy()
+        gemm_flops = 8 * w * b**4  # one of the three ring GEMMs
+        reps = max(3, int(2e9 / (3 * gemm_flops)))
+        res = {}
+        for name, fn, f in (
+            ("T", lambda: PL @ Ga, gemm_flops),
+            ("U", lambda: Gb @ PR, gemm_flops),
+            ("ring", lambda: (PL @ Ga).reshape(w, b, b * b)
+                @ (Gb @ PR).reshape(w, b * b, b), 3 * gemm_flops),
+        ):
+            fn()  # warm
+            t0 = time.perf_counter()
+            for _ in range(reps):
+                fn()
+            dt = (time.perf_counter() - t0) / reps
+            res[name] = f / dt / 1e9
+        print(f"{w:>5} {res['T']:9.1f} {res['U']:9.1f} {res['ring']:10.1f}")
+    print("\nEPYC 7742 reference: 36 GF/s/core @2.25 GHz base "
+          "(~54 boosted); 2.3 TF/s/socket, 4.6 TF/s/node.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--config", required=True)
+    p.add_argument("--gemm-roofline", action="store_true",
+                   help="print the single-thread zgemm ceiling for the ring "
+                        "shapes and exit")
+    p.add_argument("--config", required=False)
     p.add_argument("--iters", type=int, default=3,
                    help="SCBA iterations per child (first one discarded)")
     p.add_argument("--ring", default="1,8,32,64")
@@ -164,6 +207,10 @@ def main() -> int:
     p.add_argument("--child", action="store_true")
     p.add_argument("--malloc-tag", default="default")
     args = p.parse_args()
+    if args.gemm_roofline:
+        return gemm_roofline()
+    if not args.config:
+        p.error("--config is required (unless --gemm-roofline)")
     if args.child:
         child(args)
         return 0
