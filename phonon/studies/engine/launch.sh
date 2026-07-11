@@ -30,6 +30,14 @@ NRANKS="${NRANKS:-1}"
 # _ncpu=1 and serialized the bubble on every launch (found 2026-07-11; the
 # historic "56x/1232 GF/s" pool numbers in this header predated that and are
 # superseded by phonon/studies/_bench_sse_stages.py).
+#
+# Measured defaults (2026-07-11, EPYC 7742, cnt33 L2/L3/L10 via the bench
+# harness): ring=64 saturates the ring stage (~1700 GF/s = 76% of the
+# 64-core zgemm ceiling for these shapes; ring=128 within noise); BLAS
+# threading is useless for the small ring GEMMs and OVERSUBSCRIBES badly if
+# unpinned next to the pool; malloc knobs and fatter tau chunks buy nothing.
+# So: keep QUATREX_PHPH_RING_THREADS=min(64,ncpu), 1 BLAS thread -- as set
+# below.
 _ncpu="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 8)"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OPENMP_NUM_THREADS=1 \
        MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
