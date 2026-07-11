@@ -280,6 +280,13 @@ class SCBA:
                 period=getattr(self.config.scba, "anderson_period", 1),
                 restart=getattr(self.config.scba, "anderson_restart", 0),
                 ridge=getattr(self.config.scba, "anderson_ridge", 0.0),
+                step_cap=getattr(self.config.scba, "anderson_step_cap", 0.0),
+                revert_factor=getattr(
+                    self.config.scba, "anderson_revert_factor", 0.0),
+                stagnation_restart=getattr(
+                    self.config.scba, "anderson_stagnation_restart", 0),
+                collect_diagnostics=getattr(
+                    self.config.scba, "mixer_diagnostics", False),
             )
         elif self.config.scba.mixing_method == "broyden":
             from quatrex.core.broyden import BroydenMixer
@@ -540,6 +547,13 @@ class SCBA:
                 period=getattr(self.config.scba, "anderson_period", 1),
                 restart=getattr(self.config.scba, "anderson_restart", 0),
                 ridge=getattr(self.config.scba, "anderson_ridge", 0.0),
+                step_cap=getattr(self.config.scba, "anderson_step_cap", 0.0),
+                revert_factor=getattr(
+                    self.config.scba, "anderson_revert_factor", 0.0),
+                stagnation_restart=getattr(
+                    self.config.scba, "anderson_stagnation_restart", 0),
+                collect_diagnostics=getattr(
+                    self.config.scba, "mixer_diagnostics", False),
             )
             if comm.rank == 0:
                 print(f"mixer: linear -> Anderson(m={self.config.scba.anderson_depth}, "

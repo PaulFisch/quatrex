@@ -333,6 +333,16 @@ if ranks.rank == 0:
             [_final_bal[0], _final_bal[1]], dtype=complex)
     if _iter_sigma_max:
         out["iter_sigma_max"] = np.asarray(_iter_sigma_max)
+    _mx = getattr(scba, "_anderson_mixer", None)
+    if _mx is not None and getattr(_mx, "diagnostics", None):
+        # Per-step mixer forensics (scba.mixer_diagnostics=true): residual
+        # norm, LS conditioning, |gamma|, and safeguard flags.
+        _dg = _mx.diagnostics
+        out["iter_mixer_kind"] = np.array([d["kind"] for d in _dg])
+        for k in ("fnorm", "cond", "gnorm", "m",
+                  "capped", "reverted", "restarted"):
+            out[f"iter_mixer_{k}"] = np.array(
+                [d.get(k, np.nan) for d in _dg], dtype=float)
     if _DIAG and _iter_gin_dos:
         # eta=0 spectral diagnostic, full-omega per iteration (see _logged).
         out["iter_gin_dos"] = np.asarray(_iter_gin_dos)

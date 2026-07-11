@@ -276,6 +276,25 @@ class SCBAConfig(BaseModel):
     regularisation of the least-squares coefficients (suppresses overshoot
     from a near-rank-deficient history). 0 = plain SVD lstsq. Also reused as
     the Gram ridge for ``mixing_method = "rre"``."""
+    anderson_step_cap: NonNegativeFloat = 0.0
+    """Safeguard: reject the Anderson step when its correction norm exceeds
+    ``anderson_step_cap`` x the UNDAMPED residual norm ||f||, taking the
+    damped-linear step that iteration (history kept). Interpretable as the
+    largest 1/(1-lambda) the extrapolation is trusted for, independent of
+    the mixing factor. 0 = off; typical 10-50."""
+    anderson_revert_factor: NonNegativeFloat = 0.0
+    """Safeguard: when the residual exceeds ``anderson_revert_factor`` x the
+    best residual seen, clear the history and return the best iterate.
+    0 = off; typical 3.0-10.0."""
+    anderson_stagnation_restart: NonNegativeInt = 0
+    """Safeguard: clear the Anderson history after N consecutive
+    non-improving steps (gentler than restarting on every uptick). 0 = off;
+    typical 5."""
+    mixer_diagnostics: bool = False
+    """Collect per-iteration mixer diagnostics (global residual norm, LS
+    conditioning, |gamma|, step kind / safeguard flags) on the mixer object;
+    the study engine persists them into the run npz. Adds one small
+    collective per iteration when enabled."""
 
     experimental_mixer: ExperimentalMixerConfig = Field(
         default_factory=ExperimentalMixerConfig)
