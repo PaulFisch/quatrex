@@ -129,6 +129,9 @@ def main() -> int:
     ap.add_argument("--budget", type=int, default=300)
     ap.add_argument("--schemes", default=",".join(SCHEMES))
     ap.add_argument("--workdir", type=Path, default=None)
+    ap.add_argument("--beta", type=float, default=0.0,
+                    help="override mixing_factor in every scheme (0 = keep "
+                         "the scheme table's 0.2)")
     ap.add_argument("--save-sigma-at", type=int, default=0,
                     help="additionally save the final Sigma snapshot of "
                          "every scheme (for the Jacobian probe)")
@@ -141,7 +144,13 @@ def main() -> int:
         name = name.strip()
         if name not in SCHEMES:
             sys.exit(f"unknown scheme {name!r}; known: {sorted(SCHEMES)}")
-        cfg = make_config(args.base, workdir, name, SCHEMES[name])
+        patches = SCHEMES[name]
+        if args.beta > 0.0:
+            patches = {sec: [re.sub(r"mixing_factor = [0-9.]+",
+                                    f"mixing_factor = {args.beta}", ln)
+                             for ln in lines]
+                       for sec, lines in patches.items()}
+        cfg = make_config(args.base, workdir, name, patches)
         env = os.environ.copy()
         env.update(QX_CONFIG=str(cfg), QX_MAXIT=str(args.budget),
                    QX_MINIT="3", QX_NPZ=str(cfg.parent / "run.npz"),
