@@ -20,13 +20,17 @@ NRANKS="${NRANKS:-1}"
 
 # BLAS stays SINGLE-threaded; the 3-phonon bubble (~99% of a step) instead
 # parallelises its omega/tau batch over a thread pool inside ring_contract
-# (QUATREX_PHPH_RING_THREADS). The per-omega matmuls are too small for BLAS
-# threading, but the per-ring loop is cache-bound per chunk and the omega/tau
-# BATCH scales near-linearly with the pool -- measured cnt33 L2 (w=241): 56x at
-# 64 threads (1232 GF/s); it regresses past the sweet spot (~min(64, n_tau//4),
-# floored in the SSE). So per rank: 1 BLAS thread x QX_RING_THREADS pool threads.
-# Default: a single rank FILLS the node (~min(64,nproc)); MPI runs keep 1 (ranks
-# own cores). Budget for sweeps: NRANKS * QX_RING_THREADS * concurrent <= cores.
+# (QUATREX_PHPH_RING_THREADS). So per rank: 1 BLAS thread x QX_RING_THREADS
+# pool threads. Default: a single rank FILLS the node (~min(64,nproc)); MPI
+# runs keep 1 (ranks own cores). Budget for sweeps:
+# NRANKS * QX_RING_THREADS * concurrent <= cores.
+#
+# NOTE: the core count MUST be read before OMP_NUM_THREADS is exported --
+# coreutils `nproc` honors OMP_NUM_THREADS, so the old order silently gave
+# _ncpu=1 and serialized the bubble on every launch (found 2026-07-11; the
+# historic "56x/1232 GF/s" pool numbers in this header predated that and are
+# superseded by phonon/studies/_bench_sse_stages.py).
+_ncpu="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 8)"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OPENMP_NUM_THREADS=1 \
        MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
 if [ -n "${QX_RING_THREADS:-}" ]; then
@@ -34,9 +38,9 @@ if [ -n "${QX_RING_THREADS:-}" ]; then
 elif [ "$NRANKS" -gt 1 ]; then
   export QUATREX_PHPH_RING_THREADS=1
 else
-  _ncpu="$(nproc 2>/dev/null || echo 8)"
   export QUATREX_PHPH_RING_THREADS="$(( _ncpu < 64 ? _ncpu : 64 ))"
 fi
+echo "launch: ncpu=$_ncpu ring_threads=$QUATREX_PHPH_RING_THREADS"
 export QTX_PROFILE_LEVEL="${QTX_PROFILE_LEVEL:-default}"
 [ "${PROFILE_SYNC:-0}" = "1" ] && export QTX_PROFILE_COMM_SYNC=1
 
