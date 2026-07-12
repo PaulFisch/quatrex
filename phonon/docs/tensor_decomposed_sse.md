@@ -85,6 +85,7 @@ Measured at the d5a Si-nanowire block size (`b=63`, nslabs=3, n_tau=60, 1 thread
 |----|---------|--------|-----------|---------|
 | 16 | 780.4 s | 0.22 s | **3553x** | 8.8e-16 |
 | 32 | 774.7 s | 0.42 s | **1842x** | 1.3e-15 |
+| 64 | 795.6 s | 1.43 s | **557x**  | 1.5e-15 |
 
 The wire is where the decomposition pays most, and it was the one place the
 factored kernel was never wired in.
