@@ -96,3 +96,21 @@ block size is largest (`b=63` for the d5a wire), so the `b^4` saving is biggest.
   `q_diff_map` double sum.
 - The quad-product structure is a property of the enumeration, verified directly
   against `_phi_pair_index` for several geometries and offset ranges.
+
+## Found while running this: the transverse-mesh validator rejected every film
+
+The Gamma-centred-mesh check in `SigmaPhononPhonon.__init__` compared
+`mesh % 1.0` against `want % 1.0`. The mesh lives on a torus, so a momentum that
+lands a hair *below* zero wraps to `~0.99999999996` and reads as maximally
+distant from `0.0`. That happens whenever the stored `kpoint_shift` is rounded
+rather than bit-exact -- and `build_inputs.py` writes `kshift.npy` rounded
+(`0.4444444444`, not `0.4444444444444444`). So the validator rejected the very
+geometries the builder produces:
+
+    ValueError: Coupled-q vertices assume the Gamma-centered mesh q = k/n ...
+                kpoint_shift=(0.0, 0.4444444444, 0.4444444444) does not produce it.
+
+Fixed by comparing the signed circular distance
+`(mesh - want + 0.5) % 1.0 - 0.5`. A genuinely wrong shift (e.g. 0.3) is still
+rejected. This was only visible by actually launching a film run; no test covered
+it.
