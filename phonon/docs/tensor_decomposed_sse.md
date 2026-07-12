@@ -53,10 +53,18 @@ All three paths fed the same factors; `new` is parity-checked against `dense`.
 |----|---------|---------|---------|--------|-------|--------|
 | 8  | 852.9 s | 85.5 s  | 0.88 s  | **967x** | 91x | 4.5e-15 |
 | 16 | 853.2 s | --      | 2.67 s  | **319x** | --  | 5.7e-15 |
+| **32** | 854.1 s | --  | 9.36 s  | **91x**  | --  | 5.8e-15 |
+| 64 | 853.3 s | --      | 38.7 s  | **22x**  | --  | 5.6e-15 |
+| 128| 852.5 s | --      | 200.3 s | 4.3x     | --  | 5.4e-15 |
 
-Bulk Si FC3 reaches 1% Frobenius at R=21, so **R~32 is the operating point**. The
-old `>=10x at R=64` gate -- which the legacy kernel failed at **0.2x** -- is passed
-by two orders of magnitude at the ranks the fit actually needs.
+Bulk Si FC3 reaches 1% Frobenius at R=21, so **R~32 is the operating point**, where
+the new kernel is **91x** the dense ring and the legacy kernel was **0.2x** (i.e.
+slower than dense) -- a ~450x swing at the rank the fit actually needs. The
+`>=10x at R=64` campaign gate, which the legacy kernel failed, is passed at 22x.
+
+The dense time is rank-independent, as it must be: the vertex is reconstructed at
+rank R offline, but the ring it feeds is a b x b x b contraction either way. That
+is the whole point -- the dense path cannot spend a low rank.
 
 The legacy kernel's failure is now explained rather than accepted: it paid `R^2`
 once per `(quad, q_ext, q')`, i.e. `181 * 81 * 81` times per pair, through an
