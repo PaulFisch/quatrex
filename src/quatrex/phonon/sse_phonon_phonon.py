@@ -209,14 +209,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             grid = np.asarray(device_cfg.kpoint_grid, dtype=int)
             shift = np.asarray(device_cfg.kpoint_shift, dtype=float)
             tr = grid > 1
-            mesh = np.asarray(monkhorst_pack(grid[tr], shift[tr])) % 1.0
+            mesh = np.asarray(monkhorst_pack(grid[tr], shift[tr]))
             want = np.stack(
                 np.meshgrid(*[np.arange(n) / n for n in grid[tr]],
                             indexing="ij"), axis=-1).reshape(-1, int(tr.sum()))
             # ORDERED comparison: the q-difference/negation index arithmetic
-            # requires q_k = k/n at index k, not merely the same point set.
+            # requires q_k = k/n at index k, not merely the same point set. The
+            # mesh lives on a torus, so the residual is the SIGNED circular
+            # distance -- q = -1e-11 and q = 0 are the same point, whereas a
+            # plain modulo maps them to opposite ends of the cell.
+            residual = (mesh - want + 0.5) % 1.0 - 0.5
             if mesh.shape != want.shape or not np.allclose(
-                mesh % 1.0, want % 1.0, atol=1e-8
+                residual, 0.0, atol=1e-6
             ):
                 raise ValueError(
                     "Coupled-q vertices assume the Gamma-centered mesh "
