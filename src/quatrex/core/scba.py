@@ -1242,13 +1242,14 @@ class SCBA(TransportSolver):
                 with profiler.profile_range(
                     label="SCBA: stack->nnz transpose back", level="default", comm=comm
                 ):
-                    # Keep G through the back-transpose when the bubble
-                    # energy-balance diagnostic needs the same-iterand
-                    # (Sigma[G^n], G^n) pairing at the convergence check.
+                    # G must survive the back-transpose for the whole phonon
+                    # path, not just for the bubble-balance diagnostic: the
+                    # slab absorption and the post-hoc G^< diagonals are also
+                    # read off the final iterate. Discarding it here does not
+                    # fail, it silently zeroes those observables.
                     keep_g = bool(
                         self.config.scba.phonon
                         and self.config.phonon.model == "negf"
-                        and self.config.phonon.bubble_balance_check
                     )
                     for m in (self.data.g_lesser, self.data.g_greater):
                         m.dtranspose(discard=not keep_g)
