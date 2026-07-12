@@ -1246,15 +1246,17 @@ class PhononConfig(BaseModel):
     high-rank factor file. Requires ``decomposed_vertices_path``.
     """
 
-    decomposed_kernel: Literal["gram", "reconstruct"] = "reconstruct"
+    decomposed_kernel: Literal["gram", "reconstruct"] = "gram"
     """How the SSE consumes the decomposed vertex.
 
-    ``"reconstruct"`` (default): materialise the rank-local slice of the
-    dense q-folded dict from the factors once at first compute and run the
-    dense contraction -- the factored win is memory + build time.
-    ``"gram"``: the skinny-Gram factored contraction
-    (``quatrex.phonon.bubble_factored``); fewer flops than dense only at
-    small rank or large block sizes.
+    ``"gram"`` (default): the factored contraction
+    (``quatrex.phonon.bubble_factored``). The quad sum collapses onto two summed
+    Grams and the transverse-momentum sum runs as an FFT, which the dense vertex
+    cannot do, so this is asymptotically cheaper at every rank the fit needs.
+    ``"reconstruct"``: materialise the rank-local slice of the dense q-folded
+    dict from the factors and run the dense contraction. Keeps the storage win
+    but none of the arithmetic one; retained as a fallback and as the oracle the
+    parity test compares against.
     """
 
     retarded_method: Literal["half", "fft"] = "fft"

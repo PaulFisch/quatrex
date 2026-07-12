@@ -1198,7 +1198,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if getattr(self, "_qtasks_cache_key", None) == cache_key:
             qtasks = self._qtasks_cache
         else:
-            perm_cache: dict[tuple[int, int], tuple] = {}
+            bulk_vertex = self._vfactors is not None
+            perm_cache: dict[tuple, tuple] = {}
             qtasks = {}
             for iq_ext in range(q_lo, q_hi):
                 for iqp in range(nq):
@@ -1213,12 +1214,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             pr = phiR.get((J, K2p, K1p))
                             if pl is None or pr is None:
                                 continue
-                            # Keyed on the momenta and the transport offsets:
-                            # the bulk-homogeneous blocks genuinely repeat
-                            # across I, whereas keying on id() never hits (the
-                            # reconstructed blocks are fresh views per I) and
-                            # keeps one permuted copy per task.
-                            pkey = (iqp, iq2, K1 - I, K2 - I, K2p - J, K1p - J)
+                            # Only the factor-reconstructed vertex is
+                            # translationally invariant, so only there may the
+                            # permuted pair be shared across the block row via
+                            # the transport offsets. A dense q-folded vertex has
+                            # I-dependent blocks and must be keyed in full.
+                            # (Keying on id() shares nothing at all: the
+                            # reconstructed blocks are fresh views per I.)
+                            pkey = (
+                                (iqp, iq2, K1 - I, K2 - I, K2p - J, K1p - J)
+                                if bulk_vertex
+                                else (iqp, iq2, I, K1, K2, J, K2p, K1p)
+                            )
                             pre = perm_cache.get(pkey)
                             if pre is None:
                                 pre = phi_perms(xp.conj(pl), pr, xp)
