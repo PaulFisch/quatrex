@@ -105,8 +105,14 @@ def contract_legacy(quads_by_pair, block_sizes, q_diff_map, q_own, nq, g_dicts,
 
 
 def contract_dense(quads_by_pair, vf, q_diff_map, q_own, nq, nd, n_tau, g_dicts):
-    """The dense per-task ring loop (vertex reconstruction is offline)."""
-    recon = {}
+    """The dense per-task ring loop (vertex reconstruction is offline).
+
+    The pre-permuted vertex pair is cached on the momenta and the transport
+    offsets, which is what makes it repeat across the block index I. Keying it on
+    id() -- as production did -- never hits and materialises one permuted copy
+    per task (~8 GB here), which would handicap the baseline.
+    """
+    recon, perms = {}, {}
 
     def phi(iq1, iq2, d_k, d_kp):
         key = (iq1, iq2, d_k, d_kp)
@@ -114,34 +120,45 @@ def contract_dense(quads_by_pair, vf, q_diff_map, q_own, nq, nd, n_tau, g_dicts)
             recon[key] = vf.reconstruct_block(iq1, iq2, d_k, d_kp)
         return recon[key]
 
-    qtasks = {}
+    def pre_perm(iqp, iq2, d1, d2, e1, e2):
+        key = (iqp, iq2, d1, d2, e1, e2)
+        if key not in perms:
+            pl = phi(iqp, iq2, d1, d2)
+            pr = phi(iq2, iqp, e1, e2)
+            perms[key] = phi_perms(np.conj(pl), pr, np)
+        return perms[key]
+
+    # Warm the vertex + permutation caches OUTSIDE the timer: in production the
+    # vertex is reconstructed once, offline, not per SCBA iteration.
     for (I, J), quads in quads_by_pair.items():
         for iq_ext in range(q_own):
             for iqp in range(nq):
                 iq2 = int(q_diff_map[iq_ext, iqp])
                 for (K1, K2, K1p, K2p) in quads:
-                    pl = phi(iqp, iq2, K1 - I, K2 - I)
-                    pr = phi(iq2, iqp, K2p - J, K1p - J)
-                    qtasks.setdefault((I, J), []).append(
-                        (iq_ext, iqp, iq2, K1, K1p, K2, K2p)
-                        + phi_perms(np.conj(pl), pr, np))
+                    pre_perm(iqp, iq2, K1 - I, K2 - I, K2p - J, K1p - J)
 
     tic = time.perf_counter()
     out = {}
-    for (I, J), tasks in qtasks.items():
+    for (I, J), quads in quads_by_pair.items():
         out_l = np.zeros((n_tau, nq, nd, nd), complex)
         out_g = np.zeros((n_tau, nq, nd, nd), complex)
-        for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, *pre) in tasks:
-            PL, PR, nI, bK2, nJ = pre
-            la, lb = (K1, K1p), (K2, K2p)
+        for iq_ext in range(q_own):
+            for iqp in range(nq):
+                iq2 = int(q_diff_map[iq_ext, iqp])
+                for (K1, K2, K1p, K2p) in quads:
+                    PL, PR, nI, bK2, nJ = pre_perm(
+                        iqp, iq2, K1 - I, K2 - I, K2p - J, K1p - J)
+                    la, lb = (K1, K1p), (K2, K2p)
 
-            def ring(ga, gb):
-                return ring_contract_pre(
-                    PL, PR, nI, bK2, nJ, g_dicts[ga][la][:, iqp],
-                    g_dicts[gb][lb][:, iq2], np)
+                    def ring(ga, gb):
+                        return ring_contract_pre(
+                            PL, PR, nI, bK2, nJ, g_dicts[ga][la][:, iqp],
+                            g_dicts[gb][lb][:, iq2], np)
 
-            out_l[:, iq_ext] += ring("l", "l") + ring("l", "gr") + ring("gr", "l")
-            out_g[:, iq_ext] += ring("g", "g") + ring("g", "lr") + ring("lr", "g")
+                    out_l[:, iq_ext] += (
+                        ring("l", "l") + ring("l", "gr") + ring("gr", "l"))
+                    out_g[:, iq_ext] += (
+                        ring("g", "g") + ring("g", "lr") + ring("lr", "g"))
         out[(I, J)] = (out_l, out_g)
 
     return out, time.perf_counter() - tic
