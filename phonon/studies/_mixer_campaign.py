@@ -158,7 +158,19 @@ def main() -> int:
     for name in args.schemes.split(","):
         name = name.strip()
         if name not in SCHEMES:
-            sys.exit(f"unknown scheme {name!r}; known: {sorted(SCHEMES)}")
+            # Parametric RRE schemes: rre_c<CYCLE>[_b<BETA>][_r<RIDGE>]
+            m = re.fullmatch(
+                r"rre_c(\d+)(?:_b([0-9.]+))?(?:_r([0-9e.+-]+))?", name)
+            if not m:
+                sys.exit(f"unknown scheme {name!r}; known: {sorted(SCHEMES)}"
+                         " or parametric rre_c<N>[_b<B>][_r<R>]")
+            cyc, beta_s, ridge_s = m.groups()
+            SCHEMES[name] = {
+                "scba": ['mixing_method = "rre"',
+                         f"mixing_factor = {beta_s or '0.2'}",
+                         f"anderson_ridge = {ridge_s or '1e-6'}"],
+                "scba.experimental_mixer": [f"rre_cycle = {cyc}"],
+            }
         patches = SCHEMES[name]
         if args.beta > 0.0:
             patches = {sec: [re.sub(r"mixing_factor = [0-9.]+",
