@@ -104,8 +104,23 @@ def make_config(base: Path, workdir: Path, name: str,
         if not (vdir / f).exists():
             (vdir / f).symlink_to(base.parent / f)
     text = text.replace(str(base.parent), str(vdir))
-    # strip every existing mixing-related line, then insert the scheme's
-    lines = [ln for ln in text.splitlines() if not _MIX_KEYS.match(ln)]
+    # Strip the base config's mixing lines before inserting the scheme's.
+    # Physics stabilizers (eta_ir_floor / low_freq_mixing) that are part of
+    # the TESTBED's baseline setup are kept unless the scheme itself sets
+    # them (e.g. d5a runs carry eta_ir_floor_cells = 2 in every scheme).
+    scheme_keys = {ln.split("=")[0].strip()
+                   for lines_ in patches.values() for ln in lines_}
+
+    def _strip(ln: str) -> bool:
+        m = _MIX_KEYS.match(ln)
+        if not m:
+            return False
+        key = m.group(1)
+        if key.startswith(("low_freq_mixing", "eta_ir_floor")):
+            return key in scheme_keys
+        return True
+
+    lines = [ln for ln in text.splitlines() if not _strip(ln)]
     text = "\n".join(lines) + "\n"
     for section, adds in patches.items():
         header = f"[{section}]"
