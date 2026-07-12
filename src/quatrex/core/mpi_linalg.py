@@ -11,7 +11,42 @@ once instead of each mixer re-opening ``MPI.COMM_WORLD`` and writing its own
 reduction.
 """
 
+from functools import wraps
+
 import numpy as np
+
+
+def complex_to_real(z: np.ndarray) -> np.ndarray:
+    """Complex ``(n,)`` -> real ``(2n,)`` embedding ``[Re z, Im z]``."""
+    return np.concatenate([z.real, z.imag]).astype(np.float64)
+
+
+def real_to_complex(r: np.ndarray) -> np.ndarray:
+    """Real ``(2n,)`` -> complex ``(n,)``: inverse of :func:`complex_to_real`."""
+    n = r.size // 2
+    return (r[:n] + 1j * r[n:]).astype(np.complex128)
+
+
+def real_embedded(step):
+    """Runs a mixer ``step`` in the real embedding ``[Re x, Im x]``.
+
+    The SCBA map is real-linear but NOT complex-analytic -- ``G^A = (G^R)^H``,
+    the Kramers-Kronig transform and the bosonic fold all conjugate -- so
+    ``dF/dSigma`` is only R-linear. A secant/least-squares fit with complex
+    coefficients therefore linearises the wrong map. Working in the real
+    embedding is what :class:`quatrex.core.jfnk.JFNKMixer` does internally.
+    """
+
+    @wraps(step)
+    def wrapper(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
+        if not np.iscomplexobj(x):
+            return step(self, x, gx)
+
+        return real_to_complex(
+            step(self, complex_to_real(x), complex_to_real(gx))
+        )
+
+    return wrapper
 
 
 def get_comm():

@@ -104,14 +104,15 @@ class PhononSolver(SubsystemSolver):
             dtype=self.dynamical_matrix.dtype
         )
 
-        # Allocate memory for the system matrix.
+        # The system matrix is allocated per solve and freed again, so it does
+        # not sit alongside the interaction buffers.
         self.system_matrix = config.compute.dsdbsparse_type.from_sparray(
             sparsity_pattern.astype(xp.complex128),
             block_sizes=self.block_sizes,
             global_stack_shape=self.energies.shape
-                               + tuple([int(k) for k in config.device.kpoint_grid if k > 1]),
+            + tuple([int(k) for k in config.device.kpoint_grid if k > 1]),
+            allocate=False,
         )
-        self.system_matrix.free_data()  # Free any stale allocation.
         del sparsity_pattern
 
         self.block_offsets = np.hstack(([0], np.cumsum(self.block_sizes)))
@@ -183,11 +184,6 @@ class PhononSolver(SubsystemSolver):
 
         self.obc_blocks = OBCBlocks(num_blocks=self.system_matrix.num_local_blocks)
         self.block_sections = config.phonon.obc.block_sections
-
-        self.band_edge_tracking = config.phonon.band_edge_tracking
-
-        self.call_count = 0
-        self.filtering_iteration_limit = config.phonon.filtering_iteration_limit
 
     @profiler.profile(label="PhononSolver: OBC", level="default", comm=comm)
     def _compute_obc(self) -> None:
@@ -496,17 +492,6 @@ class PhononSolver(SubsystemSolver):
         new[..., dof] = nloc
         self._probe_np = 0.5 * self._probe_np + 0.5 * new
 
-    @profiler.profile(label="PhononSolver: Filter", level="default", comm=comm)
-    def _filter_peaks(self, out: tuple[DSDBSparse, ...]) -> None:
-        """Filters out peaks in the output Green's functions"""
-        pass
-
-    @profiler.profile(label="PhononSolver: DOS Peaks", level="default", comm=comm)
-    def _track_dos_peaks(self, out: tuple[DSDBSparse, ...]) -> None:
-        """Tracks dos peaks in the output Green's functions (no-op for phonons:
-        there is no Fermi-level / band-edge renormalisation to track here)."""
-        pass
-
     @profiler.profile(label="PhononSolver", level="default", comm=comm)
     def solve(
         self,
@@ -536,8 +521,6 @@ class PhononSolver(SubsystemSolver):
         self._apply_eta_ir_floor_ramp()
         self._assemble_system_matrix()
 
-        # TODO: Band edge tracking
-
         # OBC from the bare harmonic blocks (ideal-reservoir contacts);
         # the scattering self-energy enters the device Dyson only.
         self._compute_obc()
@@ -548,10 +531,3 @@ class PhononSolver(SubsystemSolver):
         self._update_buttiker_probe(out)
 
         self.system_matrix.free_data()
-        if self.call_count < self.filtering_iteration_limit:
-            self._filter_peaks(out)
-
-        if self.band_edge_tracking == "dos-peaks":
-            self._track_dos_peaks(out)
-
-        self.call_count += 1

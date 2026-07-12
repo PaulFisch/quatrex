@@ -96,6 +96,10 @@ class JFNKMixer:
         Rank-0 per-Newton-step diagnostics.
     """
 
+    #: True while the emitted iterate is a finite-difference PROBE rather than
+    #: an accepted Newton iterate. The driver must not test convergence on it.
+    probing: bool = False
+
     def __init__(self, warmup: int = 10, beta: float = 0.3,
                  max_krylov: int = 30, inner_tol: float = 0.1,
                  forcing: str = "ew", max_newton: int = 60, eps: float = 1e-7,
@@ -169,6 +173,7 @@ class JFNKMixer:
         """One mixer call: ``x`` is the iterate just evaluated, ``gx = F[x]``
         (both complex, flattened, row-local). Returns the next iterate (complex)."""
         self._it += 1
+        self.probing = False
 
         # WARM-UP: damped Picard to fall into the basin (the unstable modes are
         # still small in the first few iterations).
@@ -205,10 +210,11 @@ class JFNKMixer:
             self._R0_norm = rk
 
         # Trust-region adaptation from the previous Newton step's progress.
-        # Asymmetric, with hysteresis: shrink HARD on any worsening
-        # (overshoot of the unstable mode), but GROW on any solid monotone
-        # descent up to ``trust_max``.
-        if self._Rprev_norm is not None:
+        # Asymmetric, with hysteresis: shrink HARD on any worsening (overshoot
+        # of the unstable mode), but GROW on any solid monotone descent up to
+        # ``trust_max``. Only when the trust region is enabled -- adapting a
+        # disabled one (trust = 0) would silently switch it back on.
+        if self.trust > 0.0 and self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
                 self._trust_k = max(self._trust_k * 0.5, 1e-3)
             elif rk < 0.95 * self._Rprev_norm:   # solid progress -> grow radius
@@ -243,6 +249,7 @@ class JFNKMixer:
         self._pending_v = v1
         self._newton_it += 1
         self._phase = "arnoldi"
+        self.probing = True
         return _r2c(xk_r + self._eps_k * v1)
 
     def _arnoldi_consume(self, gx_probe: np.ndarray) -> np.ndarray:
@@ -291,6 +298,7 @@ class JFNKMixer:
         self._V.append(v_next)
         self._j += 1
         self._pending_v = v_next
+        self.probing = True
         return _r2c(self._xk_r + self._eps_k * v_next)
 
     def _assemble_and_step(self, m: int, inner_res: float) -> np.ndarray:

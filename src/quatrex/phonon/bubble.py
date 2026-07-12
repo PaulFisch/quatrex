@@ -23,21 +23,18 @@ _RING_THREADS = max(1, int(os.environ.get("QUATREX_PHPH_RING_THREADS", "1")))
 _RING_POOL = ThreadPoolExecutor(max_workers=_RING_THREADS) if _RING_THREADS > 1 else None
 # Only worth the split + concatenate overhead when the batch is large enough.
 _RING_MIN_W = int(os.environ.get("QUATREX_PHPH_RING_MIN_W", "48"))
-# Thread-local T/U GEMM workspaces (config sse_ring_workspaces): avoids the
-# two fresh temporaries per ring call -- allocator churn/contention at wide
-# pools. Bit-identical (same GEMMs into recycled memory).
+# Thread-local T/U GEMM workspaces (config sse_ring_workspaces): recycles the
+# two per-call temporaries, which contend in the allocator at wide pool widths.
 _RING_WORKSPACES = os.environ.get("QUATREX_PHPH_RING_WORKSPACES", "0") == "1"
 _TLS = threading.local()
 
 
 def configure_ring_pool(threads: int = 0, min_w: int | None = None,
                         workspaces: bool | None = None) -> None:
-    """Reconfigure the omega/tau thread pool (config-driven; the env vars
-    QUATREX_PHPH_RING_THREADS / _MIN_W / _WORKSPACES remain the initial
-    defaults).
+    """Reconfigure the omega/tau thread pool; ``threads = 0`` leaves it as is.
 
-    threads = 0 leaves the pool unchanged. Results are bit-identical for
-    any pool width (the per-w GEMMs are independent).
+    The per-w GEMMs are independent, so the result does not depend on the pool
+    width. The QUATREX_PHPH_RING_* env vars supply the initial defaults.
     """
     global _RING_THREADS, _RING_POOL, _RING_MIN_W, _RING_WORKSPACES
     if threads > 0 and threads != _RING_THREADS:
@@ -167,10 +164,9 @@ def ring_contract(phi_left, phi_right, Ga_fft, Gb_fft, *, xp=None):
     shaped (w, bK, bK') with w the leading (frequency/tau) batch axis. Returns
     ``S_hat`` shaped (w, nI, nJ).
 
-    When ``QUATREX_PHPH_RING_THREADS>1`` and on the CPU (numpy) backend, the
-    embarrassingly-parallel w batch is split across a thread pool (single-thread
-    BLAS per chunk) -- the per-w matmuls are too small for BLAS threading but the
-    batch parallelises near-linearly. Bit-identical to the serial result.
+    On the CPU backend with a pool configured, the w batch is split across the
+    thread pool: the per-w matmuls are too small for BLAS threading, but the
+    batch parallelises near-linearly.
     """
     if xp is None:
         xp = np
@@ -203,20 +199,12 @@ def _ring_contract_serial(phi_left, phi_right, Ga_fft, Gb_fft, xp):
     return ring_contract_pre(PL, PR, nI, bK2, nJ, Ga_fft, Gb_fft, xp)
 
 
-# NOTE: gemm-batching the ring (materialising every ring's BS^3 intermediate
-# at once) turns the kernel memory-bound and defeats the omega/tau thread
-# pool; the throughput lever is the pool width (QUATREX_PHPH_RING_THREADS),
-# not the kernel shape.
-
-
 def phi_perms(phi_left, phi_right, xp):
     """Pre-permute the (fixed) phi factors for :func:`ring_contract_pre`.
 
-    The phi permutes PL, PR are w-independent and the FC3 vertex is constant
-    across SCBA iterations, so they are computed once and reused -- removing
-    the per-call ``ascontiguousarray`` transpose copies that dominate the
-    bubble on small-block systems. Returns ``(PL, PR, nI, bK2, nJ)`` for the
-    contraction.
+    PL and PR are w-independent and the FC3 vertex is constant across SCBA
+    iterations, so they are built once instead of per call. Returns
+    ``(PL, PR, nI, bK2, nJ)``.
     """
     nI, bK1, bK2 = phi_left.shape
     nJ = phi_right.shape[0]
@@ -228,13 +216,13 @@ def phi_perms(phi_left, phi_right, xp):
 
 def ring_contract_pre(PL, PR, nI, bK2, nJ, Ga_fft, Gb_fft, xp):
     """Ring contraction with PRE-permuted phi factors (see :func:`phi_perms`).
-    Identical three gemms / FLOPs as :func:`_ring_contract_serial`, but with
-    ZERO per-call transpose/copy. Bit-exact with the un-cached path."""
+
+    Same three gemms as :func:`_ring_contract_serial`, without the per-call
+    transpose copies.
+    """
     n_w = Ga_fft.shape[0]
     bK1p = Ga_fft.shape[2]
     if _RING_WORKSPACES and xp is np:
-        # Recycled per-thread T/U scratch (out= GEMMs): same operations,
-        # no fresh temporaries -- see configure_ring_pool.
         dt = np.result_type(PL, Ga_fft, Gb_fft, PR)
         T = np.matmul(PL, Ga_fft,
                       out=_workspace("T", (n_w, PL.shape[0], bK1p), dt))

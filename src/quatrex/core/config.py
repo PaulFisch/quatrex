@@ -158,6 +158,10 @@ class ExperimentalMixerConfig(BaseModel):
     """For ``mixing_method = "rre"``: restart cycle length (number of iterates
     per reduced-rank-extrapolation step). Cf. ``RREMixer`` in
     ``quatrex/core/anderson.py``."""
+    rre_ridge: NonNegativeFloat = 1e-6
+    """For ``mixing_method = "rre"``: Tikhonov ridge on the (rank-deficient by
+    construction, once the residuals go collinear) Gram solve, scaled by its
+    mean diagonal. 0 = unregularised."""
 
     broyden_warmup_iters: NonNegativeInt = 0
     """For ``mixing_method = "broyden"`` / ``"rpm"``: run plain damped-LINEAR
@@ -306,7 +310,7 @@ class SCBAConfig(BaseModel):
     abort_residual: NonNegativeFloat = 1e3
     """Divergence guard: abort the SCBA once the relative self-energy
     residual exceeds this after iteration 3 (an exploded update never
-    recovers). 0 disables. QX_ABORT_RESIDUAL overrides."""
+    recovers). 0 disables."""
 
     output_interval: PositiveInt = 1
 
@@ -495,13 +499,15 @@ class SolverConfig(BaseModel):
     compute_current: bool | None = None
     """Whether to compute the current via the Meir-Wingreen formula.
 
-    This is only supported for the `"rgf"` algorithm. If not set, it is
-    automatically determined based on the algorithm. (i.e. `True` for
-    `"rgf"` and `False` for `"inv"`)
+    Supported by the `"rgf"` and `"inv"` algorithms. If not set, it
+    defaults to `True` for `"rgf"` and `False` for `"inv"`.
 
-    If `True`, the current is computed between each layer and from/to the
-    leads. This way of computing the current is usually preferable as it
-    is independet of any interaction cutoffs, since it is computed from
+    If `True`, `"rgf"` computes the current between each layer and
+    from/to the leads. `"inv"` computes only the two lead currents and
+    fills the internal interfaces with `NaN`.
+
+    This way of computing the current is usually preferable as it is
+    independet of any interaction cutoffs, since it is computed from
     the temporarily densified Green's functions and self-energies.
 
     !!! note
@@ -543,11 +549,14 @@ class SolverConfig(BaseModel):
     @model_validator(mode="after")
     def set_compute_current(self) -> Self:
         """Sets the `compute_current` parameter based on the algorithm."""
-        # Both "rgf" and "inv" support the Meir-Wingreen boundary current.
-        # ("inv" is the small-eta-stable path: its dense inverse pivots
-        # through the near-singular Dyson matrix that NaNs the RGF recursion.)
         if self.compute_current is None:
-            self.compute_current = True
+            self.compute_current = self.algorithm == "rgf"
+
+        if self.compute_current and self.algorithm not in ("rgf", "inv"):
+            raise ValueError(
+                "Current computation is only supported for the RGF and Inv "
+                "algorithms."
+            )
 
         return self
 
@@ -1193,7 +1202,9 @@ class PhononConfig(BaseModel):
     filtering_iteration_limit: PositiveInt = 1
 
     left_temperature: PositiveFloat | None = None
+    """Temperature of the left phonon reservoir. Defaults to `temperature`."""
     right_temperature: PositiveFloat | None = None
+    """Temperature of the right phonon reservoir. Defaults to `temperature`."""
 
     # --- 3-phonon (anharmonic) scattering ----------------------------
     fc3_path: Path | None = None
@@ -1288,12 +1299,12 @@ class PhononConfig(BaseModel):
     for the pure coherent+anharmonic conductance use eta->0 extrapolation
     instead. Single-block (block_comm_size==1) only."""
 
-    bubble_balance_check: bool = True
+    bubble_balance_check: bool = False
     """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
     bubble: P_in = sum hbar*w*Tr[Sigma^< G^>] must equal P_out (conserving
-    identity). Requires keeping the Green's-function data through the
-    nnz->stack back-transpose (free at stack=1; one extra all-to-all per
-    iteration at stack>1)."""
+    identity). Off by default: it keeps the Green's-function data alive through
+    the nnz->stack back-transpose, which costs one extra all-to-all per
+    iteration at stack > 1."""
 
     sse_vertex_scale: PositiveFloat = 1.0
     """Uniform 3-phonon vertex scale lambda (Sigma scales as lambda^2).
@@ -1423,6 +1434,16 @@ class PhononConfig(BaseModel):
     this are dropped from the inverse (only the stiff optical modes relax),
     preventing the soft mode's ~1/omega^2 amplification from blowing the
     solve up. Only used when ``scp_tadpole``."""
+
+    @model_validator(mode="after")
+    def set_lead_temperatures(self) -> Self:
+        """Falls the lead temperatures back to the device `temperature`."""
+        if self.left_temperature is None:
+            self.left_temperature = self.temperature
+        if self.right_temperature is None:
+            self.right_temperature = self.temperature
+
+        return self
 
     @model_validator(mode="after")
     def check_phonon_energy_or_deformation_potential(self):
@@ -1979,6 +2000,25 @@ class QuatrexConfig(BaseModel):
         if not self.device.construct_from_unit_cell and self.device.block_size is None:
             raise ValueError(
                 "block_size must be given when construct_from_unit_cell=False."
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_phonon_self_energy_symmetry(self) -> Self:
+        """Rejects symmetric storage for the phonon self-energy.
+
+        `scba.symmetric` tags the retarded self-energy buffer as
+        `"hermitian"`, which discards the anti-Hermitian part on read. The
+        phonon solver consumes that buffer as the FULL retarded self-energy
+        (Hermitian + damping), so the anharmonic linewidth would be silently
+        annihilated.
+        """
+        if self.simulation_type == "phonon" and self.scba.symmetric:
+            raise ValueError(
+                "scba.symmetric is not supported for simulation_type='phonon': "
+                "the phonon retarded self-energy is not Hermitian and its "
+                "damping part would be discarded."
             )
 
         return self

@@ -56,13 +56,17 @@ class VertexFactors:
         return {int(d): i for i, d in enumerate(self.offsets)}
 
     def truncate(self, rank: int) -> "VertexFactors":
-        """Keep the leading ``rank`` components (columns are weight-sorted)."""
+        """Keep the leading ``rank`` components (columns are weight-sorted).
+
+        The factors are COPIED, not sliced: a view would keep the full-rank
+        arrays alive, so `sse_vertex_rank` would free no memory.
+        """
         if rank <= 0 or rank >= self.rank:
             return self
         return VertexFactors(
-            D=self.D[:, :rank], lambdas=self.lambdas[:rank],
-            offsets=self.offsets, UB=self.UB[..., :rank],
-            UC=self.UC[..., :rank], q_diff_map=self.q_diff_map,
+            D=self.D[:, :rank].copy(), lambdas=self.lambdas[:rank].copy(),
+            offsets=self.offsets, UB=self.UB[..., :rank].copy(),
+            UC=self.UC[..., :rank].copy(), q_diff_map=self.q_diff_map,
             nk_shape=self.nk_shape, ansatz=self.ansatz,
             meta={**self.meta, "truncated_to": rank},
         )

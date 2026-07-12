@@ -405,7 +405,7 @@ def _assemble_kpoint(
 
     if all(kpoint_grid == 1):
         out_matrix.data += _sum_operator(matrix_dict, out_matrix.symmetry)[
-            out_matrix._local_spy()
+            out_matrix.spy()
         ]
     else:
 
@@ -427,7 +427,7 @@ def _assemble_kpoint(
 
             out_matrix.data[(...,) + stack_index + (slice(None),)] += _sum_operator(
                 matrix_dict, out_matrix.symmetry, phases=phases
-            )[out_matrix._local_spy()]
+            )[out_matrix.spy()]
 
 
 def _create_matrix_from_unit_cells(
@@ -767,15 +767,20 @@ def distributed_read_xyz(filename: Path) -> tuple[NDArray, NDArray, NDArray]:
 # phonon transport input pipeline (PhononSolver via load_matrix).
 
 
-def _trim_zeros_nd(arr: NDArray) -> NDArray:
-    """Implementation of trim_zeros over all dimensions
+def _trim_zeros_cells(arr: NDArray, num_cell_axes: int = 3) -> NDArray:
+    """Removes all-zero neighbor cells from a tight-binding matrix.
 
-    This function removes all-zero slices from a multi-dimensional array.
+    Only the leading `num_cell_axes` (cell) axes are trimmed. The trailing
+    orbital axes are left alone: an orbital row/column that happens to be
+    identically zero is still part of the basis.
 
     Parameters
     ----------
     arr : NDArray
-        The input array.
+        The input array, with `num_cell_axes` cell axes followed by the
+        orbital axes.
+    num_cell_axes : int, optional
+        The number of leading cell axes to trim. Default is 3.
 
     Returns
     -------
@@ -789,7 +794,9 @@ def _trim_zeros_nd(arr: NDArray) -> NDArray:
     if len(nz[0]) == 0:
         return xp.array([])
 
-    slices = tuple(slice(xp.min(i), xp.max(i) + 1) for i in nz)
+    slices = tuple(
+        slice(xp.min(i), xp.max(i) + 1) for i in nz[:num_cell_axes]
+    ) + (slice(None),) * (arr.ndim - num_cell_axes)
     return arr[slices]
 
 
@@ -857,7 +864,7 @@ def trim_tight_binding_matrix(
         trimmed_matrix, shift=(trimmed_matrix.shape[2] // 2), axis=2
     )
     # Remove cells that end up being all zeros.
-    trimmed_matrix = _trim_zeros_nd(trimmed_matrix)
+    trimmed_matrix = _trim_zeros_cells(trimmed_matrix)
     # Rotate back
     trimmed_matrix = xp.roll(
         trimmed_matrix, shift=-(trimmed_matrix.shape[0] // 2), axis=0
@@ -1124,7 +1131,7 @@ def _assemble_kpoint_full(
 
     if all(kpoint_grid == 1):
         summed = sparse.csr_matrix(sum(matrix_dict.values()))
-        out_matrix.data += xp.asarray(summed[out_matrix._local_spy()]).squeeze()
+        out_matrix.data += xp.asarray(summed[out_matrix.spy()]).squeeze()
     else:
         index = np.argwhere(kpoint_grid > 1).flatten()
         for stack_index in np.ndindex(kpoints.shape[:-1]):
@@ -1146,7 +1153,7 @@ def _assemble_kpoint_full(
                 )
             )
             out_matrix.data[(...,) + stack_index + (slice(None),)] += xp.asarray(
-                matrix_contribution[out_matrix._local_spy()]
+                matrix_contribution[out_matrix.spy()]
             ).squeeze()
 
 
@@ -1686,7 +1693,7 @@ def load_matrix(
     matrix.data[:] = 0.0  # Initialize to zero.
     if matrix_dict is None:
         csr = sparse.csr_matrix(matrix_sparray)
-        matrix.data += xp.asarray(csr[matrix._local_spy()]).squeeze()
+        matrix.data += xp.asarray(csr[matrix.spy()]).squeeze()
     else:
         transport_idx = "xyz".index(config.device.transport_direction)
 

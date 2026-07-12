@@ -47,6 +47,7 @@ from quatrex.core.mpi_linalg import (
     get_comm,
     global_gram,
     global_norm,
+    real_embedded,
     trust_cap,
 )
 
@@ -77,6 +78,10 @@ class RPMMixer:
         Relative singular-value cutoff for admitting a direction into ``Z``.
     """
 
+    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
+    #: the driver may always test convergence on its output.
+    probing: bool = False
+
     def __init__(self, max_subspace: int = 6, beta: float = 0.3,
                  ridge: float = 1e-8, warmup: int = 25, buffer: int = 12,
                  eig_tol: float = 1e-3, trust: float = 0.3,
@@ -105,6 +110,7 @@ class RPMMixer:
         """Global ``U^H V`` (contracts the distributed rows) via Allreduce(SUM)."""
         return global_gram(self._comm, self._SUM, U, V)
 
+    @real_embedded
     def step(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
         """One RPM step; ``x`` is the (rank-local) iterate, ``gx = g(x)``."""
         f = gx - x

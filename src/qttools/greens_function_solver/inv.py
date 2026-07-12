@@ -149,11 +149,8 @@ class Inv(GFSolver):
             rows_r, cols_r = sel_x_r.spy()
 
         if return_current:
-            # Meir-Wingreen boundary (lead) current per stack point. The
-            # robust dense inverse here pivots through the near-singular
-            # [(omega+i.eta)^2 - D - Sigma^R] that makes the block-RGF
-            # recursion lose precision / NaN at small eta -- this is the
-            # small-eta-stable path for the q-resolved phonon film.
+            # Meir-Wingreen lead current per stack point. Only the two contacts
+            # are computed; the internal interfaces are left NaN.
             current = xp.zeros((*a.shape[:-2], a.num_blocks + 1), dtype=a.dtype)
             if a.num_blocks > 1:
                 current[..., 1:-1] = xp.nan
@@ -173,15 +170,11 @@ class Inv(GFSolver):
             ):
                 b_ = slice(a.block_offsets[j], a.block_offsets[j + 1], 1)
                 if block_r is not None:
-                    # Retarded contact self-energy subtracts from A:
                     # G^R = [A - Sigma^R_lead]^{-1}.
                     a_dense[..., b_, b_] -= block_r[stack_slice]
                 if block_l is not None:
-                    # Lesser/greater contact self-energies ADD to the total
-                    # in/out-scattering: Sigma^<_tot = Sigma^<_scatter +
-                    # Sigma^<_lead (the lead injection), matching the RGF
-                    # solver and the physical NEGF convention. (The OBC blocks
-                    # are filled as +i.Gamma.n etc. in the subsystem solvers.)
+                    # The lead injection ADDS to the in/out-scattering:
+                    # Sigma^<_tot = Sigma^<_scatter + Sigma^<_lead.
                     sigma_lesser_dense[..., b_, b_] += block_l[stack_slice]
                 if block_g is not None:
                     sigma_greater_dense[..., b_, b_] += block_g[stack_slice]

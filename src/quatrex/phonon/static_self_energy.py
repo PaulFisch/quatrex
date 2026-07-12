@@ -59,14 +59,15 @@ def equal_time_uu_from_sum(g_lesser_freq_sum, dw_thz):
 
 def tadpole_source(fc3_mw, uu):
     """Force source s_a = 1/2 Phi3_{acd} <u_c u_d>"""
-    return 0.5 * np.einsum("acd,cd->a", fc3_mw, uu)
+    return 0.5 * np.einsum("acd,cd->a", fc3_mw, uu, optimize=True)
 
 
 def mean_displacement(fc3_mw, uu, phi_eff, *, optical_projector=None,
-                      omega2_floor_rel=1e-3, omega2_floor_abs=None):
+                      omega2_floor_abs=0.0):
     """Static mean displacement <w> = -CONVERSION_THZ2 Phi_eff^{+} s.
 
-    Solves Phi_eff <w> = -CONVERSION_THZ2 s
+    Solves Phi_eff <w> = -CONVERSION_THZ2 s on the subspace above
+    ``omega2_floor_abs`` [THz^2] (config ``phonon.scp_floor_thz`` squared).
     """
     s = tadpole_source(fc3_mw, uu)
     rhs = -CONVERSION_THZ2 * s
@@ -74,11 +75,7 @@ def mean_displacement(fc3_mw, uu, phi_eff, *, optical_projector=None,
         rhs = optical_projector @ rhs
     d = 0.5 * (np.asarray(phi_eff) + np.asarray(phi_eff).conj().T).real
     evals, evecs = np.linalg.eigh(d)
-    scale = float(np.max(np.abs(evals))) + 1e-300
-    cutoff = float(omega2_floor_rel) * scale
-    if omega2_floor_abs is not None:
-        cutoff = max(cutoff, float(omega2_floor_abs))
-    inv = np.where(evals > cutoff, 1.0 / evals, 0.0)
+    inv = np.where(evals > float(omega2_floor_abs), 1.0 / evals, 0.0)
     w_mean = evecs @ (inv * (evecs.conj().T @ rhs))
     if optical_projector is not None:
         w_mean = optical_projector @ w_mean
@@ -87,5 +84,5 @@ def mean_displacement(fc3_mw, uu, phi_eff, *, optical_projector=None,
 
 def sigma_tadpole(fc3_mw, w_mean):
     """Cubic tadpole self-energy Sigma_T = Phi3 : <u> [THz^2]"""
-    sig = CONVERSION_THZ2 * np.einsum("abc,c->ab", fc3_mw, w_mean)
+    sig = CONVERSION_THZ2 * np.einsum("abc,c->ab", fc3_mw, w_mean, optimize=True)
     return 0.5 * (sig + sig.conj().T).real

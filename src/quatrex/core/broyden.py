@@ -39,6 +39,7 @@ from quatrex.core.mpi_linalg import (
     allreduce_sum,
     get_comm,
     global_norm,
+    real_embedded,
     trust_cap,
 )
 
@@ -81,6 +82,10 @@ class BroydenMixer:
         then deactivates near the root. 0 disables it.
     """
 
+    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
+    #: the driver may always test convergence on its output.
+    probing: bool = False
+
     def __init__(self, depth: int = 8, beta: float = 0.5,
                  ridge: float = 1e-8, warmup: int = 0,
                  rcond: float = 1e-10, trust: float = 0.3,
@@ -101,6 +106,7 @@ class BroydenMixer:
         self._it = 0
         self._comm, self._SUM = get_comm()
 
+    @real_embedded
     def step(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
         """One Broyden update; ``x`` is the (rank-local) iterate, ``gx = g(x)``."""
         f = gx - x

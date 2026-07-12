@@ -255,7 +255,7 @@ class RGFDist(GFSolver):
             xr_out_ = xr_out.stack[stack_slice] if return_retarded else None
 
             with profiler.profile_range(
-                label="RGF dist: Schur", level="default", comm=comm
+                label="RGF dist: Schur", level="debug", comm=comm
             ):
 
                 if comm.block.rank == 0:
@@ -316,7 +316,7 @@ class RGFDist(GFSolver):
                     )
 
             with profiler.profile_range(
-                label="RGF dist: Reduce gather", level="default", comm=comm
+                label="RGF dist: Reduce gather", level="debug", comm=comm
             ):
                 # Construct the reduced system.
                 if np.all(a.block_sizes == a.block_sizes[0]):
@@ -344,12 +344,12 @@ class RGFDist(GFSolver):
 
             # Perform selected-inversion on the reduced system.
             with profiler.profile_range(
-                label="RGF dist: Reduce solve", level="default", comm=comm
+                label="RGF dist: Reduce solve", level="debug", comm=comm
             ):
                 reduced_system.solve()
 
             with profiler.profile_range(
-                label="RGF dist: Reduce scatter", level="default", comm=comm
+                label="RGF dist: Reduce scatter", level="debug", comm=comm
             ):
                 # Scatter the result to the output matrix.
                 reduced_system.scatter(
@@ -371,7 +371,7 @@ class RGFDist(GFSolver):
                 )
 
             with profiler.profile_range(
-                label="RGF dist: Selinv", level="default", comm=comm
+                label="RGF dist: Selinv", level="debug", comm=comm
             ):
 
                 if comm.block.rank == 0:

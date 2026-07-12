@@ -401,15 +401,9 @@ class RGF(GFSolver):
                 if return_retarded:
                     xr_.blocks[i, i] = xr_diag_blocks[i]
 
-            # Lead (contact) currents for THIS energy batch. Computed INSIDE
-            # the batch loop and sliced to stack_slice, exactly like the
-            # internal-interface current above: xl_diag_blocks[0]/[-1] hold
-            # this batch's diagonal blocks (they are overwritten every batch),
-            # and the OBC blocks are sliced to the batch energies. Computing
-            # these once AFTER the loop instead used only the LAST batch's
-            # diagonal blocks against the full-energy OBC -> a broadcast error
-            # (and, absent that, the wrong result) whenever get_batches returns
-            # more than one batch (i.e. nfreq > max_batch_size).
+            # The diagonal blocks are overwritten every batch, so the lead
+            # currents must be taken inside the loop, against the OBC blocks
+            # sliced to the same energies.
             if return_current:
                 current[stack_slice, ..., 0] = xp.trace(
                     obc_blocks.greater[0][stack_slice] @ xl_diag_blocks[0]

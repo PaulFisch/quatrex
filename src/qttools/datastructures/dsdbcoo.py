@@ -642,18 +642,6 @@ class DSDBCOO(DSDBSparse):
             self.cols + self.global_block_offset,
         )
 
-    def _local_spy(self) -> tuple[NDArray, NDArray]:
-        """This block-rank's nnz (row, col) in the GLOBAL index space.
-
-        ``from_sparray`` stores ``self.rows``/``self.cols`` block-locally
-        (relative to ``global_block_offset``) and ``self.data`` is the matching
-        local slice; shifting by ``global_block_offset`` recovers the global
-        coordinates WITHOUT the all-gather that :meth:`spy` does, so these align
-        element-wise with ``self.data`` for block-distributed in-place ops.
-        """
-        off = self.global_block_offset
-        return self.rows + off, self.cols + off
-
     def _check_sparsity_pattern_symmetric(self) -> bool:
         """Checks if the sparsity pattern is symmetric.
 

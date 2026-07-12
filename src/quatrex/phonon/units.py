@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from qttools import NDArray
+from qttools import NDArray, xp
 
 # Re-export the SI / phonopy constants used by the standalone bubble so
 # downstream callers don't have to reach into ``phonon_inputs``.
@@ -34,22 +34,22 @@ THZ_TO_RAD = 2.0 * np.pi * 1e12  # rad/s per THz
 def ev_to_thz(omega_ev: NDArray) -> NDArray:
     """Convert omega in eV (i.e. hbar*omega) to omega in THz (rad-free,
     plain frequency)."""
-    return np.asarray(omega_ev) / (HBAR_EV * THZ_TO_RAD)
+    return xp.asarray(omega_ev) / (HBAR_EV * THZ_TO_RAD)
 
 
 def thz_to_ev(omega_thz: NDArray) -> NDArray:
     """Inverse of :func:`ev_to_thz`."""
-    return np.asarray(omega_thz) * (HBAR_EV * THZ_TO_RAD)
+    return xp.asarray(omega_thz) * (HBAR_EV * THZ_TO_RAD)
 
 
 def ev2_to_thz2(value_ev2: NDArray) -> NDArray:
     """Convert omega^2 in eV^2 to omega^2 in THz^2 (used for D, Sigma)."""
-    return np.asarray(value_ev2) / (HBAR_EV * THZ_TO_RAD) ** 2
+    return xp.asarray(value_ev2) / (HBAR_EV * THZ_TO_RAD) ** 2
 
 
 def thz2_to_ev2(value_thz2: NDArray) -> NDArray:
     """Inverse of :func:`ev2_to_thz2`."""
-    return np.asarray(value_thz2) * (HBAR_EV * THZ_TO_RAD) ** 2
+    return xp.asarray(value_thz2) * (HBAR_EV * THZ_TO_RAD) ** 2
 
 
 def bubble_prefactor_thz(dw_thz: float) -> complex:

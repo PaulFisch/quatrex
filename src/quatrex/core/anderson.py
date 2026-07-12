@@ -18,7 +18,7 @@ safeguards are applied; ``numpy.linalg.lstsq`` resolves a
 
 import numpy as np
 
-from quatrex.core.mpi_linalg import allreduce_sum, get_comm
+from quatrex.core.mpi_linalg import allreduce_sum, get_comm, real_embedded
 
 
 class RREMixer:
@@ -42,6 +42,10 @@ class RREMixer:
     global (frequency-coupled) mode, not a per-slice one.
     """
 
+    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
+    #: the driver may always test convergence on its output.
+    probing: bool = False
+
     def __init__(self, cycle: int = 8, beta: float = 0.2, ridge: float = 1e-6) -> None:
         self.cycle = max(3, int(cycle))
         self.beta = float(beta)
@@ -50,6 +54,7 @@ class RREMixer:
         self._F: list[np.ndarray] = []
         self._comm, self._SUM = get_comm()
 
+    @real_embedded
     def step(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
         """One RRE step; ``x`` is the (rank-local) iterate, ``gx = g(x)``."""
         f = gx - x
@@ -90,6 +95,10 @@ class AndersonMixer:
     beta : float
         Damping factor applied to the residual (the linear mixing factor).
     """
+
+    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
+    #: the driver may always test convergence on its output.
+    probing: bool = False
 
     def __init__(self, depth: int = 5, beta: float = 0.5, period: int = 1,
                  restart: int = 0, ridge: float = 0.0,
@@ -143,6 +152,7 @@ class AndersonMixer:
         loc = np.array([float(np.vdot(v, v).real)])
         return float(allreduce_sum(self._comm, self._SUM, loc)[0])
 
+    @real_embedded
     def step(self, x: np.ndarray, gx: np.ndarray) -> np.ndarray:
         """One Anderson update; ``x`` is the iterate, ``gx = g(x)``."""
         f = gx - x

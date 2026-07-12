@@ -1,11 +1,16 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-"""Shared FFT helpers used by the bosonic scattering self-energies.
+"""Hilbert transform on a one-sided (positive) frequency grid.
 
-`hilbert_transform` is shared between `coulomb_screening.polarization` and
-`phonon.sse_phonon_phonon` to reconstruct the retarded component from the
-lesser/greater pair under the bosonic full-axis symmetry
-``a(-omega) = a*(omega)`` (where ``a = P^> - P^<`` or
-``Sigma^> - Sigma^<``).
+Used by `phonon.sse_phonon_phonon` to reconstruct Sigma^R from the
+lesser/greater pair under the bosonic symmetry ``a(-omega) = a*(omega)``
+(``a = Sigma^> - Sigma^<``).
+
+Note
+----
+This is NOT interchangeable with `coulomb_screening.polarization.hilbert_transform`:
+that one samples ``a`` on the symmetric energy-difference grid and uses midpoint
+``1/dE`` weights, whereas this one requires an ascending grid with
+``energies[0] >= 0`` and uses exact cell-integrated weights.
 """
 
 import math

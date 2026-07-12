@@ -24,6 +24,24 @@ def _block_offsets(block_sizes: NDArray) -> NDArray:
     return np.concatenate(([0], np.cumsum(block_sizes)))
 
 
+def _warn_truncation(
+    kept_norm_sq: float, dropped_norm_sq: float, truncation_warn: float
+) -> None:
+    """Warns when the nearest-neighbour truncation drops too much of Phi."""
+    total = kept_norm_sq + dropped_norm_sq
+    if total <= 0.0:
+        return
+
+    dropped_rel = dropped_norm_sq / total
+    if dropped_rel > truncation_warn:
+        warnings.warn(
+            f"FC3 nearest-neighbour truncation dropped {dropped_rel:.2%} of the "
+            f"Frobenius norm (threshold {truncation_warn:.2%}). Consider "
+            "enlarging the primitive-cells-per-transport-cell factor.",
+            stacklevel=3,
+        )
+
+
 def fc3_to_phi_blocks(
     phi_dense: NDArray,
     block_sizes: NDArray,
@@ -64,16 +82,10 @@ def fc3_to_phi_blocks(
                     np.vdot(block.ravel(), block.ravel()).real
                 )
 
-    if nn_only and total_norm_sq > 0.0:
-        dropped_rel = max(0.0, 1.0 - kept_norm_sq / total_norm_sq)
-        if dropped_rel > truncation_warn:
-            warnings.warn(
-                f"FC3 nearest-neighbour truncation dropped "
-                f"{dropped_rel:.2%} of the Frobenius norm "
-                f"(threshold {truncation_warn:.2%}). Consider enlarging "
-                f"the primitive-cells-per-transport-cell factor.",
-                stacklevel=2,
-            )
+    if nn_only:
+        _warn_truncation(
+            kept_norm_sq, max(0.0, total_norm_sq - kept_norm_sq), truncation_warn
+        )
 
     return blocks
 
@@ -110,16 +122,23 @@ def load_device_fc3(
                 )
             grp = f["fc3_blocks"]
             phi_blocks: PhiBlocks = {}
+            kept_norm_sq = dropped_norm_sq = 0.0
             for name in grp.keys():
                 ds = grp[name]
                 I = int(ds.attrs["I"])
                 J = int(ds.attrs["J"])
                 K = int(ds.attrs["K"])
+                block = np.asarray(ds, dtype=np.complex128)
+                norm_sq = float(np.vdot(block.ravel(), block.ravel()).real)
                 if nn_only and (
                     abs(I - J) > 1 or abs(I - K) > 1 or abs(J - K) > 1
                 ):
+                    dropped_norm_sq += norm_sq
                     continue
-                phi_blocks[(I, J, K)] = np.asarray(ds, dtype=np.complex128)
+                kept_norm_sq += norm_sq
+                phi_blocks[(I, J, K)] = block
+
+            _warn_truncation(kept_norm_sq, dropped_norm_sq, truncation_warn)
             return phi_blocks
 
         if "fc3" in f:
