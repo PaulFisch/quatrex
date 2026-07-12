@@ -1,44 +1,54 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-"""Tensor-decomposed (factored) coupled-q three-phonon ring contraction.
+"""Tensor-decomposed (factored) three-phonon ring contraction.
 
-Replaces the dense per-(q', q2) vertex-pair triple-GEMM loop of
-``SigmaPhononPhonon._contract_tau_q`` by the exact factored form. With the
-folded device vertex factorised per leg (see ``quatrex.phonon.vertex_factors``),
+With the folded device vertex factorised per leg (see
+``quatrex.phonon.vertex_factors``),
 
     Phi~(q1,q2)[(I,K,K')][a,b,c] = sum_r lam_r D[a,r] UB[K-I][q1][b,r]
                                                      UC[K'-I][q2][c,r],
 
 the dense ring  S[w,a,j] = conj(PhiL)[a,c,e] Ga[w,c,b] Gb[w,e,d] PhiR[j,d,b]
-(with PhiL = Phi~(q',q2)[(I,K1,K2)], PhiR = Phi~(q2,q')[(J,K2p,K1p)] and the
-LEFT-vertex conjugation of the dense path) collapses exactly to
+collapses to a Hadamard product of two skinny Grams, sandwiched by the external
+leg:
 
-    S[w] = Dt @ ( P_a[w] * P_b[w] ) @ Dt.T,        Dt = D @ diag(lam)
+    S[w] = Dt @ ( Pa[w] o Pb[w] ) @ Dt.T,        Dt = D @ diag(lam)
 
-    P_a[w,r,s] = conj(UB[K1-I][q'])^T @ Ga[w,q'] @ UC[K1p-J][q']     (a-line)
-    P_b[w,r,s] = conj(UC[K2-I][q2])^T @ Gb[w,q2] @ UB[K2p-J][q2]     (b-line)
+    Pa[w,r,s] = conj(UB[K1-I][q'])^T @ Ga[w,q'] @ UC[K1p-J][q']     (a-line)
+    Pb[w,r,s] = conj(UC[K2-I][q2])^T @ Gb[w,q2] @ UB[K2p-J][q2]     (b-line)
 
-i.e. one skinny Gram per (g-variant, band link, row/col transport offsets,
-momentum) instead of one BS^3 triple-GEMM per (vertex pair, quad). The row
-factor is conjugated -- that IS the conjugated-left-vertex convention at
-factor level (D and lam are real). The 3+3 absorption-fold terms combine the
-same gl/gg/glr/ggr buffers as the dense path; the bosonic fold, DC-zeroing
-and masks are inherited upstream and NOT re-derived here.
+The row factor is conjugated -- that IS the conjugated-left-vertex convention at
+factor level (D and lam are real). No ``g = g^T`` assumption is made anywhere.
 
-The q'-convolution H[iq_ext] = sum_iqp P_a[iqp] * P_b[q_diff_map[iq_ext,iqp]]
-is evaluated as a vectorised gather + reduction over stacked-in-q Gram
-tables.
+Two exact collapses make the evaluation asymptotically optimal.
 
-For the S2-symmetric INDSCAL ansatz UB is UC, so the a/b-line leg roles
-coincide and one Gram table serves both lines. For the CP fallback the roles
-differ and tables are keyed by role. No ``g = g^T`` assumption is made
-anywhere.
+**The quad sum factorises.** Per output pair (I, J) the ring runs over quads
+(K1, K2, K1p, K2p). The a-line depends only on (K1, K1p), the b-line only on
+(K2, K2p), and the quad set is exactly the Cartesian product of the two -- the
+FC3 support of the factored vertex is a full offset product, and the G band
+constrains the two lines separately. Since the Hadamard is bilinear,
+
+    sum_quads Pa[a] o Pb[b] = ( sum_a Pa[a] ) o ( sum_b Pb[b] ),
+
+so the Grams are summed FIRST and the Hadamard is taken ONCE per pair instead of
+once per quad.
+
+**The q'-sum is a circular convolution.** Pa depends only on q' and Pb only on
+q2 = q_ext - q', so
+
+    H[q_ext] = sum_{q'} Pa[q'] o Pb[q_ext - q']
+
+is a circular convolution on the transverse mesh, evaluated by FFT in
+O(N_q log N_q) instead of O(N_q^2). This is available only in the factored form:
+the dense vertex Phi~(q', q_ext - q') does not separate in the momenta.
+
+The bosonic fold, DC-zeroing and masks are inherited upstream and NOT re-derived
+here.
 """
 
 from __future__ import annotations
 
-import numpy as np
-
 from qttools import NDArray
+from qttools.fft import fft_circular_convolve
 
 # fold-term table: Sigma^< and Sigma^> as (a-line variant, b-line variant)
 FOLD_L = (("l", "l"), ("l", "gr"), ("gr", "l"))
@@ -59,10 +69,14 @@ def gram_stack(u_row: NDArray, g_q: NDArray, u_col: NDArray, xp) -> NDArray:
 
 
 class GramTables:
-    """Per-tau-chunk cache of q-stacked Gram tables.
+    """Gram tables for ONE output pair (I, J).
 
-    Key: (variant, (K, Kp), d_row, d_col, role) -> (nq, w, R, R).
-    For INDSCAL (shared contracted legs) the role is dropped from the key.
+    Key: (variant, (K, Kp), d_row, d_col, role) -> (nq, w, R, R). For INDSCAL
+    (shared contracted legs) the role is dropped from the key.
+
+    The key determines (I, J) -- ``I = K - d_row``, ``J = Kp - d_col`` -- so a
+    table built for one pair is dead for every other pair. The cache is therefore
+    scoped to a single pair; holding it across pairs would only grow the peak.
     """
 
     def __init__(self, g_dicts, UB, UC, off_pos, lo, hi, xp, shared_legs):
@@ -90,10 +104,28 @@ class GramTables:
         return P
 
 
+def _convolve_q(a: NDArray, b: NDArray, nk_shape: tuple, xp) -> NDArray:
+    """Circular convolution over the transverse mesh: sum_{q'} a[q'] * b[Q - q'].
+
+    ``a``/``b`` are (nq, w, R, R) with the flat momentum index in C order
+    (iq = ix*nky + iy), which is the native FFT ordering of the Gamma-centered
+    mesh -- no shift or roll is needed. At the Gamma point (nq == 1) the
+    convolution is the identity and the FFT is skipped.
+    """
+    if not nk_shape:
+        return a * b
+
+    shape = tuple(nk_shape) + a.shape[1:]
+    axes = tuple(range(len(nk_shape)))
+    out = fft_circular_convolve(a.reshape(shape), b.reshape(shape), axes=axes)
+
+    return out.reshape(a.shape)
+
+
 def contract_tau_q_factored(
     quads_by_pair: dict,
     block_sizes,
-    q_diff_map: NDArray,
+    nk_shape: tuple,
     q_lo: int,
     q_hi: int,
     nq: int,
@@ -110,43 +142,49 @@ def contract_tau_q_factored(
 ) -> dict:
     """Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi], factored kernel.
 
-    Mirrors ``_contract_tau_q``'s contract: returns
-    {(I, J): (out_l, out_g)} with out_* shaped (hi-lo, nq, bs_I, bs_J);
-    entries outside [q_lo, q_hi) stay zero (summed over comm.q downstream).
+    Mirrors ``_contract_tau_q``'s contract: returns {(I, J): (out_l, out_g)}
+    with out_* shaped (hi-lo, nq, bs_I, bs_J); entries outside [q_lo, q_hi) stay
+    zero (summed over comm.q downstream).
     """
-    grams = GramTables(g_dicts, UB, UC, off_pos, lo, hi, xp, shared_legs)
     nt = hi - lo
     R = Dt.shape[1]
     DtT = Dt.T.copy()
     res = {}
+
     for (I, J), quads in quads_by_pair.items():
-        bs_I = int(block_sizes[I])
-        bs_J = int(block_sizes[J])
-        out_l = xp.zeros((nt, nq, bs_I, bs_J), dtype=dtype)
-        out_g = xp.zeros((nt, nq, bs_I, bs_J), dtype=dtype)
-        Hl = xp.zeros((q_hi - q_lo, nt, R, R), dtype=dtype)
-        Hg = xp.zeros((q_hi - q_lo, nt, R, R), dtype=dtype)
-        for (K1, K2, K1p, K2p) in quads:
-            a_key = ((K1, K1p), K1 - I, K1p - J)
-            b_key = ((K2, K2p), K2 - I, K2p - J)
-            Pa = {v: grams.get(v, *a_key, role="a") for v in _VARIANTS}
-            Pb = {v: grams.get(v, *b_key, role="b") for v in _VARIANTS}
-            # Fold terms combined by shared a-line factor (6 -> 4 products):
-            #   Hl = Pa^l  o (Pb^l + Pb^gr) + Pa^gr o Pb^l
-            #   Hg = Pa^g  o (Pb^g + Pb^lr) + Pa^lr o Pb^g
-            # The b-line sums are quad-local; the gather (fancy index over
-            # the q axis) is the traffic bottleneck, so fewer products =
-            # proportionally less memory-bound work.
-            Pb_l_gr = Pb["l"] + Pb["gr"]
-            Pb_g_lr = Pb["g"] + Pb["lr"]
-            for ie, iq_ext in enumerate(range(q_lo, q_hi)):
-                idx = q_diff_map[iq_ext]        # iqp -> iq2 = q_ext - q'
-                Hl[ie] += xp.einsum("qwrs,qwrs->wrs", Pa["l"], Pb_l_gr[idx])
-                Hl[ie] += xp.einsum("qwrs,qwrs->wrs", Pa["gr"], Pb["l"][idx])
-                Hg[ie] += xp.einsum("qwrs,qwrs->wrs", Pa["g"], Pb_g_lr[idx])
-                Hg[ie] += xp.einsum("qwrs,qwrs->wrs", Pa["lr"], Pb["g"][idx])
-        for ie, iq_ext in enumerate(range(q_lo, q_hi)):
-            out_l[:, iq_ext] = (Dt @ Hl[ie]) @ DtT
-            out_g[:, iq_ext] = (Dt @ Hg[ie]) @ DtT
+        # The quad set is the product of the a-line and b-line link sets, so the
+        # Grams are summed over each line separately (see the module docstring).
+        a_links = sorted({(K1, K1p) for (K1, _K2, K1p, _K2p) in quads})
+        b_links = sorted({(K2, K2p) for (_K1, K2, _K1p, K2p) in quads})
+
+        grams = GramTables(g_dicts, UB, UC, off_pos, lo, hi, xp, shared_legs)
+        sa, sb = {}, {}
+        for variant in _VARIANTS:
+            sa[variant] = sum(
+                grams.get(variant, (K, Kp), K - I, Kp - J, role="a")
+                for (K, Kp) in a_links
+            )
+            sb[variant] = sum(
+                grams.get(variant, (K, Kp), K - I, Kp - J, role="b")
+                for (K, Kp) in b_links
+            )
+        del grams
+
+        # The 3-term bosonic fold, merged 6 -> 4 products on the shared a-line
+        # factor. One Hadamard (one convolution) per term, not one per quad.
+        h_lesser = _convolve_q(sa["l"], sb["l"] + sb["gr"], nk_shape, xp)
+        h_lesser += _convolve_q(sa["gr"], sb["l"], nk_shape, xp)
+        h_greater = _convolve_q(sa["g"], sb["g"] + sb["lr"], nk_shape, xp)
+        h_greater += _convolve_q(sa["lr"], sb["g"], nk_shape, xp)
+
+        bs_i = int(block_sizes[I])
+        bs_j = int(block_sizes[J])
+        out_l = xp.zeros((nt, nq, bs_i, bs_j), dtype=dtype)
+        out_g = xp.zeros((nt, nq, bs_i, bs_j), dtype=dtype)
+        for iq_ext in range(q_lo, q_hi):
+            out_l[:, iq_ext] = (Dt @ h_lesser[iq_ext]) @ DtT
+            out_g[:, iq_ext] = (Dt @ h_greater[iq_ext]) @ DtT
+
         res[(I, J)] = (out_l, out_g)
+
     return res

@@ -810,3 +810,146 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
                 fv_g.blocks[I, J], dv_g.blocks[I, J], atol=1e-45, rtol=1e-9,
                 err_msg=f"factored Sigma^> mismatch at {(I, J)} [{ansatz}]",
             )
+
+
+def test_q_convolution_matches_explicit_q_diff_map_sum() -> None:
+    """The FFT circular convolution == the explicit q_diff_map double sum.
+
+    The factored kernel evaluates sum_{q'} Pa[q'] o Pb[q_ext - q'] by FFT. That
+    is only legitimate because ``build_q_diff_map`` is the circulant difference
+    map on the Gamma-centered mesh, so the sum is a genuine circular
+    convolution.
+    """
+    from quatrex.phonon.bubble_factored import _convolve_q
+
+    nkx, nky = 4, 3
+    nq = nkx * nky
+    rng = np.random.default_rng(3)
+
+    def cx(*shape):
+        return rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+
+    pa, pb = cx(nq, 5, 6, 6), cx(nq, 5, 6, 6)
+    q_diff_map = np.array(
+        [
+            [
+                ((a // nky - b // nky) % nkx) * nky + (a % nky - b % nky) % nky
+                for b in range(nq)
+            ]
+            for a in range(nq)
+        ]
+    )
+
+    expected = np.stack(
+        [np.einsum("qwrs,qwrs->wrs", pa, pb[q_diff_map[q]]) for q in range(nq)]
+    )
+
+    np.testing.assert_allclose(
+        _convolve_q(pa, pb, (nkx, nky), np), expected, rtol=1e-12
+    )
+
+
+@pytest.mark.parametrize("ansatz", ["INDSCAL", "CP"])
+def test_compute_gamma_factored_matches_dense(ansatz) -> None:
+    """Factored kernel == dense ring at Gamma (nq == 1).
+
+    At the zone centre the momentum convolution is the identity, so what is
+    exercised here is the Gram collapse alone -- the regime of every
+    transversely-finite device (nanowires, CNTs), which the factored kernel
+    could not reach before.
+    """
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+    from quatrex.phonon.vertex_factors import VertexFactors
+
+    rng = np.random.default_rng(23)
+    n_blocks, nbs, ne, R = 3, 3, 13, 5
+    block_sizes = np.array([nbs] * n_blocks)
+    N = int(block_sizes.sum())
+    offsets = np.array([-1, 0, 1], dtype=np.int64)
+
+    # Gamma-only: a single momentum, so the factors are real.
+    D = rng.standard_normal((nbs, R))
+    lambdas = np.sort(np.abs(rng.standard_normal(R)))[::-1] + 0.1
+    UB = rng.standard_normal((len(offsets), 1, nbs, R)).astype(np.complex128)
+    UC = UB if ansatz == "INDSCAL" else rng.standard_normal(
+        (len(offsets), 1, nbs, R)
+    ).astype(np.complex128)
+    vf = VertexFactors(
+        D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UC,
+        q_diff_map=np.zeros((1, 1), dtype=int), nk_shape=(1,), ansatz=ansatz,
+        meta={},
+    )
+
+    # The dense Gamma vertex, built FROM the same factors.
+    phi_blocks = {}
+    for I in range(n_blocks):
+        for d1 in offsets:
+            if not 0 <= I + int(d1) < n_blocks:
+                continue
+            for d2 in offsets:
+                if not 0 <= I + int(d2) < n_blocks:
+                    continue
+                phi_blocks[(I, I + int(d1), I + int(d2))] = vf.reconstruct_block(
+                    0, 0, int(d1), int(d2)
+                )
+
+    gl_band, gg_band = {}, {}
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+            gl_band[(K, Kp)] = (rng.standard_normal((ne, nbs, nbs))
+                                + 1j * rng.standard_normal((ne, nbs, nbs)))
+            gg_band[(K, Kp)] = (rng.standard_normal((ne, nbs, nbs))
+                                + 1j * rng.standard_normal((ne, nbs, nbs)))
+
+    rows, cols = [], []
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for i in range(block_sizes[I]):
+                for j in range(block_sizes[J]):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = csr_matrix(
+        (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
+        shape=(N, N),
+    )
+
+    def _run(**ssp_kwargs):
+        mk = lambda: DSDBCOO.from_sparray(
+            pattern, block_sizes, global_stack_shape=(ne,))
+        g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+        for m in (g_l, g_g, s_l, s_g, s_r):
+            m.data[:] = 0.0
+        glv, ggv = g_l.stack[...], g_g.stack[...]
+        for (K, Kp) in gl_band:
+            glv.blocks[K, Kp] = gl_band[(K, Kp)]
+            ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+        cfg = _make_cfg("half")
+        cfg.phonon.decomposed_kernel = "gram"
+        ssp = SigmaPhononPhonon(
+            cfg,
+            phonon_frequencies=np.linspace(0.0, 16.0, ne),
+            block_sizes=block_sizes,
+            **ssp_kwargs,
+        )
+        ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+        return s_l, s_g
+
+    sl_d, sg_d = _run(phi_blocks=phi_blocks)
+    sl_f, sg_f = _run(vfactors=vf)
+
+    dv_l, dv_g = sl_d.stack[...], sg_d.stack[...]
+    fv_l, fv_g = sl_f.stack[...], sg_f.stack[...]
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            np.testing.assert_allclose(
+                fv_l.blocks[I, J], dv_l.blocks[I, J], atol=1e-45, rtol=1e-9,
+                err_msg=f"Gamma factored Sigma^< mismatch at {(I, J)}",
+            )
+            np.testing.assert_allclose(
+                fv_g.blocks[I, J], dv_g.blocks[I, J], atol=1e-45, rtol=1e-9,
+                err_msg=f"Gamma factored Sigma^> mismatch at {(I, J)}",
+            )

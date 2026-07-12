@@ -50,12 +50,6 @@ from quatrex.phonon.units import bubble_prefactor_thz
 
 profiler = Profiler()
 
-# Bose argument hbar*omega/(kB*T) per THz per K: x = _THZ_OVER_K * f[THz] / T[K]
-# (~47.99 f/T) == units.HBAR_EV * units.THZ_TO_RAD / kB[eV/K]. Kept as the exact
-# literal product so the occupation window stays bit-identical.
-_THZ_OVER_K = 6.582119569e-16 * 2.0 * np.pi * 1e12 / 8.617333262e-5
-
-
 class SigmaPhononPhonon(ScatteringSelfEnergy):
     """3-phonon SCBA scattering self-energy.
 
@@ -174,6 +168,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     f"not match the device block size "
                     f"{int(self.block_sizes[0])}."
                 )
+            if np.iscomplexobj(vfactors.D) or np.iscomplexobj(vfactors.lambdas):
+                # The kernel conjugates only the contracted-leg row factor; the
+                # external leg carries no conjugate because D and lambda are real.
+                raise ValueError(
+                    "The external-leg factors D and lambdas must be real."
+                )
             self._vfactors = vfactors
             self._q_diff_map = np.asarray(vfactors.q_diff_map, dtype=int)
             self._n_kpts = int(vfactors.n_kpts)
@@ -237,6 +237,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             phi_blocks = load_device_fc3(
                 Path(fc3_path),
                 block_sizes=self.block_sizes,
+                truncation_warn=config.phonon.phonon_phonon_truncation_warn,
             )
         self.phi_blocks = phi_blocks
 
@@ -285,7 +286,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._tau_cache: tuple | None = None
         # Cached bosonic-fold plan (local gather perm + neighbour exchange
         # schedule); False = not yet built, None = no pattern, else the tuple.
-        self._rev_perm: tuple | None | bool = False
+        self._rev_perm: tuple | bool = False
         # Pre-permuted phi factors, built lazily on first compute (after any
         # ballistic zeroing); the FC3 vertex is fixed so this is computed once.
         self._phi_pre: dict | None = None
@@ -538,11 +539,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "quatrex.phonon.qfold) or the tensor-decomposed factors "
                 "(config.phonon.decomposed_vertices_path)."
             )
-        if nq > 1 and self._n_kpts != nq:
+        if (nq > 1 or self._vfactors is not None) and self._n_kpts != nq:
             raise ValueError(
-                f"q-folded vertices are for n_kpts={self._n_kpts} but the "
-                f"Green's function has {nq} transverse momenta {nk}."
+                f"The vertices are for n_kpts={self._n_kpts} but the Green's "
+                f"function has {nq} transverse momenta {nk}."
             )
+        if nq > 1 and self._vfactors is not None:
+            # The momentum index is flattened in C order, so the per-axis mesh
+            # must match, not just its product: (3, 9) and (9, 3) both give
+            # n_kpts = 27 but index every transverse momentum differently.
+            if tuple(self._vfactors.nk_shape) != nk:
+                raise ValueError(
+                    "The decomposed vertices are for a transverse mesh "
+                    f"{tuple(self._vfactors.nk_shape)} but the Green's function "
+                    f"has {nk}."
+                )
         if nq > 1 and ranks.block.size > 1:
             raise NotImplementedError(
                 "Transverse-q (k>1) with comm.block.size > 1 is not "
@@ -754,7 +765,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # fixed phi factors are pre-permuted once -- per (I,J) a list of
             # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ) -- to avoid per-call transpose
             # copies.
-            if self._phi_pre is None:
+            # Only the dense ring consumes the pre-permuted phi factors.
+            use_factored = (
+                self._vfactors is not None and self._vf_kernel == "gram"
+            )
+            if self._phi_pre is None and not use_factored:
                 self._phi_pre = {}
                 for (I, J), quads in self._phi_pair_index.items():
                     self._phi_pre[(I, J)] = [
@@ -774,7 +789,28 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         + ring_contract_pre(PL, PR, nI, bK2, nJ, gga, glrb, xp)
                         + ring_contract_pre(PL, PR, nI, bK2, nJ, glra, ggb, xp))
 
-            if nq == 1:
+            if use_factored:
+                # The factored kernel serves the Gamma-only device too: at
+                # nq == 1 the momentum convolution is the identity and what
+                # remains is the Gram collapse, b^4 -> R b^2 + R^2 b.
+                def _qflat_f(d):
+                    return {
+                        kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
+                        for kk, v in d.items()
+                    }
+
+                gl_q = _qflat_f(gl_blk)
+                n_tau = next(iter(gl_q.values())).shape[0]
+                dtype = next(iter(gl_q.values())).dtype
+                q_lo = ranks.q.rank * nq // ranks.q.size
+                q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
+                self._contract_factored_q(
+                    owned, q_lo, q_hi, nq, nk, n_tau, dtype,
+                    gl_q, _qflat_f(gg_blk),
+                    _qflat_f(glr_blk), _qflat_f(ggr_blk),
+                    stlv, stgv, start, xp,
+                )
+            elif nq == 1:
                 _pair_debug = os.environ.get("QTX_PROFILE_LEVEL") == "debug"
 
                 # Hermitian pair-halving: contract only I <= J; the (J, I)
@@ -872,7 +908,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 self._print_ring_stats(pairs_c, n_tau, n_threads, nt,
                                        rings_per_quad=4 if fast_now else 6)
                 pair_times: dict | None = {} if _pair_debug else None
-                if pool is not None and nt > 1:
+                # The pool only pays off for the CPU backend (single-thread BLAS
+                # per chunk); on GPU the GEMMs are already batched on-device.
+                if pool is not None and xp is np and nt > 1:
                     bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
                     if self._pool_scope == "pair_tau":
                         # (pair x tau-chunk) tiles: fat chunks still fill
@@ -913,11 +951,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         stgv.blocks[J - start, I - start] = xp.conj(
                             out_g[(I, J)].swapaxes(-1, -2))
                 if fast_now:
-                    if self._build_fold_plan(g_lesser) is None:
-                        raise RuntimeError(
-                            "sse_greater_from_lesser needs the pattern-only "
-                            "fold plan (rows/cols on the Green's function)."
-                        )
                     stxv = stx.stack[...]
                     for ij in pairs_c:
                         stxv.blocks[ij[0] - start, ij[1] - start] = out_x[ij]
@@ -994,21 +1027,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 q_lo = ranks.q.rank * nq // ranks.q.size
                 q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
 
-                if self._vfactors is not None and self._vf_kernel == "gram":
-                    self._contract_factored_q(
-                        owned, qdm, q_lo, q_hi, nq, nk, n_tau, dtype,
-                        gl_q, gg_q, glr_q, ggr_q, stlv, stgv, start, xp,
-                    )
-                else:
-                    if self._vfactors is not None:
-                        # decomposed_kernel="reconstruct": dense path fed the
-                        # factor-reconstructed rank-local vertex slice.
-                        qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
-                    self._contract_dense_q(
-                        owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
-                        gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
-                        stlv, stgv, start, xp,
-                    )
+                if self._vfactors is not None:
+                    # decomposed_kernel="reconstruct": dense path fed the
+                    # factor-reconstructed rank-local vertex slice.
+                    qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
+                self._contract_dense_q(
+                    owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+                    gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
+                    stlv, stgv, start, xp,
+                )
 
             # Assemble the external-q distribution: each comm.q rank computed a
             # disjoint subset of iq_ext (others left zero), so sum over comm.q.
@@ -1071,6 +1098,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # damping sign -- unchanged by the convention flip above).
             if self.retarded_method == "fft":
                 delta = sg_data - sl_data
+                self._check_kk_grid_support(delta)
                 # transverse_shape: the exact bosonic mirror carries q -> -q on
                 # the transverse axes (exact off equilibrium, unlike the plain
                 # conjugate shortcut).
@@ -1084,6 +1112,33 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
             self._apply_scp_tadpole(g_lesser, g_greater, sigma_retarded)
+
+    def _check_kk_grid_support(self, delta: NDArray) -> None:
+        """Warns (once) if the bubble is still alive at the top of the grid.
+
+        The Hilbert transform reconstructs Re Sigma^R from Sigma^> - Sigma^<
+        sampled on [0, omega_max]. The 3-phonon bubble has support up to twice
+        the phonon band top, so a grid that stops at the band top truncates the
+        Kramers-Kronig integral. A spectrum that has not decayed by the last bin
+        is the symptom.
+        """
+        if getattr(self, "_kk_grid_checked", False):
+            return
+        self._kk_grid_checked = True
+
+        peak = float(get_host(xp.max(xp.abs(delta))))
+        if peak == 0.0:
+            return
+
+        edge = float(get_host(xp.max(xp.abs(delta[-1]))))
+        if edge > 1e-2 * peak:
+            warnings.warn(
+                f"The 3-phonon bubble still carries {edge / peak:.1%} of its "
+                "peak weight at the top of the frequency grid, so the "
+                "Kramers-Kronig integral for Re Sigma^R is truncated. Extend "
+                "energy_window_max to about twice the phonon band top.",
+                stacklevel=2,
+            )
 
     def _print_ring_stats(self, owned, n_tau, n_threads, n_chunks,
                           rings_per_quad=6):
@@ -1220,17 +1275,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 _write_q(I, J, out_l, out_g)
 
     def _contract_factored_q(
-        self, owned, qdm, q_lo, q_hi, nq, nk, n_tau, dtype,
+        self, owned, q_lo, q_hi, nq, nk, n_tau, dtype,
         gl_q, gg_q, glr_q, ggr_q, stlv, stgv, start, xp,
     ):
         """Coupled-q contraction with the TENSOR-DECOMPOSED vertex.
 
         Exact factored equivalent of ``_contract_dense_q`` (same fold terms,
         same left-vertex conjugation -- applied to the row factors inside the
-        Grams, see ``quatrex.phonon.bubble_factored``): per (g-variant, band
-        link, offset pair, q) one skinny Gram replaces the per-(q', q2)
-        vertex-pair triple-GEMMs; the q'-convolution runs entrywise on the
-        rank-R Gram tables and a small sandwich restores the band block.
+        Grams). The quad sum collapses onto two summed Grams and the
+        q'-convolution runs as an FFT; see ``quatrex.phonon.bubble_factored``.
         """
         from quatrex.phonon.bubble_factored import contract_tau_q_factored
 
@@ -1250,11 +1303,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         UB = xp.asarray(vf.UB)
         UC = UB if vf.UB is vf.UC else xp.asarray(vf.UC)
         g_dicts = {"l": gl_q, "g": gg_q, "lr": glr_q, "gr": ggr_q}
-        shared = str(vf.ansatz).upper() == "INDSCAL"
+        # Whether the two contracted legs coincide is a property of the ARRAYS,
+        # not of the ansatz label: a mislabelled file would otherwise silently
+        # serve an a-role Gram for a b-role request.
+        shared = UB is UC or bool(xp.array_equal(UB, UC))
 
         def _run(lo, hi):
             return contract_tau_q_factored(
-                quads_by_pair, self.block_sizes, qdm, q_lo, q_hi, nq,
+                quads_by_pair, self.block_sizes, tuple(nk), q_lo, q_hi, nq,
                 g_dicts, Dt, UB, UC, off_pos, lo, hi, xp, shared, dtype,
             )
 
@@ -1293,10 +1349,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         neighbour request/reply schedule) is built once; per call only the
         boundary entries are exchanged.
         """
-        plan = self._build_fold_plan(g)
-        if plan is None:  # serial-equivalent (single nnz block / no pattern)
-            return
-        local_perm, recv_dest, send_src = plan
+        local_perm, recv_dest, send_src = self._build_fold_plan(g)
         for leg in legs:
             data = leg.data
             folded = data[..., local_perm]
@@ -1326,8 +1379,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         rows = getattr(g, "rows", None)
         cols = getattr(g, "cols", None)
         if rows is None or cols is None:
-            self._rev_perm = None
-            return None
+            # Skipping the fold would silently drop the ji-transpose of the
+            # absorption legs and break the bubble's energy balance, so refuse.
+            raise TypeError(
+                f"The 3-phonon bosonic fold needs the (row, col) nnz pattern, "
+                f"which {type(g).__name__} does not expose. Use DSDBCOO "
+                "(config.compute.dsdbsparse_type)."
+            )
         off = int(getattr(g, "global_block_offset", 0))
         r = (np.asarray(rows.get() if hasattr(rows, "get") else rows) + off)
         c = (np.asarray(cols.get() if hasattr(cols, "get") else cols) + off)
