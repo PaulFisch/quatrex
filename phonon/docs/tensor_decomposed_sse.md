@@ -71,13 +71,23 @@ once per `(quad, q_ext, q')`, i.e. `181 * 81 * 81` times per pair, through an
 `einsum` gather running ~30x below GEMM throughput. Both collapses attack exactly
 that term.
 
-## Gamma-only devices
+## Gamma-only devices (nanowires, CNTs) -- previously unreachable
 
 The factored kernel now also serves `nq == 1`, where the convolution is the
 identity and the Gram collapse `b^4 -> R b^2 + R^2 b` stands alone. This is the
 regime of every transversely-finite system (cnt33/cnt80, the Si nanowires,
-SrTiO3), which the factored path could not reach at all before -- and where the
-block size is largest (`b=63` for the d5a wire), so the `b^4` saving is biggest.
+SrTiO3), which the factored path could not reach **at all** before -- and where
+the block size is largest, so the `b^4` saving is biggest.
+
+Measured at the d5a Si-nanowire block size (`b=63`, nslabs=3, n_tau=60, 1 thread):
+
+| R | dense | new | speedup | parity |
+|----|---------|--------|-----------|---------|
+| 16 | 780.4 s | 0.22 s | **3553x** | 8.8e-16 |
+| 32 | 774.7 s | 0.42 s | **1842x** | 1.3e-15 |
+
+The wire is where the decomposition pays most, and it was the one place the
+factored kernel was never wired in.
 
 ## What exists
 
