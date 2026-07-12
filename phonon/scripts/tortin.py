@@ -73,15 +73,20 @@ def gateway():
 
 
 def cload():
-    """{node_number: (load1, load5, load15)} for all nodes."""
-    r = ssh(gateway(), "cload tortin", timeout=60, check=True)
+    """{node_number: (load1, load5, load15)} for all reachable nodes.
+
+    ``cload`` exits non-zero when any node is down (rup RPC failure) but
+    still prints the reachable ones -- parse what came through and treat
+    missing nodes as unavailable (they are never launch candidates)."""
+    r = ssh(gateway(), "cload tortin", timeout=60)
     loads = {}
     for line in r.stdout.splitlines():
         m = _CLOAD_RE.match(line.strip())
         if m:
             loads[int(m.group(2))] = tuple(float(m.group(i)) for i in (3, 4, 5))
     if not loads:
-        sys.exit("could not parse cload output:\n" + r.stdout)
+        sys.exit("could not parse cload output:\n"
+                 + r.stdout + r.stderr)
     return loads
 
 
