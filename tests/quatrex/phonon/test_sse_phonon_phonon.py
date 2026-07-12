@@ -77,6 +77,9 @@ def _make_cfg(retarded_method: str = "fft"):
 
     _Phonon.retarded_method = method
     _Phonon.fc3_path = None
+    # Deliberately tiny, so the tests exercise the tau-chunked path: the kernel
+    # must give the same answer for any chunking.
+    _Phonon.sse_tau_chunk_bytes = 4096
 
     class _Cfg:
         phonon = _Phonon()

@@ -96,6 +96,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         )
         self._tau_min_chunk = int(
             getattr(config.phonon, "sse_tau_min_chunk", 4))
+        self._tau_chunk_bytes = int(config.phonon.sse_tau_chunk_bytes)
         self._pool_scope = str(
             getattr(config.phonon, "sse_pool_scope", "tau"))
         # Sigma^> reconstruction from the Sigma^< cross terms (WP3): exact
@@ -1337,20 +1338,38 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
+        # The Gram tables are (nq, n_tau, R, R), so the working set grows with the
+        # tau slice AND with R^2 -- at R=128 the full local tau axis is tens of
+        # GB. Bound it by splitting tau, whether or not there is a pool to
+        # parallelise over (on the GPU there is none).
         pool, n_threads = ring_pool()
-        nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))  # see nq==1
-        if pool is not None and xp is np and nt > 1:
-            bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
-            chunks = list(pool.map(lambda b: _run(*b), bnds))
-            for (I, J) in quads_by_pair:
-                _write(
-                    I, J,
-                    xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
-                    xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
-                )
-        else:
-            for (I, J), (out_l, out_g) in _run(0, n_tau).items():
+        bytes_per_tau = nq * Dt.shape[1] ** 2 * xp.dtype(dtype).itemsize
+        cap = max(1, self._tau_chunk_bytes // max(bytes_per_tau, 1))
+        n_chunks = max(1, -(n_tau // -int(cap)))                 # ceil
+        if pool is not None and xp is np:
+            n_chunks = max(
+                n_chunks, min(n_threads, max(1, n_tau // self._tau_min_chunk))
+            )
+
+        bnds = [(i * n_tau // n_chunks, (i + 1) * n_tau // n_chunks)
+                for i in range(n_chunks)]
+        bnds = [(lo, hi) for lo, hi in bnds if hi > lo]
+
+        if len(bnds) == 1:
+            for (I, J), (out_l, out_g) in _run(*bnds[0]).items():
                 _write(I, J, out_l, out_g)
+            return
+
+        if pool is not None and xp is np and n_threads > 1:
+            chunks = list(pool.map(lambda b: _run(*b), bnds))
+        else:
+            chunks = [_run(lo, hi) for lo, hi in bnds]
+        for (I, J) in quads_by_pair:
+            _write(
+                I, J,
+                xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
+                xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
+            )
 
     def _fold_reversed_legs(self, legs: tuple, g: DSDBSparse) -> None:
         """Apply the exact bosonic ji-transpose ``X_ij -> X_ji`` to the given

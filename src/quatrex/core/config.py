@@ -1326,6 +1326,15 @@ class PhononConfig(BaseModel):
     bins (see there). Small (~0.01-0.03) to damp the IR marginal mode; the rest
     of the spectrum keeps ``scba.mixing_factor``."""
 
+    sse_tau_chunk_bytes: PositiveInt = 256 * 1024 * 1024
+    """Memory cap on one tau chunk of the decomposed (``"gram"``) SSE kernel.
+
+    The kernel's Gram tables are ``(N_q, n_tau, R, R)``, so the working set grows
+    with the tau slice AND with the square of the rank: on a single rank at
+    R = 128 the full local tau axis is tens of GB. Tau is therefore split so that
+    one chunk's Gram stays under this cap, independently of the thread pool (the
+    GPU path has none). Results do not depend on the chunk size."""
+
     sse_ring_threads: NonNegativeInt = 0
     """Width of the omega/tau ring-contraction thread pool (bit-identical
     results for any width). 0 = keep the QUATREX_PHPH_RING_THREADS env
