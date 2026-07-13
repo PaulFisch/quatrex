@@ -49,8 +49,19 @@ _CLOAD_RE = re.compile(
 
 
 def ssh(node, cmd, timeout=30, check=False):
-    r = subprocess.run(["ssh", *SSH_OPTS, node, cmd],
-                       capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(["ssh", *SSH_OPTS, node, cmd],
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # A hung node must not take the tooling down (cf. the cload note):
+        # report it like a failed command; callers treat the node as
+        # unavailable.
+        r = subprocess.CompletedProcess(
+            ["ssh", node, cmd], returncode=255, stdout="",
+            stderr=f"ssh {node}: timeout after {timeout}s")
+        if check:
+            sys.exit(r.stderr)
+        return r
     if check and r.returncode != 0:
         sys.exit(f"ssh {node} failed: {r.stderr.strip() or r.stdout.strip()}")
     return r
