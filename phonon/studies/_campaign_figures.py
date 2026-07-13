@@ -163,30 +163,30 @@ axes[0].set_title("residual"); axes[1].set_title("LS conditioning")
 axes[2].set_title("extrapolation weights")
 save(fig, "s1d_forensics")
 
-# ---- S1e: Jacobian mechanism -------------------------------------------------
+# ---- S1e: Jacobian measurements vs the damping bound ------------------------
 fig, ax = plt.subplots(figsize=(6.0, 3.6), constrained_layout=True)
-lam = np.linspace(1, 45, 300)
+lam = np.linspace(1, 8, 300)
 ax.plot(lam, 2.0 / (1.0 + lam), color=C[0], lw=1.6,
-        label=r"stability bound  $\alpha < 2/(1+|\lambda|)$")
-pts = [  # (|lambda|, alpha, converged?, label)
-    (4.33, 0.2, True, r"L2, $\alpha=0.2$"),
-    (4.33, 0.3, True, r"L2, $\alpha=0.3$ (RRE build)"),
-    (20, 0.2, False, r"L4, $\alpha=0.2$"),
-    (20, 0.1, False, r"L4, $\alpha=0.1$"),
-    (40, 0.1, False, r"L10, $\alpha=0.1$"),
-    (40, 0.05, False, r"L4, $\alpha=0.05$ (RRE build)"),
+        label=r"$\alpha = 2/(1+|\lambda|)$")
+meas = [  # (|lambda|, label, marker) -- power-iteration measurements ONLY
+    (4.33, "L2 fixed point, $\\lambda_0$", "o"),
+    (3.94, "L2 fixed point, $\\lambda_1$", "s"),
+    (3.51, "L2 Anderson stall, $\\lambda_0$", "^"),
+    (3.30, "L2 Anderson stall, $\\lambda_1$", "v"),
 ]
-for lm, a, ok, lab in pts:
-    ax.plot([lm], [a], "o" if ok else "x", color=C[2] if ok else C[3],
-            markersize=8, mew=2)
-    ax.annotate(lab, (lm, a), textcoords="offset points", xytext=(6, 4),
-                fontsize=7)
-ax.set_xlabel(r"dominant $|\lambda|$ of $J=\partial F/\partial\Sigma$ "
-              "(negative, IR-localized)")
-ax.set_ylabel(r"damping $\alpha$")
-ax.set_title("Damped-iteration stability bound and campaign outcomes")
-ax.set_xlim(1, 45); ax.set_ylim(0, 0.45)
-ax.legend(frameon=False, fontsize=8, loc="upper right")
+for lm, lab, mk in meas:
+    ax.plot([lm], [2.0 / (1.0 + lm)], mk, color=C[2], markersize=7,
+            label=lab)
+ax.axhline(0.2, color=C[7], lw=0.9, ls="--")
+ax.text(7.0, 0.207, r"$\alpha=0.2$", fontsize=8, color="#666666")
+ax.axhline(0.3, color=C[7], lw=0.9, ls=":")
+ax.text(7.0, 0.307, r"$\alpha=0.3$", fontsize=8, color="#666666")
+ax.set_xlabel(r"measured $|\lambda|$ of $J=\partial F/\partial\Sigma$"
+              " (real, negative, IR-localized)")
+ax.set_ylabel(r"damping bound $2/(1+|\lambda|)$")
+ax.set_title("Power-iteration measurements (CNT L2) and the damping bound")
+ax.set_xlim(1, 8); ax.set_ylim(0, 0.55)
+ax.legend(frameon=False, fontsize=7.5, loc="upper right")
 save(fig, "s1e_jacobian")
 
 # ---- S2 grids: DOS / transmission / heat spectra -----------------------------
