@@ -61,6 +61,19 @@ _compute_obc_self_energies = None
 # ---------------------------------------------------------------------------
 
 
+def _supercell_widths(phonon, cell_frac) -> np.ndarray:
+    """Number of primitive cells along each axis of the FC3 supercell.
+
+    Taken from the supercell matrix when it is diagonal; otherwise inferred
+    from the spread of the mapped cell indices.
+    """
+    sc = np.asarray(getattr(phonon, "supercell_matrix", None), dtype=float)
+    if sc.shape == (3, 3) and np.allclose(sc, np.diag(np.diag(sc))):
+        return np.round(np.diag(sc)).astype(int)
+    span = np.round(cell_frac.max(axis=0) - cell_frac.min(axis=0)).astype(int)
+    return span + 1
+
+
 def build_supercell_mapping(phonon, transport_direction="x"):
     """Map supercell atoms to (primitive atom, cell translation).
 
@@ -106,6 +119,28 @@ def build_supercell_mapping(phonon, transport_direction="x"):
             raise ValueError(f"Cannot map supercell atom {s}")
 
     slab_indices = np.round(cell_frac[:, tidx]).astype(int)
+
+    # The TRANSVERSE cell index goes straight into the Bloch phase
+    # (solver/se_q.py: ph = exp(-2j*pi * cell_frac @ q)), so it must be the
+    # PHYSICAL displacement -- the minimum image -- and not the raw supercell
+    # index. A 5-cell supercell numbers its cells 0..4, but cell 4 is physically
+    # at -1; the two phases differ by exp(-2j*pi*5*q), which is unity only when
+    # the transverse mesh is a multiple of the supercell width. At nk=8 or nk=9
+    # it is not, so the folded vertex is ALIASED: it loses the permutation
+    # symmetry that the bubble's energy conservation (Phi-derivability) rests on,
+    # and P_in != P_out even for the exact, dense FC3.
+    #
+    # The transport axis is deliberately NOT wrapped: it is exported as
+    # slab_indices, whose extent (max + 1) is the supercell width used
+    # downstream, and its offsets are already minimum-imaged where they are
+    # formed (solver/fc3_device.py::_minimum_image_offset).
+    n_cells = _supercell_widths(phonon, cell_frac)
+    for ax in range(3):
+        if ax == tidx or n_cells[ax] <= 1:
+            continue
+        c = np.round(cell_frac[:, ax]).astype(int) % n_cells[ax]
+        c[c > n_cells[ax] // 2] -= n_cells[ax]
+        cell_frac[:, ax] = c
 
     # ref_sc_atoms[a] = supercell atom index for primitive atom a at cell (0,0,0)
     ref_sc_atoms = np.full(nat_prim, -1, dtype=int)
