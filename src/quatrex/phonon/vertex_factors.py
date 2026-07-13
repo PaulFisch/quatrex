@@ -20,6 +20,7 @@ input builder; consumed by SigmaPhononPhonon's factored coupled-q branch.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,9 +61,24 @@ class VertexFactors:
 
         The factors are COPIED, not sliced: a view would keep the full-rank
         arrays alive, so `sse_vertex_rank` would free no memory.
+
+        CP/INDSCAL is NOT nested: the best rank-R fit is not the leading R
+        columns of a higher-rank fit, and weight-sorting orders the components
+        without making a prefix of them optimal. Truncating the R=128 film
+        factors is 4.4x (R=8) to 83x (R=64) further from the reference than a
+        dedicated rank-R fit. Prefer one fit per rank (they are cached on the
+        bulk-FC3 hash, so this is free); truncation is a memory knob, not a
+        substitute for refitting.
         """
         if rank <= 0 or rank >= self.rank:
             return self
+        warnings.warn(
+            f"truncating a rank-{self.rank} {self.ansatz} fit to rank {rank}: "
+            "CP is not nested, so this is a strictly worse vertex than a "
+            f"dedicated rank-{rank} fit. Use decomposed_vertices_r{rank}.npz "
+            "if it exists.",
+            stacklevel=2,
+        )
         return VertexFactors(
             D=self.D[:, :rank].copy(), lambdas=self.lambdas[:rank].copy(),
             offsets=self.offsets, UB=self.UB[..., :rank].copy(),

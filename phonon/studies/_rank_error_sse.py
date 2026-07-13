@@ -37,7 +37,13 @@ from quatrex.phonon.vertex_factors import load_decomposed
 
 
 def _rel(a, b):
-    """Relative error ||a - b|| / ||b|| in the max norm."""
+    """Relative error ||a - b|| / ||b|| in the max norm.
+
+    Returns nan on a zero reference. That is not a failure: under
+    ``retarded_method="half"`` the Hermitian part of Sigma^R is identically
+    zero (the retarded self-energy is fixed by Sigma^{<,>} alone), so its
+    column is legitimately empty and the Gamma column carries the error.
+    """
     denom = float(xp.max(xp.abs(b)))
     if denom == 0.0:
         return float("nan")

@@ -41,6 +41,10 @@ cited in the script.
 | phph_physics_si | `phph_physics_si.py` | `phonon/reaps/si_primitive_work/kappa-m191919.hdf5` |
 | phph_NU_gruneisen_si | `phph_NU_gruneisen_si.py` | `phonon/reaps/si_primitive_work/{phono3py.yaml,fc2.hdf5,fc3.hdf5}` (~5 s phono3py recompute) |
 | d11a_decomp_ganh, d11a_decomp_conservation | `d11a_decomposition.py` | `phonon/configs/sinw/reaps/sinw100_d11a_vasp_sc4/transport_quality/transport_quality.csv` |
+| decomp_kernel_speedup, decomp_cost_scaling | `decomposed_sse_cost.py` | in-script literals from the standalone ring benchmark (`phonon/studies/_bench_factored_sse.py`, logs `cluster/bench-decomp`, `cluster/bench-legacy`, Γ/b=63 shape) — the benchmark contracts the ring in isolation, so it is not derivable from any run.npz; SCBA points from `phonon/scripts/data/decomposed_sse.csv` |
+| decomp_compression | `decomposed_sse_compression.py` | in-script literals: INDSCAL fit residuals + factor/qfold file sizes from the geometry build log (`cluster/sifilm-L10-geom/run.log`) |
+| decomp_rank_error, decomp_amplification | `decomposed_sse_error.py` | one-shot Σ error: literals from `phonon/studies/_rank_error_sse.py`; self-consistent errors: `phonon/scripts/data/decomposed_sse.csv` |
+| decomp_scba_convergence, decomp_harmonic, decomp_observables | `decomposed_sse_convergence.py`, `decomposed_sse_harmonic.py`, `decomposed_sse_observables.py` | `phonon/scripts/data/decomposed_sse_spectra.npz` |
 | cutoff_sse_d5_d11 | `cutoff_sse.py` | d11a: `…/sinw100_d11a_vasp_sc4/cutoffs/cutoffs_sweep.csv`; d5a: `phonon/reaps/hiphive_sinw100_d5a_vasp/cutoffs/cutoffs_sweep.csv` (restored from git) |
 | cnt33_cutoff | `cnt33_cutoff.py` | `phonon/scripts/out/cnt33_cutoff/summary.csv` — the 8-corner sweep is RE-RUNNING at the time of writing (driver `phonon/scripts/verify/cnt33_cutoff_sweep.py`, ~4 h); until it lands, the committed pdf is the original run (values verified against the notebook F30 archive) |
 | solver_scaling | `solver_scaling.py` | `phonon/scripts/out/rgf_vs_dense_scaling.csv` + retired dist_scaling literals (in-script, provenance noted) |
@@ -53,6 +57,15 @@ cited in the script.
 
 Supplementary (attic): `transmission_physicality.py` regenerates the full
 η=0-transmission physicality audit figure into `fig/attic/`.
+
+The `decomp_*` data artifacts are produced once from the campaign outputs by
+`phonon/scripts/verify/_extract_decomposed_sse.py --runs cluster`, which reduces
+~10 MB/leg of `run.npz` to a CSV plus q-summed spectra (~0.5 MB) so the
+generators read only committed data. Note it takes the per-iteration residual and
+lead-balance traces from the run LOGS, not the npz: `iter_heat`/`iter_sigma_max`
+are stored as the rank-0-local frequency slice, and these runs put one frequency
+per rank, so rank 0 holds ω=0 alone (zero heat). `iter_bubble_balance` is
+all-reduced and is safe to read from the npz.
 
 ## Figures whose RAW data cannot be re-measured without new solver runs
 
