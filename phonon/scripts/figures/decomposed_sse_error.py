@@ -40,6 +40,8 @@ ROOT = Path(__file__).resolve().parents[3]
 for p in (str(ROOT), str(ROOT / "phonon")):
     if p not in sys.path:
         sys.path.insert(0, p)
+from matplotlib.ticker import NullFormatter
+
 from phonon.studies import style
 
 CSV = ROOT / "phonon/scripts/data/decomposed_sse.csv"
@@ -99,11 +101,12 @@ def main() -> None:
     a0.loglog(orr, [ONESHOT_GAMMA[r] for r in orr], "^-", color="C0",
               label=r"$\Gamma=i(\Sigma^{>}-\Sigma^{<})$")
     a0.axhspan(0, FLOOR, color="0.85", zorder=0)
-    a0.annotate("comparison floor", xy=(10, FLOOR), xytext=(10, FLOOR * 1.35),
+    a0.annotate("comparison floor", xy=(40, FLOOR), xytext=(40, FLOOR * 1.35),
                 fontsize=7, color="0.35")
     a0.set_xlabel("CP rank $R$")
     a0.set_ylabel("relative error (one-shot, fixed $G$)")
     a0.set_xticks(orr); a0.set_xticklabels([str(r) for r in orr])
+    a0.xaxis.set_minor_formatter(NullFormatter())
     a0.legend(fontsize=7, loc="lower left")
 
     a1.loglog(ranks, [EPS_R[r] for r in ranks], "s--", color="0.55",
@@ -113,12 +116,14 @@ def main() -> None:
         if np.all(np.isnan(v)):
             continue
         a1.loglog(ranks, v, "o-", color=c, label=lab, ms=4)
-    a1.axhspan(1e-16, FLOOR, color="0.85", zorder=0)
+    a1.set_ylim(0.2 * FLOOR, None)
+    a1.axhspan(0, FLOOR, color="0.85", zorder=0)
     a1.annotate("comparison floor", xy=(ranks[0] * 1.1, FLOOR),
                 xytext=(ranks[0] * 1.1, FLOOR * 1.5), fontsize=7, color="0.35")
     a1.set_xlabel("CP rank $R$")
     a1.set_ylabel(f"relative error (self-consistent SCBA, {length})")
     a1.set_xticks(ranks); a1.set_xticklabels([str(r) for r in ranks])
+    a1.xaxis.set_minor_formatter(NullFormatter())
     a1.legend(fontsize=6.5, loc="lower left", ncol=2)
     style.save(fig, "decomp_rank_error", directory=FIGDIR)
 
@@ -140,6 +145,7 @@ def main() -> None:
     ax.set_ylabel(r"amplification: error $/\ \varepsilon_R$")
     allr = sorted(set(ranks) | set(orr))
     ax.set_xticks(allr); ax.set_xticklabels([str(r) for r in allr])
+    ax.xaxis.set_minor_formatter(NullFormatter())
     ax.legend(fontsize=7, ncol=2)
     style.save(fig, "decomp_amplification", directory=FIGDIR)
 

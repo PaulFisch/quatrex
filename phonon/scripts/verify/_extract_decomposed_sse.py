@@ -53,6 +53,41 @@ def _qmean(a):
     return a
 
 
+_TIME = re.compile(r"^\s*(.+?)\s*:\s*([0-9.]+)s\s*$")
+
+
+def _times(work: Path) -> dict[str, float]:
+    """Parse quatrex_times.out -- the per-phase profiler dump.
+
+    The wall time alone is not a cost model. It carries a rank-independent
+    offset (imports, MPI init, geometry+FC3 load, output write) that at low rank
+    DOMINATES: at R=8 the SSE is only ~25% of a 156 s run, so quoting the wall
+    time as a kernel speed-up is indefensible. Pull out the pieces:
+      ring   -- the R^2 Gram contraction, the quantity the cost model predicts
+      sse    -- the whole three-phonon self-energy (ring + FFT + fold, and the
+                fold/FFT part is an R-INDEPENDENT floor, 71% of the SSE at R=8)
+      scba   -- the iteration loop
+    """
+    f = work / "quatrex_times.out"
+    if not f.exists():
+        return {}
+    got: dict[str, float] = {}
+    for line in f.read_text(errors="ignore").splitlines():
+        m = _TIME.match(line)
+        if not m:
+            continue
+        key, val = m.group(1).strip(), float(m.group(2))
+        got[key] = got.get(key, 0.0) + val
+    pick = lambda pref: sum(v for k, v in got.items()
+                            if k.startswith(pref) and not k.endswith(" all"))
+    return {
+        "t_ring": pick("PhPh SSE: 3 ring contraction"),
+        "t_sse": sum(v for k, v in got.items()
+                     if k.startswith("PhPh SSE:") and not k.endswith(" all")),
+        "t_scba": pick("SCBA: Iteration"),
+    }
+
+
 def _bubble_resid(z):
     if "final_bubble_balance" not in z.files:
         return float("nan")
@@ -183,6 +218,13 @@ def main():
                 "internal_spread": float(np.asarray(z["internal_spread"])),
                 "bubble_resid": _bubble_resid(z),
             }
+            row |= _times(path.parent)
+            # the honest conservation scale: the heat current that flows, not the
+            # gross rate |P_in|+|P_out| the solver stores
+            if "final_bubble_balance" in z.files and row["lead_current"]:
+                pin, pout = (float(x.real) for x in
+                             np.asarray(z["final_bubble_balance"]).ravel()[:2])
+                row["bubble_over_J"] = abs(pout - pin) / abs(row["lead_current"])
             # observable errors vs the dense reference of the SAME length
             if ref is not None and leg not in ("dense",):
                 for key, name in (("last_heat", "err_heat"),

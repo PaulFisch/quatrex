@@ -30,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[3]
 for p in (str(ROOT), str(ROOT / "phonon")):
     if p not in sys.path:
         sys.path.insert(0, p)
+from matplotlib.ticker import NullFormatter
+
 from phonon.studies import style
 
 FIGDIR = ROOT / "document/fig/transport_sweeps"
@@ -59,15 +61,15 @@ def main() -> None:
     a0.set_xlabel("CP rank $R$")
     a0.set_ylabel(r"fit residual $\varepsilon_R$ (\%)".replace("\\%", "%"))
     a0.set_xticks(RANKS); a0.set_xticklabels([str(r) for r in RANKS])
+    a0.xaxis.set_minor_formatter(NullFormatter())
 
     # ---- right: storage vs device length -----------------------------------
     lengths = sorted(QFOLD_MB)
     a1.semilogy(lengths, [QFOLD_MB[n] for n in lengths], "o-", color="C3",
                 label="dense $q$-folded vertex")
-    for r in (8, 32, 128):
+    for r, col in ((8, "C2"), (32, "C0"), (128, "C1")):
         a1.semilogy(lengths, [FACTOR_MB[r]] * len(lengths), "s--",
-                    color="C0" if r == OPERATING else "0.6",
-                    lw=1.4 if r == OPERATING else 1.0,
+                    color=col, lw=1.6 if r == OPERATING else 1.1,
                     label=(f"CP factors, $R={r}$"
                            + (" (operating)" if r == OPERATING else "")))
     a1.set_xlabel("device length (transport cells)")

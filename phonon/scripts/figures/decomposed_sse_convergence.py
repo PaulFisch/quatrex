@@ -52,6 +52,14 @@ def main() -> None:
     if not have:
         raise SystemExit(f"no {LENGTH} rank traces in {NPZ}")
 
+    # the lead heat current per rank -- the scale the conservation residual must
+    # be measured against
+    import csv as _csv
+    with (ROOT / "phonon/scripts/data/decomposed_sse.csv").open() as fh:
+        J = {int(row["rank"]): float(row["lead_current"])
+             for row in _csv.DictReader(fh)
+             if row["length"] == LENGTH and int(row["rank"]) > 0}
+
     fig, (a0, a1, a2) = style.figure(ncols=3, width=3.5, height=3.1)
     colors = {r: f"C{i}" for i, r in enumerate(have)}
 
@@ -65,15 +73,23 @@ def main() -> None:
         lead = np.asarray(z[f"{LENGTH}_r{r}/trace_lead_balance"])
         it = np.arange(1, len(res) + 1)
         a0.semilogy(it, res, "-", color=c, label=lab)
-        a1.semilogy(np.arange(1, len(lead) + 1), lead, "-", color=c, label=lab)
+        # iteration 1 has Sigma = 0 (the ballistic iterate), so J_L == J_R
+        # trivially and the imbalance is ~1e-11. Including it stretches the axis
+        # over eight decades and hides the signal.
+        a1.semilogy(np.arange(2, len(lead) + 1), lead[1:], "-", color=c, label=lab)
 
+        # The bubble residual must be normalised by the heat current that actually
+        # flows, NOT by the gross rate |P_in|+|P_out| that the solver stores.
+        # The gross rate is ~14100 while J ~ 11, so the stored residual flatters
+        # the conservation test by three orders of magnitude (1e-6 instead of
+        # ~2e-3). Normalise by J.
         key = f"{LENGTH}_r{r}/iter_bubble_balance"
         bres = float("nan")
         if key in z.files:
-            bb = np.asarray(z[key])                            # (n_it, 3)
-            a2.semilogy(np.arange(1, len(bb) + 1), np.abs(bb[:, 2]), "-",
-                        color=c, label=lab)
-            bres = float(np.abs(bb[-1, 2]))
+            bb = np.asarray(z[key])                            # (n_it, P_in,P_out,resid)
+            net = np.abs(bb[:, 1] - bb[:, 0]) / abs(J[r])
+            a2.semilogy(np.arange(1, len(net) + 1), net, "-", color=c, label=lab)
+            bres = float(net[-1])
         print(f"{r:>5} {len(res):>6} {res[-1]:>11.2e} {lead[-1]:>11.2e} "
               f"{bres:>13.2e}  {100 * EPS_R[r]:.2f}%")
 
@@ -89,15 +105,16 @@ def main() -> None:
     a1.legend(fontsize=7)
 
     a2.set_xlabel("SCBA iteration")
-    a2.set_ylabel(r"bubble balance $|P_{\rm in}-P_{\rm out}|/(|P_{\rm in}|+|P_{\rm out}|)$")
+    a2.set_ylabel(r"bubble non-conservation $|P_{\rm in}-P_{\rm out}|/J$")
     a2.legend(fontsize=7)
 
     style.save(fig, "decomp_scba_convergence", directory=FIGDIR)
 
     print()
-    print("The bubble residual is the Phi-derivability test: a truncated vertex")
-    print("is a different vertex, and nothing forces it to still conserve energy.")
-    print("It does, at every rank -- including R=8, whose FC3 residual is 15.5%.")
+    print("The bubble residual is the Phi-derivability test: a truncated vertex is a")
+    print("DIFFERENT vertex and nothing forces it to still conserve energy. It is")
+    print("normalised by the heat current J that actually flows -- NOT by the gross")
+    print("rate |P_in|+|P_out| (~14100 vs J~11), which flatters the test by 10^3.")
 
 
 if __name__ == "__main__":

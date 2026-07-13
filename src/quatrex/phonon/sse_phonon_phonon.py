@@ -1131,6 +1131,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             return
         self._kk_grid_checked = True
 
+        # A rank can own NO frequencies: the stack split pads up to
+        # ceil(ne / n_ranks) per rank, so e.g. 121 frequencies over 32 ranks
+        # leaves the last rank empty. There is nothing to check there, and
+        # reducing over the empty slice raises.
+        if delta.size == 0:
+            return
+
         peak = float(get_host(xp.max(xp.abs(delta))))
         if peak == 0.0:
             return

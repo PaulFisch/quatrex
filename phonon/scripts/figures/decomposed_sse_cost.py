@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[3]
 for p in (str(ROOT), str(ROOT / "phonon")):
     if p not in sys.path:
         sys.path.insert(0, p)
+from matplotlib.ticker import NullFormatter
+
 from phonon.studies import style
 
 CSV = ROOT / "phonon/scripts/data/decomposed_sse.csv"
@@ -77,14 +79,17 @@ def main() -> None:
     print(f"  at R=8, within one run: legacy is {legacy_vs_dense:.0f}x dense, "
           f"new is {new_vs_legacy:.0f}x legacy")
 
-    # Break-even: the rank at which the factored ring would cost the dense ring.
-    # The fitted exponent is the quantity of interest -- R* itself is an
-    # extrapolation beyond the measured range and is quoted as such.
-    lg = np.polyfit(np.log(RANKS), np.log([FILM_NEW[r] for r in RANKS]), 1)
-    r_star = float(np.exp((np.log(np.mean(list(FILM_DENSE.values()))) - lg[1]) / lg[0]))
-    print(f"  fitted exponent {lg[0]:.2f} (the R^2 Gram term); at the largest rank")
-    print(f"  measured (R=128) the kernel is still {film[128]:.1f}x dense, and the")
-    print(f"  extrapolated break-even is R* ~ {r_star:.0f}")
+    # NO break-even is quoted. The curve is not a power law: the local exponent
+    # runs 1.60 -> 1.81 -> 2.05 -> 2.37 across the measured range, so a single
+    # fitted slope averages a steepening curve and any extrapolated R* inherits
+    # that. What IS measurable: at the largest rank measured the kernel is still
+    # faster than dense.
+    lo = np.diff(np.log([FILM_NEW[r] for r in RANKS])) / np.diff(np.log(RANKS))
+    print("  local exponent between successive ranks: "
+          + ", ".join(f"{e:.2f}" for e in lo))
+    print(f"  -> not a power law; no break-even rank is extrapolated.")
+    print(f"  at the largest rank measured (R=128) the kernel is still "
+          f"{film[128]:.1f}x the dense ring.")
 
     # ---------------- figure 1: speedup ------------------------------------
     fig, ax = style.figure(width=5.0, height=3.6)
@@ -101,43 +106,70 @@ def main() -> None:
     ax.set_ylabel("speed-up over the dense ring")
     ax.set_xticks(RANKS)
     ax.set_xticklabels([str(r) for r in RANKS])
+    ax.xaxis.set_minor_formatter(NullFormatter())
     ax.legend(fontsize=7.5, loc="lower left")
     style.save(fig, "decomp_kernel_speedup", directory=FIGDIR)
 
-    # ---------------- figure 2: SCBA cost scaling ---------------------------
+    # ---------------- figure 2: where the SCBA time actually goes -------------
     rows = [r for r in _rows() if r["length"] == "L10" and int(r["rank"]) > 0]
     rr = sorted(int(r["rank"]) for r in rows)
-    wall = {int(r["rank"]): float(r["wall_s"]) for r in rows
-            if r["wall_s"] not in ("", "nan")}
+    if not rr:
+        print("\n(no SCBA legs in the archive -- skipping decomp_cost_scaling)")
+        return
+    g = {int(r["rank"]): r for r in rows}
+    fnum = lambda r, k: (float(g[r][k]) if g[r].get(k, "") not in ("", "nan")
+                         else float("nan"))
+    wall = {r: fnum(r, "wall_s") for r in rr}
+    ring = {r: fnum(r, "t_ring") for r in rr}
+    sse = {r: fnum(r, "t_sse") for r in rr}
+    nit = {r: int(float(g[r]["n_iter"])) for r in rr}
 
     fig, (a0, a1) = style.figure(ncols=2, width=4.4, height=3.4)
 
-    pr = sorted(L10_PHPH_PER_ITER)
-    a0.loglog(pr, [L10_PHPH_PER_ITER[r] for r in pr], "o-", color="C0",
-              label="measured")
-    ref = [L10_PHPH_PER_ITER[pr[0]] * (r / pr[0]) ** 2 for r in pr]
-    a0.loglog(pr, ref, "--", color="0.5", label=r"$\propto R^{2}$")
+    # LEFT: the ring contraction per iteration -- the quantity the R^2 Gram term
+    # predicts. Plotting the SSE TOTAL instead hides an R-independent floor (the
+    # FFT + fold), which is 71% of the SSE at R=8 and makes the curve look
+    # sub-quadratic when the ring itself is super-quadratic.
+    rok = [r for r in rr if np.isfinite(ring[r]) and ring[r] > 0 and nit[r]]
+    if rok:
+        per = [ring[r] / nit[r] for r in rok]
+        a0.loglog(rok, per, "o-", color="C0", label="ring contraction")
+        a0.loglog(rok, [sse[r] / nit[r] for r in rok], "s--", color="C1",
+                  label="whole SSE (ring + FFT + fold)")
+        ref = [per[0] * (r / rok[0]) ** 2 for r in rok]
+        a0.loglog(rok, ref, ":", color="0.5", label=r"$\propto R^{2}$")
+        a0.set_xticks(rok); a0.set_xticklabels([str(r) for r in rok])
     a0.set_xlabel("CP rank $R$")
-    a0.set_ylabel("SSE per SCBA iteration (s)")
-    a0.set_xticks(pr); a0.set_xticklabels([str(r) for r in pr])
-    a0.legend(fontsize=7.5)
+    a0.set_ylabel("per SCBA iteration (s)")
+    a0.legend(fontsize=7)
 
-    wr = sorted(wall)
-    a1.loglog(wr, [wall[r] for r in wr], "o-", color="C0", label="factored")
+    # RIGHT: the wall time, split. A rank-independent offset (imports, MPI init,
+    # geometry + FC3 load, output write) sits outside the loop at every rank; at
+    # low rank it is the MAJORITY of the run.
+    off = [wall[r] - sse[r] for r in rr]
+    a1.bar([str(r) for r in rr], [sse[r] for r in rr], color="C0",
+           label="three-phonon SSE")
+    a1.bar([str(r) for r in rr], off, bottom=[sse[r] for r in rr], color="0.75",
+           label="everything else (setup, solver, I/O)")
     a1.set_xlabel("CP rank $R$")
     a1.set_ylabel("SCBA wall time (s)")
-    a1.set_xticks(wr); a1.set_xticklabels([str(r) for r in wr])
-    a1.legend(fontsize=7.5)
+    a1.set_yscale("log")
+    a1.legend(fontsize=7)
     style.save(fig, "decomp_cost_scaling", directory=FIGDIR)
 
-    print("\nL10 SCBA (121 ranks):")
-    for r in wr:
-        print(f"  R={r:>3}: wall {wall[r]:8.1f} s")
-    print("\nper-iteration SSE cost ratio (doubling R):")
-    for i in range(1, len(pr)):
-        print(f"  R {pr[i-1]:>3} -> {pr[i]:>3}: "
-              f"{L10_PHPH_PER_ITER[pr[i]] / L10_PHPH_PER_ITER[pr[i-1]]:.2f}x "
-              f"(R^2 would be 4.00x)")
+    print(f"\nL10 SCBA -- where the time goes:")
+    print(f"{'R':>4} {'iters':>6} {'wall s':>9} {'SSE s':>9} {'SSE/wall':>9} "
+          f"{'ring s':>9} {'ring/SSE':>9}")
+    for r in rr:
+        print(f"{r:>4} {nit[r]:>6} {wall[r]:>9.1f} {sse[r]:>9.1f} "
+              f"{sse[r]/wall[r]:>8.1%} {ring[r]:>9.1f} {ring[r]/sse[r]:>8.1%}")
+    print("  -> at low rank the SSE is a MINORITY of the run: the end-to-end")
+    print("     speed-up is bounded by the rank-independent remainder, not by the")
+    print("     kernel. Quote the kernel benchmark for kernel claims.")
+    if rok:
+        lr = np.diff(np.log([ring[r] / nit[r] for r in rok])) / np.diff(np.log(rok))
+        print("  ring-contraction local exponent: "
+              + ", ".join(f"{e:.2f}" for e in lr) + "  (R^2 would be 2.00)")
 
 
 if __name__ == "__main__":
