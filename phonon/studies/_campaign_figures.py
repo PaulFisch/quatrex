@@ -168,14 +168,17 @@ fig, ax = plt.subplots(figsize=(6.0, 3.6), constrained_layout=True)
 lam = np.linspace(1, 8, 300)
 ax.plot(lam, 2.0 / (1.0 + lam), color=C[0], lw=1.6,
         label=r"$\alpha = 2/(1+|\lambda|)$")
-meas = [  # (|lambda|, label, marker) -- power-iteration measurements ONLY
-    (4.33, "L2 fixed point, $\\lambda_0$", "o"),
-    (3.94, "L2 fixed point, $\\lambda_1$", "s"),
-    (3.51, "L2 Anderson stall, $\\lambda_0$", "^"),
-    (3.30, "L2 Anderson stall, $\\lambda_1$", "v"),
+meas = [  # (|lambda|, label, marker, color-idx) -- measurements ONLY
+    (4.33, "L2 fixed point, $\\lambda_0$", "o", 2),
+    (3.94, "L2 fixed point, $\\lambda_1$", "s", 2),
+    (3.51, "L2 Anderson stall, $\\lambda_0$", "^", 2),
+    (3.30, "L2 Anderson stall, $\\lambda_1$", "v", 2),
+    (5.07, "L4 stall (it 350), $\\lambda_0$", "D", 4),
+    (4.75, "L4 stall, $\\lambda_1$", "P", 4),
+    (4.15, "L4 stall, $\\lambda_{2,3}$", "X", 4),
 ]
-for lm, lab, mk in meas:
-    ax.plot([lm], [2.0 / (1.0 + lm)], mk, color=C[2], markersize=7,
+for lm, lab, mk, ci in meas:
+    ax.plot([lm], [2.0 / (1.0 + lm)], mk, color=C[ci], markersize=7,
             label=lab)
 ax.axhline(0.2, color=C[7], lw=0.9, ls="--")
 ax.text(7.0, 0.207, r"$\alpha=0.2$", fontsize=8, color="#666666")
@@ -184,7 +187,7 @@ ax.text(7.0, 0.307, r"$\alpha=0.3$", fontsize=8, color="#666666")
 ax.set_xlabel(r"measured $|\lambda|$ of $J=\partial F/\partial\Sigma$"
               " (real, negative, IR-localized)")
 ax.set_ylabel(r"damping bound $2/(1+|\lambda|)$")
-ax.set_title("Power-iteration measurements (CNT L2) and the damping bound")
+ax.set_title("Power-iteration measurements (CNT L2 + L4 stall) and the damping bound")
 ax.set_xlim(1, 8); ax.set_ylim(0, 0.55)
 ax.legend(frameon=False, fontsize=7.5, loc="upper right")
 save(fig, "s1e_jacobian")
