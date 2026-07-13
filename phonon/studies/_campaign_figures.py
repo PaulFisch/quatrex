@@ -46,6 +46,7 @@ def residuals(log: Path) -> np.ndarray:
 def save(fig, name):
     fig.savefig(FIG / f"{name}.png", dpi=170, bbox_inches="tight",
                 facecolor="white")
+    fig.savefig(FIG / f"{name}.pdf", bbox_inches="tight")
     plt.close(fig)
     print("saved", name)
 
@@ -55,12 +56,12 @@ LOGS = REP / "logs"
 # ---- S1a: CNT length ladder ------------------------------------------------
 fig, ax = plt.subplots(figsize=(6.4, 3.6), constrained_layout=True)
 for log, lab, c, ls in [
-    ("and-cnt-lin", "L2  a=0.2  (conv 222)", C[0], "-"),
-    ("cnt-L3-lin", "L3  a=0.2  (conv 347)", C[2], "-"),
-    ("cnt-L4-lin", "L4  a=0.2  (fails late)", C[1], "-"),
-    ("cnt-L4-m01", "L4  a=0.1  (fails late)", C[1], "--"),
-    ("cnt-L10-lin", "L10 a=0.1  (diverges)", C[3], "-"),
-    ("cnt-L10-lf", "L10 a=0.1 +lowfreq (diverges)", C[3], "--"),
+    ("and-cnt-lin", r"L2, $\alpha=0.2$", C[0], "-"),
+    ("cnt-L3-lin", r"L3, $\alpha=0.2$", C[2], "-"),
+    ("cnt-L4-lin", r"L4, $\alpha=0.2$", C[1], "-"),
+    ("cnt-L4-m01", r"L4, $\alpha=0.1$", C[1], "--"),
+    ("cnt-L10-lin", r"L10, $\alpha=0.1$", C[3], "-"),
+    ("cnt-L10-lf", r"L10, $\alpha=0.1$, low-freq mixing", C[3], "--"),
 ]:
     r = residuals(LOGS / f"{log}.log")
     if r.size:
@@ -68,7 +69,7 @@ for log, lab, c, ls in [
 ax.axhline(1e-3, color="#888888", lw=0.8, ls=":")
 ax.set_xlabel("SCBA iteration")
 ax.set_ylabel(r"rel. $\Sigma^R$ residual")
-ax.set_title("CNT(3,3): linear mixing hardens with device length")
+ax.set_title("CNT(3,3): SCBA residual, linear mixing, by device length")
 ax.set_ylim(1e-4, 1e4)
 ax.legend(frameon=False, fontsize=7.5, ncol=2)
 save(fig, "s1a_cnt_ladder")
@@ -79,8 +80,8 @@ ax = axes[0]
 for scheme, lab, c in [
     ("lin02", "linear 0.2", C[0]),
     ("lin01", "linear 0.1", C[5]),
-    ("and_d8", "Anderson d8 (ridge 0)", C[1]),
-    ("and_d8_r1e4_guard", "Anderson +ridge+guards", C[3]),
+    ("and_d8", "Anderson d8", C[1]),
+    ("and_d8_r1e4_guard", "Anderson d8, ridge, safeguards", C[3]),
     ("broyden", "Broyden", C[4]),
     ("rpm", "RPM", C[6]),
     ("rre_c12", "RRE c12", C[2]),
@@ -91,7 +92,7 @@ for scheme, lab, c in [
         ax.semilogy(r, color=c, label=lab, lw=1.2)
 ax.axhline(1e-3, color="#888888", lw=0.8, ls=":")
 ax.set_xlabel("SCBA iteration"); ax.set_ylabel(r"rel. $\Sigma^R$ residual")
-ax.set_title("CNT L2: scheme families")
+ax.set_title("CNT L2: mixing schemes")
 ax.set_ylim(5e-4, 30)
 ax.legend(frameon=False, fontsize=7.5)
 ax = axes[1]
@@ -114,11 +115,11 @@ save(fig, "s1b_l2_schemes")
 # ---- S1c: d5a scheme comparison ---------------------------------------------
 fig, ax = plt.subplots(figsize=(6.4, 3.6), constrained_layout=True)
 r = residuals(LOGS / "and-d5a-lin.log")
-ax.semilogy(r, color=C[0], label="linear 0.1 (baseline)", lw=1.2)
+ax.semilogy(r, color=C[0], label=r"linear, $\alpha=0.1$", lw=1.2)
 for scheme, lab, c in [
-    ("and_d8", "Anderson d8 (legacy)", C[1]),
-    ("and_d8_r1e4", "Anderson +ridge", C[5]),
-    ("and_d8_r1e4_guard", "Anderson +ridge+guards", C[3]),
+    ("and_d8", "Anderson d8", C[1]),
+    ("and_d8_r1e4", "Anderson d8, ridge", C[5]),
+    ("and_d8_r1e4_guard", "Anderson d8, ridge, safeguards", C[3]),
     ("rre_c8", "RRE c8", C[2]),
     ("rre_c12", "RRE c12", C[4]),
     ("rpm", "RPM", C[6]),
@@ -128,7 +129,7 @@ for scheme, lab, c in [
         ax.semilogy(residuals(log), color=c, label=lab, lw=1.2)
 ax.axhline(1e-3, color="#888888", lw=0.8, ls=":")
 ax.set_xlabel("SCBA iteration"); ax.set_ylabel(r"rel. $\Sigma^R$ residual")
-ax.set_title("d5a SiNW (a=0.1, IR floor): schemes")
+ax.set_title(r"d5a SiNW, $\alpha=0.1$, IR floor: mixing schemes")
 ax.set_ylim(1e-4, 30)
 ax.legend(frameon=False, fontsize=7.5)
 save(fig, "s1c_d5a_schemes")
@@ -136,9 +137,9 @@ save(fig, "s1c_d5a_schemes")
 # ---- S1d: Anderson forensics -------------------------------------------------
 fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.2), constrained_layout=True)
 runs = [("mixer_campaign_L2/and_d8_r1e4/run.npz",
-         "CNT L2 Anderson+ridge (fails)", C[1]),
+         "CNT L2, Anderson d8, ridge", C[1]),
         ("mixer_campaign_d5a_v2/and_d8_r1e4_guard/run.npz",
-         "d5a Anderson+ridge+guards (49 it)", C[3])]
+         "d5a, Anderson d8, ridge, safeguards", C[3])]
 for path, lab, c in runs:
     d = np.load(BASE / path)
     if "iter_mixer_fnorm" not in d.files:
@@ -168,12 +169,12 @@ lam = np.linspace(1, 45, 300)
 ax.plot(lam, 2.0 / (1.0 + lam), color=C[0], lw=1.6,
         label=r"stability bound  $\alpha < 2/(1+|\lambda|)$")
 pts = [  # (|lambda|, alpha, converged?, label)
-    (4.33, 0.2, True, "L2 @0.2 (probe: $\\lambda=-4.33$)"),
-    (4.33, 0.3, True, "L2 RRE build @0.3"),
-    (20, 0.2, False, "L4 @0.2"),
-    (20, 0.1, False, "L4 @0.1"),
-    (40, 0.1, False, "L10 @0.1"),
-    (40, 0.05, False, "L4 RRE build @0.05"),
+    (4.33, 0.2, True, r"L2, $\alpha=0.2$"),
+    (4.33, 0.3, True, r"L2, $\alpha=0.3$ (RRE build)"),
+    (20, 0.2, False, r"L4, $\alpha=0.2$"),
+    (20, 0.1, False, r"L4, $\alpha=0.1$"),
+    (40, 0.1, False, r"L10, $\alpha=0.1$"),
+    (40, 0.05, False, r"L4, $\alpha=0.05$ (RRE build)"),
 ]
 for lm, a, ok, lab in pts:
     ax.plot([lm], [a], "o" if ok else "x", color=C[2] if ok else C[3],
@@ -183,14 +184,14 @@ for lm, a, ok, lab in pts:
 ax.set_xlabel(r"dominant $|\lambda|$ of $J=\partial F/\partial\Sigma$ "
               "(negative, IR-localized)")
 ax.set_ylabel(r"damping $\alpha$")
-ax.set_title("Measured mechanism: negative IR eigenvalue grows with L")
+ax.set_title("Damped-iteration stability bound and campaign outcomes")
 ax.set_xlim(1, 45); ax.set_ylim(0, 0.45)
 ax.legend(frameon=False, fontsize=8, loc="upper right")
 save(fig, "s1e_jacobian")
 
 # ---- S2 grids: DOS / transmission / heat spectra -----------------------------
 FULL = [("cnt_L2", "CNT L2"), ("cnt_L3", "CNT L3"),
-        ("cnt_L4", "CNT L4 (unconv.)"), ("d5a_lin", "d5a SiNW")]
+        ("cnt_L4", "CNT L4*"), ("d5a_lin", "d5a SiNW")]
 
 for panel, key_s, key_b, ylab, title in [
     ("s2a_dos", "ldos", "ldos_ball", r"DOS per DOF (THz$^{-1}$)",
@@ -341,7 +342,7 @@ ax.plot(Ls, G * Ls, "o-", color=C[2],
 ax.plot(Ls, G / Gb, "s-", color=C[1], label=r"$r(L) = G_{\rm anh}/G_{\rm ball}$")
 ax.set_xlabel("device length L (cells)")
 ax.set_xticks(Ls)
-ax.set_title("Length scaling (L4 point unconverged)")
+ax.set_title("Length scaling")
 ax.legend(frameon=False, fontsize=8)
 save(fig, "s3a_length")
 
@@ -354,21 +355,23 @@ l2 = [(k, float(O[k]["final_heat"][0])) for k in sorted(O)
 names = [k[3:] for k, _ in l2]
 vals = [(v - ref) / ref for _, v in l2]
 colors = [C[3] if "irfloor" in n else C[0] for n in names]
-ax.bar(range(len(vals)), np.array(vals) * 1e6, color=colors)
+ax.bar(range(len(vals)), np.array(vals), color=colors)
 ax.set_xticks(range(len(names)))
 ax.set_xticklabels(names, rotation=60, ha="right", fontsize=7)
-ax.set_ylabel(r"$(J_L - J_L^{\rm lin02})/J_L^{\rm lin02}$  (ppm)")
+ax.set_ylabel(r"$(J_L - J_L^{\rm lin02})/J_L^{\rm lin02}$")
+ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
 ax.set_title("CNT L2: fixed-point agreement across schemes")
 ax = axes[1]
-d5 = [("linear 0.1", "d5a_lin"), ("Anderson stall*", "d5a_and"),
-      ("guard (conv)", "d5a_guard"), ("RRE c8", "d5a_rre8")]
+d5 = [("linear 0.1", "d5a_lin"), ("Anderson d8*", "d5a_and"),
+      ("Anderson safeguarded", "d5a_guard"), ("RRE c8", "d5a_rre8")]
 refd = float(O["d5a_guard"]["final_heat"][0])
-vals = [(float(O[k]["final_heat"][0]) - refd) / refd * 100 for _, k in d5]
+vals = [(float(O[k]["final_heat"][0]) - refd) / refd for _, k in d5]
 ax.bar(range(len(d5)), vals, color=[C[0], C[5], C[3], C[2]])
 ax.set_xticks(range(len(d5)))
 ax.set_xticklabels([n for n, _ in d5], rotation=30, ha="right", fontsize=8)
-ax.set_ylabel(r"$\Delta J_L$ vs guard (%)")
-ax.set_title("d5a: spread limited by the conservation floor")
+ax.set_ylabel(r"$(J_L - J_L^{\rm ref})/J_L^{\rm ref}$")
+ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
+ax.set_title("d5a: fixed-point spread across schemes")
 save(fig, "s3b_agreement")
 
 # ---- S3c: CNT vs d5a -----------------------------------------------------------
