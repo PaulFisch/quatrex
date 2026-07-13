@@ -491,6 +491,7 @@ def scba_loop(
     return_greens=False,
     divergence_patience=4,
     masses_primitive=None,
+    sigma_init=None,
     causality_projection=False,
     track_diagnostics=False,
     static_se_hook=None,
@@ -819,10 +820,17 @@ def scba_loop(
             if srel < stage_tol:
                 break
 
-    # --- iteration 0: lowest-order Born (Sigma = 0 -> bare G -> bubble) -
+    # --- iteration 0: lowest-order Born (Sigma = 0 -> bare G -> bubble),
+    # or, with sigma_init=(Sigma_l, Sigma_g), a warm start: the first
+    # iterate is F(Sigma_init) (unmixed).
+    if sigma_init is not None:
+        init_l = np.array(sigma_init[0], dtype=complex).reshape(shape)
+        init_g = np.array(sigma_init[1], dtype=complex).reshape(shape)
+    else:
+        init_l = np.zeros(shape, dtype=complex)
+        init_g = np.zeros(shape, dtype=complex)
     Sigma_l, Sigma_g, Sigma_static, info = _scba_step(
-        np.zeros(shape, dtype=complex), np.zeros(shape, dtype=complex),
-        Sigma_static)
+        init_l, init_g, Sigma_static)
     if verbose:
         gl_max = np.max(np.abs(G_less_dev_q))
         sig0 = np.max(np.abs(Sigma_l)) + np.max(np.abs(Sigma_g))
