@@ -125,6 +125,12 @@ class PhononSolver(SubsystemSolver):
 
         self.compute_meir_wingreen_current = config.phonon.solver.compute_current
 
+        # sse_g_band = 2: the SSE bubble consumes the second off-diagonal
+        # G^{<,>} blocks, so the selected solve must produce them.
+        self._second_offdiagonals = (
+            int(getattr(config.phonon, "sse_g_band", 1) or 1) >= 2
+        )
+
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
@@ -392,7 +398,16 @@ class PhononSolver(SubsystemSolver):
         out: tuple[DSDBSparse, ...]
     ) -> None:
         """Perform selected solve for the phonon Green's function."""
+        extra_kw = (
+            {"second_offdiagonals": True} if self._second_offdiagonals else {}
+        )
         if comm.block.size > 1:
+            if self._second_offdiagonals:
+                raise NotImplementedError(
+                    "sse_g_band > 1 requires block_comm_size = 1 (the "
+                    "distributed RGF does not produce the second "
+                    "off-diagonal blocks)."
+                )
             # NOTE: mirror the single-block branch -- the distributed RGF
             # also returns the (block-all-reduced) lead heat current when
             # asked. Without this the block-parallel path leaves
@@ -417,6 +432,7 @@ class PhononSolver(SubsystemSolver):
                 out=out,
                 return_retarded=True,
                 return_current=self.compute_meir_wingreen_current,
+                **extra_kw,
             )
 
     def _probe_indices(self, sse_lesser: DSDBSparse):

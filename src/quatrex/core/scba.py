@@ -112,6 +112,49 @@ class SCBAData:
                 end_idx=end_idx,
             )
 
+            # sse_g_band > 1: the bubble contraction keeps inner G links
+            # beyond the tridiagonal band, so the solver must produce (and
+            # the shared pattern must hold) the second off-diagonal blocks.
+            # Sigma's extra blocks stay structurally zero (the SSE output
+            # band is unchanged).
+            g_band = 1
+            if getattr(config, "simulation_type", "") == "phonon":
+                g_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
+            if g_band > 1:
+                if comm.block.size > 1:
+                    raise NotImplementedError(
+                        "sse_g_band > 1 requires block_comm_size = 1."
+                    )
+                from qttools import sparse as _sparse
+
+                block_offsets_ = np.hstack(([0], np.cumsum(block_sizes)))
+                rows_, cols_ = [], []
+                for bi in range(len(block_sizes)):
+                    for bj in range(len(block_sizes)):
+                        if 1 < abs(bi - bj) <= g_band:
+                            r = np.arange(block_offsets_[bi],
+                                          block_offsets_[bi + 1])
+                            c = np.arange(block_offsets_[bj],
+                                          block_offsets_[bj + 1])
+                            rr, cc = np.meshgrid(r, c, indexing="ij")
+                            rows_.append(rr.ravel())
+                            cols_.append(cc.ravel())
+                if rows_:
+                    n_ = int(block_offsets_[-1])
+                    band_pattern = _sparse.coo_matrix(
+                        (
+                            np.ones(sum(len(r) for r in rows_)),
+                            (np.concatenate(rows_), np.concatenate(cols_)),
+                        ),
+                        shape=(n_, n_),
+                    )
+                    ext = (
+                        self.sparsity_pattern.astype(np.float64)
+                        + band_pattern
+                    ).tocoo()
+                    ext.data[:] = 1.0
+                    self.sparsity_pattern = ext
+
         dsdbsparse_type = config.compute.dsdbsparse_type
 
         def _zeros_like(dsdbsparse: DSDBSparse) -> DSDBSparse:

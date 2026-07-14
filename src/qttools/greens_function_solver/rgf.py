@@ -109,6 +109,7 @@ class RGF(GFSolver):
         obc_blocks: OBCBlocks | None = None,
         return_retarded: bool = False,
         return_current: bool = False,
+        second_offdiagonals: bool = False,
     ) -> None | NDArray:
         r"""Produces elements of the solution to the congruence equation.
 
@@ -140,6 +141,13 @@ class RGF(GFSolver):
         return_current : bool, optional
             Whether to compute and return the current for each layer via
             the Meir-Wingreen formula. By default False.
+        second_offdiagonals : bool, optional
+            Additionally compute the second off-diagonal blocks
+            X^{<,>}_{i,i+2} (and their skew-hermitian mirrors) and write
+            them to the output. The output pattern must contain these
+            blocks (writes to absent blocks drop silently). The
+            block-tridiagonal outputs are bit-identical to the default
+            path. By default False.
 
         Returns
         -------
@@ -302,6 +310,11 @@ class RGF(GFSolver):
                 xr_.blocks[a.num_blocks - 1, a.num_blocks - 1] = xr_diag_blocks[-1]
 
             # Backwards sweep.
+            compute_d2 = second_offdiagonals and a.num_blocks >= 3
+            # Rolling stashes from the previous backward step (row i+1):
+            # X^{<,>}_{i+1,i+2} and the fully-connected first
+            # off-diagonals X^R_{i+1,i+2} / X^R_{i+2,i+1}.
+            prev_xl_up = prev_xg_up = prev_xr_dn = None
             for i in range(a.num_blocks - 2, -1, -1):
                 j = i + 1
 
@@ -374,6 +387,46 @@ class RGF(GFSolver):
                 xg_.blocks[i, i] = 0.5 * (
                     xg_diag_blocks[i] - xg_diag_blocks[i].conj().swapaxes(-2, -1)
                 )
+
+                if compute_d2:
+                    # Fully-connected first lower off-diagonal of X^R at
+                    # this step (xr_ii is still the left-connected g^L_i):
+                    #   X^R_{i+1,i} = -X^R_{i+1,i+1} A_{i+1,i} g^L_i
+                    xr_dn_i = -xr_jj_a_ji @ xr_ii
+                    if i + 2 < a.num_blocks:
+                        # Second off-diagonals by upward propagation with
+                        # the left-connected auxiliaries (g^L_i = xr_ii,
+                        # g^{L,x}_i = xl_ii / xg_ii); same identity as the
+                        # first off-diagonal with the (i+1, i+1) column
+                        # objects replaced by the (i+1, i+2) ones:
+                        #   X^x_{i,i+2} = -g^L_i A_{i,i+1} X^x_{i+1,i+2}
+                        #     + (g^L_i Sigma^x_{i,i+1}
+                        #        - g^{L,x}_i A_{i+1,i}^dag) X^A_{i+1,i+2}
+                        # with X^A_{i+1,i+2} = (X^R_{i+2,i+1})^dag.
+                        a_ji_dag = a_ji.conj().swapaxes(-2, -1)
+                        xa_d2 = prev_xr_dn.conj().swapaxes(-2, -1)
+                        xl_id2 = (
+                            -xr_ii_a_ij @ prev_xl_up
+                            + (xr_ii @ sigma_lesser_ij - xl_ii @ a_ji_dag)
+                            @ xa_d2
+                        )
+                        xl_.blocks[i, i + 2] = xl_id2
+                        if xl_.symmetry is None:
+                            xl_.blocks[i + 2, i] = -xl_id2.conj().swapaxes(
+                                -2, -1
+                            )
+                        xg_id2 = (
+                            -xr_ii_a_ij @ prev_xg_up
+                            + (xr_ii @ sigma_greater_ij - xg_ii @ a_ji_dag)
+                            @ xa_d2
+                        )
+                        xg_.blocks[i, i + 2] = xg_id2
+                        if xg_.symmetry is None:
+                            xg_.blocks[i + 2, i] = -xg_id2.conj().swapaxes(
+                                -2, -1
+                            )
+                    prev_xl_up, prev_xg_up = xl_ij, xg_ij
+                    prev_xr_dn = xr_dn_i
 
                 if return_current:
                     a_ji_dagger = a_ji.conj().swapaxes(-2, -1)

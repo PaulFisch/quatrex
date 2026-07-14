@@ -1397,6 +1397,19 @@ class PhononConfig(BaseModel):
     (0 = off). Stabilises soft-mode structures whose full-coupling SCBA
     overshoots into unphysical gain states under plain damped iteration."""
 
+    sse_g_band: int = Field(default=1, ge=1, le=2)
+    """Inner Green's-function block band |K - K'| kept in the bubble
+    contraction. The default 1 uses the RGF block-tridiagonal G and masks
+    the bubble kernel G(x)G to that band -- a masked positive-semidefinite
+    form is NOT positive-semidefinite (Schur product with the indefinite
+    tridiagonal-ones mask), so interior slabs (>= 3 transport cells)
+    acquire non-causal gain components of Sigma. With 2, the solver
+    additionally produces the second off-diagonal G^{<,>} blocks and the
+    contraction keeps all links the nearest-neighbour vertex span needs:
+    the diagonal Sigma blocks become exact and causal. Extends the shared
+    G/Sigma sparsity pattern by the second off-diagonal blocks (Sigma's
+    extra blocks stay structurally zero). Single block-rank only."""
+
     heat_flow_conservation_tol: PositiveFloat = 1e-2
     """Convergence tolerance for the anharmonic phonon SCBA: the relative
     lead balance of the (hbar-omega-weighted) Meir-Wingreen HEAT current.

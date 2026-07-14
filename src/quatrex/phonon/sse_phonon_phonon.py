@@ -246,11 +246,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             )
         self.phi_blocks = phi_blocks
 
-        # Inner Green's-function band kept in the contraction. The
-        # RGF selected-inversion produces the block-tridiagonal
-        # G (diagonal + first off-diagonal, |K-K'| <= 1), so the full
-        # off-diagonal ring keeps exactly that band
-        self.g_band = 1
+        # Inner Green's-function band kept in the contraction. The default
+        # RGF selected-inversion produces the block-tridiagonal G
+        # (diagonal + first off-diagonal, |K-K'| <= 1), and the ring masks
+        # the bubble kernel G(x)G to that band. That mask is NOT a
+        # congruence: it breaks the positive-semidefiniteness of Sigma^{<,>}
+        # on interior slabs (Schur product with the indefinite
+        # tridiagonal-ones mask), injecting non-causal gain. With
+        # sse_g_band = 2 the solver additionally produces the second
+        # off-diagonal G^{<,>} blocks and the kernel is complete for the
+        # nearest-neighbour vertex span (diagonal Sigma blocks exact).
+        self.g_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
+        if self.g_band > 1 and ranks.block.size > 1:
+            raise NotImplementedError(
+                "sse_g_band > 1 requires block_comm_size = 1 (the band "
+                "halo exchange only spans immediate neighbours)."
+            )
 
         # Precompute the full off-diagonal pair index: for each output
         # block pair (I, J) with |I-J| <= 1, collect the ring quads
