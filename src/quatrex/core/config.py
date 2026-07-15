@@ -1397,6 +1397,19 @@ class PhononConfig(BaseModel):
     (0 = off). Stabilises soft-mode structures whose full-coupling SCBA
     overshoots into unphysical gain states under plain damped iteration."""
 
+    obc_scattering_contacts: bool = False
+    """Dress the lead open-boundary problem with the device's boundary
+    scattering self-energy each iteration (GW-style self-consistent
+    contacts): the OBC is computed AFTER Sigma^R is folded into the system
+    matrix, so the periodic lead superblocks inherit the boundary slab's
+    Sigma^R under the bulk-periodicity assumption, and the contact
+    injection becomes the fluctuation-dissipation pair of the DRESSED
+    escape rate at the lead temperatures. The reservoirs then carry the
+    same anharmonic dissipation as the device instead of being ideal
+    ballistic mirrors (no artificial contact broadening needed). Default
+    off: bare harmonic reservoirs, scattering enters the device Dyson
+    only."""
+
     sse_g_band: int = Field(default=1, ge=1, le=2)
     """Inner Green's-function block band |K - K'| kept in the bubble
     contraction. The default 1 uses the RGF block-tridiagonal G and masks

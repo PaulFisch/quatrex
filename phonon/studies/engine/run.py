@@ -44,6 +44,8 @@ if os.environ.get("QX_ETA_IR_FLOOR"):   cfg.phonon.eta_ir_floor_cells = float(os
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
 if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
 if os.environ.get("QX_GBAND"):    cfg.phonon.sse_g_band = int(os.environ["QX_GBAND"])
+if os.environ.get("QX_RAMP"):     cfg.phonon.sse_ramp_iterations = int(os.environ["QX_RAMP"])
+if os.environ.get("QX_SCATCONTACTS"): cfg.phonon.obc_scattering_contacts = bool(int(os.environ["QX_SCATCONTACTS"]))
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
 if os.environ.get("QX_QCS"):      cfg.compute.comm.q_comm_size = int(os.environ["QX_QCS"])
 

@@ -131,6 +131,13 @@ class PhononSolver(SubsystemSolver):
             int(getattr(config.phonon, "sse_g_band", 1) or 1) >= 2
         )
 
+        # GW-style self-consistent contacts: compute the OBC AFTER Sigma^R
+        # is folded into the system matrix, dressing the periodic lead
+        # superblocks with the boundary slab's scattering self-energy.
+        self._obc_scattering_contacts = bool(
+            getattr(config.phonon, "obc_scattering_contacts", False)
+        )
+
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
@@ -537,10 +544,21 @@ class PhononSolver(SubsystemSolver):
         self._apply_eta_ir_floor_ramp()
         self._assemble_system_matrix()
 
-        # OBC from the bare harmonic blocks (ideal-reservoir contacts);
-        # the scattering self-energy enters the device Dyson only.
-        self._compute_obc()
-        _btd_subtract(self.system_matrix, sse_retarded)
+        if self._obc_scattering_contacts:
+            # GW-style self-consistent contacts: fold Sigma^R into the
+            # system matrix FIRST, so the periodic lead superblocks (built
+            # from the boundary blocks) carry the boundary slab's
+            # scattering self-energy, and the contact injection is the
+            # fluctuation-dissipation pair of the dressed escape rate.
+            # At iteration 0 (Sigma = 0) this degenerates to bare leads.
+            _btd_subtract(self.system_matrix, sse_retarded)
+            self._compute_obc()
+        else:
+            # OBC from the bare harmonic blocks (ideal-reservoir
+            # contacts); the scattering self-energy enters the device
+            # Dyson only.
+            self._compute_obc()
+            _btd_subtract(self.system_matrix, sse_retarded)
         self._apply_buttiker_probe(sse_lesser, sse_greater)   # no-op if off
         self._selected_solve(sse_lesser, sse_greater, out)
         self._restore_buttiker_probe(sse_lesser, sse_greater)
