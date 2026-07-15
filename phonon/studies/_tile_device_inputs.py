@@ -76,7 +76,15 @@ def write_device(src: Path, out: Path, n_cells: int, offs: dict) -> None:
     with h5py.File(out / "fc3_blocks.hdf5", "w") as f:
         g = f.create_group("fc3_blocks")
         for (i, k1, k2), v in sorted(blocks.items()):
-            g.create_dataset(f"{i}_{k1}_{k2}", data=v)
+            ds = g.create_dataset(f"{i}_{k1}_{k2}", data=v)
+            # The production loader reads the triplet indices and block
+            # sizes from per-dataset attributes, not from the key.
+            ds.attrs["I"] = np.int64(i)
+            ds.attrs["J"] = np.int64(k1)
+            ds.attrs["K"] = np.int64(k2)
+            ds.attrs["b_I"] = np.int64(v.shape[0])
+            ds.attrs["b_J"] = np.int64(v.shape[1])
+            ds.attrs["b_K"] = np.int64(v.shape[2])
         m = f.create_group("meta")
         m.attrs["units"] = units
         m.create_dataset("block_sizes", data=np.full(n_cells, b, dtype=np.int64))
