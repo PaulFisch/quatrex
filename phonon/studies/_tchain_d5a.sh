@@ -12,7 +12,7 @@
 # Single rank, one node (the bubble thread-pools over the ring).
 set -uo pipefail
 REPO=/usr/scratch/mont-fort11/pfischill/quatrex
-CFG=$REPO/phonon/studies/out/d5a_gridladder/nf361/quatrex_config.toml
+CFG=$REPO/phonon/studies/out/newton_tchain_d5a/quatrex_config.toml
 OUT=$REPO/phonon/studies/out/newton_tchain_d5a
 mkdir -p "$OUT"
 PREV=
