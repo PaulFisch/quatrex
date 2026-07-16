@@ -280,6 +280,18 @@ class ExperimentalMixerConfig(BaseModel):
     reconstruction self-check run at every Newton step (dense reassembled
     G^{<,>} against the solver's RGF output). A failure aborts instead of
     silently corrupting the Krylov space."""
+    newton_precond: Literal["none", "recycle", "fresh"] = "none"
+    """For ``mixing_method = "newton"``: low-rank deflation right
+    preconditioner for the inner GMRES. ``"recycle"`` harvests harmonic
+    Ritz pairs (the near-singular directions) from the previous Newton
+    step's Arnoldi relation -- exact operator images at zero extra kernel
+    cost; ``"fresh"`` builds the basis at the current step and spends
+    ``newton_precond_rank`` exact JVPs on their images (the literal
+    low-rank Schur surrogate); ``"none"`` disables. Memory: 2 x rank
+    extra state vectors."""
+    newton_precond_rank: PositiveInt = 8
+    """For ``mixing_method = "newton"``: rank of the stored deflation
+    basis (number of (direction, image) pairs)."""
     newton_jvp_form: Literal["bilinear", "polarization"] = "bilinear"
     """For ``mixing_method = "newton"``: evaluation route of the exact
     bubble derivative. ``"bilinear"`` is the mixed-leg cross

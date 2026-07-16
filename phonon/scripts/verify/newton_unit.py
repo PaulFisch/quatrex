@@ -215,8 +215,107 @@ def test_pathological_bounded():
     return progressed and graceful
 
 
+def test_woodbury():
+    # M^{-1} must exactly invert the rank-r surrogate I - Yk Q^T, and
+    # right-preconditioning must deflate the outliers of A = J_F - I:
+    # on exact eigenvector pairs, A M^{-1} q = -q.
+    from quatrex.core.mpi_linalg import get_comm
+    from quatrex.core.newton import _LowRankPrecond
+
+    rng = np.random.default_rng(5)
+    n = 50
+    U, _ = np.linalg.qr(rng.standard_normal((n, n)))
+    lam = np.concatenate([[25.0, -12.0, 6.0], rng.uniform(-0.5, 0.5, n - 3)])
+    Jf = U @ np.diag(lam) @ U.T          # real symmetric for exact pairs
+    Q = U[:, :3].T.copy()                # (r, n) outlier eigvecs
+    Yk = (Jf @ Q.T).T.copy()
+    comm, op = get_comm()
+    M = _LowRankPrecond(Q, Yk, comm, op)
+
+    # Woodbury identity: (I - Yk^T diag-free Q)(M^{-1} v) == v.
+    v = rng.standard_normal(n)
+    Ktilde = Yk.T @ Q
+    resid = np.linalg.norm((np.eye(n) - Ktilde) @ M.apply(v) - v)
+    A = Jf - np.eye(n)
+    # Deflation: preconditioned operator == -I on the stored subspace.
+    defl = max(np.linalg.norm(A @ M.apply(Q[i]) + Q[i]) for i in range(3))
+    ok = resid < 1e-10 and defl < 1e-10
+    print(f"[woodbury]  surrogate-inverse resid {resid:.2e}, deflation "
+          f"|A M^-1 q + q| {defl:.2e} {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
+def _run_precond_collapse(precond, rank=16):
+    # Production-like spectrum: a handful of detached outliers (the
+    # measured lambda ~ -4..-5 cluster) + a near-marginal pair + a tight
+    # contractive bulk, solved to the production forcing tolerance 0.1
+    # where the outliers dominate the Krylov dimension. Repeated Newton
+    # solves of the same system: after the first, the recycled deflation
+    # must collapse gmres_m.
+    rng = np.random.default_rng(6)
+    n = 80
+    U, _ = np.linalg.qr(rng.standard_normal((n, n))
+                        + 1j * rng.standard_normal((n, n)))
+    lam = np.concatenate([[-20.0, -15.0, 9 + 5j, 9 - 5j, 6.0,
+                           0.995, 1.004],
+                          rng.uniform(-0.05, 0.05, n - 7)]).astype(complex)
+    A = U @ np.diag(lam) @ U.conj().T
+    b = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+
+    def g(x):
+        return A @ x + b
+
+    jvp = ToyJVP(lambda x, v: A @ v)
+    mixer = NewtonKrylovMixer(
+        jvp_factory=lambda: jvp, warmup=1, switch_tol=1e9, beta=0.02,
+        max_krylov=2 * n + 5, inner_tol=0.1, forcing="fixed",
+        trust=0.0, backtrack=0, precond=precond, precond_rank=rank,
+        verbose=False)
+    # Capture gmres_m per newton step from the log line.
+    ms = []
+    real_log = mixer._log
+
+    def grab(msg):
+        if "gmres_m=" in msg:
+            ms.append(int(msg.split("gmres_m=")[1].split()[0]))
+        real_log(msg)
+
+    mixer._log = grab
+    # Perturb the iterate after each converged solve so Newton re-solves
+    # the same linear system from a fresh residual.
+    x = np.zeros(n, complex)
+    jvp.bind(lambda: x)
+    for _ in range(4):
+        for _ in range(8):
+            gx = g(x)
+            if np.linalg.norm(gx - x) < 1e-9:
+                break
+            x = mixer.step(x, gx)
+        x = x + 0.1 * (rng.standard_normal(n)
+                       + 1j * rng.standard_normal(n))
+        mixer._pending = None
+    return ms
+
+
+def test_precond_collapse():
+    ms_none = _run_precond_collapse("none")
+    ms_rec = _run_precond_collapse("recycle")
+    ms_fresh = _run_precond_collapse("fresh")
+    # The basis matures over the first solves (merged harvests must
+    # cover both embedded partners of each C-linear mode here); assert
+    # the steady-state collapse and the total-JVP saving.
+    base_peak = max(ms_none[1:])
+    ok = (max(ms_rec[-6:]) <= max(3, base_peak // 2 + 1)
+          and sum(ms_rec) < 0.8 * sum(ms_none)
+          and sum(ms_fresh) <= sum(ms_none))
+    print(f"[precond]   gmres_m none={ms_none} recycle={ms_rec} "
+          f"fresh={ms_fresh} {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
 if __name__ == "__main__":
     results = [test_linear(), test_two_phase(), test_unstable(),
-               test_overshoot(), test_pathological_bounded()]
+               test_overshoot(), test_pathological_bounded(),
+               test_woodbury(), test_precond_collapse()]
     print("OVERALL:", "PASS" if all(results) else "FAIL")
     sys.exit(0 if all(results) else 1)

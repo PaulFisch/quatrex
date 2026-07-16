@@ -34,6 +34,7 @@ from __future__ import annotations
 import numpy as np
 
 from quatrex.core.mpi_linalg import (
+    allreduce_sum,
     complex_to_real as _c2r,
     get_comm,
     global_dot,
@@ -43,6 +44,50 @@ from quatrex.core.mpi_linalg import (
 )
 
 __all__ = ["NewtonKrylovMixer"]
+
+
+class _LowRankPrecond:
+    """Right preconditioner from stored exact Jacobian actions.
+
+    Given r globally-orthonormal real directions Q (rows) and their
+    exact map images Yk = J_F Q, the rank-r surrogate K~ = Yk Q^T of
+    J_F gives, by the Woodbury identity, the exact inverse of the
+    surrogate Newton operator I - K~:
+
+        M^{-1} v = v + Yk^T D (Q v),   D = (I_r - Q Yk^T)^{-1}.
+
+    On the stored subspace the preconditioned operator (J_F - I) M^{-1}
+    acts as -I, so GMRES sees the deflated spectrum: the dominant
+    outliers collapse onto the bulk cluster. Application cost is one
+    r-vector Allreduce and a rank-r update; the small D is replicated
+    (bit-identical control flow on all ranks).
+    """
+
+    def __init__(self, Q: np.ndarray, Yk: np.ndarray, comm, op_sum):
+        self._Q = Q          # (r, 2n) real, globally orthonormal rows
+        self._Yk = Yk        # (r, 2n) real, Yk[i] = J_F Q[i]
+        self._comm, self._SUM = comm, op_sum
+        r = Q.shape[0]
+        gram = allreduce_sum(comm, op_sum,
+                             np.ascontiguousarray(Q @ Yk.T))
+        small = np.eye(r) - gram
+        try:
+            self._D = np.linalg.inv(small)
+        except np.linalg.LinAlgError:
+            # I - Q^T Yk singular <=> a stored direction with J_F ~ I
+            # (marginal mode / fold point): fall back to the pseudo-
+            # inverse, which deflates the regular part and leaves the
+            # marginal direction untouched.
+            self._D = np.linalg.pinv(small)
+
+    @property
+    def rank(self) -> int:
+        return int(self._Q.shape[0])
+
+    def apply(self, v: np.ndarray) -> np.ndarray:
+        c = allreduce_sum(self._comm, self._SUM,
+                          np.ascontiguousarray(self._Q @ v))
+        return v + self._Yk.T @ (self._D @ c)
 
 
 class NewtonKrylovMixer:
@@ -77,6 +122,16 @@ class NewtonKrylovMixer:
     backtrack : int
         Maximum step-halvings when a Newton step increased ``||R||``.
         0 disables the accept/reject test.
+    precond : {"none", "recycle", "fresh"}
+        Low-rank right preconditioner for the inner GMRES. ``recycle``
+        harvests harmonic Ritz pairs (the near-singular directions) of
+        the previous Newton step's Arnoldi relation -- exact operator
+        images at ZERO extra JVPs. ``fresh`` builds the basis at the
+        current step (residual + recent updates + previous basis) and
+        spends ``precond_rank`` exact JVPs on their images. Memory:
+        2 x rank extra state vectors.
+    precond_rank : int
+        Rank of the stored deflation basis.
     verbose : bool
         Rank-0 per-step diagnostics.
     """
@@ -91,6 +146,7 @@ class NewtonKrylovMixer:
                  forcing: str = "ew", max_newton: int = 100,
                  trust: float = 0.5, trust_max: float = 0.0,
                  newton_damp: float = 1.0, backtrack: int = 3,
+                 precond: str = "none", precond_rank: int = 8,
                  verbose: bool = True) -> None:
         self._jvp_factory = jvp_factory
         self.warmup = int(warmup)
@@ -104,6 +160,10 @@ class NewtonKrylovMixer:
         self.trust_max = max(float(trust_max), float(trust))
         self.newton_damp = float(newton_damp)
         self.backtrack = int(backtrack)
+        if precond not in ("none", "recycle", "fresh"):
+            raise ValueError(f"Unknown precond={precond!r}.")
+        self.precond = str(precond)
+        self.precond_rank = int(precond_rank)
         self.verbose = bool(verbose)
 
         self._jvp = None
@@ -114,6 +174,9 @@ class NewtonKrylovMixer:
         # Pending accept/reject bookkeeping: the iterate emitted by the
         # last Newton step, its base point, base residual and step.
         self._pending = None    # (xk, delta, Rk_norm, halvings)
+        # Low-rank deflation state.
+        self._precond_op: _LowRankPrecond | None = None
+        self._prev_deltas: list[np.ndarray] = []   # fresh-basis seeds
         self._comm, self._SUM = get_comm()
 
     # ---- distributed primitives -----------------------------------------
@@ -200,22 +263,38 @@ class NewtonKrylovMixer:
         b = -_c2r(R)
         beta_g = rk
         m_max = self.max_krylov
+
+        # Right preconditioner for this step (fixed across the solve).
+        if self.precond == "fresh":
+            M = self._build_fresh_precond(b / beta_g)
+        elif self.precond == "recycle":
+            M = self._precond_op
+        else:
+            M = None
+
+        # GMRES on (J_F - I) M^{-1}; the Krylov basis V spans the
+        # preconditioned space, delta = M^{-1} (V y) at the end.
         V = [b / beta_g]
         Hg = np.zeros((m_max + 1, m_max), dtype=np.float64)
+        H_raw = np.zeros((m_max + 1, m_max), dtype=np.float64)
         g = np.zeros(m_max + 1, dtype=np.float64)
         g[0] = beta_g
         cs, sn = [], []
         inner_res = beta_g
         m = 0
+        v_tail = None
         for j in range(m_max):
-            # (J_F - I) v, real embedding; the JVP is R-linear.
-            Av = _c2r(self._jvp.apply(_r2c(V[j]))) - V[j]
+            # (J_F - I) M^{-1} v, real embedding; the JVP is R-linear.
+            z = M.apply(V[j]) if M is not None else V[j]
+            Av = _c2r(self._jvp.apply(_r2c(z))) - z
             for i in range(j + 1):
                 h = self._dot(V[i], Av)
                 Hg[i, j] = h
+                H_raw[i, j] = h
                 Av = Av - h * V[i]
             hjp = self._gnorm(Av)
             Hg[j + 1, j] = hjp
+            H_raw[j + 1, j] = hjp
             for i in range(j):
                 a_, b_ = Hg[i, j], Hg[i + 1, j]
                 Hg[i, j] = cs[i] * a_ + sn[i] * b_
@@ -231,34 +310,192 @@ class NewtonKrylovMixer:
             g[j] = c_ * g[j]
             inner_res = abs(g[j + 1])
             m = j + 1
+            v_tail = Av / hjp if hjp > 0.0 else None
             if inner_res <= inner_tol * beta_g:
                 break
             if hjp <= 1e-13 * max(beta_g, 1e-300):
                 break
-            V.append(Av / hjp)
+            V.append(v_tail)
 
         Rt = np.triu(Hg[:m, :m])
         try:
             y = np.linalg.solve(Rt, g[:m])
         except np.linalg.LinAlgError:
             y = np.linalg.lstsq(Rt, g[:m], rcond=None)[0]
-        delta_r = np.zeros_like(xk_r)
+        u_r = np.zeros_like(xk_r)
         for i in range(m):
-            delta_r = delta_r + y[i] * V[i]
+            u_r = u_r + y[i] * V[i]
+        delta_r = M.apply(u_r) if M is not None else u_r
         if not np.all(np.isfinite(delta_r)):
             self._log("  newton: non-finite delta, damped Picard fallback")
             return x + self.beta * R
         step_r = trust_cap(self._comm, self._SUM,
                            self.newton_damp * delta_r, xk_r, self._trust_k)
 
+        # Harvest the deflation basis for the NEXT step from this step's
+        # Arnoldi relation (exact operator images, no extra JVPs).
+        if self.precond == "recycle":
+            self._precond_op = self._harvest_ritz(V, v_tail, H_raw, m, M)
+
         self._newton_it += 1
+        pc = "none" if M is None else f"{self.precond}(r={M.rank})"
         self._log(f"  newton#{self._newton_it}: gmres_m={m} "
                   f"inner_res/||R||={inner_res / (beta_g + 1e-300):.2e} "
                   f"(tol {inner_tol:.2e}) ||R||={rk:.3e} "
                   f"||delta||={self._gnorm(step_r):.3e} "
-                  f"trust={self._trust_k:.2g} recon={recon:.1e}")
+                  f"trust={self._trust_k:.2g} precond={pc} recon={recon:.1e}")
+
+        # Seed directions for the fresh-basis variant.
+        if self.precond == "fresh":
+            nrm = self._gnorm(step_r)
+            if nrm > 0.0 and np.all(np.isfinite(step_r)):
+                self._prev_deltas.append(step_r / nrm)
+                self._prev_deltas = self._prev_deltas[-3:]
 
         delta = _r2c(step_r)
         if self.backtrack > 0:
             self._pending = (x, delta, R, rk, 0)
         return x + delta
+
+    # ---- low-rank deflation machinery ---------------------------------------
+    def _harvest_ritz(self, V, v_tail, H_raw, m, M):
+        """Harmonic Ritz pairs of the (preconditioned) Arnoldi relation,
+        mapped back to exact (direction, J_F direction) pairs.
+
+        The relation A~ V_m = V_{m+1} Hbar with A~ = (J_F - I) M^{-1}
+        gives, for any small combination u~ = V_m gvec, the exact image
+        A (M^{-1} u~) = V_{m+1} Hbar gvec -- so the harvested pairs are
+        exact regardless of the preconditioner in effect. Harmonic Ritz
+        targets the smallest-|theta| eigenvalues: the near-singular
+        directions that stall GMRES.
+        """
+        r = min(self.precond_rank, m)
+        if r < 1:
+            return self._precond_op
+        H = H_raw[:m, :m]
+        e_m = np.zeros(m)
+        e_m[m - 1] = 1.0
+        h2 = float(H_raw[m, m - 1]) ** 2
+        try:
+            f = np.linalg.solve(H.T, e_m)
+        except np.linalg.LinAlgError:
+            f = np.linalg.lstsq(H.T, e_m, rcond=None)[0]
+        theta, Gv = np.linalg.eig(H + h2 * np.outer(f, e_m))
+        # Ritz-residual quality: ||A u - theta u|| ~ |h_{m+1,m} g_m| for
+        # the Ritz combination u = V_m g. Only CONVERGED pairs (detached
+        # outliers, marginal modes) are worth deflating -- unconverged
+        # bulk combinations pollute the basis and can make M^{-1} worse
+        # than the identity.
+        h_last = float(H_raw[m, m - 1])
+        quality = np.abs(h_last * Gv[m - 1, :]) / np.maximum(
+            np.abs(theta) * np.linalg.norm(Gv, axis=0), 1e-300)
+        converged = quality < 0.1
+        # Both ends of the spectrum stall GMRES: near-singular
+        # directions of A (marginal modes, smallest |theta|) delay
+        # convergence, and each detached outlier (largest |theta|)
+        # costs a Krylov dimension per solve. Interleave both ends.
+        by_small = [i for i in np.argsort(np.abs(theta)) if converged[i]]
+        by_large = by_small[::-1]
+        order = []
+        for a_, b_ in zip(by_small, by_large):
+            order.extend((a_, b_))
+        cols: list[np.ndarray] = []
+        used: set[int] = set()
+        for idx in order:
+            if len(cols) >= r:
+                break
+            if int(idx) in used:
+                continue
+            used.add(int(idx))
+            th, gvec = theta[idx], Gv[:, idx]
+            if abs(th.imag) <= 1e-12 * max(abs(th.real), 1e-300):
+                cols.append(np.real(gvec))
+            else:
+                # Complex pair: span the real 2D subspace, mark the
+                # conjugate partner as consumed.
+                cols.append(np.real(gvec))
+                if len(cols) < r:
+                    cols.append(np.imag(gvec))
+                for idx2 in order:
+                    if int(idx2) not in used and np.isclose(
+                            theta[idx2], np.conj(th)):
+                        used.add(int(idx2))
+                        break
+        if not cols:
+            return self._precond_op
+        G = np.array(cols, dtype=np.float64).T      # (m, r_eff)
+        r_eff = G.shape[1]
+
+        # x-space directions U and exact images Yk = J_F U, built as
+        # small combinations of the stored basis (no (m x 2n) copies).
+        Vfull = V + ([v_tail] if len(V) == m and v_tail is not None else [])
+        n_rows = min(len(Vfull), m + 1)
+        Himg = H_raw[:n_rows, :m] @ G               # (n_rows, r_eff)
+        U, Yk = [], []
+        for jcol in range(r_eff):
+            u = np.zeros_like(V[0])
+            for i in range(m):
+                u = u + G[i, jcol] * V[i]
+            if M is not None:
+                u = M.apply(u)
+            ya = np.zeros_like(V[0])
+            for i in range(n_rows):
+                ya = ya + Himg[i, jcol] * Vfull[i]
+            U.append(u)
+            Yk.append(ya + u)          # J_F u = (J_F - I) u + u
+        # Merge with the previous basis: fresh pairs first (the Jacobian
+        # drifts, and the new Krylov space is dominated by whatever the
+        # old basis failed to deflate -- e.g. the embedded i-partners of
+        # near-C-linear eigenmodes); surviving old pairs behind them,
+        # capped at the configured rank. Global MGS mirrors every
+        # operation onto Yk so the image property Yk[i] = J_F U[i] is
+        # preserved exactly (old images stay exact up to Jacobian drift,
+        # which is the approximation a preconditioner tolerates).
+        if self._precond_op is not None:
+            U += list(self._precond_op._Q)
+            Yk += list(self._precond_op._Yk)
+        Q_rows, Y_rows = [], []
+        for u, yk in zip(U, Yk):
+            if len(Q_rows) >= self.precond_rank:
+                break
+            u = u.copy()
+            yk = yk.copy()
+            for q, yq in zip(Q_rows, Y_rows):
+                h = self._dot(q, u)
+                u = u - h * q
+                yk = yk - h * yq
+            nrm = self._gnorm(u)
+            if nrm <= 1e-8:
+                continue
+            Q_rows.append(u / nrm)
+            Y_rows.append(yk / nrm)
+        if not Q_rows:
+            return self._precond_op
+        return _LowRankPrecond(np.array(Q_rows), np.array(Y_rows),
+                               self._comm, self._SUM)
+
+    def _build_fresh_precond(self, r0_unit):
+        """The proposal's literal variant: orthonormal basis from the
+        current residual, recent Newton updates and the previous basis;
+        exact images via ``precond_rank`` fresh JVPs."""
+        cands = [r0_unit] + list(self._prev_deltas)
+        if self._precond_op is not None:
+            cands += list(self._precond_op._Q)
+        Q_rows = []
+        for u in cands:
+            if len(Q_rows) >= self.precond_rank:
+                break
+            u = u.copy()
+            for q in Q_rows:
+                u = u - self._dot(q, u) * q
+            nrm = self._gnorm(u)
+            if nrm <= 1e-10:
+                continue
+            Q_rows.append(u / nrm)
+        if not Q_rows:
+            return None
+        Y_rows = [_c2r(self._jvp.apply(_r2c(q))) for q in Q_rows]
+        op = _LowRankPrecond(np.array(Q_rows), np.array(Y_rows),
+                             self._comm, self._SUM)
+        self._precond_op = op
+        return op

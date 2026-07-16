@@ -561,6 +561,8 @@ class SCBA(TransportSolver):
                 trust_max=xm.newton_trust_max,
                 newton_damp=xm.newton_damp,
                 backtrack=xm.newton_backtrack,
+                precond=xm.newton_precond,
+                precond_rank=xm.newton_precond_rank,
             )
 
         raise ValueError(f"Unknown mixing method '{scba.mixing_method}'.")

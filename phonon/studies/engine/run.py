@@ -57,6 +57,8 @@ if os.environ.get("QX_NEWTON_KRYLOV"):  cfg.scba.experimental_mixer.newton_max_k
 if os.environ.get("QX_NEWTON_TRUST"):   cfg.scba.experimental_mixer.newton_trust = float(os.environ["QX_NEWTON_TRUST"])
 if os.environ.get("QX_NEWTON_TRUSTMAX"):cfg.scba.experimental_mixer.newton_trust_max = float(os.environ["QX_NEWTON_TRUSTMAX"])
 if os.environ.get("QX_JVP_FORM"):    cfg.scba.experimental_mixer.newton_jvp_form = os.environ["QX_JVP_FORM"]
+if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_precond = os.environ["QX_NEWTON_PRECOND"]
+if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
 
 # Honor the (possibly-overridden) comm grid + threading + profiler.
 setup_context(cfg)
