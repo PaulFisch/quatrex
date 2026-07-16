@@ -136,6 +136,13 @@ class PhononJVP:
         # (system-matrix subtraction and the RGF source reads); the d2
         # pattern slots (present when sse_g_band = 2) carry J == 0.
         self._bt_mask = np.abs(blk_r - blk_c) <= 1
+        # The RGF writes G only on its output band (2 with the second
+        # off-diagonals, else 1); pattern slots beyond it -- present when
+        # the cutoff makes the pattern block-dense -- stay zero in the
+        # production buffers and must stay zero in the JVP's dG too.
+        out_band = 2 if getattr(self._solver, "_second_offdiagonals",
+                                False) else 1
+        self._g_mask = np.abs(blk_r - blk_c) <= out_band
 
         # Dense block-tridiagonal dynamical matrix (what _btd_subtract
         # actually subtracts), assembled once.
@@ -278,10 +285,11 @@ class PhononJVP:
         self._g_l_flat = np.asarray(data.g_lesser.data).copy()
         self._g_g_flat = np.asarray(data.g_greater.data).copy()
         num2 = den2 = 0.0
+        gm = self._g_mask
         for dense, flat in ((GL, self._g_l_flat), (GG, self._g_g_flat)):
             got = self._to_flat(self._skew_project(dense))
-            num2 += float(np.linalg.norm(got - flat) ** 2)
-            den2 += float(np.linalg.norm(flat) ** 2)
+            num2 += float(np.linalg.norm(got[:, gm] - flat[:, gm]) ** 2)
+            den2 += float(np.linalg.norm(flat[:, gm]) ** 2)
         # Global relative norm (a rank with pathological frequencies must
         # not silently poison the Krylov space).
         from quatrex.core.mpi_linalg import allreduce_sum, get_comm
@@ -332,8 +340,8 @@ class PhononJVP:
         GRdr = GR @ dr_d
         dGl = GR @ dl_d @ GA + GRdr @ GL + GL @ dr_dH @ GA
         dGg = GR @ dg_d @ GA + GRdr @ GG + GG @ dr_dH @ GA
-        dGl_flat = self._to_flat(self._skew_project(dGl))
-        dGg_flat = self._to_flat(self._skew_project(dGg))
+        dGl_flat = self._to_flat(self._skew_project(dGl)) * self._g_mask
+        dGg_flat = self._to_flat(self._skew_project(dGg)) * self._g_mask
 
         # Bubble half: polarisation identity, two production-kernel calls.
         s1 = self._kernel(self._g_l_flat + dGl_flat,
