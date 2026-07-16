@@ -578,6 +578,8 @@ class SCBA(TransportSolver):
                 recon_check_tol=(
                     self.config.scba.experimental_mixer
                     .newton_recon_check_tol),
+                jvp_form=(
+                    self.config.scba.experimental_mixer.newton_jvp_form),
             )
             self._phonon_jvp = jvp
         return jvp

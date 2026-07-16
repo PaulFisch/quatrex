@@ -34,6 +34,8 @@ SNAP = os.environ["QX_SNAPSHOT"]
 cfg = parse_config(CFG)
 if os.environ.get("QX_GBAND"):
     cfg.phonon.sse_g_band = int(os.environ["QX_GBAND"])
+if os.environ.get("QX_JVP_FORM"):
+    cfg.scba.experimental_mixer.newton_jvp_form = os.environ["QX_JVP_FORM"]
 cfg.scba.mixing_method = "newton"
 cfg.scba.max_iterations = 12
 cfg.scba.min_iterations = 12
@@ -94,8 +96,17 @@ class ABMixer:
             t0 = time.time()
             self.Jv_an = jvp.apply(v)
             self.t_jvp = time.time() - t0
+            # Both evaluation routes on the same direction: exact identity
+            # up to rounding (the bilinear cross vs the polarisation form).
+            alt = ("polarization" if jvp.jvp_form == "bilinear"
+                   else "bilinear")
+            Jv_alt = jvp.apply(v, form=alt)
+            self.rel_forms = (self._norm(self.Jv_an - Jv_alt)
+                              / max(self._norm(self.Jv_an), 1e-300))
             print(f"AB: recon={self.recon:.2e} t_prepare={t_prep:.1f}s "
-                  f"t_jvp={self.t_jvp:.1f}s", flush=True)
+                  f"t_jvp={self.t_jvp:.1f}s form={jvp.jvp_form} "
+                  f"|{jvp.jvp_form}-{alt}|/|Jv| = {self.rel_forms:.3e}",
+                  flush=True)
             self.stage = 1
             self.probing = True
             eps = self.eps_rels[0]
@@ -114,7 +125,8 @@ class ABMixer:
             self.probing = True
             return self.x0 + self.eps_rels[i_eps + 1] * self.v
         # Done: report.
-        results = {"recon": self.recon, "t_jvp_s": self.t_jvp}
+        results = {"recon": self.recon, "t_jvp_s": self.t_jvp,
+                   "rel_forms": self.rel_forms}
         an_n = self._norm(self.Jv_an)
         for k, e in enumerate(self.eps_rels):
             jfd = (self.fd[(k, "+")] - self.fd[(k, "-")]) / (2 * e)

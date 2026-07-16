@@ -532,6 +532,39 @@ def test_kernel() -> bool:
                   f"{'PASS' if good else 'FAIL'}")
             ok = ok and good
 
+            if g_from_l or herm_pairs:
+                continue
+            # Bilinear mixed-leg kernel (plain path only): must equal the
+            # polarisation cross to rounding on ordinary directions...
+            def S_lin(gl_dense, gg_dense, dl_dense, dg_dense):
+                gl, gg = gbuf(gl_dense), gbuf(gg_dense)
+                dl_, dg_ = gbuf(dl_dense), gbuf(dg_dense)
+                outs = (gbuf(), gbuf(), gbuf())
+                sse.compute_linearized(gl, gg, dl_, dg_, out=outs)
+                return np.concatenate(
+                    [np.asarray(m.data).ravel().copy() for m in outs])
+
+            cross_bil = S_lin(G_l, G_g, d_l, d_g)
+            bil_rel = _rel(cross_bil, cross_pol)
+            print(f"[kernel] bilinear vs polarisation: rel {bil_rel:.2e} "
+                  f"{'PASS' if bil_rel < 5e-13 else 'FAIL'}")
+            ok = ok and bil_rel < 5e-13
+
+            # ...and stay exact for SMALL directions, where the
+            # polarisation route loses ~|S(G)|/|cross| digits to the
+            # subtraction (the motivation for the mixed-leg form).
+            s = 1e-8
+            bil_small = S_lin(G_l, G_g, s * d_l, s * d_g) / s
+            pol_small = (S(G_l + s * d_l, G_g + s * d_g) - s0
+                         - S(s * d_l, s * d_g)) / s
+            bil_deg = _rel(bil_small, cross_bil)
+            pol_deg = _rel(pol_small, cross_bil)
+            print(f"[kernel] small direction (1e-8): bilinear rel "
+                  f"{bil_deg:.2e}, polarisation rel {pol_deg:.2e} "
+                  f"{'PASS' if bil_deg < 1e-12 and pol_deg > 1e-9 else 'FAIL'}"
+                  f" (polarisation digit loss is the point)")
+            ok = ok and bil_deg < 1e-12 and pol_deg > 1e-9
+
     return ok
 
 
@@ -597,8 +630,8 @@ def test_endtoend() -> bool:
         sse_ramp_iterations=0, sse_vertex_scale=1.0, sse_ring_threads=1,
         sse_ring_min_w=None, sse_ring_workspaces=False, sse_tau_min_chunk=4,
         sse_tau_chunk_bytes=1 << 26, sse_pool_scope="tau",
-        sse_greater_from_lesser=True, sse_fold_verify_iterations=0,
-        sse_hermitian_pairs=True, retarded_method="fft",
+        sse_greater_from_lesser=False, sse_fold_verify_iterations=0,
+        sse_hermitian_pairs=False, retarded_method="fft",
         qfold_path=None, decomposed_vertices_path=None, fc3_path=None,
         sse_g_band=2)
     sse = SigmaPhononPhonon(SimpleNamespace(phonon=phonon_cfg, device=None),
@@ -680,7 +713,14 @@ def test_endtoend() -> bool:
 
     S_base = kernel_S(gl_rgf, gg_rgf)
 
-    def apply_jvp(dl, dg, dr):
+    def kernel_S_lin(gl_dense, gg_dense, dgl_dense, dgg_dense):
+        gl, gg = gbuf(gl_dense), gbuf(gg_dense)
+        dgl, dgg = gbuf(dgl_dense), gbuf(dgg_dense)
+        outs = (gbuf(), gbuf(), gbuf())
+        sse.compute_linearized(gl, gg, dgl, dgg, out=outs)
+        return [_band_to_dense(m, nb, b, 2, nf) for m in outs]
+
+    def apply_jvp(dl, dg, dr, form="polarization"):
         dl = _skew_project_band(dl, nb, b)
         dg = _skew_project_band(dg, nb, b)
         dGl = (GR @ dl @ GA + GR @ dr @ GL
@@ -689,9 +729,12 @@ def test_endtoend() -> bool:
                + GG @ dr.conj().swapaxes(-2, -1) @ GA)
         dGl = _proj_out(dGl, nb, b) * _bandmask(nb, b, 2)
         dGg = _proj_out(dGg, nb, b) * _bandmask(nb, b, 2)
-        S_plus = kernel_S(gl_rgf + dGl, gg_rgf + dGg)
-        S_dir = kernel_S(dGl, dGg)
-        dS = [p - s - d for p, s, d in zip(S_plus, S_base, S_dir)]
+        if form == "bilinear":
+            dS = kernel_S_lin(gl_rgf, gg_rgf, dGl, dGg)
+        else:
+            S_plus = kernel_S(gl_rgf + dGl, gg_rgf + dGg)
+            S_dir = kernel_S(dGl, dGg)
+            dS = [p - s - d for p, s, d in zip(S_plus, S_base, S_dir)]
         dS[2] = dS[2] + 0.5 * (dS[0] - dS[1])
         return dS
 
@@ -708,15 +751,22 @@ def test_endtoend() -> bool:
     dg = _skew_project_band(dg, nb, b)
 
     an = apply_jvp(dl, dg, dr)
+    an_bil = apply_jvp(dl, dg, dr, form="bilinear")
     eps = 1e-5
     Fp = F(sl0 + eps * dl, sg0 + eps * dg, sr0 + eps * dr)[:3]
     Fm = F(sl0 - eps * dl, sg0 - eps * dg, sr0 - eps * dr)[:3]
     fd = [(p - m) / (2 * eps) for p, m in zip(Fp, Fm)]
     rel = max(_rel(a, f) for a, f in zip(an, fd))
-    print(f"[endtoend] composed analytic JVP vs central FD of F: "
-          f"rel {rel:.2e} {'PASS' if rel < 1e-7 else 'FAIL'}")
+    rel_bil = max(_rel(a, f) for a, f in zip(an_bil, fd))
+    rel_forms = max(_rel(a, p) for a, p in zip(an_bil, an))
+    print(f"[endtoend] composed JVP vs central FD of F: polarization "
+          f"rel {rel:.2e}, bilinear rel {rel_bil:.2e} "
+          f"{'PASS' if rel < 1e-7 and rel_bil < 1e-7 else 'FAIL'}")
+    print(f"[endtoend] bilinear vs polarization: rel {rel_forms:.2e} "
+          f"{'PASS' if rel_forms < 1e-12 else 'FAIL'}")
 
-    return recon < 1e-11 and rel < 1e-7
+    return (recon < 1e-11 and rel < 1e-7 and rel_bil < 1e-7
+            and rel_forms < 1e-12)
 
 
 def _bandmask(nb, b, band):

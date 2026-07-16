@@ -537,6 +537,71 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if m.distribution_state != incoming_states[id(m)]:
                     m.dtranspose()
 
+    @profiler.profile(
+        label="SigmaPhononPhonon.linearized", level="default", comm=comm
+    )
+    def compute_linearized(
+        self,
+        g_lesser: DSDBSparse,
+        g_greater: DSDBSparse,
+        dg_lesser: DSDBSparse,
+        dg_greater: DSDBSparse,
+        out: tuple[DSDBSparse, ...],
+    ) -> None:
+        """Exact directional derivative of the bubble: the mixed-leg form.
+
+        The bubble is a homogeneous quadratic map S(G) = B(G, G) with B
+        bilinear in the two internal legs, so its Frechet derivative in
+        the direction dG is the cut-line (2PI-kernel) contraction
+
+            dSigma = B(dG, G) + B(G, dG),
+
+        evaluated here through the SAME FFT/fold/ring pipeline as
+        :meth:`compute`, with each ring replaced by its two mixed-leg
+        variants. Algebraically identical to the polarisation identity
+        S(G+dG) - S(G) - S(dG), but with no subtraction of large terms:
+        uniformly exact to rounding even for directions that are small
+        or nearly annihilated by the kernel.
+
+        Gamma-only (nq == 1), single block rank, plain 6-ring path (the
+        symmetry fast paths fuse legs across the (I,J) mirror and do not
+        commute with the asymmetric cross). Does not advance the
+        adiabatic-ramp counter; the current ramp prefactor is reused.
+        Future work: coupled-q cross, fast-path product rules, the
+        adjoint (VJP) pipeline.
+
+        Parameters
+        ----------
+        g_lesser, g_greater
+            The frozen Green's function (the linearisation point).
+        dg_lesser, dg_greater
+            The direction. Must share G's sparsity pattern.
+        out
+            ``(dsigma_lesser, dsigma_greater, dsigma_retarded)``.
+        """
+        dsigma_lesser, dsigma_greater, dsigma_retarded = out
+
+        all_bufs = (
+            g_lesser, g_greater, dg_lesser, dg_greater,
+            dsigma_lesser, dsigma_greater, dsigma_retarded,
+        )
+        incoming_states = {id(m): m.distribution_state for m in all_bufs}
+
+        for m in all_bufs:
+            if m.distribution_state != "nnz":
+                m.dtranspose()
+
+        try:
+            self._compute_fft_first(
+                g_lesser, g_greater,
+                dsigma_lesser, dsigma_greater, dsigma_retarded,
+                dg_lesser=dg_lesser, dg_greater=dg_greater,
+            )
+        finally:
+            for m in all_bufs:
+                if m.distribution_state != incoming_states[id(m)]:
+                    m.dtranspose()
+
     def _compute_fft_first(
         self,
         g_lesser: DSDBSparse,
@@ -544,6 +609,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         sigma_lesser: DSDBSparse,
         sigma_greater: DSDBSparse,
         sigma_retarded: DSDBSparse,
+        dg_lesser: DSDBSparse | None = None,
+        dg_greater: DSDBSparse | None = None,
     ) -> None:
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
@@ -575,6 +642,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "Transverse-q (k>1) with comm.block.size > 1 is not "
                 "supported."
             )
+        # Linearized (mixed-leg cross) mode: dG legs provided.
+        lin = dg_lesser is not None
+        if lin:
+            if nq > 1 or self._vfactors is not None:
+                raise NotImplementedError(
+                    "compute_linearized supports the Gamma-only dense-"
+                    "vertex path (nq == 1, no factored vertices)."
+                )
+            if ranks.block.size > 1:
+                raise NotImplementedError(
+                    "compute_linearized requires block_comm_size == 1."
+                )
+
         n_fft = 2 * ne_full - 1
         full_freqs = self._full_frequencies(ne_full)
         prefactor = bubble_prefactor_thz(float(full_freqs[1] - full_freqs[0]))
@@ -582,11 +662,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # Sigma ~ Phi^2 -> lambda^2 on the bubble
             prefactor = prefactor * self._vertex_scale**2
         if self._ramp_n > 0:
-            # adiabatic switch-on (config.phonon.sse_ramp_iterations)
-            self._ramp_it += 1
+            # adiabatic switch-on (config.phonon.sse_ramp_iterations).
+            # The linearized call reuses the CURRENT ramp factor without
+            # advancing the counter (it is not an SCBA iteration).
+            if not lin:
+                self._ramp_it += 1
             ramp = min(1.0, self._ramp_it / float(self._ramp_n))
             prefactor = prefactor * ramp
-            if ranks.rank == 0 and ramp < 1.0:
+            if ranks.rank == 0 and ramp < 1.0 and not lin:
                 print(f"SSE ramp: {ramp:.3f}", flush=True)
         # Coupled-q convolution carries the 1/N_q mesh-average
         if nq > 1:
@@ -627,8 +710,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # Halving is suspended during the fold-verify iterations (the gate
         # needs both triangles contracted directly).
         halve_now = self._herm_pairs and not verify_now
+        if lin:
+            # The symmetry fast paths fuse legs across the (I,J)<->(J,I)
+            # mirror -- exact for the symmetric quadratic form B(G, G),
+            # not for the asymmetric cross B(dG, G) + B(G, dG). The
+            # linearized bubble always runs the plain 6-ring path.
+            fast_now = halve_now = verify_now = False
 
-        gtl, gtg, stl, stg, gtlr, gtgr = self._ensure_tau_buffers(g_lesser, n_fft)
+        bufs = self._ensure_tau_buffers(g_lesser, n_fft, with_dg=lin)
+        gtl, gtg, stl, stg, gtlr, gtgr = bufs[:6]
+        dgtl = dgtg = dgtlr = dgtgr = None
+        if lin:
+            dgtl, dgtg, dgtlr, dgtgr = bufs[6:10]
         stx = gtlr  # fast mode: cross-term accumulator in the gtlr slot
 
         # (1) FFT G(omega)->g(tau) in nnz.
@@ -704,6 +797,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             gtgr.data[0] = Xg[0]
             gtgr.data[1:] = Xg[:0:-1]
 
+            if lin:
+                # Direction legs: identical FFT + DC mask + reversal.
+                for m in (dgtl, dgtg, dgtlr, dgtgr):
+                    if m.distribution_state != "nnz":
+                        m.dtranspose(discard=True)
+                dgl_in, dgg_in = dg_lesser.data, dg_greater.data
+                if bool(sse_mask.any()):
+                    dgl_in = dgl_in.copy(); dgl_in[sse_mask] = 0.0
+                    dgg_in = dgg_in.copy(); dgg_in[sse_mask] = 0.0
+                dgtl.data[:] = self._fft_pad(dgl_in, n_fft)
+                dgtg.data[:] = self._fft_pad(dgg_in, n_fft)
+                dXl, dXg = dgtl.data, dgtg.data
+                dgtlr.data[0] = dXl[0]
+                dgtlr.data[1:] = dXl[:0:-1]
+                dgtgr.data[0] = dXg[0]
+                dgtgr.data[1:] = dXg[:0:-1]
+
         # (2) g(tau) nnz->stack: tau-slice of the full band per stack rank
         with profiler.profile_range(
             "PhPh SSE: 2 tau nnz->stack + fold", level="default", comm=comm,
@@ -715,6 +825,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             else:
                 gtlr.dtranspose()
             gtgr.dtranspose()
+            if lin:
+                for m in (dgtl, dgtg, dgtlr, dgtgr):
+                    m.dtranspose()
             # ji-transpose of the reversed legs, applied in the "stack" state where
             # the FULL nnz axis is local on every rank (the decay legs gtl/gtg are
             # NOT transposed). The transpose (i,j)->(j,i) is a pure function of the
@@ -723,7 +836,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # an immediate-neighbour exchange (BT band => |I-J|<=1). Exact + conserving
             # at any nranks AND any block_comm_size.
             self._fold_reversed_legs(
-                (gtgr,) if fast_now else (gtlr, gtgr), g_lesser)
+                (gtlr, gtgr, dgtlr, dgtgr) if lin
+                else ((gtgr,) if fast_now else (gtlr, gtgr)), g_lesser)
             if fast_now:
                 stx.data[:] = 0.0
             if stl.distribution_state != "stack":
@@ -739,6 +853,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             gtlv, gtgv = gtl.stack[...], gtg.stack[...]
             gtlrv, gtgrv = gtlr.stack[...], gtgr.stack[...]
             stlv, stgv = stl.stack[...], stg.stack[...]
+            if lin:
+                dgtlv, dgtgv = dgtl.stack[...], dgtg.stack[...]
+                dgtlrv, dgtgrv = dgtlr.stack[...], dgtgr.stack[...]
 
             # (3) Ring contraction per tau-slice in stack. Under a comm.block
             # split each rank owns outputs (I,J) with min(I,J) in its block
@@ -760,12 +877,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             gg_blk: dict[tuple[int, int], NDArray] = {}
             glr_blk: dict[tuple[int, int], NDArray] = {}
             ggr_blk: dict[tuple[int, int], NDArray] = {}
+            dgl_blk: dict[tuple[int, int], NDArray] = {}
+            dgg_blk: dict[tuple[int, int], NDArray] = {}
+            dglr_blk: dict[tuple[int, int], NDArray] = {}
+            dggr_blk: dict[tuple[int, int], NDArray] = {}
             for (K, Kp) in self._links_for_range(start, end):
                 if start <= min(K, Kp) < end:
                     gl_blk[(K, Kp)] = gtlv.blocks[K - start, Kp - start]
                     gg_blk[(K, Kp)] = gtgv.blocks[K - start, Kp - start]
                     glr_blk[(K, Kp)] = gtlrv.blocks[K - start, Kp - start]
                     ggr_blk[(K, Kp)] = gtgrv.blocks[K - start, Kp - start]
+                    if lin:
+                        dgl_blk[(K, Kp)] = dgtlv.blocks[K - start, Kp - start]
+                        dgg_blk[(K, Kp)] = dgtgv.blocks[K - start, Kp - start]
+                        dglr_blk[(K, Kp)] = dgtlrv.blocks[
+                            K - start, Kp - start]
+                        dggr_blk[(K, Kp)] = dgtgrv.blocks[
+                            K - start, Kp - start]
                 else:
                     gl_blk[(K, Kp)] = halo_l[(K, Kp)]
                     gg_blk[(K, Kp)] = halo_g[(K, Kp)]
@@ -878,6 +1006,36 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             gg_b = gg_blk[(K2, K2p)][lo:hi]
                             ggr_a = ggr_blk[(K1, K1p)][lo:hi]
                             ggr_b = ggr_blk[(K2, K2p)][lo:hi]
+                            if lin:
+                                # Mixed-leg cross (product rule): each of
+                                # the 3 bosonic-fold rings with leg a, then
+                                # leg b, carrying the direction. Exactly
+                                # B(dG, G) + B(G, dG); the reversed
+                                # direction legs are rev(dG) (R-linear).
+                                dgl_a = dgl_blk[(K1, K1p)][lo:hi]
+                                dgl_b = dgl_blk[(K2, K2p)][lo:hi]
+                                dgg_a = dgg_blk[(K1, K1p)][lo:hi]
+                                dgg_b = dgg_blk[(K2, K2p)][lo:hi]
+                                dggr_a = dggr_blk[(K1, K1p)][lo:hi]
+                                dggr_b = dggr_blk[(K2, K2p)][lo:hi]
+                                glr_a = glr_blk[(K1, K1p)][lo:hi]
+                                glr_b = glr_blk[(K2, K2p)][lo:hi]
+                                dglr_a = dglr_blk[(K1, K1p)][lo:hi]
+                                dglr_b = dglr_blk[(K2, K2p)][lo:hi]
+                                a1, a2, a3 = _rings3(
+                                    pre, dgl_a, gl_b, dggr_a, ggr_b)
+                                b1, b2, b3 = _rings3(
+                                    pre, gl_a, dgl_b, ggr_a, dggr_b)
+                                sl = ((a1 + a2) + a3) + ((b1 + b2) + b3)
+                                a4, a5, a6 = _rings3(
+                                    pre, dgg_a, gg_b, dglr_a, glr_b)
+                                b4, b5, b6 = _rings3(
+                                    pre, gg_a, dgg_b, glr_a, dglr_b)
+                                sg = ((a4 + a5) + a6) + ((b4 + b5) + b6)
+                                tx = None
+                                acc_l = sl if acc_l is None else acc_l + sl
+                                acc_g = sg if acc_g is None else acc_g + sg
+                                continue
                             r1, r2, r3 = _rings3(pre, gl_a, gl_b, ggr_a, ggr_b)
                             sl = (r1 + r2) + r3  # == legacy _fold_l order
                             if fast_now:
@@ -921,8 +1079,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # shorter chunks regress into dispatch/allocator churn.
                 pool, n_threads = ring_pool()
                 nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))
-                self._print_ring_stats(pairs_c, n_tau, n_threads, nt,
-                                       rings_per_quad=4 if fast_now else 6)
+                self._print_ring_stats(
+                    pairs_c, n_tau, n_threads, nt,
+                    rings_per_quad=12 if lin else (4 if fast_now else 6))
                 pair_times: dict | None = {} if _pair_debug else None
                 # The pool only pays off for the CPU backend (single-thread BLAS
                 # per chunk); on GPU the GEMMs are already batched on-device.
@@ -1617,14 +1776,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         return halo_l, halo_g
 
     def _ensure_tau_buffers(
-        self, g_lesser: DSDBSparse, n_fft: int
-    ) -> tuple[DSDBSparse, DSDBSparse, DSDBSparse, DSDBSparse]:
-        """Lazily allocate the four n_fft tau-buffers sharing G's pattern.
+        self, g_lesser: DSDBSparse, n_fft: int, with_dg: bool = False
+    ) -> tuple[DSDBSparse, ...]:
+        """Lazily allocate the n_fft tau-buffers sharing G's pattern.
+
+        Six buffers for the quadratic bubble (decay + sigma accumulators
+        + reversed legs); ``with_dg`` extends the SAME cached set by four
+        more (the direction's decay + reversed legs) for the linearized
+        bubble -- allocated only when first requested, so runs that never
+        call :meth:`compute_linearized` pay nothing.
         """
         cls = type(g_lesser)
         key = (cls, n_fft)
+        n_needed = 10 if with_dg else 6
         if self._tau_cache is not None and self._tau_cache[0] == key:
-            return self._tau_cache[1]
+            bufs = self._tau_cache[1]
+            if len(bufs) >= n_needed:
+                return bufs[:n_needed]
 
         rows, cols = g_lesser.spy()
         N = int(np.sum(self.block_sizes))
@@ -1636,11 +1804,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             shape=(N, N),
         ).tocsr()
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
-        bufs = tuple(
+        existing = (
+            self._tau_cache[1]
+            if self._tau_cache is not None and self._tau_cache[0] == key
+            else ()
+        )
+        bufs = existing + tuple(
             cls.from_sparray(
                 pattern, self.block_sizes, global_stack_shape=(n_fft,) + nk
             )
-            for _ in range(6)
+            for _ in range(n_needed - len(existing))
         )
         gt_rows, gt_cols = bufs[0].spy()
         if not (

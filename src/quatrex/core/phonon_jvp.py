@@ -14,12 +14,20 @@ derivative therefore needs no finite differencing:
       dG^{<,>}  = G^R dSigma^{<,>} G^A + G^R dSigma^R G^{<,>}
                   + G^{<,>} (dSigma^R)^H G^A
 
-* bubble half via the polarisation identity of a quadratic map::
+* bubble half: the bubble is a homogeneous quadratic map, so its
+  derivative is the mixed-leg (2PI-kernel, cut-line) contraction::
+
+      S'(G) dG = B(dG, G) + B(G, dG)
+
+  evaluated by ``SigmaPhononPhonon.compute_linearized`` (the default
+  ``"bilinear"`` route -- no subtraction of large terms, uniformly
+  exact to rounding), or equivalently via the polarisation identity::
 
       S'(G) dG = S(G + dG) - S(G) - S(dG)
 
-  i.e. two extra calls to the UNMODIFIED production kernel per
-  direction (``S(G)`` is the SSE output the driver already has).
+  through three calls to the unmodified production kernel (the
+  ``"polarization"`` route, kept as an independent cross-check; it
+  loses ~|S(G)|/|cross| digits on very small directions).
 
 The RGF selected solve is not the plain congruence for arbitrary
 inputs: it reads only the diagonal + upper Sigma^{<,>} blocks
@@ -62,9 +70,14 @@ class PhononJVP:
     recon_check_tol : float
         Relative tolerance for the reconstruction self-check of the
         frozen dense G against the solver's actual RGF output.
+    jvp_form : {"bilinear", "polarization"}
+        Evaluation route of the bubble derivative (see module
+        docstring). The bilinear route needs the symmetry fast paths
+        off; otherwise it falls back to polarization with a notice.
     """
 
-    def __init__(self, scba, recon_check_tol: float = 1e-8) -> None:
+    def __init__(self, scba, recon_check_tol: float = 1e-8,
+                 jvp_form: str = "bilinear") -> None:
         config = scba.config
         ph = config.phonon
 
@@ -111,6 +124,23 @@ class PhononJVP:
         self._sse = scba._phonon_phonon_interaction.sigma_phonon_phonon
         self._data = scba.data
         self.recon_check_tol = float(recon_check_tol)
+
+        if jvp_form not in ("bilinear", "polarization"):
+            raise ValueError(f"Unknown jvp_form={jvp_form!r}.")
+        if jvp_form == "bilinear" and (
+            bool(getattr(ph, "sse_greater_from_lesser", False))
+            or bool(getattr(ph, "sse_hermitian_pairs", False))
+        ):
+            # compute_linearized forces the plain 6-ring path; with a fast
+            # path enabled the driver's map differs from the plain form, so
+            # the mixed-leg cross would linearise the wrong map.
+            if comm.rank == 0:
+                print(
+                    "PhononJVP: symmetry fast paths enabled -> falling back "
+                    "to the polarization JVP route.", flush=True,
+                )
+            jvp_form = "polarization"
+        self.jvp_form = jvp_form
 
         g = self._data.g_lesser
         rows = getattr(g, "rows", None)
@@ -318,11 +348,15 @@ class PhononJVP:
     # ------------------------------------------------------------------
     # Jacobian-vector product
     # ------------------------------------------------------------------
-    def apply(self, dx: np.ndarray) -> np.ndarray:
+    def apply(self, dx: np.ndarray, form: str | None = None) -> np.ndarray:
         """Return ``J_F dx`` for a flat complex direction ``dx`` in the
-        mixer layout ``[dSigma^<, dSigma^>, dSigma^R]`` (rank-local)."""
+        mixer layout ``[dSigma^<, dSigma^>, dSigma^R]`` (rank-local).
+
+        ``form`` overrides the configured JVP route for this call
+        (used by the A/B validation to compare both)."""
         if self._GR is None:
             raise RuntimeError("PhononJVP.apply() before prepare().")
+        form = self.jvp_form if form is None else form
         n_local, nnz = self._n_local, self._nnz
         size = n_local * nnz
         dl = dx[:size].reshape(n_local, nnz)
@@ -343,15 +377,22 @@ class PhononJVP:
         dGl_flat = self._to_flat(self._skew_project(dGl)) * self._g_mask
         dGg_flat = self._to_flat(self._skew_project(dGg)) * self._g_mask
 
-        # Bubble half: polarisation identity, two production-kernel calls.
-        s1 = self._kernel(self._g_l_flat + dGl_flat,
-                          self._g_g_flat + dGg_flat)
-        s2 = self._kernel(dGl_flat, dGg_flat)
+        # Bubble half.
+        if form == "bilinear":
+            # Mixed-leg cross through compute_linearized: one kernel call,
+            # frozen legs read straight from the driver's live G buffers.
+            dS_l, dS_g, dS_r = self._kernel_linearized(dGl_flat, dGg_flat)
+        else:
+            # Polarisation identity: two production-kernel calls plus the
+            # cached S(G) from the driver's own SSE output.
+            s1 = self._kernel(self._g_l_flat + dGl_flat,
+                              self._g_g_flat + dGg_flat)
+            s2 = self._kernel(dGl_flat, dGg_flat)
+            s_l0, s_g0, s_r0 = self._s_base
+            dS_l = s1[0] - s_l0 - s2[0]
+            dS_g = s1[1] - s_g0 - s2[1]
+            dS_r = s1[2] - s_r0 - s2[2]
 
-        s_l0, s_g0, s_r0 = self._s_base
-        dS_l = s1[0] - s_l0 - s2[0]
-        dS_g = s1[1] - s_g0 - s2[1]
-        dS_r = s1[2] - s_r0 - s2[2]
         # Driver post-op on the deltas (scba.py: Sigma^R += 0.5*(S_l-S_g)).
         dF_r = dS_r + 0.5 * (dS_l - dS_g)
         return np.concatenate([dS_l, dS_g, dF_r])
@@ -365,4 +406,19 @@ class PhononJVP:
         for m in self._out:
             m.data[:] = 0.0
         self._sse.compute(self._in_l, self._in_g, out=self._out)
+        return [np.asarray(m.data).ravel().copy() for m in self._out]
+
+    def _kernel_linearized(self, dgl_flat: np.ndarray,
+                           dgg_flat: np.ndarray):
+        """One mixed-leg linearized bubble evaluation on scratch buffers."""
+        self._in_l.data[:] = xp.asarray(
+            dgl_flat.reshape(self._in_l.data.shape))
+        self._in_g.data[:] = xp.asarray(
+            dgg_flat.reshape(self._in_g.data.shape))
+        for m in self._out:
+            m.data[:] = 0.0
+        self._sse.compute_linearized(
+            self._data.g_lesser, self._data.g_greater,
+            self._in_l, self._in_g, out=self._out,
+        )
         return [np.asarray(m.data).ravel().copy() for m in self._out]

@@ -280,6 +280,17 @@ class ExperimentalMixerConfig(BaseModel):
     reconstruction self-check run at every Newton step (dense reassembled
     G^{<,>} against the solver's RGF output). A failure aborts instead of
     silently corrupting the Krylov space."""
+    newton_jvp_form: Literal["bilinear", "polarization"] = "bilinear"
+    """For ``mixing_method = "newton"``: evaluation route of the exact
+    bubble derivative. ``"bilinear"`` is the mixed-leg cross
+    B(dG, G) + B(G, dG) through ``compute_linearized`` (no subtraction of
+    large terms -- uniformly exact to rounding); ``"polarization"`` is
+    S(G+dG) - S(G) - S(dG) through three calls to the unmodified
+    production kernel (kept as the independent cross-check; loses digits
+    on very small or nearly-annihilated directions). The bilinear route
+    requires the symmetry fast paths (``sse_greater_from_lesser``,
+    ``sse_hermitian_pairs``) off; with either enabled it falls back to
+    polarization with a notice."""
 
 
 class SCBAConfig(BaseModel):
