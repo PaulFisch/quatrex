@@ -21,7 +21,7 @@ for T in 150 160 170 180 190 200; do
   echo "=== RUNG T=$T (TL=$TL TR=$TR) warm=${PREV:-cold} ==="
   env QX_CONFIG="$CFG" QX_TLEFT=$TL QX_TRIGHT=$TR \
       QX_MIXMETHOD=newton QX_MIX=0.2 QX_SIGMATOL=1e-8 QX_MAXIT=250 \
-      QX_NEWTON_SWITCH=0.1 QX_NEWTON_KRYLOV=12 QX_NEWTON_TRUSTMAX=2.0 \
+      QX_NEWTON_SWITCH=0.1 QX_NEWTON_KRYLOV=30 QX_NEWTON_TRUSTMAX=2.0 \
       ${PREV:+QX_SIGMA_INIT="$PREV"} \
       QX_SAVE_SIGMA="$OUT/sigma_T$T.npz" QX_NPZ="$OUT/run_T$T.npz" \
       bash "$REPO/phonon/studies/engine/launch.sh"
