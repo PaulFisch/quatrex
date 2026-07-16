@@ -542,8 +542,45 @@ class SCBA(TransportSolver):
                 newton_damp=xm.jfnk_newton_damp,
                 ptc=xm.jfnk_ptc,
             )
+        if scba.mixing_method == "newton":
+            from quatrex.core.newton import NewtonKrylovMixer
+
+            # The JVP context is built lazily on the first Newton step:
+            # the mixer is constructed before the phonon solver (and the
+            # interactions) exist.
+            return NewtonKrylovMixer(
+                jvp_factory=self._get_phonon_jvp,
+                warmup=xm.newton_warmup_iters,
+                switch_tol=xm.newton_switch_tol,
+                beta=self.mixing_factor,
+                max_krylov=xm.newton_max_krylov,
+                inner_tol=xm.newton_inner_tol,
+                forcing=xm.newton_forcing,
+                max_newton=xm.newton_max_newton,
+                trust=xm.newton_trust,
+                trust_max=xm.newton_trust_max,
+                newton_damp=xm.newton_damp,
+                backtrack=xm.newton_backtrack,
+            )
 
         raise ValueError(f"Unknown mixing method '{scba.mixing_method}'.")
+
+    def _get_phonon_jvp(self):
+        """Construct (once) and return the exact-JVP context for the
+        ``"newton"`` mixer. Deferred to first use so the phonon solver and
+        the phonon-phonon interaction exist."""
+        jvp = getattr(self, "_phonon_jvp", None)
+        if jvp is None:
+            from quatrex.core.phonon_jvp import PhononJVP
+
+            jvp = PhononJVP(
+                self,
+                recon_check_tol=(
+                    self.config.scba.experimental_mixer
+                    .newton_recon_check_tol),
+            )
+            self._phonon_jvp = jvp
+        return jvp
 
     def _stash_sigma(self) -> None:
         """Stash the current into the previous self-energy buffers."""

@@ -232,6 +232,55 @@ class ExperimentalMixerConfig(BaseModel):
     (marginal) eigenvalues of ``J = J_F - I`` off the origin so the inner
     GMRES no longer stalls on the near-null-space. 0 = pure Newton."""
 
+    # --- exact-Jacobian Newton-Krylov (mixing_method = "newton") --------------
+    # Same Newton system as jfnk, but the Jacobian-vector products are the
+    # EXACT analytic linearisation (frozen-G Dyson identity + polarisation
+    # identity of the quadratic bubble; cf. ``quatrex/core/phonon_jvp.py``),
+    # computed synchronously inside one mixer call -- no finite differences,
+    # no probe iterates. Phonon-only; requires a stationary map (no ramps,
+    # no Buttiker probe, no SCP tadpole, bare-lead contacts, rgf solver).
+    newton_warmup_iters: NonNegativeInt = 5
+    """For ``mixing_method = "newton"``: minimum damped-Picard iterations
+    before Newton may engage (basin capture)."""
+    newton_switch_tol: NonNegativeFloat = 1e-2
+    """For ``mixing_method = "newton"``: engage Newton once the residual has
+    dropped below ``newton_switch_tol * ||R_first||`` (two-phase
+    globalisation). ``>= 1`` engages immediately after the warmup count."""
+    newton_max_krylov: PositiveInt = 30
+    """For ``mixing_method = "newton"``: maximum GMRES dimension per Newton
+    step. Each Krylov vector costs two bubble evaluations (the polarisation
+    identity), all inside one SCBA iteration."""
+    newton_inner_tol: NonNegativeFloat = 0.1
+    """For ``mixing_method = "newton"``: base relative GMRES tolerance (used
+    directly when ``newton_forcing = "fixed"``)."""
+    newton_forcing: Literal["ew", "fixed"] = "ew"
+    """For ``mixing_method = "newton"``: Eisenstat-Walker forcing ("ew") or
+    fixed inner tolerance."""
+    newton_max_newton: PositiveInt = 100
+    """For ``mixing_method = "newton"``: cap on Newton steps; afterwards the
+    mixer falls back to damped Picard."""
+    newton_trust: NonNegativeFloat = 0.5
+    """For ``mixing_method = "newton"``: initial trust-region cap
+    ``||delta|| <= newton_trust * ||Sigma||``; adapts with hysteresis
+    (shrinks on a rejected step, grows toward ``newton_trust_max``).
+    0 disables."""
+    newton_trust_max: NonNegativeFloat = 0.0
+    """For ``mixing_method = "newton"``: maximum adaptive trust radius
+    (``<= 0`` -> no growth above ``newton_trust``)."""
+    newton_damp: PositiveFloat = 1.0
+    """For ``mixing_method = "newton"``: fixed damping of the accepted
+    (trust-capped) Newton step."""
+    newton_backtrack: NonNegativeInt = 3
+    """For ``mixing_method = "newton"``: maximum step-halvings when a Newton
+    step increased ``||R||`` (the trial residual arrives with the next SCBA
+    iteration, so each halving costs one fixed-point sweep). 0 disables the
+    accept/reject test."""
+    newton_recon_check_tol: PositiveFloat = 1e-8
+    """For ``mixing_method = "newton"``: relative tolerance of the frozen-G
+    reconstruction self-check run at every Newton step (dense reassembled
+    G^{<,>} against the solver's RGF output). A failure aborts instead of
+    silently corrupting the Krylov space."""
+
 
 class SCBAConfig(BaseModel):
     """Options for the self-consistent Born approximation."""
@@ -247,7 +296,9 @@ class SCBAConfig(BaseModel):
     the update is ``Sigma <- (1-a) Sigma_prev + a Sigma_new``; for
     ``"anderson"`` it is the damping ``beta`` of the accelerated step."""
 
-    mixing_method: Literal["linear", "anderson", "broyden", "rre", "rpm", "jfnk"] = "linear"
+    mixing_method: Literal[
+        "linear", "anderson", "broyden", "rre", "rpm", "jfnk", "newton"
+    ] = "linear"
     """Self-energy fixed-point mixer. ``"linear"`` is plain damped mixing;
     ``"anderson"`` is Anderson(m) acceleration (helps a convergent iteration;
     NOT a cure for a marginal / non-existent fixed point) -- cf.
@@ -256,7 +307,9 @@ class SCBAConfig(BaseModel):
     ``"jfnk"`` can LAND an iteration-UNSTABLE fixed point (Jacobian
     |lambda|>1) that damped/Anderson mixing cannot reach -- cf.
     ``quatrex/core/broyden.py``, ``quatrex/core/rpm.py`` and
-    ``quatrex/core/jfnk.py``."""
+    ``quatrex/core/jfnk.py``. ``"newton"`` is Newton-Krylov with the EXACT
+    analytic Jacobian-vector product (phonon-only; cf.
+    ``quatrex/core/newton.py`` and ``quatrex/core/phonon_jvp.py``)."""
 
     anderson_depth: PositiveInt = 5
     """History size m for ``mixing_method = "anderson"`` (number of stored

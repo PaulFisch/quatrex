@@ -48,6 +48,14 @@ if os.environ.get("QX_RAMP"):     cfg.phonon.sse_ramp_iterations = int(os.enviro
 if os.environ.get("QX_SCATCONTACTS"): cfg.phonon.obc_scattering_contacts = bool(int(os.environ["QX_SCATCONTACTS"]))
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
 if os.environ.get("QX_QCS"):      cfg.compute.comm.q_comm_size = int(os.environ["QX_QCS"])
+if os.environ.get("QX_TLEFT"):    cfg.phonon.left_temperature = float(os.environ["QX_TLEFT"])
+if os.environ.get("QX_TRIGHT"):   cfg.phonon.right_temperature = float(os.environ["QX_TRIGHT"])
+# Exact-Jacobian Newton-Krylov (mixing_method = "newton") knobs.
+if os.environ.get("QX_NEWTON_WARMUP"):  cfg.scba.experimental_mixer.newton_warmup_iters = int(os.environ["QX_NEWTON_WARMUP"])
+if os.environ.get("QX_NEWTON_SWITCH"):  cfg.scba.experimental_mixer.newton_switch_tol = float(os.environ["QX_NEWTON_SWITCH"])
+if os.environ.get("QX_NEWTON_KRYLOV"):  cfg.scba.experimental_mixer.newton_max_krylov = int(os.environ["QX_NEWTON_KRYLOV"])
+if os.environ.get("QX_NEWTON_TRUST"):   cfg.scba.experimental_mixer.newton_trust = float(os.environ["QX_NEWTON_TRUST"])
+if os.environ.get("QX_NEWTON_TRUSTMAX"):cfg.scba.experimental_mixer.newton_trust_max = float(os.environ["QX_NEWTON_TRUSTMAX"])
 
 # Honor the (possibly-overridden) comm grid + threading + profiler.
 setup_context(cfg)
