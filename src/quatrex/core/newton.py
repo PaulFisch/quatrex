@@ -265,9 +265,17 @@ class NewtonKrylovMixer:
         m_max = self.max_krylov
 
         # Right preconditioner for this step (fixed across the solve).
+        # Staleness guard: the harvested images are exact for the PREVIOUS
+        # iterate's Jacobian; after a large accepted step they mislead the
+        # inner solve more than they deflate it (measured: a stale basis
+        # can push GMRES to the Krylov cap). Deflation is applied only in
+        # the small-step regime -- the endgame, where m matters most --
+        # while harvesting continues every step so the basis stays warm.
+        step_frac = getattr(self, "_last_step_frac", None)
+        stale = step_frac is None or step_frac > 0.05
         if self.precond == "fresh":
             M = self._build_fresh_precond(b / beta_g)
-        elif self.precond == "recycle":
+        elif self.precond == "recycle" and not stale:
             M = self._precond_op
         else:
             M = None
@@ -331,6 +339,9 @@ class NewtonKrylovMixer:
             return x + self.beta * R
         step_r = trust_cap(self._comm, self._SUM,
                            self.newton_damp * delta_r, xk_r, self._trust_k)
+        xnorm = self._gnorm(xk_r)
+        self._last_step_frac = (self._gnorm(step_r) / xnorm
+                                if xnorm > 0.0 else None)
 
         # Harvest the deflation basis for the NEXT step from this step's
         # Arnoldi relation (exact operator images, no extra JVPs).

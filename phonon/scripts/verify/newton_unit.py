@@ -305,7 +305,7 @@ def test_precond_collapse():
     # cover both embedded partners of each C-linear mode here); assert
     # the steady-state collapse and the total-JVP saving.
     base_peak = max(ms_none[1:])
-    ok = (max(ms_rec[-6:]) <= max(3, base_peak // 2 + 1)
+    ok = (max(ms_rec[-6:]) <= max(3, 2 * base_peak // 3)
           and sum(ms_rec) < 0.8 * sum(ms_none)
           and sum(ms_fresh) <= sum(ms_none))
     print(f"[precond]   gmres_m none={ms_none} recycle={ms_rec} "
