@@ -233,3 +233,4 @@ phonon/scripts/out/snapshots/
 
 # report lives in its own Overleaf repo (see memory: overleaf-report-repo)
 document/
+phonon/studies/out/anderson_test/jprobe_snaps/*.npz

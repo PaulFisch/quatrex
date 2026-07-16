@@ -101,6 +101,7 @@ def f1():
                  "(crosses: not converged / false convergence)", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     fig.savefig(FIG / "toy_f1_linewidth.png", dpi=160)
+    fig.savefig(FIG / "toy_f1_linewidth.pdf")
     plt.close(fig)
 
 
@@ -128,6 +129,7 @@ def f2():
                  "converged linewidth and the convergence rate", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     fig.savefig(FIG / "toy_f2_alignment.png", dpi=160)
+    fig.savefig(FIG / "toy_f2_alignment.pdf")
     plt.close(fig)
 
 
@@ -182,6 +184,7 @@ def f3():
                  "and history-selected", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     fig.savefig(FIG / "toy_f3_branches.png", dpi=160)
+    fig.savefig(FIG / "toy_f3_branches.pdf")
     plt.close(fig)
 
 
@@ -226,6 +229,7 @@ def f4():
     ax.grid(alpha=0.25)
     fig.tight_layout()
     fig.savefig(FIG / "toy_f4_spectra.png", dpi=160)
+    fig.savefig(FIG / "toy_f4_spectra.pdf")
     plt.close(fig)
 
 
