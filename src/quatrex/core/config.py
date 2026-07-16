@@ -1389,6 +1389,14 @@ class PhononConfig(BaseModel):
     lambda < 1 = reduced-coupling runs for extrapolation and for soft-mode
     structures whose full-coupling bubble-only SCBA is unstable."""
 
+    sse_low_freq_mask_thz: NonNegativeFloat = 0.0
+    """Zero the bubble legs and outputs on all |omega| < this (THz). The
+    frequency grid stays anchored at zero (the FFT convolution and the
+    bosonic fold require it), so this is the working equivalent of
+    starting the window above the acoustic region: masked bins keep their
+    ballistic Dyson/transport content but contribute no three-phonon
+    scattering. 0 = legacy (only the omega = 0 bin is masked)."""
+
     low_freq_mixing_thz: NonNegativeFloat = 0.0
     """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this
     (THz) are mixed with ``low_freq_mixing_factor`` instead of the global

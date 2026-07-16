@@ -59,6 +59,7 @@ if os.environ.get("QX_NEWTON_TRUSTMAX"):cfg.scba.experimental_mixer.newton_trust
 if os.environ.get("QX_JVP_FORM"):    cfg.scba.experimental_mixer.newton_jvp_form = os.environ["QX_JVP_FORM"]
 if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_precond = os.environ["QX_NEWTON_PRECOND"]
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
+if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
 
 # Honor the (possibly-overridden) comm grid + threading + profiler.
 setup_context(cfg)

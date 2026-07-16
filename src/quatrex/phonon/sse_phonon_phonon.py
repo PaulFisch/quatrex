@@ -117,6 +117,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "use 'half' or 'fft'."
             )
         self.retarded_method = retarded_method
+        # Low-frequency scattering mask (sse_low_freq_mask_thz): zero the
+        # bubble legs AND outputs on all |omega| < cutoff bins. The grid
+        # stays anchored at zero (the FFT convolution and the bosonic fold
+        # require it), so this is the working equivalent of starting the
+        # frequency window above the acoustic region: the masked bins keep
+        # their (ballistic) Dyson/transport content but contribute no
+        # three-phonon scattering. 0 = legacy (only the omega = 0 bin is
+        # masked).
+        self._low_freq_mask = float(
+            getattr(config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0)
 
         # Transversely-periodic (k>1) coupled-q vertices
         self._qvertices: dict | None = None
@@ -737,7 +747,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # stay intact for Dyson/observables; only the copies fed into the
             # 3-phonon convolution are masked, with the matching output mask in
             # step (5).
-            sse_mask = xp.abs(xp.asarray(full_freqs)) < 1e-6
+            sse_mask = xp.abs(xp.asarray(full_freqs)) < max(
+                1e-6, self._low_freq_mask)
             if bool(sse_mask.any()):
                 gl_in = gl_in.copy(); gl_in[sse_mask] = 0.0
                 gg_in = gg_in.copy(); gg_in[sse_mask] = 0.0
