@@ -41,15 +41,16 @@ def save(fig, name):
 
 # ---------------------------------------------------------------- W1
 def w1_length_series():
-    conv = {2: (222, 44.20), 4: (311, 35.22), 5: (304, 32.44),
-            6: (241, 30.73), 7: (314, 28.07)}
+    conv = {2: (222, 44.20), 3: (209, 38.86), 4: (311, 35.22),
+            5: (304, 32.44), 6: (241, 30.73), 7: (314, 28.07)}
     div = {8: 63, 10: 119}
     J_BALL = 77.669
 
     fig, axes = plt.subplots(1, 3, figsize=(13.6, 3.7),
                              constrained_layout=True)
     ax = axes[0]
-    series = [("L4", CL / "cnt-L4-gband2/run.log", 0, "tab:blue"),
+    series = [("L3", CL / "cnt-L3-gband2/run.log", 0, "tab:purple"),
+              ("L4", CL / "cnt-L4-gband2/run.log", 0, "tab:blue"),
               ("L5", CL / "cnt-L5-gband2/run.log", 0, "tab:cyan"),
               ("L6", CL / "cnt-L56-chain/run.log", 1, "tab:green"),
               ("L7", CL / "cnt-L7-gband2/run.log", 0, "tab:olive"),
