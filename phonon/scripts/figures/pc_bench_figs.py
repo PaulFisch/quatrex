@@ -45,7 +45,8 @@ def parse(arm: str):
 def main():
     arms = sys.argv[1:] or ["none", "recycle", "fresh"]
     colors = {"none": "tab:gray", "recycle": "tab:blue",
-              "fresh": "tab:orange"}
+              "fresh": "tab:orange", "none-x": "black",
+              "recycle-x": "tab:green"}
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.8),
                              constrained_layout=True)
     print(f"{'arm':>8} {'steps':>5} {'sum_m':>6} {'+setup':>6} "
