@@ -77,12 +77,14 @@ code{font:.88em/1.4 ui-monospace,monospace;background:var(--card);
 body = f"""
 <main>
 <header>
-  <div class="eyebrow">Quatrex · phonon-phonon SCBA · full campaign report (2026-07-10 → 07-16)</div>
+  <div class="eyebrow">Quatrex · phonon-phonon SCBA · full campaign report (2026-07-10 → 07-17)</div>
   <h1>Phonon SCBA campaign: observables, convergence, and the kernel-band mechanism</h1>
   <p class="meta">Systems: CNT(3,3) at L = 2–10 cells, d5a SiNW. Post-refactor
   verification → observables pipeline → mixing-scheme study → measured Jacobians →
   synthetic grid study → the bubble kernel's inner-band causality defect, its fix
-  (<code>sse_g_band = 2</code>), and the exact-kernel length series.</p>
+  (<code>sse_g_band = 2</code>), the exact-kernel length series → the
+  exact-Jacobian Newton solver (bilinear JVP, recycled deflation) and the
+  η = 0 suite (§6).</p>
   <div class="tiles">
     {tile("0.569 → 0.362", "", "r = J/J<sub>ball</sub>, CNT L2 → L7 on the exact kernel (all converged fixed points)")}
     {tile("−1.6·10³", "", "first-Born causality violation of the masked kernel on interior slabs (edge slabs exactly causal)")}
@@ -184,6 +186,8 @@ body = f"""
         <th>iterations</th><th>J (W)</th><th>r = J/J<sub>ball</sub></th></tr>
     <tr><td>2</td><td>converged</td><td class="num">222</td>
         <td class="num">44.2</td><td class="num">0.569</td></tr>
+    <tr><td>3</td><td>converged</td><td class="num">209</td>
+        <td class="num">38.9</td><td class="num">0.500</td></tr>
     <tr><td>4</td><td>converged</td><td class="num">311</td>
         <td class="num">35.2</td><td class="num">0.453</td></tr>
     <tr><td>5</td><td>converged</td><td class="num">304</td>
@@ -196,6 +200,76 @@ body = f"""
         <td class="num">—</td><td class="num">—</td></tr>
     <tr><td>10</td><td>diverged (soft-mode collapse)</td><td class="num">119</td>
         <td class="num">—</td><td class="num">—</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>6 · The exact-Jacobian Newton solver and the η = 0 suite</h2>
+  <p>The SCBA map's nonlinearity terminates: the bubble is exactly
+  quadratic in G, so its Fréchet derivative is the mixed-leg
+  (cut-line, 2PI-kernel) contraction B(δG,G)+B(G,δG), evaluated by
+  <code>compute_linearized</code> through the unmodified production
+  pipeline — no differencing parameter, no subtraction of large terms.
+  Composed with the frozen-G dense Dyson identities this gives an exact
+  Jacobian–vector product (<code>mixing_method = "newton"</code>),
+  validated in layers: bilinear ≡ polarisation 8.7·10⁻¹⁶ (5.7·10⁻¹⁶ on
+  10⁻⁸-small directions where polarisation degrades to 4.4·10⁻⁸);
+  Dyson vs the recursive solver on its skew-hermitian invariant
+  subspace 2.3·10⁻¹⁰; composed JVP vs finite differences of the full
+  production iteration 1.6·10⁻⁹; the two routes mutually 1.3·10⁻¹⁴;
+  frozen-G reconstruction self-check 4·10⁻¹⁰ at every Newton step.</p>
+  <p><b>Deflation preconditioner, measured in both regimes.</b>
+  Harmonic-Ritz pairs recycled from each step's Arnoldi relation (exact
+  images, zero extra kernel cost, Ritz-residual filtered, accumulated
+  across steps, and gated on the step size — a stale basis measurably
+  poisons the inner solve during large steps). In the small-step
+  endgame the bare inner GMRES saturates its 30-vector cap without
+  meeting the forcing tolerance while the deflated solve meets it at
+  3–10 vectors; over matched 35-iteration budgets: 295 vs 642 exact
+  JVPs to the same residual. The fresh-basis variant (the literal
+  low-rank Schur surrogate) halves the inner dimension but pays exactly
+  that in setup — net neutral.</p>
+  {img("pc_bench", "Deflation benchmark (CNT L4 from the archived stall state): the extended bare solver (black) pins at the 30-vector cap; guarded recycling (green) runs the endgame at m = 3–10. Right: residual against cumulative exact JVPs — 295 vs 642.")}
+  <p><b>Two-phase deep convergence (L4, cold start).</b> The mid-field
+  (rel. residual 10⁻¹–10⁻³) is strongly curved — trust-capped Newton
+  advances slower than plain damped iteration there, whatever the inner
+  solve costs — so the switch belongs below it: ~306 damped sweeps to
+  10⁻³, then <b>three</b> Newton steps: 1.2·10⁻³ → 1.3·10⁻⁴ →
+  6.7·10⁻⁷ → 1.9·10⁻¹⁰ (inner m = 3/17/30). Same fixed point as the
+  linear baseline (J = 35.21, 0.03%), seven orders deeper, at
+  essentially the cost linear paid to reach 10⁻³. On L8 (no stable
+  fixed point) the solver diagnoses instead of diverging: six steps
+  with the inner iteration retaining 62–79% at the full Krylov budget
+  — the near-singular operator — while the trust region keeps
+  iterates bounded.</p>
+  <p><b>The η = 0 suite (L3).</b> With no artificial broadening
+  anywhere (device η = 0 exactly, bare spectral open boundaries),
+  plain damped iteration converges in the same 210 iterations to the
+  same fixed point as η = 10⁻¹² — heat currents agree to 2·10⁻¹³: the
+  production numbers are genuine η = 0 results. Σ-dressed leads
+  (GW ordering) reach a 2·10⁻⁵ residual but carry a 1.2% lead
+  imbalance and 13% telescoped-current spread — the dressed map does
+  not conserve at the bare-lead level. Masking three-phonon scattering
+  below 2 THz (the grid itself must stay zero-anchored for the
+  convolution arithmetic) converges tightly at r = 0.809 vs the full
+  kernel's 0.500: <b>over 60% of the anharmonic resistance at 300 K
+  flows through channels involving a sub-2-THz phonon</b> — the
+  infrared bins are the dominant resistive phase space, not a
+  numerical nuisance.</p>
+  <div class="tblwrap"><table>
+    <tr><th>run</th><th>setting</th><th>outcome</th></tr>
+    <tr><td>cnt-L3-eta0</td><td>η = 0 exact, bare spectral OBC, linear</td>
+        <td>converged, ≡ η=10⁻¹² fixed point to 1.6·10⁻¹³ (r = 0.500)</td></tr>
+    <tr><td>cnt-L3-eta0-scat</td><td>+ Σ-dressed leads</td>
+        <td>residual 2·10⁻⁵; 1.2% lead imbalance, 13% internal spread</td></tr>
+    <tr><td>cnt-L3-eta0-mask</td><td>+ scattering masked &lt; 2 THz</td>
+        <td>converged, tightly conserving, r = 0.809</td></tr>
+    <tr><td>newton-L4-v2</td><td>two-phase, switch at rel 10⁻³</td>
+        <td>309 its → residual 1.9·10⁻¹⁰, J ≡ linear (0.03%)</td></tr>
+    <tr><td>newton-L8</td><td>Newton on the unstable model</td>
+        <td>bounded; inner solve retains 62–79% at the cap (diagnosis)</td></tr>
+    <tr><td>newton-d5a-chain</td><td>T-continuation 150→200 K, deflated Newton</td>
+        <td>in flight (rung 150; marginal spectrum, m = 40 inner solves)</td></tr>
   </table></div>
 </section>
 
@@ -224,19 +298,39 @@ body = f"""
     <tr><td>Contact model</td>
         <td>Scattering-dressed (GW-ordering) contacts are stable on the
         exact kernel and shift J by 25–30% at L4 — a leading-order model
-        choice for short devices.</td></tr>
+        choice for short devices; at η = 0 (L3) they carry a 1.2% lead
+        imbalance and a 13% telescoped-current spread the bare-lead map
+        does not have.</td></tr>
+    <tr><td>Deep convergence?</td>
+        <td>Two-phase: damped iteration through the curved mid-field to
+        rel 10⁻³, then exact-Jacobian Newton — three steps to 1.9·10⁻¹⁰
+        at L4, same fixed point, same total cost as linear-to-10⁻³.
+        Recycled harmonic-Ritz deflation cuts the endgame inner solve
+        3–10× per step (2.2× total), gated against staleness.</td></tr>
+    <tr><td>Is η = 10⁻¹² a real η = 0?</td>
+        <td>Yes — exact-η=0 reproduces it to 1.6·10⁻¹³ (identical
+        210-iteration trajectory, L3, bare spectral OBC).</td></tr>
+    <tr><td>Can the infrared bins be excluded?</td>
+        <td>No — masking scattering below 2 THz raises r from 0.500 to
+        0.809: the sub-2-THz channels carry ~62% of the anharmonic
+        resistance. (A grid not anchored at 0 is refused by the kernel:
+        the FFT convolution and bosonic fold require zero anchoring.)</td></tr>
   </table></div>
   <p class="meta">Provenance: engine snapshots (run*.npz), per-run logs and
-  Σ snapshots mirrored under <code>phonon/studies/out/anderson_test/</code>
+  Σ snapshots mirrored under <code>phonon/studies/out/anderson_test/</code>,
+  <code>phonon/studies/out/newton_pc_bench/</code>
   and <code>cluster/</code> on the laptop; figures from
-  <code>phonon/scripts/figures/gband_campaign_figs.py</code> and
+  <code>phonon/scripts/figures/gband_campaign_figs.py</code>,
+  <code>pc_bench_figs.py</code> and
   <code>_campaign_figures.py</code>; synthetic study
-  <code>phonon/studies/_toy_grid_*.py</code>. Document: theory
-  <code>40_sse_computation</code> (corrected block-band paragraph +
-  Schur positivity), results <code>60_eta0</code> (ssec:res_gband),
-  <code>30_cnt</code> (exact-kernel series), <code>90_scaling</code>
-  (band cost). The L3 exact-kernel rerun is in flight and completes the
-  series.</p>
+  <code>phonon/studies/_toy_grid_*.py</code>; JVP validation
+  <code>phonon/studies/_jvp_validate.py</code>, <code>_newton_ab.py</code>,
+  <code>phonon/scripts/verify/newton_unit.py</code>. Document: theory
+  <code>40_scba</code> (exact linearisation sub:exact_jvp +
+  eq:jvp_woodbury), results <code>60_eta0</code> (ssec:res_gband,
+  ssec:res_newton), <code>30_cnt</code> (exact-kernel series incl. L3),
+  <code>90_scaling</code> (band cost). The d5a temperature-continuation
+  chain is in flight.</p>
 </section>
 </main>
 """
