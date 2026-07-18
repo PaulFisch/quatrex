@@ -342,6 +342,56 @@ class SCBA(TransportSolver):
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
 
+        # File-based (possibly NON-UNIFORM) phonon frequency grid: with
+        # phonon.frequency_grid = "file" the grid is read verbatim from
+        # phonon_energies.npy and overrides the electron energy window.
+        # The bubble then needs the auxiliary uniform grid
+        # (phonon.sse_aux_grid_dw_thz > 0) unless the file is uniform.
+        if (
+            config.simulation_type == "phonon"
+            and getattr(config.phonon, "frequency_grid", "window") == "file"
+        ):
+            energies_path = self.config.input_dir / "phonon_energies.npy"
+            grid = np.asarray(get_host(distributed_load(energies_path)))
+            if grid.ndim != 1 or grid.size < 2:
+                raise ValueError(
+                    f"phonon_energies.npy ({energies_path}) must hold a 1D "
+                    "frequency grid with at least 2 points."
+                )
+            if float(grid[0]) < 0.0 or np.any(np.diff(grid) <= 0.0):
+                raise ValueError(
+                    "phonon.frequency_grid='file' requires a strictly "
+                    "ascending, non-negative grid in phonon_energies.npy."
+                )
+            # Fail fast (before a full Dyson sweep) on the combination the
+            # SSE will reject anyway: a non-uniform grid needs the
+            # auxiliary bubble grid.
+            if (
+                config.scba.phonon
+                and config.phonon.model == "negf"
+                and float(getattr(config.phonon,
+                                  "sse_aux_grid_dw_thz", 0.0) or 0.0) <= 0.0
+            ):
+                df = float(grid[1] - grid[0])
+                if abs(float(grid[0])) > 1e-9 * df or bool(
+                    np.max(np.abs(np.diff(grid) - df)) > 1e-9 * df
+                ):
+                    raise ValueError(
+                        "phonon_energies.npy holds a non-uniform (or "
+                        "non-zero-anchored) grid, but the bubble FFT runs "
+                        "on the primary grid (sse_aux_grid_dw_thz = 0). "
+                        "Set phonon.sse_aux_grid_dw_thz > 0."
+                    )
+            self.energies = xp.asarray(grid)
+            if comm.rank == 0:
+                spacings = np.diff(grid)
+                print(
+                    f"Phonon frequency grid from file: {grid.size} pts on "
+                    f"[{grid[0]:.4g}, {grid[-1]:.4g}] THz, spacing "
+                    f"[{spacings.min():.4g}, {spacings.max():.4g}] THz.",
+                    flush=True,
+                )
+
         min_energy = self.energies[0]
         max_energy = self.energies[-1]
         num_energies = len(self.energies)
@@ -441,13 +491,19 @@ class SCBA(TransportSolver):
                 solver_freqs = np.asarray(self.phonon_solver.local_frequencies)
                 npy_freqs = np.asarray(self.phonon_energies)
                 # Compare against the GLOBAL configured window -- NOT the
-                # rank-local slice (len(global)/stack points).
-                el = self.config.electron
-                global_freqs = np.linspace(
-                    float(el.energy_window_min),
-                    float(el.energy_window_max),
-                    int(el.energy_window_num),
-                )
+                # rank-local slice (len(global)/stack points). With
+                # frequency_grid = "file" the npy IS the solver grid, so
+                # there is nothing to reconcile.
+                if getattr(config.phonon, "frequency_grid",
+                           "window") == "file":
+                    global_freqs = np.asarray(get_host(self.energies))
+                else:
+                    el = self.config.electron
+                    global_freqs = np.linspace(
+                        float(el.energy_window_min),
+                        float(el.energy_window_max),
+                        int(el.energy_window_num),
+                    )
                 if npy_freqs.shape != global_freqs.shape or not np.allclose(
                     npy_freqs, global_freqs
                 ):
@@ -876,6 +932,20 @@ class SCBA(TransportSolver):
             flush=True,
         )
 
+    @staticmethod
+    def _phonon_hw_weights(solver) -> NDArray:
+        """``|omega|`` weights of the phonon energy integrals, multiplied
+        by the per-bin quadrature cell widths when the frequency grid is
+        NON-UNIFORM. On a uniform grid the legacy unweighted sum is kept
+        bit-for-bit (the constant ``dw`` cancels in every conservation
+        ratio); on a non-uniform grid the unweighted sum is not an
+        integral and the conservation gates would compare misweighted
+        quantities."""
+        w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
+        if not getattr(solver, "uniform_frequency_grid", True):
+            w = w * xp.asarray(solver.local_frequency_weights, dtype=float)
+        return w
+
     def _phonon_bubble_energy_balance(self):
         """Bubble energy-balance diagnostic: the in- and out-scattering
         energy integrals
@@ -915,7 +985,7 @@ class SCBA(TransportSolver):
                               xp.asarray(ok.astype(np.float64)))
         perm, ok = self._bal_perm
         solver = self.subsystems.get("phonon")
-        w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
+        w = self._phonon_hw_weights(solver)
 
         def weighted(sig, g):
             sd = sig.data.reshape(sig.data.shape[0], -1, sig.data.shape[-1])
@@ -986,7 +1056,7 @@ class SCBA(TransportSolver):
             self._slab_onehot = (xp.asarray(onehot), xp.asarray(onehot_diag))
         onehot, onehot_diag = self._slab_onehot
         solver = self.subsystems.get("phonon")
-        w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
+        w = self._phonon_hw_weights(solver)
 
         def weighted_by_slab(sig, g):
             sd = sig.data.reshape(sig.data.shape[0], -1, sig.data.shape[-1])
@@ -1022,7 +1092,7 @@ class SCBA(TransportSolver):
         if mw is None:
             return None, float("inf"), float("inf")
         mw = xp.asarray(mw)
-        w = xp.abs(xp.asarray(solver.local_frequencies)).reshape(
+        w = self._phonon_hw_weights(solver).reshape(
             (-1,) + (1,) * (mw.ndim - 1))
         heat_e = xp.real(xp.sum(w * mw, axis=0))    # (*nk, interface)
         # Sum over any transverse-q axes: under 3-phonon scattering the

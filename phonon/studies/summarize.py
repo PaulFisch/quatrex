@@ -84,6 +84,10 @@ def lead_heat(npz):
         out["best0"] = float(bh.reshape(-1)[0])
         out["best_cons"] = float(d.get("best_cons", np.nan))
         out["internal_spread"] = float(d.get("internal_spread", np.nan))
+    # Heat-key convention: uniform grids store the legacy unweighted sum
+    # (needs the * dw of g_const); non-uniform runs already fold the cell
+    # widths in, so the keys ARE integrals (skip the dw factor).
+    out["uniform_grid"] = bool(d.get("uniform_frequency_grid", True))
     return out
 
 
@@ -116,15 +120,19 @@ def summarize(run_dir, out_dir, do_plot):
             print(f"[skip] {c['tag']}: no ballistic npz")
             continue
         C, A_c, dw = g_const(c, run_dir)
+        # Non-uniform (file-grid) runs store the heat INTEGRAL, not the
+        # unweighted sum: drop the dw factor of the conversion for them.
+        C_b = C if b.get("uniform_grid", True) else C / dw
         row = dict(tag=c["tag"], system=c["system"], sweep=c["sweep"],
                    t_mean=c["t_mean"], n_slabs=c["n_slabs"],
-                   G_ball_W_per_m2_K=C * b["lead0"], A_c=A_c, dw_THz=dw)
+                   G_ball_W_per_m2_K=C_b * b["lead0"], A_c=A_c, dw_THz=dw)
         if a is not None:
             # prefer the converged fixed point; fall back to best-iterate
             anh0 = a["lead0"] if a["converged"] else a.get("best0", a["lead0"])
-            row["G_anh_W_per_m2_K"] = C * anh0
-            row["G_anh"] = C * anh0
-            row["ratio"] = anh0 / b["lead0"]
+            C_a = C if a.get("uniform_grid", True) else C / dw
+            row["G_anh_W_per_m2_K"] = C_a * anh0
+            row["G_anh"] = C_a * anh0
+            row["ratio"] = (C_a * anh0) / (C_b * b["lead0"])
             row["anh_converged"] = a["converged"]
             row["anh_n_iter"] = a["n_iter"]
             row["lead_conservation"] = (abs(a["lead0"] - a["lead1"])

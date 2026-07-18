@@ -8,7 +8,9 @@ Env overrides (optional, on top of the TOML):
   QX_CONFIG (required, toml path), QX_NPZ (snapshot out, default <dir>/run.npz),
   QX_BALLISTIC=1 (zero the 3-phonon vertex -> the G_ball baseline),
   QX_ETA QX_MIX QX_MAXIT QX_NE QX_RETARDED QX_FC3 QX_ETAOBC
-  QX_BCS QX_QCS (comm sizes -- override the TOML for a one-config rank sweep).
+  QX_BCS QX_QCS (comm sizes -- override the TOML for a one-config rank sweep),
+  QX_FREQGRID=file (non-uniform grid from phonon_energies.npy),
+  QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz).
 
 Run: ``mpirun -np N python run.py`` (config via QX_CONFIG).
 """
@@ -60,6 +62,19 @@ if os.environ.get("QX_JVP_FORM"):    cfg.scba.experimental_mixer.newton_jvp_form
 if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_precond = os.environ["QX_NEWTON_PRECOND"]
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
 if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
+# Non-uniform frequency grid: primary grid from phonon_energies.npy
+# (QX_FREQGRID=file) + auxiliary uniform bubble grid (spacing/extent).
+if os.environ.get("QX_FREQGRID"):
+    _fg = os.environ["QX_FREQGRID"].strip().lower()
+    if _fg not in ("window", "file"):
+        raise SystemExit(f"QX_FREQGRID must be 'window' or 'file', "
+                         f"got {os.environ['QX_FREQGRID']!r}")
+    cfg.phonon.frequency_grid = _fg
+if cfg.phonon.frequency_grid == "file" and os.environ.get("QX_NE"):
+    print("WARNING: QX_NE has no effect with frequency_grid='file' "
+          "(the grid comes from phonon_energies.npy).", flush=True)
+if os.environ.get("QX_AUXDW"):    cfg.phonon.sse_aux_grid_dw_thz = float(os.environ["QX_AUXDW"])
+if os.environ.get("QX_AUXFMAX"):  cfg.phonon.sse_aux_grid_fmax_thz = float(os.environ["QX_AUXFMAX"])
 
 # Honor the (possibly-overridden) comm grid + threading + profiler.
 setup_context(cfg)
@@ -117,6 +132,10 @@ if os.environ.get("QX_BALLISTIC") == "1":
         print(f"BALLISTIC: zeroed {n_zeroed} phi_blocks in place", flush=True)
 
 w = np.abs(np.asarray(ph.local_frequencies))
+if not getattr(ph, "uniform_frequency_grid", True):
+    # Non-uniform grid: fold the per-bin quadrature cell widths into the
+    # heat integral (uniform grids keep the legacy unweighted sum).
+    w = w * np.asarray(ph.local_frequency_weights)
 
 
 def _heat(mw):
@@ -204,7 +223,8 @@ SCBA._has_converged = _logged
 if ranks.rank == 0:
     print(f"RUN config={CFG} phonon={cfg.scba.phonon} eta={cfg.phonon.eta} "
           f"retarded={cfg.phonon.retarded_method} nblk={ph.block_sizes.shape[0]} "
-          f"ne={cfg.electron.energy_window_num} "
+          f"ne={int(np.asarray(scba.energies).shape[0])} "
+          f"fgrid={cfg.phonon.frequency_grid} "
           f"bcs={cfg.compute.comm.block_comm_size} qcs={cfg.compute.comm.q_comm_size} "
           f"nranks={ranks.size}", flush=True)
 
@@ -291,8 +311,16 @@ if ranks.rank == 0:
     Path(npz).parent.mkdir(parents=True, exist_ok=True)
     final_heat = (_heat(ph.meir_wingreen_current)
                   if getattr(ph, "meir_wingreen_current", None) is not None else None)
+    from quatrex.grid.energies import frequency_cell_widths
     out = dict(
         energies=np.asarray(scba.energies).real,
+        # Heat-key convention marker: on a UNIFORM grid the heat keys are
+        # the legacy unweighted sums (integral / dw); on a non-uniform
+        # grid the cell widths are folded in and the keys ARE integrals.
+        uniform_frequency_grid=bool(
+            getattr(ph, "uniform_frequency_grid", True)),
+        frequency_cell_widths=np.asarray(
+            frequency_cell_widths(np.asarray(scba.energies).real)),
         eta=float(cfg.phonon.eta), retarded=str(cfg.phonon.retarded_method),
         nblocks=int(ph.block_sizes.shape[0]), phonon=bool(cfg.scba.phonon),
         ballistic=bool(os.environ.get("QX_BALLISTIC") == "1"),
@@ -364,8 +392,14 @@ if ranks.rank == 0:
         out["iter_sigR_w"] = np.asarray(_iter_sigR_w)
         out["iter_sigL_w"] = np.asarray(_iter_sigL_w)
         if _iter_graw_w:
+            # graw lives on the primary grid (== energies); gwin on the
+            # bubble's conv grid (the aux grid when sse_aux_grid_dw_thz
+            # is on, else identical) -- save that axis alongside.
             out["iter_graw_w"] = np.asarray(_iter_graw_w)
             out["iter_gwin_w"] = np.asarray(_iter_gwin_w)
+            _wf = getattr(_sse_diag, "_diag_win_freqs", None)
+            if _wf is not None:
+                out["gwin_freqs"] = np.asarray(_wf)
     if _iter_heat:
         # SCBA convergence trace: heat per interface per iteration. At
         # stack>1 this is the rank-0-local frequency slice (relative

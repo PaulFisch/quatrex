@@ -137,6 +137,9 @@ low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
+frequency_grid = "{a.freq_grid}"
+sse_aux_grid_dw_thz = {a.aux_dw}
+sse_aux_grid_fmax_thz = {a.aux_fmax}
 [phonon.solver]
 compute_current = true
 max_batch_size = {a.max_batch}
@@ -244,6 +247,9 @@ low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
+frequency_grid = "{a.freq_grid}"
+sse_aux_grid_dw_thz = {a.aux_dw}
+sse_aux_grid_fmax_thz = {a.aux_fmax}
 [phonon.solver]
 compute_current = true
 max_batch_size = {a.max_batch}
@@ -280,6 +286,20 @@ def main():
     p.add_argument("--emin", type=float, default=0.0)
     p.add_argument("--nfreq", type=int, default=None)
     p.add_argument("--fmax", type=float, default=None)
+    p.add_argument("--freq-grid", dest="freq_grid", default="window",
+                   choices=["window", "file"],
+                   help="phonon frequency grid source: the uniform window "
+                        "(legacy) or phonon_energies.npy verbatim (may be "
+                        "non-uniform; pair with --aux-dw). With 'file' an "
+                        "EXISTING phonon_energies.npy (e.g. from "
+                        "make_grid.py) is kept, not overwritten.")
+    p.add_argument("--aux-dw", dest="aux_dw", type=float, default=0.0,
+                   help="auxiliary uniform bubble-grid spacing (THz); "
+                        "0 = legacy (bubble on the primary grid)")
+    p.add_argument("--aux-fmax", dest="aux_fmax", type=float, default=0.0,
+                   help="auxiliary bubble-grid upper edge (THz), set >= "
+                        "2*omega_max for a support-complete KK; 0 = span "
+                        "the primary grid")
     p.add_argument("--mix", type=float, default=0.1)
     p.add_argument("--mixing-method", default="linear",
                    choices=["linear", "anderson", "broyden", "rre", "rpm", "jfnk"],
@@ -433,17 +453,31 @@ def main():
         a.fmax = a.fmax or 15.0
         cfg = film_config(a)
 
+    # Validate BEFORE writing anything: --freq-grid file must not leave a
+    # TOML behind that references a grid file which does not exist.
+    import numpy as np
+    ep = Path(a.work) / "phonon_energies.npy"
+    if a.freq_grid == "file" and not (ep.exists() and not ep.is_symlink()):
+        raise SystemExit(
+            "--freq-grid file requires an existing (non-symlink) "
+            f"phonon_energies.npy in {a.work} (run make_grid.py first).")
+
     path = Path(a.work) / "quatrex_config.toml"
     path.write_text(cfg)
     # Keep the energy-grid input consistent with the configured window: the
     # geometry build may have used a different default nfreq, and the SSE
     # grid spacing scales Sigma (2026-06-10 audit). Replace symlinked inputs
     # with a real file (never write through the shared geometry symlink).
-    import numpy as np
-    ep = Path(a.work) / "phonon_energies.npy"
-    if ep.is_symlink() or ep.exists():
-        ep.unlink()  # break sym/hard links to the shared geometry copy
-    np.save(ep, np.linspace(a.emin, a.fmax, a.nfreq))
+    if a.freq_grid == "file":
+        # The file IS the (possibly non-uniform) grid -- e.g. written by
+        # make_grid.py before this call. Keep it.
+        g = np.load(ep)
+        print(f"kept phonon_energies.npy: {g.size} pts on "
+              f"[{g[0]:.4g}, {g[-1]:.4g}] THz")
+    else:
+        if ep.is_symlink() or ep.exists():
+            ep.unlink()  # break sym/hard links to the shared geometry copy
+        np.save(ep, np.linspace(a.emin, a.fmax, a.nfreq))
     print(f"wrote {path}  system={a.system} T={a.temperature}(dT={a.dt}) "
           f"eta={a.eta} retarded={a.retarded} "
           f"mix={a.mix}/{a.mixing_method} bcs={a.bcs} qcs={a.qcs} "

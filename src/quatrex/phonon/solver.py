@@ -80,6 +80,15 @@ class PhononSolver(SubsystemSolver):
                 "in the SSE, not by the grid)."
             )
         self.local_frequencies = get_local_slice(frequencies, comm.stack)
+        # Per-bin quadrature cell widths + uniformity flag: the heat/energy
+        # integrals (SCBA conservation gates, engine snapshots) weight by
+        # these on a NON-UNIFORM grid; on a uniform grid they are the
+        # constant dw and the legacy unweighted sums are kept.
+        from quatrex.grid.energies import (
+            frequency_cell_widths, is_uniform_grid)
+        self.local_frequency_weights = get_local_slice(
+            frequency_cell_widths(frequencies), comm.stack)
+        self.uniform_frequency_grid = is_uniform_grid(frequencies)
         self._ir_floor_diag = None
 
         # Load the dynamical matrix
@@ -141,8 +150,9 @@ class PhononSolver(SubsystemSolver):
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
-        # frequencies are the linear-frequency grid in THz (uniform spacing,
-        # as the bubble FFT requires); the Bose occupation needs hbar*omega.
+        # frequencies are the linear-frequency grid in THz (uniform unless
+        # the SSE runs on the auxiliary bubble grid, sse_aux_grid_dw_thz);
+        # the Bose occupation needs hbar*omega.
         hbar_omega_eV = thz_to_ev(np.abs(self.local_frequencies))
         self.left_occupancies = bose_einstein(hbar_omega_eV, self.left_temperature)
         self.right_occupancies = bose_einstein(hbar_omega_eV, self.right_temperature)
@@ -383,6 +393,9 @@ class PhononSolver(SubsystemSolver):
         _ir_floor_c = self._eta_ir_floor_c
         self._ir_floor_diag = None
         if _ir_floor_c > 0.0 and self.energies.size > 1:
+            # On a non-uniform grid this is the width of the FIRST cell --
+            # exactly the near-DC resolution the sub-grid soft-mode floor
+            # is meant to track (uniform grids: the usual dw).
             _dw = float(abs(get_host(self.energies[1] - self.energies[0])))
             _w = xp.asarray(self.local_frequencies, dtype=float)
             _gamma = (_ir_floor_c * _dw) ** 2          # THz^2
