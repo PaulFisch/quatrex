@@ -42,7 +42,7 @@ def setup_module() -> None:  # pytest hook
 
 
 def _make_cfg(retarded_method: str = "fft", aux_dw: float = 0.0,
-              aux_fmax: float = 0.0):
+              aux_fmax: float = 0.0, aux_restrict: str = "adjoint"):
     """Minimal mock config (cf. test_sse_phonon_phonon._make_cfg)."""
 
     class _Phonon:
@@ -53,6 +53,7 @@ def _make_cfg(retarded_method: str = "fft", aux_dw: float = 0.0,
     _Phonon.sse_tau_chunk_bytes = 4096
     _Phonon.sse_aux_grid_dw_thz = aux_dw
     _Phonon.sse_aux_grid_fmax_thz = aux_fmax
+    _Phonon.sse_aux_restrict = aux_restrict
 
     class _Cfg:
         phonon = _Phonon()
@@ -132,10 +133,13 @@ def _random_phi(rng, n_blocks, nbs):
     return phi
 
 
+@pytest.mark.parametrize("restrict", ["adjoint", "sample"])
 @pytest.mark.parametrize("retarded", ["half", "fft"])
-def test_aux_matches_legacy_on_matching_grid(retarded: str) -> None:
+def test_aux_matches_legacy_on_matching_grid(retarded: str,
+                                             restrict: str) -> None:
     """aux grid == uniform primary grid: the bridge is the identity and
-    the aux path must reproduce the legacy path to rounding."""
+    the aux path must reproduce the legacy path to rounding (both
+    restriction modes degenerate to the identity)."""
     rng = np.random.default_rng(5)
     n_blocks, nbs, ne = 3, 3, 21
     block_sizes = [nbs] * n_blocks
@@ -147,7 +151,8 @@ def test_aux_matches_legacy_on_matching_grid(retarded: str) -> None:
     ref = _run_production(freqs, phi, block_sizes, gl, gg,
                           _make_cfg(retarded))
     aux = _run_production(freqs, phi, block_sizes, gl, gg,
-                          _make_cfg(retarded, aux_dw=dw))
+                          _make_cfg(retarded, aux_dw=dw,
+                                    aux_restrict=restrict))
 
     for r, a, name in zip(ref, aux, ("Sigma^<", "Sigma^>", "Sigma^R")):
         for key in r:
@@ -172,11 +177,15 @@ def _lorentz_bands(freqs, centers, width, amps_l, amps_g):
     return gl, gg
 
 
-def test_nonuniform_matches_fine_uniform_reference() -> None:
+@pytest.mark.parametrize("restrict", ["adjoint", "sample"])
+def test_nonuniform_matches_fine_uniform_reference(restrict: str) -> None:
     """A non-uniform primary grid clustered on the spectral lines +
     auxiliary grid reproduces the fine-uniform-reference Sigma at the
-    primary points (linear-interpolation error, second order in the
-    local spacing)."""
+    primary points (leg-interpolation error, second order in the local
+    spacing). "sample" is compared pointwise; "adjoint" against the
+    SAME hat-averaging applied to the reference (its pointwise values
+    at unresolved combination peaks are conservation-correct averages
+    by design)."""
     rng = np.random.default_rng(9)
     n_blocks, nbs = 2, 2
     block_sizes = [nbs] * n_blocks
@@ -212,16 +221,40 @@ def test_nonuniform_matches_fine_uniform_reference() -> None:
     gl_n, gg_n = _lorentz_bands(freqs_nu, centers, width, amps_l, amps_g)
     nu_l, nu_g, nu_r = _run_production(
         freqs_nu, phi, block_sizes, gl_n, gg_n,
-        _make_cfg("fft", aux_dw=dw_fine, aux_fmax=fmax))
+        _make_cfg("fft", aux_dw=dw_fine, aux_fmax=fmax,
+                  aux_restrict=restrict))
 
-    def _interp_ref(block):  # reference block sampled at the nu points
-        out = np.empty((freqs_nu.size,) + block.shape[1:], dtype=complex)
-        for i in range(block.shape[1]):
-            for j in range(block.shape[2]):
-                out[:, i, j] = (
-                    np.interp(freqs_nu, freqs_fine, block[:, i, j].real)
-                    + 1j * np.interp(freqs_nu, freqs_fine, block[:, i, j].imag))
-        return out
+    if restrict == "adjoint":
+        # The reference grid IS the aux grid (same dw and span): apply
+        # the identical restriction operator to the reference.
+        from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+        ssp = SigmaPhononPhonon(
+            _make_cfg("half", aux_dw=dw_fine, aux_fmax=fmax),
+            phonon_frequencies=freqs_nu,
+            block_sizes=np.array([nbs]),
+            phi_blocks={(0, 0, 0): np.zeros((nbs, nbs, nbs), complex)},
+        )
+        aux, _, r_plan = ssp._aux_grid_plan(
+            ssp._full_frequencies(freqs_nu.size))
+        np.testing.assert_allclose(np.asarray(aux), freqs_fine, atol=1e-9)
+
+        def _interp_ref(block):
+            out = np.asarray(
+                ssp._restrict_from_aux(xp.asarray(block), r_plan))
+            out[0] = 0.0  # the production out-masks the omega=0 bin
+            return out
+    else:
+        def _interp_ref(block):  # reference sampled at the nu points
+            out = np.empty((freqs_nu.size,) + block.shape[1:],
+                           dtype=complex)
+            for i in range(block.shape[1]):
+                for j in range(block.shape[2]):
+                    out[:, i, j] = (
+                        np.interp(freqs_nu, freqs_fine, block[:, i, j].real)
+                        + 1j * np.interp(freqs_nu, freqs_fine,
+                                         block[:, i, j].imag))
+            return out
 
     for ref, nu, name, tol in (
         (ref_l, nu_l, "Sigma^<", 0.02),
@@ -291,7 +324,8 @@ def test_aux_fmax_extends_convolution_support() -> None:
     freqs = np.linspace(0.0, 16.0, ne)
     phi = {(0, 0, 0): rng.standard_normal((nbs, nbs, nbs)) + 0j}
     ssp = SigmaPhononPhonon(
-        _make_cfg("half", aux_dw=0.5, aux_fmax=32.0),
+        _make_cfg("half", aux_dw=0.5, aux_fmax=32.0,
+                  aux_restrict="sample"),
         phonon_frequencies=freqs, block_sizes=np.array([nbs]),
         phi_blocks=phi,
     )
@@ -307,11 +341,47 @@ def test_aux_fmax_extends_convolution_support() -> None:
         interp[inside, 0].real, 2.0 * np.asarray(aux)[inside] + 1.0,
         rtol=1e-12)
     assert np.all(interp[~inside] == 0.0)
-    # R: sampling back the aux-grid linear function is exact.
+    # R ("sample"): sampling back an aux-grid linear function is exact.
     lin_aux = (3.0 * np.asarray(aux) - 0.5)[:, None]
-    back = np.asarray(ssp._sample_axis0(xp.asarray(lin_aux + 0j), r_plan))
+    back = np.asarray(ssp._restrict_from_aux(xp.asarray(lin_aux + 0j),
+                                             r_plan))
     np.testing.assert_allclose(
         back[:, 0].real, 3.0 * np.asarray(freqs) - 0.5, rtol=1e-12)
+
+
+def test_adjoint_restriction_conserves_pairing() -> None:
+    """R = W_prim^-1 P^T W_aux transfers the aux-grid pairing exactly:
+    sum_m w_m (R S)(m) G(m) == dw_aux sum_n S(n) (P G)(n) -- the
+    discrete identity that keeps the dual-grid bubble Phi-derivable."""
+    from quatrex.grid.energies import frequency_cell_widths
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+    rng = np.random.default_rng(4)
+    nbs = 2
+    freqs = np.unique(np.concatenate(
+        [np.linspace(0.0, 16.0, 12), np.linspace(4.0, 6.0, 25)]))
+    phi = {(0, 0, 0): rng.standard_normal((nbs, nbs, nbs)) + 0j}
+    ssp = SigmaPhononPhonon(
+        _make_cfg("half", aux_dw=0.11, aux_fmax=20.0),
+        phonon_frequencies=freqs, block_sizes=np.array([nbs]),
+        phi_blocks=phi,
+    )
+    aux, p_plan, r_plan = ssp._aux_grid_plan(
+        ssp._full_frequencies(freqs.size))
+    assert r_plan[0] == "adjoint"
+    ne_aux = int(np.asarray(aux).size)
+    sig = (rng.standard_normal((ne_aux, 3))
+           + 1j * rng.standard_normal((ne_aux, 3)))
+    g = (rng.standard_normal((freqs.size, 3))
+         + 1j * rng.standard_normal((freqs.size, 3)))
+    w_prim = np.asarray(frequency_cell_widths(freqs))
+    dw = float(aux[1] - aux[0])
+    lhs = np.sum(w_prim[:, None]
+                 * np.asarray(ssp._restrict_from_aux(xp.asarray(sig),
+                                                     r_plan)) * g)
+    pg = np.asarray(ssp._interp_axis0(xp.asarray(g), p_plan))
+    rhs = dw * np.sum(sig * pg)
+    np.testing.assert_allclose(lhs, rhs, rtol=1e-12)
 
 
 def test_frequency_cell_widths() -> None:

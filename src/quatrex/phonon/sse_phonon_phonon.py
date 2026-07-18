@@ -141,6 +141,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             getattr(config.phonon, "sse_aux_grid_dw_thz", 0.0) or 0.0)
         self._aux_fmax = float(
             getattr(config.phonon, "sse_aux_grid_fmax_thz", 0.0) or 0.0)
+        # Restriction aux -> primary: "adjoint" (default) is the adjoint of
+        # the leg interpolation, R = W_prim^-1 P^T W_aux -- it transfers
+        # the Phi-derivable energy balance of the aux-grid bubble to the
+        # primary cell-width pairing EXACTLY. "sample" is the pointwise
+        # linear sample (sharper at peaks, not conserving).
+        self._aux_restrict = str(
+            getattr(config.phonon, "sse_aux_restrict", "adjoint"))
+        if self._aux_restrict not in ("adjoint", "sample"):
+            raise ValueError(
+                f"Unknown sse_aux_restrict={self._aux_restrict!r}; "
+                "use 'adjoint' or 'sample'.")
         self._aux_plan: tuple | None = None
 
         # Transversely-periodic (k>1) coupled-q vertices
@@ -1352,8 +1363,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # Sample Sigma back on the (possibly non-uniform) primary
                 # grid; the conv-grid values keep the full [0, 2*omega_max]
                 # support for the Hilbert transform below.
-                sl_data = self._sample_axis0(sl_conv, r_plan)
-                sg_data = self._sample_axis0(sg_conv, r_plan)
+                sl_data = self._restrict_from_aux(sl_conv, r_plan)
+                sg_data = self._restrict_from_aux(sg_conv, r_plan)
                 if bool(out_mask.any()):
                     sl_data[out_mask] = 0.0
                     sg_data[out_mask] = 0.0
@@ -1379,7 +1390,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 hil = 0.5j * hilbert_transform(delta, conv_freqs,
                                                transverse_shape=nk)
                 if aux_on:
-                    hil = self._sample_axis0(hil, r_plan)
+                    hil = self._restrict_from_aux(hil, r_plan)
                 if bool(out_mask.any()):
                     # post-mask the retarded consistently with Sigma^<>
                     hil[out_mask] = 0.0
@@ -2037,10 +2048,29 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         p_w = xp.clip((aux - prim[lo]) / xp.where(gap > 0, gap, 1.0), 0.0, 1.0)
         p_valid = (aux >= prim[0] - 1e-12 * dw) & (aux <= prim[-1] + 1e-12 * dw)
         # R: aux (uniform) -> primary.
-        pos = prim / dw
-        r_i0 = xp.clip(xp.floor(pos).astype(int), 0, ne_aux - 2)
-        r_w = xp.clip(pos - r_i0, 0.0, 1.0)
-        self._aux_plan = (aux, (lo, hi, p_w, p_valid), (r_i0, r_w))
+        if self._aux_restrict == "adjoint":
+            # Adjoint of the leg interpolation, R = W_prim^-1 P^T W_aux:
+            # sum_m w_m Sigma_prim(m) G(m) == dw_aux sum_n Sigma_aux(n)
+            # (P G)(n) exactly, so the aux bubble's Phi-derivable energy
+            # balance holds on the primary cell-width pairing to roundoff.
+            # Aux bins outside the primary span pair with zero legs and
+            # are dropped (their columns are zero). Each aux column has
+            # exactly two entries (lo, hi), so plain fancy assignment
+            # builds P^T without scatter-add.
+            from quatrex.grid.energies import frequency_cell_widths
+
+            w_prim = xp.asarray(frequency_cell_widths(prim), dtype=float)
+            R = xp.zeros((int(prim.shape[0]), ne_aux))
+            cols = xp.arange(ne_aux)
+            R[lo, cols] = (1.0 - p_w) * p_valid * dw
+            R[hi, cols] = p_w * p_valid * dw
+            r_plan = ("adjoint", R / w_prim[:, None])
+        else:
+            pos = prim / dw
+            r_i0 = xp.clip(xp.floor(pos).astype(int), 0, ne_aux - 2)
+            r_w = xp.clip(pos - r_i0, 0.0, 1.0)
+            r_plan = ("sample", (r_i0, r_w))
+        self._aux_plan = (aux, (lo, hi, p_w, p_valid), r_plan)
         return self._aux_plan
 
     @staticmethod
@@ -2052,9 +2082,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         return ((1.0 - w_) * data[lo] + w_ * data[hi]) * valid.reshape(shape)
 
     @staticmethod
-    def _sample_axis0(data: NDArray, plan: tuple) -> NDArray:
-        """Apply an (i0, w) uniform-grid sampling plan on axis 0."""
-        i0, w = plan
-        shape = (w.shape[0],) + (1,) * (data.ndim - 1)
-        w_ = w.reshape(shape)
-        return (1.0 - w_) * data[i0] + w_ * data[i0 + 1]
+    def _restrict_from_aux(data: NDArray, r_plan: tuple) -> NDArray:
+        """Apply the aux -> primary restriction plan on axis 0."""
+        kind, op = r_plan
+        if kind == "sample":
+            i0, w = op
+            shape = (w.shape[0],) + (1,) * (data.ndim - 1)
+            w_ = w.reshape(shape)
+            return (1.0 - w_) * data[i0] + w_ * data[i0 + 1]
+        flat = data.reshape(data.shape[0], -1)
+        return (op @ flat).reshape((op.shape[0],) + data.shape[1:])

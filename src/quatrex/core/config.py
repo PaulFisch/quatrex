@@ -1427,6 +1427,19 @@ class PhononConfig(BaseModel):
     [omega_max, 2*omega_max] half consumes no Dyson solves. 0 = span the
     primary grid (no extension beyond its top)."""
 
+    sse_aux_restrict: Literal["adjoint", "sample"] = "adjoint"
+    """How Sigma comes back from the auxiliary bubble grid onto the
+    primary grid. ``"adjoint"`` (default): the adjoint of the leg
+    interpolation, R = W_prim^-1 P^T W_aux -- the cell-width-weighted
+    pairing sum_m w_m Tr[Sigma(w_m) G(w_m)] then equals the aux-grid
+    pairing EXACTLY, so the dual-grid bubble keeps the Phi-derivable
+    energy balance to roundoff (a pointwise sample breaks it at the
+    interpolation-error level, concentrated where the primary grid is
+    coarsest, and the violation enters the SCBA as gain).
+    ``"sample"``: pointwise linear sampling of the aux-grid Sigma
+    (sharper at resonance peaks, not conserving). Identical when the
+    grids coincide."""
+
     low_freq_mixing_thz: NonNegativeFloat = 0.0
     """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this
     (THz) are mixed with ``low_freq_mixing_factor`` instead of the global
