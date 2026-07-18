@@ -142,7 +142,10 @@ def main() -> None:
                         "auxiliary grid (--aux-fmax at config time)")
     p.add_argument("--width-thz", type=float, default=0.1,
                    help="Lorentzian half-width per line (THz): the expected "
-                        "linewidth max(eta_eff, Gamma_anh) [0.1]")
+                        "ANHARMONIC linewidth Gamma_anh (golden rule, or "
+                        "measured from a previous run). This is a grid-"
+                        "design resolution target, NOT a broadening -- "
+                        "runs stay at eta = 0 [0.1]")
     p.add_argument("--widths", type=Path, default=None,
                    help=".npy per-line widths (overrides --width-thz)")
     p.add_argument("--pts-per-line", type=int, default=12,
