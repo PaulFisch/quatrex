@@ -12,11 +12,11 @@ Asserts the comm-grid constraints: ``block*q`` must divide the rank count
 ``block==1`` (the coupled-q SSE forbids nq>1 with block>1).
 
 Usage (CNT):
-    python write_config.py --system cnt33 --work DIR -L 4 --eta 0.7 \
+    python write_config.py --system cnt33 --work DIR -L 4 \
         --nfreq 161 --fmax 55 [--bcs 1 --qcs 1 --numba-threads 1]
 Usage (film):
     python write_config.py --system sifilm --work DIR --nslabs 5 --nk 8 \
-        --tdir x --shift <kshift> --eta 0.4 --nfreq 121 --fmax 15 [--qcs 8]
+        --tdir x --shift <kshift> --nfreq 121 --fmax 15 [--qcs 8]
 """
 import argparse
 from pathlib import Path
@@ -281,7 +281,8 @@ def main():
     p.add_argument("--temperature", type=float, default=300.0,
                    help="mean device temperature T (K); leads at T +/- dt/2")
     p.add_argument("--dt", type=float, default=10.0, help="lead temperature drop (K)")
-    p.add_argument("--eta", type=float, default=None, help="THz (CNT 0.7, film 0.4)")
+    p.add_argument("--eta", type=float, default=None,
+                   help="THz [0 = NO artificial broadening, the default -- do NOT add smearing, see CLAUDE.md]")
     p.add_argument("--eta-obc", type=float, default=0.0)
     p.add_argument("--emin", type=float, default=0.0)
     p.add_argument("--nfreq", type=int, default=None)
@@ -430,25 +431,25 @@ def main():
 
     if a.system in ("cnt33", "cnt80"):
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.7
+        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 161
         a.fmax = a.fmax or 55.0
         cfg = cnt_config(a)
     elif a.system in ("sinw_d5a", "sinw_d11a"):
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.11  # physical eta_w (F10/F14)
+        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 101
         a.fmax = a.fmax or 18.0
         cfg = cnt_config(a)
     elif a.system == "srtio3":
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.3  # strongly anharmonic -> broader
+        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 121
         a.fmax = a.fmax or 26.0
         cfg = cnt_config(a)
     else:
         a.tdir = a.tdir or "x"
-        a.eta = a.eta if a.eta is not None else 0.4
+        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 121
         a.fmax = a.fmax or 15.0
         cfg = film_config(a)
