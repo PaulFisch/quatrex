@@ -92,16 +92,16 @@ def prep(tag: str, nf: int | None, aux_dw: float, aux_fmax: float) -> Path:
                  f"energy_window_num = {nf}", cfg)
     cfg = re.sub(r"(?m)^max_iterations = \d+",
                  f"max_iterations = {MAX_ITER}", cfg)
-    cfg = re.sub(r"(?m)^ir_taper_cells = [0-9.eE+-]+",
-                 "ir_taper_cells = 0.0", cfg)
-    # keys REMOVED from the schema (smooth window deleted 2026-07-06)
-    cfg = re.sub(r"(?m)^sse_smooth_window = .*\n", "", cfg)
-    cfg = re.sub(r"(?m)^support_taper_cells = .*\n", "", cfg)
-    cfg = re.sub(r"(?m)^band_limit_sse = .*", "band_limit_sse = false", cfg)
-    cfg = re.sub(r"(?m)^band_support_margin_thz = .*",
-                 "band_support_margin_thz = 0.0", cfg)
-    cfg = re.sub(r"(?m)^sse_freeze_occupation = .*",
-                 "sse_freeze_occupation = 0.0", cfg)
+    # keys REMOVED from the schema since the diag config was written
+    # (smooth window 2026-07-06; masks/taps/caps folded into
+    # sse_low_freq_mask_thz; fermi_level dropped for phonon runs) --
+    # delete them, the current defaults ARE the fully-raw recipe.
+    for key in ("sse_smooth_window", "support_taper_cells",
+                "ir_taper_cells", "band_limit_sse",
+                "band_support_margin_thz", "sse_freeze_occupation",
+                "sse_cutoff_zero_g", "sse_low_freq_cutoff_thz",
+                "spectral_sharp_cap", "fermi_level"):
+        cfg = re.sub(rf"(?m)^{key} = .*\n", "", cfg)
     # strip any stale grid keys, then set this rung's
     cfg = re.sub(r"(?m)^(frequency_grid|sse_aux_grid_dw_thz|"
                  r"sse_aux_grid_fmax_thz) = .*\n", "", cfg)
