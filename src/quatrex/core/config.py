@@ -1430,15 +1430,18 @@ class PhononConfig(BaseModel):
     sse_aux_restrict: Literal["adjoint", "sample"] = "adjoint"
     """How Sigma comes back from the auxiliary bubble grid onto the
     primary grid. ``"adjoint"`` (default): the adjoint of the leg
-    interpolation, R = W_prim^-1 P^T W_aux -- the cell-width-weighted
-    pairing sum_m w_m Tr[Sigma(w_m) G(w_m)] then equals the aux-grid
+    interpolation w.r.t. the ENERGY measure w*|omega|,
+    R = (W O)^-1 P^T (dw O_aux) -- the hbar*omega-weighted pairing
+    sum_m w_m om_m Tr[Sigma(w_m) G(w_m)] then equals the aux-grid
     pairing EXACTLY, so the dual-grid bubble keeps the Phi-derivable
-    energy balance to roundoff (a pointwise sample breaks it at the
-    interpolation-error level, concentrated where the primary grid is
-    coarsest, and the violation enters the SCBA as gain).
+    ENERGY balance (and the lead heat balance J_L - J_R = P_in - P_out)
+    to roundoff. A pointwise sample breaks it at the interpolation-error
+    level, concentrated where the primary grid is coarsest; the net
+    current is a small difference of large fluxes, so the leak dominates
+    the lead balance long before it is visible in Sigma itself.
     ``"sample"``: pointwise linear sampling of the aux-grid Sigma
     (sharper at resonance peaks, not conserving). Identical when the
-    grids coincide."""
+    grids coincide (up to the masked omega = 0 bin)."""
 
     low_freq_mixing_thz: NonNegativeFloat = 0.0
     """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this

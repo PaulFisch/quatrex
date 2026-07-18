@@ -350,9 +350,11 @@ def test_aux_fmax_extends_convolution_support() -> None:
 
 
 def test_adjoint_restriction_conserves_pairing() -> None:
-    """R = W_prim^-1 P^T W_aux transfers the aux-grid pairing exactly:
-    sum_m w_m (R S)(m) G(m) == dw_aux sum_n S(n) (P G)(n) -- the
-    discrete identity that keeps the dual-grid bubble Phi-derivable."""
+    """R adjoint w.r.t. the energy measure w*|omega| transfers the
+    hbar*omega-weighted aux-grid pairing exactly:
+    sum_m w_m om_m (R S)(m) G(m) == dw sum_n om_n S(n) (P G)(n) -- the
+    identity that keeps the dual-grid bubble's ENERGY balance (and with
+    it the lead heat balance) Phi-derivable."""
     from quatrex.grid.energies import frequency_cell_widths
     from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 
@@ -374,13 +376,17 @@ def test_adjoint_restriction_conserves_pairing() -> None:
            + 1j * rng.standard_normal((ne_aux, 3)))
     g = (rng.standard_normal((freqs.size, 3))
          + 1j * rng.standard_normal((freqs.size, 3)))
+    # The production zeroes the (zero-measure, masked) omega = 0 bin of
+    # the legs BEFORE interpolating; the dropped omega = 0 row of R is
+    # consistent exactly under that convention.
+    g[0] = 0.0
     w_prim = np.asarray(frequency_cell_widths(freqs))
     dw = float(aux[1] - aux[0])
-    lhs = np.sum(w_prim[:, None]
+    lhs = np.sum((w_prim * freqs)[:, None]
                  * np.asarray(ssp._restrict_from_aux(xp.asarray(sig),
                                                      r_plan)) * g)
     pg = np.asarray(ssp._interp_axis0(xp.asarray(g), p_plan))
-    rhs = dw * np.sum(sig * pg)
+    rhs = dw * np.sum(np.asarray(aux)[:, None] * sig * pg)
     np.testing.assert_allclose(lhs, rhs, rtol=1e-12)
 
 

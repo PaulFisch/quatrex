@@ -2049,22 +2049,35 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         p_valid = (aux >= prim[0] - 1e-12 * dw) & (aux <= prim[-1] + 1e-12 * dw)
         # R: aux (uniform) -> primary.
         if self._aux_restrict == "adjoint":
-            # Adjoint of the leg interpolation, R = W_prim^-1 P^T W_aux:
-            # sum_m w_m Sigma_prim(m) G(m) == dw_aux sum_n Sigma_aux(n)
-            # (P G)(n) exactly, so the aux bubble's Phi-derivable energy
-            # balance holds on the primary cell-width pairing to roundoff.
+            # Adjoint of the leg interpolation w.r.t. the ENERGY measure
+            # w*|omega|, R = (W O)^-1 P^T (dw O_aux) with O = diag(omega):
+            # the hbar*omega-weighted pairing
+            #   sum_m w_m om_m Sigma_prim(m) G(m)
+            #     == dw sum_n om_n Sigma_aux(n) (P G)(n)
+            # holds exactly, so the aux bubble's Phi-derivable ENERGY
+            # balance (P_in = P_out, and with it the lead heat balance
+            # J_L - J_R = P_in - P_out) transfers to roundoff. The plain
+            # cell-width adjoint transfers the unweighted pairing instead
+            # and leaves an O(interp-error) energy leak that the lead
+            # currents -- a small difference of large fluxes -- amplify.
             # Aux bins outside the primary span pair with zero legs and
-            # are dropped (their columns are zero). Each aux column has
-            # exactly two entries (lo, hi), so plain fancy assignment
+            # are dropped (zero columns); the omega = 0 row/column carry
+            # zero measure (the DC bin is masked anyway). Each aux column
+            # has exactly two entries (lo, hi), so plain fancy assignment
             # builds P^T without scatter-add.
             from quatrex.grid.energies import frequency_cell_widths
 
             w_prim = xp.asarray(frequency_cell_widths(prim), dtype=float)
+            col_w = dw * aux                      # dw * omega_n^aux
+            row_w = w_prim * prim                 # w_m * omega_m
             R = xp.zeros((int(prim.shape[0]), ne_aux))
             cols = xp.arange(ne_aux)
-            R[lo, cols] = (1.0 - p_w) * p_valid * dw
-            R[hi, cols] = p_w * p_valid * dw
-            r_plan = ("adjoint", R / w_prim[:, None])
+            R[lo, cols] = (1.0 - p_w) * p_valid * col_w
+            R[hi, cols] = p_w * p_valid * col_w
+            R = xp.where(row_w[:, None] > 0.0,
+                         R / xp.where(row_w[:, None] > 0.0,
+                                      row_w[:, None], 1.0), 0.0)
+            r_plan = ("adjoint", R)
         else:
             pos = prim / dw
             r_i0 = xp.clip(xp.floor(pos).astype(int), 0, ne_aux - 2)
