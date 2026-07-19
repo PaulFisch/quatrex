@@ -330,12 +330,16 @@ class SCBA(TransportSolver):
         ):
             self._anderson_mixer = self._build_mixer()
 
-        # Anharmonic-phonon convergence by HEAT-FLOW conservation, with
-        # best-iterate capture (the Sigma residual is non-monotone on
-        # soft-mode structures, so the most-conserved heat current is kept).
+        # Anharmonic-phonon convergence by HEAT-FLOW conservation. The
+        # reported result is the CONVERGED fixed point (last iterate with
+        # converged == True); a run that does not converge is reported as
+        # such, with its last iterate. No "best-conserved iterate" is
+        # tracked: over a non-converged trajectory the most-conserved
+        # iterate is not a fixed point (it is typically an early, still
+        # near-ballistic step, which conserves trivially because Sigma has
+        # not developed), so headlining it misrepresents a non-result as
+        # the answer.
         self._scba_iteration = 0
-        self._best_heat_conservation = float("inf")
-        self._best_heat_current = None
         self._last_heat_current = None
         self._diverged = False
 
@@ -844,26 +848,16 @@ class SCBA(TransportSolver):
                 return True
             heat, balance, spread = self._phonon_heat_flow_conservation()
             if heat is not None:
-                # Last-iterate heat (the actual current state at the fixed point)
-                # and a best-conserved fallback for diagnostics if it never
-                # converges (so a non-converged run is reported, not silently
-                # passed off as the answer).
+                # Last-iterate heat: the actual current SCBA state. This is
+                # the reported current when converged; on a non-converged
+                # run it is transparently the last iterate, not a
+                # cherry-picked one.
                 self._last_heat_current = heat.copy()
                 self._last_heat_spread = spread
-                # Only track the best-conserving iterate AFTER the self-energy has
-                # developed (past the initial transient). Without this gate the
-                # eta->0 case is broken: iteration 0 is ballistic (Sigma~0) and
-                # therefore conserves to machine precision, so it would pin
-                # `best_heat` to the BALLISTIC current and report G_anh == G_ball.
-                if (self._scba_iteration > self.config.scba.min_iterations
-                        and balance < self._best_heat_conservation):
-                    self._best_heat_conservation = balance
-                    self._best_heat_current = heat.copy()
                 if comm.rank == 0:
                     print(f"Phonon: rel Sigma^R residual {rel_sigma:.4e}; "
-                          f"lead balance {balance:.4e} "
-                          f"(best {self._best_heat_conservation:.4e}; "
-                          f"internal spread {spread:.4e})", flush=True)
+                          f"lead balance {balance:.4e}; "
+                          f"internal spread {spread:.4e}", flush=True)
                 # NOTE: G survives the back-transpose only when
                 # bubble_balance_check keeps it; on discarded G the traces
                 # would evaluate to a spurious machine-perfect 0 == 0.

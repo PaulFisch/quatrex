@@ -64,9 +64,6 @@ def lead_heat(npz):
                     finite=True,
                     converged=bool(d.get("converged", False)),
                     n_iter=int(d.get("n_iter", -1)),
-                    best0=(float(np.asarray(d["best_heat"]).reshape(-1)[0])
-                           if "best_heat" in d.files else float(abs(js[0]))),
-                    best_cons=float(d.get("best_cons", np.nan)),
                     internal_spread=float(d.get("internal_spread", np.nan)))
     fh = d.get("final_heat")
     if fh is None:
@@ -78,12 +75,7 @@ def lead_heat(npz):
                finite=bool(np.isfinite(fh).all()),
                converged=bool(d.get("converged", False)),
                n_iter=int(d.get("n_iter", -1)))
-    bh = d.get("best_heat")
-    if bh is not None:
-        bh = np.asarray(bh)
-        out["best0"] = float(bh.reshape(-1)[0])
-        out["best_cons"] = float(d.get("best_cons", np.nan))
-        out["internal_spread"] = float(d.get("internal_spread", np.nan))
+    out["internal_spread"] = float(d.get("internal_spread", np.nan))
     # Heat-key convention: uniform grids store the legacy unweighted sum
     # (needs the * dw of g_const); non-uniform runs already fold the cell
     # widths in, so the keys ARE integrals (skip the dw factor).
@@ -127,8 +119,12 @@ def summarize(run_dir, out_dir, do_plot):
                    t_mean=c["t_mean"], n_slabs=c["n_slabs"],
                    G_ball_W_per_m2_K=C_b * b["lead0"], A_c=A_c, dw_THz=dw)
         if a is not None:
-            # prefer the converged fixed point; fall back to best-iterate
-            anh0 = a["lead0"] if a["converged"] else a.get("best0", a["lead0"])
+            # The anharmonic conductance is the CONVERGED fixed point. A
+            # non-converged run reports its last iterate with
+            # anh_converged = False -- it is NOT silently rescued by a
+            # cherry-picked best-conserved iterate (that iterate is not a
+            # fixed point). Filter on anh_converged when reading the CSV.
+            anh0 = a["lead0"]
             C_a = C if a.get("uniform_grid", True) else C / dw
             row["G_anh_W_per_m2_K"] = C_a * anh0
             row["G_anh"] = C_a * anh0
@@ -137,7 +133,6 @@ def summarize(run_dir, out_dir, do_plot):
             row["anh_n_iter"] = a["n_iter"]
             row["lead_conservation"] = (abs(a["lead0"] - a["lead1"])
                                         / abs(a["lead0"]) if a["lead0"] else np.nan)
-            row["best_cons"] = a.get("best_cons", np.nan)
             row["eta_dip"] = a.get("internal_spread", np.nan)
         rows.append(row)
         rr = row.get("ratio")
@@ -150,7 +145,7 @@ def summarize(run_dir, out_dir, do_plot):
     out_dir.mkdir(parents=True, exist_ok=True)
     cols = ["tag", "system", "sweep", "t_mean", "n_slabs",
             "G_ball_W_per_m2_K", "G_anh_W_per_m2_K", "G_anh", "ratio",
-            "anh_converged", "anh_n_iter", "lead_conservation", "best_cons", "eta_dip",
+            "anh_converged", "anh_n_iter", "lead_conservation", "eta_dip",
             "A_c", "dw_THz"]
     with open(out_dir / "summary.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")

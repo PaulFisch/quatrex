@@ -268,7 +268,7 @@ if _mw is not None:
         _full = _recv
     spec_full = _full
 
-# --- snapshot (rank 0; best_heat is the canonical stack/q-reduced current) ---
+# --- snapshot (rank 0; last_heat is the stack/q-reduced fixed-point current) ---
 if cfg.outputs.save_profiling_results:
     Profiler().dump_stats()
 
@@ -335,24 +335,25 @@ if ranks.rank == 0:
         # solver fills only the leads). This is the physical film quantity
         # (the internal interfaces differ structurally). NB at stack>1 this
         # is the rank-0-local frequency slice; use np=1 for the clean number
-        # or read the (q-summed) best_heat when the RGF path supplies it.
-    # Converged-iterate (fixed-point) heat -- the canonical conductance source
-    # (all-reduced over stack + q-summed by the SCBA). Use this, NOT the
-    # best-conserved transient. converged = the SCBA stopped before max_iter.
+        # or read the (q-summed) last_heat when the RGF path supplies it.
+    # Fixed-point (last-iterate) heat -- the canonical conductance source
+    # (all-reduced over stack + q-summed by the SCBA), read together with
+    # `converged`. converged = the SCBA reached self-consistency before
+    # max_iter; a False here means the last_heat is a non-converged iterate.
     out["diverged"] = bool(getattr(scba, "_diverged", False))
     # The SCBA sets _converged in the genuine convergence-return path;
     # a crashed run (err set) must not be reported as converged.
     out["converged"] = (bool(getattr(scba, "_converged", False))
                         and not out["diverged"] and err is None)
+    # The reported current is the LAST iterate (the actual fixed point when
+    # converged == True; otherwise transparently the last iterate). No
+    # "best-conserved iterate" is kept -- over a non-converged trajectory it
+    # is not a fixed point and headlining it misrepresents a non-result.
     lh = getattr(scba, "_last_heat_current", None)
     if lh is not None:
         lh = np.asarray(lh)
         out["last_heat"] = lh
         out["lead_current"] = 0.5 * (abs(float(np.real(lh[0]))) + abs(float(np.real(lh[-1]))))
-    bh = getattr(scba, "_best_heat_current", None)
-    if bh is not None:
-        out["best_heat"] = np.asarray(bh)
-        out["best_cons"] = float(getattr(scba, "_best_heat_conservation", float("nan")))
     # eta-absorption diagnostic: max-min spread over ALL interfaces (contains
     # the physical internal dip from finite eta; NOT the convergence gate)
     sp = getattr(scba, "_last_heat_spread", None)
@@ -432,7 +433,12 @@ if ranks.rank == 0:
                  sigma_retarded=np.asarray(
                      scba.data.sigma_retarded_hermitian.data))
         print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}", flush=True)
-    print(f"SAVED {npz}  final_heat="
+    # Headline the CONVERGED fixed point and its status -- not a
+    # "best-conserved" transient. A non-converged run says so, and shows
+    # its last iterate + iteration count so it is read as a non-result.
+    _status = ("converged" if out.get("converged")
+               else ("DIVERGED" if out.get("diverged") else "NOT CONVERGED"))
+    print(f"SAVED {npz}  [{_status} after {out.get('n_iter')} it]  "
+          f"final_heat="
           f"{None if final_heat is None else np.round(final_heat, 3)}  "
-          f"best={None if bh is None else np.round(np.asarray(bh), 3)}  "
-          f"best_cons={out.get('best_cons')}", flush=True)
+          f"lead_current={out.get('lead_current')}", flush=True)

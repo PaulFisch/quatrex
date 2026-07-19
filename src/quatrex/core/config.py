@@ -1559,8 +1559,11 @@ class PhononConfig(BaseModel):
     lead balance of the (hbar-omega-weighted) Meir-Wingreen HEAT current.
     3-phonon processes do NOT conserve phonon NUMBER (1<->2 splitting/
     merging), so only the ENERGY current is conserved and SCBA convergence
-    means the heat flow matches across the leads. The most-conserved (best)
-    iterate's heat current is captured even if the iteration later drifts."""
+    means the heat flow matches across the leads. The reported current is
+    the converged fixed point; a run that fails this gate is reported as
+    non-converged with its last iterate (no most-conserved iterate is
+    cherry-picked -- over a non-converged trajectory it is not a fixed
+    point, and it is typically an early near-ballistic step)."""
 
     sigma_convergence_tol: PositiveFloat = 1e-3
     """Relative self-energy residual tolerance
