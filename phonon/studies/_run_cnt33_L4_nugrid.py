@@ -77,14 +77,40 @@ def prep_uni(d: Path) -> None:
 def prep_nu(d: Path) -> None:
     _prep_geom(d)
     # Non-uniform primary grid from the converged device DOS peaks.
-    # Conservative validation grid: background floor 0.35 THz (finer than
-    # 2x the uni reference spacing) so it is provably at least as resolved
-    # as uni everywhere the DOS has weight, refined further at the peaks.
+    # DOS-peak comb + 0.35 THz background. NOTE: this UNDER-resolves the
+    # acoustic band -- kept as the diagnostic rung; nu2 adds the fix.
     subprocess.run(
         [sys.executable, str(MG), "--npz", str(DOS_NPZ),
          "--fmax", str(FMAX), "--width-thz", "0.3", "--pts-per-line", "8",
          "--max-spacing", "0.35", "--peak-prominence", "0.01",
          "--out", str(d / "phonon_energies.npy")],
+        check=True)
+
+
+def prep_nu2(d: Path) -> None:
+    _prep_geom(d)
+    # Corrected grid: same comb + background, but the acoustic /
+    # low-frequency propagating window (< 9 THz) is held at the uni
+    # reference spacing (0.153 THz). The acoustic continuum is smooth and
+    # low-DOS -- the comb misses it -- but carries ~23% of the heat, so
+    # coarse sampling there (nu's 0.34 THz) shifted the transport by ~5%.
+    subprocess.run(
+        [sys.executable, str(MG), "--npz", str(DOS_NPZ),
+         "--fmax", str(FMAX), "--width-thz", "0.3", "--pts-per-line", "8",
+         "--max-spacing", "0.35", "--peak-prominence", "0.01",
+         "--lowfreq-fmax", "9", "--lowfreq-spacing", str(AUX_DW),
+         "--out", str(d / "phonon_energies.npy")],
+        check=True)
+    g = np.load(d / "phonon_energies.npy")
+    print(f"[grid ] nu2: {g.size} pts on [0, {FMAX}] THz, spacing "
+          f"[{np.diff(g).min():.4f}, {np.diff(g).max():.4f}] THz "
+          f"(acoustic floor {AUX_DW:.4f} < 9 THz)", flush=True)
+    subprocess.run(
+        [sys.executable, str(WC), "--system", "cnt33", "--work", str(d),
+         "-L", "4", "--eta", "0", "--nfreq", str(NFREQ_UNI),
+         "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.2",
+         "--max-iter", str(MAX_ITER), "--freq-grid", "file",
+         "--aux-dw", str(AUX_DW), "--aux-fmax", str(FMAX)],
         check=True)
     g = np.load(d / "phonon_energies.npy")
     print(f"[grid ] nu: {g.size} pts on [0, {FMAX}] THz, spacing "
@@ -99,7 +125,7 @@ def prep_nu(d: Path) -> None:
         check=True)
 
 
-RUNGS = [("uni", prep_uni), ("nu", prep_nu)]
+RUNGS = [("uni", prep_uni), ("nu", prep_nu), ("nu2", prep_nu2)]
 
 ENV = dict(os.environ,
            OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",

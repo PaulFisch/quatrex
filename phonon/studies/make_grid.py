@@ -42,13 +42,21 @@ def _modes_from_file(path: Path) -> np.ndarray:
 
 
 def _modes_from_npz(path: Path, prominence: float) -> np.ndarray:
-    """Peak-pick the DOS of a previous run (gr_diag_imag = -Im G^R diag)."""
+    """Peak-pick the DOS of a previous run (gr_diag_imag = -Im G^R diag).
+
+    The omega ~ 0 (DC) bin is EXCLUDED: it is masked out of the bubble
+    and carries a large 1/omega^2 acoustic-resolvent artifact in the DOS
+    proxy, which would otherwise be picked as a spurious peak and pull a
+    comb onto the zero-measure bin instead of the physical bands.
+    """
     from scipy.signal import find_peaks
 
     d = np.load(path)
     w = np.asarray(d["energies"], dtype=float)
     dos = np.asarray(d["gr_diag_imag"], dtype=float)
     dos = dos.reshape(dos.shape[0], -1).sum(axis=1)
+    live = w > 1e-9  # drop the masked DC bin (artifact spike)
+    w, dos = w[live], dos[live]
     peaks, _ = find_peaks(dos, prominence=prominence * float(dos.max()))
     if peaks.size == 0:
         raise SystemExit(
@@ -88,8 +96,18 @@ def build_grid(
     pts_per_line: int,
     max_spacing: float,
     min_spacing: float,
+    lowfreq_floor: tuple[float, float] | None = None,
 ) -> np.ndarray:
-    """CDF-equidistributed grid on [0, fmax] for a Lorentzian-comb density."""
+    """CDF-equidistributed grid on [0, fmax] for a Lorentzian-comb density.
+
+    ``lowfreq_floor = (f_lf, spacing_lf)`` enforces spacing <= spacing_lf
+    for omega < f_lf. The acoustic / low-frequency window is a SMOOTH,
+    low-DOS but HEAT-CARRYING continuum: the Lorentzian comb (which
+    tracks DOS peaks) does not refine it, yet under-resolving it shifts
+    the self-consistent transport there. Set (f_lf, spacing_lf) to keep
+    the propagating continuum at the target uniform resolution; the comb
+    still refines sharp bands and the gaps above still coarsen.
+    """
     modes = np.asarray(modes, dtype=float).ravel()
     # Broadcast BEFORE filtering so per-line --widths stay index-aligned
     # with their modes (--dyn sources always contain omega = 0 acoustics
@@ -114,6 +132,9 @@ def build_grid(
     rho = np.full(probe.shape, 1.0 / max_spacing)
     for m, w in zip(modes, widths):
         rho += (pts_per_line / np.pi) * w / ((probe - m) ** 2 + w**2)
+    if lowfreq_floor is not None:
+        f_lf, spacing_lf = lowfreq_floor
+        rho = np.where(probe < f_lf, np.maximum(rho, 1.0 / spacing_lf), rho)
     rho = np.minimum(rho, 1.0 / min_spacing)
     cdf = np.concatenate(
         ([0.0], np.cumsum(0.5 * (rho[1:] + rho[:-1]) * np.diff(probe))))
@@ -161,6 +182,16 @@ def main() -> None:
                         "under-sampled.")
     p.add_argument("--min-spacing", type=float, default=None,
                    help="lower spacing bound (THz) [width/8]")
+    p.add_argument("--lowfreq-fmax", type=float, default=0.0,
+                   help="resolve the low-frequency propagating window "
+                        "omega < this (THz) at --lowfreq-spacing. The "
+                        "acoustic continuum is smooth and low-DOS (so the "
+                        "comb misses it) but carries heat, and coarse "
+                        "sampling there shifts the transport; set this to "
+                        "the top of the acoustic/low band. 0 = off.")
+    p.add_argument("--lowfreq-spacing", type=float, default=None,
+                   help="spacing (THz) enforced below --lowfreq-fmax "
+                        "[= --max-spacing/2]")
     p.add_argument("--peak-prominence", type=float, default=0.01,
                    help="--npz peak-picking prominence, rel. to max [0.01]")
     p.add_argument("--out", type=Path, default=Path("phonon_energies.npy"))
@@ -178,9 +209,14 @@ def main() -> None:
     max_spacing = a.max_spacing if a.max_spacing is not None else a.fmax / 100
     min_spacing = (a.min_spacing if a.min_spacing is not None
                    else float(np.min(width)) / 8.0)
+    lowfreq_floor = None
+    if a.lowfreq_fmax > 0.0:
+        lf_sp = (a.lowfreq_spacing if a.lowfreq_spacing is not None
+                 else max_spacing / 2.0)
+        lowfreq_floor = (a.lowfreq_fmax, lf_sp)
 
     grid = build_grid(modes, a.fmax, width, a.pts_per_line,
-                      max_spacing, min_spacing)
+                      max_spacing, min_spacing, lowfreq_floor=lowfreq_floor)
     np.save(a.out, grid)
     sp = np.diff(grid)
     n_uni = int(np.ceil(a.fmax / sp.min())) + 1
