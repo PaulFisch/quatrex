@@ -134,11 +134,11 @@ class PhononSolver(SubsystemSolver):
 
         self.compute_meir_wingreen_current = config.phonon.solver.compute_current
 
-        # sse_g_band = 2: the SSE bubble consumes the second off-diagonal
-        # G^{<,>} blocks, so the selected solve must produce them.
-        self._second_offdiagonals = (
-            int(getattr(config.phonon, "sse_g_band", 1) or 1) >= 2
-        )
+        # sse_g_band = k: the SSE bubble consumes the G^{<,>} blocks out to
+        # the k-th off-diagonal, so the selected solve must produce them. The
+        # RGF takes this as an integer off-diagonal band (1 = block-tridiagonal
+        # only, 2 = + second off-diagonal, 3 = + third).
+        self._gf_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
 
         # GW-style self-consistent contacts: compute the OBC AFTER Sigma^R
         # is folded into the system matrix, dressing the periodic lead
@@ -419,10 +419,10 @@ class PhononSolver(SubsystemSolver):
     ) -> None:
         """Perform selected solve for the phonon Green's function."""
         extra_kw = (
-            {"second_offdiagonals": True} if self._second_offdiagonals else {}
+            {"n_offdiagonals": self._gf_band} if self._gf_band >= 2 else {}
         )
         if comm.block.size > 1:
-            if self._second_offdiagonals:
+            if self._gf_band > 1:
                 raise NotImplementedError(
                     "sse_g_band > 1 requires block_comm_size = 1 (the "
                     "distributed RGF does not produce the second "

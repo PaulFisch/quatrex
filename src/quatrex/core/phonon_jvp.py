@@ -166,12 +166,12 @@ class PhononJVP:
         # (system-matrix subtraction and the RGF source reads); the d2
         # pattern slots (present when sse_g_band = 2) carry J == 0.
         self._bt_mask = np.abs(blk_r - blk_c) <= 1
-        # The RGF writes G only on its output band (2 with the second
-        # off-diagonals, else 1); pattern slots beyond it -- present when
-        # the cutoff makes the pattern block-dense -- stay zero in the
-        # production buffers and must stay zero in the JVP's dG too.
-        out_band = 2 if getattr(self._solver, "_second_offdiagonals",
-                                False) else 1
+        # The RGF writes G only on its output band (= sse_g_band: 1 =
+        # block-tridiagonal, 2 = + second off-diagonal, 3 = + third); pattern
+        # slots beyond it -- present when the cutoff makes the pattern
+        # block-dense -- stay zero in the production buffers and must stay
+        # zero in the JVP's dG too.
+        out_band = int(getattr(self._solver, "_gf_band", 1))
         self._g_mask = np.abs(blk_r - blk_c) <= out_band
 
         # Dense block-tridiagonal dynamical matrix (what _btd_subtract

@@ -1541,7 +1541,7 @@ class PhononConfig(BaseModel):
     (no artificial contact broadening needed). Default off: bare
     harmonic reservoirs, scattering enters the device Dyson only."""
 
-    sse_g_band: int = Field(default=1, ge=1, le=2)
+    sse_g_band: int = Field(default=1, ge=1, le=3)
     """Inner Green's-function block band |K - K'| kept in the bubble
     contraction. The default 1 uses the RGF block-tridiagonal G and masks
     the bubble kernel G(x)G to that band -- a masked positive-semidefinite
@@ -1550,9 +1550,11 @@ class PhononConfig(BaseModel):
     acquire non-causal gain components of Sigma. With 2, the solver
     additionally produces the second off-diagonal G^{<,>} blocks and the
     contraction keeps all links the nearest-neighbour vertex span needs:
-    the diagonal Sigma blocks become exact and causal. Extends the shared
-    G/Sigma sparsity pattern by the second off-diagonal blocks (Sigma's
-    extra blocks stay structurally zero). Single block-rank only."""
+    the diagonal Sigma blocks become exact and causal. With 3, the third
+    off-diagonal G^{<,>} blocks are produced too, so the first off-diagonal
+    Sigma blocks become exact and causal as well. Extends the shared
+    G/Sigma sparsity pattern by the corresponding off-diagonal blocks
+    (Sigma's extra blocks stay structurally zero). Single block-rank only."""
 
     heat_flow_conservation_tol: PositiveFloat = 1e-2
     """Convergence tolerance for the anharmonic phonon SCBA: the relative
