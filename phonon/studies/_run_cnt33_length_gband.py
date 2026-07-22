@@ -101,11 +101,12 @@ def hygiene() -> None:
         time.sleep(3)
 
 
-def run_rung(L: int, g: int) -> None:
-    d = OUT / f"L{L}_g{g}"
+def run_rung(L: int, g: int, taper: bool = False) -> None:
+    tag = f"L{L}_g{g}{'t' if taper else ''}"
+    d = OUT / tag
     npz = d / "run.npz"
     if npz.exists():
-        print(f"[skip ] L{L} g_band={g}: run.npz exists", flush=True)
+        print(f"[skip ] {tag}: run.npz exists", flush=True)
         return
     prep(d, L)
     hygiene()
@@ -117,15 +118,20 @@ def run_rung(L: int, g: int) -> None:
                QX_BBCHECK="1",                    # log the bubble balance
                QX_CONFIG=str(d / "quatrex_config.toml"),
                QX_NPZ=str(npz))
+    if taper:
+        # PSD (Bartlett) taper of the band mask: causal-by-construction
+        # band-g bubble (see config.phonon.sse_g_band_taper).
+        env["QX_GBAND_TAPER"] = "bartlett"
     t0 = time.time()
-    print(f"[run  ] L{L} g_band={g} (eta=0, bare contacts, aux_fmax=88, "
-          f"{NRANKS} ranks)", flush=True)
-    with open(OUT / f"L{L}_g{g}.log", "w") as log:
+    print(f"[run  ] {tag} (eta=0, bare contacts, aux_fmax=88, "
+          f"taper={'bartlett' if taper else 'none'}, {NRANKS} ranks)",
+          flush=True)
+    with open(OUT / f"{tag}.log", "w") as log:
         rc = subprocess.run(
             ["mpirun", "--bind-to", "core", "--map-by", "core",
              "-np", str(NRANKS), sys.executable, str(RUN)],
             env=env, stdout=log, stderr=subprocess.STDOUT).returncode
-    print(f"[done ] L{L} g_band={g}: rc={rc} "
+    print(f"[done ] {tag}: rc={rc} "
           f"npz={'yes' if npz.exists() else 'MISSING'} "
           f"wall={(time.time() - t0) / 60:.1f} min", flush=True)
 
@@ -137,13 +143,18 @@ def main() -> int:
     ap.add_argument("--gbands", type=int, nargs="+", default=[1, 2],
                     help="sse_g_band values to sweep (default 1 2; add 3 once "
                          "the k=3 RGF recursion lands)")
+    ap.add_argument("--taper", action="store_true",
+                    help="Bartlett PSD taper of the band mask "
+                         "(sse_g_band_taper=bartlett); rung tags get a 't' "
+                         "suffix")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     for L in args.lengths:
         for g in args.gbands:
-            run_rung(L, g)
+            run_rung(L, g, taper=args.taper)
     print(f"[done ] cnt33 g_band-length sweep complete "
-          f"(lengths={args.lengths}, gbands={args.gbands}).", flush=True)
+          f"(lengths={args.lengths}, gbands={args.gbands}, "
+          f"taper={args.taper}).", flush=True)
     return 0
 
 

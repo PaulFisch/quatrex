@@ -1556,6 +1556,22 @@ class PhononConfig(BaseModel):
     G/Sigma sparsity pattern by the corresponding off-diagonal blocks
     (Sigma's extra blocks stay structurally zero). Single block-rank only."""
 
+    sse_g_band_taper: Literal["none", "bartlett"] = "none"
+    """PSD taper of the inner-G band mask. The boxcar band truncation is a
+    Schur product with the indefinite band-ones matrix; it destroys the
+    positive-semidefiniteness of the bubble kernel and injects non-causal
+    gain (the sse_g_band=1 instability). "bartlett" weights every inner G
+    link by w_d = 1 - d/(sse_g_band+1) (d = |K-K'|) and the Sigma output
+    blocks by the same w_{|I-J|}: the taper matrix is PSD (Fejer kernel),
+    so by the Schur product theorem -+i Sigma^{<,>} stays PSD -- causal at
+    ANY band -- and using the same taper on G and Sigma is the
+    Phi-derivable pair (Phi[M o G]), so Baym-Kadanoff energy conservation
+    is retained. Price: off-diagonal coherence is underweighted (band-1:
+    factor 1/2 per G link and on the off-diagonal Sigma blocks). "none" is
+    the legacy boxcar, bit-identical to previous behaviour. Not supported
+    with decomposed_kernel="gram" (per-quad weights do not factor through
+    the Gram collapse)."""
+
     heat_flow_conservation_tol: PositiveFloat = 1e-2
     """Convergence tolerance for the anharmonic phonon SCBA: the relative
     lead balance of the (hbar-omega-weighted) Meir-Wingreen HEAT current.

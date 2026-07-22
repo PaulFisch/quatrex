@@ -206,6 +206,7 @@ def _ref_compute_multiblock(
     block_sizes: np.ndarray,
     dw_thz: float,
     g_band: int = 1,
+    taper_w: list[float] | None = None,
 ) -> tuple[
     dict[tuple[int, int], np.ndarray],
     dict[tuple[int, int], np.ndarray],
@@ -266,6 +267,14 @@ def _ref_compute_multiblock(
                 phi_left, phi_right,
                 gg_band[la], gl_band[laT].swapaxes(-1, -2),
                 gg_band[lb], gl_band[lbT].swapaxes(-1, -2), dw_thz)
+            if taper_w is not None:
+                # Bartlett-tapered band: the two inner G-link weights and
+                # the Sigma output-block weight collapse to one scalar per
+                # quad (mirrors SigmaPhononPhonon._quad_weight).
+                wq = (taper_w[abs(K1 - K1p)] * taper_w[abs(K2 - K2p)]
+                      * taper_w[abs(I - J)])
+                sl = sl * wq
+                sg = sg * wq
             sl_full[(I, J)] = sl_full.get((I, J), 0) + sl
             sg_full[(I, J)] = sg_full.get((I, J), 0) + sg
 
@@ -494,6 +503,214 @@ def test_compute_restores_distribution_state() -> None:
         assert m.distribution_state == "nnz", (
             f"distribution_state was not restored; got {m.distribution_state!r}"
         )
+
+
+def _taper_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
+    """NN phi blocks, Hermitian-PSD-per-omega band G^{<,>}, and the
+    DSDBSparse buffers for a taper/causality test device.
+
+    The G inputs are the BT band of FULL Hermitian PSD matrices P(w)
+    (what the RGF hands the bubble): the causality theorem is about
+    M (.) P with the Bartlett M supported on that band, so PSD-ness of
+    the underlying full matrix is the correct premise.
+    """
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+
+    rng = np.random.default_rng(seed)
+    block_sizes = np.array([nbs] * n_blocks)
+    N = int(block_sizes.sum())
+
+    # REAL vertex blocks, symmetric under exchange of the two contracted
+    # legs (incl. their block indices): Phi(I,K2,K1)_{i,b,a} =
+    # Phi(I,K1,K2)_{i,a,b}. This is the (S_3-subgroup) property of the
+    # physical fc3 that makes the bubble a congruence -- the PSD/causality
+    # statement is only a theorem for such vertices.
+    phi_blocks: dict[tuple[int, int, int], np.ndarray] = {}
+    for I in range(n_blocks):
+        for K1 in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for K2 in range(K1, min(n_blocks, I + 2)):
+                if abs(K1 - K2) > 1:
+                    continue
+                A = rng.standard_normal((nbs, nbs, nbs))
+                if K1 == K2:
+                    A = 0.5 * (A + A.transpose(0, 2, 1))
+                    phi_blocks[(I, K1, K2)] = A
+                else:
+                    phi_blocks[(I, K1, K2)] = A
+                    phi_blocks[(I, K2, K1)] = A.transpose(0, 2, 1)
+
+    def _psd_stack() -> np.ndarray:
+        # RANK-1 (+ tiny ridge) spectral matrices: maximal inter-cell
+        # coherence, the flat-band regime. This is where the boxcar band
+        # truncation actually goes indefinite (banded truncation of a
+        # rank-1 projector, cf. the indefinite tridiagonal-ones mask);
+        # full-rank random PSD stacks average the defect away and the
+        # one-shot masked bubble stays accidentally PSD.
+        out = np.empty((ne, N, N), dtype=complex)
+        for k in range(ne):
+            c = rng.standard_normal((N, 1)) + 1j * rng.standard_normal((N, 1))
+            out[k] = c @ c.conj().T + 1e-6 * np.eye(N)
+        return out
+
+    P_l, P_g = _psd_stack(), _psd_stack()
+
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    gl_band: dict[tuple[int, int], np.ndarray] = {}
+    gg_band: dict[tuple[int, int], np.ndarray] = {}
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+            sK = slice(offs[K], offs[K + 1])
+            sKp = slice(offs[Kp], offs[Kp + 1])
+            gl_band[(K, Kp)] = P_l[:, sK, sKp].copy()
+            gg_band[(K, Kp)] = P_g[:, sK, sKp].copy()
+
+    rows, cols = [], []
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for i in range(nbs):
+                for j in range(nbs):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = csr_matrix(
+        (np.ones(len(rows), dtype=np.complex128),
+         (np.array(rows), np.array(cols))), shape=(N, N))
+
+    def make_buffers():
+        bufs = [DSDBCOO.from_sparray(pattern, block_sizes,
+                                     global_stack_shape=(ne,))
+                for _ in range(5)]
+        for m in bufs:
+            m.data[:] = 0.0
+        gl, gg = bufs[0], bufs[1]
+        gl_v, gg_v = gl.stack[...], gg.stack[...]
+        for (K, Kp) in gl_band:
+            gl_v.blocks[K, Kp] = gl_band[(K, Kp)]
+            gg_v.blocks[K, Kp] = gg_band[(K, Kp)]
+        return bufs
+
+    return phi_blocks, gl_band, gg_band, block_sizes, offs, make_buffers
+
+
+def _run_sigma(phi_blocks, block_sizes, ne, make_buffers, taper: str | None):
+    """Run the production bubble; return the (I,J)->block Sigma^{<,>} dicts.
+
+    ``taper=None`` leaves the config attribute ABSENT (pre-option configs);
+    a string sets ``sse_g_band_taper`` explicitly.
+    """
+    cfg = _make_cfg("fft")
+    if taper is not None:
+        cfg.phonon.sse_g_band_taper = taper
+    freqs_thz = np.linspace(0.0, 16.0, ne)
+    gl, gg, sl, sg, sr = make_buffers()
+    ssp = SigmaPhononPhonon(
+        cfg, phonon_frequencies=freqs_thz,
+        block_sizes=block_sizes, phi_blocks=phi_blocks)
+    ssp.compute(gl, gg, out=(sl, sg, sr))
+    n_blocks = len(block_sizes)
+    sl_v, sg_v = sl.stack[...], sg.stack[...]
+    out_l, out_g = {}, {}
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            out_l[(I, J)] = np.asarray(sl_v.blocks[I, J]).copy()
+            out_g[(I, J)] = np.asarray(sg_v.blocks[I, J]).copy()
+    return out_l, out_g
+
+
+def _assemble(blocks: dict, offs: np.ndarray, N: int, ne: int) -> np.ndarray:
+    """Banded (I,J) block dict -> full (ne, N, N) matrices (zeros outside)."""
+    out = np.zeros((ne, N, N), dtype=complex)
+    for (I, J), v in blocks.items():
+        out[:, offs[I]:offs[I + 1], offs[J]:offs[J + 1]] = v
+    return out
+
+
+def test_taper_none_is_bit_identical() -> None:
+    """sse_g_band_taper='none' (and absent) reproduce the legacy output
+    bit-for-bit -- the option must not perturb existing runs."""
+    phi_blocks, _, _, block_sizes, _, make_buffers = _taper_fixture(4, 2, 15)
+    # "none" set explicitly vs attribute entirely absent (pre-option config).
+    l_none, g_none = _run_sigma(
+        phi_blocks, block_sizes, 15, make_buffers, taper="none")
+    l_absent, g_absent = _run_sigma(
+        phi_blocks, block_sizes, 15, make_buffers, taper=None)
+    for key in l_none:
+        assert np.array_equal(l_none[key], l_absent[key])
+        assert np.array_equal(g_none[key], g_absent[key])
+
+
+def test_taper_matches_tapered_reference() -> None:
+    """Production bartlett == independently-tapered dense reference."""
+    phi_blocks, gl_band, gg_band, block_sizes, _, make_buffers = (
+        _taper_fixture(4, 2, 15))
+    ne = 15
+    dw = 16.0 / (ne - 1)
+    out_l, out_g = _run_sigma(
+        phi_blocks, block_sizes, ne, make_buffers, taper="bartlett")
+    ref_l, ref_g, _ = _ref_compute_multiblock(
+        phi_blocks, gl_band, gg_band, block_sizes, dw,
+        g_band=1, taper_w=[1.0, 0.5])
+    for key in out_l:
+        np.testing.assert_allclose(
+            out_l[key], ref_l.get(key, 0), atol=1e-40, rtol=1e-9,
+            err_msg=f"tapered Sigma^< mismatch at block {key}")
+        np.testing.assert_allclose(
+            out_g[key], ref_g.get(key, 0), atol=1e-40, rtol=1e-9,
+            err_msg=f"tapered Sigma^> mismatch at block {key}")
+
+
+def test_taper_restores_causality_psd() -> None:
+    """THE point of the taper: with Hermitian-PSD G^{<,>} inputs, the
+    boxcar band-1 Sigma^{<,>} is INDEFINITE on a >=4-block device
+    (non-causal gain -- the documented sse_g_band=1 disease), while the
+    Bartlett-tapered band-1 Sigma^{<,>} is PSD at every omega (Schur
+    product theorem with the PSD taper matrix)."""
+    ne = 15
+    n_blocks, nbs = 5, 2
+    phi_blocks, _, _, block_sizes, offs, make_buffers = (
+        _taper_fixture(n_blocks, nbs, ne))
+    N = int(block_sizes.sum())
+
+    # Orientation calibration on a single block (no masking -> exact,
+    # causal by construction): find the phase z in {1,-1,1j,-1j} that
+    # makes z * Sigma(omega) Hermitian PSD. This decouples the test from
+    # the production sign convention.
+    phi1, _, _, bs1, offs1, mk1 = _taper_fixture(1, 4, ne)
+    sl1, _ = _run_sigma(phi1, bs1, ne, mk1, taper="none")
+    S1 = _assemble(sl1, offs1, int(bs1.sum()), ne)
+    z_found = None
+    for z in (1.0, -1.0, 1j, -1j):
+        M = z * S1
+        herm = np.linalg.norm(M - M.conj().swapaxes(-1, -2))
+        if herm > 1e-8 * np.linalg.norm(M):
+            continue
+        if np.linalg.eigvalsh(M).min() >= -1e-10 * np.abs(M).max():
+            z_found = z
+            break
+    assert z_found is not None, "no PSD orientation on the 1-block device"
+
+    def min_eig(blocks):
+        S = z_found * _assemble(blocks, offs, N, ne)
+        # Hermitian part (the anti-Hermitian remainder is zero for exact
+        # channels; the masked kernel's defect shows up here too).
+        S = 0.5 * (S + S.conj().swapaxes(-1, -2))
+        return np.linalg.eigvalsh(S).min(), np.abs(S).max()
+
+    box_l, box_g = _run_sigma(
+        phi_blocks, block_sizes, ne, make_buffers, taper="none")
+    tap_l, tap_g = _run_sigma(
+        phi_blocks, block_sizes, ne, make_buffers, taper="bartlett")
+
+    lam_box, scale_box = min_eig(box_l)
+    assert lam_box < -1e-4 * scale_box, (
+        "expected the boxcar band-1 Sigma^< to be indefinite (non-causal "
+        f"gain); min eig {lam_box:.3e} vs scale {scale_box:.3e}")
+
+    for tag, blocks in (("<", tap_l), (">", tap_g)):
+        lam, scale = min_eig(blocks)
+        assert lam >= -1e-9 * scale, (
+            f"tapered Sigma^{tag} lost PSD-ness: min eig {lam:.3e} vs "
+            f"scale {scale:.3e}")
 
 
 def test_fc3_writer_roundtrip(tmp_path) -> None:

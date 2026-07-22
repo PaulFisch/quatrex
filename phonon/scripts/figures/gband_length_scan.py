@@ -75,11 +75,13 @@ def main() -> int:
     p.add_argument("--root", type=Path,
                    default=Path("phonon/studies/out/cnt33_gband_length"))
     p.add_argument("--lengths", type=int, nargs="+", default=[8, 10])
-    p.add_argument("--gbands", type=int, nargs="+", default=[1, 2, 3])
+    p.add_argument("--gbands", nargs="+", default=["1", "2", "3", "1t"],
+                   help="g_band rung tags; a 't' suffix = Bartlett-tapered "
+                        "(e.g. 1 2 3 1t)")
     p.add_argument("--out", type=Path, default=None)
     a = p.parse_args()
 
-    data: dict[tuple[int, int], dict] = {}
+    data: dict[tuple[int, str], dict] = {}
     hdr = (f"{'L':>3} {'g_band':>6} {'status':>10} {'n_iter':>6} "
            f"{'lead_current':>13} {'|dJ|/|I|':>11} {'|J_s|/|I|':>11}")
     print(hdr)

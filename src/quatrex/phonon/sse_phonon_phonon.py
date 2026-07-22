@@ -299,6 +299,32 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "halo exchange only spans immediate neighbours)."
             )
 
+        # PSD taper of the band mask (sse_g_band_taper = "bartlett"): the
+        # boxcar mask above is indefinite, so the masked kernel loses
+        # PSD-ness; Bartlett weights w_d = 1 - d/(g_band+1) make the mask
+        # matrix PSD (Fejer kernel) so -+i Sigma^{<,>} stays PSD (Schur
+        # product theorem) at ANY band, and applying the SAME taper to the
+        # inner G legs and the Sigma output blocks is the Phi-derivable
+        # pair (Phi[M o G] chain rule) -- energy conservation retained.
+        # Implementation: the ring is linear in each factor, so the two
+        # G-leg weights and the output weight collapse to ONE scalar per
+        # quad, w(K1,K1') * w(K2,K2') * w(I,J), folded into the left
+        # vertex factor at the consumption sites (_phi_pre build for the
+        # nq==1 dense ring; the qtask weight for the coupled-q ring).
+        _taper = str(
+            getattr(config.phonon, "sse_g_band_taper", "none") or "none")
+        self._taper_w: list[float] | None = (
+            [1.0 - d / (self.g_band + 1.0) for d in range(self.g_band + 1)]
+            if _taper == "bartlett" else None
+        )
+        if (self._taper_w is not None and self._vfactors is not None
+                and self._vf_kernel == "gram"):
+            raise NotImplementedError(
+                "sse_g_band_taper requires the dense ring: per-quad taper "
+                "weights do not factor through the Gram collapse "
+                "(decomposed_kernel='gram')."
+            )
+
         # Precompute the full off-diagonal pair index: for each output
         # block pair (I, J) with |I-J| <= 1, collect the ring quads
         #   (K1, K2, K1', K2', phi_left, phi_right)
@@ -1013,10 +1039,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 self._vfactors is not None and self._vf_kernel == "gram"
             )
             if self._phi_pre is None and not use_factored:
+                # The Bartlett taper weight (1.0 when off) is folded into
+                # the left vertex factor once here; every downstream ring
+                # (legacy, lin, fast, verify, hermitian mirror) is linear
+                # in PL and inherits it.
                 self._phi_pre = {}
                 for (I, J), quads in self._phi_pair_index.items():
                     self._phi_pre[(I, J)] = [
-                        (K1, K2, K1p, K2p) + phi_perms(pl, pr, xp)
+                        (K1, K2, K1p, K2p) + phi_perms(
+                            pl if (w := self._quad_weight(
+                                I, J, K1, K1p, K2, K2p)) == 1.0 else pl * w,
+                            pr, xp)
                         for (K1, K2, K1p, K2p, pl, pr) in quads
                     ]
 
@@ -1532,8 +1565,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             if pre is None:
                                 pre = phi_perms(xp.conj(pl), pr, xp)
                                 perm_cache[pkey] = pre
+                            # Taper weight OUTSIDE the perm cache: pkey is
+                            # shared across the block row (bulk_vertex), but
+                            # the weight depends on the absolute |I-J| and
+                            # link distances of THIS quad.
                             qtasks.setdefault((I, J), []).append(
-                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p) + pre)
+                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p,
+                                 self._quad_weight(I, J, K1, K1p, K2, K2p))
+                                + pre)
             self._qtasks_cache_key = cache_key
             self._qtasks_cache = qtasks
 
@@ -1547,21 +1586,26 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 bs_J = int(self.block_sizes[J])
                 out_l = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
                 out_g = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
-                for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, *pre) in tasks:
-                    out_l[:, iq_ext] += _fold_l(
+                for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, wq, *pre) in tasks:
+                    sl = _fold_l(
                         pre,
                         gl_q[(K1, K1p)][lo:hi, iqp],
                         gl_q[(K2, K2p)][lo:hi, iq2],
                         ggr_q[(K1, K1p)][lo:hi, iqp],
                         ggr_q[(K2, K2p)][lo:hi, iq2],
                     )
-                    out_g[:, iq_ext] += _fold_g(
+                    sg = _fold_g(
                         pre,
                         gg_q[(K1, K1p)][lo:hi, iqp],
                         gg_q[(K2, K2p)][lo:hi, iq2],
                         glr_q[(K1, K1p)][lo:hi, iqp],
                         glr_q[(K2, K2p)][lo:hi, iq2],
                     )
+                    if wq != 1.0:
+                        sl *= wq
+                        sg *= wq
+                    out_l[:, iq_ext] += sl
+                    out_g[:, iq_ext] += sg
                 res[(I, J)] = (out_l, out_g)
             return res
 
@@ -1803,6 +1847,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             [data, xp.zeros(pad_shape, dtype=data.dtype)], axis=0
         )
         return xp.fft.fft(padded, axis=0)
+
+    def _quad_weight(
+        self, I: int, J: int, K1: int, K1p: int, K2: int, K2p: int,
+    ) -> float:
+        """Bartlett taper weight of one ring quad: the product of the two
+        inner G-link weights and the Sigma output-block weight (the ring is
+        linear in each factor, so the three Schur-taper applications
+        collapse to this one scalar). 1.0 when the taper is off."""
+        if self._taper_w is None:
+            return 1.0
+        w = self._taper_w
+        return w[abs(K1 - K1p)] * w[abs(K2 - K2p)] * w[abs(I - J)]
 
     def _links_for_range(self, a: int, b: int) -> set[tuple[int, int]]:
         """Distinct inner G band links needed by outputs owned
