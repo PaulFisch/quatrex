@@ -144,8 +144,12 @@ def main() -> int:
         # the reduced-system path reorders flops -> ~1e-8, not bitwise.
         lc1, lc2 = float(d1["lead_current"]), float(d2["lead_current"])
         rel = abs(lc1 - lc2) / max(abs(lc1), 1e-300)
-        lh = (np.max(np.abs(d1["last_heat"] - d2["last_heat"]))
-              / max(np.max(np.abs(d1["last_heat"])), 1e-300))
+        # The distributed RGF NaNs the INTERIOR interfaces by design
+        # (only lead currents are valid) -- compare the two leads only.
+        h1 = np.asarray(d1["last_heat"])[[0, -1]]
+        h2 = np.asarray(d2["last_heat"])[[0, -1]]
+        lh = (np.max(np.abs(h1 - h2))
+              / max(np.max(np.abs(h1)), 1e-300))
         verdict = "PASS" if (rel < 1e-6 and lh < 1e-6) else "FAIL"
         print(f"[parity] lead_current bcs1={lc1:.10g} bcs2={lc2:.10g} "
               f"rel={rel:.2e}; last_heat rel-max={lh:.2e} -> {verdict}",
