@@ -121,24 +121,30 @@ class SCBAData:
             if getattr(config, "simulation_type", "") == "phonon":
                 g_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
             if g_band > 1:
-                if comm.block.size > 1:
-                    raise NotImplementedError(
-                        "sse_g_band > 1 requires block_comm_size = 1."
-                    )
                 from qttools import sparse as _sparse
 
+                # Distributed: emit the extra band blocks only within
+                # this rank's arrow-wise window (min block index inside
+                # the rank's section), matching compute_sparsity_pattern
+                # above. At block.size == 1 the window spans all blocks
+                # and this reduces to the legacy full loop.
+                sec_lo = int(section_offsets[comm.block.rank])
+                sec_hi = int(section_offsets[comm.block.rank + 1])
                 block_offsets_ = np.hstack(([0], np.cumsum(block_sizes)))
                 rows_, cols_ = [], []
                 for bi in range(len(block_sizes)):
                     for bj in range(len(block_sizes)):
-                        if 1 < abs(bi - bj) <= g_band:
-                            r = np.arange(block_offsets_[bi],
-                                          block_offsets_[bi + 1])
-                            c = np.arange(block_offsets_[bj],
-                                          block_offsets_[bj + 1])
-                            rr, cc = np.meshgrid(r, c, indexing="ij")
-                            rows_.append(rr.ravel())
-                            cols_.append(cc.ravel())
+                        if not (1 < abs(bi - bj) <= g_band):
+                            continue
+                        if not (sec_lo <= min(bi, bj) < sec_hi):
+                            continue
+                        r = np.arange(block_offsets_[bi],
+                                      block_offsets_[bi + 1])
+                        c = np.arange(block_offsets_[bj],
+                                      block_offsets_[bj + 1])
+                        rr, cc = np.meshgrid(r, c, indexing="ij")
+                        rows_.append(rr.ravel())
+                        cols_.append(cc.ravel())
                 if rows_:
                     n_ = int(block_offsets_[-1])
                     band_pattern = _sparse.coo_matrix(

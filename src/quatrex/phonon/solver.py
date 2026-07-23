@@ -422,12 +422,6 @@ class PhononSolver(SubsystemSolver):
             {"n_offdiagonals": self._gf_band} if self._gf_band >= 2 else {}
         )
         if comm.block.size > 1:
-            if self._gf_band > 1:
-                raise NotImplementedError(
-                    "sse_g_band > 1 requires block_comm_size = 1 (the "
-                    "distributed RGF does not produce the second "
-                    "off-diagonal blocks)."
-                )
             # NOTE: mirror the single-block branch -- the distributed RGF
             # also returns the (block-all-reduced) lead heat current when
             # asked. Without this the block-parallel path leaves
@@ -442,6 +436,7 @@ class PhononSolver(SubsystemSolver):
                 out=out,
                 return_retarded=True,
                 return_current=self.compute_meir_wingreen_current,
+                **extra_kw,
             )
         else:
             self.meir_wingreen_current = self.solver.selected_solve(

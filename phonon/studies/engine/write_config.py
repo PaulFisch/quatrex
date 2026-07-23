@@ -63,6 +63,14 @@ def cnt_config(a):
     if a.bcs > a.ncells:
         raise SystemExit(f"block_comm_size {a.bcs} > num_transport_cells {a.ncells} "
                          "(each block-rank needs >=1 BTD block)")
+    if a.bcs > 1 and a.ncells < 2 * a.bcs:
+        # Runtime enforces ncells >= (sse_g_band+1)*bcs (band halo +
+        # distributed RGF off-diagonal post-pass); warn early for the
+        # weakest case g_band=1.
+        raise SystemExit(f"block_comm_size {a.bcs} needs >= 2 blocks per "
+                         f"block-rank (ncells >= {2 * a.bcs}); with "
+                         "sse_g_band=g the runtime requires ncells >= "
+                         "(g+1)*bcs.")
     if a.qcs != 1:
         raise SystemExit("Gamma-only system (k==1); q_comm_size must be 1")
     orb = _orbital_block(a.work)

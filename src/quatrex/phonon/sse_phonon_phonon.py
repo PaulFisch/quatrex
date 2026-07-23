@@ -27,6 +27,7 @@ from qttools.comm import comm as ranks
 from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
+from qttools.utils.mpi_utils import get_section_sizes
 
 from scipy import sparse
 
@@ -294,10 +295,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # nearest-neighbour vertex span (diagonal Sigma blocks exact).
         self.g_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
         if self.g_band > 1 and ranks.block.size > 1:
-            raise NotImplementedError(
-                "sse_g_band > 1 requires block_comm_size = 1 (the band "
-                "halo exchange only spans immediate neighbours)."
+            # The band halo exchange and the bosonic-fold plan only span
+            # the IMMEDIATE comm.block neighbours; with every rank owning
+            # at least g_band + 1 blocks all band links land there (the
+            # halo width itself is data-driven via _links_for_range). The
+            # distributed RGF enforces the same bound for its
+            # off-diagonal post-pass.
+            min_local = int(
+                min(get_section_sizes(self.n_blocks, ranks.block.size)[0])
             )
+            if min_local < self.g_band + 1:
+                raise ValueError(
+                    f"sse_g_band={self.g_band} with block_comm_size="
+                    f"{ranks.block.size} leaves a comm.block rank with only "
+                    f"{min_local} blocks (need >= {self.g_band + 1} so the "
+                    "band halo spans only immediate neighbours); reduce "
+                    "block_comm_size."
+                )
 
         # PSD taper of the band mask (sse_g_band_taper = "bartlett"): the
         # boxcar mask above is indefinite, so the masked kernel loses
