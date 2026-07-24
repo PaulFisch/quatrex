@@ -56,12 +56,23 @@ def _load(path: Path) -> dict | None:
         out["scale"] = np.nan
     bb = d.get("bubble_balance_spectrum")
     if bb is not None:
+        # NOTE: the npz spectrum is the RANK-0-LOCAL frequency slice; the
+        # authoritative global balance is iter_bubble_balance (all-reduced
+        # P_in, P_out per iteration). Js here is the slice sum -- indicative,
+        # not the global number.
         P_in, P_out = np.asarray(bb, float)
         out["Js_spec"] = P_out - P_in
         out["Js"] = float(np.sum(P_out - P_in))
     else:
         out["Js_spec"] = None
         out["Js"] = np.nan
+    ibb = d.get("iter_bubble_balance")
+    if ibb is not None:
+        # (P_in, P_out, resid) per iteration -- resid is RELATIVE to the
+        # bubble power, the honest conservation figure of merit.
+        out["bb_resid"] = float(np.asarray(ibb)[-1, 2])
+    else:
+        out["bb_resid"] = np.nan
     return out
 
 
@@ -83,7 +94,8 @@ def main() -> int:
 
     data: dict[tuple[int, str], dict] = {}
     hdr = (f"{'L':>3} {'g_band':>6} {'status':>10} {'n_iter':>6} "
-           f"{'lead_current':>13} {'|dJ|/|I|':>11} {'|J_s|/|I|':>11}")
+           f"{'lead_current':>13} {'|dJ|/|I|':>11} {'|J_s|/|I|':>11} "
+           f"{'bb_resid':>10}")
     print(hdr)
     print("-" * len(hdr))
     for L in a.lengths:
@@ -97,7 +109,8 @@ def main() -> int:
             dJrel = abs(r["dJ"]) / sc if np.isfinite(sc) else np.nan
             Jsrel = abs(r["Js"]) / sc if np.isfinite(sc) else np.nan
             print(f"{L:>3} {g:>6} {_status(r):>10} {r['n_iter']:>6} "
-                  f"{r['lead_current']:>13.5g} {dJrel:>11.3e} {Jsrel:>11.3e}")
+                  f"{r['lead_current']:>13.5g} {dJrel:>11.3e} {Jsrel:>11.3e} "
+                  f"{r['bb_resid']:>10.2e}")
 
     if a.out is None or not data:
         return 0
