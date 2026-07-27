@@ -129,11 +129,41 @@ def run_rung(tag: str, lowmask: float) -> None:
           f"wall={(time.time() - t0) / 60:.1f} min", flush=True)
 
 
+OLD_FC2 = (REPO / "phonon/scripts/out/prod/sinw_d5a/work/T100/"
+           "dynamical_matrix.mat")
+
+
+def prep_oldfc2_inputs() -> None:
+    """Attribution control: the CORRUPTED historical FC2 with otherwise
+    identical settings (grid, aux/KK support, FC3), so the corrected-
+    baseline shift can be attributed to the FC2 fix alone."""
+    d = OUT / "inputs_oldfc2"
+    d.mkdir(parents=True, exist_ok=True)
+    for f in GEOM:
+        dst = d / f
+        if not dst.exists():
+            src = OLD_FC2 if f == "dynamical_matrix.mat" else INPUTS / f
+            dst.symlink_to(src)
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     build_and_validate_inputs()
     run_rung("bare", 0.0)
     run_rung("ircut", 1.5)
+    # Attribution control on the historical corrupted FC2.
+    if OLD_FC2.exists():
+        prep_oldfc2_inputs()
+        global INPUTS
+        saved = INPUTS
+        INPUTS = OUT / "inputs_oldfc2"
+        try:
+            run_rung("ircut_oldfc2", 1.5)
+        finally:
+            INPUTS = saved
+    else:
+        print(f"[warn ] old FC2 not found at {OLD_FC2}; skipping the "
+              "attribution control.", flush=True)
     print("[done ] d5a fixed-export re-baseline complete.", flush=True)
     return 0
 
