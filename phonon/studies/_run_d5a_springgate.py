@@ -44,16 +44,22 @@ LINKED = ("fc3_blocks.hdf5", "phonon_energies.npy", "structure.xyz")
 WC = REPO / "phonon/studies/engine/write_config.py"
 RUN = REPO / "phonon/studies/engine/run.py"
 
-TARGETS = (0.2, 0.5, 1.0)  # THz twist gaps
+TARGETS = (0.2, 0.5, 1.0)  # THz twist gaps (ASR-restored: LA/TA gapless)
+# Shell-clamped variant (no transverse-ASR restoration): twist +
+# flexural + transverse translations all gapped, only the z/LA channel
+# stays gapless -- the physically embedded wire. Added after the
+# ASR-restored rungs diverged at gaps 0.2/0.5 (the flexural quadratic
+# IR tail survives the twist-only gapping).
+TARGETS_NOASR = (0.5, 1.0)
 
 
-def make_pinned_inputs(target: float) -> Path:
-    """Pinned+ASR dynamical matrix for the given twist gap; returns dir."""
+def make_pinned_inputs(target: float, asr: bool = True) -> Path:
+    """Pinned dynamical matrix for the given twist gap; returns dir."""
     import scipy.io as sio
     from phonon_inputs.embedded_extract import (
         gamma_spectrum, pin_for_twist_gap, read_structure_xyz)
 
-    d = OUT / f"inputs_gap{target:g}"
+    d = OUT / (f"inputs_gap{target:g}" + ("" if asr else "_noasr"))
     mat = d / "dynamical_matrix.mat"
     if mat.exists():
         return d
@@ -66,13 +72,16 @@ def make_pinned_inputs(target: float) -> Path:
     syms, pos, masses = read_structure_xyz(INPUTS / "structure.xyz")
     surface = np.array([i for i, s in enumerate(syms) if s == "H"])
     fixed, k_pin, gap = pin_for_twist_gap(
-        blocks, pos, masses, surface, target_gap_thz=target)
+        blocks, pos, masses, surface, target_gap_thz=target, asr=asr)
     w = gamma_spectrum(fixed)
-    print(f"[pin  ] target {target} THz: k_pin={k_pin:.4f} THz^2*amu, "
-          f"achieved gap {gap:.4f} THz; Gamma lowest-5 "
+    print(f"[pin  ] target {target} THz (asr={asr}): k_pin={k_pin:.4f} "
+          f"THz^2*amu, achieved gap {gap:.4f} THz; Gamma lowest-5 "
           f"{np.array2string(w[:5], precision=4)}", flush=True)
-    if np.abs(w[:3]).max() > 1e-4 or w.min() < -1e-4:
-        sys.exit(f"[fatal] pinned matrix invalid: {w[:5]}")
+    n_zero_expected = 3 if asr else 1
+    n_zero = int(np.sum(np.abs(w) < 1e-4))
+    if n_zero != n_zero_expected or w.min() < -1e-4:
+        sys.exit(f"[fatal] pinned matrix invalid (zeros {n_zero} != "
+                 f"{n_zero_expected}): {w[:5]}")
     sio.savemat(str(mat), {f"[{a}, {b}, {c}]": v
                            for (a, b, c), v in fixed.items()})
     for f in LINKED:
@@ -88,14 +97,14 @@ def hygiene() -> None:
         subprocess.run(["kill", "-9", p], capture_output=True)
 
 
-def run_rung(target: float) -> None:
-    tag = f"gap{target:g}"
+def run_rung(target: float, asr: bool = True) -> None:
+    tag = f"gap{target:g}" + ("" if asr else "_noasr")
     d = OUT / tag
     npz = d / "run.npz"
     if npz.exists():
         print(f"[skip ] {tag}: run.npz exists", flush=True)
         return
-    src = make_pinned_inputs(target)
+    src = make_pinned_inputs(target, asr=asr)
     d.mkdir(parents=True, exist_ok=True)
     for f in ("dynamical_matrix.mat",) + LINKED:
         dst = d / f
@@ -133,6 +142,8 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     for t in TARGETS:
         run_rung(t)
+    for t in TARGETS_NOASR:
+        run_rung(t, asr=False)
     print("[done ] d5a spring-pinning gate complete.", flush=True)
     return 0
 

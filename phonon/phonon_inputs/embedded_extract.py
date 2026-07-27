@@ -166,14 +166,23 @@ def pin_for_twist_gap(
     axis: str = "z",
     tol: float = 0.02,
     max_iter: int = 60,
+    asr: bool = True,
 ) -> tuple[dict, float, float]:
-    """Bisect k_pin so the ASR-corrected twist gap hits ``target_gap_thz``.
+    """Bisect k_pin so the twist gap hits ``target_gap_thz``.
 
-    Returns (pinned+ASR blocks, k_pin, achieved gap).
+    ``asr=True`` re-imposes the full translational ASR after pinning
+    (LA/TA gapless -- only the rotational stiffening survives).
+    ``asr=False`` keeps the transverse pinning as-is: the shell-clamped
+    wire model, gapping twist + flexural + transverse translations while
+    the untouched axis translation (the LA transport channel) remains an
+    exact zero mode.
+
+    Returns (pinned blocks, k_pin, achieved gap).
     """
     def gap_of(k_pin: float) -> tuple[dict, float]:
         b = add_surface_pinning(blocks, masses, surface_idx, k_pin)
-        b = reimpose_translational_asr(b, masses)
+        if asr:
+            b = reimpose_translational_asr(b, masses)
         return b, twist_gap(b, positions, masses, axis)
 
     lo, hi = 0.0, 1.0
