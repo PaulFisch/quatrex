@@ -44,7 +44,7 @@ import h5py
 from phonopy import Phonopy
 from phonopy.structure.atoms import PhonopyAtoms
 
-from phonon_inputs.convention import get_btd_blocks
+from phonon_inputs.convention import get_btd_blocks_folded
 from phonon_inputs.constants import CONVERSION_THZ2
 from phonon_inputs.separable import (
     build_supercell_mapping,
@@ -100,23 +100,39 @@ def build_cnt(system, ncells, tdir, nfreq, fmax, emin, out):
         flush=True,
     )
 
-    h00, h01 = get_btd_blocks(
+    # Beyond-nearest-cell Fourier coefficients (n_qz >= 4) are FOLDED
+    # into H00: exact at Gamma (acoustic sum rule, twist, optical onset)
+    # and at the zone boundary; without the fold the emitted BT matrix
+    # has shifted / imaginary translational modes (the d5a/d11a
+    # corruption, 2026-07: Gamma [-0.27, -0.15, ...] instead of zeros).
+    h00, h01, fold = get_btd_blocks_folded(
         phonon, (0.0, 0.0), transport_direction=tdir, n_qz=n_qz,
         conversion_factor=CONVERSION_THZ2,
     )
     print(
         f"||H00||={np.linalg.norm(h00):.1f} ||H01||={np.linalg.norm(h01):.1f} "
-        f"THz^2; H00 herm err {np.abs(h00 - h00.conj().T).max():.1e}",
+        f"THz^2; H00 herm err {np.abs(h00 - h00.conj().T).max():.1e}; "
+        f"folded n>=2 coeffs {fold['fold_norms']} "
+        f"(midzone bound {fold['midzone_bound']:.2f} THz^2)",
         flush=True,
     )
-    # Dispersion sanity (no imaginary modes).
+    # Dispersion sanity: SIGNED frequencies -- imaginary modes must fail
+    # loudly, not be clipped away (the old np.clip hid the truncation
+    # corruption).
     fr = []
     for kz in np.linspace(0, 0.5, 21):
         hk = h00 + h01 * np.exp(2j * np.pi * kz) + h01.conj().T * np.exp(-2j * np.pi * kz)
-        fr.append(np.sqrt(np.clip(np.linalg.eigvalsh(hk), 0, None)))
+        w2 = np.linalg.eigvalsh(hk)
+        fr.append(np.sign(w2) * np.sqrt(np.abs(w2)))
     fr = np.array(fr)
-    print(f"dispersion: min {fr.min():.3f}, max {fr.max():.3f} THz; "
-          f"acoustic lowest-4 @kz->0: {np.round(fr[0, :4], 4)}", flush=True)
+    print(f"dispersion: min {fr.min():.4f}, max {fr.max():.3f} THz; "
+          f"lowest-5 @Gamma (signed): {np.round(fr[0, :5], 4)}", flush=True)
+    if fr.min() < -1e-3:
+        raise SystemExit(
+            f"IMAGINARY modes in the emitted BT dispersion (min "
+            f"{fr.min():.4f} THz): the export is corrupt -- refusing to "
+            "write inputs."
+        )
 
     def key(n):
         k = [0, 0, 0]
@@ -266,8 +282,11 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
     H00 = np.zeros((n_kpts, nd, nd), complex)
     H01 = np.zeros((n_kpts, nd, nd), complex)
     for iq, (qa, qb) in enumerate(q_points):
-        h00, h01 = get_btd_blocks(phonon, (qa, qb), transport_direction=tdir,
-                                  conversion_factor=CONVERSION_THZ2)
+        # Folded variant: a no-op at the default n_qz=3 (no n>=2
+        # coefficients exist), future-proof for wider transport meshes.
+        h00, h01, _fold = get_btd_blocks_folded(
+            phonon, (qa, qb), transport_direction=tdir,
+            conversion_factor=CONVERSION_THZ2)
         H00[iq], H01[iq] = h00, h01
     print(f"dense H(q): ||H00(G)||={np.linalg.norm(H00[0]):.1f} "
           f"||H01(G)||={np.linalg.norm(H01[0]):.1f} THz^2; "

@@ -180,6 +180,16 @@ def get_btd_blocks(
     These are COMPLEX at non-zero q_perp (2D Fourier sum of real
     coefficients evaluated at non-zero argument).
 
+    .. warning::
+        For ``n_qz >= 4`` the mesh carries Fourier coefficients beyond
+        n = 1 (couplings past the nearest cell). This function DROPS
+        them, which breaks the acoustic sum rule of the emitted
+        block-tridiagonal matrix (the d5a/d11a corruption: shifted /
+        imaginary translational modes at Gamma). Use
+        :func:`get_btd_blocks_folded` instead, which folds the n >= 2
+        coefficients into H_00 (exact at Gamma and at the zone
+        boundary; error peaks mid-zone, bounded by 2*sum||H_n||).
+
     Parameters
     ----------
     phonon : Phonopy
@@ -223,3 +233,75 @@ def get_btd_blocks(
     H_01 = np.einsum("k,kij->ij", phases, D_qz) / n_qz * conversion_factor
 
     return H_00, H_01
+
+
+def get_btd_blocks_folded(
+    phonon: Phonopy,
+    q_perp_frac: tuple[float, float],
+    transport_direction: str = "z",
+    n_qz: int = 3,
+    conversion_factor: float = CONVERSION,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """BTD blocks with the beyond-nearest-cell coefficients FOLDED into H_00.
+
+    The transport format holds only (H_00, H_01, H_01^dag). When the fit
+    mesh resolves couplings beyond one cell (n_qz >= 4 -- e.g. an FC2
+    cutoff exceeding the transport period), the n >= 2 Fourier
+    coefficients are nonzero; dropping them breaks the acoustic sum rule
+    (Gamma translations shift away from zero, possibly imaginary).
+
+    Folding each n >= 2 coefficient into H_00 (Hermitian-symmetrised;
+    the even-mesh Nyquist coefficient counted once, since +-n alias)
+    makes the emitted three-block model EXACT at Gamma (exact zero
+    modes, twist, and optical onset) and at the zone boundary
+    (exp(2*pi*i*n*q) = 1 at q = 0 AND q = 1/2 for even n); the error
+    peaks mid-zone and is bounded by 2 * sum_n ||H_n||.
+
+    Returns
+    -------
+    H_00 : ndarray (n_dof, n_dof), complex
+        On-site block including the folded n >= 2 coefficients.
+    H_01 : ndarray (n_dof, n_dof), complex
+        Nearest-cell coupling (n = 1 coefficient).
+    report : dict
+        "fold_norms": {n: ||H_n|| / ||H_01||} for the folded orders,
+        "midzone_bound": sum of 2*||H_n|| (THz^2, absolute) -- the
+        worst-case mid-zone dispersion-matrix error.
+    """
+    tau = phonon.primitive.scaled_positions
+    nd = len(phonon.primitive.masses) * 3
+    tidx = "xyz".index(transport_direction)
+
+    D_qz = np.zeros((n_qz, nd, nd), dtype=complex)
+    for k in range(n_qz):
+        q = [0.0, 0.0, 0.0]
+        perp_idx = [i for i in range(3) if i != tidx]
+        q[perp_idx[0]] = q_perp_frac[0]
+        q[perp_idx[1]] = q_perp_frac[1]
+        q[tidx] = k / n_qz
+        q = np.array(q)
+        D_A = phonon.get_dynamical_matrix_at_q(q)
+        D_qz[k] = gauge_transform_A_to_B(D_A, q, tau)
+
+    def coeff(n):
+        ph = np.exp(-2j * np.pi * n * np.arange(n_qz) / n_qz)
+        return np.einsum("k,kij->ij", ph, D_qz) / n_qz * conversion_factor
+
+    H_00 = coeff(0)
+    H_01 = coeff(1)
+    fold_norms: dict[int, float] = {}
+    midzone = 0.0
+    h01_norm = float(np.linalg.norm(H_01))
+    for n in range(2, n_qz // 2 + 1):
+        Hn = coeff(n)
+        if 2 * n == n_qz:
+            # Even-mesh Nyquist: the +-n coefficients alias onto one
+            # (real-phase) coefficient -- fold it once.
+            H_00 = H_00 + 0.5 * (Hn + Hn.conj().swapaxes(-2, -1))
+        else:
+            H_00 = H_00 + Hn + Hn.conj().swapaxes(-2, -1)
+        nrm = float(np.linalg.norm(Hn))
+        fold_norms[n] = nrm / max(h01_norm, 1e-300)
+        midzone += 2.0 * nrm
+
+    return H_00, H_01, {"fold_norms": fold_norms, "midzone_bound": midzone}
