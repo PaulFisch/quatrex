@@ -66,6 +66,11 @@ class VASPConfig:
     kpoints_scf: list[int] = field(default_factory=lambda: [4, 4, 4])
     vasp_command: str = "vasp_std"
     nsw: int = 300                 # max ionic steps for relaxation
+    # Extra INCAR tags appended verbatim to every generated INCAR
+    # (relax AND static force runs), e.g. {IVDW: 11} for the D3
+    # dispersion correction of the oxide-embedded wire (the steric
+    # H...O contact IS the vdW physics there).
+    incar_extra: dict = field(default_factory=dict)
 
 
 @dataclass

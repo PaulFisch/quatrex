@@ -493,6 +493,8 @@ def _write_vasp_relax_inputs(
             f.write(f"NCORE = {vasp_config.ncore}\n")
         if vasp_config.kpar is not None:
             f.write(f"KPAR = {vasp_config.kpar}\n")
+        for key, val in getattr(vasp_config, "incar_extra", {}).items():
+            f.write(f"{key} = {val}\n")
 
     # --- KPOINTS (use denser mesh for relaxation) ---
     kpts = vasp_config.kpoints_scf

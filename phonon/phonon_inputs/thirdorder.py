@@ -284,6 +284,8 @@ def _build_vasp_incar_text(
         incar_lines.append(f"KPAR = {kpar}\n")
     if vasp_config.ncore is not None:
         incar_lines.append(f"NCORE = {vasp_config.ncore}\n")
+    for key, val in getattr(vasp_config, "incar_extra", {}).items():
+        incar_lines.append(f"{key} = {val}\n")
 
     return "".join(incar_lines)
 
