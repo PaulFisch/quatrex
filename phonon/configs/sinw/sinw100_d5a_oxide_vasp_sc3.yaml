@@ -201,8 +201,9 @@ vasp:
   ncore: 8
   kpar: 4
   kpoints_scf: [1, 1, 4]
-  vasp_command: ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; mpirun -np 128
-    --bind-to core --map-by socket:PE=1 /usr/scratch/tortin8/pfischill/vasp.6.3.2/bin/vasp_std
+  vasp_command: export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib;
+    ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun
+    -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std
   incar_extra: {IVDW: 11}
 fc_method: hiphive
 relax: {calculation: relax, forc_conv_thr: 0.001, calculator: vasp, work_dir: ./relax_sinw100_d5a_oxide_vasp}
