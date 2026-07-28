@@ -50,7 +50,7 @@ TARGETS = (0.2, 0.5, 1.0)  # THz twist gaps (ASR-restored: LA/TA gapless)
 # stays gapless -- the physically embedded wire. Added after the
 # ASR-restored rungs diverged at gaps 0.2/0.5 (the flexural quadratic
 # IR tail survives the twist-only gapping).
-TARGETS_NOASR = (0.5, 1.0)
+TARGETS_NOASR = (0.5, 1.0, 2.0)  # 2.0: probe beyond the marginal 1 THz
 
 
 def make_pinned_inputs(target: float, asr: bool = True) -> Path:
