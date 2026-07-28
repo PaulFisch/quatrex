@@ -581,6 +581,7 @@ def run_vasp_relax(
     forc_conv_thr: float = 0.01,
     press_conv_thr: float = 0.5,
     skip_existing: bool = True,
+    timeout: int = 7200,
 ) -> PhonopyAtoms:
     """Run a VASP structural relaxation and return the relaxed structure.
 
@@ -630,7 +631,7 @@ def run_vasp_relax(
     cmd = vasp_config.vasp_command if use_shell else vasp_config.vasp_command.split()
     log_file = work_dir / "vasp_relax.log"
     import sys
-    rc = _run_and_tee(cmd, log_file, str(work_dir), timeout=7200,
+    rc = _run_and_tee(cmd, log_file, str(work_dir), timeout=timeout,
                       use_shell=use_shell)
 
     if rc != 0 or not _is_vasp_done(work_dir):

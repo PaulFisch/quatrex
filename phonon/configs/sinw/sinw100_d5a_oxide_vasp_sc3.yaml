@@ -241,4 +241,4 @@ thirdorder:
   fc_calculator: symfc
   calculator: vasp
   work_dir: ./fc3_sinw100_d5a_sc4_vasp
-  pw_timeout: 7200
+  pw_timeout: 14400
