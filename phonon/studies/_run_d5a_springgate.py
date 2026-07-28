@@ -135,6 +135,49 @@ def run_rung(target: float, asr: bool = True) -> None:
           f"wall={(time.time() - t0) / 60:.1f} min", flush=True)
 
 
+def run_rung_long(target: float) -> None:
+    """Continuation of the BOUNDED shell-clamped rung: gap1_noasr stayed
+    finite through 300 bare eta=0 iterations (first ever for d5a) but
+    did not reach the fixed point -- rerun with 600 iterations and
+    Anderson(m=8) mixing (a solver choice, not physics smearing)."""
+    tag = f"gap{target:g}_noasr_long"
+    d = OUT / tag
+    npz = d / "run.npz"
+    if npz.exists():
+        print(f"[skip ] {tag}: run.npz exists", flush=True)
+        return
+    src = make_pinned_inputs(target, asr=False)
+    d.mkdir(parents=True, exist_ok=True)
+    for f in ("dynamical_matrix.mat",) + LINKED:
+        dst = d / f
+        if not dst.exists():
+            dst.symlink_to(src / f)
+    subprocess.run(
+        [sys.executable, str(WC), "--system", "sinw_d5a", "--work", str(d),
+         "-L", str(NCELLS), "--eta", "0", "--nfreq", str(NFREQ),
+         "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.1",
+         "--mixing-method", "anderson", "--max-iter", "600",
+         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+        check=True)
+    hygiene()
+    env = dict(os.environ,
+               OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
+               MKL_NUM_THREADS="1", NUMEXPR_NUM_THREADS="1",
+               QX_SCATCONTACTS="0", QX_BBCHECK="1",
+               QX_CONFIG=str(d / "quatrex_config.toml"),
+               QX_NPZ=str(npz))
+    t0 = time.time()
+    print(f"[run  ] {tag} (eta=0 BARE, anderson m-default, 600 it, "
+          f"{NRANKS} ranks)", flush=True)
+    with open(OUT / f"{tag}.log", "w") as log:
+        rc = subprocess.run(
+            ["mpirun", "--bind-to", "core", "--map-by", "numa",
+             "-np", str(NRANKS), sys.executable, str(RUN)],
+            env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+    print(f"[done ] {tag}: rc={rc} npz={'yes' if npz.exists() else 'MISSING'} "
+          f"wall={(time.time() - t0) / 60:.1f} min", flush=True)
+
+
 def main() -> int:
     if not (INPUTS / "dynamical_matrix.mat").exists():
         sys.exit("[fatal] run _run_d5a_fixed_export.py first (needs the "
@@ -144,6 +187,7 @@ def main() -> int:
         run_rung(t)
     for t in TARGETS_NOASR:
         run_rung(t, asr=False)
+    run_rung_long(1.0)
     print("[done ] d5a spring-pinning gate complete.", flush=True)
     return 0
 
