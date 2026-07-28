@@ -27,7 +27,7 @@ N_WIRE = 21  # Si9H12 -- the first 21 atoms of the inline structure
 
 def main() -> int:
     from phonon_inputs.config import load_config
-    from phonon_inputs.io import load_structure
+    from phonon_inputs.structure import load_structure
     from phonon_inputs.qe_interface import run_vasp_relax
 
     config = load_config(CFG)
