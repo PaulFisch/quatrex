@@ -1,0 +1,61 @@
+## phonon_inputs config: 2H-MoS2 bulk -- RELAX STAGE ONLY (dense k-mesh).
+## Cross-plane (c-axis) thermal-transport campaign vs Sood et al.,
+## Nano Lett. 19, 2434 (2019): measured kappa_z(t) 0.9->2.0 W/mK over
+## 20-240 nm films.
+##
+## Cell FIXED to experiment (a=3.160, c=12.294 A; Bronsema 1986):
+## kappa_z is exquisitely sensitive to the interlayer distance, and
+## PBE+D3 cell errors along c would pollute the comparison. Only the
+## internal S z-parameter relaxes (ISIF=2). D3 (IVDW=11) is essential:
+## the interlayer restoring forces ARE the cross-plane channel.
+##
+## Driven by phonon/studies/_run_mos2_fc.py (relax here at dense k;
+## statics in mos2_bulk_vasp.yaml at supercell-appropriate k).
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Mo, Mo, S, S, S, S]
+  lattice:
+    - [3.1600, 0.0000, 0.0000]
+    - [-1.5800, 2.7366, 0.0000]
+    - [0.0000, 0.0000, 12.2940]
+  scaled_positions:
+    - [0.333333, 0.666667, 0.250000]   # Mo (2c)
+    - [0.666667, 0.333333, 0.750000]   # Mo
+    - [0.666667, 0.333333, 0.121000]   # S (4f, z ~ 0.121)
+    - [0.666667, 0.333333, 0.379000]   # S
+    - [0.333333, 0.666667, 0.621000]   # S
+    - [0.333333, 0.666667, 0.879000]   # S
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Mo: Mo_sv
+    S: S
+  encut: 400
+  ediff: 1.0e-7                    # tight: one internal parameter, cheap cell
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: .FALSE.                   # 6-atom cell: reciprocal projectors
+  lwave: false
+  lcharg: false
+  ncore: 4
+  kpar: 4
+  kpoints_scf: [12, 12, 4]         # dense: 6-atom primitive relax
+  incar_extra: {IVDW: 11}
+  vasp_command: "export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib; ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: relax               # ISIF=2: ions only, cell fixed to experiment
+  forc_conv_thr: 0.001             # eV/A -- one free parameter, converge hard
+  calculator: vasp
+  work_dir: ./relax_mos2_vasp
+
+hiphive:                           # unused in this stage (driver splits stages)
+  supercell: [4, 4, 1]
+  n_structures: 40
+  calculator: vasp
+  work_dir: ./fc3_hiphive_mos2_vasp
