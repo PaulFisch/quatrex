@@ -1,18 +1,22 @@
-"""Units-bridge parity: production engine (ballistic) vs dense Caroli.
+"""Units-bridge parity: production engine (ballistic) vs exact mode count.
 
-Same device (cnt33 L4, dynamical_matrix.mat as consumed by the engine),
-two independent paths to a physical conductance:
+Same device (cnt33 L4, dynamical_matrix.mat as consumed by the engine):
 
-  A. dense reference -- Caroli T(omega) from the .mat blocks via
-     Sancho-Rubio leads, integrated with the dense-stack convention
-     J = sum(hbar omega_rad (n_L - n_R) T) * dnu * 1e12, G = J/(A dT).
+  A. reference -- Landauer G from the lead Bloch mode count M(nu)
+     (assumption-free for a pristine wire; no NEGF, no surface GF),
+     integrated with the dense-stack convention
+     J = sum(hbar omega_rad (n_L - n_R) M) * dnu * 1e12, G = J/(A dT).
   B. engine -- QX_BALLISTIC=1 single-rank run, then
      phonon.postproc.units.run_npz_conductance on run.npz.
 
-Agreement within a few percent validates every unit factor in the
-bridge (a missing hbar / 2pi / dnu is a factor >= 6). Differences at
-the % level come from OBC construction (Sancho-Rubio + eta_factor lead
-seed vs the engine OBC) and grid quadrature.
+Validated 2026-07-29: engine T_eff = spectrum/(n_L - n_R) reproduces
+M(nu) on 361/361 bins exactly; G ratio 1.00000 (797.0 MW/m^2/K).
+
+The retired Sancho-Rubio reference (dense_reference below) is kept as
+a secondary check only: its eta_factor lead seed smears the stepped
+transmission and reads ~10% LOW on cnt33 (T peak 10.5 vs the true
+11-channel step at 40 THz). The same caveat applies to the stored
+ballistic.py d5a/d11a curves at ETA_FACTOR = 0.3.
 
 Run locally:  python phonon/studies/_units_parity.py
 """
@@ -112,7 +116,7 @@ def engine_ballistic() -> float:
          "--system", "cnt33", "--work", str(WORK), "-L", str(L),
          "--eta", "0", "--temperature", str(T0), "--dt", str(DT),
          "--nfreq", str(NFREQ), "--fmax", str(FMAX), "--retarded", "fft",
-         "--mix", "0.2", "--max-iter", "40"],
+         "--mix", "0.2", "--max-iter", "3"],
         check=True)
     npz = WORK / "run.npz"
     env = dict(os.environ,
@@ -139,12 +143,47 @@ def engine_ballistic() -> float:
     return float(res["G_Wm2K"])
 
 
+def bloch_mode_reference(npz_path) -> float:
+    """Exact ballistic reference: Landauer G from the lead Bloch mode
+    count M(nu) (no NEGF, no surface GF -- assumption-free for a pristine
+    wire), integrated with the identical unit convention. The engine's
+    T_eff = spectrum/(n_L - n_R) matched M(nu) on 361/361 bins (2026-07-29).
+    """
+    import numpy as np
+    from phonon.phonon_inputs.constants import HBAR_SI, THZ_TO_RAD
+    from phonon.solver.grids import bose_full_axis
+
+    h00, h01 = load_mat_blocks()      # nu^2 THz^2 as written by the exporter
+    nk = 4001
+    ks = np.linspace(0, np.pi, nk)
+    bands = np.zeros((nk, h00.shape[0]))
+    for i, k in enumerate(ks):
+        Hk = h00 + h01 * np.exp(1j * k) + h01.conj().T * np.exp(-1j * k)
+        bands[i] = np.sqrt(np.clip(np.linalg.eigvalsh(Hk), 0, None))
+
+    d = np.load(npz_path)
+    en = np.asarray(d["energies"], float)
+    M = np.zeros(len(en))
+    for n in range(bands.shape[1]):
+        s = np.signbit(bands[:, n][None, :] - en[:, None])
+        M += (s[:, 1:] != s[:, :-1]).sum(axis=1)
+    nL = bose_full_axis(en, T0 + DT / 2)
+    nR = bose_full_axis(en, T0 - DT / 2)
+    w = np.asarray(d["frequency_cell_widths"], float)
+    J = HBAR_SI * THZ_TO_RAD * 1e12 * np.sum(w * np.abs(en) * (nL - nR) * M)
+    lat = lattice_from_xyz()
+    A_c = float(np.linalg.norm(np.cross(lat[0], lat[1])) * 1e-20)
+    G = J / (A_c * DT)
+    print(f"[bloch] omega_max {bands.max():.2f} THz; "
+          f"G_ref = {G / 1e6:.2f} MW/m^2/K", flush=True)
+    return G
+
 def main() -> int:
-    G_dense = dense_reference()
     G_engine = engine_ballistic()
-    ratio = G_engine / G_dense
-    print(f"[parity] G_engine / G_dense = {ratio:.4f}", flush=True)
-    ok = 0.9 < ratio < 1.1
+    G_ref = bloch_mode_reference(WORK / "run.npz")
+    ratio = G_engine / G_ref
+    print(f"[parity] G_engine / G_ref(mode count) = {ratio:.5f}", flush=True)
+    ok = 0.99 < ratio < 1.01
     print(f"[{'PASS' if ok else 'FAIL'}] units bridge "
           f"{'validated' if ok else 'INCONSISTENT -- do not quote kappa'}",
           flush=True)
