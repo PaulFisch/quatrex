@@ -366,8 +366,13 @@ def _write_vasp_inputs(
         sorted_indices.extend(i for i, s in enumerate(symbols) if s == sp)
     sorted_positions = positions_cart[sorted_indices]
 
+    # Row-vector lattice convention: cart = frac @ cell, so
+    # frac = cart @ inv(cell) -- NO transpose. The old `@ inv_cell.T`
+    # was correct only for diagonal cells (all systems before MoS2);
+    # for a hexagonal/monoclinic cell it scrambles the geometry
+    # (caught 2026-07-29: 96-atom MoS2 supercell with 0.98 A pairs).
     inv_cell = np.linalg.inv(cell)
-    sorted_frac = sorted_positions @ inv_cell.T
+    sorted_frac = sorted_positions @ inv_cell
     sorted_frac %= 1.0
     sorted_frac[sorted_frac > 1.0 - 1e-10] = 0.0
 
