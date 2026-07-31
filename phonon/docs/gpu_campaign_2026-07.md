@@ -159,6 +159,32 @@ the g1t damping even converges faster. Memory was never a constraint
 comparable to the tortin campaign L16 numbers (different
 taper band/settings and 600-cap non-converged trajectories there).
 
+### Full length ladder (all converged, ne=161, 2x4 GH200)
+
+| L | variant | iters | lead current | lead balance | interior spread |
+|---|---|---|---|---|---|
+| 16 | g3 | 98 | 38.36 | 9.5e-5 | 6.3% |
+| 16 | g1t | 67 | 17.71 | 3.4e-3 | 47% |
+| 24 | g3 | 97 | 44.10 | 3.0e-3 | 11% |
+| 24 | g1t | 71 | 16.32 | 3.7e-3 | 72% |
+| 32 | g3 | 177 | 56.22 | 9.9e-3 | 18% |
+| 32 | g1t | 71 | 16.04 | 3.7e-3 | 86% |
+
+Physics reading: the **g3 boxcar lead current GROWS with length**
+(38 → 44 → 56) — anomalous gain for a wire at fixed dT, consistent
+with the documented non-PSD band-mask pathology (the boxcar Schur
+mask injects non-causal gain in interior Sigma blocks; the effect
+compounds with device length, the lead balance degrades in step
+9.5e-5 → 1e-2, and convergence slows to 177 iterations). The
+**g1t series saturates physically** (17.7 → 16.3 → 16.0, stable
+balance ~3.5e-3) but underweights coherence ~2x and its interior
+profile dips to 86% — structurally incomplete interior Sigma, honest
+leads. Neither truncation is converged in the band parameter at these
+lengths: the natural next rung is **g_band=2 + Bartlett** (PSD taper
+at a band where the diagonal AND first-off-diagonal Sigma blocks are
+exact) — the campaign machinery runs it as-is (~15 debug-min per
+point). All eight runs eta=0, no instabilities.
+
 ## 8. cuTile fused-ring experiment: blocked upstream (2026-07-31)
 
 Goal: reimplement the ring as one fused cuda.tile kernel (tile sizes

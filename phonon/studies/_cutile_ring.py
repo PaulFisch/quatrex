@@ -29,34 +29,28 @@ import time
 
 import cupy as cp
 
-import cuda.tile as ct
+# tileiras is not self-contained: it resolves its nvvm/ptxas backend
+# via PATH / CUDA_HOME / CUDA_PATH / **CUDA_ROOT**. A system CUDA
+# toolkit (13.1 here) reachable through any of those shadows the
+# wheel's matched 13.3 components and yields the generic "failed to
+# compile Tile IR program" for every mma / lineinfo compile (same root
+# cause as NVIDIA/cutile-python#72, which was a bad CUDA_HOME). The
+# library sanitizes CUDA_HOME/CUDA_PATH in the compiler subprocess but
+# NOT CUDA_ROOT -- bisected here 2026-07-31. Scrub and prepend the
+# wheel toolkit BEFORE cuda.tile captures the environment.
+import os
+from pathlib import Path
 
-# tileiras 13.3.36 chokes on cuda-tile 1.5/1.6rc debug info: it
-# rejects --lineinfo outright AND bytecode carrying real-file debug
-# paths even without the flag ("failed to compile Tile IR program";
-# bisected 2026-07-31 against captured bytecodes). Workaround: strip
-# the flag and anonymize the generated debug info. Experiment-local;
-# remove when a matched cuda-tile/tileiras pair ships.
-import cuda.tile._compile as _ctc  # noqa: E402
+import nvidia
 
-_orig_run = _ctc._CompilerBinary.run
+_cu13 = Path(next(iter(nvidia.__path__))) / "cu13"
+for _v in ("CUDA_ROOT", "CUDA_HOME", "CUDA_PATH"):
+    os.environ.pop(_v, None)
+os.environ["PATH"] = f"{_cu13 / 'bin'}:{os.environ.get('PATH', '')}"
+os.environ["LD_LIBRARY_PATH"] = (
+    f"{_cu13 / 'nvvm' / 'lib64'}:{os.environ.get('LD_LIBRARY_PATH', '')}")
 
-
-def _run_no_lineinfo(self, args, flags, timeout_sec=None):
-    return _orig_run(self, args,
-                     [f for f in flags if f != "--lineinfo"], timeout_sec)
-
-
-_ctc._CompilerBinary.run = _run_no_lineinfo
-
-_orig_gb = _ctc._get_bytecode
-
-
-def _gb_anon(ir_keeper, compiler_options, anonymize_debug_info):
-    return _orig_gb(ir_keeper, compiler_options, anonymize_debug_info=True)
-
-
-_ctc._get_bytecode = _gb_anon
+import cuda.tile as ct  # noqa: E402
 
 F64 = ct.float64
 ZERO = ct.PaddingMode.ZERO
@@ -295,8 +289,12 @@ def cmd_smoke(_args) -> int:
 
 def cmd_check(args) -> int:
     ok = True
-    for b in (36, 63, 135):
-        for w in (60, 241):
+    # --quick: b=36/w=60 only -- the laptop A1000 runs FP64 at 1:64, so
+    # the full cross (esp. b=135) belongs on the GH200.
+    bs = (36,) if args.quick else (36, 63, 135)
+    ws = (60,) if args.quick else (60, 241)
+    for b in bs:
+        for w in ws:
             for nb in (1, 3):
                 phi_l, phi_r, ga, gb = rand_inputs(b, w, nb, seed=b + w + nb)
                 ref = reference_ring(phi_l, phi_r, ga, gb, b)
@@ -395,7 +393,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("smoke")
-    sub.add_parser("check")
+    q = sub.add_parser("check")
+    q.add_argument("--quick", action="store_true")
     q = sub.add_parser("bench")
     q.add_argument("--json", default=None)
     args = p.parse_args()
