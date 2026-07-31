@@ -185,30 +185,44 @@ at a band where the diagonal AND first-off-diagonal Sigma blocks are
 exact) — the campaign machinery runs it as-is (~15 debug-min per
 point). All eight runs eta=0, no instabilities.
 
-## 8. cuTile fused-ring experiment: blocked upstream (2026-07-31)
+## 8. cuTile fused-ring experiment: correct, but far below cuBLAS
+(2026-07-31)
 
 Goal: reimplement the ring as one fused cuda.tile kernel (tile sizes
 matched to b instead of cuBLAS's 32/64 menu — padded-flop ceilings
 ~28 TF/s at b=36 vs cuBLAS's 13.5, ~64 at b=63; T/U kept on-chip;
 complex128 as in-kernel 4M split since Tile IR has no complex dtypes).
-The complete kernel + correctness/bench harness is in
-`phonon/studies/_cutile_ring.py`.
+Kernel + harness: `phonon/studies/_cutile_ring.py` (smoke/check/bench).
 
-Outcome: **blocked by the NVIDIA toolchain.** tileiras 13.3.36 (the
-only wheel supporting sm_86/sm_90; 13.2.x knows neither) rejects every
-`ct.mma` bytecode — "failed to compile Tile IR program", rc 5 — for
-EVERY --gpu-name (sm_80/86/90/100), from cuda-tile 1.5.0 and the
-contemporaneous 1.6.0rc3, at -O0..3; 3D broadcast+reduce fails the
-same way. Non-mma kernels compile and run correctly on sm_86 (after
-two more workarounds baked into the study: strip the hard-coded
---lineinfo flag and anonymize debug info, both of which tileiras also
-chokes on). Same signature as NVIDIA/cutile-python#72 (closed,
-unresolved). Forensics: bisected via CUDA_TILE_DUMP_BYTECODE +
-captured failing bytecodes + manual tileiras invocations.
+**Environment trap (cost half the investigation; now handled in the
+study file):** tileiras resolves its nvvm/ptxas backend via PATH /
+CUDA_HOME / CUDA_PATH / **CUDA_ROOT**. cuda.tile sanitizes the first
+three in the compiler subprocess but NOT CUDA_ROOT; a system CUDA 13.1
+behind CUDA_ROOT poisons every mma/lineinfo compile with the generic
+"failed to compile Tile IR program" (same root cause as
+NVIDIA/cutile-python#72, which was a bad CUDA_HOME). Scrubbing
+CUDA_ROOT and prepending the wheel's cu13 toolkit fixes everything.
 
-The experiment is a re-run of `_cutile_ring.py smoke` away from being
-live once a fixed tileiras ships; the pre-registered assessment
-criteria (integrate at ≥1.3x cuBLAS at b=36, ≥0.9x elsewhere) stand.
+Results (tileiras 13.3.36, cuda-tile 1.5.0):
+- **Correctness: perfect.** smoke + full check PASS on sm_86 (A1000)
+  and sm_90 (GH200): the fused 4M ring matches the production cuBLAS
+  ring at 3-8e-15 across b ∈ {36,63,135} and every tile config.
+- **Performance on GH200: 0.8-1.0 TF/s effective — 0.03-0.08x
+  cuBLAS** (9.8-28 TF/s on the same shapes/harness). The smallest
+  tile (T8/E2) wins and throughput is flat in shape and batch — the
+  signature of the one-release-old sm_90 backend not lowering f64 mma
+  to DMMA (plus immature codegen for the nested fused loops). The
+  arXiv CUDA-Tile evaluation saw a >4x maturity spread across
+  backends for tuned AI kernels; FP64 fused contractions are clearly
+  far behind that.
+
+Pre-registered verdict: **<1.1x = negative result, park.** The
+tile-quantization headroom (28 vs 13.5 TF/s at b=36) remains real in
+principle, but today's compiler cannot approach it. Re-evaluate on
+future tileiras releases: `_cutile_ring.py smoke && check --quick`
+(laptop) then the bench job — the harness is ready and the assessment
+criteria (≥1.3x at b=36, ≥0.9x at 63/135) stand. This is, to our
+knowledge, the first FP64/complex cuTile-on-Hopper datapoint.
 
 ## Budget
 
