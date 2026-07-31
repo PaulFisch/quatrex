@@ -4,7 +4,11 @@ from hashlib import sha256
 from tempfile import NamedTemporaryFile
 
 import ase.io
-import gmsh
+
+try:
+    import gmsh
+except ImportError:  # no aarch64 wheel; only electrostatic meshing needs it
+    gmsh = None
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import meshio
@@ -731,6 +735,12 @@ class DeviceMesh:
 
         """
         print("Generating mesh with GMSH...")
+
+        if gmsh is None:
+            raise ImportError(
+                "gmsh is required for electrostatic mesh generation "
+                "but is not installed (no aarch64 wheel)."
+            )
 
         # Initialize gmsh and create a temporary model.
         gmsh.initialize()

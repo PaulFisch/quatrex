@@ -91,13 +91,17 @@ def cmd_setup(_):
         f"uenv run {UENV} --view=default -- bash -c '"
         f"source {VENV}/bin/activate && "
         f"pip install -q --upgrade pip && "
-        f"MPICC=\"cc -shared\" pip install -q mpi4py && "
+        # mpi4py MUST build against the uenv mpicc (cray-mpich); the
+        # plain env var MPICC is ignored by mpi4py >= 4.
+        f"MPI4PY_BUILD_MPICC=\"mpicc -shared\" "
+        f"pip install -q --no-binary=mpi4py mpi4py && "
         f"pip install -q cupy-cuda{cuda_major}x numpy scipy h5py pydantic "
-        f"toml numba matplotlib pytest pytest-mpi'", 1800))
+        f"toml numba ase matplotlib pytest pytest-mpi'", 1800))
     print(ssh(
         f"uenv run {UENV} --view=default -- bash -c '"
         f"source {VENV}/bin/activate && python -c \""
-        f"import cupy, mpi4py; print(cupy.__version__, mpi4py.__version__)"
+        f"import cupy; import mpi4py.MPI as M; "
+        f"print(cupy.__version__, M.Get_library_version()[:40])"
         f"\"'", 300))
     print("setup done")
 
