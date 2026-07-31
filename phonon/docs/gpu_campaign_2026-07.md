@@ -133,7 +133,33 @@ worth it at these gains.
    the ring efficiency of b=36).
 5. E4 tau-chunking: deferred until a b=135 case at ne≳241 is real.
 
+## 7. Full L16 pair on 2x4 GH200 (ne=161, converged, eta=0)
+
+g_band=3 (boxcar) vs g_band=1 + Bartlett taper, otherwise identical
+(linear 0.1 mixing, TOML defaults). Fixed a g_band>1 GPU bug first
+(the band-pattern extension fed numpy index arrays to cupyx
+coo_matrix; every earlier GPU run was band-1).
+
+| | g3 | g1 + bartlett |
+|---|---|---|
+| converged after | 98 it (~5 min) | 67 it (~2.3 min) |
+| s/iter (8 GPUs) | 3.07 | 2.04 |
+| lead current (internal units) | **38.36** | **17.71** |
+| lead-to-lead balance | 9.5e-5 | 3.4e-3 |
+| internal interface spread | 6.3% | 47.5% |
+| mempool peak | 5.6 GB/GPU | smaller |
+
+The band-1 taper halves every |d|=1 G link and off-diagonal Sigma
+block, and at L16 that costs a factor ~2.17 in transmitted heat and a
+47% interior heat-profile dip (structurally incomplete interior
+Sigma) — the g3 boxcar keeps the interior flat to 6% with 36x tighter
+lead balance. Both fixed points are clean (no eta, no instability);
+the g1t damping even converges faster. Memory was never a constraint
+(5.6 GB/GPU of 96) — no batching changes needed. NOTE: not directly
+comparable to the tortin campaign L16 numbers (different
+taper band/settings and 600-cap non-converged trajectories there).
+
 ## Budget
 
-~20 debug jobs, all ≤ 15 min, 2 of them 2-node: **0.71 node-hours**
-total on lp16 (sacct, month-to-date).
+~26 debug jobs incl. the 2-node L16 pair: **1.19 node-hours** total on
+lp16 (sacct, month-to-date).
