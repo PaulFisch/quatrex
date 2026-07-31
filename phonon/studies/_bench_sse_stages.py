@@ -387,6 +387,63 @@ def gemm_tc() -> int:
     return 0
 
 
+def gemm_prec() -> int:
+    """Precision ladder for the ring shapes: complex128 vs complex64
+    batched GEMMs (run again with CUPY_TF32=1 in the environment for
+    the TF32 variant). The complex64 rows are the throughput ceiling
+    for ``phonon.sse_ring_dtype = "complex64"``. All TF/s numbers use
+    the complex128 flop model, so the c64 column reads as speedup."""
+    import time
+
+    from qttools import xp
+    from qttools.utils.gpu_utils import free_mempool, synchronize_device
+
+    def timeit(fn, flops):
+        fn()
+        synchronize_device()
+        reps = max(3, int(3e12 / flops))
+        t0 = time.perf_counter()
+        for _ in range(reps):
+            fn()
+        synchronize_device()
+        return flops / ((time.perf_counter() - t0) / reps) / 1e12
+
+    rng = xp.random.default_rng(0)
+    print(f"backend: {xp.__name__}  "
+          f"CUPY_TF32={os.environ.get('CUPY_TF32', '0')}")
+    print("== square ceilings (TF/s @ c128 flop model) ==")
+    print(f"{'n':>6} {'c128':>8} {'c64':>8}")
+    for n in (2048, 4096):
+        A = rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n))
+        z = timeit(lambda: A @ A, 8 * n**3)
+        C = A.astype(xp.complex64)
+        c = timeit(lambda: C @ C, 8 * n**3)
+        print(f"{n:>6} {z:8.1f} {c:8.1f}", flush=True)
+        del A, C
+        free_mempool()
+
+    print("== batched ring: c128 vs c64 (TF/s @ c128 flop model) ==")
+    print(f"{'b':>6} {'w':>6} {'c128':>8} {'c64':>8} {'speedup':>8}")
+    for b in (36, 63, 135):
+        w = min(481, max(8, int(2e9 // (32 * b**3))))
+        PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
+            (b * b, b))
+        PR = rng.standard_normal((b, b * b)) + 1j * rng.standard_normal(
+            (b, b * b))
+        Ga = rng.standard_normal((w, b, b)) + 1j * rng.standard_normal(
+            (w, b, b))
+        gemm = 8 * w * b**4
+        z = timeit(lambda: (PL @ Ga).reshape(w, b, b * b)
+                   @ (Ga @ PR).reshape(w, b * b, b), 3 * gemm)
+        PLc, PRc, Gac = (m.astype(xp.complex64) for m in (PL, PR, Ga))
+        c = timeit(lambda: (PLc @ Gac).reshape(w, b, b * b)
+                   @ (Gac @ PRc).reshape(w, b * b, b), 3 * gemm)
+        print(f"{b:>6} {w:>6} {z:8.1f} {c:8.1f} {c / z:8.2f}", flush=True)
+        del PL, PR, Ga, PLc, PRc, Gac
+        free_mempool()
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--gemm-roofline", action="store_true",
@@ -395,6 +452,9 @@ def main() -> int:
     p.add_argument("--gemm-tc", action="store_true",
                    help="peak-gap microbench: square Z/D ceilings, batched "
                         "Z-vs-D, batch-depth scan, 4M split")
+    p.add_argument("--gemm-prec", action="store_true",
+                   help="precision microbench: c128 vs c64 at the ring "
+                        "shapes (set CUPY_TF32=1 for the TF32 variant)")
     p.add_argument("--config", required=False)
     p.add_argument("--iters", type=int, default=3,
                    help="SCBA iterations per child (first one discarded)")
@@ -414,6 +474,8 @@ def main() -> int:
         return gemm_roofline()
     if args.gemm_tc:
         return gemm_tc()
+    if args.gemm_prec:
+        return gemm_prec()
     if not args.config:
         p.error("--config is required (unless --gemm-roofline)")
     if args.child:
