@@ -44,7 +44,7 @@ def _orbital_block(work):
 
 def tail_block(a):
     """The shared [outputs] + [compute] + [compute.comm] tail."""
-    return f"""
+    tail = f"""
 [outputs]
 save_profiling_results = {str(a.profile).lower()}
 profiling_save_format = "json"
@@ -57,6 +57,16 @@ blas_num_threads = {a.blas_threads}
 block_comm_size = {a.bcs}
 q_comm_size = {a.qcs}
 """
+    if getattr(a, "comm_backend", None):
+        # One backend for every per-op comm selector (GPU runs); unset
+        # keeps the emitted TOML byte-identical to the legacy output.
+        ops = ["all_to_all", "all_gather", "all_reduce", "bcast"]
+        lines = [f'{axis}_{op} = "{a.comm_backend}"'
+                 for axis in ("block", "stack", "q") for op in ops]
+        lines += [f'{axis}_send_recv = "{a.comm_backend}"'
+                  for axis in ("block", "stack")]
+        tail += "\n".join(lines) + "\n"
+    return tail
 
 
 def cnt_config(a):
@@ -428,6 +438,10 @@ def main():
                         "modes where sancho-rubio stalls (d5a)")
     p.add_argument("--bcs", type=int, default=1, help="block_comm_size")
     p.add_argument("--qcs", type=int, default=1, help="q_comm_size")
+    p.add_argument("--comm-backend", default=None,
+                   choices=("host_mpi", "device_mpi", "nccl"),
+                   help="set every per-op [compute.comm] backend selector "
+                        "(GPU runs); default omits them (legacy TOML)")
     p.add_argument("--numba-threads", type=int, default=1)
     p.add_argument("--blas-threads", type=int, default=1)
     p.add_argument("--algorithm", default="rgf", choices=["rgf","inv"])

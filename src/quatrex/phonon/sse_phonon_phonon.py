@@ -22,14 +22,12 @@ import numpy as np
 from mpi4py import MPI
 from mpi4py.MPI import COMM_WORLD as comm
 
-from qttools import NDArray, xp
+from qttools import NDArray, sparse, xp
 from qttools.comm import comm as ranks
 from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
 from qttools.utils.mpi_utils import get_section_sizes
-
-from scipy import sparse
 
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.fft_utils import hilbert_transform
@@ -878,9 +876,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # over WORLD. Read on rank 0 in engine/run.py. No effect on the math.
                 nw_raw = int(g_lesser.data.shape[0])
                 nw_win = int(gl_in.shape[0])
-                graw = np.abs(np.asarray(g_lesser.data)).reshape(
+                graw = np.abs(np.asarray(get_host(g_lesser.data))).reshape(
                     nw_raw, -1).max(axis=1)
-                gwin = np.abs(np.asarray(gl_in)).reshape(
+                gwin = np.abs(np.asarray(get_host(gl_in))).reshape(
                     nw_win, -1).max(axis=1)
                 graw = np.ascontiguousarray(graw, dtype=np.float64)
                 gwin = np.ascontiguousarray(gwin, dtype=np.float64)
@@ -890,8 +888,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 self._diag_gwin_w = gwin
                 # graw lives on the primary grid, gwin on the conv grid
                 # (identical in legacy mode).
-                self._diag_full_freqs = np.abs(np.asarray(full_freqs).real)
-                self._diag_win_freqs = np.abs(np.asarray(conv_freqs).real)
+                self._diag_full_freqs = np.abs(
+                    np.asarray(get_host(full_freqs)).real)
+                self._diag_win_freqs = np.abs(
+                    np.asarray(get_host(conv_freqs)).real)
             gtl.data[:] = self._fft_pad(gl_in, n_fft)
             gtg.data[:] = self._fft_pad(gg_in, n_fft)
             # Build the reversed (absorption) legs: DFT index-reversal
@@ -1059,11 +1059,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # in PL and inherits it.
                 self._phi_pre = {}
                 for (I, J), quads in self._phi_pair_index.items():
+                    # xp.asarray stages the host vertex factors to the
+                    # device once here (free view under numpy).
                     self._phi_pre[(I, J)] = [
                         (K1, K2, K1p, K2p) + phi_perms(
-                            pl if (w := self._quad_weight(
-                                I, J, K1, K1p, K2, K2p)) == 1.0 else pl * w,
-                            pr, xp)
+                            xp.asarray(
+                                pl if (w := self._quad_weight(
+                                    I, J, K1, K1p, K2, K2p)) == 1.0 else pl * w
+                            ),
+                            xp.asarray(pr), xp)
                         for (K1, K2, K1p, K2p, pl, pr) in quads
                     ]
 
@@ -1293,7 +1297,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if verify_now:
                     # Identity gate (single rank: full tau + all pairs
                     # local): (t5+t6)_IJ[l, a, b] == (t2+t3)_JI[-l, b, a].
-                    rev = (-np.arange(n_tau)) % n_tau
+                    rev = (-xp.arange(n_tau)) % n_tau
                     worst = worst_rel = 0.0
                     for (I, J) in owned:
                         rec = out_x[(J, I)][rev].swapaxes(-1, -2)
@@ -1513,6 +1517,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     + nI * bK2 * bK1p * nJ
                 )
                 flops += rings_per_quad * ring
+        self._ring_model_gflop = flops / 1e9
         print(
             f"PhPh SSE ring: pairs={len(owned)} quads={n_quads} "
             f"n_tau={n_tau} pool={n_threads} chunks={n_chunks} "
@@ -1577,7 +1582,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             )
                             pre = perm_cache.get(pkey)
                             if pre is None:
-                                pre = phi_perms(xp.conj(pl), pr, xp)
+                                pre = phi_perms(
+                                    xp.conj(xp.asarray(pl)), xp.asarray(pr), xp
+                                )
                                 perm_cache[pkey] = pre
                             # Taper weight OUTSIDE the perm cache: pkey is
                             # shared across the block row (bulk_vertex), but
@@ -1749,8 +1756,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 rshape = data.shape[:-1] + (recv_dest[nbr].size,)
                 rbuf = xp.empty(rshape, dtype=data.dtype) if nbr in recv_dest \
                     else xp.empty((0,), dtype=data.dtype)
-                self._fold_bcomm.Sendrecv(sbuf, dest=nbr, sendtag=7,
-                                          recvbuf=rbuf, source=nbr, recvtag=7)
+                ranks.block.send_recv(sbuf, nbr, rbuf, nbr)
                 if nbr in recv_dest:
                     folded[..., recv_dest[nbr]] = rbuf
             data[:] = folded
@@ -1791,8 +1797,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 want.setdefault(nbr, []).append((k, (int(j), int(i))))
         recv_dest, send_src = {}, {}
         if want or ranks.block.size > 1:
+            # Pattern-only key exchange: pickled python objects, one-time,
+            # host-side -- stays on the raw mpi4py communicator.
             bcomm = ranks.block._mpi_comm
-            self._fold_bcomm = bcomm
             rank, size = ranks.block.rank, ranks.block.size
             for nbr in (rank - 1, rank + 1):
                 if not (0 <= nbr < size):
@@ -1910,8 +1917,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
     ) -> tuple[dict[tuple[int, int], NDArray], dict[tuple[int, int], NDArray]]:
         """Fetch the off-window band links (for both lesser and greater)
         from the immediate comm.block neighbours via a width-N_h halo.
+
+        No MPI tags: both peers enumerate the identical sorted link set
+        per direction, so messages between a fixed rank pair match in
+        posting order, and the exchange runs through the backend-agnostic
+        ``comm.block`` group isend/irecv.
         """
-        bcomm = ranks.block._mpi_comm
         rank, size = ranks.block.rank, ranks.block.size
         offs = ref.block_section_offsets
         nloc_tau = int(ref.data.shape[0])  # local tau count (stack state)
@@ -1923,46 +1934,55 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             K, Kp = link
             return (nloc_tau, int(self.block_sizes[K]), int(self.block_sizes[Kp]))
 
-        halo_l: dict[tuple[int, int], NDArray] = {}
-        halo_g: dict[tuple[int, int], NDArray] = {}
-        reqs = []
-        sendbufs = []
-
-        def post(neigh, lo, hi, send_tag_l, send_tag_g, recv_tag_l, recv_tag_g):
-            # send: links the neighbour's outputs need that I own
-            for link in sorted(l for l in self._links_for_range(lo, hi) if is_local(l)):
-                K, Kp = link
-                bl = xp.ascontiguousarray(gtlv.blocks[K - start, Kp - start])
-                bg = xp.ascontiguousarray(gtgv.blocks[K - start, Kp - start])
-                sendbufs.extend((bl, bg))
-                reqs.append(bcomm.Isend(bl, dest=neigh, tag=send_tag_l))
-                reqs.append(bcomm.Isend(bg, dest=neigh, tag=send_tag_g))
-            # recv: links my outputs need that the neighbour owns
-            for link in sorted(l for l in self._links_for_range(start, end)
-                               if lo <= min(l) < hi):
-                bl = xp.empty(shape(link), dtype=complex)
-                bg = xp.empty(shape(link), dtype=complex)
-                halo_l[link], halo_g[link] = bl, bg
-                reqs.append(bcomm.Irecv(bl, source=neigh, tag=recv_tag_l))
-                reqs.append(bcomm.Irecv(bg, source=neigh, tag=recv_tag_g))
-
-        if rank + 1 < size:  # upper neighbour; my send uses tags 0/1
-            post(rank + 1, int(offs[rank + 1]), int(offs[rank + 2]), 0, 1, 2, 3)
-        if rank - 1 >= 0:    # lower neighbour; my send uses tags 2/3
-            post(rank - 1, int(offs[rank - 1]), int(offs[rank]), 2, 3, 0, 1)
+        neighbours = [
+            (nbr, int(offs[nbr]), int(offs[nbr + 1]))
+            for nbr in (rank + 1, rank - 1)
+            if 0 <= nbr < size
+        ]
 
         # Guard: every non-local needed link must be in an immediate
-        # neighbour
+        # neighbour. Checked BEFORE posting so the (rank-symmetric)
+        # failure leaves no dangling group state.
         needed_nonlocal = {l for l in self._links_for_range(start, end)
                            if not is_local(l)}
-        missing = needed_nonlocal - set(halo_l)
+        received = set()
+        for _neigh, lo, hi in neighbours:
+            received |= {l for l in self._links_for_range(start, end)
+                         if lo <= min(l) < hi}
+        missing = needed_nonlocal - received
         if missing:
             raise RuntimeError(
                 "Phonon-phonon halo reaches beyond the immediate comm.block "
                 f"neighbour (links {sorted(missing)}). Give each comm.block "
                 "rank at least N_h blocks (reduce comm.block.size)."
             )
-        MPI.Request.Waitall(reqs)
+
+        halo_l: dict[tuple[int, int], NDArray] = {}
+        halo_g: dict[tuple[int, int], NDArray] = {}
+        reqs = []
+        sendbufs = []
+
+        backend = ranks.block._config["send_recv"]
+        ranks.block.group_start(backend)
+        for neigh, lo, hi in neighbours:
+            # send: links the neighbour's outputs need that I own
+            for link in sorted(l for l in self._links_for_range(lo, hi)
+                               if is_local(l)):
+                K, Kp = link
+                bl = xp.ascontiguousarray(gtlv.blocks[K - start, Kp - start])
+                bg = xp.ascontiguousarray(gtgv.blocks[K - start, Kp - start])
+                sendbufs.extend((bl, bg))
+                reqs.append(ranks.block.isend(bl, dest=neigh))
+                reqs.append(ranks.block.isend(bg, dest=neigh))
+            # recv: links my outputs need that the neighbour owns
+            for link in sorted(l for l in self._links_for_range(start, end)
+                               if lo <= min(l) < hi):
+                bl = xp.empty(shape(link), dtype=complex)
+                bg = xp.empty(shape(link), dtype=complex)
+                halo_l[link], halo_g[link] = bl, bg
+                reqs.append(ranks.block.irecv(bl, source=neigh))
+                reqs.append(ranks.block.irecv(bg, source=neigh))
+        ranks.block.group_end(backend, reqs)
         return halo_l, halo_g
 
     def _ensure_tau_buffers(
@@ -1988,8 +2008,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         N = int(np.sum(self.block_sizes))
         pattern = sparse.coo_matrix(
             (
-                np.ones(len(rows), dtype=np.complex128),
-                (np.asarray(rows), np.asarray(cols)),
+                xp.ones(len(rows), dtype=xp.complex128),
+                (xp.asarray(rows), xp.asarray(cols)),
             ),
             shape=(N, N),
         ).tocsr()
@@ -2007,8 +2027,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         )
         gt_rows, gt_cols = bufs[0].spy()
         if not (
-            np.array_equal(np.asarray(rows), np.asarray(gt_rows))
-            and np.array_equal(np.asarray(cols), np.asarray(gt_cols))
+            bool(xp.array_equal(xp.asarray(rows), xp.asarray(gt_rows)))
+            and bool(xp.array_equal(xp.asarray(cols), xp.asarray(gt_cols)))
         ):
             raise RuntimeError(
                 "tau-buffer sparsity does not match G; cannot FFT raw data."

@@ -128,6 +128,14 @@ def bubble_dense(
     if xp is None:
         xp = np
 
+    # Accept host arrays on any backend (asarray is a free view under
+    # numpy); preserve the G_b-is-G_a aliasing the zero_freq path checks.
+    same_input = G_b is G_a
+    G_a = xp.asarray(G_a)
+    G_b = G_a if same_input else xp.asarray(G_b)
+    phi_left = xp.asarray(phi_left)
+    phi_right = xp.asarray(phi_right)
+
     ne, bK1, bK1p = G_a.shape
     _, bK2, bK2p = G_b.shape
     if out_slice is None:

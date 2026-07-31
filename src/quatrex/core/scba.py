@@ -11,7 +11,7 @@ from qttools import NDArray, xp
 from qttools.comm import comm
 from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
-from qttools.utils.gpu_utils import get_host
+from qttools.utils.gpu_utils import get_any_location, get_host
 from qttools.utils.mpi_utils import distributed_load, get_section_sizes
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.interaction import (
@@ -498,8 +498,9 @@ class SCBA(TransportSolver):
                 # that disagrees with the configured window would silently
                 # misscale Sigma, so pass the solver grid and only warn
                 # about the mismatch.
-                solver_freqs = np.asarray(self.phonon_solver.local_frequencies)
-                npy_freqs = np.asarray(self.phonon_energies)
+                solver_freqs = np.asarray(
+                    get_host(self.phonon_solver.local_frequencies))
+                npy_freqs = np.asarray(get_host(self.phonon_energies))
                 # Compare against the GLOBAL configured window -- NOT the
                 # rank-local slice (len(global)/stack points). With
                 # frequency_grid = "file" the npy IS the solver grid, so
@@ -756,7 +757,11 @@ class SCBA(TransportSolver):
                 self.data.sigma_retarded_hermitian)
         prev = (self.data.sigma_lesser_prev, self.data.sigma_greater_prev,
                 self.data.sigma_retarded_hermitian_prev)
-        to_host = (lambda a: a.get()) if xp.__name__ == "cupy" else np.asarray
+        to_host = (
+            (lambda a: get_any_location(a, "numpy", use_pinned_memory=True))
+            if xp.__name__ == "cupy"
+            else np.asarray
+        )
         x = np.concatenate([to_host(m.data).ravel() for m in prev])
         gx = np.concatenate([to_host(m.data).ravel() for m in bufs])
         x_new = self._anderson_mixer.step(x, gx)

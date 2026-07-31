@@ -22,6 +22,12 @@ import pytest
 
 from qttools import xp
 from qttools.comm import comm as _qtt_comm
+from qttools.utils.gpu_utils import get_host
+
+
+def _h(a, **kw):
+    """Host-side np.asarray that also accepts device arrays (cupy)."""
+    return np.asarray(get_host(a) if isinstance(a, xp.ndarray) else a, **kw)
 
 
 def _configure_serial_comm() -> None:
@@ -84,19 +90,22 @@ def _run_production(freqs: np.ndarray, phi_blocks, block_sizes,
         (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
         shape=(N, N),
     )
+    if xp.__name__ == "cupy":
+        from qttools import sparse
+        pattern = sparse.csr_matrix(pattern)
     mk = lambda: DSDBCOO.from_sparray(
-        pattern, np.asarray(block_sizes), global_stack_shape=(ne,))
+        pattern, _h(block_sizes), global_stack_shape=(ne,))
     g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
     for m in (g_l, g_g, s_l, s_g, s_r):
         m.data[:] = 0.0
     glv, ggv = g_l.stack[...], g_g.stack[...]
     for (K, Kp) in gl_band:
-        glv.blocks[K, Kp] = gl_band[(K, Kp)]
-        ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+        glv.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+        ggv.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
 
     ssp = SigmaPhononPhonon(
         cfg, phonon_frequencies=freqs,
-        block_sizes=np.asarray(block_sizes), phi_blocks=phi_blocks,
+        block_sizes=_h(block_sizes), phi_blocks=phi_blocks,
     )
     ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
 
@@ -104,9 +113,9 @@ def _run_production(freqs: np.ndarray, phi_blocks, block_sizes,
     slv, sgv, srv = s_l.stack[...], s_g.stack[...], s_r.stack[...]
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
-            out_l[(I, J)] = np.asarray(slv.blocks[I, J])
-            out_g[(I, J)] = np.asarray(sgv.blocks[I, J])
-            out_r[(I, J)] = np.asarray(srv.blocks[I, J])
+            out_l[(I, J)] = _h(slv.blocks[I, J])
+            out_g[(I, J)] = _h(sgv.blocks[I, J])
+            out_r[(I, J)] = _h(srv.blocks[I, J])
     return out_l, out_g, out_r
 
 
@@ -166,7 +175,7 @@ def _lorentz_bands(freqs, centers, width, amps_l, amps_g):
     """Smooth Lorentzian-comb legs evaluated on an arbitrary grid: the
     (K,K') band entries are shared complex mixtures of the same comb, so
     both grids sample the SAME analytic function."""
-    w = np.asarray(freqs, dtype=float)
+    w = _h(freqs, dtype=float)
     comb = np.stack(
         [width**2 / ((w - c) ** 2 + width**2) for c in centers], axis=0
     )  # (n_lines, ne)
@@ -237,10 +246,10 @@ def test_nonuniform_matches_fine_uniform_reference(restrict: str) -> None:
         )
         aux, _, r_plan = ssp._aux_grid_plan(
             ssp._full_frequencies(freqs_nu.size))
-        np.testing.assert_allclose(np.asarray(aux), freqs_fine, atol=1e-9)
+        np.testing.assert_allclose(_h(aux), freqs_fine, atol=1e-9)
 
         def _interp_ref(block):
-            out = np.asarray(
+            out = _h(
                 ssp._restrict_from_aux(xp.asarray(block), r_plan))
             out[0] = 0.0  # the production out-masks the omega=0 bin
             return out
@@ -261,7 +270,7 @@ def test_nonuniform_matches_fine_uniform_reference(restrict: str) -> None:
         (ref_g, nu_g, "Sigma^>", 0.02),
         (ref_r, nu_r, "Sigma^R", 0.03),
     ):
-        scale = max(np.abs(np.asarray(list(ref.values()))).max(), 1e-300)
+        scale = max(np.abs(_h(list(ref.values()))).max(), 1e-300)
         for key in ref:
             err = np.abs(nu[key] - _interp_ref(ref[key])).max() / scale
             assert err < tol, (
@@ -334,19 +343,19 @@ def test_aux_fmax_extends_convolution_support() -> None:
     assert float(aux[1] - aux[0]) == 0.5
     # P: linear functions are reproduced exactly inside the primary span,
     # and zeroed beyond it (G has no support there).
-    lin = (2.0 * np.asarray(ssp._full_frequencies(ne)) + 1.0)[:, None]
-    interp = np.asarray(ssp._interp_axis0(xp.asarray(lin + 0j), p_plan))
-    inside = np.asarray(aux) <= 16.0 + 1e-12
+    lin = (2.0 * _h(ssp._full_frequencies(ne)) + 1.0)[:, None]
+    interp = _h(ssp._interp_axis0(xp.asarray(lin + 0j), p_plan))
+    inside = _h(aux) <= 16.0 + 1e-12
     np.testing.assert_allclose(
-        interp[inside, 0].real, 2.0 * np.asarray(aux)[inside] + 1.0,
+        interp[inside, 0].real, 2.0 * _h(aux)[inside] + 1.0,
         rtol=1e-12)
     assert np.all(interp[~inside] == 0.0)
     # R ("sample"): sampling back an aux-grid linear function is exact.
-    lin_aux = (3.0 * np.asarray(aux) - 0.5)[:, None]
-    back = np.asarray(ssp._restrict_from_aux(xp.asarray(lin_aux + 0j),
+    lin_aux = (3.0 * _h(aux) - 0.5)[:, None]
+    back = _h(ssp._restrict_from_aux(xp.asarray(lin_aux + 0j),
                                              r_plan))
     np.testing.assert_allclose(
-        back[:, 0].real, 3.0 * np.asarray(freqs) - 0.5, rtol=1e-12)
+        back[:, 0].real, 3.0 * _h(freqs) - 0.5, rtol=1e-12)
 
 
 def test_adjoint_restriction_conserves_pairing() -> None:
@@ -371,7 +380,7 @@ def test_adjoint_restriction_conserves_pairing() -> None:
     aux, p_plan, r_plan = ssp._aux_grid_plan(
         ssp._full_frequencies(freqs.size))
     assert r_plan[0] == "adjoint"
-    ne_aux = int(np.asarray(aux).size)
+    ne_aux = int(_h(aux).size)
     sig = (rng.standard_normal((ne_aux, 3))
            + 1j * rng.standard_normal((ne_aux, 3)))
     g = (rng.standard_normal((freqs.size, 3))
@@ -380,13 +389,13 @@ def test_adjoint_restriction_conserves_pairing() -> None:
     # the legs BEFORE interpolating; the dropped omega = 0 row of R is
     # consistent exactly under that convention.
     g[0] = 0.0
-    w_prim = np.asarray(frequency_cell_widths(freqs))
+    w_prim = _h(frequency_cell_widths(freqs))
     dw = float(aux[1] - aux[0])
     lhs = np.sum((w_prim * freqs)[:, None]
-                 * np.asarray(ssp._restrict_from_aux(xp.asarray(sig),
+                 * _h(ssp._restrict_from_aux(xp.asarray(sig),
                                                      r_plan)) * g)
-    pg = np.asarray(ssp._interp_axis0(xp.asarray(g), p_plan))
-    rhs = dw * np.sum(np.asarray(aux)[:, None] * sig * pg)
+    pg = _h(ssp._interp_axis0(xp.asarray(g), p_plan))
+    rhs = dw * np.sum(_h(aux)[:, None] * sig * pg)
     np.testing.assert_allclose(lhs, rhs, rtol=1e-12)
 
 
@@ -394,12 +403,12 @@ def test_frequency_cell_widths() -> None:
     from quatrex.grid.energies import frequency_cell_widths, is_uniform_grid
 
     uni = np.linspace(0.0, 10.0, 21)
-    cw = np.asarray(frequency_cell_widths(uni))
+    cw = _h(frequency_cell_widths(uni))
     np.testing.assert_allclose(cw, 0.5)  # every bin, edges included
     assert is_uniform_grid(uni)
 
     nu = np.array([0.0, 0.1, 0.15, 0.4, 1.0])
-    cw = np.asarray(frequency_cell_widths(nu))
+    cw = _h(frequency_cell_widths(nu))
     np.testing.assert_allclose(cw, [0.1, 0.075, 0.15, 0.425, 0.6])
     assert not is_uniform_grid(nu)
     # The cell widths tile the axis (plus one half-gap overhang per edge).

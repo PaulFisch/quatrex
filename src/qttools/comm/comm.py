@@ -169,6 +169,12 @@ class _SubCommunicator:
         # This is not something we can easily guard against.
         self._group_start_called = False
 
+        # Host staging buffers for host_mpi isend/irecv. Send copies
+        # must stay alive until the requests complete; receives are
+        # copied back to the device in group_end.
+        self._pending_host_sends: list[NDArray] = []
+        self._pending_host_recvs: list[tuple[NDArray, NDArray]] = []
+
     @classmethod
     def _validate_config(cls, config: dict):
         """Validate the configuration for the communication backend."""
@@ -244,6 +250,18 @@ class _SubCommunicator:
                 f"sendbuf and recvbuf must be of the same type, but got {sendbuf.dtype} and {recvbuf.dtype}."
             )
 
+    def _resolve_backend(self, backend: str, *bufs: NDArray) -> str:
+        """Resolves the backend for the given buffers.
+
+        Host (numpy) buffers cannot go through NCCL and need no staging,
+        so they always take the plain-MPI path, whatever the configured
+        backend. Under the numpy array module this is the identity.
+
+        """
+        if all(get_array_module_name(buf) == "numpy" for buf in bufs):
+            return "device_mpi"
+        return backend
+
     def all_to_all(
         self, sendbuf: NDArray, recvbuf: NDArray, backend: str | None = None
     ) -> None:
@@ -269,6 +287,8 @@ class _SubCommunicator:
             backend = self._config["all_to_all"]
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
+
+        backend = self._resolve_backend(backend, sendbuf, recvbuf)
 
         self._check_bufs_consistent(sendbuf, recvbuf)
 
@@ -301,7 +321,7 @@ class _SubCommunicator:
 
             recvbuf[:] = get_any_location(
                 _recvbuf_host,
-                output_module="cupy",
+                output_module=get_array_module_name(recvbuf),
                 use_pinned_memory=True,
             )
 
@@ -332,6 +352,8 @@ class _SubCommunicator:
             backend = self._config["all_gather"]
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
+
+        backend = self._resolve_backend(backend, sendbuf, recvbuf)
 
         self._check_bufs_consistent(sendbuf, recvbuf)
 
@@ -365,7 +387,7 @@ class _SubCommunicator:
 
             recvbuf[:] = get_any_location(
                 _recvbuf_host,
-                output_module="cupy",
+                output_module=get_array_module_name(recvbuf),
                 use_pinned_memory=True,
             )
 
@@ -403,6 +425,8 @@ class _SubCommunicator:
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
 
+        backend = self._resolve_backend(backend, sendbuf, recvbuf)
+
         self._check_bufs_consistent(sendbuf, recvbuf)
 
         if sendbuf.size != recvbuf.size:
@@ -435,7 +459,7 @@ class _SubCommunicator:
 
             recvbuf[:] = get_any_location(
                 _recvbuf_host,
-                output_module="cupy",
+                output_module=get_array_module_name(recvbuf),
                 use_pinned_memory=True,
             )
 
@@ -467,6 +491,8 @@ class _SubCommunicator:
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
 
+        backend = self._resolve_backend(backend, sendrecvbuf)
+
         synchronize_device()
         if backend == "nccl":
             self._nccl_comm.broadcast(sendrecvbuf, root=root)
@@ -484,7 +510,7 @@ class _SubCommunicator:
 
             sendrecvbuf[:] = get_any_location(
                 _sendrecvbuf_host,
-                output_module="cupy",
+                output_module=get_array_module_name(sendrecvbuf),
                 use_pinned_memory=True,
             )
         synchronize_device()
@@ -522,7 +548,13 @@ class _SubCommunicator:
                 "This cannot be called between group_start and group_end."
             )
 
+        # Accept buffers from either array module; gather in the backend
+        # module and return the result where the input lived.
+        in_module = get_array_module_name(sendbuf)
+        sendbuf = xp.asarray(sendbuf)
+
         if mask is not None:
+            mask = xp.asarray(mask)
             if mask.size // self.size < sendbuf.shape[axis]:
                 raise ValueError(
                     f"The mask is too small for the sendbuf: {mask.size // self.size} < {sendbuf.shape[axis]}."
@@ -551,7 +583,8 @@ class _SubCommunicator:
         recvbuf = xp.moveaxis(recvbuf, 0, axis)
 
         indices = xp.where(mask)[0]
-        return xp.take(recvbuf, indices, axis=axis)
+        result = xp.take(recvbuf, indices, axis=axis)
+        return get_any_location(result, in_module, use_pinned_memory=True)
 
     def send_recv(
         self,
@@ -587,6 +620,8 @@ class _SubCommunicator:
             backend = self._config["send_recv"]
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
+
+        backend = self._resolve_backend(backend, sendbuf, recvbuf)
 
         if backend == "nccl":
 
@@ -624,7 +659,7 @@ class _SubCommunicator:
             )
             recvbuf[:] = get_any_location(
                 recvbuf_host,
-                output_module="cupy",
+                output_module=get_array_module_name(recvbuf),
                 use_pinned_memory=True,
             )
 
@@ -703,6 +738,18 @@ class _SubCommunicator:
 
             MPI.Request.Waitall(requests)
 
+        # Flush host_mpi staging: copy completed receives back to their
+        # destination buffers (no-op unless host_mpi isend/irecv ran).
+        for buf, buf_host in self._pending_host_recvs:
+            buf[:] = get_any_location(
+                buf_host,
+                output_module=get_array_module_name(buf),
+                use_pinned_memory=True,
+            )
+        self._pending_host_recvs.clear()
+        self._pending_host_sends.clear()
+        synchronize_device()
+
     def send(
         self,
         buf: NDArray,
@@ -733,6 +780,8 @@ class _SubCommunicator:
             backend = self._config["send_recv"]
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
+
+        backend = self._resolve_backend(backend, buf)
 
         if backend == "nccl":
             self._nccl_comm.send(buf, dest)
@@ -790,6 +839,8 @@ class _SubCommunicator:
         elif backend not in _backends:
             raise ValueError(f"Invalid backend: {backend}. Must be one of {_backends}.")
 
+        backend = self._resolve_backend(backend, buf)
+
         if backend == "nccl":
             self._nccl_comm.recv(buf, source)
 
@@ -812,7 +863,7 @@ class _SubCommunicator:
             )
             buf[:] = get_any_location(
                 buf_host,
-                output_module="cupy",
+                output_module=get_array_module_name(buf),
                 use_pinned_memory=True,
             )
 
@@ -868,10 +919,20 @@ class _SubCommunicator:
             )
 
         elif backend == "host_mpi":
-            raise NotImplementedError(
-                "Non-blocking send is not implemented for the host_mpi backend."
-                "This is because it would need to synchronize in the irecv call,"
-                "which would defeat the purpose of non-blocking communication."
+            buf_host = get_any_location(
+                buf,
+                output_module="numpy",
+                use_pinned_memory=True,
+            )
+
+            # Need to synchronize the current stream to ensure that
+            # the D2H copy finished before MPI reads the host buffer.
+            synchronize_device()
+
+            self._pending_host_sends.append(buf_host)
+            return self._mpi_comm.Isend(
+                buf=buf_host,
+                dest=dest,
             )
 
     def irecv(
@@ -926,10 +987,16 @@ class _SubCommunicator:
             )
 
         elif backend == "host_mpi":
-            raise NotImplementedError(
-                "Non-blocking receive is not implemented for the host_mpi backend."
-                "This is because it would need to synchronize when copying the data back to the device,"
-                "which would defeat the purpose of non-blocking communication."
+            buf_host = empty_like_pinned(buf)
+
+            # Need to synchronize the current stream to ensure that
+            # the alloc call is finished
+            synchronize_device()
+
+            self._pending_host_recvs.append((buf, buf_host))
+            return self._mpi_comm.Irecv(
+                buf=buf_host,
+                source=source,
             )
 
 

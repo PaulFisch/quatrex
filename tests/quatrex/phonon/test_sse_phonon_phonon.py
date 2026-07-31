@@ -14,10 +14,17 @@ import pytest
 
 from qttools import xp
 from qttools.comm import comm as _qtt_comm
+from qttools.utils.gpu_utils import get_host
 
 from quatrex.phonon.fc3_loader import fc3_to_phi_blocks
 from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 from quatrex.phonon.units import bubble_prefactor_thz
+
+
+def _dev_pattern(p):
+    """Host scipy pattern -> backend-native sparse (no-op under numpy)."""
+    from qttools import sparse
+    return sparse.csr_matrix(p) if xp.__name__ == "cupy" else p
 
 
 def _configure_serial_comm() -> None:
@@ -124,7 +131,8 @@ def test_bubble_block_matches_reference(nd: int, ne: int) -> None:
     )
 
     # Atol scales with the prefactor magnitude (~5e-23) — use rtol.
-    assert np.allclose(sig_l_ref, sig_l_new, atol=1e-40, rtol=1e-10)
+    assert np.allclose(sig_l_ref, np.asarray(get_host(sig_l_new)),
+                       atol=1e-40, rtol=1e-10)
 
 
 def test_fc3_to_phi_blocks_truncation_warning() -> None:
@@ -297,7 +305,8 @@ def _ref_compute_multiblock(
         # The production SSE adds only the dispersive (Hilbert) part of
         # Σ^R; the SCBA loop adds the anti-Hermitian ½(Σ^>−Σ^<) itself.
         # The hard-mask path post-masks the Hilbert at the omega=0 bin.
-        sr = 0.5j * hilbert_transform(delta, freqs)
+        sr = 0.5j * np.asarray(
+            get_host(hilbert_transform(xp.asarray(delta), xp.asarray(freqs))))
         sr[0] = 0.0
         sr_full[key] = sr
 
@@ -368,11 +377,11 @@ def test_compute_multiblock_matches_reference() -> None:
                 for j in range(block_sizes[J]):
                     pattern_rows.append(block_offsets[I] + i)
                     pattern_cols.append(block_offsets[J] + j)
-    pattern = csr_matrix(
+    pattern = _dev_pattern(csr_matrix(
         (np.ones(len(pattern_rows), dtype=np.complex128),
          (np.array(pattern_rows), np.array(pattern_cols))),
         shape=(N, N),
-    )
+    ))
 
     g_lesser = DSDBCOO.from_sparray(pattern, block_sizes, global_stack_shape=(ne,))
     g_greater = DSDBCOO.from_sparray(pattern, block_sizes, global_stack_shape=(ne,))
@@ -387,8 +396,8 @@ def test_compute_multiblock_matches_reference() -> None:
     gl_view = g_lesser.stack[...]
     gg_view = g_greater.stack[...]
     for (K, Kp) in gl_band:
-        gl_view.blocks[K, Kp] = gl_band[(K, Kp)]
-        gg_view.blocks[K, Kp] = gg_band[(K, Kp)]
+        gl_view.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+        gg_view.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
 
     # Run the production routine.
     cfg = _make_cfg("fft")
@@ -417,15 +426,18 @@ def test_compute_multiblock_matches_reference() -> None:
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             key = (I, J)
             np.testing.assert_allclose(
-                sl_view.blocks[I, J], sl_ref.get(key, 0), atol=1e-40, rtol=1e-9,
+                np.asarray(get_host(sl_view.blocks[I, J])), sl_ref.get(key, 0),
+                atol=1e-40, rtol=1e-9,
                 err_msg=f"Sigma^< mismatch at block {key}",
             )
             np.testing.assert_allclose(
-                sg_view.blocks[I, J], sg_ref.get(key, 0), atol=1e-40, rtol=1e-10,
+                np.asarray(get_host(sg_view.blocks[I, J])), sg_ref.get(key, 0),
+                atol=1e-40, rtol=1e-10,
                 err_msg=f"Sigma^> mismatch at block {key}",
             )
             np.testing.assert_allclose(
-                sr_view.blocks[I, J], sr_ref.get(key, 0), atol=1e-40, rtol=1e-10,
+                np.asarray(get_host(sr_view.blocks[I, J])), sr_ref.get(key, 0),
+                atol=1e-40, rtol=1e-10,
                 err_msg=f"Sigma^R mismatch at block {key}",
             )
 
@@ -462,11 +474,11 @@ def test_compute_restores_distribution_state() -> None:
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
                     cols.append(offs[J] + j)
-    pattern = csr_matrix(
+    pattern = _dev_pattern(csr_matrix(
         (np.ones(len(rows), dtype=np.complex128),
          (np.array(rows), np.array(cols))),
         shape=(N, N),
-    )
+    ))
 
     bufs = [DSDBCOO.from_sparray(pattern, block_sizes, global_stack_shape=(ne,))
             for _ in range(5)]
@@ -478,10 +490,12 @@ def test_compute_restores_distribution_state() -> None:
     gl_v = g_lesser.stack[...]
     gg_v = g_greater.stack[...]
     for K in range(n_blocks):
-        gl_v.blocks[K, K] = (rng.standard_normal((ne, nbs, nbs))
-                             + 1j * rng.standard_normal((ne, nbs, nbs)))
-        gg_v.blocks[K, K] = (rng.standard_normal((ne, nbs, nbs))
-                             + 1j * rng.standard_normal((ne, nbs, nbs)))
+        gl_v.blocks[K, K] = xp.asarray(
+            rng.standard_normal((ne, nbs, nbs))
+            + 1j * rng.standard_normal((ne, nbs, nbs)))
+        gg_v.blocks[K, K] = xp.asarray(
+            rng.standard_normal((ne, nbs, nbs))
+            + 1j * rng.standard_normal((ne, nbs, nbs)))
 
     # Force the buffers into nnz distribution (mimicking the SCBA loop's
     # state immediately before interactions run).
@@ -572,9 +586,9 @@ def _taper_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
                 for j in range(nbs):
                     rows.append(offs[I] + i)
                     cols.append(offs[J] + j)
-    pattern = csr_matrix(
+    pattern = _dev_pattern(csr_matrix(
         (np.ones(len(rows), dtype=np.complex128),
-         (np.array(rows), np.array(cols))), shape=(N, N))
+         (np.array(rows), np.array(cols))), shape=(N, N)))
 
     def make_buffers():
         bufs = [DSDBCOO.from_sparray(pattern, block_sizes,
@@ -585,8 +599,8 @@ def _taper_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
         gl, gg = bufs[0], bufs[1]
         gl_v, gg_v = gl.stack[...], gg.stack[...]
         for (K, Kp) in gl_band:
-            gl_v.blocks[K, Kp] = gl_band[(K, Kp)]
-            gg_v.blocks[K, Kp] = gg_band[(K, Kp)]
+            gl_v.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+            gg_v.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
         return bufs
 
     return phi_blocks, gl_band, gg_band, block_sizes, offs, make_buffers
@@ -612,8 +626,8 @@ def _run_sigma(phi_blocks, block_sizes, ne, make_buffers, taper: str | None):
     out_l, out_g = {}, {}
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
-            out_l[(I, J)] = np.asarray(sl_v.blocks[I, J]).copy()
-            out_g[(I, J)] = np.asarray(sg_v.blocks[I, J]).copy()
+            out_l[(I, J)] = np.asarray(get_host(sl_v.blocks[I, J])).copy()
+            out_g[(I, J)] = np.asarray(get_host(sg_v.blocks[I, J])).copy()
     return out_l, out_g
 
 
@@ -805,10 +819,10 @@ def test_compute_coupled_q_matches_reference() -> None:
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
                     cols.append(offs[J] + j)
-    pattern = csr_matrix(
+    pattern = _dev_pattern(csr_matrix(
         (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
         shape=(N, N),
-    )
+    ))
     mk = lambda: DSDBCOO.from_sparray(
         pattern, block_sizes, global_stack_shape=(ne, nq)
     )
@@ -817,8 +831,8 @@ def test_compute_coupled_q_matches_reference() -> None:
         m.data[:] = 0.0
     glv, ggv = g_l.stack[...], g_g.stack[...]
     for (K, Kp) in gl_band:
-        glv.blocks[K, Kp] = gl_band[(K, Kp)]
-        ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+        glv.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+        ggv.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
 
     cfg = _make_cfg("half")
     ssp = SigmaPhononPhonon(
@@ -898,11 +912,13 @@ def test_compute_coupled_q_matches_reference() -> None:
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             np.testing.assert_allclose(
-                slv.blocks[I, J], ref_l.get((I, J), 0), atol=1e-40, rtol=1e-9,
+                np.asarray(get_host(slv.blocks[I, J])), ref_l.get((I, J), 0),
+                atol=1e-40, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^< mismatch at {(I, J)}",
             )
             np.testing.assert_allclose(
-                sgv.blocks[I, J], ref_g.get((I, J), 0), atol=1e-40, rtol=1e-9,
+                np.asarray(get_host(sgv.blocks[I, J])), ref_g.get((I, J), 0),
+                atol=1e-40, rtol=1e-9,
                 err_msg=f"coupled-q Sigma^> mismatch at {(I, J)}",
             )
 
@@ -989,10 +1005,10 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
                     cols.append(offs[J] + j)
-    pattern = csr_matrix(
+    pattern = _dev_pattern(csr_matrix(
         (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
         shape=(N, N),
-    )
+    ))
 
     def _run(**ssp_kwargs):
         mk = lambda: DSDBCOO.from_sparray(
@@ -1002,8 +1018,8 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
             m.data[:] = 0.0
         glv, ggv = g_l.stack[...], g_g.stack[...]
         for (K, Kp) in gl_band:
-            glv.blocks[K, Kp] = gl_band[(K, Kp)]
-            ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+            glv.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+            ggv.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
         cfg = _make_cfg("half")
         cfg.phonon.decomposed_kernel = kernel
         ssp = SigmaPhononPhonon(
@@ -1023,11 +1039,13 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             np.testing.assert_allclose(
-                fv_l.blocks[I, J], dv_l.blocks[I, J], atol=1e-45, rtol=1e-9,
+                np.asarray(get_host(fv_l.blocks[I, J])),
+                np.asarray(get_host(dv_l.blocks[I, J])), atol=1e-45, rtol=1e-9,
                 err_msg=f"factored Sigma^< mismatch at {(I, J)} [{ansatz}]",
             )
             np.testing.assert_allclose(
-                fv_g.blocks[I, J], dv_g.blocks[I, J], atol=1e-45, rtol=1e-9,
+                np.asarray(get_host(fv_g.blocks[I, J])),
+                np.asarray(get_host(dv_g.blocks[I, J])), atol=1e-45, rtol=1e-9,
                 err_msg=f"factored Sigma^> mismatch at {(I, J)} [{ansatz}]",
             )
 
@@ -1065,7 +1083,9 @@ def test_q_convolution_matches_explicit_q_diff_map_sum() -> None:
     )
 
     np.testing.assert_allclose(
-        _convolve_q(pa, pb, (nkx, nky), np), expected, rtol=1e-12
+        np.asarray(get_host(
+            _convolve_q(xp.asarray(pa), xp.asarray(pb), (nkx, nky), xp))),
+        expected, rtol=1e-12,
     )
 
 
@@ -1132,10 +1152,10 @@ def test_compute_gamma_factored_matches_dense(ansatz) -> None:
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
                     cols.append(offs[J] + j)
-    pattern = csr_matrix(
+    pattern = _dev_pattern(csr_matrix(
         (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
         shape=(N, N),
-    )
+    ))
 
     def _run(**ssp_kwargs):
         mk = lambda: DSDBCOO.from_sparray(
@@ -1145,8 +1165,8 @@ def test_compute_gamma_factored_matches_dense(ansatz) -> None:
             m.data[:] = 0.0
         glv, ggv = g_l.stack[...], g_g.stack[...]
         for (K, Kp) in gl_band:
-            glv.blocks[K, Kp] = gl_band[(K, Kp)]
-            ggv.blocks[K, Kp] = gg_band[(K, Kp)]
+            glv.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+            ggv.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
         cfg = _make_cfg("half")
         cfg.phonon.decomposed_kernel = "gram"
         ssp = SigmaPhononPhonon(
@@ -1166,10 +1186,12 @@ def test_compute_gamma_factored_matches_dense(ansatz) -> None:
     for I in range(n_blocks):
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
             np.testing.assert_allclose(
-                fv_l.blocks[I, J], dv_l.blocks[I, J], atol=1e-45, rtol=1e-9,
+                np.asarray(get_host(fv_l.blocks[I, J])),
+                np.asarray(get_host(dv_l.blocks[I, J])), atol=1e-45, rtol=1e-9,
                 err_msg=f"Gamma factored Sigma^< mismatch at {(I, J)}",
             )
             np.testing.assert_allclose(
-                fv_g.blocks[I, J], dv_g.blocks[I, J], atol=1e-45, rtol=1e-9,
+                np.asarray(get_host(fv_g.blocks[I, J])),
+                np.asarray(get_host(dv_g.blocks[I, J])), atol=1e-45, rtol=1e-9,
                 err_msg=f"Gamma factored Sigma^> mismatch at {(I, J)}",
             )

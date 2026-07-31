@@ -9,8 +9,13 @@ Env overrides (optional, on top of the TOML):
   QX_BALLISTIC=1 (zero the 3-phonon vertex -> the G_ball baseline),
   QX_ETA QX_MIX QX_MAXIT QX_NE QX_RETARDED QX_FC3 QX_ETAOBC
   QX_BCS QX_QCS (comm sizes -- override the TOML for a one-config rank sweep),
+  QX_COMM_BACKEND=host_mpi|device_mpi|nccl (all per-op comm selectors at once),
   QX_FREQGRID=file (non-uniform grid from phonon_energies.npy),
   QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz).
+
+Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
+(qttools default "cupy" with silent NumPy fallback); set it explicitly for
+reproducible CPU-vs-GPU parity runs.
 
 Run: ``mpirun -np N python run.py`` (config via QX_CONFIG).
 """
@@ -21,8 +26,10 @@ from pathlib import Path
 import numpy as np
 
 from quatrex.core.config import parse_config, setup_context
+from qttools import xp
 from qttools.comm import comm as ranks
 from qttools.profiling import Profiler
+from qttools.utils.gpu_utils import get_host
 
 CFG = os.environ["QX_CONFIG"]
 cfg = parse_config(CFG)
@@ -52,6 +59,14 @@ if os.environ.get("QX_SCATCONTACTS"): cfg.phonon.obc_scattering_contacts = bool(
 if os.environ.get("QX_BBCHECK"):  cfg.phonon.bubble_balance_check = bool(int(os.environ["QX_BBCHECK"]))
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
 if os.environ.get("QX_QCS"):      cfg.compute.comm.q_comm_size = int(os.environ["QX_QCS"])
+if os.environ.get("QX_COMM_BACKEND"):
+    # One backend for every per-op comm selector. Pydantic validates the
+    # value; comm.configure rejects backend/array-module mismatches.
+    _cb = os.environ["QX_COMM_BACKEND"]
+    for _f in type(cfg.compute.comm).model_fields:
+        if _f.endswith(("all_to_all", "all_gather", "all_reduce",
+                        "bcast", "send_recv")):
+            setattr(cfg.compute.comm, _f, _cb)
 if os.environ.get("QX_TLEFT"):    cfg.phonon.left_temperature = float(os.environ["QX_TLEFT"])
 if os.environ.get("QX_TRIGHT"):   cfg.phonon.right_temperature = float(os.environ["QX_TRIGHT"])
 # Exact-Jacobian Newton-Krylov (mixing_method = "newton") knobs.
@@ -133,16 +148,16 @@ if os.environ.get("QX_BALLISTIC") == "1":
     if ranks.rank == 0:
         print(f"BALLISTIC: zeroed {n_zeroed} phi_blocks in place", flush=True)
 
-w = np.abs(np.asarray(ph.local_frequencies))
+w = np.abs(np.asarray(get_host(ph.local_frequencies)))
 if not getattr(ph, "uniform_frequency_grid", True):
     # Non-uniform grid: fold the per-bin quadrature cell widths into the
     # heat integral (uniform grids keep the legacy unweighted sum).
-    w = w * np.asarray(ph.local_frequency_weights)
+    w = w * np.asarray(get_host(ph.local_frequency_weights))
 
 
 def _heat(mw):
     """Local hbar-omega-weighted heat current per interface (and per q)."""
-    mw = np.asarray(mw)
+    mw = np.asarray(get_host(mw))
     ww = w.reshape((-1,) + (1,) * (mw.ndim - 1))
     return np.real(np.sum(ww * mw, axis=0))
 
@@ -168,7 +183,7 @@ for _inter in getattr(scba, "interactions", []):
     if _s is not None:
         _sse_diag = _s
         break
-_eg_full = np.abs(np.asarray(scba.energies).real)   # (ne,) THz grid
+_eg_full = np.abs(np.asarray(get_host(scba.energies)).real)   # (ne,) THz grid
 
 
 def _gather_full(local_w):
@@ -176,7 +191,7 @@ def _gather_full(local_w):
     placement + a stack SUM all-reduce (each omega bin owned by one rank).
     Mirrors the current_spectrum gather below."""
     local_w = np.asarray(local_w, float).ravel()
-    lf = np.abs(np.asarray(ph.local_frequencies))
+    lf = np.abs(np.asarray(get_host(ph.local_frequencies)))
     full = np.zeros(_eg_full.size, dtype=np.float64)
     i0 = int(np.argmin(np.abs(_eg_full - float(lf.flat[0]))))
     full[i0:i0 + local_w.size] = local_w
@@ -196,15 +211,16 @@ def _logged(self):
     if ranks.rank == 0:
         # per-omega magnitude of the raw SSE output: localizes WHERE a
         # diverging update grows (the omega bin), at negligible cost.
-        sd = np.asarray(self.data.sigma_lesser.data)
+        sd = np.asarray(get_host(self.data.sigma_lesser.data))
         _iter_sigma_max.append(np.abs(sd).reshape(sd.shape[0], -1).max(axis=1))
     if _DIAG:
         # collective gathers (ALL ranks). G^R DOS = -Im Tr G^R; per-omega
         # |Sigma| = max over the (full, bcs=1) nnz block.
-        gloc = -np.asarray(self.data.g_retarded.diagonal()).imag.sum(axis=1)
+        gloc = -np.asarray(
+            get_host(self.data.g_retarded.diagonal())).imag.sum(axis=1)
         gin = _gather_full(gloc)
-        sr = np.asarray(self.data.sigma_retarded_hermitian.data)
-        sl = np.asarray(self.data.sigma_lesser.data)
+        sr = np.asarray(get_host(self.data.sigma_retarded_hermitian.data))
+        sl = np.asarray(get_host(self.data.sigma_lesser.data))
         sR = _gather_full(np.abs(sr).reshape(sr.shape[0], -1).max(axis=1))
         sL = _gather_full(np.abs(sl).reshape(sl.shape[0], -1).max(axis=1))
         if ranks.rank == 0:
@@ -225,7 +241,7 @@ SCBA._has_converged = _logged
 if ranks.rank == 0:
     print(f"RUN config={CFG} phonon={cfg.scba.phonon} eta={cfg.phonon.eta} "
           f"retarded={cfg.phonon.retarded_method} nblk={ph.block_sizes.shape[0]} "
-          f"ne={int(np.asarray(scba.energies).shape[0])} "
+          f"ne={int(scba.energies.shape[0])} "
           f"fgrid={cfg.phonon.frequency_grid} "
           f"bcs={cfg.compute.comm.block_comm_size} qcs={cfg.compute.comm.q_comm_size} "
           f"nranks={ranks.size}", flush=True)
@@ -240,9 +256,10 @@ if os.environ.get("QX_SIGMA_INIT"):
                          "(the flat nnz layout must match the snapshot).")
     _sd = np.load(os.environ["QX_SIGMA_INIT"])
     _scale = float(os.environ.get("QX_SIGMA_SCALE", "1.0"))
-    scba.data.sigma_lesser.data[:] = _scale * _sd["sigma_lesser"]
-    scba.data.sigma_greater.data[:] = _scale * _sd["sigma_greater"]
-    scba.data.sigma_retarded_hermitian.data[:] = _scale * _sd["sigma_retarded"]
+    scba.data.sigma_lesser.data[:] = _scale * xp.asarray(_sd["sigma_lesser"])
+    scba.data.sigma_greater.data[:] = _scale * xp.asarray(_sd["sigma_greater"])
+    scba.data.sigma_retarded_hermitian.data[:] = _scale * xp.asarray(
+        _sd["sigma_retarded"])
     print(f"WARM START from {os.environ['QX_SIGMA_INIT']} "
           f"(scale {_scale})", flush=True)
 
@@ -258,9 +275,9 @@ except Exception:
 spec_full = None
 _mw = getattr(ph, "meir_wingreen_current", None)
 if _mw is not None:
-    _mw = np.asarray(_mw)
-    _eg = np.abs(np.asarray(scba.energies).real)
-    _lf = np.abs(np.asarray(ph.local_frequencies))
+    _mw = np.asarray(get_host(_mw))
+    _eg = np.abs(np.asarray(get_host(scba.energies)).real)
+    _lf = np.abs(np.asarray(get_host(ph.local_frequencies)))
     _full = np.zeros((_eg.size,) + _mw.shape[1:], dtype=np.float64)
     _i0 = int(np.argmin(np.abs(_eg - float(_lf.flat[0]))))
     _full[_i0:_i0 + _mw.shape[0]] = np.real(_mw)
@@ -294,15 +311,16 @@ try:
     if os.environ.get("QX_SAVE_DIAG_G", "1") == "1" and cfg.scba.phonon:
         _mask = scba.data.g_lesser._stack_padding_mask
         _gr_diag = ranks.stack.all_gather_v(
-            np.asarray(-scba.data.g_retarded.diagonal().imag), axis=0,
-            mask=_mask)
+            np.asarray(get_host(-scba.data.g_retarded.diagonal().imag)),
+            axis=0, mask=_mask)
         _gl_diag = ranks.stack.all_gather_v(
-            np.asarray(scba.data.g_lesser.diagonal().imag), axis=0,
-            mask=_mask)
+            np.asarray(get_host(scba.data.g_lesser.diagonal().imag)),
+            axis=0, mask=_mask)
     _spectra = getattr(scba, "_bubble_balance_spectra", None)
     if _spectra is not None:
         _bb_spec = np.stack([
-            ranks.stack.all_gather_v(np.ascontiguousarray(sp), axis=0)
+            ranks.stack.all_gather_v(
+                np.ascontiguousarray(get_host(sp)), axis=0)
             for sp in _spectra])
 except Exception as exc:  # noqa: BLE001 -- diagnostic, never fatal
     if ranks.rank == 0:
@@ -315,14 +333,14 @@ if ranks.rank == 0:
                   if getattr(ph, "meir_wingreen_current", None) is not None else None)
     from quatrex.grid.energies import frequency_cell_widths
     out = dict(
-        energies=np.asarray(scba.energies).real,
+        energies=np.asarray(get_host(scba.energies)).real,
         # Heat-key convention marker: on a UNIFORM grid the heat keys are
         # the legacy unweighted sums (integral / dw); on a non-uniform
         # grid the cell widths are folded in and the keys ARE integrals.
         uniform_frequency_grid=bool(
             getattr(ph, "uniform_frequency_grid", True)),
-        frequency_cell_widths=np.asarray(
-            frequency_cell_widths(np.asarray(scba.energies).real)),
+        frequency_cell_widths=np.asarray(get_host(
+            frequency_cell_widths(xp.asarray(scba.energies).real))),
         eta=float(cfg.phonon.eta), retarded=str(cfg.phonon.retarded_method),
         nblocks=int(ph.block_sizes.shape[0]), phonon=bool(cfg.scba.phonon),
         ballistic=bool(os.environ.get("QX_BALLISTIC") == "1"),
@@ -353,7 +371,7 @@ if ranks.rank == 0:
     # is not a fixed point and headlining it misrepresents a non-result.
     lh = getattr(scba, "_last_heat_current", None)
     if lh is not None:
-        lh = np.asarray(lh)
+        lh = np.asarray(get_host(lh))
         out["last_heat"] = lh
         out["lead_current"] = 0.5 * (abs(float(np.real(lh[0]))) + abs(float(np.real(lh[-1]))))
     # eta-absorption diagnostic: max-min spread over ALL interfaces (contains
@@ -371,7 +389,7 @@ if ranks.rank == 0:
     # bubble balance connecting adjacent interface heat currents by energy
     # continuity (J_k = J_{k-1} + P_abs(k) + eta term).
     if _slab_pa is not None:
-        out["slab_absorption"] = np.asarray(_slab_pa)
+        out["slab_absorption"] = np.asarray(get_host(_slab_pa))
     if _final_bal is not None:
         # Same-instant global balance (same Sigma/G pairing as the slab
         # binning): sum(slab_absorption) == P_out - P_in to roundoff.
@@ -430,10 +448,11 @@ if ranks.rank == 0:
     np.savez(npz, **out)
     if os.environ.get("QX_SAVE_SIGMA") and ranks.size == 1 and not err:
         np.savez(os.environ["QX_SAVE_SIGMA"],
-                 sigma_lesser=np.asarray(scba.data.sigma_lesser.data),
-                 sigma_greater=np.asarray(scba.data.sigma_greater.data),
+                 sigma_lesser=np.asarray(get_host(scba.data.sigma_lesser.data)),
+                 sigma_greater=np.asarray(
+                     get_host(scba.data.sigma_greater.data)),
                  sigma_retarded=np.asarray(
-                     scba.data.sigma_retarded_hermitian.data))
+                     get_host(scba.data.sigma_retarded_hermitian.data)))
         print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}", flush=True)
     # Headline the CONVERGED fixed point and its status -- not a
     # "best-conserved" transient. A non-converged run says so, and shows

@@ -16,6 +16,7 @@ import numpy as np
 from qttools import xp
 from qttools.comm import comm
 from qttools.profiling import Profiler
+from qttools.utils.gpu_utils import get_host
 
 from quatrex.coulomb_screening import CoulombScreeningSolver, PCoulombScreening
 from quatrex.electron import (
@@ -148,7 +149,7 @@ class PhononPhononInteraction(Interaction):
         self.sigma_phonon_phonon = SigmaPhononPhonon(
             config,
             phonon_energies,
-            block_sizes=np.asarray(block_sizes),
+            block_sizes=np.asarray(get_host(block_sizes)),
             dynamical_matrix=dynamical_matrix,
         )
 

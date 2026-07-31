@@ -380,9 +380,6 @@ def test_isend_and_irecv(
     ):
         pytest.skip("Config not valid")
 
-    if backend_type == "host_mpi":
-        pytest.skip("Non-blocking receive is not implemented for the host_mpi backend.")
-
     for test_comm in [comm.block, comm.stack]:
 
         if test_comm.size < 2:
@@ -408,3 +405,119 @@ def test_isend_and_irecv(
 
             expected = xp.ones((data_size), dtype=xp.float32)
             assert xp.allclose(expected, recvbuf)
+
+
+@pytest.mark.mpi(min_size=2)
+def test_isend_irecv_multi(
+    backend_type: str,
+    block_comm_size: int,
+):
+    """Multiple in-flight messages per peer must match in posting order."""
+
+    if not _configure(
+        backend_type=backend_type,
+        block_comm_size=block_comm_size,
+    ):
+        pytest.skip("Config not valid")
+
+    n_msgs = 3
+    for test_comm in [comm.block, comm.stack]:
+
+        if test_comm.size < 2:
+            pytest.skip("Need at least 2 processes for isend_irecv test")
+
+        if test_comm.rank in [0, 1]:
+
+            other = 1 - test_comm.rank
+
+            sendbufs = [
+                xp.full((data_size,), test_comm.rank * 10 + i, dtype=xp.float32)
+                for i in range(n_msgs)
+            ]
+            recvbufs = [
+                xp.empty((data_size,), dtype=xp.float32) for _ in range(n_msgs)
+            ]
+
+            backend = test_comm._config["send_recv"]
+            test_comm.group_start(backend)
+            requests = []
+            for i in range(n_msgs):
+                requests.append(test_comm.isend(buf=sendbufs[i], dest=other))
+                requests.append(test_comm.irecv(buf=recvbufs[i], source=other))
+            test_comm.group_end(backend, requests)
+
+            for i in range(n_msgs):
+                assert xp.allclose(
+                    xp.full((data_size,), other * 10 + i, dtype=xp.float32),
+                    recvbufs[i],
+                ), f"message {i}: {recvbufs[i]}"
+
+
+@pytest.mark.mpi(min_size=2)
+def test_collectives_numpy_buffers(
+    backend_type: str,
+    block_comm_size: int,
+):
+    """Host (numpy) buffers must work under any configured backend."""
+
+    if not _configure(
+        backend_type=backend_type,
+        block_comm_size=block_comm_size,
+    ):
+        pytest.skip("Config not valid")
+
+    for test_comm in [comm.block, comm.stack]:
+
+        sendbuf = np.ones((data_size,), dtype=np.float32) * test_comm.rank
+        recvbuf = np.empty_like(sendbuf)
+
+        test_comm.all_reduce(sendbuf, recvbuf)
+
+        assert np.allclose(
+            np.ones((data_size,), dtype=np.float32)
+            * test_comm.size
+            * (test_comm.size - 1)
+            / 2,
+            recvbuf,
+        )
+
+        gathered = test_comm.all_gather_v(
+            np.ones((2, data_size - test_comm.rank), dtype=np.float32)
+            * test_comm.rank,
+            axis=1,
+        )
+
+        assert isinstance(gathered, np.ndarray)
+        assert gathered.shape[1] == sum(
+            data_size - i for i in range(test_comm.size)
+        )
+
+
+@pytest.mark.mpi(min_size=2)
+def test_send_recv_zero_size(
+    backend_type: str,
+    block_comm_size: int,
+):
+    """Zero-size exchanges must complete on every backend."""
+
+    if not _configure(
+        backend_type=backend_type,
+        block_comm_size=block_comm_size,
+    ):
+        pytest.skip("Config not valid")
+
+    for test_comm in [comm.block, comm.stack]:
+
+        if test_comm.size < 2:
+            pytest.skip("Need at least 2 processes for send_recv test")
+
+        if test_comm.rank in [0, 1]:
+
+            other = 1 - test_comm.rank
+
+            sendbuf = xp.empty((0,), dtype=xp.float32)
+            recvbuf = xp.empty((0,), dtype=xp.float32)
+
+            test_comm.send_recv(
+                sendbuf=sendbuf, dest=other, recvbuf=recvbuf, source=other
+            )
