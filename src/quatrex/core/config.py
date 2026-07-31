@@ -1572,6 +1572,17 @@ class PhononConfig(BaseModel):
     with decomposed_kernel="gram" (per-quad weights do not factor through
     the Gram collapse)."""
 
+    sse_ring_dtype: Literal["complex128", "complex64"] = "complex128"
+    """Precision of the ring-contraction GEMMs (the SSE hot path). With
+    "complex64" the vertex factors and inner-G band links are cast to
+    single precision, so every per-quad ring runs as batched CGEMM,
+    while the accumulation ACROSS quads (and everything else: FFTs,
+    fold, Dyson, OBC) stays complex128. Gamma-only dense path only (the
+    coupled-q and factored kernels ignore it). Cheaper in time and leg
+    memory; the price is a ~1e-6-relative Sigma and a degraded bubble
+    energy-balance residual -- measure before trusting a production
+    number. "complex128" is the legacy path, bit-identical."""
+
     heat_flow_conservation_tol: PositiveFloat = 1e-2
     """Convergence tolerance for the anharmonic phonon SCBA: the relative
     lead balance of the (hbar-omega-weighted) Meir-Wingreen HEAT current.

@@ -98,6 +98,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._tau_chunk_bytes = int(config.phonon.sse_tau_chunk_bytes)
         self._pool_scope = str(
             getattr(config.phonon, "sse_pool_scope", "tau"))
+        self._ring_c64 = (
+            getattr(config.phonon, "sse_ring_dtype", "complex128")
+            == "complex64")
         # Sigma^> reconstruction from the Sigma^< cross terms (WP3): exact
         # bosonic tau-domain identity, 4 instead of 6 ring calls per quad.
         self._g_from_l = bool(
@@ -1011,7 +1014,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             else:
                 halo_l = halo_g = halo_lr = halo_gr = {}
 
-            # Materialise each distinct band link
+            # Materialise each distinct band link. With the
+            # single-precision ring the links are downcast copies (the
+            # tau buffers themselves stay complex128). Gamma-only: the
+            # coupled-q kernels ignore sse_ring_dtype.
+            _c = ((lambda a: xp.ascontiguousarray(a, dtype=xp.complex64))
+                  if (self._ring_c64 and nq == 1) else (lambda a: a))
             gl_blk: dict[tuple[int, int], NDArray] = {}
             gg_blk: dict[tuple[int, int], NDArray] = {}
             glr_blk: dict[tuple[int, int], NDArray] = {}
@@ -1022,22 +1030,24 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             dggr_blk: dict[tuple[int, int], NDArray] = {}
             for (K, Kp) in self._links_for_range(start, end):
                 if start <= min(K, Kp) < end:
-                    gl_blk[(K, Kp)] = gtlv.blocks[K - start, Kp - start]
-                    gg_blk[(K, Kp)] = gtgv.blocks[K - start, Kp - start]
-                    glr_blk[(K, Kp)] = gtlrv.blocks[K - start, Kp - start]
-                    ggr_blk[(K, Kp)] = gtgrv.blocks[K - start, Kp - start]
+                    gl_blk[(K, Kp)] = _c(gtlv.blocks[K - start, Kp - start])
+                    gg_blk[(K, Kp)] = _c(gtgv.blocks[K - start, Kp - start])
+                    glr_blk[(K, Kp)] = _c(gtlrv.blocks[K - start, Kp - start])
+                    ggr_blk[(K, Kp)] = _c(gtgrv.blocks[K - start, Kp - start])
                     if lin:
-                        dgl_blk[(K, Kp)] = dgtlv.blocks[K - start, Kp - start]
-                        dgg_blk[(K, Kp)] = dgtgv.blocks[K - start, Kp - start]
-                        dglr_blk[(K, Kp)] = dgtlrv.blocks[
-                            K - start, Kp - start]
-                        dggr_blk[(K, Kp)] = dgtgrv.blocks[
-                            K - start, Kp - start]
+                        dgl_blk[(K, Kp)] = _c(
+                            dgtlv.blocks[K - start, Kp - start])
+                        dgg_blk[(K, Kp)] = _c(
+                            dgtgv.blocks[K - start, Kp - start])
+                        dglr_blk[(K, Kp)] = _c(dgtlrv.blocks[
+                            K - start, Kp - start])
+                        dggr_blk[(K, Kp)] = _c(dgtgrv.blocks[
+                            K - start, Kp - start])
                 else:
-                    gl_blk[(K, Kp)] = halo_l[(K, Kp)]
-                    gg_blk[(K, Kp)] = halo_g[(K, Kp)]
-                    glr_blk[(K, Kp)] = halo_lr[(K, Kp)]
-                    ggr_blk[(K, Kp)] = halo_gr[(K, Kp)]
+                    gl_blk[(K, Kp)] = _c(halo_l[(K, Kp)])
+                    gg_blk[(K, Kp)] = _c(halo_g[(K, Kp)])
+                    glr_blk[(K, Kp)] = _c(halo_lr[(K, Kp)])
+                    ggr_blk[(K, Kp)] = _c(halo_gr[(K, Kp)])
 
             # The full bubble folds the negative-omega contribution
             # into the one-sided grid via G^<(-omega)=G^>(omega): per ring quad
@@ -1058,18 +1068,42 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # (legacy, lin, fast, verify, hermitian mirror) is linear
                 # in PL and inherits it.
                 self._phi_pre = {}
+                # xp.asarray stages the host vertex factors to the
+                # device once here (free view under numpy). With the
+                # single-precision ring the copies are downcast so the
+                # per-quad GEMMs run as batched CGEMM -- prescaled by an
+                # exact power of two: the raw FC3 elements are ~1e20, so
+                # the Phi G G Phi product would overflow float32 (~1e38).
+                # The 2^-e / 2^e pair is exact in floating point, adding
+                # no rounding beyond the downcast itself.
+                _dt = xp.complex64 if self._ring_c64 else None
+                _sl = _sr = 1.0
+                if self._ring_c64:
+                    m = max((max(float(np.abs(pl).max()),
+                                 float(np.abs(pr).max()))
+                             for quads in self._phi_pair_index.values()
+                             for (*_, pl, pr) in quads), default=1.0)
+                    # Full scale on EACH side: the T = Phi@G and
+                    # U = G@Phi intermediates must stay ~O(|G| b), or
+                    # the S = T@U product overflows float32 in the
+                    # Bose-enhanced low-omega bins.
+                    e = int(np.ceil(np.log2(max(m, 1e-300))))
+                    _sl = _sr = 2.0 ** -e
+                    self._ring_unscale = 2.0 ** (2 * e)
                 for (I, J), quads in self._phi_pair_index.items():
-                    # xp.asarray stages the host vertex factors to the
-                    # device once here (free view under numpy).
-                    self._phi_pre[(I, J)] = [
-                        (K1, K2, K1p, K2p) + phi_perms(
-                            xp.asarray(
-                                pl if (w := self._quad_weight(
-                                    I, J, K1, K1p, K2, K2p)) == 1.0 else pl * w
-                            ),
-                            xp.asarray(pr), xp)
-                        for (K1, K2, K1p, K2p, pl, pr) in quads
-                    ]
+                    pre_list = []
+                    for (K1, K2, K1p, K2p, pl, pr) in quads:
+                        w = self._quad_weight(I, J, K1, K1p, K2, K2p)
+                        pl_eff = pl if w == 1.0 else pl * w
+                        pr_eff = pr
+                        if self._ring_c64:
+                            pl_eff = pl_eff * _sl
+                            pr_eff = pr * _sr
+                        pre_list.append(
+                            (K1, K2, K1p, K2p) + phi_perms(
+                                xp.asarray(pl_eff, dtype=_dt),
+                                xp.asarray(pr_eff, dtype=_dt), xp))
+                    self._phi_pre[(I, J)] = pre_list
 
             def _fold_l(pre, gla, glb, ggra, ggrb):
                 PL, PR, nI, bK2, nJ = pre
@@ -1113,7 +1147,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                            if halve_now else owned)
 
                 n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
-                _dt = next(iter(gl_blk.values())).dtype if gl_blk else complex
+                # Sigma dtype, NOT the leg dtype: with the c64 ring the
+                # accumulators are complex128 (unscaled magnitudes far
+                # beyond float32 range) -- a c64 output buffer would clip
+                # the largest Sigma^>(tau) elements to inf on assignment.
+                _dt = stl.data.dtype
                 # Preallocated per-pair outputs: pool tasks write disjoint
                 # tau slices directly (race-free), removing the per-pair
                 # concatenate alloc+copy of the chunked path.
@@ -1205,14 +1243,29 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                 tx = (r2 + r3) if verify_now else None
                                 if verify_now:
                                     t56 = r5 + r6
-                            acc_l = sl if acc_l is None else acc_l + sl
-                            acc_g = sg if acc_g is None else acc_g + sg
+                            acc_l = (sl.astype(xp.complex128, copy=False)
+                                     if acc_l is None else acc_l + sl)
+                            acc_g = (sg.astype(xp.complex128, copy=False)
+                                     if acc_g is None else acc_g + sg)
                             if tx is not None:
-                                acc_x = tx if acc_x is None else acc_x + tx
+                                acc_x = (tx.astype(xp.complex128, copy=False)
+                                         if acc_x is None else acc_x + tx)
                             if verify_now:
-                                acc_t56 = (t56 if acc_t56 is None
+                                acc_t56 = (t56.astype(xp.complex128,
+                                                      copy=False)
+                                           if acc_t56 is None
                                            else acc_t56 + t56)
                         if acc_l is not None:
+                            if self._ring_c64:
+                                # exact power-of-two unscale (see the
+                                # _phi_pre build)
+                                u = self._ring_unscale
+                                acc_l = acc_l * u
+                                acc_g = acc_g * u
+                                if acc_x is not None:
+                                    acc_x = acc_x * u
+                                if acc_t56 is not None:
+                                    acc_t56 = acc_t56 * u
                             out_l[(I, J)][lo:hi] = acc_l
                             out_g[(I, J)][lo:hi] = acc_g
                             if acc_x is not None:
