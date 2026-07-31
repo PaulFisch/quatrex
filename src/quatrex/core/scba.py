@@ -147,10 +147,13 @@ class SCBAData:
                         cols_.append(cc.ravel())
                 if rows_:
                     n_ = int(block_offsets_[-1])
+                    # backend-native arrays: qttools sparse is cupyx
+                    # under cupy, which rejects numpy index arrays
                     band_pattern = _sparse.coo_matrix(
                         (
-                            np.ones(sum(len(r) for r in rows_)),
-                            (np.concatenate(rows_), np.concatenate(cols_)),
+                            xp.ones(sum(len(r) for r in rows_)),
+                            (xp.asarray(np.concatenate(rows_)),
+                             xp.asarray(np.concatenate(cols_))),
                         ),
                         shape=(n_, n_),
                     )
