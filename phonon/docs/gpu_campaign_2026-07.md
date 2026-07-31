@@ -159,6 +159,31 @@ the g1t damping even converges faster. Memory was never a constraint
 comparable to the tortin campaign L16 numbers (different
 taper band/settings and 600-cap non-converged trajectories there).
 
+## 8. cuTile fused-ring experiment: blocked upstream (2026-07-31)
+
+Goal: reimplement the ring as one fused cuda.tile kernel (tile sizes
+matched to b instead of cuBLAS's 32/64 menu — padded-flop ceilings
+~28 TF/s at b=36 vs cuBLAS's 13.5, ~64 at b=63; T/U kept on-chip;
+complex128 as in-kernel 4M split since Tile IR has no complex dtypes).
+The complete kernel + correctness/bench harness is in
+`phonon/studies/_cutile_ring.py`.
+
+Outcome: **blocked by the NVIDIA toolchain.** tileiras 13.3.36 (the
+only wheel supporting sm_86/sm_90; 13.2.x knows neither) rejects every
+`ct.mma` bytecode — "failed to compile Tile IR program", rc 5 — for
+EVERY --gpu-name (sm_80/86/90/100), from cuda-tile 1.5.0 and the
+contemporaneous 1.6.0rc3, at -O0..3; 3D broadcast+reduce fails the
+same way. Non-mma kernels compile and run correctly on sm_86 (after
+two more workarounds baked into the study: strip the hard-coded
+--lineinfo flag and anonymize debug info, both of which tileiras also
+chokes on). Same signature as NVIDIA/cutile-python#72 (closed,
+unresolved). Forensics: bisected via CUDA_TILE_DUMP_BYTECODE +
+captured failing bytecodes + manual tileiras invocations.
+
+The experiment is a re-run of `_cutile_ring.py smoke` away from being
+live once a fixed tileiras ships; the pre-registered assessment
+criteria (integrate at ≥1.3x cuBLAS at b=36, ≥0.9x elsewhere) stand.
+
 ## Budget
 
 ~26 debug jobs incl. the 2-node L16 pair: **1.19 node-hours** total on
