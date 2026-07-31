@@ -40,6 +40,22 @@ STAGES = [
     "PhPh SSE: 4 tau stack->nnz",
     "PhPh SSE: 5 IFFT + Hilbert",
 ]
+# Per-iteration attribution tree: top-level components of one SCBA
+# iteration (their sum + residual = "SCBA: Iteration") and the solver
+# sub-ranges. All labels are emitted by existing @profiler.profile
+# decorations; this is a pure read-out.
+EXTRA = {
+    "solver": "PhononSolver",
+    "obc": "PhononSolver: OBC",
+    "assemble": "PhononSolver: Assemble",
+    "rgf": "PhononSolver: Selected Solve",
+    "sse": "SigmaPhononPhonon",
+    "symm": "SCBA: Symmetrize Sigma",
+    "mix": "SCBA: Update Sigma",
+    "conv": "SCBA: Convergence test",
+    "t_fwd": "SCBA: stack->nnz transpose",
+    "t_bwd": "SCBA: stack->nnz transpose back",
+}
 MALLOC_KNOBS = {
     "default": {},
     # one arena per NUMA-ish group: kills the per-thread arena explosion
@@ -86,11 +102,15 @@ def child(args) -> None:
     # Aggregate the per-stage ranges from the in-process eventlog:
     # entries are (timestamp, depth, label, call_time, after_barrier_time).
     per_stage: dict[str, list[float]] = {s: [] for s in STAGES}
+    extra: dict[str, list[float]] = {k: [] for k in EXTRA}
+    label_to_key = {v: k for k, v in EXTRA.items()}
     iters: list[float] = []
     for ev in Profiler().eventlog:
         label, t = ev[2], float(ev[3])
         if label in per_stage:
             per_stage[label].append(t)
+        elif label in label_to_key:
+            extra[label_to_key[label]].append(t)
         elif label == "SCBA: Iteration":
             iters.append(t)
 
@@ -99,6 +119,10 @@ def child(args) -> None:
         return sum(v) / len(v) if v else 0.0
 
     from qttools import xp
+
+    mempool_gb = 0.0
+    if xp.__name__ == "cupy":
+        mempool_gb = xp.get_default_memory_pool().total_bytes() / 1e9
 
     out = {
         "backend": xp.__name__,
@@ -109,7 +133,9 @@ def child(args) -> None:
         "checksum": checksum,
         "sigma_max": sigma_max,
         "gflop": gflop,
+        "mempool_gb": mempool_gb,
         **{f"s{i+1}": steady(per_stage[s]) for i, s in enumerate(STAGES)},
+        **{k: steady(v) for k, v in extra.items()},
     }
     print("BENCH_JSON: " + json.dumps(out), flush=True)
 
@@ -174,6 +200,18 @@ def parent(args) -> int:
               f"{r['malloc']:>8} {r['s_iter']:9.2f} {r['s1']:7.2f} "
               f"{r['s2']:7.2f} {r['s3']:9.2f} {r['s4']:7.2f} "
               f"{r['s5']:7.2f} {gfs(r):8.1f}")
+        if r.get("solver") or r.get("sse"):
+            top = sum(r.get(k, 0.0) for k in
+                      ("solver", "sse", "symm", "mix", "conv",
+                       "t_fwd", "t_bwd"))
+            resid = r["s_iter"] - top
+            print(f"        attr: solver {r.get('solver', 0):.3f} "
+                  f"(obc {r.get('obc', 0):.3f} asm {r.get('assemble', 0):.3f}"
+                  f" rgf {r.get('rgf', 0):.3f})  sse {r.get('sse', 0):.3f}  "
+                  f"tpose {r.get('t_fwd', 0) + r.get('t_bwd', 0):.3f}  "
+                  f"symm {r.get('symm', 0):.3f}  mix {r.get('mix', 0):.3f}  "
+                  f"conv {r.get('conv', 0):.3f}  resid {resid:.3f}  "
+                  f"mempool {r.get('mempool_gb', 0):.2f} GB")
     # Bit-identity holds only within one backend (cuFFT/cuBLAS reorder);
     # across backends gate on a loose relative agreement instead.
     worst = 0.0
@@ -202,7 +240,7 @@ def gemm_roofline() -> int:
     import time
 
     from qttools import xp
-    from qttools.utils.gpu_utils import synchronize_device
+    from qttools.utils.gpu_utils import free_mempool, synchronize_device
 
     if xp.__name__ == "numpy" and os.environ.get("OPENBLAS_NUM_THREADS") != "1":
         print("WARNING: OPENBLAS_NUM_THREADS != 1 -- per-core numbers off")
@@ -215,7 +253,9 @@ def gemm_roofline() -> int:
             (b * b, b))
         PR = rng.standard_normal((b, b * b)) + 1j * rng.standard_normal(
             (b, b * b))
-        w_cap = max(8, int(2e9 / (16 * b**3)))  # T buffer w*b^2*b ~2 GB
+        # T and U (w*b^3 complex each) coexist in the ring: cap their sum
+        # at ~2 GB so the sweep also fits small (6 GB) devices.
+        w_cap = max(8, int(2e9 / (32 * b**3)))
         for w in (60, 241, 481):
             w = min(w, w_cap)
             Ga = rng.standard_normal((w, b, b)) + 1j * rng.standard_normal(
@@ -240,9 +280,110 @@ def gemm_roofline() -> int:
                 res[name] = f / dt / 1e9
             print(f"{b:>5} {w:>5} {res['T']:9.1f} {res['U']:9.1f} "
                   f"{res['ring']:10.1f}", flush=True)
+            del Ga, Gb
+            free_mempool()
     print("\nEPYC 7742 reference: 36 GF/s/core @2.25 GHz base "
           "(~54 boosted); 2.3 TF/s/socket, 4.6 TF/s/node. "
           "H100/GH200 FP64 peak 67 TF/s (small-n tiles land well below).")
+    return 0
+
+
+def gemm_tc() -> int:
+    """Peak-gap attribution microbench: is cuBLAS complex FP64 routed
+    through the tensor cores (DMMA, 67 TF/s peak) or the plain FP64
+    pipe (33.5 TF/s), and where do the batched ring shapes lose?
+    (1) square ZGEMM/DGEMM ceilings; (2) batched Z-vs-D at the ring
+    shapes; (3) tau-batch-depth scan at b=36; (4) 4M real-split
+    emulation of the T GEMM."""
+    import time
+
+    from qttools import xp
+    from qttools.utils.gpu_utils import free_mempool, synchronize_device
+
+    def timeit(fn, flops):
+        fn()  # warm: builds handles, picks kernels
+        synchronize_device()
+        reps = max(3, int(3e12 / flops))
+        t0 = time.perf_counter()
+        for _ in range(reps):
+            fn()
+        synchronize_device()
+        return flops / ((time.perf_counter() - t0) / reps) / 1e12
+
+    rng = xp.random.default_rng(0)
+    print(f"backend: {xp.__name__}")
+
+    print("== square GEMM ceilings (TF/s) ==")
+    print(f"{'n':>6} {'ZGEMM':>8} {'DGEMM':>8}")
+    for n in (1024, 2048, 4096, 8192):
+        A = rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n))
+        z = timeit(lambda: A @ A, 8 * n**3)
+        D = xp.ascontiguousarray(A.real)
+        d = timeit(lambda: D @ D, 2 * n**3)
+        print(f"{n:>6} {z:8.1f} {d:8.1f}", flush=True)
+        del A, D
+        free_mempool()
+
+    print("== batched ring shapes: Z vs D (TF/s) ==")
+    print(f"{'b':>6} {'w':>6} {'Z-T':>8} {'D-T':>8} {'Z-ring':>8} "
+          f"{'D-ring':>8}")
+    for b in (36, 63, 135):
+        w = min(241, max(8, int(2e9 // (32 * b**3))))
+        PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
+            (b * b, b))
+        PR = rng.standard_normal((b, b * b)) + 1j * rng.standard_normal(
+            (b, b * b))
+        Ga = rng.standard_normal((w, b, b)) + 1j * rng.standard_normal(
+            (w, b, b))
+        gemm = 8 * w * b**4
+        zt = timeit(lambda: PL @ Ga, gemm)
+        zr = timeit(lambda: (PL @ Ga).reshape(w, b, b * b)
+                    @ (Ga @ PR).reshape(w, b * b, b), 3 * gemm)
+        PLd, PRd, Gad = (xp.ascontiguousarray(m.real) for m in (PL, PR, Ga))
+        dt = timeit(lambda: PLd @ Gad, gemm // 4)
+        dr = timeit(lambda: (PLd @ Gad).reshape(w, b, b * b)
+                    @ (Gad @ PRd).reshape(w, b * b, b), 3 * gemm // 4)
+        print(f"{b:>6} {w:>6} {zt:8.1f} {dt:8.1f} {zr:8.1f} {dr:8.1f}",
+              flush=True)
+        del PL, PR, Ga, PLd, PRd, Gad
+        free_mempool()
+
+    print("== tau-batch-depth scan, b=36 Z-ring (TF/s) ==")
+    b = 36
+    PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
+        (b * b, b))
+    PR = rng.standard_normal((b, b * b)) + 1j * rng.standard_normal(
+        (b, b * b))
+    w_cap = int(16e9 / (32 * b**3))
+    print(f"{'w':>6} {'ring':>8}")
+    for w in (60, 241, 481, 1024, 2048, 4096, 8192):
+        if w > w_cap:
+            continue
+        Ga = rng.standard_normal((w, b, b)) + 1j * rng.standard_normal(
+            (w, b, b))
+        r = timeit(lambda: (PL @ Ga).reshape(w, b, b * b)
+                   @ (Ga @ PR).reshape(w, b * b, b), 24 * w * b**4)
+        print(f"{w:>6} {r:8.1f}", flush=True)
+        del Ga
+        free_mempool()
+
+    print("== 4M real-split emulation of T = PL@Ga (TF/s, same flops) ==")
+    print(f"{'b':>6} {'Z-T':>8} {'4M-T':>8}")
+    for b in (36, 63):
+        w = min(481, max(8, int(2e9 // (32 * b**3))))
+        PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
+            (b * b, b))
+        Ga = rng.standard_normal((w, b, b)) + 1j * rng.standard_normal(
+            (w, b, b))
+        PLr, PLi = xp.ascontiguousarray(PL.real), xp.ascontiguousarray(PL.imag)
+        Gar, Gai = xp.ascontiguousarray(Ga.real), xp.ascontiguousarray(Ga.imag)
+        gemm = 8 * w * b**4
+        zt = timeit(lambda: PL @ Ga, gemm)
+        m4 = timeit(lambda: (PLr @ Gar - PLi @ Gai,
+                             PLr @ Gai + PLi @ Gar), gemm)
+        print(f"{b:>6} {zt:8.1f} {m4:8.1f}", flush=True)
+        del PL, Ga, PLr, PLi, Gar, Gai
+        free_mempool()
     return 0
 
 
@@ -251,6 +392,9 @@ def main() -> int:
     p.add_argument("--gemm-roofline", action="store_true",
                    help="print the single-thread zgemm ceiling for the ring "
                         "shapes and exit")
+    p.add_argument("--gemm-tc", action="store_true",
+                   help="peak-gap microbench: square Z/D ceilings, batched "
+                        "Z-vs-D, batch-depth scan, 4M split")
     p.add_argument("--config", required=False)
     p.add_argument("--iters", type=int, default=3,
                    help="SCBA iterations per child (first one discarded)")
@@ -268,6 +412,8 @@ def main() -> int:
     args = p.parse_args()
     if args.gemm_roofline:
         return gemm_roofline()
+    if args.gemm_tc:
+        return gemm_tc()
     if not args.config:
         p.error("--config is required (unless --gemm-roofline)")
     if args.child:

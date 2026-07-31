@@ -291,6 +291,14 @@ if _mw is not None:
 if cfg.outputs.save_profiling_results:
     Profiler().dump_stats()
 
+if xp.__name__ == "cupy":
+    from mpi4py import MPI as _MPI
+    _mp = np.array([xp.get_default_memory_pool().total_bytes() / 1e9])
+    _MPI.COMM_WORLD.Allreduce(_MPI.IN_PLACE, _mp, op=_MPI.MAX)
+    if ranks.rank == 0:
+        print(f"GPU mempool peak (max over ranks): {_mp[0]:.2f} GB",
+              flush=True)
+
 # Per-slab scattering absorption + same-instant global balance: COLLECTIVE
 # (stack all-reduce inside) -- must run on ALL ranks, before the rank-0
 # snapshot gate (rank-0-only invocation deadlocks any stack>1 run).
