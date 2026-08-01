@@ -136,7 +136,8 @@ def cmd_launch(args):
         if not args.config:
             sys.exit("either --config or a trailing '-- <command>' is needed")
         env_lines += f"\nexport QX_CONFIG={REPO}/{args.config}"
-        env_lines += f"\nexport QX_NPZ={run_dir}/run.npz"
+        if not any(e.startswith("QX_NPZ=") for e in (args.env or [])):
+            env_lines += f"\nexport QX_NPZ={run_dir}/run.npz"
         payload = f"python {REPO}/phonon/studies/engine/run.py"
     script = f"""#!/bin/bash
 #SBATCH --job-name=qx-{args.name}
