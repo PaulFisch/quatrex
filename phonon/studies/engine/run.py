@@ -250,20 +250,32 @@ if ranks.rank == 0:
           f"nranks={ranks.size}", flush=True)
 
 # Warm start: load Sigma^{<,>,R} from a previous cell's QX_SAVE_SIGMA file
-# (vertex-scale continuation / temperature annealing). Optional QX_SIGMA_SCALE
-# multiplies the loaded Sigma -- e.g. (lambda_new/lambda_old)^2 when stepping
-# the vertex scale (Sigma ~ lambda^2). Single-rank layouts only.
+# (vertex-scale continuation / temperature annealing / wall-time chaining).
+# Optional QX_SIGMA_SCALE multiplies the loaded Sigma -- e.g.
+# (lambda_new/lambda_old)^2 when stepping the vertex scale (Sigma ~ lambda^2).
+# Multi-rank: each rank saves/loads ITS deterministic slice of the
+# distributed buffers (file suffix .rank<r>.npz); the layout is reproducible
+# iff the restart uses the SAME rank grid, which is asserted via the shapes.
+def _sigma_file(base: str) -> str:
+    if ranks.size == 1:
+        return base
+    stem = base[:-4] if base.endswith(".npz") else base
+    return f"{stem}.rank{ranks.rank}.npz"
+
+
 if os.environ.get("QX_SIGMA_INIT"):
-    if ranks.size > 1:
-        raise SystemExit("QX_SIGMA_INIT requires a single-rank run "
-                         "(the flat nnz layout must match the snapshot).")
-    _sd = np.load(os.environ["QX_SIGMA_INIT"])
+    _sd = np.load(_sigma_file(os.environ["QX_SIGMA_INIT"]))
     _scale = float(os.environ.get("QX_SIGMA_SCALE", "1.0"))
-    scba.data.sigma_lesser.data[:] = _scale * xp.asarray(_sd["sigma_lesser"])
-    scba.data.sigma_greater.data[:] = _scale * xp.asarray(_sd["sigma_greater"])
-    scba.data.sigma_retarded_hermitian.data[:] = _scale * xp.asarray(
-        _sd["sigma_retarded"])
-    print(f"WARM START from {os.environ['QX_SIGMA_INIT']} "
+    for _key, _buf in (("sigma_lesser", scba.data.sigma_lesser),
+                       ("sigma_greater", scba.data.sigma_greater),
+                       ("sigma_retarded", scba.data.sigma_retarded_hermitian)):
+        if _sd[_key].shape != _buf.data.shape:
+            raise SystemExit(
+                f"QX_SIGMA_INIT slice mismatch for {_key}: snapshot "
+                f"{_sd[_key].shape} vs local {_buf.data.shape} -- restart "
+                "with the same rank grid as the saving run.")
+        _buf.data[:] = _scale * xp.asarray(_sd[_key])
+    print(f"WARM START from {_sigma_file(os.environ['QX_SIGMA_INIT'])} "
           f"(scale {_scale})", flush=True)
 
 err = None
@@ -462,14 +474,6 @@ if ranks.rank == 0:
     if err:
         out["error"] = err
     np.savez(npz, **out)
-    if os.environ.get("QX_SAVE_SIGMA") and ranks.size == 1 and not err:
-        np.savez(os.environ["QX_SAVE_SIGMA"],
-                 sigma_lesser=np.asarray(get_host(scba.data.sigma_lesser.data)),
-                 sigma_greater=np.asarray(
-                     get_host(scba.data.sigma_greater.data)),
-                 sigma_retarded=np.asarray(
-                     get_host(scba.data.sigma_retarded_hermitian.data)))
-        print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}", flush=True)
     # Headline the CONVERGED fixed point and its status -- not a
     # "best-conserved" transient. A non-converged run says so, and shows
     # its last iterate + iteration count so it is read as a non-result.
@@ -480,3 +484,15 @@ if ranks.rank == 0:
           f"{_fh_tag}"
           f"{None if final_heat is None else np.round(final_heat, 3)}  "
           f"lead_current={out.get('lead_current')}", flush=True)
+
+# Sigma snapshot for wall-time chaining / warm starts: EVERY rank writes its
+# own slice (multi-rank layouts restart via QX_SIGMA_INIT with the same grid).
+if os.environ.get("QX_SAVE_SIGMA") and err is None:
+    np.savez(_sigma_file(os.environ["QX_SAVE_SIGMA"]),
+             sigma_lesser=np.asarray(get_host(scba.data.sigma_lesser.data)),
+             sigma_greater=np.asarray(get_host(scba.data.sigma_greater.data)),
+             sigma_retarded=np.asarray(
+                 get_host(scba.data.sigma_retarded_hermitian.data)))
+    if ranks.rank == 0:
+        print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}"
+              f"{' (per-rank slices)' if ranks.size > 1 else ''}", flush=True)
