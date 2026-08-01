@@ -36,8 +36,9 @@ for _p in (str(ROOT), str(ROOT / "phonon")):
 METHODS = ["least-squares", "ridge", "bayesian-ridge", "ardr"]
 
 
-def load_container(data_dir: Path):
-    """Rebuild the hiphive StructureContainer from the reaped VASP dirs."""
+def load_container(data_dirs: list[Path]):
+    """Rebuild the hiphive StructureContainer from one or more reaped
+    VASP dirs (extra displacement batches merge into one fit)."""
     import ase
     from hiphive import ClusterSpace, StructureContainer
     from hiphive.utilities import prepare_structures
@@ -46,22 +47,33 @@ def load_container(data_dir: Path):
         _atoms_from_meta, _fold_positions_to_min_image, _load_meta,
         _read_positions_from_vasp_poscar)
 
-    meta = _load_meta(data_dir)
+    meta = _load_meta(data_dirs[0])
     atoms_ideal = _atoms_from_meta(meta["supercell_atoms"])
     primitive = _atoms_from_meta(meta["primitive"])
     n_super = len(atoms_ideal)
 
     rattled = []
-    for i in range(1, meta["n_structures"] + 1):
-        disp_dir = data_dir / f"disp-{i:05d}"
-        forces = _to._parse_vasp_forces(disp_dir, n_super)
-        positions = _read_positions_from_vasp_poscar(disp_dir / "POSCAR", n_super)
-        positions = _fold_positions_to_min_image(
-            positions, atoms_ideal.positions, atoms_ideal.cell)
-        rat = ase.Atoms(symbols=list(atoms_ideal.get_chemical_symbols()),
-                        cell=atoms_ideal.cell, positions=positions, pbc=True)
-        rat.arrays["forces"] = forces
-        rattled.append(rat)
+    for data_dir in data_dirs:
+        m = _load_meta(data_dir)
+        if not np.allclose(_atoms_from_meta(m["supercell_atoms"]).positions,
+                           atoms_ideal.positions, atol=1e-8):
+            raise ValueError(f"{data_dir}: supercell differs from {data_dirs[0]}")
+        n_batch = 0
+        for i in range(1, m["n_structures"] + 1):
+            disp_dir = data_dir / f"disp-{i:05d}"
+            if not (disp_dir / "vasprun.xml").exists():
+                continue  # batch still running -- use what's there
+            forces = _to._parse_vasp_forces(disp_dir, n_super)
+            positions = _read_positions_from_vasp_poscar(
+                disp_dir / "POSCAR", n_super)
+            positions = _fold_positions_to_min_image(
+                positions, atoms_ideal.positions, atoms_ideal.cell)
+            rat = ase.Atoms(symbols=list(atoms_ideal.get_chemical_symbols()),
+                            cell=atoms_ideal.cell, positions=positions, pbc=True)
+            rat.arrays["forces"] = forces
+            rattled.append(rat)
+            n_batch += 1
+        print(f"  {data_dir}: {n_batch} structures", flush=True)
     print(f"loaded {len(rattled)} rattled structures ({n_super} atoms)", flush=True)
 
     with contextlib.redirect_stdout(io.StringIO()):
@@ -111,14 +123,15 @@ def fc2_gates(fc2: np.ndarray, primitive, supercell_matrix) -> dict:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--data", required=True)
+    p.add_argument("--data", required=True, nargs="+",
+                   help="one or more reaped VASP workdirs (batches merge)")
     p.add_argument("--out", required=True)
     p.add_argument("--methods", default=",".join(METHODS))
     p.add_argument("--n-splits", type=int, default=5)
     p.add_argument("--skip-hdf5", action="store_true",
                    help="metrics only, no fc3_<method>.hdf5 output")
     a = p.parse_args()
-    data_dir, out = Path(a.data), Path(a.out)
+    data_dirs, out = [Path(d) for d in a.data], Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
     import h5py
@@ -126,7 +139,7 @@ def main() -> int:
     from trainstation import CrossValidationEstimator, Optimizer
     from phonon_inputs.hiphive_convergence import _apply_rotational_sum_rules
 
-    meta, atoms_ideal, primitive, cs, sc = load_container(data_dir)
+    meta, atoms_ideal, primitive, cs, sc = load_container(data_dirs)
     fit_data = sc.get_fit_data()
     A, y = fit_data
     print(f"fit matrix: {A.shape}, target {y.shape}", flush=True)
