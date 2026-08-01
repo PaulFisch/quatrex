@@ -205,8 +205,7 @@ num_transport_cells = {a.nslabs}
 neighbor_cell_cutoff = [{ncc[0]}, {ncc[1]}, {ncc[2]}]
 kpoint_grid = [{kg[0]}, {kg[1]}, {kg[2]}]
 kpoint_shift = [{ks[0]}, {ks[1]}, {ks[2]}]
-[device.num_orbitals_per_atom]
-Si = 3
+{_orbital_block(a.work)}
 
 [scba]
 max_iterations = {a.max_iter}
