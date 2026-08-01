@@ -1,0 +1,89 @@
+## GENERATED extra-displacement batch (fc3 refit campaign 2026-08-01) -- derived from mos2_bulk_vasp.gen.yaml (same relaxed structure); seed 2718, rattle_std 0.05, n=20. Do not edit.
+fc_method: hiphive
+structure:
+  source: inline
+  symbols:
+  - Mo
+  - Mo
+  - S
+  - S
+  - S
+  - S
+  lattice:
+  - - 3.16
+    - 0.0
+    - 0.0
+  - - -1.58
+    - 2.736640276
+    - 0.0
+  - - 0.0
+    - 0.0
+    - 12.294
+  scaled_positions:
+  - - 0.3333333333330017
+    - 0.6666666666669983
+    - 0.25
+  - - 0.6666666666669983
+    - 0.3333333333330017
+    - 0.75
+  - - 0.6666666666669983
+    - 0.3333333333330017
+    - 0.122788635577633
+  - - 0.6666666666669983
+    - 0.3333333333330017
+    - 0.377211364422367
+  - - 0.3333333333330017
+    - 0.6666666666669983
+    - 0.6227886355776331
+  - - 0.3333333333330017
+    - 0.6666666666669983
+    - 0.8772113644223669
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Mo: Mo_sv
+    S: S
+  encut: 400
+  ediff: 1.0e-06
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: Auto
+  lwave: false
+  lcharg: false
+  ncore: 8
+  kpar: 2
+  kpoints_scf:
+  - 3
+  - 3
+  - 2
+  incar_extra:
+    IVDW: 11
+  vasp_command: export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib;
+    ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun
+    -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std
+relax:
+  calculation: relax
+  forc_conv_thr: 0.001
+  calculator: vasp
+  work_dir: ./relax_mos2_vasp
+hiphive:
+  supercell:
+  - 4
+  - 4
+  - 1
+  n_structures: 20
+  rattle_method: mc
+  rattle_std: 0.05
+  rattle_d_min: 2.0
+  rattle_n_iter: 2
+  rattle_seed: 2718
+  cutoffs:
+  - 6.0
+  - 4.0
+  fit_method: ardr
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: vasp
+  work_dir: ./fc3_hiphive_mos2_vasp_c
+  pw_timeout: 7200
