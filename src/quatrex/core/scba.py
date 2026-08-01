@@ -119,7 +119,10 @@ class SCBAData:
             # band is unchanged).
             g_band = 1
             if getattr(config, "simulation_type", "") == "phonon":
-                g_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
+                g_band = min(
+                    int(getattr(config.phonon, "sse_g_band", 1) or 1),
+                    len(block_sizes) - 1,
+                )
             if g_band > 1:
                 from qttools import sparse as _sparse
 

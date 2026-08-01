@@ -1541,11 +1541,11 @@ class PhononConfig(BaseModel):
     (no artificial contact broadening needed). Default off: bare
     harmonic reservoirs, scattering enters the device Dyson only."""
 
-    sse_g_band: int = Field(default=1, ge=1, le=3)
+    sse_g_band: int = Field(default=3, ge=1, le=3)
     """Inner Green's-function block band |K - K'| kept in the bubble
-    contraction. The default 1 uses the RGF block-tridiagonal G and masks
-    the bubble kernel G(x)G to that band -- a masked positive-semidefinite
-    form is NOT positive-semidefinite (Schur product with the indefinite
+    contraction. With 1 the RGF block-tridiagonal G masks the bubble
+    kernel G(x)G to that band -- a masked positive-semidefinite form is
+    NOT positive-semidefinite (Schur product with the indefinite
     tridiagonal-ones mask), so interior slabs (>= 3 transport cells)
     acquire non-causal gain components of Sigma. With 2, the solver
     additionally produces the second off-diagonal G^{<,>} blocks and the
@@ -1554,7 +1554,15 @@ class PhononConfig(BaseModel):
     off-diagonal G^{<,>} blocks are produced too, so the first off-diagonal
     Sigma blocks become exact and causal as well. Extends the shared
     G/Sigma sparsity pattern by the corresponding off-diagonal blocks
-    (Sigma's extra blocks stay structurally zero). Single block-rank only."""
+    (Sigma's extra blocks stay structurally zero). Single block-rank only.
+
+    Default 3 (2026-08-01): the L16-L32 CNT ladder showed the band-1
+    boxcar's anomalous gain GROWS with length while the Bartlett-tapered
+    band-1 run underweights off-diagonal coherence ~2x -- both
+    incorrect; the full band-3 run is the reference. The value is
+    clamped at use to n_blocks - 1 (a band wider than the device has
+    off-diagonals is meaningless), so short devices keep their exact
+    full-band behaviour."""
 
     sse_g_band_taper: Literal["none", "bartlett"] = "none"
     """PSD taper of the inner-G band mask. The boxcar band truncation is a

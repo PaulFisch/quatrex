@@ -294,7 +294,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # sse_g_band = 2 the solver additionally produces the second
         # off-diagonal G^{<,>} blocks and the kernel is complete for the
         # nearest-neighbour vertex span (diagonal Sigma blocks exact).
-        self.g_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
+        self.g_band = min(
+            int(getattr(config.phonon, "sse_g_band", 1) or 1),
+            self.n_blocks - 1,
+        )
         if self.g_band > 1 and ranks.block.size > 1:
             # The band halo exchange and the bosonic-fold plan only span
             # the IMMEDIATE comm.block neighbours; with every rank owning

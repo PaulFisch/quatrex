@@ -137,8 +137,12 @@ class PhononSolver(SubsystemSolver):
         # sse_g_band = k: the SSE bubble consumes the G^{<,>} blocks out to
         # the k-th off-diagonal, so the selected solve must produce them. The
         # RGF takes this as an integer off-diagonal band (1 = block-tridiagonal
-        # only, 2 = + second off-diagonal, 3 = + third).
-        self._gf_band = int(getattr(config.phonon, "sse_g_band", 1) or 1)
+        # only, 2 = + second off-diagonal, 3 = + third). Clamped to the
+        # widest off-diagonal the device has.
+        self._gf_band = min(
+            int(getattr(config.phonon, "sse_g_band", 1) or 1),
+            len(self.block_sizes) - 1,
+        )
 
         # GW-style self-consistent contacts: compute the OBC AFTER Sigma^R
         # is folded into the system matrix, dressing the periodic lead
