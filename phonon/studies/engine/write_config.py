@@ -282,7 +282,8 @@ block_sections = 1
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--system", required=True,
-                   choices=["cnt33", "cnt80", "sinw_d5a", "sinw_d11a", "srtio3", "sifilm"])
+                   choices=["cnt33", "cnt80", "sinw_d5a", "sinw_d11a",
+                            "srtio3", "sifilm", "mos2film"])
     p.add_argument("--work", required=True)
     p.add_argument("-L", "--ncells", type=int, default=2)
     p.add_argument("--nslabs", type=int, default=5)
@@ -469,6 +470,14 @@ def main():
         a.nfreq = a.nfreq or 121
         a.fmax = a.fmax or 26.0
         cfg = cnt_config(a)
+    elif a.system == "mos2film":
+        # 2H-MoS2 cross-plane: transport along c, hexagonal transverse
+        # mesh (kpoint_shift 0.4 at nk=5); spectrum tops at 14.07 THz.
+        a.tdir = a.tdir or "z"
+        a.eta = a.eta if a.eta is not None else 0.0
+        a.nfreq = a.nfreq or 121
+        a.fmax = a.fmax or 16.0
+        cfg = film_config(a)
     else:
         a.tdir = a.tdir or "x"
         a.eta = a.eta if a.eta is not None else 0.0

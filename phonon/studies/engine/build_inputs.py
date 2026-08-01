@@ -173,6 +173,38 @@ def _load_bulk_si(fc3_subdir):
     return phonon, str(d / "fc3.hdf5")
 
 
+def _load_bulk_hiphive(fc3_dir):
+    """Bulk phonopy from a hiphive-format reap (hiphive_meta.json +
+    fc3.hdf5 carrying both fc2 and fc3 datasets) -- the CNT reap
+    format, lattice-agnostic (hexagonal MoS2, monoclinic TiS3, ...)."""
+    d = Path(fc3_dir)
+    if not d.is_absolute():
+        d = _PHON / d
+    meta = json.load(open(d / "hiphive_meta.json"))
+    prim = meta["primitive"]
+    unit = PhonopyAtoms(
+        symbols=prim["symbols"],
+        cell=np.array(prim["cell"]),
+        scaled_positions=np.array(prim["scaled_positions"]),
+    )
+    phonon = Phonopy(unit, supercell_matrix=np.diag(meta["supercell"]),
+                     primitive_matrix=np.eye(3))
+    with h5py.File(d / "fc3.hdf5", "r") as f:
+        phonon.force_constants = f["fc2"][...]
+    return phonon, str(d / "fc3.hdf5")
+
+
+def _load_bulk_film(fc3_subdir):
+    """Dispatch on the reap format: hiphive_meta.json marks the CNT/
+    hiphive layout; otherwise the phono3py (bulk-Si) layout."""
+    d = Path(fc3_subdir)
+    if not d.is_absolute():
+        d = _PHON / d
+    if (d / "hiphive_meta.json").exists():
+        return _load_bulk_hiphive(d)
+    return _load_bulk_si(fc3_subdir)
+
+
 def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
                              q_points, q_diff_map, nk, tdir, ranks, ansatz,
                              cache_dir, out, dense_vertices=None):
@@ -251,7 +283,7 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
     from quatrex.phonon.qfold import save_qfold
 
     assert nk % 2 == 1, "use ODD nk (clean Gamma-centered IDFT)"
-    phonon, fc3_path = _load_bulk_si(fc3_subdir)
+    phonon, fc3_path = _load_bulk_film(fc3_subdir)
     nat = len(phonon.primitive.masses)
     nd = 3 * nat
     tidx = "xyz".index(tdir)
@@ -371,7 +403,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--system", required=True,
-                   choices=["cnt33", "cnt80", "sinw_d5a", "sinw_d11a", "srtio3", "sifilm"])
+                   choices=["cnt33", "cnt80", "sinw_d5a", "sinw_d11a",
+                            "srtio3", "sifilm", "mos2film"])
     p.add_argument("-L", "--ncells", type=int, default=2, help="CNT transport cells")
     p.add_argument("--nslabs", type=int, default=5, help="film layers along transport")
     p.add_argument("--nk", type=int, default=8, help="film transverse mesh (odd)")
@@ -421,11 +454,24 @@ def main():
         emin = a.emin if a.emin is not None else 0.0
         build_cnt(a.system, a.ncells, tdir, nfreq, fmax, emin, out)
     else:
-        tdir = a.tdir or "x"
+        if a.system == "mos2film":
+            # 2H-MoS2 cross-plane (kappa_z): transport along c, hexagonal
+            # transverse q; spectrum tops at ~14.1 THz. The reap must be
+            # the [4,4,3]-rematerialized one (phonon/studies/
+            # _mos2_film_reap.py) -- the [4,4,1] fit cannot separate
+            # H00/H01 along c.
+            tdir = a.tdir or "z"
+            fc3_subdir = (a.fc3_subdir
+                          if a.fc3_subdir != "reaps/si_big_hiphive"
+                          else "../cluster/mos2_film_reap")
+            fmax = a.fmax or 16.0
+        else:
+            tdir = a.tdir or "x"
+            fc3_subdir = a.fc3_subdir
+            fmax = a.fmax or 15.0
         nfreq = a.nfreq or 121
-        fmax = a.fmax or 15.0
         ranks = tuple(int(r) for r in a.decompose_ranks.split(",") if r)
-        build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, a.fc3_subdir,
+        build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, fc3_subdir,
                      out, a.nproc, decompose_ranks=ranks,
                      decompose_ansatz=a.decompose_ansatz,
                      decompose_only=a.decompose_only)
