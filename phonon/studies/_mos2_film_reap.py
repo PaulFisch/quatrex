@@ -32,6 +32,10 @@ def main() -> int:
     p.add_argument("--reap", required=True,
                    help="dir with fcp.fcp + hiphive_meta.json")
     p.add_argument("--out", required=True)
+    p.add_argument("--fc2-fcp", default=None,
+                   help="optional separate FCP for the HARMONIC part (e.g. "
+                        "the SCP-renormalised fcp_scp300.fcp); fc3 still "
+                        "comes from --reap's fcp.fcp")
     a = p.parse_args()
     reap, out = Path(a.reap), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -60,6 +64,10 @@ def main() -> int:
 
     fcs = fcp.get_force_constants(sc)
     fc2 = fcs.get_fc_array(order=2)          # (n, n, 3, 3)
+    if a.fc2_fcp is not None:
+        fcp2 = ForceConstantPotential.read(str(a.fc2_fcp))
+        fc2 = fcp2.get_force_constants(sc).get_fc_array(order=2)
+        print(f"fc2 REPLACED from {a.fc2_fcp}", flush=True)
     print(f"fc2 {fc2.shape}, max {np.abs(fc2).max():.3f} eV/A^2",
           flush=True)
     fc3 = fcs.get_fc_array(order=3)          # (n, n, n, 3, 3, 3)
