@@ -340,8 +340,13 @@ except Exception as exc:  # noqa: BLE001 -- diagnostic, never fatal
 if ranks.rank == 0:
     npz = os.environ.get("QX_NPZ") or str(Path(cfg.output_dir).parent / "run.npz")
     Path(npz).parent.mkdir(parents=True, exist_ok=True)
+    # NOTE: _heat() sums this rank's LOCAL frequency slice only. On a
+    # single-rank run that is the full spectrum; multi-rank runs mark the
+    # key so a partial slice is never mistaken for the physical current
+    # (the stack-reduced value is out["last_heat"]/out["lead_current"]).
     final_heat = (_heat(ph.meir_wingreen_current)
                   if getattr(ph, "meir_wingreen_current", None) is not None else None)
+    _heat_partial = ranks.stack.size > 1
     from quatrex.grid.energies import frequency_cell_widths
     out = dict(
         energies=np.asarray(get_host(scba.energies)).real,
@@ -470,7 +475,8 @@ if ranks.rank == 0:
     # its last iterate + iteration count so it is read as a non-result.
     _status = ("converged" if out.get("converged")
                else ("DIVERGED" if out.get("diverged") else "NOT CONVERGED"))
+    _fh_tag = "final_heat(rank0-slice)=" if _heat_partial else "final_heat="
     print(f"SAVED {npz}  [{_status} after {out.get('n_iter')} it]  "
-          f"final_heat="
+          f"{_fh_tag}"
           f"{None if final_heat is None else np.round(final_heat, 3)}  "
           f"lead_current={out.get('lead_current')}", flush=True)

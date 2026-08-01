@@ -356,7 +356,7 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
         return acc
 
     worst = 0.0
-    for iq in (0, 1, n_kpts // 3, n_kpts - 1):
+    for iq in sorted({0, min(1, n_kpts - 1), n_kpts // 3, n_kpts - 1}):
         qa, qb = q_points[iq]
         e00 = np.abs(fold(0, qa, qb) - H00[iq]).max() / (np.abs(H00[iq]).max() + 1e-30)
         e01 = np.abs(fold(1, qa, qb) - H01[iq]).max() / (np.abs(H01[iq]).max() + 1e-30)
