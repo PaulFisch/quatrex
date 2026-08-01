@@ -205,12 +205,26 @@ def _gather_full(local_w):
     return full
 
 
+_best = {"res": np.inf, "sig": None}
+
+
 def _logged(self):
     mw = getattr(ph, "meir_wingreen_current", None)
     if mw is not None and ranks.rank == 0:
         h = _heat(mw)
         _iter_heat.append(np.asarray(h))
         print(f"[it {_it['n']:2d}] energy J(local)={np.round(h, 4)}", flush=True)
+    # Best-residual Sigma snapshot (QX_SAVE_SIGMA_BEST): a soft-bin kick on
+    # a LATE iteration must not poison a warm-start chain with its worst
+    # iterate, so track the minimum-residual state on every rank.
+    if os.environ.get("QX_SAVE_SIGMA_BEST"):
+        _res = float(getattr(self, "_last_rel_sigma", np.inf))
+        if np.isfinite(_res) and _res < _best["res"]:
+            _best["res"] = _res
+            _best["sig"] = tuple(
+                np.asarray(get_host(b.data)).copy()
+                for b in (self.data.sigma_lesser, self.data.sigma_greater,
+                          self.data.sigma_retarded_hermitian))
     if ranks.rank == 0:
         # per-omega magnitude of the raw SSE output: localizes WHERE a
         # diverging update grows (the omega bin), at negligible cost.
@@ -496,3 +510,11 @@ if os.environ.get("QX_SAVE_SIGMA") and err is None:
     if ranks.rank == 0:
         print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}"
               f"{' (per-rank slices)' if ranks.size > 1 else ''}", flush=True)
+# Minimum-residual snapshot (tracked per iteration in _logged).
+if os.environ.get("QX_SAVE_SIGMA_BEST") and err is None and _best["sig"] is not None:
+    _sl, _sg, _sr = _best["sig"]
+    np.savez(_sigma_file(os.environ["QX_SAVE_SIGMA_BEST"]),
+             sigma_lesser=_sl, sigma_greater=_sg, sigma_retarded=_sr)
+    if ranks.rank == 0:
+        print(f"SAVED SIGMA(best, res={_best['res']:.4e}) "
+              f"{os.environ['QX_SAVE_SIGMA_BEST']}", flush=True)

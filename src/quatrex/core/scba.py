@@ -852,6 +852,7 @@ class SCBA(TransportSolver):
             smag = np.empty_like(local_smag)
             global_comm.Allreduce(local_smag, smag, op=MPI.MAX)
             rel_sigma = float(max_diff_all) / (float(smag) + 1e-300)
+            self._last_rel_sigma = rel_sigma
             # Divergence guard: an exploded update never recovers, so abort
             # instead of burning the remaining iterations.
             abort_at = self.config.scba.abort_residual
