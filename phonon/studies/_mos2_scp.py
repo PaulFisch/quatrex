@@ -162,12 +162,21 @@ def main() -> int:
           [f"{d:.3e}" for d in drift[::5]], flush=True)
     results["scp_drift_last"] = drift[-1]
 
-    fcp_scp = ForceConstantPotential(cs2, param_traj[-1])
-    fcp_scp.write(str(out / f"fcp_scp{int(a.temperature)}.fcp"))
-    fc2_scp = fcp_scp.get_force_constants(atoms_ideal).get_fc_array(order=2)
-    gs = gamma_gates(fc2_scp, prim, [4, 4, 1])
-    print(f"SCP({a.temperature:.0f} K) gates:", json.dumps(gs), flush=True)
-    results["gates_scp"] = gs
+    np.save(out / "scp_param_traj.npy", np.asarray(param_traj))
+    # The stochastic SCP loop bounces around the fixed point (sampling
+    # noise at finite n_structures); the tail average is the standard
+    # low-noise estimator of the self-consistent parameters.
+    n_tail = max(1, len(param_traj) // 4)
+    p_avg = np.mean(np.asarray(param_traj[-n_tail:]), axis=0)
+    for tag, pp in (("last", param_traj[-1]), ("tailavg", p_avg)):
+        fcp_scp = ForceConstantPotential(cs2, pp)
+        fcp_scp.write(str(out / (f"fcp_scp{int(a.temperature)}.fcp" if tag == "last"
+                                 else f"fcp_scp{int(a.temperature)}_tailavg.fcp")))
+        fc2_scp = fcp_scp.get_force_constants(atoms_ideal).get_fc_array(order=2)
+        gs = gamma_gates(fc2_scp, prim, [4, 4, 1])
+        print(f"SCP({a.temperature:.0f} K, {tag}) gates:", json.dumps(gs),
+              flush=True)
+        results[f"gates_scp_{tag}"] = gs
 
     import h5py
     with h5py.File(out / f"fc2_scp{int(a.temperature)}.hdf5", "w") as f:
