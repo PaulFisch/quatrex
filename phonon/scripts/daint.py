@@ -31,7 +31,8 @@ HOST = "daint"
 ACCOUNT = "lp16"
 PARTITION = "debug"
 TIME_LIMIT = "00:30:00"
-MAX_ACTIVE = 2
+MAX_ACTIVE = 2          # debug-partition churn limit
+MAX_ACTIVE_NORMAL = 5   # Paul 2026-08-02: parallel normal jobs OK, don't overdo
 MAX_NODES = 1
 SCRATCH = "/capstor/scratch/cscs/pfischil"
 REPO = f"{SCRATCH}/quatrex"
@@ -181,9 +182,10 @@ def _guard(args):
         sys.exit(f"policy: >{MAX_NODES} node needs Paul's explicit OK first "
                  "(then pass --approved-by-paul)")
     jobs = our_jobs()
-    if len(jobs) >= MAX_ACTIVE:
+    cap_active = MAX_ACTIVE_NORMAL if part == "normal" else MAX_ACTIVE
+    if len(jobs) >= cap_active:
         sys.exit(f"policy: {len(jobs)} qx- jobs already active "
-                 f"(max {MAX_ACTIVE}) -- wait or kill one")
+                 f"(max {cap_active} for {part}) -- wait or kill one")
     if any(j[1] == f"qx-{args.name}" for j in jobs):
         sys.exit(f"qx-{args.name} is already queued/running")
 
