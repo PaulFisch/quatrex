@@ -287,3 +287,54 @@ def test_fit_production_gate(target):
     with pytest.raises(RuntimeError, match="not conserving"):
         fcc.fit_production(t, rank=2, ansatz="INDSCAL", n_restarts=1,
                            seed=0, enforce_asr=False)
+
+
+# ---------------------------------------------------------------------
+# Mass-weighted ASR (two-species): the physical sum rule on the
+# mass-weighted target is sum_s sqrt(m_s) M[.., 3s+b, ..] = 0.
+# ---------------------------------------------------------------------
+
+def test_weighted_projector_reduces_to_plain_for_equal_masses():
+    rng = np.random.default_rng(3)
+    n_super = 8
+    V = rng.normal(size=(3 * n_super, 5))
+    plain = fcc.asr_project_factor(V, n_super)
+    unif = fcc.asr_project_factor(V, n_super, weights=np.full(n_super, 2.7))
+    np.testing.assert_allclose(unif, plain, rtol=0, atol=1e-14)
+
+
+def test_weighted_projector_zeroes_weighted_sum_and_is_idempotent():
+    rng = np.random.default_rng(4)
+    n_super = 8
+    w = np.sqrt(rng.uniform(20.0, 90.0, size=n_super))
+    V = rng.normal(size=(3 * n_super, 5))
+    P = fcc.asr_project_factor(V, n_super, weights=w)
+    s = (w[:, None, None] * P.reshape(n_super, 3, -1)).sum(axis=0)
+    assert np.abs(s).max() < 1e-12
+    P2 = fcc.asr_project_factor(P, n_super, weights=w)
+    np.testing.assert_allclose(P2, P, rtol=0, atol=1e-13)
+
+
+@pytest.mark.parametrize("method", ["INDSCAL", "CP"])
+def test_weighted_asr_preserved_two_species(target, method):
+    # Two-species weights (the mock has masses 28/70); a fit with
+    # asr_weights must satisfy the PHYSICAL (weighted) sum rule, which
+    # differs measurably from the plain one.
+    rng = np.random.default_rng(12)
+    w = np.sqrt(np.tile([28.0, 70.0], target.n_super // 2))
+    T_bad = target.T + 0.1 * rng.normal(size=target.T.shape)
+    t = fcc.FC3Target(
+        T=T_bad, T_lifted=target.T_lifted, T_lifted_sym=target.T_lifted_sym,
+        p2s_map=target.p2s_map, nat_prim=target.nat_prim,
+        n_super=target.n_super, n_dof=target.n_dof, dim_sc=target.dim_sc,
+        target_norm=float(np.linalg.norm(T_bad)), asr_weights=w)
+    res = fcc.FITTERS[method](t, rank=4, n_restarts=1, seed=0,
+                              enforce_asr=True)
+    T_hat = fcc.reconstruct(res, t)
+    asr_w = fcc.asr_residual(T_hat, t.n_super, weights=w)
+    assert asr_w["leg_j"] < 1e-10 * asr_w["norm"]
+    assert asr_w["leg_k"] < 1e-10 * asr_w["norm"]
+    # the plain (unweighted) sum must NOT vanish -- the two null spaces
+    # genuinely differ for two species
+    asr_plain = fcc.asr_residual(T_hat, t.n_super)
+    assert asr_plain["leg_j"] > 1e-6 * asr_plain["norm"]

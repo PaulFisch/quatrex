@@ -49,6 +49,7 @@ def fit_film_fc3_factors(
     rank: int,
     ansatz: str = "INDSCAL",
     cache_dir: str | Path | None = None,
+    masses_super: np.ndarray | None = None,
     **fit_kwargs,
 ) -> dict:
     """Fit the mass-weighted bulk FC3 and return the production factor export.
@@ -61,7 +62,18 @@ def fit_film_fc3_factors(
     dim_sc = 3 * n_super
     T = np.asarray(M_stacked, dtype=np.float64).reshape(n_dof, dim_sc, dim_sc)
 
+    # The physical ASR on the mass-weighted target is the sqrt-mass-
+    # weighted sum; uniform masses reduce to the legacy plain projector
+    # (and keep the legacy cache tag valid).
+    asr_w = None
+    if masses_super is not None:
+        m = np.asarray(masses_super, dtype=float)
+        if not np.allclose(m, m[0]):
+            asr_w = np.sqrt(m)
     tag = f"fc3_factors_{ansatz.lower()}_r{rank}_{_fc3_hash(T)}"
+    if asr_w is not None:
+        import hashlib
+        tag += "_mw" + hashlib.sha256(asr_w.tobytes()).hexdigest()[:8]
     cache = None if cache_dir is None else Path(cache_dir) / f"{tag}.npz"
     if cache is not None and cache.exists():
         z = np.load(cache, allow_pickle=True)
@@ -71,7 +83,7 @@ def fit_film_fc3_factors(
               f"(rel_err={exp['meta']['rel_err']:.4f})", flush=True)
         return exp
 
-    target = target_from_dense(T, n_super)
+    target = target_from_dense(T, n_super, asr_weights=asr_w)
     res = fit_production(target, rank=rank, ansatz=ansatz, **fit_kwargs)
     exp = export_production_factors(res, target)
     asr = res.info["asr"]

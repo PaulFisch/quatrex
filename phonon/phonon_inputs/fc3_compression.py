@@ -147,35 +147,56 @@ S3_PERMS = tuple(itertools.permutations(range(3)))
 # 2009; and phonon-community practice in hiPhive / phono3py / ALAMODE).
 
 
-def asr_project_factor(V: np.ndarray, n_super: int, axis: int = 0) -> np.ndarray:
+def asr_project_factor(V: np.ndarray, n_super: int, axis: int = 0,
+                       weights: np.ndarray | None = None) -> np.ndarray:
     """Project V along ``axis`` (size dim_sc = 3*n_super) onto the ASR null-space.
 
-    Subtracts the Cartesian-by-Cartesian mean over supercell atoms.  Idempotent.
+    ``weights`` is the per-supercell-atom constraint weight w_s. The fitted
+    target is the MASS-WEIGHTED tensor M = Phi / (sqrt(m_i) sqrt(m_s)
+    sqrt(m_s')), so the physical acoustic sum rule sum_s Phi[..,s,..] = 0
+    reads sum_s sqrt(m_s) M[..,3s+beta,..] = 0 -- the constraint weight is
+    w_s = sqrt(m_s), NOT the plain mean. ``weights=None`` keeps the legacy
+    unweighted projector, which is identical iff all masses are equal
+    (mono-species systems: Si). Idempotent either way.
     """
     V = np.moveaxis(V, axis, 0)
     dim_sc = V.shape[0]
     assert dim_sc == 3 * n_super, f"axis size {dim_sc} != 3*n_super = {3*n_super}"
     rest = V.shape[1:]
     V_r = V.reshape(n_super, 3, *rest)
-    V_r = V_r - V_r.mean(axis=0, keepdims=True)
+    if weights is None:
+        V_r = V_r - V_r.mean(axis=0, keepdims=True)
+    else:
+        w = np.asarray(weights, dtype=V_r.real.dtype).reshape(
+            (n_super,) + (1,) * (V_r.ndim - 1))
+        V_r = V_r - w * ((w * V_r).sum(axis=0, keepdims=True)
+                         / (w * w).sum())
     V = V_r.reshape(dim_sc, *rest)
     return np.moveaxis(V, 0, axis)
 
 
-def _asr_project_torch(V, n_super: int):
-    """Torch version of asr_project_factor on the first axis.  Differentiable."""
+def _asr_project_torch(V, n_super: int, weights=None):
+    """Torch version of asr_project_factor on the first axis.  Differentiable
+    in V; ``weights`` (torch tensor, (n_super,)) is a constant."""
     dim_sc = V.shape[0]
     rest = V.shape[1:]
     V_r = V.reshape(n_super, 3, *rest)
-    V_r = V_r - V_r.mean(dim=0, keepdim=True)
+    if weights is None:
+        V_r = V_r - V_r.mean(dim=0, keepdim=True)
+    else:
+        w = weights.reshape((n_super,) + (1,) * (V_r.dim() - 1)).to(V_r.dtype)
+        V_r = V_r - w * ((w * V_r).sum(dim=0, keepdim=True) / (w * w).sum())
     return V_r.reshape(dim_sc, *rest)
 
 
-def asr_residual(T_hat: np.ndarray, n_super: int) -> dict[str, float]:
+def asr_residual(T_hat: np.ndarray, n_super: int,
+                 weights: np.ndarray | None = None) -> dict[str, float]:
     """Return ||ASR_leg(T_hat)|| on legs 1, 2, 3 (axes 0, 1, 2) in Frobenius norm.
 
     For the (n_dof, dim_sc, dim_sc) target, only legs 2 and 3 are directly
     enforceable (leg 1 is primitive-DOF indexed, not a supercell atom sum).
+    With ``weights`` the PHYSICAL (sqrt-mass-weighted) sum is measured --
+    see asr_project_factor.
     """
     out = {}
     out["norm"] = float(np.linalg.norm(T_hat))
@@ -183,6 +204,10 @@ def asr_residual(T_hat: np.ndarray, n_super: int) -> dict[str, float]:
         R = T_hat.reshape(
             T_hat.shape[0], n_super, 3, n_super, 3
         )
+        if weights is not None:
+            w = np.asarray(weights, dtype=float)
+            R = R * (w[None, :, None, None, None] if axis == 1
+                     else w[None, None, None, :, None])
         if axis == 1:
             s = R.sum(axis=1)   # sum over leg-2 supercell atoms
         else:
@@ -210,6 +235,7 @@ class FC3Target:
     dim_sc: int
     target_norm: float
     s2_residual: float = 0.0      # ||T - T^(j<->k)|| / ||T|| of the INPUT
+    asr_weights: np.ndarray | None = None  # (n_super,) sqrt-masses; None = uniform
 
 
 def build_fc3_target(fc3_raw: np.ndarray, phonon,
@@ -271,10 +297,12 @@ def build_fc3_target(fc3_raw: np.ndarray, phonon,
         dim_sc=dim_sc,
         target_norm=target_norm,
         s2_residual=s2_residual,
+        asr_weights=np.sqrt(np.asarray(phonon.supercell.masses, dtype=float)),
     )
 
 
-def target_from_dense(T: np.ndarray, n_super: int) -> FC3Target:
+def target_from_dense(T: np.ndarray, n_super: int,
+                      asr_weights: np.ndarray | None = None) -> FC3Target:
     """FC3Target from a dense (n_dof, dim_sc, dim_sc) tensor, no phonopy.
 
     Used by the production factor pipeline, which fits the SAME mass-weighted
@@ -291,7 +319,7 @@ def target_from_dense(T: np.ndarray, n_super: int) -> FC3Target:
         T=T, T_lifted=np.zeros((0, 0, 0)), T_lifted_sym=np.zeros((0, 0, 0)),
         p2s_map=np.arange(n_dof // 3), nat_prim=n_dof // 3, n_super=n_super,
         n_dof=n_dof, dim_sc=dim_sc, target_norm=target_norm,
-        s2_residual=s2_residual)
+        s2_residual=s2_residual, asr_weights=asr_weights)
 
 
 def _symmetrise_s3(A: np.ndarray) -> np.ndarray:
@@ -360,8 +388,8 @@ def fit_msvd(
     n_dof, dim_sc, _ = T.shape
     T_fit = T
     if enforce_asr:
-        T_fit = asr_project_factor(T_fit, target.n_super, axis=1)
-        T_fit = asr_project_factor(T_fit, target.n_super, axis=2)
+        T_fit = asr_project_factor(T_fit, target.n_super, axis=1, weights=target.asr_weights)
+        T_fit = asr_project_factor(T_fit, target.n_super, axis=2, weights=target.asr_weights)
     M = T_fit.reshape(n_dof * dim_sc, dim_sc)
 
     U, S, Vt = np.linalg.svd(M, full_matrices=False)
@@ -372,9 +400,9 @@ def fit_msvd(
     if enforce_asr:
         # Safety: re-project V_R columns (axis 1 of V_R = dim_sc), and reshape
         # U_R's second factor (j) in the (n_dof, dim_sc, R) lift to re-project.
-        V_R = asr_project_factor(V_R, target.n_super, axis=1)
+        V_R = asr_project_factor(V_R, target.n_super, axis=1, weights=target.asr_weights)
         U_R_cube = U_R.reshape(n_dof, dim_sc, R)
-        U_R_cube = asr_project_factor(U_R_cube, target.n_super, axis=1)
+        U_R_cube = asr_project_factor(U_R_cube, target.n_super, axis=1, weights=target.asr_weights)
         U_R = U_R_cube.reshape(n_dof * dim_sc, R)
 
     M_approx = U_R @ V_R
@@ -434,7 +462,7 @@ def fit_hosvd(
     def _proj_B(B_: np.ndarray) -> np.ndarray:
         if not enforce_asr:
             return B_
-        Bp = asr_project_factor(B_, n_super, axis=0)
+        Bp = asr_project_factor(B_, n_super, axis=0, weights=target.asr_weights)
         Q, _ = np.linalg.qr(Bp)
         return Q
 
@@ -585,22 +613,23 @@ def fit_cp(
     # legs 2 and 3 of the rank-1 outer products).  We then re-solve for A and
     # lambdas in closed form given the projected (B, C) to stabilise the init.
     if enforce_asr:
-        B = asr_project_factor(B, target.n_super)
-        C = asr_project_factor(C, target.n_super)
+        B = asr_project_factor(B, target.n_super, weights=target.asr_weights)
+        C = asr_project_factor(C, target.n_super, weights=target.asr_weights)
 
     # --- L-BFGS refinement in PyTorch (only keep if it improves) ---
     if lbfgs_refine and torch is not None:
         A2, B2, C2, lam2, lbfgs_err = _cp_lbfgs_refine(
             T, A, B, C, lam, n_iter=lbfgs_iters, target_norm=target.target_norm,
             enforce_asr=enforce_asr, n_super=target.n_super,
+            weights=target.asr_weights,
         )
         if lbfgs_err < best_err:
             best_err = lbfgs_err
             A, B, C, lam = A2, B2, C2, lam2
 
     if enforce_asr:
-        B = asr_project_factor(B, target.n_super)
-        C = asr_project_factor(C, target.n_super)
+        B = asr_project_factor(B, target.n_super, weights=target.asr_weights)
+        C = asr_project_factor(C, target.n_super, weights=target.asr_weights)
         best_err = _cp_error(T, A, B, C, lam) / (target.target_norm or 1.0)
 
     # Sort by |lambda| descending
@@ -629,6 +658,7 @@ def _cp_error(
 def _cp_lbfgs_refine(
     T, A, B, C, lam, n_iter: int, target_norm: float,
     enforce_asr: bool = False, n_super: int | None = None,
+    weights=None,
 ):
     Tn = target_norm or 1.0
     Tt = torch.tensor(T / Tn, dtype=torch.float64)
@@ -636,6 +666,8 @@ def _cp_lbfgs_refine(
     Bt = torch.tensor(B, dtype=torch.float64, requires_grad=True)
     Ct = torch.tensor(C, dtype=torch.float64, requires_grad=True)
     lamt = torch.tensor(lam / Tn, dtype=torch.float64, requires_grad=True)
+    _wt = (None if weights is None else
+           torch.tensor(np.asarray(weights, dtype=float)))
 
     opt = torch.optim.LBFGS(
         [At, Bt, Ct, lamt],
@@ -649,8 +681,8 @@ def _cp_lbfgs_refine(
 
     def closure():
         opt.zero_grad()
-        B_eff = _asr_project_torch(Bt, n_super) if enforce_asr else Bt
-        C_eff = _asr_project_torch(Ct, n_super) if enforce_asr else Ct
+        B_eff = _asr_project_torch(Bt, n_super, _wt) if enforce_asr else Bt
+        C_eff = _asr_project_torch(Ct, n_super, _wt) if enforce_asr else Ct
         Tap = torch.einsum("r,mr,jr,kr->mjk", lamt, At, B_eff, C_eff)
         loss = torch.sum((Tap - Tt) ** 2)
         loss.backward()
@@ -663,8 +695,8 @@ def _cp_lbfgs_refine(
     C = Ct.detach().numpy()
     lam = lamt.detach().numpy() * Tn
     if enforce_asr:
-        B = asr_project_factor(B, n_super)
-        C = asr_project_factor(C, n_super)
+        B = asr_project_factor(B, n_super, weights=weights)
+        C = asr_project_factor(C, n_super, weights=weights)
     err = _cp_error(T, A, B, C, lam) / Tn
     return A, B, C, lam, err
 
@@ -726,11 +758,12 @@ def fit_indscal(
             V0 = rng.normal(0, 1.0 / np.sqrt(rank), (dim_sc, rank))
 
         if enforce_asr:
-            V0 = asr_project_factor(V0, target.n_super)
+            V0 = asr_project_factor(V0, target.n_super, weights=target.asr_weights)
 
         D, V, err = _indscal_als(
             T_sym, D0, V0, max_iter=max_iter, tol=tol, target_norm=target.target_norm,
             enforce_asr=enforce_asr, n_super=target.n_super,
+            weights=target.asr_weights,
         )
         restart_errs.append(err)
         if err < best_err:
@@ -741,13 +774,14 @@ def fit_indscal(
     D, V, lbfgs_err = _indscal_lbfgs(
         T_sym, best_D, best_V, n_iter=lbfgs_iters, target_norm=target.target_norm,
         enforce_asr=enforce_asr, n_super=target.n_super,
+        weights=target.asr_weights,
     )
     if lbfgs_err < best_err:
         best_err = lbfgs_err
         best_D, best_V = D.copy(), V.copy()
 
     if enforce_asr:
-        best_V = asr_project_factor(best_V, target.n_super)
+        best_V = asr_project_factor(best_V, target.n_super, weights=target.asr_weights)
 
     # Final error on the original (non-symmetrised) target
     T_approx = np.einsum("mr,jr,kr->mjk", best_D, best_V, best_V, optimize=True)
@@ -818,6 +852,7 @@ def _indscal_algebraic_init(T_sym: np.ndarray, rank: int,
 def _indscal_als(
     T_sym, D, V, max_iter: int, tol: float, target_norm: float,
     enforce_asr: bool = False, n_super: int | None = None,
+    weights=None,
 ):
     """Symmetric ALS: update D in closed form, update V via symmetric solve."""
     n_dof, dim_sc, _ = T_sym.shape
@@ -842,7 +877,7 @@ def _indscal_als(
         V2 = np.linalg.solve(G_sys + 1e-12 * np.eye(G_sys.shape[0]), RHS3.T).T
         V = 0.5 * (V1 + V2)
         if enforce_asr:
-            V = asr_project_factor(V, n_super)
+            V = asr_project_factor(V, n_super, weights=weights)
 
         T_approx = np.einsum("mr,jr,kr->mjk", D, V, V, optimize=True)
         err = float(np.linalg.norm(T_sym - T_approx) / Tn)
@@ -856,11 +891,14 @@ def _indscal_als(
 def _indscal_lbfgs(
     T_sym, D, V, n_iter: int, target_norm: float,
     enforce_asr: bool = False, n_super: int | None = None,
+    weights=None,
 ):
     Tn = target_norm or 1.0
     Tt = torch.tensor(T_sym / Tn, dtype=torch.float64)
     Dt = torch.tensor(D, dtype=torch.float64, requires_grad=True)
     Vt = torch.tensor(V, dtype=torch.float64, requires_grad=True)
+    _wt = (None if weights is None else
+           torch.tensor(np.asarray(weights, dtype=float)))
 
     opt = torch.optim.LBFGS(
         [Dt, Vt],
@@ -874,7 +912,7 @@ def _indscal_lbfgs(
 
     def closure():
         opt.zero_grad()
-        V_eff = _asr_project_torch(Vt, n_super) if enforce_asr else Vt
+        V_eff = _asr_project_torch(Vt, n_super, _wt) if enforce_asr else Vt
         Tap = torch.einsum("mr,jr,kr->mjk", Dt, V_eff, V_eff)
         loss = torch.sum((Tap - Tt) ** 2)
         loss.backward()
@@ -885,7 +923,7 @@ def _indscal_lbfgs(
     D = Dt.detach().numpy()
     V = Vt.detach().numpy()
     if enforce_asr:
-        V = asr_project_factor(V, n_super)
+        V = asr_project_factor(V, n_super, weights=weights)
     T_approx = np.einsum("mr,jr,kr->mjk", D, V, V, optimize=True)
     err = float(np.linalg.norm(T_sym - T_approx) / Tn)
     return D, V, err
@@ -1407,7 +1445,8 @@ def annotate_result(
     claims it enforced.
     """
     T_hat = reconstruct(result, target, phonon=phonon)
-    asr = asr_residual(T_hat, target.n_super)
+    asr = asr_residual(T_hat, target.n_super,
+                       weights=target.asr_weights)
     result.info["asr"] = asr
     result.info["s2_recon"] = float(
         np.linalg.norm(T_hat - T_hat.transpose(0, 2, 1))

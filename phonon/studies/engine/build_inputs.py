@@ -207,7 +207,8 @@ def _load_bulk_film(fc3_subdir):
 
 def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
                              q_points, q_diff_map, nk, tdir, ranks, ansatz,
-                             cache_dir, out, dense_vertices=None):
+                             cache_dir, out, dense_vertices=None,
+                             masses_super=None):
     """Fit the bulk FC3 (cached per (ansatz, rank, tensor-hash)), gather the
     per-(offset, q) device factor arrays and write
     ``decomposed_vertices[_r{R}].npz``. Self-check: reconstruct sample folded
@@ -225,7 +226,8 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
     paths = []
     for rank in ranks:
         export = fit_film_fc3_factors(
-            M_stacked, nat, n_super, rank, ansatz=ansatz, cache_dir=cache_dir)
+            M_stacked, nat, n_super, rank, ansatz=ansatz, cache_dir=cache_dir,
+            masses_super=masses_super)
         arrays = build_device_factor_arrays(
             export, prim_idx, cell_frac, slab_idx, nat, q_points, tdir)
         vf = VertexFactors(
@@ -308,7 +310,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
         _decompose_film_vertices(
             M_stacked, prim_idx, cell_frac, slab_idx, nat, q_points,
             q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
-            Path(fc3_path).parent, out, dense_vertices=None)
+            Path(fc3_path).parent, out, dense_vertices=None,
+            masses_super=np.asarray(phonon.supercell.masses, dtype=float))
         return
 
     H00 = np.zeros((n_kpts, nd, nd), complex)
@@ -384,7 +387,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
         _decompose_film_vertices(
             M_stacked, prim_idx, cell_frac, slab_idx, nat, q_points,
             q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
-            Path(fc3_path).parent, out, dense_vertices=vertices)
+            Path(fc3_path).parent, out, dense_vertices=vertices,
+            masses_super=np.asarray(phonon.supercell.masses, dtype=float))
 
     gamma = {k: np.ascontiguousarray(v.astype(complex)) for k, v in vertices[(0, 0)].items()}
     write_fc3_blocks(gamma, np.array([nd] * nslabs), out / "fc3_blocks.hdf5", units="THz^2")
