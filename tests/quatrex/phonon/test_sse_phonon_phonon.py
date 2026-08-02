@@ -73,7 +73,7 @@ def _ref_bubble(phi: np.ndarray, G: np.ndarray, dw_thz: float) -> np.ndarray:
     return prefactor * np.fft.ifft(S.reshape(n_fft, nd, nd), axis=0)[:ne]
 
 
-def _make_cfg(retarded_method: str = "fft"):
+def _make_cfg(retarded_method: str = "fft", g_band: int = 1):
     """Minimal mock config object exposing the attributes used by the
     SigmaPhononPhonon ``__init__`` path that is fed an explicit
     ``phi_blocks`` dict (so ``fc3_path`` is not required)."""
@@ -87,6 +87,7 @@ def _make_cfg(retarded_method: str = "fft"):
     # Deliberately tiny, so the tests exercise the tau-chunked path: the kernel
     # must give the same answer for any chunking.
     _Phonon.sse_tau_chunk_bytes = 4096
+    _Phonon.sse_g_band = g_band
 
     class _Cfg:
         phonon = _Phonon()
@@ -469,7 +470,7 @@ def test_compute_restores_distribution_state() -> None:
     rows, cols = [], []
     offs = np.concatenate(([0], np.cumsum(block_sizes)))
     for I in range(n_blocks):
-        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+        for J in range(max(0, I - g_band), min(n_blocks, I + g_band + 1)):
             for i in range(block_sizes[I]):
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
@@ -759,7 +760,8 @@ def _ref_quad_scaled(phi_left, phi_right, G_a, G_b, dw_thz, scale):
     return scale * _ref_quad(phi_left, phi_right, G_a, G_b, dw_thz)
 
 
-def test_compute_coupled_q_matches_reference() -> None:
+@pytest.mark.parametrize("g_band,n_blocks_par", [(1, 3), (2, 3), (3, 4)])
+def test_compute_coupled_q_matches_reference(g_band, n_blocks_par) -> None:
     """Transverse-q (k>1) coupled-momentum SSE parity vs an independent
     einsum oracle.
 
@@ -778,7 +780,7 @@ def test_compute_coupled_q_matches_reference() -> None:
     rng = np.random.default_rng(7)
     # nq=3 so the q -> -q negation of the exact bosonic fold is actually
     # exercised (at nq=2 the negation is the identity).
-    n_blocks, nbs, ne, nq = 3, 3, 13, 3
+    n_blocks, nbs, ne, nq = n_blocks_par, 3, 13, 3
     block_sizes = np.array([nbs] * n_blocks)
     N = int(block_sizes.sum())
     dw_thz = 16.0 / (ne - 1)
@@ -803,7 +805,7 @@ def test_compute_coupled_q_matches_reference() -> None:
 
     gl_band, gg_band = {}, {}
     for K in range(n_blocks):
-        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+        for Kp in range(max(0, K - g_band), min(n_blocks, K + g_band + 1)):
             gl_band[(K, Kp)] = rng.standard_normal(
                 (ne, nq, nbs, nbs)
             ) + 1j * rng.standard_normal((ne, nq, nbs, nbs))
@@ -814,7 +816,7 @@ def test_compute_coupled_q_matches_reference() -> None:
     rows, cols = [], []
     offs = np.concatenate(([0], np.cumsum(block_sizes)))
     for I in range(n_blocks):
-        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+        for J in range(max(0, I - g_band), min(n_blocks, I + g_band + 1)):
             for i in range(block_sizes[I]):
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
@@ -834,7 +836,7 @@ def test_compute_coupled_q_matches_reference() -> None:
         glv.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
         ggv.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
 
-    cfg = _make_cfg("half")
+    cfg = _make_cfg("half", g_band=g_band)
     ssp = SigmaPhononPhonon(
         cfg,
         phonon_frequencies=np.linspace(0.0, 16.0, ne),
@@ -846,8 +848,10 @@ def test_compute_coupled_q_matches_reference() -> None:
     pair_index = {}
     for (I, K1, K2) in qvertices[(0, 0)]:
         for J in range(max(0, I - 1), min(n_blocks, I + 2)):
-            for K1p in range(max(0, K1 - 1), min(n_blocks, K1 + 2)):
-                for K2p in range(max(0, K2 - 1), min(n_blocks, K2 + 2)):
+            for K1p in range(max(0, K1 - g_band),
+                             min(n_blocks, K1 + g_band + 1)):
+                for K2p in range(max(0, K2 - g_band),
+                                 min(n_blocks, K2 + g_band + 1)):
                     if (J, K2p, K1p) in qvertices[(0, 0)]:
                         pair_index.setdefault((I, J), []).append(
                             (K1, K2, K1p, K2p)
@@ -991,7 +995,7 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
     # Shared random (non-TRS) G bands.
     gl_band, gg_band = {}, {}
     for K in range(n_blocks):
-        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+        for Kp in range(max(0, K - g_band), min(n_blocks, K + g_band + 1)):
             gl_band[(K, Kp)] = (rng.standard_normal((ne, nq, nbs, nbs))
                                 + 1j * rng.standard_normal((ne, nq, nbs, nbs)))
             gg_band[(K, Kp)] = (rng.standard_normal((ne, nq, nbs, nbs))
@@ -1000,7 +1004,7 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
     rows, cols = [], []
     offs = np.concatenate(([0], np.cumsum(block_sizes)))
     for I in range(n_blocks):
-        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+        for J in range(max(0, I - g_band), min(n_blocks, I + g_band + 1)):
             for i in range(block_sizes[I]):
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
@@ -1138,7 +1142,7 @@ def test_compute_gamma_factored_matches_dense(ansatz) -> None:
 
     gl_band, gg_band = {}, {}
     for K in range(n_blocks):
-        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+        for Kp in range(max(0, K - g_band), min(n_blocks, K + g_band + 1)):
             gl_band[(K, Kp)] = (rng.standard_normal((ne, nbs, nbs))
                                 + 1j * rng.standard_normal((ne, nbs, nbs)))
             gg_band[(K, Kp)] = (rng.standard_normal((ne, nbs, nbs))
@@ -1147,7 +1151,7 @@ def test_compute_gamma_factored_matches_dense(ansatz) -> None:
     rows, cols = [], []
     offs = np.concatenate(([0], np.cumsum(block_sizes)))
     for I in range(n_blocks):
-        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+        for J in range(max(0, I - g_band), min(n_blocks, I + g_band + 1)):
             for i in range(block_sizes[I]):
                 for j in range(block_sizes[J]):
                     rows.append(offs[I] + i)
