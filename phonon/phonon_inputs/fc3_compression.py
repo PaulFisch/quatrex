@@ -147,6 +147,22 @@ S3_PERMS = tuple(itertools.permutations(range(3)))
 # 2009; and phonon-community practice in hiPhive / phono3py / ALAMODE).
 
 
+def _torch_device():
+    """Fit device: QX_FIT_DEVICE=cuda|cpu, else cuda when available.
+    The L-BFGS refinement is dense f64 linear algebra -- one GH200 runs
+    the 16-restart production fits ~an order of magnitude faster than a
+    CPU node (Paul 2026-08-02: use GPU where significantly faster)."""
+    import os
+    dev = os.environ.get("QX_FIT_DEVICE")
+    if dev:
+        return dev
+    try:
+        import torch as _t
+        return "cuda" if _t.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
 def asr_project_factor(V: np.ndarray, n_super: int, axis: int = 0,
                        weights: np.ndarray | None = None) -> np.ndarray:
     """Project V along ``axis`` (size dim_sc = 3*n_super) onto the ASR null-space.
@@ -661,13 +677,15 @@ def _cp_lbfgs_refine(
     weights=None,
 ):
     Tn = target_norm or 1.0
-    Tt = torch.tensor(T / Tn, dtype=torch.float64)
-    At = torch.tensor(A, dtype=torch.float64, requires_grad=True)
-    Bt = torch.tensor(B, dtype=torch.float64, requires_grad=True)
-    Ct = torch.tensor(C, dtype=torch.float64, requires_grad=True)
-    lamt = torch.tensor(lam / Tn, dtype=torch.float64, requires_grad=True)
+    _dev = _torch_device()
+    Tt = torch.tensor(T / Tn, dtype=torch.float64, device=_dev)
+    At = torch.tensor(A, dtype=torch.float64, device=_dev, requires_grad=True)
+    Bt = torch.tensor(B, dtype=torch.float64, device=_dev, requires_grad=True)
+    Ct = torch.tensor(C, dtype=torch.float64, device=_dev, requires_grad=True)
+    lamt = torch.tensor(lam / Tn, dtype=torch.float64, device=_dev,
+                        requires_grad=True)
     _wt = (None if weights is None else
-           torch.tensor(np.asarray(weights, dtype=float)))
+           torch.tensor(np.asarray(weights, dtype=float), device=_dev))
 
     opt = torch.optim.LBFGS(
         [At, Bt, Ct, lamt],
@@ -690,10 +708,10 @@ def _cp_lbfgs_refine(
 
     opt.step(closure)
 
-    A = At.detach().numpy()
-    B = Bt.detach().numpy()
-    C = Ct.detach().numpy()
-    lam = lamt.detach().numpy() * Tn
+    A = At.detach().cpu().numpy()
+    B = Bt.detach().cpu().numpy()
+    C = Ct.detach().cpu().numpy()
+    lam = lamt.detach().cpu().numpy() * Tn
     if enforce_asr:
         B = asr_project_factor(B, n_super, weights=weights)
         C = asr_project_factor(C, n_super, weights=weights)
@@ -894,11 +912,12 @@ def _indscal_lbfgs(
     weights=None,
 ):
     Tn = target_norm or 1.0
-    Tt = torch.tensor(T_sym / Tn, dtype=torch.float64)
-    Dt = torch.tensor(D, dtype=torch.float64, requires_grad=True)
-    Vt = torch.tensor(V, dtype=torch.float64, requires_grad=True)
+    _dev = _torch_device()
+    Tt = torch.tensor(T_sym / Tn, dtype=torch.float64, device=_dev)
+    Dt = torch.tensor(D, dtype=torch.float64, device=_dev, requires_grad=True)
+    Vt = torch.tensor(V, dtype=torch.float64, device=_dev, requires_grad=True)
     _wt = (None if weights is None else
-           torch.tensor(np.asarray(weights, dtype=float)))
+           torch.tensor(np.asarray(weights, dtype=float), device=_dev))
 
     opt = torch.optim.LBFGS(
         [Dt, Vt],
@@ -920,8 +939,8 @@ def _indscal_lbfgs(
 
     opt.step(closure)
 
-    D = Dt.detach().numpy()
-    V = Vt.detach().numpy()
+    D = Dt.detach().cpu().numpy()
+    V = Vt.detach().cpu().numpy()
     if enforce_asr:
         V = asr_project_factor(V, n_super, weights=weights)
     T_approx = np.einsum("mr,jr,kr->mjk", D, V, V, optimize=True)
@@ -1256,8 +1275,8 @@ def _waring_lbfgs_lift(
 
     opt.step(closure)
 
-    V = Vt.detach().numpy()
-    lam = lamt.detach().numpy() * Tn
+    V = Vt.detach().cpu().numpy()
+    lam = lamt.detach().cpu().numpy() * Tn
     V_out = asr_project_factor(V, n_super) if enforce_asr else V
     err = float(np.linalg.norm(
         T_lifted_sym - np.einsum("r,ir,jr,kr->ijk", lam, V_out, V_out, V_out, optimize=True)
@@ -1303,8 +1322,8 @@ def _waring_lbfgs_primitive(
 
     opt.step(closure)
 
-    V = Vt.detach().numpy()
-    lam = lamt.detach().numpy() * Tn
+    V = Vt.detach().cpu().numpy()
+    lam = lamt.detach().cpu().numpy() * Tn
     V_out = asr_project_factor(V, n_super) if enforce_asr else V
     Vs = V_out[prim_idx]
     err = float(np.linalg.norm(
