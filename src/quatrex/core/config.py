@@ -1639,6 +1639,12 @@ class PhononConfig(BaseModel):
     NOTE: the implementation assembles dense device-level arrays (FC3
     tensor + Phi_eff eigensolve); intended for single / few-cell devices."""
 
+    scp_uu_min_thz: NonNegativeFloat = 0.0
+    """<uu> quadrature floor (THz): exclude bins below this from
+    the equal-time <uu> integral (eta=0 IR tails below the lowest
+    device mode can dominate and flip Tr<uu> negative). 0 = legacy
+    full integral. Set just below the lowest on-mesh mode."""
+
     scp_loop: bool = False
     """Quartic (SCP) loop static self-energy Sigma_L = 1/2 Phi4 : <uu>
     on top of the cubic tadpole (requires ``scp_tadpole``): the SCP

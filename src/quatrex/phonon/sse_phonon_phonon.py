@@ -524,6 +524,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 D[I * n_dof:(I + 1) * n_dof, J * n_dof:(J + 1) * n_dof] = blk.real
         self._scp_D = 0.5 * (D + D.T)
         self._sigma_static = np.zeros((N_D, N_D), dtype=float)
+        self._scp_cfg = config.phonon
         # Quartic (SCP) loop: Sigma_L = 1/2 Phi4 : <uu> -- the
         # stiffening counterterm that GROWS with <uu>, restoring the
         # negative feedback the cubic-only bubble lacks on soft-mode
@@ -580,13 +581,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # slice); the w=0 bin is excluded from the folded G^> half.
         ax = tuple(range(g_lesser.data.ndim - 1))
         full_freqs = self._full_frequencies(int(g_lesser.data.shape[0]))
-        pos = xp.abs(xp.asarray(full_freqs)) > 1e-12
+        # <uu> quadrature floor: bins below the lowest device mode
+        # carry only eta=0 resolvent tails/leakage (no spectral
+        # weight), yet on IR-resolved grids they can dominate and
+        # even flip Tr<uu> negative. scp_uu_min_thz (default 0 =
+        # legacy) excludes them from BOTH G^< and the folded G^>.
+        _uu_min = float(getattr(self._scp_cfg, "scp_uu_min_thz", 0.0)
+                        if hasattr(self, "_scp_cfg") else 0.0)
+        _keep = xp.abs(xp.asarray(full_freqs)) >= max(_uu_min, 0.0)
+        pos = (xp.abs(xp.asarray(full_freqs)) > 1e-12) & _keep
         if is_uniform_grid(full_freqs):
             # Legacy path: plain sum, scalar dw applied downstream. The dw
             # source is the rank-LOCAL first gap, as before this change:
             # on linspace grids the local and global first gaps can differ
             # in the last ulp, and the legacy bit-identity contract wins.
-            gl_sum_local = g_lesser.data.sum(axis=ax)        # (local_nnz,)
+            gl_sum_local = g_lesser.data[_keep].sum(axis=ax)
             gg_sum_local = g_greater.data[pos].sum(axis=ax)
             lf = np.asarray(self.local_frequencies)
             dw = (float(lf[1] - lf[0]) if int(lf.shape[0]) >= 2
@@ -595,7 +604,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # Non-uniform grid: per-bin quadrature weights, dw folded in.
             cw = frequency_cell_widths(full_freqs).reshape(
                 (-1,) + (1,) * (g_lesser.data.ndim - 1))
-            gl_sum_local = (cw * g_lesser.data).sum(axis=ax)
+            gl_sum_local = (cw * g_lesser.data)[_keep].sum(axis=ax)
             gg_sum_local = (cw * g_greater.data)[pos].sum(axis=ax)
             dw = 1.0
         # Transverse-momentum mesh average (1/N_q).
