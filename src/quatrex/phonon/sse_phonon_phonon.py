@@ -632,6 +632,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 self.n_blocks, int(self.block_sizes[0]))
         self._sigma_static = (
             (1.0 - self._scp_mix) * self._sigma_static + self._scp_mix * sig_new)
+        if ranks.rank == 0:
+            _ev = np.linalg.eigvalsh(
+                0.5 * (phi_eff + phi_eff.T)
+                + (self._sigma_static - (phi_eff - self._scp_D)))
+            _w = np.sign(_ev[:6]) * np.sqrt(np.abs(_ev[:6]))
+            print(f"SCP static: dressed low-6 (THz) "
+                  f"{np.round(_w, 4)}", flush=True)
         # Broadcast the static self-energy into Sigma^R at every frequency.
         sr_static = xp.asarray(
             self._sigma_static[get_host(rows), get_host(cols)]
