@@ -2,8 +2,11 @@
 
 Policy (Paul, 2026-07-31 -- hard-coded, do not work around):
   - account lp16 ONLY;
-  - debug partition ONLY (30 min limit); another partition or more
-    than one node requires asking Paul FIRST, then --approved-by-paul;
+  - debug partition by default (30 min limit). NORMAL partition allowed
+    (Paul 2026-08-02) under the daint_normal_ledger.md hard cap of
+    100 committed node-hours (nodes x walltime at submission) and
+    <=2 nodes/job; exceeding either needs Paul FIRST, then
+    --approved-by-paul. Other partitions: ask Paul first;
   - at most MAX_ACTIVE jobs queued/running at once;
   - every job goes through this script (never ad-hoc sbatch), named
     qx-<name>, workdir <repo>/cluster/<name>/ on daint scratch.
@@ -22,6 +25,7 @@ import argparse
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 HOST = "daint"
 ACCOUNT = "lp16"
@@ -110,14 +114,72 @@ def cmd_sync(_):
     print(ssh(f"git -C {REPO} pull --ff-only", 120, check=True))
 
 
+NORMAL_LEDGER = Path(__file__).resolve().parent / "daint_normal_ledger.md"
+NORMAL_NH_CAP = 100.0        # Paul 2026-08-02: HARD upper limit, not a target
+NORMAL_MAX_NODES = 2         # per job, unless Paul authorises more
+
+
+def _walltime_hours(t: str) -> float:
+    p = [int(x) for x in t.split("-")[-1].split(":")]
+    days = int(t.split("-")[0]) if "-" in t else 0
+    while len(p) < 3:
+        p.insert(0, 0)
+    return days * 24 + p[0] + p[1] / 60 + p[2] / 3600
+
+
+def _ledger_committed() -> float:
+    """Sum of committed node-hours (nodes x walltime AT SUBMISSION --
+    worst case, so the cap cannot be exceeded by construction)."""
+    if not NORMAL_LEDGER.exists():
+        return 0.0
+    total = 0.0
+    for line in NORMAL_LEDGER.read_text().splitlines():
+        if line.startswith("| 2"):          # data rows: | 2026-.. |
+            try:
+                total += float(line.split("|")[6])
+            except (IndexError, ValueError):
+                pass
+    return total
+
+
+def _ledger_append(args, job_id: str, nh: float, total: float) -> None:
+    import datetime
+    if not NORMAL_LEDGER.exists():
+        NORMAL_LEDGER.write_text(
+            "# daint NORMAL-partition job ledger\n\n"
+            f"Hard cap {NORMAL_NH_CAP:.0f} node-hours committed "
+            "(nodes x walltime at submission). Paul authorises any "
+            "excess BEFORE launch.\n\n"
+            "| date | job | name | nodes | walltime | nh | total nh |\n"
+            "|---|---|---|---|---|---|---|\n")
+    with NORMAL_LEDGER.open("a") as f:
+        f.write(f"| {datetime.date.today()} | {job_id} | {args.name} "
+                f"| {args.nodes} | {args.time} | {nh:.2f} "
+                f"| {total:.2f} |\n")
+
+
 def _guard(args):
-    if getattr(args, "nodes", 1) > MAX_NODES and not args.approved_by_paul:
-        sys.exit(f"policy: >{MAX_NODES} node needs Paul's explicit OK first "
-                 "(then pass --approved-by-paul)")
-    if getattr(args, "partition", PARTITION) != PARTITION \
-            and not args.approved_by_paul:
+    part = getattr(args, "partition", PARTITION)
+    if part == "normal":
+        # Paul 2026-08-02: normal partition allowed under the ledgered
+        # 100 nh cap and <=2 nodes/job (more needs his OK).
+        if getattr(args, "nodes", 1) > NORMAL_MAX_NODES \
+                and not args.approved_by_paul:
+            sys.exit(f"policy: normal partition allows <={NORMAL_MAX_NODES} "
+                     "nodes/job (Paul's OK + --approved-by-paul for more)")
+        nh = args.nodes * _walltime_hours(args.time)
+        committed = _ledger_committed()
+        if committed + nh > NORMAL_NH_CAP:
+            sys.exit(f"policy: ledger holds {committed:.1f} nh committed; "
+                     f"+{nh:.1f} nh would exceed the {NORMAL_NH_CAP:.0f} nh "
+                     "cap -- needs Paul's explicit authorization")
+    elif part != PARTITION and not args.approved_by_paul:
         sys.exit(f"policy: partition != {PARTITION} needs Paul's explicit OK "
                  "first (then pass --approved-by-paul)")
+    if part != "normal" and getattr(args, "nodes", 1) > MAX_NODES \
+            and not args.approved_by_paul:
+        sys.exit(f"policy: >{MAX_NODES} node needs Paul's explicit OK first "
+                 "(then pass --approved-by-paul)")
     jobs = our_jobs()
     if len(jobs) >= MAX_ACTIVE:
         sys.exit(f"policy: {len(jobs)} qx- jobs already active "
@@ -168,6 +230,13 @@ srun --cpu-bind=cores bash -c \\
     )
     out = ssh(f"cd {run_dir} && sbatch job.sh", check=True)
     print(out.strip())
+    if getattr(args, "partition", PARTITION) == "normal":
+        job_id = out.strip().split()[-1]
+        nh = args.nodes * _walltime_hours(args.time)
+        total = _ledger_committed() + nh
+        _ledger_append(args, job_id, nh, total)
+        print(f"  ledger: +{nh:.2f} nh committed "
+              f"({total:.2f}/{NORMAL_NH_CAP:.0f} nh) -> {NORMAL_LEDGER}")
     print(f"  tail: python phonon/scripts/daint.py tail --name {args.name} -f")
 
 
