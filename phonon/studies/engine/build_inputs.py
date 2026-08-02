@@ -208,7 +208,7 @@ def _load_bulk_film(fc3_subdir):
 def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
                              q_points, q_diff_map, nk, tdir, ranks, ansatz,
                              cache_dir, out, dense_vertices=None,
-                             masses_super=None):
+                             masses_super=None, support="full"):
     """Fit the bulk FC3 (cached per (ansatz, rank, tensor-hash)), gather the
     per-(offset, q) device factor arrays and write
     ``decomposed_vertices[_r{R}].npz``. Self-check: reconstruct sample folded
@@ -223,6 +223,16 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
     from quatrex.phonon.vertex_factors import VertexFactors, save_decomposed
 
     n_super = len(prim_idx)
+    support_pairs = None
+    if support == "dense":
+        # (dK, dK') offset pairs the DENSE FC3 populates (zero blocks
+        # dropped) -- the factored path otherwise manufactures vertex
+        # blocks over the full offs x offs window (support asymmetry).
+        phi_off = build_device_fc3_blocks(
+            M_stacked, prim_idx, slab_idx, nat, 1, return_offsets=True)
+        support_pairs = sorted((int(a), int(b)) for (a, b) in phi_off)
+        print(f"[decompose] dense support: {len(support_pairs)} offset "
+              f"pairs {support_pairs}", flush=True)
     paths = []
     for rank in ranks:
         export = fit_film_fc3_factors(
@@ -235,7 +245,9 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
             offsets=arrays["offsets"], UB=arrays["UB"], UC=arrays["UC"],
             q_diff_map=np.asarray(q_diff_map, dtype=np.int64),
             nk_shape=(nk, nk), ansatz=ansatz,
-            meta={**arrays["meta"], "fc3_rank": int(rank)},
+            meta={**arrays["meta"], "fc3_rank": int(rank),
+                  **({"support_pairs": support_pairs}
+                     if support_pairs is not None else {})},
         )
         rel_err = float(vf.meta.get("rel_err", np.nan))
 
@@ -279,6 +291,7 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
 
 def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
                  decompose_ranks=(), decompose_ansatz="INDSCAL",
+                 decompose_support="full",
                  decompose_only=False):
     """Transversely-periodic (k>1) Si film. Port of /tmp/build_sifilm_inputs.py."""
     from phonon.solver.se_q import _build_folded_vertices
@@ -311,7 +324,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
             M_stacked, prim_idx, cell_frac, slab_idx, nat, q_points,
             q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
             Path(fc3_path).parent, out, dense_vertices=None,
-            masses_super=np.asarray(phonon.supercell.masses, dtype=float))
+            masses_super=np.asarray(phonon.supercell.masses, dtype=float),
+            support=decompose_support)
         return
 
     H00 = np.zeros((n_kpts, nd, nd), complex)
@@ -388,7 +402,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
             M_stacked, prim_idx, cell_frac, slab_idx, nat, q_points,
             q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
             Path(fc3_path).parent, out, dense_vertices=vertices,
-            masses_super=np.asarray(phonon.supercell.masses, dtype=float))
+            masses_super=np.asarray(phonon.supercell.masses, dtype=float),
+            support=decompose_support)
 
     gamma = {k: np.ascontiguousarray(v.astype(complex)) for k, v in vertices[(0, 0)].items()}
     write_fc3_blocks(gamma, np.array([nd] * nslabs), out / "fc3_blocks.hdf5", units="THz^2")
@@ -426,6 +441,12 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--nproc", type=int, default=1,
                    help="parallel workers for the O(nk^2) folded-vertex build")
+    p.add_argument("--decompose-support", default="full",
+                   choices=["full", "dense"],
+                   help="factor offset window: 'dense' restricts the "
+                        "generated vertex blocks to the (dK, dK') pairs "
+                        "the dense FC3 populates (kills the invented "
+                        "out-of-support weight); 'full' is legacy")
     p.add_argument("--decompose-ranks", default="",
                    help="comma-separated CP ranks; fit the bulk FC3 and write "
                         "decomposed_vertices[_r{R}].npz next to the qfold "
@@ -478,6 +499,7 @@ def main():
         build_sifilm(a.nslabs, a.nk, tdir, nfreq, fmax, a.emin, fc3_subdir,
                      out, a.nproc, decompose_ranks=ranks,
                      decompose_ansatz=a.decompose_ansatz,
+                     decompose_support=a.decompose_support,
                      decompose_only=a.decompose_only)
     print(f"inputs -> {out}", flush=True)
 

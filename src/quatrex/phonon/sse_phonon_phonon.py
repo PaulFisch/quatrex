@@ -217,7 +217,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._q_diff_map = np.asarray(vfactors.q_diff_map, dtype=int)
             self._n_kpts = int(vfactors.n_kpts)
             # Kernel choice for consuming the factors:
-            #   "reconstruct" (default): materialise the RANK-LOCAL slice of
+            #   "gram" (the config default): materialise the RANK-LOCAL slice of
             #     the dense q-folded dict from the factors once at first
             #     compute (the vertex is fixed) and run the dense path; the
             #     factored win is MEMORY + build time, not flops.
@@ -396,8 +396,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
     def _phi_blocks_from_factors(self, vf) -> dict:
         """Dense Gamma-point (iq1 = iq2 = 0) vertex blocks reconstructed from
-        the factors, over the factor offset window -- feeds the pair index."""
+        the factors, over the factor offset window -- feeds the pair index.
+
+        With ``support_pairs`` in the factor metadata (builder option
+        ``--decompose-support dense``) only the (d1, d2) offset pairs the
+        DENSE FC3 actually populates are emitted: the full offs x offs
+        window otherwise manufactures vertex blocks the force constants do
+        not contain, weighted only by the global fit residual (the
+        "vertex-support asymmetry" -- severe for offset-diagonal vertices).
+        """
         offs = [int(d) for d in vf.offsets]
+        support = vf.meta.get("support_pairs")
+        if support is not None:
+            support = {(int(a), int(b)) for a, b in support}
         blocks: dict[tuple[int, int, int], np.ndarray] = {}
         for I in range(self.n_blocks):
             for d1 in offs:
@@ -407,6 +418,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 for d2 in offs:
                     K2 = I + d2
                     if not 0 <= K2 < self.n_blocks:
+                        continue
+                    if support is not None and (d1, d2) not in support:
                         continue
                     blocks[(I, K1, K2)] = vf.reconstruct_block(0, 0, d1, d2)
         return blocks
@@ -434,6 +447,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 pairs.add((iq2, iqp))
         offs = [int(d) for d in vf.offsets]
         pos = vf.offset_index()
+        support = vf.meta.get("support_pairs")
+        if support is not None:
+            support = {(int(a), int(b)) for a, b in support}
         lam_D = vf.D * vf.lambdas[None, :]          # (b, R)
         qv: dict = {}
         for (iq1, iq2) in pairs:
@@ -451,6 +467,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     for d2 in offs:
                         K2 = I + d2
                         if not 0 <= K2 < self.n_blocks:
+                            continue
+                        if support is not None and (d1, d2) not in support:
                             continue
                         blocks[(I, K1, K2)] = table[pos[d1], pos[d2]]
             qv[(iq1, iq2)] = blocks
@@ -789,10 +807,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # runs only); afterwards the 4-ring fast path takes over and the
         # reversed-lesser leg buffer (gtlr) is repurposed as the cross-term
         # accumulator stx.
-        if self._g_from_l and nq > 1:
+        _gram_now = (self._vfactors is not None
+                     and self._vf_kernel == "gram")
+        if self._g_from_l and (nq > 1 or _gram_now):
+            # gram at nq == 1 took precedence over the dense Gamma path
+            # since the two-collapse commit; with greater_from_lesser the
+            # repurposed gtlr/stx buffers are never written by the
+            # factored kernel -> silently wrong Sigma^>. Refuse both.
             raise ValueError(
-                "sse_greater_from_lesser supports the Gamma-only device "
-                "(nq == 1); the coupled-q bookkeeping is not implemented."
+                "sse_greater_from_lesser supports the Gamma-only DENSE "
+                "kernel only (nq == 1, no decomposed gram kernel)."
             )
         verify_now = self._g_from_l and self._fold_verify_done < self._fold_verify
         if verify_now and ranks.size > 1:
@@ -805,10 +829,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             verify_now = False
             self._fold_verify_done = self._fold_verify
         fast_now = self._g_from_l and not verify_now
-        if self._herm_pairs and nq > 1:
+        if self._herm_pairs and (nq > 1 or _gram_now):
+            # The factored kernel contracts ALL owned pairs; the stage-5
+            # mirror completion would then overwrite directly-computed
+            # blocks with the tau reversal -> garbage. Refuse.
             raise ValueError(
-                "sse_hermitian_pairs supports the Gamma-only device "
-                "(nq == 1)."
+                "sse_hermitian_pairs supports the Gamma-only DENSE kernel "
+                "only (nq == 1, no decomposed gram kernel)."
             )
         if self._herm_pairs and ranks.size > 1:
             raise NotImplementedError(
