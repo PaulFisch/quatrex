@@ -6,3 +6,4 @@ Hard cap 100 node-hours committed (nodes x walltime at submission). Paul authori
 |---|---|---|---|---|---|---|
 | 2026-08-02 | 4318325 | mos2f3long | 1 | 10:00:00 | 10.00 | 10.00 |
 | 2026-08-02 | 4318752 | mos2f3mr | 1 | 02:00:00 | 2.00 | 12.00 |
+| 2026-08-02 | 4318792 | mos2f3tp | 1 | 02:00:00 | 2.00 | 14.00 |
