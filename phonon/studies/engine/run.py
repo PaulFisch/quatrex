@@ -83,6 +83,8 @@ if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_
 if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
 if os.environ.get("QX_RING_DTYPE"): cfg.phonon.sse_ring_dtype = os.environ["QX_RING_DTYPE"]
 if os.environ.get("QX_QBATCH"):   cfg.phonon.sse_dense_q_batched = bool(int(os.environ["QX_QBATCH"]))
+if os.environ.get("QX_SCP_TADPOLE"): cfg.phonon.scp_tadpole = bool(int(os.environ["QX_SCP_TADPOLE"]))
+if os.environ.get("QX_SCP_LOOP"): cfg.phonon.scp_loop = bool(int(os.environ["QX_SCP_LOOP"]))
 # Non-uniform frequency grid: primary grid from phonon_energies.npy
 # (QX_FREQGRID=file) + auxiliary uniform bubble grid (spacing/extent).
 if os.environ.get("QX_FREQGRID"):

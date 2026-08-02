@@ -1639,6 +1639,16 @@ class PhononConfig(BaseModel):
     NOTE: the implementation assembles dense device-level arrays (FC3
     tensor + Phi_eff eigensolve); intended for single / few-cell devices."""
 
+    scp_loop: bool = False
+    """Quartic (SCP) loop static self-energy Sigma_L = 1/2 Phi4 : <uu>
+    on top of the cubic tadpole (requires ``scp_tadpole``): the SCP
+    stiffening counterterm that grows with <uu> -- restores the
+    negative feedback the cubic-only bubble lacks on soft-mode
+    structures. Device FC4 blocks from ``scp_fc4_path`` (default:
+    fc4_blocks.hdf5 next to the FC3 file; produced by the fc4 reap)."""
+
+    scp_fc4_path: str | None = None
+
     scp_static_mixing: PositiveFloat = 0.1
     """Linear mixing factor for the self-consistent static (tadpole)
     self-energy across SCBA iterations. Gentler than the dynamic-Sigma

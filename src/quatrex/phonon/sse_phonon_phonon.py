@@ -524,6 +524,30 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 D[I * n_dof:(I + 1) * n_dof, J * n_dof:(J + 1) * n_dof] = blk.real
         self._scp_D = 0.5 * (D + D.T)
         self._sigma_static = np.zeros((N_D, N_D), dtype=float)
+        # Quartic (SCP) loop: Sigma_L = 1/2 Phi4 : <uu> -- the
+        # stiffening counterterm that GROWS with <uu>, restoring the
+        # negative feedback the cubic-only bubble lacks on soft-mode
+        # structures (the MoS2 film spiral instability).
+        self._fc4_blocks = None
+        if bool(getattr(config.phonon, "scp_loop", False)):
+            import h5py as _h5py
+            from pathlib import Path as _Path
+            _fc4p = getattr(config.phonon, "scp_fc4_path", None)
+            if _fc4p is None and getattr(config.phonon, "fc3_path", None):
+                _fc4p = str(_Path(config.phonon.fc3_path).parent
+                            / "fc4_blocks.hdf5")
+            if _fc4p is None or not _Path(_fc4p).exists():
+                raise FileNotFoundError(
+                    f"scp_loop requested but fc4_blocks not found "
+                    f"({_fc4p!r}); run the fc4 reap first.")
+            self._fc4_blocks = {}
+            with _h5py.File(_fc4p, "r") as _f:
+                for _k, _d in _f["fc4_blocks"].items():
+                    self._fc4_blocks[tuple(int(x) for x in
+                                           _k.split("_"))] = _d[()]
+            if ranks.rank == 0:
+                print(f"SCP loop: {len(self._fc4_blocks)} fc4 device "
+                      f"blocks from {_fc4p}", flush=True)
         self._scp_mix = float(getattr(config.phonon, "scp_static_mixing", 0.1))
         self._scp_floor2 = float(getattr(config.phonon, "scp_floor_thz", 0.5)) ** 2
         if comm.rank == 0:
@@ -601,6 +625,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._fc3_dev_mw, uu, phi_eff,
             omega2_floor_abs=self._scp_floor2)
         sig_new = sigma_tadpole(self._fc3_dev_mw, w_mean)
+        if self._fc4_blocks is not None:
+            from quatrex.phonon.static_self_energy import sigma_loop_blocks
+            sig_new = sig_new + sigma_loop_blocks(
+                self._fc4_blocks, uu,
+                self.n_blocks, int(self.block_sizes[0]))
         self._sigma_static = (
             (1.0 - self._scp_mix) * self._sigma_static + self._scp_mix * sig_new)
         # Broadcast the static self-energy into Sigma^R at every frequency.
