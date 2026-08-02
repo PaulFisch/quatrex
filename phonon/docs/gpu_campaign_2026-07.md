@@ -228,3 +228,45 @@ knowledge, the first FP64/complex cuTile-on-Hopper datapoint.
 
 ~26 debug jobs incl. the 2-node L16 pair: **1.19 node-hours** total on
 lp16 (sacct, month-to-date).
+
+## 9. Film / coupled-q SSE (2026-08-02)
+
+Question: is the dense-q film ring near the previously quoted 42% of
+peak (that figure was b=63, Gamma-only)? Answer: no — and after
+batching it sits at its own shape ceiling.
+
+**b=18/54 batched-ring shape ceilings (GH200, cuBLAS Z, full ring):**
+
+| b  | w=60 | w=241 | w=481 | note |
+|----|------|-------|-------|------|
+| 15 | 0.35 | 1.36  | 2.69  | TF/s |
+| 18 | 0.71 | 2.59  | 5.48  | film block size |
+| 36 | 9.8  | 12.3  | 13.7  | CNT (campaign) |
+| 54 | 22.8 | 24.7  | 25.4  | film 3-slab dense |
+| 63 | 27.5 | 28.3  | 28.2  | the "42%" row |
+
+**In-engine film ring (mos2f3, nq=25, 7 pairs, 4375 qtasks, ne=121,
+1 GH200):**
+
+| kernel | ring s/it | TF/s | % of 67 peak |
+|---|---|---|---|
+| per-task loop (legacy) | 6.47 | 2.46 | 3.7% |
+| batched (sse_dense_q_batched) | 2.33 | **6.84** | 10.2% |
+
+The legacy loop ran one (q-pair, quad) task per launch — batch=w=241,
+which the microbench shows is itself capped at 2.59 TF/s at b=18: the
+old rate was the PER-LAUNCH ceiling, not Python overhead alone. The
+batched kernel (C x w ~ 1e5-deep strided batches, single-gather legs,
+scatter-add over q_ext) saturates the b=18 quantization ceiling.
+Correctness: identical heat matrix to the baseline smoke; the nq=3
+reference test passes at g_band=1/2/3 on numpy+cupy.
+
+Iteration: 9.53 -> 5.35 s/it (1.8x); OBC (2.9 s) is again the top
+non-ring cost (obc_cache recommendation unchanged). The coupled-q
+GFLOP model is now computed in-engine (was 0 for all film runs).
+
+Remaining headroom at b=18 is structural (tile quantization ~(32/18)^3):
+the factored gram kernel (q-FFT collapse, N_q^2 -> N_q log N_q) is the
+next lever — pending the factorisation audit gates (mass-weighted ASR
+fixed; post-min-image conservation ladder in progress; note the shipped
+sifilm nk9 dense reference itself predated the min-image fix).
