@@ -450,6 +450,7 @@ def test_compute_restores_distribution_state() -> None:
     restoring; this broke the SCBA loop, which expects ``nnz`` to be
     preserved across interactions. Pin the contract.
     """
+    g_band = 1  # these fixtures are band-1
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
     from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
@@ -942,6 +943,7 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
     mode. G is random complex (non-TRS) -- kills any accidental g = g^T
     assumption in the Gram pairing.
     """
+    g_band = 1  # these fixtures are band-1
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
     from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
@@ -1102,6 +1104,7 @@ def test_compute_gamma_factored_matches_dense(ansatz) -> None:
     transversely-finite device (nanowires, CNTs), which the factored kernel
     could not reach before.
     """
+    g_band = 1  # these fixtures are band-1
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
 
