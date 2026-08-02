@@ -254,7 +254,8 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
         # Phase-convention self-check on sample (q1, q2) pairs.
         n_kpts = len(q_points)
         pos = vf.offset_index()
-        worst = 0.0
+        num2 = den2 = 0.0
+        off_cls: dict = {}
         for (iq1, iq2) in {(0, 0), (1, min(2, n_kpts - 1)),
                            (n_kpts - 1, min(3, n_kpts - 1))}:
             if dense_vertices is not None and (iq1, iq2) in dense_vertices:
@@ -269,16 +270,36 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
                 if dK not in pos or dKp not in pos:
                     continue
                 rec = vf.reconstruct_block(iq1, iq2, dK, dKp)
-                num = float(np.abs(rec - dense_blk).max())
-                den = float(np.abs(dense_blk).max()) + 1e-30
-                worst = max(worst, num / den)
-        print(f"[decompose r{rank}] fit rel_err={rel_err:.4f}; sample-block "
-              f"reconstruction max rel err={worst:.3e}", flush=True)
-        if worst > 10.0 * max(rel_err, 1e-12) + 1e-10:
+                _e2 = float(np.linalg.norm(rec - dense_blk) ** 2)
+                _d2 = float(np.linalg.norm(dense_blk) ** 2)
+                num2 += _e2
+                den2 += _d2
+                oc = off_cls.setdefault((dK, dKp), [0.0, 0.0])
+                oc[0] += _e2
+                oc[1] += _d2
+        # NORM-WEIGHTED aggregate: a global-Frobenius fit leaves O(1)
+        # RELATIVE errors on weak blocks by construction (MoS2: the
+        # cross-slab vertex carries ~0.5% of the diagonal weight), so
+        # the old max-single-block-relative gate misfires exactly when
+        # the fit is honest. The aggregate tracks rel_err for a
+        # convention-correct chain; a phase/gauge break shows up as
+        # aggregate >> rel_err.
+        agg = float(np.sqrt(num2 / max(den2, 1e-300)))
+        per_off = {k: float(np.sqrt(e2 / max(d2, 1e-300)))
+                   for k, (e2, d2) in sorted(off_cls.items())}
+        print(f"[decompose r{rank}] fit rel_err={rel_err:.4f}; sample "
+              f"aggregate rel err={agg:.4f}; per-offset "
+              f"{ {k: round(v, 3) for k, v in per_off.items()} }", flush=True)
+        weak = [k for k, v in per_off.items() if v > 0.5]
+        if weak:
+            print(f"[decompose r{rank}] WARNING: offset classes {weak} are "
+                  "fit-noise dominated (weak-block physics NOT captured at "
+                  "this rank -- cf. the ARDR cross-gap pruning).", flush=True)
+        if agg > 1.5 * max(rel_err, 1e-12) + 1e-10:
             raise RuntimeError(
                 f"decomposed-vertex self-check FAILED at rank {rank}: sample "
-                f"max rel err {worst:.3e} >> fit rel_err {rel_err:.3e} -- "
-                "phase-convention mismatch, not fit error.")
+                f"aggregate rel err {agg:.3e} >> fit rel_err {rel_err:.3e} "
+                "-- phase-convention mismatch, not fit error.")
 
         tag = "" if rank == max(ranks) else f"_r{rank}"
         path = out / f"decomposed_vertices{tag}.npz"
