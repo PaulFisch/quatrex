@@ -1653,6 +1653,33 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._qtasks_cache_key = cache_key
             self._qtasks_cache = qtasks
 
+        # One-time stage-3 cost model for the COUPLED-Q ring (mirrors
+        # _print_ring_stats): 6 ring calls of 3 GEMMs per task, 8 real
+        # flops per complex MAC. Without this every film run reported
+        # _ring_model_gflop = 0 and no in-engine GF/s could be derived.
+        if not getattr(self, "_ring_stats_printed", False) and ranks.rank == 0:
+            self._ring_stats_printed = True
+            n_tasks = sum(len(t) for t in qtasks.values())
+            flops = 0.0
+            for tasks in qtasks.values():
+                for t in tasks:
+                    PL, PR, nI, bK2, nJ = t[8], t[9], t[10], t[11], t[12]
+                    bK1 = PL.shape[1]
+                    bK2p = PR.shape[0]
+                    bK1p = PR.shape[1] // nJ
+                    flops += 6 * 8 * n_tau * (
+                        nI * bK2 * bK1 * bK1p
+                        + bK2 * bK2p * bK1p * nJ
+                        + nI * bK2 * bK1p * nJ
+                    )
+            self._ring_model_gflop = flops / 1e9
+            print(
+                f"PhPh SSE ring (coupled-q): pairs={len(qtasks)} "
+                f"qtasks={n_tasks} nq={nq} q_local={q_hi - q_lo} "
+                f"n_tau={n_tau} model={flops / 1e9:.1f} GFLOP/pass",
+                flush=True,
+            )
+
         # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
         # nq==1 _contract_tau so the omega/tau batch parallelises across
         # the ring pool.

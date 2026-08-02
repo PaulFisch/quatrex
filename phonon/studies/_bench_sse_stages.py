@@ -248,7 +248,7 @@ def gemm_roofline() -> int:
     rng = xp.random.default_rng(0)
     print(f"{'b':>5} {'w':>5} {'T=PL@Ga':>9} {'U=Gb@PR':>9} {'full ring':>10}"
           f"   GF/s")
-    for b in (15, 36, 63, 135):
+    for b in (15, 18, 36, 54, 63, 135):
         PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
             (b * b, b))
         PR = rng.standard_normal((b, b * b)) + 1j * rng.standard_normal(
@@ -327,7 +327,7 @@ def gemm_tc() -> int:
     print("== batched ring shapes: Z vs D (TF/s) ==")
     print(f"{'b':>6} {'w':>6} {'Z-T':>8} {'D-T':>8} {'Z-ring':>8} "
           f"{'D-ring':>8}")
-    for b in (36, 63, 135):
+    for b in (18, 36, 54, 63, 135):
         w = min(241, max(8, int(2e9 // (32 * b**3))))
         PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
             (b * b, b))
@@ -424,7 +424,7 @@ def gemm_prec() -> int:
 
     print("== batched ring: c128 vs c64 (TF/s @ c128 flop model) ==")
     print(f"{'b':>6} {'w':>6} {'c128':>8} {'c64':>8} {'speedup':>8}")
-    for b in (36, 63, 135):
+    for b in (18, 36, 54, 63, 135):
         w = min(481, max(8, int(2e9 // (32 * b**3))))
         PL = rng.standard_normal((b * b, b)) + 1j * rng.standard_normal(
             (b * b, b))
