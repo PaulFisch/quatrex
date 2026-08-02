@@ -298,6 +298,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             int(getattr(config.phonon, "sse_g_band", 1) or 1),
             self.n_blocks - 1,
         )
+        # Coupled-q dense ring: strided-batched GEMMs over the (q', quad)
+        # task axis instead of one Python task at a time (the per-task
+        # dispatch cost ~200 us dominated the film ring at 4-10% of peak).
+        self._dense_q_batched = bool(
+            getattr(config.phonon, "sse_dense_q_batched", True))
         if self.g_band > 1 and ranks.block.size > 1:
             # The band halo exchange and the bosonic-fold plan only span
             # the IMMEDIATE comm.block neighbours; with every rank owning
@@ -1747,9 +1752,127 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
 
+        def _scatter_add_q(out, idx, vals):
+            # out (w, nq, bI, bJ); vals (C, w, bI, bJ); idx (C,) with
+            # duplicates -> accumulate on axis 1 of out via a transposed
+            # view (both add.at and scatter_add handle repeated indices).
+            outT = out.transpose(1, 0, 2, 3)          # view
+            if xp is np:
+                np.add.at(outT, idx, vals)
+            else:
+                import cupyx
+                # cupy.add.at has no complex support -> scatter the real
+                # and imaginary float64 views separately.
+                cupyx.scatter_add(outT.real, idx, vals.real)
+                cupyx.scatter_add(outT.imag, idx, vals.imag)
+
+        def _contract_tau_q_batched(lo, hi):
+            """Same math as _contract_tau_q with the (q', quad) task axis
+            flattened into strided-batched GEMMs (per (I, J), grouped by
+            ring shape). Reduction order differs from the task loop only
+            within the scatter-add -> gate at ~1e-12, not bit."""
+            w = hi - lo
+            # Stack each G dict once: {(K, K'): (n_tau, nq, b, b)} ->
+            # (n_pairs, n_tau, nq, b, b) + index map (per shape group the
+            # block sizes are uniform, so one stack per dict suffices for
+            # uniform-block devices; mixed-block devices fall back).
+            def _stack(d):
+                keys = sorted(d.keys())
+                shapes = {d[k].shape[-2:] for k in keys}
+                if len(shapes) > 1:
+                    return None, None
+                return xp.stack([xp.ascontiguousarray(d[k]) for k in keys]), \
+                    {k: i for i, k in enumerate(keys)}
+            GL, gl_i = _stack(gl_q)
+            GG, gg_i = _stack(gg_q)
+            GGR, ggr_i = _stack(ggr_q)
+            GLR, glr_i = _stack(glr_q)
+            if GL is None or GG is None or GGR is None or GLR is None:
+                return _contract_tau_q(lo, hi)
+
+            res = {}
+            for (I, J), tasks in qtasks.items():
+                bs_I = int(self.block_sizes[I])
+                bs_J = int(self.block_sizes[J])
+                out_l = xp.zeros((w, nq, bs_I, bs_J), dtype=dtype)
+                out_g = xp.zeros((w, nq, bs_I, bs_J), dtype=dtype)
+                # group tasks by ring shape (uniform blocks -> one group)
+                groups: dict[tuple, list] = {}
+                for t in tasks:
+                    PL, PR, nI, bK2, nJ = t[8], t[9], t[10], t[11], t[12]
+                    groups.setdefault(
+                        (PL.shape, PR.shape, nI, bK2, nJ), []).append(t)
+                for (shpL, shpR, nI, bK2, nJ), ts in groups.items():
+                    Tn = len(ts)
+                    bK1 = shpL[1]
+                    bK1p = shpR[1] // nJ
+                    # memory budget -> task chunk size
+                    per_task = 16 * w * (
+                        2 * bK1 * bK1p + shpL[0] * bK1p
+                        + bK2 * shpR[1] + 2 * nI * nJ)
+                    C = max(16, min(Tn, self._tau_chunk_bytes
+                                    // max(per_task, 1)))
+                    iqe = xp.asarray([t[0] for t in ts], dtype=xp.int64)
+                    a_id = xp.asarray([gl_i[(t[3], t[4])] for t in ts],
+                                      dtype=xp.int64)
+                    b_id = xp.asarray([gl_i[(t[5], t[6])] for t in ts],
+                                      dtype=xp.int64)
+                    qa = xp.asarray([t[1] for t in ts], dtype=xp.int64)
+                    qb = xp.asarray([t[2] for t in ts], dtype=xp.int64)
+                    wq = xp.asarray([t[7] for t in ts], dtype=xp.float64)
+                    for c0 in range(0, Tn, C):
+                        c1 = min(c0 + C, Tn)
+                        PLc = xp.stack([t[8] for t in ts[c0:c1]])
+                        PRc = xp.stack([t[9] for t in ts[c0:c1]])
+                        PLc = PLc[:, None]            # (C,1,nIbK2,bK1)
+                        PRc = PRc[:, None]            # (C,1,bK2p,bK1pnJ)
+                        ai, bi = a_id[c0:c1], b_id[c0:c1]
+                        qi, q2 = qa[c0:c1], qb[c0:c1]
+
+                        _tau_ix = xp.arange(lo, hi)[None, :]
+
+                        def _legs(A, B):
+                            # single gather -> (C, w, b, b); no (C, w, nq,
+                            # b, b) intermediate (25x the needed memory).
+                            Ga = A[ai[:, None], _tau_ix, qi[:, None]]
+                            Gb = B[bi[:, None], _tau_ix, q2[:, None]]
+                            return Ga, Gb
+
+                        def _ring(Ga, Gb):
+                            Tm = PLc @ Ga             # (C,w,nIbK2,bK1p)
+                            Um = Gb @ PRc             # (C,w,bK2,bK1pnJ)
+                            return (
+                                Tm.reshape(c1 - c0, w, nI, bK2 * bK1p)
+                                @ Um.reshape(c1 - c0, w, bK2 * bK1p, nJ))
+
+                        sl = None
+                        for A, B in ((GL, GL), (GL, GGR), (GGR, GL)):
+                            Ga, Gb = _legs(A, B)
+                            s = _ring(Ga, Gb)
+                            sl = s if sl is None else sl + s
+                        sg = None
+                        for A, B in ((GG, GG), (GG, GLR), (GLR, GG)):
+                            Ga, Gb = _legs(A, B)
+                            s = _ring(Ga, Gb)
+                            sg = s if sg is None else sg + s
+                        wc = wq[c0:c1]
+                        if bool((wc != 1.0).any()):
+                            sl = sl * wc[:, None, None, None]
+                            sg = sg * wc[:, None, None, None]
+                        _scatter_add_q(out_l, iqe[c0:c1], sl.astype(dtype,
+                                                                    copy=False))
+                        _scatter_add_q(out_g, iqe[c0:c1], sg.astype(dtype,
+                                                                    copy=False))
+                res[(I, J)] = (out_l, out_g)
+            return res
+
         pool, n_threads = ring_pool()
         nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))  # see nq==1
-        if pool is not None and xp is np and nt > 1:
+        if self._dense_q_batched:
+            for (I, J), (out_l, out_g) in (
+                    _contract_tau_q_batched(0, n_tau).items()):
+                _write_q(I, J, out_l, out_g)
+        elif pool is not None and xp is np and nt > 1:
             bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
                     for i in range(nt)]
             chunks = list(pool.map(lambda b: _contract_tau_q(*b), bnds))

@@ -1580,6 +1580,15 @@ class PhononConfig(BaseModel):
     with decomposed_kernel="gram" (per-quad weights do not factor through
     the Gram collapse)."""
 
+    sse_dense_q_batched: bool = True
+    """Coupled-q dense ring: flatten the (q', quad) task axis into
+    strided-batched GEMMs (per (I, J), grouped by ring shape) instead of
+    one Python task per (q-pair, quad). Same math; the scatter-add
+    reduction order differs from the task loop at rounding level
+    (~1e-12). The task loop measured ~200 us fixed cost per ring call --
+    the film ring ran at 4-10% of peak, ~85% non-GEMM time. False
+    restores the legacy per-task loop bit-exactly."""
+
     sse_ring_dtype: Literal["complex128", "complex64"] = "complex128"
     """Precision of the ring-contraction GEMMs (the SSE hot path). With
     "complex64" the vertex factors and inner-G band links are cast to
