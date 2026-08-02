@@ -207,6 +207,8 @@ def _gather_full(local_w):
 
 
 _best = {"res": np.inf, "sig": None}
+_mean = {"n": 0, "sum": None}
+_MEAN_SKIP = int(os.environ.get("QX_SIGMA_MEAN_SKIP", "4"))
 
 
 def _logged(self):
@@ -215,6 +217,23 @@ def _logged(self):
         h = _heat(mw)
         _iter_heat.append(np.asarray(h))
         print(f"[it {_it['n']:2d}] energy J(local)={np.round(h, 4)}", flush=True)
+    # Orbit-mean Sigma (QX_SAVE_SIGMA_MEAN): for a spiral orbit around
+    # the fixed point (underdamped complex eigenpair, the mos2 film
+    # limit cycle) the period-mean cancels the rotating component --
+    # the mean IS the fixed-point estimate; restart from it.
+    if os.environ.get("QX_SAVE_SIGMA_MEAN"):
+        _it["mean_seen"] = _it.get("mean_seen", 0) + 1
+        if _it["mean_seen"] > _MEAN_SKIP:
+            _cur = tuple(
+                np.asarray(get_host(b.data)).copy()
+                for b in (self.data.sigma_lesser, self.data.sigma_greater,
+                          self.data.sigma_retarded_hermitian))
+            if _mean["sum"] is None:
+                _mean["sum"] = list(_cur)
+            else:
+                for _a, _b in zip(_mean["sum"], _cur):
+                    _a += _b
+            _mean["n"] += 1
     # Best-residual Sigma snapshot (QX_SAVE_SIGMA_BEST): a soft-bin kick on
     # a LATE iteration must not poison a warm-start chain with its worst
     # iterate, so track the minimum-residual state on every rank.
@@ -511,6 +530,14 @@ if os.environ.get("QX_SAVE_SIGMA") and err is None:
     if ranks.rank == 0:
         print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}"
               f"{' (per-rank slices)' if ranks.size > 1 else ''}", flush=True)
+# Orbit-mean snapshot (see _logged; the spiral-orbit fixed-point estimate).
+if os.environ.get("QX_SAVE_SIGMA_MEAN") and err is None and _mean["n"] > 0:
+    _sl, _sg, _sr = (a / _mean["n"] for a in _mean["sum"])
+    np.savez(_sigma_file(os.environ["QX_SAVE_SIGMA_MEAN"]),
+             sigma_lesser=_sl, sigma_greater=_sg, sigma_retarded=_sr)
+    if ranks.rank == 0:
+        print(f"SAVED SIGMA(mean over {_mean['n']} it) "
+              f"{os.environ['QX_SAVE_SIGMA_MEAN']}", flush=True)
 # Minimum-residual snapshot (tracked per iteration in _logged).
 if os.environ.get("QX_SAVE_SIGMA_BEST") and err is None and _best["sig"] is not None:
     _sl, _sg, _sr = _best["sig"]
