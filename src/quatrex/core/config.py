@@ -1639,6 +1639,13 @@ class PhononConfig(BaseModel):
     NOTE: the implementation assembles dense device-level arrays (FC3
     tensor + Phi_eff eigensolve); intended for single / few-cell devices."""
 
+    scp_uu_source: Literal["g", "dressed"] = "g"
+    """Equal-time <uu> source for the static SCP terms: "g" =
+    the NEGF G^< quadrature (legacy; ill-conditioned at eta=0 on
+    IR-resolved grids), "dressed" = SCP closed form on the
+    dressed harmonic model Phi_eff at the mean lead temperature
+    (exact in equilibrium, robust)."""
+
     scp_uu_min_thz: NonNegativeFloat = 0.0
     """<uu> quadrature floor (THz): exclude bins below this from
     the equal-time <uu> integral (eta=0 IR tails below the lowest

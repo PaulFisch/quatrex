@@ -630,6 +630,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "SCP tadpole: Tr<uu> <= 0 -- sign-convention violation?",
                 stacklevel=2)
         phi_eff = self._scp_D + self._sigma_static
+        if str(getattr(self._scp_cfg, "scp_uu_source", "g")) == "dressed":
+            # SCP closed form on the dressed model -- the eta=0 G^<
+            # quadrature is ill-conditioned on IR-resolved grids and
+            # produced O(10x) <uu> errors driving the static terms
+            # unphysical (2026-08-02).
+            from quatrex.phonon.static_self_energy import (
+                equal_time_uu_dressed)
+            _tbar = 0.5 * (float(self._scp_cfg.left_temperature)
+                           + float(self._scp_cfg.right_temperature))
+            uu = equal_time_uu_dressed(phi_eff, _tbar)
         w_mean = mean_displacement(
             self._fc3_dev_mw, uu, phi_eff,
             omega2_floor_abs=self._scp_floor2)

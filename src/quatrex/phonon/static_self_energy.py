@@ -114,3 +114,20 @@ def sigma_loop_blocks(fc4_blocks, uu, n_blocks, n_dof):
                             optimize=True))
     sig *= CONVERSION_THZ2
     return 0.5 * (sig + sig.T)
+
+
+def equal_time_uu_dressed(phi_eff, temperature_k, floor_thz=1e-3):
+    """SCP closed-form equal-time <w w> [amu A^2] from the dressed
+    harmonic model: sum_modes (hbar/2 omega) coth(hbar omega / 2 kT)
+    |e><e| over the eigenmodes of Phi_eff [THz^2]. Exact in equilibrium
+    and immune to the eta=0 NEGF quadrature ill-conditioning that makes
+    the raw G^< integral unusable on IR-resolved grids (modes below
+    ``floor_thz`` are excluded)."""
+    d = 0.5 * (np.asarray(phi_eff) + np.asarray(phi_eff).T).real
+    evals, evecs = np.linalg.eigh(d)
+    w = np.sqrt(np.clip(evals, 0.0, None))
+    keep = w > float(floor_thz)
+    x = HBAR_EV * THZ_TO_RAD * w[keep] / (2.0 * 8.617333262e-5 * temperature_k)
+    amp = UU_PREFACTOR * 0.5 / w[keep] / np.tanh(x)
+    V = evecs[:, keep]
+    return (V * amp) @ V.T
