@@ -86,3 +86,31 @@ def sigma_tadpole(fc3_mw, w_mean):
     """Cubic tadpole self-energy Sigma_T = Phi3 : <u> [THz^2]"""
     sig = CONVERSION_THZ2 * np.einsum("abc,c->ab", fc3_mw, w_mean, optimize=True)
     return 0.5 * (sig + sig.conj().T).real
+
+
+CONVERSION_FC4 = CONVERSION / (1e-20 * AMU_KG)
+CONVERSION_FC4_THZ = CONVERSION_FC4 / THZ_TO_RAD**3
+
+
+def sigma_loop_blocks(fc4_blocks, uu, n_blocks, n_dof):
+    """Quartic (SCP) loop self-energy Sigma_L = 1/2 Phi4 : <uu> [THz^2].
+
+    ``fc4_blocks``: {(I, J, K, Kp): Phi4[n_dof, n_dof, n_dof, n_dof]}
+    mass-weighted quartic device blocks in eV/(A^4 amu^2) — the (I, J)
+    legs are the Sigma indices, (K, Kp) are contracted against the
+    equal-time mass-weighted <w w> [amu A^2] (equal_time_uu_from_sum),
+    giving eV/(A^2 amu) -> CONVERSION_THZ2 -> THz^2. For a locally
+    stable quartic the loop is the SCP stiffening term: it GROWS with
+    <uu>, providing the restoring feedback the cubic-only bubble lacks
+    on soft-mode structures.
+    """
+    N_D = n_blocks * n_dof
+    sig = np.zeros((N_D, N_D), dtype=float)
+    uu = np.asarray(uu)
+    for (I, J, K, Kp), blk in fc4_blocks.items():
+        uu_blk = uu[K * n_dof:(K + 1) * n_dof, Kp * n_dof:(Kp + 1) * n_dof]
+        sig[I * n_dof:(I + 1) * n_dof, J * n_dof:(J + 1) * n_dof] += (
+            0.5 * np.einsum("abcd,cd->ab", np.asarray(blk).real, uu_blk,
+                            optimize=True))
+    sig *= CONVERSION_THZ2
+    return 0.5 * (sig + sig.T)
