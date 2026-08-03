@@ -122,7 +122,8 @@ def fig_stabilisers(d) -> None:
     named = [("floor_ramp", r"annealed $\eta_\mathrm{ir}$ floor", 1),
              ("orbit_mean", "orbit-mean restart", 2),
              ("tadpole", "SCP tadpole", 3),
-             ("loop3", "tadpole + quartic loop", 4)]
+             ("loop3", "tadpole + quartic loop", 4),
+             ("loop4", "quartic loop only", 5)]
     for key, lab, ci in named:
         r = d[f"res_{key}"][:, 0]
         ax.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci], lw=1.3,
@@ -135,7 +136,7 @@ def fig_stabilisers(d) -> None:
 
     print("stabiliser probes, min residual (iterations):")
     for key in ("mix_a", "mix_b", "mix_c", "floor_ramp", "orbit_mean",
-                "tadpole", "loop3"):
+                "tadpole", "loop3", "loop4"):
         r = d[f"res_{key}"][:, 0]
         print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
 

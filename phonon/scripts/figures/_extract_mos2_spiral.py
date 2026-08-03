@@ -24,6 +24,9 @@ phonon/scripts/data/mos2_spiral.npz for the mos2_spiral.py generator:
                   tadpole             SCP tadpole static Sigma (4318792)
                   loop3               tadpole+quartic loop, dressed
                                       <uu> (4319028, diverged)
+                  loop4               quartic loop only, dressed <uu>,
+                                      bare o4 build (4320390, diverged
+                                      at it 28, best residual 0.83)
 
 Run:  python phonon/scripts/figures/_extract_mos2_spiral.py
 """
@@ -49,6 +52,7 @@ RECORDS = {
     "orbit_mean": "cluster/mos2f3mr/slurm-4318752.out",
     "tadpole": "cluster/mos2f3tp/slurm-4318792.out",
     "loop3": "cluster/mos2f3o4/slurm-4319028.out",
+    "loop4": "cluster/mos2f3o4/slurm-4320390.out",
 }
 
 
