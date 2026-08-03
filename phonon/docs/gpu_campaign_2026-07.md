@@ -270,3 +270,32 @@ the factored gram kernel (q-FFT collapse, N_q^2 -> N_q log N_q) is the
 next lever — pending the factorisation audit gates (mass-weighted ASR
 fixed; post-min-image conservation ladder in progress; note the shipped
 sifilm nk9 dense reference itself predated the min-image fix).
+
+## 10. Fused-ring kernel, rounds 1-2 (2026-08-03): the empirical ceiling
+
+Hand-written CUDA C++ fused chain (T/U never touch HBM), 11 variants
++ 4 operation restructures + cuTENSOR/cuTile, all parity 2-5e-15:
+
+| candidate | b=18 @ depth | vs cuBLAS (7.6-7.9) |
+|---|---|---|
+| cuBLAS 3-GEMM composite | 7.6-7.9 TF/s | 1.00 |
+| fused v1 (o1, panel-streamed) | **8.9-9.0** | **1.17-1.19** |
+| fused rt22/rt23/rt33 (register tiles) | < v1 | — |
+| fused v3 (fixed-k2 mapping) | 4.4-4.8 | 0.56-0.62 |
+| cuTENSOR einsum mapping | 7.1-7.2 | 0.90 |
+| grouped tall-GEMM restructure | <= 5.7 | <= 0.73 |
+| cuTile (sec. 8) | 0.8-1.0 | 0.03-0.08 |
+
+ncu on v1: smem/L1 pipe 79% vs FMA 28%, 162 regs -> 17% occupancy —
+the on-chip pipes bind, not HBM (29 GB/s) or arithmetic. Literature
+(MAGMA/DBCSR class, verified): published batched-FP64 best at b~16-32
+= 90% of the nB/8 complex roofline = 12-31% of raw peak; the fused-
+chain roofline (~18 TF/s = 53% of the 34 TF/s vector peak) has no
+published FP64 demonstration and is NOT reachable here — every
+organisation that cut one stage's traffic paid it back elsewhere.
+VERDICT: empirical max ~9 TF/s (26% of peak) at b=18; +15-19% over
+cuBLAS = below the 1.5x integration bar -> parked (sources
+phonon/studies/_fused_ring.* / _ring_variants_bench.py). Tensor
+cores irrelevant at b=18 (bandwidth-bound); b>=36 belongs to cuBLAS.
+Realised film levers instead: bosonic fold (1.5x flops, merged) +
+OBC cache mode + stack scaling.
