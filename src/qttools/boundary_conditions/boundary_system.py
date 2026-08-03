@@ -264,7 +264,7 @@ class BaseBoundarySystem(ABC):
         solution = self.cache_compressor.decompress(self._cache.get(contact, None))
 
         if solution is None:
-            if self.memoization_mode in ["auto", "force-after-first"]:
+            if self.memoization_mode in ["auto", "cache", "force-after-first"]:
                 return self._solve(boundary_system, contact, **kwargs)
 
             elif self.memoization_mode == "force":
@@ -276,6 +276,21 @@ class BaseBoundarySystem(ABC):
         rel_residuals, abs_residuals, solution = self._get_residuals(
             boundary_system, solution
         )
+
+        if self.memoization_mode == "cache":
+            # Accept the cached solution only if EVERY local entry is
+            # converged after the single refinement step above; any
+            # stale entry (changed boundary system, e.g. during an eta
+            # ramp) forces the full solve. Never discards a converged
+            # cache and never returns an unconverged one -- cf. "auto",
+            # which does both. Rank-local: no collectives, ranks may
+            # branch differently (the per-entry solves are independent).
+            converged = (abs_residuals < self.absolute_tol) | (
+                rel_residuals < self.relative_tol
+            )
+            if bool(xp.all(converged)):
+                return solution
+            return self._solve(boundary_system, contact, **kwargs)
 
         if self.memoization_mode == "auto":
             # Check for convergence accross all MPI ranks.

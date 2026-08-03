@@ -529,11 +529,22 @@ class MemoizerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["auto", "force", "force-after-first", "off"] = "auto"
+    mode: Literal["auto", "cache", "force", "force-after-first", "off"] = "auto"
     """The memoization mode to determine when to do fixed-point iterations.
 
     - "auto": Automatically decides whether to use memoization based on the
         specified tolerances. Only useful if all ranks memoize.
+    - "cache": Accept the cached solution outright when every local entry
+        is converged after one refinement step; full re-solve otherwise.
+        The right mode for iteration-invariant boundary systems (eta = 0,
+        fixed leads, no scattering contacts): the OBC input is identical
+        every SCBA iteration, so from the second iteration the cache is
+        exact and the per-iteration OBC cost drops to one refinement
+        step. Self-invalidating: any input change (eta/eta_obc/ir-floor
+        ramps) breaks convergence of the cached solution and triggers
+        the full solve. Rank-local decision, no collectives. Unlike
+        "auto", a converged cache is never discarded and an unconverged
+        one is never returned.
     - "force": Always use memoization.
     - "force-after-first": Use memoization after the first SCBA iteration.
     - "off": Never use memoization.
