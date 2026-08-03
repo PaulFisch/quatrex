@@ -9,20 +9,24 @@
                     matrix; (c) max|Sigma^<| per (iteration, energy)
                     on the low-frequency slice -- the burst locus
                     sits on the soft interlayer modes.
-  mos2_stabilisers  residual traces of every stabiliser probe on the
-                    same fixed point: three mixing variants, the
-                    annealed eta_ir floor ramp, the orbit-mean
-                    restart, the SCP tadpole, and the tadpole+loop
-                    (loop3) -- none descends; the two static-Sigma
-                    probes diverge.
+  mos2_stabilisers  (a) residual traces of the FULL-vertex stabiliser
+                    probes on the film fixed point: the 95-it linear
+                    record, the orbit-mean restart, the SCP tadpole,
+                    and the two quartic-loop attempts -- none
+                    descends below 0.62 and both loop probes
+                    diverge. (b) the vertex-ablation control: on the
+                    accidental diagonal-only (no cross-slab FC3)
+                    build the same iteration descends -- probe c
+                    monotonically to 0.087 before its 55-it cap
+                    (unrecorded per-run overrides), the
+                    current-code defaults continuation to 0.646
+                    before a late divergence at 66 -- the
+                    cross-slab anharmonic channel is what
+                    destabilises.
 
 Data: phonon/scripts/data/mos2_spiral.npz, distilled by
-_extract_mos2_spiral.py from cluster/mos2f3long (job 4318325),
-cluster/mos2f3{,mr,tp,o4} slurm logs. All runs eta=0. The three
-mixing-variant probes are plotted as an unlabelled ensemble: their
-per-job scheme identity was not preserved in the surviving artifacts
-(the run dir's job.sh was overwritten by later launches); the claim
-they support is collective -- no scheme descends -- not per-scheme.
+_extract_mos2_spiral.py (see its docstring for the full vertex
+provenance of every run). All runs eta=0.
 
 Run:  python phonon/scripts/figures/mos2_spiral.py
 """
@@ -109,34 +113,46 @@ def fig_spiral(d) -> None:
 
 
 def fig_stabilisers(d) -> None:
-    fig, ax = style.figure(width=5.4, height=3.4)
+    fig, (ax_a, ax_b) = style.figure(ncols=2, width=4.4, height=3.4)
     colors = style.RC["axes.prop_cycle"].by_key()["color"]
 
     long_res = d["res_long"][:, 0]
-    ax.semilogy(np.arange(1, len(long_res) + 1), long_res, color="0.8",
-                lw=1.0, label="linear 0.1 (95-it record)")
-    for key in ("mix_a", "mix_b", "mix_c"):
-        r = d[f"res_{key}"][:, 0]
-        ax.semilogy(np.arange(1, len(r) + 1), r, color="0.55", lw=0.9,
-                    label="mixing variants" if key == "mix_a" else None)
-    named = [("floor_ramp", r"annealed $\eta_\mathrm{ir}$ floor", 1),
-             ("orbit_mean", "orbit-mean restart", 2),
+    ax_a.semilogy(np.arange(1, len(long_res) + 1), long_res, color="0.6",
+                  lw=1.1, label="linear 0.1 (95-it record)")
+    named = [("orbit_mean", "orbit-mean restart", 2),
              ("tadpole", "SCP tadpole", 3),
              ("loop3", "tadpole + quartic loop", 4),
              ("loop4", "quartic loop only", 5)]
     for key, lab, ci in named:
         r = d[f"res_{key}"][:, 0]
-        ax.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci], lw=1.3,
-                    label=lab)
-    ax.set_xlabel("iteration")
-    ax.set_ylabel(r"rel $\Sigma^R$ residual")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        ax_a.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci],
+                      lw=1.3, label=lab)
+    ax_a.set_xlabel("iteration")
+    ax_a.set_ylabel(r"rel $\Sigma^R$ residual")
+    ax_a.legend(fontsize=7, loc="lower right")
+
+    ax_b.semilogy(np.arange(1, len(long_res) + 1), long_res, color="0.6",
+                  lw=1.1, label="full vertex (record)")
+    for key, lab, ci, lw in (
+            ("abl_c", "ablated, probe c", 0, 1.4),
+            ("abl_a", "ablated, probe a", 0, 0.8),
+            ("abl_cont", "ablated, defaults (250-it cont.)", 1, 1.2)):
+        r = d[f"res_{key}"][:, 0]
+        ax_b.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci],
+                      lw=lw, alpha=1.0 if lw > 1 else 0.5,
+                      label=lab)
+    ax_b.set_xlabel("iteration")
+    ax_b.legend(fontsize=7, loc="lower left")
 
     style.save(fig, "mos2_stabilisers", directory=FIGDIR)
 
-    print("stabiliser probes, min residual (iterations):")
-    for key in ("mix_a", "mix_b", "mix_c", "floor_ramp", "orbit_mean",
-                "tadpole", "loop3", "loop4"):
+    print("FULL-vertex probes, min residual (iterations):")
+    for key in ("orbit_mean", "tadpole", "loop3", "loop4"):
+        r = d[f"res_{key}"][:, 0]
+        print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
+    print(f"  long record {long_res.min():.3e} ({len(long_res)} it)")
+    print("ABLATED-vertex (diagonal-only) probes:")
+    for key in ("abl_a", "abl_b", "abl_c", "abl_floor", "abl_cont"):
         r = d[f"res_{key}"][:, 0]
         print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
 
