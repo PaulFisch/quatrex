@@ -29,6 +29,17 @@ number below is hard-coded:
       anharmonic 939.7 at 3 uc (1.62 nm), 890.97 at 5 uc (2.70 nm);
       ballistic NEGF 1065.81 at 5 uc (their convergence table).
 
+  eta=0 coupled-q re-runs (2026-08-03, the finite-eta supersession):
+      read live from phonon/scripts/data/film_kappa.csv (extractor
+      _extract_film_kappa.py; runs cluster/sifilm{3,5,8}{b,s} --
+      nk=9 shifted mesh, 121 freq, eta=0, converged fixed points
+      70/52 iterations at L3/L8, 5x5x5 VASP constants, nk9r rebuilt
+      post-min-image build). Slab here = the FCC-primitive transport
+      cell (V/A_perp = 3.16 A), so thicknesses are 0.95/1.58/2.53 nm
+      -- thinner per layer count than the old finite-eta series.
+      The finite-eta curves above stay plotted, greyed, as the
+      retracted record.
+
 Review-mandated fixes vs the old plot_si_film_consolidated.py figure:
   (i)  legend moved OUTSIDE the axes (it hid the Guo 890.97 star and the
        last 2x2x2 ballistic point);
@@ -68,17 +79,37 @@ GUO_BALL = [1065.81]
 C = ["#0173b2", "#de8f05", "#029e73", "#d55e00"]   # style palette
 
 
+def _eta0_rows():
+    import csv
+    rows = [r for r in csv.DictReader(
+        (ROOT / "phonon/scripts/data/film_kappa.csv").open())
+        if r["system"] == "si"]
+    out = {}
+    for kind in ("ballistic", "scba"):
+        pts = sorted((float(r["t_nm"]), 1e-6 * float(r["G_W_m2K"]))
+                     for r in rows if r["kind"] == kind
+                     and (kind == "ballistic" or r["converged"] == "True"))
+        out[kind] = ([p[0] for p in pts], [p[1] for p in pts])
+    return out
+
+
 def main():
     fig, ax = style.figure(width=4.8, height=3.4)
 
-    ax.plot(TWO_BALL_L, TWO_BALL, "o-", color=C[0],
-            label=r"$2{\times}2{\times}2$ FC, ballistic")
-    ax.plot(TWO_ANH_L, TWO_ANH, "s", color=C[0], mfc="none", mew=1.4,
-            label=r"$2{\times}2{\times}2$ FC, anharmonic")
-    ax.plot(BIG_L, BIG_BALL, "o-", color=C[3],
-            label=r"$5{\times}5{\times}5$ FC, ballistic")
-    ax.plot(BIG_L, BIG_ANH, "s--", color=C[3],
-            label=r"$5{\times}5{\times}5$ FC, anharmonic")
+    # retracted finite-eta record, greyed (see docstring)
+    ax.plot(TWO_BALL_L, TWO_BALL, "o-", color="0.75",
+            label=r"finite-$\eta$ $2{\times}2{\times}2$ (retracted)")
+    ax.plot(TWO_ANH_L, TWO_ANH, "s", color="0.75", mfc="none", mew=1.4)
+    ax.plot(BIG_L, BIG_BALL, "o-", color="0.55",
+            label=r"finite-$\eta$ $5{\times}5{\times}5$ (retracted)")
+    ax.plot(BIG_L, BIG_ANH, "s--", color="0.55")
+
+    e0 = _eta0_rows()
+    ax.plot(*e0["ballistic"], "o-", color=C[0], lw=1.6,
+            label=r"$\eta=0$ coupled-$q$, ballistic")
+    ax.plot(*e0["scba"], "s-", color=C[3], lw=1.6,
+            label=r"$\eta=0$ coupled-$q$, anharmonic")
+
     ax.plot(GUO_ANH_L, GUO_ANH, "*", color="k", ms=11, ls="none",
             label="Guo et al. 2020, anharmonic")
     ax.plot(GUO_BALL_L, GUO_BALL, "*", color="k", ms=11, mfc="none",
@@ -86,7 +117,7 @@ def main():
 
     ax.set_xlabel("film thickness $L$ (nm)")
     ax.set_ylabel(r"cross-plane conductance $G$ (MW m$^{-2}$K$^{-1}$)")
-    ax.set_xlim(1.0, 3.3)
+    ax.set_xlim(0.8, 3.3)
     ax.set_ylim(0, 1150)
     # legend OUTSIDE the axes so it cannot mask any data point (review fix)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
@@ -94,6 +125,15 @@ def main():
     style.save(fig, "si_film_vs_guo", directory=FIGDIR)
 
     print("\n  plotted values (MW m^-2 K^-1):")
+    for kind in ("ballistic", "scba"):
+        L, G = e0[kind]
+        print(f"  eta0 {kind:9s}: " + "  ".join(
+            f"{l:.2f}nm={g:.1f}" for l, g in zip(L, G)))
+    if e0["scba"][0]:
+        rr = [g / e0["ballistic"][1][0] for g in e0["scba"][1]]
+        print("  eta0 reduction: " + "  ".join(
+            f"{1 - r:.1%}" for r in rr)
+            + "  (Guo's own: 16.4% at 5 uc)")
     for lab, L, G in [("2x2x2 ball", TWO_BALL_L, TWO_BALL),
                       ("2x2x2 anh ", TWO_ANH_L, TWO_ANH),
                       ("5x5x5 ball", BIG_L, BIG_BALL),
