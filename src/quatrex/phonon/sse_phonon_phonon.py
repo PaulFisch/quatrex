@@ -282,6 +282,43 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 block_sizes=self.block_sizes,
                 truncation_warn=config.phonon.phonon_phonon_truncation_warn,
             )
+
+        # Selective cross-slab vertex scale (sse_cross_slab_scale): scale
+        # every block whose slab triple (I, K1, K2) is non-uniform. The
+        # class is permutation-invariant, so S3 symmetry (and with it the
+        # bubble-balance identity) survives at any scale. The Gamma dict
+        # may alias the qfold (0, 0) entry, so both are rebuilt into fresh
+        # dicts to scale each block exactly once.
+        xscale = float(getattr(config.phonon, "sse_cross_slab_scale", 1.0))
+        if xscale != 1.0:
+            if self._vfactors is not None:
+                raise ValueError(
+                    "sse_cross_slab_scale != 1 is unsupported with the "
+                    "factored vertex (decomposed_vertices_path); use the "
+                    "dense qfold or Gamma path."
+                )
+
+            def _xs(trip, blk):
+                return blk if trip[0] == trip[1] == trip[2] else xscale * blk
+
+            if self._qvertices is not None:
+                self._qvertices = {
+                    qp: {trip: _xs(trip, blk) for trip, blk in blocks.items()}
+                    for qp, blocks in self._qvertices.items()
+                }
+                phi_blocks = self._qvertices[(0, 0)]
+            else:
+                phi_blocks = {
+                    trip: _xs(trip, blk) for trip, blk in phi_blocks.items()
+                }
+            n_cross = sum(
+                1 for t in phi_blocks if not (t[0] == t[1] == t[2]))
+            print(
+                f"[SigmaPhononPhonon] cross-slab vertex scale "
+                f"{xscale:g} on {n_cross} of {len(phi_blocks)} Gamma "
+                "blocks (and every q-folded block of the class).",
+                flush=True,
+            )
         self.phi_blocks = phi_blocks
 
         # Inner Green's-function band kept in the contraction. The default
