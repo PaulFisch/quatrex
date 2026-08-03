@@ -1,0 +1,151 @@
+"""MoS2 film instability figures (fig:res_mos2_spiral, fig:res_mos2_stab).
+
+  mos2_spiral       the 95-iteration record of the eta=0 cubic-only
+                    film SCBA (SCP(300 K) fc2, linear 0.1 mixing,
+                    nu grid): (a) rel Sigma^R residual with the
+                    metastable orbit and the terminal burst; (b) the
+                    bounded, non-converging orbit in the leading two
+                    principal components of the per-iteration heat
+                    matrix; (c) max|Sigma^<| per (iteration, energy)
+                    on the low-frequency slice -- the burst locus
+                    sits on the soft interlayer modes.
+  mos2_stabilisers  residual traces of every stabiliser probe on the
+                    same fixed point: three mixing variants, the
+                    annealed eta_ir floor ramp, the orbit-mean
+                    restart, the SCP tadpole, and the tadpole+loop
+                    (loop3) -- none descends; the two static-Sigma
+                    probes diverge.
+
+Data: phonon/scripts/data/mos2_spiral.npz, distilled by
+_extract_mos2_spiral.py from cluster/mos2f3long (job 4318325),
+cluster/mos2f3{,mr,tp,o4} slurm logs. All runs eta=0. The three
+mixing-variant probes are plotted as an unlabelled ensemble: their
+per-job scheme identity was not preserved in the surviving artifacts
+(the run dir's job.sh was overwritten by later launches); the claim
+they support is collective -- no scheme descends -- not per-scheme.
+
+Run:  python phonon/scripts/figures/mos2_spiral.py
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[3]
+for p in (str(ROOT), str(ROOT / "phonon")):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+from phonon.studies import style
+
+DATA = ROOT / "phonon/scripts/data/mos2_spiral.npz"
+FIGDIR = ROOT / "document/fig/transport_sweeps"
+
+
+def orbit_periods(x: np.ndarray, n_top: int = 3) -> list[float]:
+    """Leading periods (iterations) from the PC-trajectory spectrum."""
+    y = x - x.mean()
+    spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
+    ks = np.argsort(spec[1:])[::-1][:n_top] + 1
+    return [len(y) / int(k) for k in ks]
+
+
+def fig_spiral(d) -> None:
+    res = d["res_long"][:, 0]
+    heat = d["heat_long"]
+    sig = d["sigmax_long"]
+    en = d["energies_lo"]
+
+    fig, (ax_a, ax_b, ax_c) = style.figure(ncols=3, width=3.5, height=3.1)
+    colors = style.RC["axes.prop_cycle"].by_key()["color"]
+
+    it = np.arange(1, len(res) + 1)
+    ax_a.semilogy(it, res, color=colors[0], lw=1.2)
+    ax_a.set_xlabel("iteration")
+    ax_a.set_ylabel(r"rel $\Sigma^R$ residual")
+    ax_a.axvspan(30, 88, color=colors[2], alpha=0.12, linewidth=0)
+    ax_a.annotate("metastable orbit", (58, res[30:88].max() * 2),
+                  ha="center", fontsize=8)
+    ax_a.annotate("burst", (len(res) - 1, res[-1]),
+                  textcoords="offset points", xytext=(-28, -2), fontsize=8)
+
+    # PCA of the heat-matrix trajectory over the orbit window
+    w0, w1 = 10, 88
+    flat = heat[w0:w1].reshape(w1 - w0, -1)
+    flat = flat - flat.mean(axis=0)
+    _, _, vt = np.linalg.svd(flat, full_matrices=False)
+    pc = flat @ vt[:2].T
+    ax_b.plot(pc[:, 0], pc[:, 1], "-", color="0.75", lw=0.8, zorder=1)
+    sc = ax_b.scatter(pc[:, 0], pc[:, 1], c=np.arange(w0, w1), s=9,
+                      cmap="viridis", zorder=2)
+    fig.colorbar(sc, ax=ax_b, label="iteration", shrink=0.85)
+    ax_b.set_xlabel("heat-matrix PC 1")
+    ax_b.set_ylabel("heat-matrix PC 2")
+
+    pers = orbit_periods(pc[:, 0])
+
+    it_sig = np.arange(1, sig.shape[0] + 1)
+    m = ax_c.pcolormesh(it_sig, en, np.log10(np.maximum(sig, 1e-3)).T,
+                        cmap="magma", shading="nearest", rasterized=True)
+    fig.colorbar(m, ax=ax_c, label=r"$\log_{10}\max|\Sigma^<|$", shrink=0.85)
+    ax_c.set_xlabel("iteration")
+    ax_c.set_ylabel(r"$\omega$ (THz)")
+    ax_c.set_ylim(0, en.max())
+
+    style.save(fig, "mos2_spiral", directory=FIGDIR)
+
+    print(f"long record: {len(res)} residual points, min {res.min():.3e} "
+          f"at it {res.argmin() + 1}, final {res[-1]:.3e}")
+    print("orbit recurrence, leading PC1 periods (iterations): "
+          + ", ".join(f"{p:.0f}" for p in pers)
+          + "  (slow envelope + subharmonics; no single clean period)")
+    p90 = np.percentile(sig[-1], 90)
+    locus = en[sig[-1] > p90]
+    print(f"burst locus (last iteration, top decile of max|Sigma^<|): "
+          f"{locus.min():.2f}-{locus.max():.2f} THz on the "
+          f"{en.min():.2f}-{en.max():.2f} THz slice")
+
+
+def fig_stabilisers(d) -> None:
+    fig, ax = style.figure(width=5.4, height=3.4)
+    colors = style.RC["axes.prop_cycle"].by_key()["color"]
+
+    long_res = d["res_long"][:, 0]
+    ax.semilogy(np.arange(1, len(long_res) + 1), long_res, color="0.8",
+                lw=1.0, label="linear 0.1 (95-it record)")
+    for key in ("mix_a", "mix_b", "mix_c"):
+        r = d[f"res_{key}"][:, 0]
+        ax.semilogy(np.arange(1, len(r) + 1), r, color="0.55", lw=0.9,
+                    label="mixing variants" if key == "mix_a" else None)
+    named = [("floor_ramp", r"annealed $\eta_\mathrm{ir}$ floor", 1),
+             ("orbit_mean", "orbit-mean restart", 2),
+             ("tadpole", "SCP tadpole", 3),
+             ("loop3", "tadpole + quartic loop", 4)]
+    for key, lab, ci in named:
+        r = d[f"res_{key}"][:, 0]
+        ax.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci], lw=1.3,
+                    label=lab)
+    ax.set_xlabel("iteration")
+    ax.set_ylabel(r"rel $\Sigma^R$ residual")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    style.save(fig, "mos2_stabilisers", directory=FIGDIR)
+
+    print("stabiliser probes, min residual (iterations):")
+    for key in ("mix_a", "mix_b", "mix_c", "floor_ramp", "orbit_mean",
+                "tadpole", "loop3"):
+        r = d[f"res_{key}"][:, 0]
+        print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
+
+
+def main() -> None:
+    FIGDIR.mkdir(parents=True, exist_ok=True)
+    d = np.load(DATA)
+    fig_spiral(d)
+    fig_stabilisers(d)
+
+
+if __name__ == "__main__":
+    main()
