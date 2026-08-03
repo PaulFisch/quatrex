@@ -41,7 +41,7 @@ H_SI = 6.62607015e-34
 
 RUNS = [
     # (system, tag, kind, run_dir, npz, tdir)
-    ("mos2", "L3", "ballistic", "cluster/mos2f3nu", "run_ballistic.npz", "z"),
+    ("mos2", "L3", "ballistic", "cluster/mos2f3b2", "run.npz", "z"),
     ("mos2", "L6", "ballistic", "cluster/mos2f6b", "run.npz", "z"),
     ("mos2", "L10", "ballistic", "cluster/mos2f10b", "run.npz", "z"),
     ("mos2", "L16", "ballistic", "cluster/mos2f16b", "run.npz", "z"),

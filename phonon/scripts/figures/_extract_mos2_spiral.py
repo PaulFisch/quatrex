@@ -70,6 +70,14 @@ RECORDS = {
     "abl_c": "cluster/mos2f3/slurm-4315592.out",
     "abl_floor": "cluster/mos2f3/slurm-4315641.out",
     "abl_cont": "cluster/mos2f3-b2cont/slurm-4322408.out",
+    # resolution x coupling quadrant runs (2026-08-03):
+    # xs0 = intra-slab-only (sse_cross_slab_scale=0) on the CORRECT o4
+    # build + resolved nu grid -- dips to 0.375 at it 16, diverges at
+    # 38 (job 4322499): under-resolution, not the coupling alone, was
+    # the stabiliser of the coarse-grid descents.
+    "xs0": "cluster/mos2f3-xs0/slurm-4322499.out",
+    # u121 = FULL vertex on the coarse uniform-121 grid (job appended
+    # when the probe lands).
 }
 
 
