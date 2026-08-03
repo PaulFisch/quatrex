@@ -1639,6 +1639,12 @@ class PhononConfig(BaseModel):
     NOTE: the implementation assembles dense device-level arrays (FC3
     tensor + Phi_eff eigensolve); intended for single / few-cell devices."""
 
+    scp_tadpole_term: bool = True
+    """Include the cubic tadpole Phi3:<u> in the static SCP
+    self-energy. False for centrosymmetric crystals (<u> = 0 by
+    inversion; the numerical tadpole is noise amplified through
+    Phi_eff^+ and destabilises the map) -- keeps the quartic loop."""
+
     scp_uu_source: Literal["g", "dressed"] = "g"
     """Equal-time <uu> source for the static SCP terms: "g" =
     the NEGF G^< quadrature (legacy; ill-conditioned at eta=0 on

@@ -640,10 +640,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             _tbar = 0.5 * (float(self._scp_cfg.left_temperature)
                            + float(self._scp_cfg.right_temperature))
             uu = equal_time_uu_dressed(phi_eff, _tbar)
-        w_mean = mean_displacement(
-            self._fc3_dev_mw, uu, phi_eff,
-            omega2_floor_abs=self._scp_floor2)
-        sig_new = sigma_tadpole(self._fc3_dev_mw, w_mean)
+        if bool(getattr(self._scp_cfg, "scp_tadpole_term", True)):
+            w_mean = mean_displacement(
+                self._fc3_dev_mw, uu, phi_eff,
+                omega2_floor_abs=self._scp_floor2)
+            sig_new = sigma_tadpole(self._fc3_dev_mw, w_mean)
+        else:
+            # Centrosymmetric crystals (2H-MoS2, P6_3/mmc): <u> = 0 by
+            # inversion symmetry -- the tadpole is pure numerical noise
+            # amplified through Phi_eff^+ (the loop3 runaway). Keep the
+            # inversion-even quartic loop only.
+            sig_new = np.zeros_like(self._sigma_static)
         if self._fc4_blocks is not None:
             from quatrex.phonon.static_self_energy import sigma_loop_blocks
             sig_new = sig_new + sigma_loop_blocks(

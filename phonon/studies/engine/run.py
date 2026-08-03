@@ -87,6 +87,7 @@ if os.environ.get("QX_SCP_TADPOLE"): cfg.phonon.scp_tadpole = bool(int(os.enviro
 if os.environ.get("QX_SCP_LOOP"): cfg.phonon.scp_loop = bool(int(os.environ["QX_SCP_LOOP"]))
 if os.environ.get("QX_SCP_UU_MIN"): cfg.phonon.scp_uu_min_thz = float(os.environ["QX_SCP_UU_MIN"])
 if os.environ.get("QX_SCP_UU_SOURCE"): cfg.phonon.scp_uu_source = os.environ["QX_SCP_UU_SOURCE"]
+if os.environ.get("QX_SCP_TADPOLE_TERM"): cfg.phonon.scp_tadpole_term = bool(int(os.environ["QX_SCP_TADPOLE_TERM"]))
 # Non-uniform frequency grid: primary grid from phonon_energies.npy
 # (QX_FREQGRID=file) + auxiliary uniform bubble grid (spacing/extent).
 if os.environ.get("QX_FREQGRID"):
