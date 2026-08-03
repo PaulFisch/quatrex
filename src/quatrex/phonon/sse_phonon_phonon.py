@@ -1905,12 +1905,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     Tn = len(ts)
                     bK1 = shpL[1]
                     bK1p = shpR[1] // nJ
-                    # memory budget -> task chunk size
-                    per_task = 16 * w * (
+                    # Memory budget bounds the GEMM batch VOLUME C * wt
+                    # (tasks x tau window). The old code fixed wt = w and
+                    # let C absorb the budget with a floor of 16, so at
+                    # large n_tau (fine aux grids) the intermediates blew
+                    # past the budget ~10x. Now the tau axis is windowed
+                    # too: pick wt so a preferred task depth fits, then C
+                    # from the remaining budget. Throughput is flat once
+                    # C * wt saturates the b-ceiling (microbench: by a few
+                    # hundred), so this is a memory fix, not a speed knob.
+                    per_tt = 16 * (
                         2 * bK1 * bK1p + shpL[0] * bK1p
                         + bK2 * shpR[1] + 2 * nI * nJ)
+                    c_pref = min(Tn, 256)
+                    wt = int(max(16, min(
+                        w, self._tau_chunk_bytes // max(per_tt * c_pref, 1))))
                     C = max(16, min(Tn, self._tau_chunk_bytes
-                                    // max(per_task, 1)))
+                                    // max(per_tt * wt, 1)))
                     iqe = xp.asarray([t[0] for t in ts], dtype=xp.int64)
                     a_id = xp.asarray([gl_i[(t[3], t[4])] for t in ts],
                                       dtype=xp.int64)
@@ -1928,40 +1939,47 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         ai, bi = a_id[c0:c1], b_id[c0:c1]
                         qi, q2 = qa[c0:c1], qb[c0:c1]
 
-                        _tau_ix = xp.arange(lo, hi)[None, :]
+                        for w0 in range(0, w, wt):
+                            w1 = min(w0 + wt, w)
+                            _tau_ix = xp.arange(lo + w0, lo + w1)[None, :]
 
-                        def _legs(A, B):
-                            # single gather -> (C, w, b, b); no (C, w, nq,
-                            # b, b) intermediate (25x the needed memory).
-                            Ga = A[ai[:, None], _tau_ix, qi[:, None]]
-                            Gb = B[bi[:, None], _tau_ix, q2[:, None]]
-                            return Ga, Gb
+                            def _legs(A, B):
+                                # single gather -> (C, wt, b, b); no
+                                # (C, wt, nq, b, b) intermediate (25x the
+                                # needed memory).
+                                Ga = A[ai[:, None], _tau_ix, qi[:, None]]
+                                Gb = B[bi[:, None], _tau_ix, q2[:, None]]
+                                return Ga, Gb
 
-                        def _ring(Ga, Gb):
-                            Tm = PLc @ Ga             # (C,w,nIbK2,bK1p)
-                            Um = Gb @ PRc             # (C,w,bK2,bK1pnJ)
-                            return (
-                                Tm.reshape(c1 - c0, w, nI, bK2 * bK1p)
-                                @ Um.reshape(c1 - c0, w, bK2 * bK1p, nJ))
+                            def _ring(Ga, Gb):
+                                Tm = PLc @ Ga         # (C,wt,nIbK2,bK1p)
+                                Um = Gb @ PRc         # (C,wt,bK2,bK1pnJ)
+                                return (
+                                    Tm.reshape(c1 - c0, w1 - w0,
+                                               nI, bK2 * bK1p)
+                                    @ Um.reshape(c1 - c0, w1 - w0,
+                                                 bK2 * bK1p, nJ))
 
-                        sl = None
-                        for A, B in ((GL, GL), (GL, GGR), (GGR, GL)):
-                            Ga, Gb = _legs(A, B)
-                            s = _ring(Ga, Gb)
-                            sl = s if sl is None else sl + s
-                        sg = None
-                        for A, B in ((GG, GG), (GG, GLR), (GLR, GG)):
-                            Ga, Gb = _legs(A, B)
-                            s = _ring(Ga, Gb)
-                            sg = s if sg is None else sg + s
-                        wc = wq[c0:c1]
-                        if bool((wc != 1.0).any()):
-                            sl = sl * wc[:, None, None, None]
-                            sg = sg * wc[:, None, None, None]
-                        _scatter_add_q(out_l, iqe[c0:c1], sl.astype(dtype,
-                                                                    copy=False))
-                        _scatter_add_q(out_g, iqe[c0:c1], sg.astype(dtype,
-                                                                    copy=False))
+                            sl = None
+                            for A, B in ((GL, GL), (GL, GGR), (GGR, GL)):
+                                Ga, Gb = _legs(A, B)
+                                s = _ring(Ga, Gb)
+                                sl = s if sl is None else sl + s
+                            sg = None
+                            for A, B in ((GG, GG), (GG, GLR), (GLR, GG)):
+                                Ga, Gb = _legs(A, B)
+                                s = _ring(Ga, Gb)
+                                sg = s if sg is None else sg + s
+                            wc = wq[c0:c1]
+                            if bool((wc != 1.0).any()):
+                                sl = sl * wc[:, None, None, None]
+                                sg = sg * wc[:, None, None, None]
+                            _scatter_add_q(
+                                out_l[w0:w1], iqe[c0:c1],
+                                sl.astype(dtype, copy=False))
+                            _scatter_add_q(
+                                out_g[w0:w1], iqe[c0:c1],
+                                sg.astype(dtype, copy=False))
                 res[(I, J)] = (out_l, out_g)
             return res
 
