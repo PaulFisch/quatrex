@@ -928,6 +928,141 @@ def test_compute_coupled_q_matches_reference(g_band, n_blocks_par) -> None:
             )
 
 
+@pytest.mark.parametrize("dense_batched", [True, False])
+def test_coupled_q_greater_from_lesser_matches_six_ring(
+    dense_batched, capsys
+) -> None:
+    """Coupled-q (nq > 1) Sigma^> reconstruction A/B through the full
+    ``compute()`` entry: ``sse_greater_from_lesser`` (4-ring bosonic tau
+    fold + external q negation) == the legacy 6-ring path, on Sigma^< AND
+    Sigma^>.
+
+    The fold identity Sigma^>_IJ(q,tau) = Sigma^<_JI(-q,-tau)^T is
+    STRUCTURAL inside one compute() call (the reversed absorption legs are
+    built in-process from the very same gl/gg arrays), so the G bands are
+    arbitrary independent random -- no gl/gg relation is enforced. The one
+    INPUT condition is the vertex reality Phi(-q1,-q2) = conj(Phi(q1,q2))
+    (real real-space FC3; production qfold vertices satisfy it), enforced
+    here by symmetrising the random q-folded dict (the self-paired (0,0)
+    entry is made real). nq=3 so the q -> -q gather is actually exercised.
+    """
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+
+    rng = np.random.default_rng(11)
+    n_blocks, nbs, ne, nq, g_band = 3, 3, 13, 3, 1
+    block_sizes = np.array([nbs] * n_blocks)
+    N = int(block_sizes.sum())
+    q_diff_map = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+
+    keys = [
+        (I, K1, K2)
+        for I in range(n_blocks)
+        for K1 in range(max(0, I - 1), min(n_blocks, I + 2))
+        for K2 in range(max(0, I - 1), min(n_blocks, I + 2))
+        if abs(K1 - K2) <= 1
+    ]
+
+    def _phi():
+        return {
+            k: rng.standard_normal((nbs, nbs, nbs))
+            + 1j * rng.standard_normal((nbs, nbs, nbs))
+            for k in keys
+        }
+
+    # Vertex reality of a real real-space FC3: Phi(-q1,-q2) = conj(Phi(q1,q2)),
+    # with the self-paired entries ((-a)%nq, (-b)%nq) == (a, b) real.
+    qvertices: dict = {}
+    for a in range(nq):
+        for b in range(nq):
+            na, nb = (-a) % nq, (-b) % nq
+            if (na, nb) in qvertices:
+                qvertices[(a, b)] = {
+                    k: np.conj(v) for k, v in qvertices[(na, nb)].items()
+                }
+            elif (na, nb) == (a, b):
+                qvertices[(a, b)] = {
+                    k: v.real.astype(complex) for k, v in _phi().items()
+                }
+            else:
+                qvertices[(a, b)] = _phi()
+
+    gl_band, gg_band = {}, {}
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - g_band), min(n_blocks, K + g_band + 1)):
+            gl_band[(K, Kp)] = rng.standard_normal(
+                (ne, nq, nbs, nbs)
+            ) + 1j * rng.standard_normal((ne, nq, nbs, nbs))
+            gg_band[(K, Kp)] = rng.standard_normal(
+                (ne, nq, nbs, nbs)
+            ) + 1j * rng.standard_normal((ne, nq, nbs, nbs))
+
+    rows, cols = [], []
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    for I in range(n_blocks):
+        for J in range(max(0, I - g_band), min(n_blocks, I + g_band + 1)):
+            for i in range(block_sizes[I]):
+                for j in range(block_sizes[J]):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = _dev_pattern(csr_matrix(
+        (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
+        shape=(N, N),
+    ))
+
+    def _run(g_from_l: bool, verify: int = 0):
+        mk = lambda: DSDBCOO.from_sparray(
+            pattern, block_sizes, global_stack_shape=(ne, nq)
+        )
+        g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+        for m in (g_l, g_g, s_l, s_g, s_r):
+            m.data[:] = 0.0
+        glv, ggv = g_l.stack[...], g_g.stack[...]
+        for (K, Kp) in gl_band:
+            glv.blocks[K, Kp] = xp.asarray(gl_band[(K, Kp)])
+            ggv.blocks[K, Kp] = xp.asarray(gg_band[(K, Kp)])
+        cfg = _make_cfg("half", g_band=g_band)
+        cfg.phonon.sse_greater_from_lesser = g_from_l
+        cfg.phonon.sse_dense_q_batched = dense_batched
+        cfg.phonon.sse_fold_verify_iterations = verify
+        ssp = SigmaPhononPhonon(
+            cfg,
+            phonon_frequencies=np.linspace(0.0, 16.0, ne),
+            block_sizes=block_sizes,
+            qfold=(qvertices, q_diff_map, nq),
+        )
+        ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+        return (
+            np.asarray(get_host(s_l.data)),
+            np.asarray(get_host(s_g.data)),
+        )
+
+    sl6, sg6 = _run(False)
+    sl4, sg4 = _run(True)
+    np.testing.assert_allclose(
+        sl4, sl6, rtol=1e-12, atol=1e-12 * np.abs(sl6).max(),
+        err_msg="coupled-q greater_from_lesser Sigma^< mismatch",
+    )
+    np.testing.assert_allclose(
+        sg4, sg6, rtol=1e-12, atol=1e-12 * np.abs(sg6).max(),
+        err_msg="coupled-q greater_from_lesser Sigma^> mismatch",
+    )
+
+    # In-process verify gate at nq > 1: the first call runs the legacy
+    # 6-ring path and checks the fold identity (tau reversal + JI/orbital
+    # transpose + q negation) in place.
+    capsys.readouterr()
+    slv, sgv = _run(True, verify=1)
+    out = capsys.readouterr().out
+    assert "fold-verify" in out
+    assert "OK" in out and "MISMATCH" not in out
+    # The verify iteration ships the legacy result.
+    np.testing.assert_allclose(
+        sgv, sg6, rtol=1e-12, atol=1e-12 * np.abs(sg6).max(),
+        err_msg="verify-gate iteration did not ship the legacy Sigma^>",
+    )
+
+
 @pytest.mark.parametrize("kernel", ["gram", "reconstruct"])
 @pytest.mark.parametrize("ansatz", ["INDSCAL", "CP"])
 def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:

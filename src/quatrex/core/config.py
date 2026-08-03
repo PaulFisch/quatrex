@@ -1522,18 +1522,25 @@ class PhononConfig(BaseModel):
     sse_greater_from_lesser: bool = False
     """Reconstruct the cross terms of Sigma^> from the Sigma^< ring pass via
     the exact bosonic tau-domain identity (the ji-transposed, tau-reversed
-    cross terms of pair (J, I) are the absorption terms of pair (I, J)):
-    4 instead of 6 ring contractions per vertex quad, and the reversed-lesser
-    leg is never built. Construction-exact -- independent of any property of
-    G -- up to summation order (~1e-13 rel). Gamma-only (nq == 1); verify
-    with ``sse_fold_verify_iterations``."""
+    cross terms of pair (J, I) are the absorption terms of pair (I, J); at
+    coupled-q additionally at NEGATED external q): 4 instead of 6 ring
+    contractions per vertex quad, and the reversed-lesser leg is never built.
+    Construction-exact -- independent of any property of G -- up to summation
+    order (~1e-13 rel). Supported on the dense kernels: Gamma (nq == 1), and
+    at nq > 1 the dense coupled-q path fed EXPLICIT q-folded vertices
+    (``qfold_path``), whose reality Phi(-q1,-q2) = conj(Phi(q1,q2)) (real
+    real-space FC3, Gamma-centered mesh) the identity relies on. Refused
+    with the decomposed vertex (gram kernel unwired; the reconstructed
+    slice's reality is not audited). Verify with
+    ``sse_fold_verify_iterations``."""
 
     sse_fold_verify_iterations: NonNegativeInt = 0
     """With ``sse_greater_from_lesser``: for the first N compute() calls run
     the LEGACY 6-ring path, additionally accumulate the cross terms, and
     report the max-abs/rel mismatch of the reconstruction identity per output
     pair (rank 0; single-rank runs only -- multi-rank runs skip the gate with
-    a warning). The legacy result is shipped during these iterations (with
+    a warning). At nq > 1 the checked identity includes the external q -> -q
+    map. The legacy result is shipped during these iterations (with
     ``sse_hermitian_pairs`` the halving is also suspended during them)."""
 
     sse_hermitian_pairs: bool = False

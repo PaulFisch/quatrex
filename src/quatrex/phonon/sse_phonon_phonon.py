@@ -913,14 +913,26 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # accumulator stx.
         _gram_now = (self._vfactors is not None
                      and self._vf_kernel == "gram")
-        if self._g_from_l and (nq > 1 or _gram_now):
-            # gram at nq == 1 took precedence over the dense Gamma path
-            # since the two-collapse commit; with greater_from_lesser the
+        if self._g_from_l and _gram_now:
+            # gram takes precedence over the dense path since the
+            # two-collapse commit; with greater_from_lesser the
             # repurposed gtlr/stx buffers are never written by the
-            # factored kernel -> silently wrong Sigma^>. Refuse both.
+            # factored kernel -> silently wrong Sigma^>. Refuse.
             raise ValueError(
-                "sse_greater_from_lesser supports the Gamma-only DENSE "
-                "kernel only (nq == 1, no decomposed gram kernel)."
+                "sse_greater_from_lesser supports the DENSE kernels only "
+                "(no decomposed gram kernel)."
+            )
+        if self._g_from_l and nq > 1 and self._vfactors is not None:
+            # The coupled-q fold identity
+            #   Sigma^>_IJ(q, tau) = Sigma^<_JI(-q, -tau)^T
+            # relies on the vertex reality Phi(-q1,-q2) = conj(Phi(q1,q2))
+            # (real real-space FC3). Production qfold vertices satisfy it;
+            # the factor-reconstructed slice is not audited for it. Refuse.
+            raise ValueError(
+                "sse_greater_from_lesser at nq > 1 requires the explicit "
+                "dense q-folded vertex (qfold); the factor-reconstructed "
+                "vertex is not audited for the reality condition "
+                "Phi(-q1,-q2) = conj(Phi(q1,q2)) the fold relies on."
             )
         verify_now = self._g_from_l and self._fold_verify_done < self._fold_verify
         if verify_now and ranks.size > 1:
@@ -1547,12 +1559,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
                     gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
                     stlv, stgv, start, xp,
+                    fast_now=fast_now, verify_now=verify_now,
+                    stxv=stx.stack[...] if fast_now else None,
                 )
+                if fast_now:
+                    # ji-transpose the cross terms in the stack state (same
+                    # exchange pattern as the Gamma fast path); the tau
+                    # reversal AND the q_ext -> -q_ext gather complete the
+                    # fold in stage 5 (nnz state, full tau/q axes local).
+                    self._fold_reversed_legs((stx,), g_lesser)
 
             # Assemble the external-q distribution: each comm.q rank computed a
-            # disjoint subset of iq_ext (others left zero), so sum over comm.q.
+            # disjoint subset of iq_ext (others left zero), so sum over comm.q
+            # (in fast mode also the cross-term accumulator stx -- the fold
+            # permutation is rank-independent, so it commutes with the sum).
             if nq > 1 and ranks.q.size > 1:
-                for m in (stl, stg):
+                for m in ((stl, stg, stx) if fast_now else (stl, stg)):
                     recv = xp.empty_like(m.data)
                     ranks.q.all_reduce(xp.ascontiguousarray(m.data), recv, op="sum")
                     m.data[:] = recv
@@ -1584,9 +1606,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if fast_now:
                 # Complete the Sigma^> reconstruction: add the ji-transposed
                 # cross terms with the tau axis reversed (circular; l = 0
-                # self-maps, n_fft odd so there is no Nyquist bin).
-                stg.data[0] += stx.data[0]
-                stg.data[1:] += stx.data[:0:-1]
+                # self-maps, n_fft odd so there is no Nyquist bin). At
+                # coupled-q the identity carries exactly one extra
+                # operation, the external q -> -q gather on the transverse
+                # axes (Gamma-centered mesh, closed under q -> -q; the same
+                # negation as the stage-1 reversed legs).
+                xs = stx.data
+                if nq > 1:
+                    for ax, k in enumerate(nk, start=1):
+                        xs = xp.take(xs, (-xp.arange(k)) % k, axis=ax)
+                stg.data[0] += xs[0]
+                stg.data[1:] += xs[:0:-1]
             sl_conv = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_conv]
             sg_conv = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_conv]
             # OUTPUT mask, completing the input masking above: the scattering
@@ -1717,6 +1747,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
         gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
         stlv, stgv, start, xp,
+        fast_now=False, verify_now=False, stxv=None,
     ):
         """DENSE coupled-q vertex-pair contraction (the reference path).
 
@@ -1724,6 +1755,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         tau-domain Green's function band dicts, writes the per-(I, J)
         Sigma^{<,>} tau blocks into the stack views. See
         ``_contract_factored_q`` for the tensor-decomposed equivalent.
+
+        ``fast_now`` (sse_greater_from_lesser): 4-ring bosonic tau fold --
+        Sigma^> is contracted from the (gg, gg) ring only and its two
+        absorption cross terms are the mixed Sigma^< rings of pair (J, I)
+        at negated external q, folded downstream (JI/orbital transpose in
+        the stack state, tau reversal + q negation in stage 5); the mixed
+        rings are accumulated per (I, J, q_ext) and written into ``stxv``.
+        ``verify_now``: legacy 6-ring result shipped, the reconstruction
+        identity checked in place (single-rank runs only).
         """
         # Resolve the per-(I, J) vertex-pair task list once. The LEFT
         # vertex is CONJUGATED: the bubble at external q pairs
@@ -1791,6 +1831,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if not getattr(self, "_ring_stats_printed", False) and ranks.rank == 0:
             self._ring_stats_printed = True
             n_tasks = sum(len(t) for t in qtasks.values())
+            n_rings = 4 if fast_now else 6
             flops = 0.0
             for tasks in qtasks.values():
                 for t in tasks:
@@ -1798,7 +1839,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     bK1 = PL.shape[1]
                     bK2p = PR.shape[0]
                     bK1p = PR.shape[1] // nJ
-                    flops += 6 * 8 * n_tau * (
+                    flops += n_rings * 8 * n_tau * (
                         nI * bK2 * bK1 * bK1p
                         + bK2 * bK2p * bK1p * nJ
                         + nI * bK2 * bK1p * nJ
@@ -1813,43 +1854,90 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
         # nq==1 _contract_tau so the omega/tau batch parallelises across
-        # the ring pool.
+        # the ring pool. In fast/verify mode the two mixed (absorption)
+        # Sigma^< rings are kept separate and accumulated into out_x --
+        # they double as the Sigma^> cross-term source of the bosonic tau
+        # fold; in verify mode the direct mixed Sigma^> rings go to
+        # out_t56 for the in-place identity gate.
         def _contract_tau_q(lo, hi):
             res = {}
+            need_x = fast_now or verify_now
             for (I, J), tasks in qtasks.items():
                 bs_I = int(self.block_sizes[I])
                 bs_J = int(self.block_sizes[J])
                 out_l = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
                 out_g = xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                out_x = (xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                         if need_x else None)
+                out_t56 = (xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
+                           if verify_now else None)
                 for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, wq, *pre) in tasks:
-                    sl = _fold_l(
-                        pre,
-                        gl_q[(K1, K1p)][lo:hi, iqp],
-                        gl_q[(K2, K2p)][lo:hi, iq2],
-                        ggr_q[(K1, K1p)][lo:hi, iqp],
-                        ggr_q[(K2, K2p)][lo:hi, iq2],
-                    )
-                    sg = _fold_g(
-                        pre,
-                        gg_q[(K1, K1p)][lo:hi, iqp],
-                        gg_q[(K2, K2p)][lo:hi, iq2],
-                        glr_q[(K1, K1p)][lo:hi, iqp],
-                        glr_q[(K2, K2p)][lo:hi, iq2],
-                    )
+                    gla = gl_q[(K1, K1p)][lo:hi, iqp]
+                    glb = gl_q[(K2, K2p)][lo:hi, iq2]
+                    ggra = ggr_q[(K1, K1p)][lo:hi, iqp]
+                    ggrb = ggr_q[(K2, K2p)][lo:hi, iq2]
+                    tx = t56 = None
+                    if need_x:
+                        PL, PR, nI, bK2, nJ = pre
+                        tx = (ring_contract_pre(
+                                  PL, PR, nI, bK2, nJ, gla, ggrb, xp)
+                              + ring_contract_pre(
+                                  PL, PR, nI, bK2, nJ, ggra, glb, xp))
+                        sl = ring_contract_pre(
+                            PL, PR, nI, bK2, nJ, gla, glb, xp) + tx
+                    else:
+                        sl = _fold_l(pre, gla, glb, ggra, ggrb)
+                    gga = gg_q[(K1, K1p)][lo:hi, iqp]
+                    ggb = gg_q[(K2, K2p)][lo:hi, iq2]
+                    if fast_now:
+                        # Exact reconstruction: only the diagonal ring
+                        # (g^>, g^>); the cross terms come from (J, I)'s
+                        # folded out_x at negated external q.
+                        PL, PR, nI, bK2, nJ = pre
+                        sg = ring_contract_pre(
+                            PL, PR, nI, bK2, nJ, gga, ggb, xp)
+                    elif verify_now:
+                        PL, PR, nI, bK2, nJ = pre
+                        t56 = (ring_contract_pre(
+                                   PL, PR, nI, bK2, nJ, gga,
+                                   glr_q[(K2, K2p)][lo:hi, iq2], xp)
+                               + ring_contract_pre(
+                                   PL, PR, nI, bK2, nJ,
+                                   glr_q[(K1, K1p)][lo:hi, iqp], ggb, xp))
+                        sg = ring_contract_pre(
+                            PL, PR, nI, bK2, nJ, gga, ggb, xp) + t56
+                    else:
+                        sg = _fold_g(
+                            pre,
+                            gga,
+                            ggb,
+                            glr_q[(K1, K1p)][lo:hi, iqp],
+                            glr_q[(K2, K2p)][lo:hi, iq2],
+                        )
                     if wq != 1.0:
                         sl *= wq
                         sg *= wq
+                        if tx is not None:
+                            tx *= wq
+                        if t56 is not None:
+                            t56 *= wq
                     out_l[:, iq_ext] += sl
                     out_g[:, iq_ext] += sg
-                res[(I, J)] = (out_l, out_g)
+                    if tx is not None:
+                        out_x[:, iq_ext] += tx
+                    if t56 is not None:
+                        out_t56[:, iq_ext] += t56
+                res[(I, J)] = (out_l, out_g, out_x, out_t56)
             return res
 
-        def _write_q(I, J, out_l, out_g):
+        def _write_q(I, J, out_l, out_g, out_x=None):
             bs_I = int(self.block_sizes[I])
             bs_J = int(self.block_sizes[J])
             blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
             stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
             stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+            if out_x is not None:
+                stxv.blocks[I - start, J - start] = out_x.reshape(blk_shape)
 
         def _scatter_add_q(out, idx, vals):
             # out (w, nq, bI, bJ); vals (C, w, bI, bJ); idx (C,) with
@@ -1885,16 +1973,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             GL, gl_i = _stack(gl_q)
             GG, gg_i = _stack(gg_q)
             GGR, ggr_i = _stack(ggr_q)
-            GLR, glr_i = _stack(glr_q)
+            # Fast mode never contracts the reversed-lesser legs (its
+            # buffer is repurposed as stx and holds zeros here).
+            GLR, _glr_i = (GG, gg_i) if fast_now else _stack(glr_q)
             if GL is None or GG is None or GGR is None or GLR is None:
                 return _contract_tau_q(lo, hi)
 
+            need_x = fast_now or verify_now
             res = {}
             for (I, J), tasks in qtasks.items():
                 bs_I = int(self.block_sizes[I])
                 bs_J = int(self.block_sizes[J])
                 out_l = xp.zeros((w, nq, bs_I, bs_J), dtype=dtype)
                 out_g = xp.zeros((w, nq, bs_I, bs_J), dtype=dtype)
+                out_x = (xp.zeros((w, nq, bs_I, bs_J), dtype=dtype)
+                         if need_x else None)
+                out_t56 = (xp.zeros((w, nq, bs_I, bs_J), dtype=dtype)
+                           if verify_now else None)
                 # group tasks by ring shape (uniform blocks -> one group)
                 groups: dict[tuple, list] = {}
                 for t in tasks:
@@ -1960,48 +2055,118 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                     @ Um.reshape(c1 - c0, w1 - w0,
                                                  bK2 * bK1p, nJ))
 
-                            sl = None
-                            for A, B in ((GL, GL), (GL, GGR), (GGR, GL)):
-                                Ga, Gb = _legs(A, B)
-                                s = _ring(Ga, Gb)
-                                sl = s if sl is None else sl + s
-                            sg = None
-                            for A, B in ((GG, GG), (GG, GLR), (GLR, GG)):
-                                Ga, Gb = _legs(A, B)
-                                s = _ring(Ga, Gb)
-                                sg = s if sg is None else sg + s
+                            tx = t56 = None
+                            if need_x:
+                                # mixed lesser rings kept separate: they
+                                # double as the Sigma^> cross-term source
+                                # of the bosonic tau fold
+                                Ga, Gb = _legs(GL, GGR)
+                                tx = _ring(Ga, Gb)
+                                Ga, Gb = _legs(GGR, GL)
+                                tx = tx + _ring(Ga, Gb)
+                                Ga, Gb = _legs(GL, GL)
+                                sl = _ring(Ga, Gb) + tx
+                            else:
+                                sl = None
+                                for A, B in ((GL, GL), (GL, GGR), (GGR, GL)):
+                                    Ga, Gb = _legs(A, B)
+                                    s = _ring(Ga, Gb)
+                                    sl = s if sl is None else sl + s
+                            if fast_now:
+                                # Exact reconstruction: only the diagonal
+                                # ring (g^>, g^>); the cross terms come
+                                # from (J, I)'s folded out_x at negated
+                                # external q.
+                                Ga, Gb = _legs(GG, GG)
+                                sg = _ring(Ga, Gb)
+                            elif verify_now:
+                                Ga, Gb = _legs(GG, GLR)
+                                t56 = _ring(Ga, Gb)
+                                Ga, Gb = _legs(GLR, GG)
+                                t56 = t56 + _ring(Ga, Gb)
+                                Ga, Gb = _legs(GG, GG)
+                                sg = _ring(Ga, Gb) + t56
+                            else:
+                                sg = None
+                                for A, B in ((GG, GG), (GG, GLR), (GLR, GG)):
+                                    Ga, Gb = _legs(A, B)
+                                    s = _ring(Ga, Gb)
+                                    sg = s if sg is None else sg + s
                             wc = wq[c0:c1]
                             if bool((wc != 1.0).any()):
                                 sl = sl * wc[:, None, None, None]
                                 sg = sg * wc[:, None, None, None]
+                                if tx is not None:
+                                    tx = tx * wc[:, None, None, None]
+                                if t56 is not None:
+                                    t56 = t56 * wc[:, None, None, None]
                             _scatter_add_q(
                                 out_l[w0:w1], iqe[c0:c1],
                                 sl.astype(dtype, copy=False))
                             _scatter_add_q(
                                 out_g[w0:w1], iqe[c0:c1],
                                 sg.astype(dtype, copy=False))
-                res[(I, J)] = (out_l, out_g)
+                            if tx is not None:
+                                _scatter_add_q(
+                                    out_x[w0:w1], iqe[c0:c1],
+                                    tx.astype(dtype, copy=False))
+                            if t56 is not None:
+                                _scatter_add_q(
+                                    out_t56[w0:w1], iqe[c0:c1],
+                                    t56.astype(dtype, copy=False))
+                res[(I, J)] = (out_l, out_g, out_x, out_t56)
             return res
 
         pool, n_threads = ring_pool()
         nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))  # see nq==1
         if self._dense_q_batched:
-            for (I, J), (out_l, out_g) in (
-                    _contract_tau_q_batched(0, n_tau).items()):
-                _write_q(I, J, out_l, out_g)
+            res = _contract_tau_q_batched(0, n_tau)
         elif pool is not None and xp is np and nt > 1:
             bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
                     for i in range(nt)]
             chunks = list(pool.map(lambda b: _contract_tau_q(*b), bnds))
-            for (I, J) in qtasks:
-                _write_q(
-                    I, J,
-                    xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
-                    xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
+            res = {
+                ij: tuple(
+                    xp.concatenate([c[ij][t] for c in chunks], axis=0)
+                    if chunks[0][ij][t] is not None else None
+                    for t in range(4)
                 )
+                for ij in qtasks
+            }
         else:
-            for (I, J), (out_l, out_g) in _contract_tau_q(0, n_tau).items():
-                _write_q(I, J, out_l, out_g)
+            res = _contract_tau_q(0, n_tau)
+        for (I, J), (out_l, out_g, out_x, _t56) in res.items():
+            # out_x reaches the stx buffer only in fast mode; in verify
+            # mode that buffer still holds the reversed-lesser legs.
+            _write_q(I, J, out_l, out_g, out_x if fast_now else None)
+
+        if verify_now:
+            # Identity gate (single rank: full tau + all q_ext + all pairs
+            # local), the coupled-q mirror of the Gamma gate:
+            #   (t5+t6)_IJ[l, qe, a, b] == (t2+t3)_JI[-l, -qe, b, a].
+            rev = (-xp.arange(n_tau)) % n_tau
+            # Flat-index permutation of the per-axis q -> -q negation
+            # (C-order flattening of the transverse mesh).
+            qneg = xp.arange(nq).reshape(nk)
+            for ax, k in enumerate(nk):
+                qneg = xp.take(qneg, (-xp.arange(k)) % k, axis=ax)
+            qneg = qneg.reshape(-1)
+            worst = worst_rel = 0.0
+            for (I, J) in res:
+                rec = res[(J, I)][2][rev][:, qneg].swapaxes(-1, -2)
+                d = float(xp.max(xp.abs(res[(I, J)][3] - rec)))
+                scale = float(xp.max(xp.abs(res[(I, J)][3]))) or 1.0
+                worst = max(worst, d)
+                worst_rel = max(worst_rel, d / scale)
+            self._fold_verify_done += 1
+            if ranks.rank == 0:
+                print(
+                    "PhPh SSE fold-verify (coupled-q) "
+                    f"[{self._fold_verify_done}/{self._fold_verify}]"
+                    f": max|d|={worst:.3e} rel={worst_rel:.3e} "
+                    f"({'OK' if worst_rel < 1e-10 else 'MISMATCH'})",
+                    flush=True,
+                )
 
     def _contract_factored_q(
         self, owned, q_lo, q_hi, nq, nk, n_tau, dtype,
