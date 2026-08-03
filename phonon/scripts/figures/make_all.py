@@ -23,16 +23,27 @@ SKIP = {"make_all.py"}
 
 
 def referenced_figures():
-    stems = set()
-    pat = re.compile(r"transport_sweeps/([A-Za-z0-9_]+)\.pdf")
+    """(subdir, stem) pairs for every figure the report includes.
+
+    Covers all figure subdirs under document/fig, not only
+    transport_sweeps -- the toy_grid/gband/newton figures were
+    previously outside the gate and went stale silently.
+    """
+    pairs = set()
+    pat = re.compile(r"(transport_sweeps|toy_grid|gband|newton)/"
+                     r"([A-Za-z0-9_]+)\.pdf")
     for tex in list(SRC.rglob("*.tex")) + [ROOT / "document/report.tex"]:
-        stems.update(pat.findall(tex.read_text(errors="ignore")))
-    return sorted(stems)
+        pairs.update(pat.findall(tex.read_text(errors="ignore")))
+    return sorted(pairs)
 
 
 def main():
     t0 = time.time()
-    scripts = sorted(p for p in HERE.glob("*.py") if p.name not in SKIP)
+    # underscore scripts are extractors: they read uncommitted run
+    # artifacts (cluster/, studies/out) to refresh the committed
+    # distillates in phonon/scripts/data and cannot run everywhere
+    scripts = sorted(p for p in HERE.glob("*.py")
+                     if p.name not in SKIP and not p.name.startswith("_"))
     failures = []
     for s in scripts:
         r = subprocess.run([sys.executable, str(s)], capture_output=True,
@@ -42,10 +53,11 @@ def main():
         if r.returncode != 0:
             failures.append((s.name, (r.stderr or r.stdout).strip()[-800:]))
 
-    refs = referenced_figures()
-    missing = [f for f in refs if not (FIGDIR / f"{f}.pdf").exists()]
-    stale = [f for f in refs if (FIGDIR / f"{f}.pdf").exists()
-             and (FIGDIR / f"{f}.pdf").stat().st_mtime < t0 - 1]
+    refs = [(d, s) for d, s in referenced_figures()]
+    paths = {(d, s): ROOT / "document/fig" / d / f"{s}.pdf" for d, s in refs}
+    missing = [f"{d}/{s}" for (d, s), p in paths.items() if not p.exists()]
+    stale = [f"{d}/{s}" for (d, s), p in paths.items()
+             if p.exists() and p.stat().st_mtime < t0 - 1]
 
     print(f"\nreferenced figures: {len(refs)}; regenerated this run: "
           f"{len(refs) - len(missing) - len(stale)}")
