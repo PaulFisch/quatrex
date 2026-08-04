@@ -252,6 +252,17 @@ def _logged(self):
                 np.asarray(get_host(b.data)).copy()
                 for b in (self.data.sigma_lesser, self.data.sigma_greater,
                           self.data.sigma_retarded_hermitian))
+            # QX_SIGMA_BEST_LIVE=1: also write the snapshot NOW (same
+            # format as the end-of-run save, which stays the default
+            # when unset and loses the state on a walltime kill).
+            if os.environ.get("QX_SIGMA_BEST_LIVE") == "1":
+                _sl_b, _sg_b, _sr_b = _best["sig"]
+                np.savez(_sigma_file(os.environ["QX_SAVE_SIGMA_BEST"]),
+                         sigma_lesser=_sl_b, sigma_greater=_sg_b,
+                         sigma_retarded=_sr_b)
+                if ranks.rank == 0:
+                    print(f"SAVED SIGMA(best-live, res={_best['res']:.4e}) "
+                          f"{os.environ['QX_SAVE_SIGMA_BEST']}", flush=True)
     if ranks.rank == 0:
         # per-omega magnitude of the raw SSE output: localizes WHERE a
         # diverging update grows (the omega bin), at negligible cost.
