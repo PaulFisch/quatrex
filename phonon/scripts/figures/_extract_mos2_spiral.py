@@ -76,8 +76,26 @@ RECORDS = {
     # 38 (job 4322499): under-resolution, not the coupling alone, was
     # the stabiliser of the coarse-grid descents.
     "xs0": "cluster/mos2f3-xs0/slurm-4322499.out",
-    # u121 = FULL vertex on the coarse uniform-121 grid (job appended
-    # when the probe lands).
+    # u121 = FULL vertex on the coarse uniform-121 primary grid (job
+    # 4323428): bounded orbit, min 0.505 -- coarsening the primary
+    # grid does not restore the fixed point.
+    "u121": "cluster/mos2f3-u121/slurm-4323428.out",
+    # aux13 = FULL vertex, resolved primary, COARSE convolution grid
+    # (sse_aux_grid_dw=0.13, job 4324718): diverges at 36.
+    "aux13": "cluster/mos2f3-aux13/slurm-4324718.out",
+    # u2001 = FULL vertex on a uniform-2001 primary grid (job 4326550,
+    # 2026-08-03, Paul-ordered): diverges at iteration 4, residual
+    # 6.5e3 -- the extreme-resolution cell of the continuation cube,
+    # measured; resolution destabilises monotonically.
+    "u2001": "cluster/mos2f3-u2001/slurm-4326550.out",
+    # ablcoarse = full-provenance rerun of the historic descending
+    # regime (job 4326551, 2026-08-03): mos2f3 ARDR build (diagonal-
+    # only vertex) + coarse grid, QX_MIX=0.05, QX_MAXIT=400, explicit
+    # job.sh env record. Dips to 0.355 at it 14, diverges at 47: the
+    # ablated-coarse regime is metastable, not convergent; the one
+    # monotone descent to 0.087 (abl_c, envs unrecorded) remains
+    # unreproduced under recorded conditions.
+    "ablcoarse": "cluster/mos2f3-ablcoarse/slurm-4326551.out",
 }
 
 

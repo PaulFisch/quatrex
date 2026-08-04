@@ -20,9 +20,16 @@
                     monotonically to 0.087 before its 55-it cap
                     (unrecorded per-run overrides), the
                     current-code defaults continuation to 0.646
-                    before a late divergence at 66 -- the
-                    cross-slab anharmonic channel is what
-                    destabilises.
+                    before a late divergence at 66, and the
+                    full-provenance heavy-damped rerun (alpha=0.05,
+                    400-it budget, explicit job.sh env record) to
+                    0.355 before diverging at 47; the in-code
+                    ablation on the correct build + resolved grid
+                    (xs0, sse_cross_slab_scale=0) dips to 0.375 and
+                    diverges at 38. The ablated model is gentler but
+                    nowhere convergent -- the cross-slab channel
+                    destabilises, and probe c's monotone descent is
+                    unreproduced under recorded conditions.
 
 Data: phonon/scripts/data/mos2_spiral.npz, distilled by
 _extract_mos2_spiral.py (see its docstring for the full vertex
@@ -136,7 +143,9 @@ def fig_stabilisers(d) -> None:
     for key, lab, ci, lw in (
             ("abl_c", "ablated, probe c", 0, 1.4),
             ("abl_a", "ablated, probe a", 0, 0.8),
-            ("abl_cont", "ablated, defaults (250-it cont.)", 1, 1.2)):
+            ("abl_cont", "ablated, defaults (250-it cont.)", 1, 1.2),
+            ("ablcoarse", r"ablated, $\alpha=0.05$ rerun", 2, 1.2),
+            ("xs0", "in-code ablation, resolved grid", 4, 1.2)):
         r = d[f"res_{key}"][:, 0]
         ax_b.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci],
                       lw=lw, alpha=1.0 if lw > 1 else 0.5,
@@ -152,7 +161,12 @@ def fig_stabilisers(d) -> None:
         print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
     print(f"  long record {long_res.min():.3e} ({len(long_res)} it)")
     print("ABLATED-vertex (diagonal-only) probes:")
-    for key in ("abl_a", "abl_b", "abl_c", "abl_floor", "abl_cont"):
+    for key in ("abl_a", "abl_b", "abl_c", "abl_floor", "abl_cont",
+                "ablcoarse", "xs0"):
+        r = d[f"res_{key}"][:, 0]
+        print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
+    print("grid cells (full vertex): u121 / aux13 / u2001:")
+    for key in ("u121", "aux13", "u2001"):
         r = d[f"res_{key}"][:, 0]
         print(f"  {key:11s} {r.min():.3e} ({len(r)} it, last {r[-1]:.3e})")
 
