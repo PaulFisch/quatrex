@@ -289,6 +289,13 @@ if ranks.rank == 0:
           f"fgrid={cfg.phonon.frequency_grid} "
           f"bcs={cfg.compute.comm.block_comm_size} qcs={cfg.compute.comm.q_comm_size} "
           f"nranks={ranks.size}", flush=True)
+    # Provenance: every QX_* override in the log, always. The 2026-08-01
+    # film probe series became unattributable because the per-run envs
+    # were recorded nowhere (job.sh overwritten by later launches).
+    _qx = {k: v for k, v in sorted(os.environ.items())
+           if k.startswith("QX_")}
+    print("RUN env " + " ".join(f"{k}={v}" for k, v in _qx.items()),
+          flush=True)
 
 # Warm start: load Sigma^{<,>,R} from a previous cell's QX_SAVE_SIGMA file
 # (vertex-scale continuation / temperature annealing / wall-time chaining).
