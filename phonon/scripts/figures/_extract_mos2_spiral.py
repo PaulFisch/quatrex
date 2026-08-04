@@ -118,6 +118,16 @@ RECORDS = {
     # diverges at 4 like the bridged run -- interpolation aliasing
     # exonerated as the fine-grid driver.
     "u2001_noaux": "cluster/mos2f3-u2001-noaux/slurm-4327852.out",
+    # asr: ASR-REPAIRED vertex (mos2f3-asr: inverse-fold + interior
+    # S3-symmetric projection, correction |dPhi|/|Phi| ~ 4e-6/1.3e-6;
+    # the leak itself came from the even [4,4] transverse torus
+    # identifying +-2 offsets inside the 6.0 A cutoff on the
+    # hexagonal lattice -- fit and reap are TI-exact), production nu
+    # grid, NO mask (4327969): tracks the unrepaired 95-it record
+    # through the transient (11.9 vs 12.0 at it 5, 0.69 vs 0.62 at
+    # 13) and settles into the same orbit -- the ASR defect is real
+    # but NOT the instability driver.
+    "asr": "cluster/mos2f3-asr/slurm-4327969.out",
 }
 
 
