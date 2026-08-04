@@ -26,9 +26,14 @@ export PYTHONPATH=$REPO/src:$REPO/phonon:$REPO
 
 mkdir -p $OUT
 
-echo asr-project-film: selftest
-$PY $REPO/phonon/studies/_asr_project_film.py selftest --workdir $OUT/selftest_tmp > $OUT/selftest.log 2>&1
-tail -n 3 $OUT/selftest.log
+# The selftest needs the production fold code (phonopy import chain),
+# which the daint venv does not carry; it runs on the laptop instead.
+# QX_SKIP_SELFTEST=1 skips it here.
+if [ -z "${QX_SKIP_SELFTEST:-}" ]; then
+    echo asr-project-film: selftest
+    $PY $REPO/phonon/studies/_asr_project_film.py selftest --workdir $OUT/selftest_tmp > $OUT/selftest.log 2>&1
+    tail -n 3 $OUT/selftest.log
+fi
 
 echo asr-project-film: pre-audit
 $PY $REPO/phonon/studies/_asr_project_film.py audit --fc3 $SRC/fc3_blocks.hdf5 --qfold $SRC/qfold_vertices.npz > $OUT/audit_pre.log 2>&1
