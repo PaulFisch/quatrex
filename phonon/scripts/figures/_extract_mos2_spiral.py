@@ -96,6 +96,28 @@ RECORDS = {
     # monotone descent to 0.087 (abl_c, envs unrecorded) remains
     # unreproduced under recorded conditions.
     "ablcoarse": "cluster/mos2f3-ablcoarse/slurm-4326551.out",
+    # 2026-08-04 lowmask ladder (probe c identified as the
+    # QX_SSE_LOWMASK run; sse_low_freq_mask_thz zeroes the bubble
+    # legs+outputs on |omega| < cut):
+    # abl_lm15: ablated build + mask 1.5 (4327703) -- reproduces probe
+    # c through its 55-it window, floor 0.089 at it 111, metastable
+    # plateau, diverges at 361. Probe c would NOT have converged.
+    "abl_lm15": "cluster/mos2f3-abl-lm15/slurm-4327703.out",
+    # lm15/lm03: FULL vertex, production nu grid, mask 1.5/0.3
+    # (4327664/4327700, 3-h wall): orbit ~1.0-1.7 / dip 0.68 then
+    # pegged -- on the nu grid the mask alone does not give descent.
+    "lm15": "cluster/mos2f3-lm15/slurm-4327664.out",
+    "lm03": "cluster/mos2f3-lm03/slurm-4327700.out",
+    # u2001_lm15: FULL vertex, uniform-2001 grid, mask 1.5 (4327702):
+    # min 0.2645 at it 16 (deepest full-vertex state on record), then
+    # monotone rebound to 0.93 at the 28-it wall. The mask converts
+    # the fine grid's 4-it explosion into a deep descent -- the
+    # near-DC window is the fast driver; 7-h continuation = lm15b.
+    "u2001_lm15": "cluster/mos2f3-u2001-lm15/slurm-4327702.out",
+    # u2001_noaux: no aux bridge (QX_AUXDW=0, 4327852), no mask:
+    # diverges at 4 like the bridged run -- interpolation aliasing
+    # exonerated as the fine-grid driver.
+    "u2001_noaux": "cluster/mos2f3-u2001-noaux/slurm-4327852.out",
 }
 
 
