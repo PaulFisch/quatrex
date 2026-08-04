@@ -129,7 +129,8 @@ def fig_stabilisers(d) -> None:
     named = [("orbit_mean", "orbit-mean restart", 2),
              ("tadpole", "SCP tadpole", 3),
              ("loop3", "tadpole + quartic loop", 4),
-             ("loop4", "quartic loop only", 5)]
+             ("loop4", "quartic loop only", 5),
+             ("u2001_lm15b", "near-DC mask, uniform-2001", 6)]
     for key, lab, ci in named:
         r = d[f"res_{key}"][:, 0]
         ax_a.semilogy(np.arange(1, len(r) + 1), r, color=colors[ci],

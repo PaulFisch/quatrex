@@ -118,6 +118,13 @@ RECORDS = {
     # diverges at 4 like the bridged run -- interpolation aliasing
     # exonerated as the fine-grid driver.
     "u2001_noaux": "cluster/mos2f3-u2001-noaux/slurm-4327852.out",
+    # u2001_lm15b: 7-h continuation of u2001_lm15 (4330508, fresh
+    # start, QX_SIGMA_BEST_LIVE): reproduces the descent to 0.2645
+    # at it 16 deterministically, then a BOUNDED orbit 0.26-1.2
+    # through the 64-it wall -- no burst, no fixed point. The mask
+    # removes the explosive near-DC driver and more than halves the
+    # floor (0.62 -> 0.26); a slow mid-band marginal gain remains.
+    "u2001_lm15b": "cluster/mos2f3-u2001-lm15b/slurm-4330508.out",
     # asr: ASR-REPAIRED vertex (mos2f3-asr: inverse-fold + interior
     # S3-symmetric projection, correction |dPhi|/|Phi| ~ 4e-6/1.3e-6;
     # the leak itself came from the even [4,4] transverse torus
