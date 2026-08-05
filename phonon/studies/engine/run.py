@@ -156,8 +156,20 @@ if os.environ.get("QX_BALLISTIC") == "1":
             sse._scp_tadpole = False
             if getattr(sse, "_sigma_static", None) is not None:
                 sse._sigma_static[...] = 0.0
+    # With the vertex zeroed, Sigma_phph == 0 identically -- but the dense-q
+    # contraction machinery would still allocate its full tau/fold buffer
+    # stack (OOM at ~100 GB on the mos2 nk7 mesh, job 4344975). Drop the
+    # phonon-phonon interaction from the registry so the SSE never runs;
+    # the in-place zeroing above stays as belt-and-suspenders for anything
+    # else holding vertex references.
+    scba.interactions = [
+        inter for inter in getattr(scba, "interactions", [])
+        if getattr(inter, "sigma_phonon_phonon", None) is None
+    ]
     if ranks.rank == 0:
-        print(f"BALLISTIC: zeroed {n_zeroed} phi_blocks in place", flush=True)
+        print(f"BALLISTIC: zeroed {n_zeroed} phi_blocks in place; "
+              "phonon-phonon interaction removed from the registry",
+              flush=True)
 
 w = np.abs(np.asarray(get_host(ph.local_frequencies)))
 if not getattr(ph, "uniform_frequency_grid", True):
