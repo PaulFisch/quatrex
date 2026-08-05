@@ -161,22 +161,38 @@ discriminator), which is why they converge regardless.
 
 ## 3. The surgical subtraction
 
-### 3.1 Definition
+### 3.1 Definition: subtract the exact centre-of-mass channel
 
-Let `t_hat` be the orthonormal translation triplet and define the
-rank-3 singular fields (production convention)
+The subtracted field is not the Laurent series but the *exact*
+Green's function of the CM coordinate itself — the lead-damped free
+particle on the translation subspace (all objects 3x3 in the `t_hat`
+basis, embedded by `t_hat . t_hat^T`):
 
-    S^{<}(w) = i t_hat [ C2 / w^2 - V_T^{-1} / w ] t_hat^T
-    S^{>}(w) = i t_hat [ C2 / w^2 + V_T^{-1} / w ] t_hat^T
+    S^R(w)     = [ w^2 + i w V_T ]^{-1}
+    S^{<}(w)   = S^R(w) [ i sum_alpha 2 w n_alpha(w) V_{alpha,T} ] S^A(w)
+    S^{>}(w)   = S^R(w) [ i sum_alpha 2 w (n_alpha(w)+1) V_{alpha,T} ] S^A(w)
 
-with `C2`, `V_T` computed from the run's own lead model
+with `V_alpha` from the run's own lead model
 (`Gamma_alpha(w)/2w -> V_alpha` at build time; no fit, no free
-parameter, no scale). The subtracted bubble uses legs
+parameter, no scale). Because `S` is a genuine open-subsystem
+Green's-function pair it satisfies the bosonic fold and, at equal
+temperatures, the KMS condition *exactly at every frequency* — not
+just asymptotically — while its Laurent parts coincide with Sec. 1.3
+(`C2/w^2 -+ V_T^{-1}/w`). The strict-Laurent variant fails detailed
+balance at the truncated order (measured 4.5e-2 on the chain gate);
+the CM form restores it to 1.3e-14 and shrinks the ledger defect
+`Delta` from 2e-4 to 2e-7 (Sec. 4.2, `_ir_conserve_gate.py`).
+
+The subtracted bubble uses legs
 
     Gbar^{<,>} = G^{<,>} - S^{<,>}      (SSE legs only)
 
 on the q = Gamma pair, with *zero add-back*. The Dyson equation, the
-current, and all observables keep the full `G` (mask precedent).
+current, and all observables keep the full `G` (mask precedent). The
+physical statement is a two-fluid split: `G = S + Gbar`, CM Brownian
+motion plus internal motion; the extended theory's vertex couples
+only to the internal part, and the model's leaked CM coupling is the
+artifact being removed.
 
 ### 3.2 Why zero add-back is the physical value
 
@@ -259,11 +275,19 @@ the consistent pairing, and degraded the balance from 7e-18 to
 lowmask conserving — the mask is the crude limit of this scheme, with
 the rank-3 Laurent corner replaced by everything below 1.5 THz.
 
-Detailed balance at equilibrium: `S^{<,>}` are the Laurent parts of
-functions satisfying KMS with the full Bose factors, and satisfy it
-themselves through the retained orders; `Sigma_sub^> =
-e^{beta h w} Sigma_sub^<` then holds by the same triangle algebra
-(gate V3 measures the residual).
+Detailed balance at equilibrium: the CM-channel `S` satisfies KMS
+exactly (Sec. 3.1), hence so does `Gbar`, hence
+`Sigma_sub^> = e^{beta h w} Sigma_sub^<` exactly. Measured on the
+chain gate: 1.29e-14 (vs 4.5e-2 for the strict-Laurent variant — the
+measurement that fixed the scheme's final form).
+
+Chain-gate numbers (`_ir_conserve_gate.py`, 6-DOF diatomic device,
+spectral OBC, T_L/T_R = 305/295, random S3 vertex WITHOUT sum rule):
+bare balance 0.8-1.4e-16; subtracted Gbar-paired balance 1-4e-17 on
+every rung; ledger defect Delta = 2.3e-7 -> 1.6e-7 (falling with dw);
+disease/cure at w_out = 1 THz: bare 4.50e4 / 8.72e4 / 1.71e5 under
+dw = 0.1/0.05/0.025 (the exact 1/dw law), subtracted
+1.20e3 / 1.27e3 / 1.30e3 (first-order convergence to ~1.33e3).
 
 ## 5. Discrete rule and implementation seam (P3, summary only)
 
