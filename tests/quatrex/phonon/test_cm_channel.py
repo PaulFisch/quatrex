@@ -61,7 +61,7 @@ def test_null_modes_are_mass_weighted_translation() -> None:
 def test_lead_velocities_symmetric_and_positive() -> None:
     d00, d01, d10 = _chain_blocks()
     t, _ = translation_null_modes(d00, d01, d10)
-    v_l, v_r = lead_velocity_matrices(d00, d01, d10, t)
+    v_l, v_r, _ = lead_velocity_matrices(d00, d01, d10, t)
     # symmetric chain: left and right leads identical
     assert np.allclose(v_l, v_r, rtol=1e-6)
     assert np.linalg.eigvalsh(v_l).min() > 0.0
@@ -70,7 +70,7 @@ def test_lead_velocities_symmetric_and_positive() -> None:
 def test_cm_pair_fold_kms_laurent() -> None:
     d00, d01, d10 = _chain_blocks()
     t, _ = translation_null_modes(d00, d01, d10)
-    v_l, v_r = lead_velocity_matrices(d00, d01, d10, t)
+    v_l, v_r, _ = lead_velocity_matrices(d00, d01, d10, t)
     t_l, t_r = 305.0, 295.0
     for w in (0.05, 0.3, 1.7):
         m_l, m_g = cm_sigma_pair(w, v_l, v_r, t_l, t_r)

@@ -49,6 +49,17 @@ if TYPE_CHECKING:
 _PROBE_W = (2e-3, 4e-3, 8e-3, 1.6e-2)
 # |eigenvalue| < _NULL_TOL * |K| counts as a translation/null mode
 _NULL_TOL = 1e-4
+# per-mode acceptance for the LINEAR-opening model Gamma = 2 w V: a
+# channel mode must be lead-damped (V > _MIN_DAMPING THz) and its V(w)
+# ladder must actually be w^2-flat (relative fit residual below
+# _MAX_FIT_RESID). Flexural/rotational acoustic branches of quasi-1D
+# leads open as a different power of w -- their extraction degenerates
+# (measured on CNT33 L4: rank-4 raw channel with V_T eigs
+# [0.0, 0.077, 0.079, 6.14] THz and a 0.995 first-iteration kick on
+# the converged state, cluster/cnt-cmnull). Such modes are DROPPED
+# with a warning; if nothing survives, the builder refuses.
+_MIN_DAMPING = 1e-3
+_MAX_FIT_RESID = 0.2
 
 
 def load_gamma_transport_blocks(
@@ -155,6 +166,7 @@ def lead_velocity_matrices(
     sig_r = m_01 @ flip(g_nn) @ m_10
 
     out = []
+    ladders = []
     for sig in (sig_l, sig_r):
         gam = (1j * (sig - np.conj(np.swapaxes(sig, -2, -1)))).real
         v_w = np.einsum("ai,wij,bj->wab", t_cell, gam, t_cell) / (
@@ -163,7 +175,8 @@ def lead_velocity_matrices(
             ws ** 2, v_w.reshape(len(ws), -1), 1)
         v0 = coef[0].reshape(t_cell.shape[0], t_cell.shape[0])
         out.append(0.5 * (v0 + v0.T))
-    return out[0], out[1]
+        ladders.append(v_w)
+    return out[0], out[1], ladders[0] + ladders[1]
 
 
 def cm_sigma_pair(
@@ -201,7 +214,41 @@ def compute_cm_channel(
     """
     d00, d01, d10 = load_gamma_transport_blocks(config)
     t_cell, eigs = translation_null_modes(d00, d01, d10)
-    v_l, v_r = lead_velocity_matrices(d00, d01, d10, t_cell)
+    v_l, v_r, v_ladder = lead_velocity_matrices(d00, d01, d10, t_cell)
+
+    # Per-mode acceptance of the linear-opening model (see the module
+    # constants): diagonalise the total V0 and check, mode by mode,
+    # damping and the w^2-flatness of the extracted ladder. Drop what
+    # fails (flexural/rotational branches of quasi-1D leads).
+    v_tot = v_l + v_r
+    evals, evecs = np.linalg.eigh(v_tot)
+    ws2 = np.asarray(_PROBE_W) ** 2
+    keep = []
+    for i in range(len(evals)):
+        mode = evecs[:, i]
+        ladder_i = np.einsum("a,wab,b->w", mode, v_ladder, mode)
+        coef = np.polynomial.polynomial.polyfit(ws2, ladder_i, 1)
+        fit = coef[0] + coef[1] * ws2
+        resid = float(np.max(np.abs(ladder_i - fit))
+                      / max(abs(coef[0]), 1e-300))
+        if evals[i] > _MIN_DAMPING and resid < _MAX_FIT_RESID:
+            keep.append(i)
+        else:
+            import warnings
+            warnings.warn(
+                f"cm_channel: dropping channel mode {i} (V_T eig "
+                f"{evals[i]:.5f} THz, opening-fit residual {resid:.2f}) "
+                "-- not described by the linear-opening CM model.",
+                stacklevel=2)
+    if not keep:
+        raise ValueError(
+            "cm_channel: no channel mode survives the linear-opening "
+            f"gate (V_T eigs {evals}); CM subtraction is not applicable "
+            "to this lead model.")
+    basis = evecs[:, keep].T          # (r_kept, r_raw)
+    t_cell = basis @ t_cell
+    v_l = basis @ v_l @ basis.T
+    v_r = basis @ v_r @ basis.T
     ev_l = np.linalg.eigvalsh(v_l)
     if ev_l.min() < -1e-8 * max(ev_l.max(), 1e-300):
         raise ValueError(
