@@ -132,18 +132,26 @@ def lead_velocity_matrices(
     Gamma_alpha(w) = i(Sigma^R_alpha - Sigma^A_alpha) = 2 w V_alpha
     + O(w^3); V extracted on the probe ladder with a w^2 fit.
     """
+    from qttools import xp
+    from qttools.utils.gpu_utils import get_host
+
     obc = _spectral_obc()
     b = d00.shape[-1]
     eye = np.eye(b)
     flip = lambda a: np.flip(a, axis=(-2, -1))  # noqa: E731
     ws = np.asarray(_PROBE_W)
     z2 = (ws * ws).astype(complex)
+    # The qttools OBC kernels dispatch on the global xp backend (cupy on
+    # GPU nodes) -- feed xp arrays, bring the surface GF back to host.
     m_00 = z2[:, None, None] * eye - d00[None]
     m_01 = np.broadcast_to(-d01, m_00.shape).copy()
     m_10 = np.broadcast_to(-d10, m_00.shape).copy()
-    g_00 = np.asarray(obc(m_00, m_01, m_10, "left"))
+    g_00 = np.asarray(get_host(obc(
+        xp.asarray(m_00), xp.asarray(m_01), xp.asarray(m_10), "left")))
     sig_l = m_10 @ g_00 @ m_01
-    g_nn = np.asarray(obc(flip(m_00), flip(m_10), flip(m_01), "right"))
+    g_nn = np.asarray(get_host(obc(
+        xp.asarray(flip(m_00)), xp.asarray(flip(m_10)),
+        xp.asarray(flip(m_01)), "right")))
     sig_r = m_01 @ flip(g_nn) @ m_10
 
     out = []
