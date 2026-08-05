@@ -305,6 +305,21 @@ suppressed by the 2D q-sum, and the QCONV ladder will quantify it.
 
 ## 6. Pre-registered gates and falsification (P2)
 
+Status 2026-08-05 (commit 1d62a48a): V1/V2 PASSED (Secs. 4.2, 7);
+V3/V4 PASSED (`_ir_v34_gates.py`, chain bed): the bare eta=0 SCBA
+reproduces the film disease end-to-end -- converges at dw=0.1, stalls
+at 0.05 (contraction estimate lambda = 0.63), diverges at 0.025 --
+while the CM-subtracted loop converges at every resolution (93/91/151
+iterations, lambda < 0.4); detailed balance at the subtracted fixed
+point 1e-14; equal-time <ww> doubles per refinement bare and
+converges subtracted. The production port is in
+(`sse_cm_subtraction` / `QX_SSE_CMSUB`; builder
+`quatrex/phonon/cm_channel.py` validated against Sec. 7's film
+numbers, seam pinned by `tests/quatrex/phonon/test_cm_channel.py`).
+V5 pending: CNT33 L4 null test staged on tortin
+(`cluster/cnt_cmnull.sh`, waits on the pool watcher); film runs
+(nu grid + uniform-2001, QX_SSE_CMSUB=1) wait on daint access.
+
 - V1 exactness: scalar/rank-3 models of the *derived* class
   (C2/w^2 even + V^{-1}/w odd); subtracted quadrature error must fall
   uniformly with refinement; the bare rule must reproduce the 1/dw
