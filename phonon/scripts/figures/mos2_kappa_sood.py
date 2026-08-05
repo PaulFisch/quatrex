@@ -51,13 +51,25 @@ K_BULK = (2.0, 4.8)   # W / m K    (bulk measurement spread)
 
 def main() -> None:
     FIGDIR.mkdir(parents=True, exist_ok=True)
-    rows = [r for r in csv.DictReader(DATA.open())
-            if r["system"] == "mos2" and r["kind"] == "ballistic"]
+    allrows = [r for r in csv.DictReader(DATA.open())
+               if r["system"] == "mos2" and r["kind"] == "ballistic"]
+    # thickness ladder = the 5x5-mesh L rows; L3qN rows are the
+    # transverse-mesh convergence ladder at fixed L3 (QCONV 2026-08-05)
+    rows = [r for r in allrows if "q" not in r["tag"]]
     t_nm = np.array([float(r["t_nm"]) for r in rows])
     G = np.array([float(r["G_W_m2K"]) for r in rows])
     order = np.argsort(t_nm)
     t_nm, G = t_nm[order], G[order]
-    G_flat = float(np.median(G[-3:]))  # the ladder-grid value
+    G_flat = float(np.median(G[-3:]))  # the ladder-grid (5x5) value
+
+    # transverse-mesh ladder nk = 5, 7, 9 -> geometric extrapolation
+    qmesh = {25: G_flat}
+    for r in allrows:
+        if "q" in r["tag"]:
+            qmesh[int(r["N_q"])] = float(r["G_W_m2K"])
+    gq = [qmesh[k] for k in sorted(qmesh)]
+    d1, d2 = gq[1] - gq[0], gq[2] - gq[1]
+    G_inf = gq[2] + d2 * (d2 / d1) / (1.0 - d2 / d1)
 
     fig, (ax_a, ax_b) = style.figure(ncols=2, width=4.4, height=3.4)
     colors = style.RC["axes.prop_cycle"].by_key()["color"]
@@ -65,6 +77,8 @@ def main() -> None:
     tt = np.logspace(np.log10(2.0), np.log10(300.0), 200)  # nm
     ax_a.plot(tt, G_flat * tt * 1e-9, color=colors[0], lw=1.4,
               label=r"ballistic NEGF ($\kappa = G_\mathrm{ball}\,t$)")
+    ax_a.plot(tt, G_inf * tt * 1e-9, color=colors[0], lw=1.1, ls="--",
+              label=r"mesh-converged $G_\mathrm{ball}$")
     ax_a.plot(t_nm, G * t_nm * 1e-9, "o", color=colors[0], markersize=6)
     lo = tt * 1e-9 / (R_ASYM + tt * 1e-9 / K_BULK[0])
     hi = tt * 1e-9 / (R_ASYM + tt * 1e-9 / K_BULK[1])
@@ -78,7 +92,9 @@ def main() -> None:
     ax_a.legend(fontsize=7.5, loc="upper left")
 
     ax_b.axhline(1e9 / G_flat, color=colors[0], lw=1.4,
-                 label="ballistic NEGF")
+                 label=r"ballistic NEGF ($5{\times}5$ mesh)")
+    ax_b.axhline(1e9 / G_inf, color=colors[0], lw=1.1, ls="--",
+                 label="mesh-converged")
     ax_b.plot(t_nm, t_nm * 1e-9 / (G * t_nm * 1e-9) * 1e9, "o",
               color=colors[0], markersize=6)
     ax_b.axhline(R_ASYM * 1e9, color=colors[1], lw=1.2, ls="--",
@@ -99,6 +115,13 @@ def main() -> None:
           f"R = {1e9 / G_flat:.2f} m^2K/GW vs Sood asymptote "
           f"{R_ASYM * 1e9:.0f} m^2K/GW "
           f"({1e9 / G_flat / (R_ASYM * 1e9):.0%} of it)")
+    print("transverse-mesh ladder (L3): "
+          + "  ".join(f"nk^2={k}: G={v:.4e} R={1e9 / v:.2f}"
+                      for k, v in sorted(qmesh.items()))
+          + f"  -> extrapolated G_inf={G_inf:.4e}, "
+          f"R_inf={1e9 / G_inf:.2f} m^2K/GW "
+          f"({1e9 / G_inf / (R_ASYM * 1e9):.0%} of the asymptote); "
+          f"kappa(20 nm)={G_inf * 20e-9:.2f} W/mK")
     for t, g in zip(t_nm, G):
         print(f"  t={t:6.2f} nm  G={g:.4e}  kappa={g * t * 1e-9:.3f} W/mK")
     print(f"kappa_z at 20/100/240 nm (ballistic): "

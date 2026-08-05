@@ -51,6 +51,15 @@ RUNS = [
     ("si", "L3", "scba", "cluster/sifilm3s", "run.npz", "x"),
     ("si", "L5", "scba", "cluster/sifilm5s", "run.npz", "x"),
     ("si", "L8", "scba", "cluster/sifilm8s", "run.npz", "x"),
+    # QCONV transverse-mesh ladder (2026-08-05, daint jobs 4344979 /
+    # 4345441-era reruns 4344975->q7b2, 4345165->q9b2 after the
+    # QX_BALLISTIC registry fix): same L3 films, larger q meshes.
+    # MoS2 on the 262-pt nu grid: G falls 147.3 -> 141.7 -> 139.6
+    # MW/m^2K (nk5/7/9, geometric increments ratio 0.37 -> G_inf ~
+    # 138.4, R_inf ~ 7.2 m^2K/GW); Si converged: nk13 = +0.68% vs nk9.
+    ("mos2", "L3q7", "ballistic", "cluster/mos2f3q7b2", "run.npz", "z"),
+    ("mos2", "L3q9", "ballistic", "cluster/mos2f3q9b2", "run.npz", "z"),
+    ("si", "L3q13", "ballistic", "cluster/sifilm3q13b", "run.npz", "x"),
 ]
 
 
