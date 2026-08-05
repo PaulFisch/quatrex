@@ -339,6 +339,25 @@ suppressed by the 2D q-sum, and the QCONV ladder will quantify it.
 | ring slopes full / projected | -2, -4 / regular | -2.0, -4.0 / 0.00, 0.00 |
 | channel/regular crossover | — | 0.18 THz |
 
+Film-scale demonstration (`_ir_subtraction_demo.py`: real 54-DOF
+ballistic legs, real 15-block vertex, W = 12 THz, dw ladder
+0.1/0.05/0.025/0.0125, values normalised to the coarsest rung):
+
+| w_out | bare | CM-subtracted |
+|---|---|---|
+| 0.5 THz | 1.0 / 2.20 / 4.65 / 9.59 (1/dw law) | 1.0 / 1.06 / 1.10 / 1.14 |
+| 1.0 THz | 1.0 / 1.87 / 3.68 / 7.35 | 1.0 / 1.00 / 1.02 / 1.07 |
+| 3.0 THz | 1.0 / 0.57 / 0.38 / 14.8 (cancellation noise) | 1.0 / 1.01 / 1.02 / 1.06 |
+
+The 3 THz bare row is float noise: the e37-scale channel terms cancel
+past machine precision (e20 residue, erratic ladder) — on fine grids
+the bare bubble is not merely divergent at small w_out but
+catastrophically ill-conditioned at every output. The subtracted
+bubble is well-conditioned and grid-stable everywhere. The CM form
+also removes the Laurent variant's mid-band over-subtraction
+(Sigma_sub(3 THz) smaller by 170x).
+
 Reproduce:
 `QTX_ARRAY_MODULE=numpy python phonon/studies/_ir_exponents.py`,
-`_ir_killtest.py`, `_ir_residue_check.py`.
+`_ir_killtest.py`, `_ir_residue_check.py`, `_ir_conserve_gate.py`,
+`_ir_subtraction_demo.py`.
