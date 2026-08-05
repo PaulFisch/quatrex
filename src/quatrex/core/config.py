@@ -1421,6 +1421,20 @@ class PhononConfig(BaseModel):
     ballistic Dyson/transport content but contribute no three-phonon
     scattering. 0 = legacy (only the omega = 0 bin is masked)."""
 
+    sse_cm_subtraction: bool = False
+    """Subtract the exact centre-of-mass (lead-driven translation)
+    channel from the SSE bubble legs at the q = Gamma pair (env
+    QX_SSE_CMSUB). The channel carries a non-integrable rank-r
+    -iG^{<,>} ~ C2/omega^2 infrared weight that the full crystal's
+    cubic acoustic sum rule annihilates exactly but the
+    device-truncated vertex cannot -- the measured driver of the
+    eta = 0 grid-refinement divergence. The subtracted field is the
+    exact CM-subsystem Green's-function pair (fold- and KMS-exact, no
+    regulator, no free parameter), built from the run's own lead model;
+    Dyson and all observables keep the full G. See
+    phonon/docs/ir_residue_derivation.md. False = legacy
+    (bit-identical)."""
+
     frequency_grid: Literal["window", "file"] = "window"
     """Source of the phonon frequency grid. ``"window"`` (legacy): the
     uniform ``linspace`` from the electron ``energy_window_*`` fields.

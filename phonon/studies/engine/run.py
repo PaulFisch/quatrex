@@ -83,6 +83,7 @@ if os.environ.get("QX_JVP_FORM"):    cfg.scba.experimental_mixer.newton_jvp_form
 if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_precond = os.environ["QX_NEWTON_PRECOND"]
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
 if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
+if os.environ.get("QX_SSE_CMSUB"): cfg.phonon.sse_cm_subtraction = bool(int(os.environ["QX_SSE_CMSUB"]))
 if os.environ.get("QX_RING_DTYPE"): cfg.phonon.sse_ring_dtype = os.environ["QX_RING_DTYPE"]
 if os.environ.get("QX_QBATCH"):   cfg.phonon.sse_dense_q_batched = bool(int(os.environ["QX_QBATCH"]))
 if os.environ.get("QX_SCP_TADPOLE"): cfg.phonon.scp_tadpole = bool(int(os.environ["QX_SCP_TADPOLE"]))

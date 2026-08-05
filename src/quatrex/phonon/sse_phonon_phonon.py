@@ -129,6 +129,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # masked).
         self._low_freq_mask = float(
             getattr(config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0)
+        # CM-channel subtraction (sse_cm_subtraction): subtract the exact
+        # centre-of-mass (lead-driven translation) Green's-function pair
+        # from the bubble legs at the q = Gamma pair. The channel data
+        # (t_dev, V_LT, V_RT, T_L, T_R) is injected once via
+        # set_cm_channel() (interaction registry, first compute); the
+        # per-frequency nnz arrays are built lazily where the grid and
+        # the sparsity pattern are at hand. See
+        # phonon/docs/ir_residue_derivation.md.
+        self._cm_sub_enabled = bool(
+            getattr(config.phonon, "sse_cm_subtraction", False))
+        self._cm_channel = None
+        self._cm_arrays = None
         # Auxiliary uniform bubble grid (sse_aux_grid_dw_thz): the FFT
         # convolution, the bosonic fold and the Hilbert transform only exist
         # on a uniform, zero-anchored grid. With aux_dw > 0 they run on an
@@ -983,6 +995,28 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if m.distribution_state != "nnz":
                     m.dtranspose(discard=True)
             gl_in, gg_in = g_lesser.data, g_greater.data
+            if self._cm_sub_enabled:
+                # Subtract the exact CM (lead-driven translation) channel
+                # from the legs at the q = Gamma pair, on the PRIMARY grid
+                # BEFORE any interpolation/masking (the channel lives at
+                # q index 0 -- the Gamma-centered mesh is enforced above).
+                # S is fold-symmetric (S^<(-w) = S^>(w)^T holds exactly
+                # for the CM pair), so every downstream fold/reversal
+                # consumes Gbar consistently. Zero add-back: the
+                # channel's vertex contraction is spurious in the
+                # device-truncated model (ir_residue_derivation.md).
+                if self._cm_channel is None:
+                    raise RuntimeError(
+                        "sse_cm_subtraction is enabled but no CM channel "
+                        "was injected (set_cm_channel); refusing to run "
+                        "the bare bubble silently."
+                    )
+                s_l, s_g = self._cm_sub_arrays(g_lesser, full_freqs)
+                gamma_idx = (slice(None),) + (0,) * len(nk)
+                gl_in = gl_in.copy()
+                gg_in = gg_in.copy()
+                gl_in[gamma_idx] = gl_in[gamma_idx] - s_l
+                gg_in[gamma_idx] = gg_in[gamma_idx] - s_g
             # The omega=0 bin never enters the bubble (Bose divergence at DC;
             # the zero-measure convention of the theory). The Green's functions
             # stay intact for Dyson/observables; only the copies fed into the
@@ -2578,6 +2612,63 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             zero_freq_idx=None,
             xp=xp,
         )
+
+    def set_cm_channel(self, t_dev, v_l, v_r, t_left, t_right) -> None:
+        """Inject the CM-channel data (see quatrex.phonon.cm_channel).
+
+        t_dev : (r, n_dof_total) orthonormal device-tiled translation
+        modes; v_l/v_r : (r, r) lead velocity matrices on that basis;
+        t_left/t_right : lead temperatures (K).
+        """
+        self._cm_channel = (
+            np.asarray(get_host(t_dev), dtype=float),
+            np.asarray(get_host(v_l), dtype=float),
+            np.asarray(get_host(v_r), dtype=float),
+            float(t_left), float(t_right),
+        )
+        self._cm_arrays = None
+
+    def _cm_sub_arrays(self, g_lesser, full_freqs):
+        """(S^<, S^>) of the CM channel on the primary grid, mapped onto
+        the local nnz slice (the bubble only reads pattern entries, so
+        the pattern-projected S is exactly the channel content the legs
+        carry). Cached: the grid and pattern are fixed per run."""
+        if self._cm_arrays is not None:
+            return self._cm_arrays
+        from quatrex.phonon.cm_channel import cm_sigma_pair
+
+        t_dev, v_l, v_r, t_left, t_right = self._cm_channel
+        rows = np.asarray(get_host(g_lesser.rows))
+        cols = np.asarray(get_host(g_lesser.cols))
+        if t_dev.shape[1] <= int(max(rows.max(), cols.max())):
+            raise ValueError(
+                "sse_cm_subtraction: channel t_dev covers "
+                f"{t_dev.shape[1]} DOF but the sparsity pattern indexes "
+                f"up to {int(max(rows.max(), cols.max()))}."
+            )
+        off = int(g_lesser.nnz_section_offsets[ranks.stack.rank])
+        n_loc = int(g_lesser.data.shape[-1])
+        t_row = t_dev[:, rows[off:off + n_loc]]
+        t_col = t_dev[:, cols[off:off + n_loc]]
+        w = np.asarray(get_host(full_freqs)).real
+        s_l = np.zeros((w.size, n_loc), dtype=np.complex128)
+        s_g = np.zeros((w.size, n_loc), dtype=np.complex128)
+        for i, wi in enumerate(w):
+            if abs(wi) < 1e-12:
+                continue  # the omega = 0 bin stays zero-measure
+            m_l, m_g = cm_sigma_pair(float(wi), v_l, v_r, t_left, t_right)
+            s_l[i] = np.einsum("ak,ab,bk->k", t_row, m_l, t_col)
+            s_g[i] = np.einsum("ak,ab,bk->k", t_row, m_g, t_col)
+        self._cm_arrays = (xp.asarray(s_l), xp.asarray(s_g))
+        if comm.rank == 0:
+            v_t = np.linalg.eigvalsh(v_l + v_r)
+            print(
+                f"CM SUBTRACTION ON: rank-{t_dev.shape[0]} translation "
+                f"channel, V_T eigs {np.round(v_t, 5).tolist()} THz, "
+                f"T_L/T_R = {t_left}/{t_right} K",
+                flush=True,
+            )
+        return self._cm_arrays
 
     def _full_frequencies(self, ne_full: int) -> NDArray:
         """Full (cached) frequency grid, all-gathers the local slice."""
