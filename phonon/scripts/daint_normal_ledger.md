@@ -1,6 +1,6 @@
 # daint NORMAL-partition job ledger
 
-Hard cap 100 node-hours committed (nodes x walltime at submission). Paul authorises any excess BEFORE launch.
+Hard cap 200 node-hours committed (nodes x walltime at submission; raised from 100 by Paul 2026-08-05). Paul authorises any excess BEFORE launch.
 
 | date | job | name | nodes | walltime | nh | total nh |
 |---|---|---|---|---|---|---|
@@ -37,3 +37,8 @@ Hard cap 100 node-hours committed (nodes x walltime at submission). Paul authori
 | 2026-08-05 | 4345165 | mos2f3q9b | 1 | 00:30:00 | 0.50 | 70.50 |
 | 2026-08-05 | 4345522 | mos2f3q7b2 | 1 | 00:30:00 | 0.50 | 71.00 |
 | 2026-08-05 | 4345523 | mos2f3q9b2 | 1 | 00:30:00 | 0.50 | 71.50 |
+| 2026-08-05 | 4348734 | mos2f3-cmsub | 1 | 03:00:00 | 3.00 | 74.50 |
+| 2026-08-05 | 4348739 | mos2f3-u2001-cmsub | 1 | 07:00:00 | 7.00 | 81.50 |
+| 2026-08-05 | 4349709 | mos2f3-cmsub2 | 1 | 03:00:00 | 3.00 | 84.50 |
+| 2026-08-05 | 4349710 | mos2f3-u2001-cmsub2 | 1 | 07:00:00 | 7.00 | 91.50 |
+| 2026-08-05 | 4351512 | mos2f3-u2001-cmsub3 | 1 | 07:00:00 | 7.00 | 98.50 |

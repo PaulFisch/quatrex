@@ -116,7 +116,7 @@ def cmd_sync(_):
 
 
 NORMAL_LEDGER = Path(__file__).resolve().parent / "daint_normal_ledger.md"
-NORMAL_NH_CAP = 100.0        # Paul 2026-08-02: HARD upper limit, not a target
+NORMAL_NH_CAP = 200.0        # Paul 2026-08-05: raised from 100 (CM-subtraction campaign); HARD upper limit, not a target
 NORMAL_MAX_NODES = 2         # per job, unless Paul authorises more
 
 
