@@ -41,6 +41,9 @@ def main() -> int:
         calculation=rc.calculation,
         forc_conv_thr=rc.forc_conv_thr,
         timeout=172800,  # 48 h -- 168-atom PBE+D3 relax, not a wire cell
+        # legs continue from the previous leg's CONTCAR (oxrelax1-4 each
+        # restarted from the original structure and re-paid the descent)
+        restart_from_contcar=True,
     )
 
     # Wire drift diagnostics (first N_WIRE atoms are the wire).

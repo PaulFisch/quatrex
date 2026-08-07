@@ -573,6 +573,29 @@ def parse_vasp_relax_output(work_dir: Path) -> PhonopyAtoms:
                             scaled_positions=scaled)
 
 
+def _maybe_restart_cell(
+    work_dir: Path, cell: PhonopyAtoms, restart_from_contcar: bool
+) -> PhonopyAtoms:
+    """Seed a relaxation leg from the work dir's CONTCAR if requested.
+
+    Long relaxations run in timeout-bounded legs; without this, every
+    leg rewrites POSCAR from the ORIGINAL cell and re-pays the whole
+    descent (measured on oxrelax4: leg 4 restarted at F = -997.17 eV,
+    the unrelaxed energy, and spent its 48 h regaining -1033.9).
+    Only consulted for INCOMPLETE runs -- the completed-run skip in
+    :func:`run_vasp_relax` short-circuits before this.
+    """
+    if not restart_from_contcar:
+        return cell
+    contcar = Path(work_dir) / "CONTCAR"
+    if contcar.exists() and contcar.stat().st_size > 0:
+        seeded = parse_vasp_relax_output(Path(work_dir))
+        print(f"  Restarting from {contcar} "
+              f"({len(seeded.symbols)} atoms, prior unconverged leg)")
+        return seeded
+    return cell
+
+
 def run_vasp_relax(
     cell: PhonopyAtoms,
     work_dir: Path,
@@ -582,6 +605,7 @@ def run_vasp_relax(
     press_conv_thr: float = 0.5,
     skip_existing: bool = True,
     timeout: int = 7200,
+    restart_from_contcar: bool = False,
 ) -> PhonopyAtoms:
     """Run a VASP structural relaxation and return the relaxed structure.
 
@@ -601,6 +625,11 @@ def run_vasp_relax(
         Not directly used by VASP (stress converges via EDIFFG + ISIF).
     skip_existing : bool
         If True and CONTCAR exists from a completed run, skip re-running.
+    restart_from_contcar : bool
+        If True and the work dir holds a CONTCAR from an INCOMPLETE
+        prior leg (timeout-bounded relaxations), seed POSCAR from it
+        instead of the passed ``cell``. Default False (legacy: every
+        leg restarts from the original structure).
 
     Returns
     -------
@@ -623,6 +652,7 @@ def run_vasp_relax(
                       f"(|a{i+1}| = {np.linalg.norm(v):.4f} A)")
             return relaxed
 
+    cell = _maybe_restart_cell(work_dir, cell, restart_from_contcar)
     _write_vasp_relax_inputs(work_dir, cell, vasp_config, calculation,
                              forc_conv_thr)
 
