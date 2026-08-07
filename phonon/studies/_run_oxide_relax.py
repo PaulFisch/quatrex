@@ -58,8 +58,12 @@ def main() -> int:
     sp = relaxed.positions[N_WIRE:]
     hw = [i for i, s in enumerate(relaxed.symbols[:N_WIRE]) if s == "H"]
     dmin = [float(np.min(np.linalg.norm(sp - wp[i], axis=1))) for i in hw]
-    print(f"[relax] wire-H to shell contact: min {min(dmin):.2f} A, "
-          f"median {np.median(dmin):.2f} A", flush=True)
+    if dmin:
+        print(f"[relax] wire-H to shell contact: min {min(dmin):.2f} A, "
+              f"median {np.median(dmin):.2f} A", flush=True)
+    else:
+        print("[warn ] no H found in the first N_WIRE atoms -- atom "
+              "ordering suspect, skipping contact stats.", flush=True)
     print("[done ] oxide relax complete.", flush=True)
     return 0
 

@@ -64,3 +64,38 @@ def test_no_contcar_falls_back_to_original(tmp_path: Path) -> None:
     orig = _cell()
     out = _maybe_restart_cell(tmp_path, orig, True)
     assert out is orig
+
+
+def test_restore_original_order_roundtrip(tmp_path: Path) -> None:
+    """Species-interleaved cell (wire Si/H then shell Si/O): the CONTCAR
+    is species-grouped; restore_original_order must map every atom back
+    to its original index."""
+    from phonon_inputs.qe_interface import (
+        _species_sort_indices, restore_original_order)
+
+    symbols = ["Si", "H", "Si", "O"]  # interleaved on purpose
+    pos = np.array([[0.0, 0.0, 0.1], [0.2, 0.0, 0.0],
+                    [0.0, 0.3, 0.0], [0.4, 0.4, 0.4]])
+    orig = PhonopyAtoms(symbols=symbols, cell=np.eye(3) * 5.0,
+                        scaled_positions=pos)
+    idx = _species_sort_indices(symbols)          # [0, 2, 1, 3] (Si,Si,H,O)
+    sorted_pos = pos[idx]
+    sorted_syms = [symbols[i] for i in idx]
+    parsed = PhonopyAtoms(symbols=sorted_syms, cell=np.eye(3) * 5.0,
+                          scaled_positions=sorted_pos)
+    restored = restore_original_order(parsed, orig)
+    assert list(restored.symbols) == symbols
+    assert np.allclose(restored.scaled_positions, pos, atol=1e-12)
+
+
+def test_relax_converged_marker(tmp_path: Path) -> None:
+    from phonon_inputs.qe_interface import _relax_converged
+
+    out = tmp_path / "OUTCAR"
+    out.write_text("... some output ...\n"
+                   "General timing and accounting informations for this job\n")
+    assert not _relax_converged(tmp_path)   # graceful exit != converged
+    out.write_text("...\n reached required accuracy - stopping structural "
+                   "energy minimisation\n"
+                   "General timing and accounting informations for this job\n")
+    assert _relax_converged(tmp_path)

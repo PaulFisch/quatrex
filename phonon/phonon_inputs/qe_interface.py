@@ -456,9 +456,7 @@ def _write_vasp_relax_inputs(
 
     unique_species = list(dict.fromkeys(symbols))
     species_counts = [symbols.count(sp) for sp in unique_species]
-    sorted_indices = []
-    for sp in unique_species:
-        sorted_indices.extend(i for i, s in enumerate(symbols) if s == sp)
+    sorted_indices = _species_sort_indices(symbols)
     sorted_positions = positions_frac[sorted_indices]
 
     # --- POSCAR ---
@@ -522,6 +520,63 @@ def _write_vasp_relax_inputs(
                 )
             with open(pp_path) as pp_in:
                 potcar_out.write(pp_in.read())
+
+
+def _species_sort_indices(symbols: list) -> list:
+    """POSCAR species-grouping permutation: original index of each atom
+    in write order (species blocks in first-appearance order)."""
+    unique_species = list(dict.fromkeys(symbols))
+    idx: list = []
+    for sp in unique_species:
+        idx.extend(i for i, s in enumerate(symbols) if s == sp)
+    return idx
+
+
+def restore_original_order(
+    parsed: PhonopyAtoms, original_cell: PhonopyAtoms
+) -> PhonopyAtoms:
+    """Invert the POSCAR species sorting of a parsed CONTCAR structure.
+
+    The POSCAR writer groups atoms by species, so CONTCAR atom order
+    differs from the original cell's whenever species interleave (e.g.
+    wire Si/H followed by shell Si/O: CONTCAR's first block is ALL Si,
+    wire and shell mixed). Any positional diagnostic against the
+    original cell must run in the original order. No-op (with a
+    warning) if the symbol multisets do not match.
+    """
+    import warnings
+
+    symbols = list(original_cell.symbols)
+    if sorted(symbols) != sorted(list(parsed.symbols)):
+        warnings.warn(
+            "restore_original_order: symbol sets differ between parsed "
+            "CONTCAR and original cell; returning CONTCAR order.",
+            stacklevel=2)
+        return parsed
+    idx = _species_sort_indices(symbols)
+    scaled = np.empty_like(parsed.scaled_positions)
+    scaled[idx] = parsed.scaled_positions
+    return PhonopyAtoms(symbols=symbols, cell=parsed.cell,
+                        scaled_positions=scaled)
+
+
+def _relax_converged(work_dir: Path) -> bool:
+    """True if the OUTCAR records IONIC convergence (EDIFFG met).
+
+    ``_is_vasp_done`` only certifies a graceful VASP exit -- a relax
+    that runs out of NSW ionic steps exits gracefully too (measured:
+    oxrelax4 'completed' at step 300 with dE still -4e-3 eV/step).
+    """
+    outcar = Path(work_dir) / "OUTCAR"
+    if not outcar.exists():
+        return False
+    with open(outcar, "rb") as f:
+        try:
+            f.seek(-500_000, 2)
+        except OSError:
+            f.seek(0)
+        tail = f.read().decode(errors="replace")
+    return "reached required accuracy" in tail
 
 
 def parse_vasp_relax_output(work_dir: Path) -> PhonopyAtoms:
@@ -589,7 +644,8 @@ def _maybe_restart_cell(
         return cell
     contcar = Path(work_dir) / "CONTCAR"
     if contcar.exists() and contcar.stat().st_size > 0:
-        seeded = parse_vasp_relax_output(Path(work_dir))
+        seeded = restore_original_order(
+            parse_vasp_relax_output(Path(work_dir)), cell)
         print(f"  Restarting from {contcar} "
               f"({len(seeded.symbols)} atoms, prior unconverged leg)")
         return seeded
@@ -640,11 +696,12 @@ def run_vasp_relax(
 
     work_dir = Path(work_dir)
 
-    if skip_existing and _is_vasp_done(work_dir):
+    if skip_existing and _is_vasp_done(work_dir) and _relax_converged(work_dir):
         contcar = work_dir / "CONTCAR"
         if contcar.exists() and contcar.stat().st_size > 0:
             print(f"  Relax already done, loading {contcar}")
-            relaxed = parse_vasp_relax_output(work_dir)
+            relaxed = restore_original_order(
+                parse_vasp_relax_output(work_dir), cell)
             a_new = np.linalg.norm(relaxed.cell, axis=1)
             print(f"  Relaxed: {len(relaxed.symbols)} atoms")
             for i, v in enumerate(relaxed.cell):
@@ -668,7 +725,7 @@ def run_vasp_relax(
         raise RuntimeError(f"VASP relaxation failed (exit {rc}). "
                            f"Check {log_file}")
 
-    relaxed = parse_vasp_relax_output(work_dir)
+    relaxed = restore_original_order(parse_vasp_relax_output(work_dir), cell)
     a_new = np.linalg.norm(relaxed.cell, axis=1)
     print(f"  Relaxed lattice vectors: |a|={a_new[0]:.4f}, "
           f"|b|={a_new[1]:.4f}, |c|={a_new[2]:.4f} A")
