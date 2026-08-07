@@ -92,6 +92,51 @@ resolution** — Γ_em ≈ Δω/2 at every under-resolved rung
 only detaches once Δω < 2Γ_true ≈ 0.038. A "converged" coarse run
 reports its own grid spacing as the physics.
 
+#### How fine is actually enough (the ladder pushed to Δω/Γ = 0.06)
+
+S_B saturating at 1.000 does **not** mean the observable has converged.
+Judged by the successive-rung change `|Γ(n) − Γ(n/2)|/Γ(n)` (the
+distance to the finest rung is 0 by construction and must not be used):
+
+| nfreq | Δω/Γ | Γ_spectral | d(spec) | Γ_from-Σ | d(Σ) | ρ_raw |
+|---|---|---|---|---|---|---|
+| 1920 | 0.9 | 0.02423 | 44 % | 0.02666 | 0.8 % | 0.79 |
+| 3840 | 0.5 | 0.01906 | **27 %** | 0.02671 | 0.2 % | 0.82 |
+| 7680 | 0.24 | 0.01824 | 4.5 % | 0.02674 | 0.1 % | 0.82 |
+| 15360 | 0.12 | 0.01796 | 1.5 % | 0.02674 | 0.0 % | 0.82 |
+| 30720 | 0.06 | 0.01791 | **0.3 %** | 0.02675 | 0.0 % | 0.82 |
+
+The successive changes fall 27 → 4.5 → 1.5 → 0.3 %, i.e. roughly
+second order in Δω. **1 % accuracy on the spectral width needs
+Δω/Γ ≈ 0.12 — about 8 points per half-width** — a factor ~10 stricter
+than `eq:grid_resolution`'s Δω ≲ Γ_anh (1 point per linewidth). ρ_raw
+is flat at 0.82 across the whole resolved regime, so regime 3 is
+genuinely stable, not marginally so.
+
+The two width readers converge to **different** values, 0.0179
+(spectral FWHM) vs 0.0267 (−Im Σ^R/2ω), and both are right: their ratio
+0.67 is the quasiparticle residue `Z = (1 − ∂ReΣ/∂ω)^-1`. The Σ-based
+reader converges ten times sooner (0.1 % by nf = 7680) because it
+samples one bin; the spectral width is the demanding observable. Any
+"resolved" claim must say which width it means.
+
+#### A latent code trap this exposed
+
+At nf = 30720 the cold-started run reported **converged at iteration 1**
+with S_B = 0.006 and Γ = 6e-4 — it had never iterated and sat on the
+ballistic branch. Cause: the SCBA residual `‖f‖/‖sol‖`
+(`phonon/solver/dense.py:900`) is **grid-dependent at the first
+iteration** — 5.6e-5 at nf = 15360 but 8.8e-8 at nf = 30720 — so against
+a fixed `tol` the finest grid trips the convergence test immediately.
+Warm-starting the same grid from the nf = 15360 fixed point runs 24
+iterations to S_B = 1.0000, Γ = 0.01791, exactly on the convergence
+trend. **`scba_tol` is not grid-invariant**, and the same signature
+(“converged in 1 iteration”) is already sitting in the committed
+`out/toy_grid/results_ref.json`. Production tolerances (1e-3) are far
+from this threshold, but any fine-grid or tight-tolerance study must
+guard on the iteration count — `_grid_regimes.py` now re-runs any rung
+that stops in ≤ 2 iterations from the previous rung's solution.
+
 Control: S_A (dispersive band) stays 0.70→0.93 across the whole ladder,
 saturating below 1 only from fmax truncation — the deficit is
 specifically the flat band, not global.
