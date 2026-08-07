@@ -35,6 +35,21 @@ import numpy as np
 
 def _load(path):
     d = np.load(path)
+    # POST-HOC PAIRING TRAP: bubble_balance_spectrum / slab_absorption are
+    # produced in engine/run.py AFTER scba.run() returns, when sigma holds
+    # the MIXED iterate -- not the pair (Sigma = bubble[G], G) the identity
+    # is about. The post-hoc number is then the SCBA residual in energy
+    # units, not a conservation defect: measured on a CONVERGED CNT run,
+    # pre-mixing 5e-16 vs post-hoc 2.8e-8 (phonon/docs/
+    # mos2_conservation_audit.md). Only iter_bubble_balance (QX_BBCHECK=1,
+    # scba.py:884, between the SSE evaluation and the mixing step) tests
+    # the bubble itself.
+    if d.get("iter_bubble_balance") is None:
+        print(f"WARNING [{Path(path).name}]: no iter_bubble_balance in this "
+              "run -- identity (C) below is computed from the POST-HOC "
+              "(mixed-sigma) arrays and mostly measures non-self-"
+              "consistency. Rerun with QX_BBCHECK=1 before attributing a "
+              "break to the bubble/vertex.")
     w = np.asarray(d["energies"], float)
     cw = np.asarray(d.get("frequency_cell_widths", np.gradient(w)), float)
     wt = np.abs(w) * cw                    # hbar-omega * quadrature weight
