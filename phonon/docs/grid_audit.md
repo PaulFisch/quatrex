@@ -46,14 +46,73 @@ magnitude less sensitive than the spectral width — consistent with the
 shoulder entering through Kramers–Kronig rather than through terminal
 heat.
 
+### RESOLUTION — three regimes: blind → partially registered → resolved
+
+**Paul's hypothesis (2026-08-07), CONFIRMED.** Coarse-grid convergence
+is not evidence that coarse grids work: the grid does not *register* the
+resonance, so the map is nearly ballistic and trivially contracting
+while the answer is wrong. The registration fraction is the exact
+per-orbital spectral sum rule `S_i = ∫2ω(−1/π)Im G^R_ii dω = 1`,
+restricted to the flat band whose entire width is anharmonic
+(`_grid_regimes.py`, 8 resolutions × 5 sub-cell offsets, medians):
+
+| nfreq | Δω | **S_B** | Γ_FB(own grid) | Γ_em | **ρ_raw** | ρ_damped | \|ΔΓ\|/Γ_ref | regime |
+|---|---|---|---|---|---|---|---|---|
+| 30 | 1.173 | **0.047** | 0.0071 | 0.683 | **0.13** | 0.826 | 34.8 | blind |
+| 60 | 0.587 | 0.130 | 0.0139 | 0.325 | 0.39 | 0.863 | 16.1 | blind |
+| 120 | 0.293 | 0.863 | 0.0198 | 0.153 | 1.12 | 0.950 | 7.03 | transition |
+| 240 | 0.147 | 0.814 | 0.0158 | 0.082 | 1.40 | 0.954 | 3.32 | transition |
+| 480 | 0.073 | 0.916 | 0.0220 | 0.049 | **1.50** | 0.935 | 1.58 | transition |
+| 960 | 0.037 | 0.987 | 0.0200 | 0.035 | 1.22 | 0.933 | 0.84 | resolved |
+| 1920 | 0.018 | 1.000 | 0.0188 | 0.024 | **0.79** | 0.932 | 0.27 | resolved |
+| 3840 | 0.009 | 1.000 | 0.0184 | 0.019 | 0.82 | 0.929 | 0.00 | resolved |
+
+All three predicted regimes appear:
+
+1. **Blind.** At Δω/Γ ≈ 59 the grid registers **4.7 %** of the
+   resonance, the raw loop gain is **0.13** (trivially contracting), and
+   the answer is wrong by a factor 35. The a-priori check agrees
+   independently: the first-Born linewidth computed with that rung's own
+   quadrature is 0.0071 against a grid-converged 0.0184 — 60 % of the
+   physics is invisible to the grid. Ballistic control: S_B = 0.000 at
+   every rung, so the *difference* between the anharmonic and ballistic
+   states at nfreq = 30 is 4.7 % of one orbital.
+2. **Transition.** As the grid starts to sample the line, ρ_raw rises
+   through 1 and **peaks at 1.50** (nfreq = 480, S_B ≈ 0.92).
+3. **Resolved.** Once S_B → 1.000, ρ_raw falls **back below 1**
+   (0.79–0.82) and the linewidth converges to the reference.
+
+So the non-monotonicity is not a puzzle: it is the signature of passing
+through partial registration. **Refining does not monotonically
+destabilise, and coarse stability is worthless.**
+
+Bonus finding: **the measured linewidth is a pure grid artefact until
+resolution** — Γ_em ≈ Δω/2 at every under-resolved rung
+(1.173→0.683, 0.587→0.325, 0.293→0.153, 0.147→0.082, 0.073→0.049) and
+only detaches once Δω < 2Γ_true ≈ 0.038. A "converged" coarse run
+reports its own grid spacing as the physics.
+
+Control: S_A (dispersive band) stays 0.70→0.93 across the whole ladder,
+saturating below 1 only from fmax truncation — the deficit is
+specifically the flat band, not global.
+
 ### RESOLUTION — the accuracy half holds, the stability half does not
 
 | claim | verdict | measurement |
 |---|---|---|
 | #2 discrete pole weight `W ≈ (Δω/π)Γ/(d²+Γ²)` | **TRUE (exact)**; amplitude of the *swing* overstated ~4× | closed form reproduces the peak-bin weight to **1.0000** at dw/Γ = 0.25…64; sub-cell swing 1.02/1.25/5.0/65/862 — quadratic in dw/Γ as claimed, prefactor ≈ 1/4 |
 | #1 **accuracy** half (`Δω ≲ Γ_anh` for the integrals) | **TRUE, and worse than reported** | at dw/Γ = 2.9 the measured linewidth swings **0.094–0.162 THz across one cell = 73 %**, against the 25 % quoted at `62:145` |
-| #1 **stability** half ("…and for the stability of the map"), with #3's `\|λ\| ~ Δω/Γ > 1` | **FALSE as stated** | ρ(J) is **non-monotonic** in dw/Γ and **smallest on the coarsest grid**: at Γ=0.02, dw/Γ = 58.7 → ρ = **0.13** (converges) where the claim predicts ≈ 59. At Γ=0.2, ρ ≈ 0.66–0.83 over dw/Γ = 0.37…5.9 — no trend |
-| #3 alignment multiplies the gain | **mechanism TRUE, magnitude ~1.4× optimistic** | at fixed dw, translating the pole across one cell moves ρ **0.72 → 1.51** (swing 2.10 vs predicted dw/Γ = 2.93) and **crosses 1** — alignment alone can destabilise a marginal cycle |
+| #1 **stability** half ("…and for the stability of the map"), with #3's `\|λ\| ~ Δω/Γ > 1` | **FALSE as stated** — the true control parameter is *registration*, not Δω/Γ | ρ_raw is **non-monotonic** in Δω/Γ and **smallest on the coarsest grid** (0.13 at Δω/Γ = 58.7, where the claim predicts ≈ 59) because the coarse grid is blind. The instability lives in the *transition*, and refining past it restores ρ_raw < 1 |
+| #3 alignment multiplies the gain | **mechanism TRUE, magnitude ~1.4× optimistic** | at fixed Δω, translating the pole across one cell moves ρ_raw **0.72 → 1.51** (swing 2.10 vs predicted Δω/Γ = 2.93) |
+
+**Stability convention (correction).** `arnoldi_spectrum` returns the
+Jacobian of the **raw** map F. The SCBA iterate is damped,
+`x ← (1−a)x + aF(x)`, so its eigenvalue is `m = 1 − a + aλ` and the
+convergence criterion is `|m| < 1`, **not** `|λ| < 1` — which is why
+rungs with ρ_raw > 1 still converge at a = 0.2. Earlier statements in
+this file that ρ "crosses 1" refer to ρ_raw and are *not* convergence
+statements. Measured ρ_damped stays 0.83–0.95 across the whole ladder
+(every rung converges); the physics signal is in ρ_raw.
 | #4 the divergence is "erratic rather than geometric" | **supported** | ρ(offset) is non-monotonic: peak 1.51 at offset 0.875, minimum 0.72 at 1.0 |
 
 **Reading:** the criterion `Δω ≲ Γ_anh` is a *quadrature-accuracy*
