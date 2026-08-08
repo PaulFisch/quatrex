@@ -708,6 +708,50 @@ resolution. Going longer needs a non-uniform primary grid
 (`frequency_grid = "file"`, see `make_grid.py`) rather than more nodes,
 since the 2-node cap binds first.
 
+### 6.11 Why only MoS2: the mask is PSD for every clean system
+
+The same box mask, evaluated at the production default 10 A on each
+system's own device geometry, predicts the behaviour of every run in
+this campaign with no exceptions and no fitting:
+
+| system | tiling vector | mask axis | extent on that axis | fill @ 10 A | mask PSD | observed |
+|---|---|---|---|---|---|---|
+| MoS2 film L3 | a3 = (0,0,12.294) | z | 33.86 A | 46.9 % | **no** (-6.27) | diverges |
+| MoS2 film 6 cells | a3 | z | 70.74 A | 25.2 % | **no** (-7.06) | diverges |
+| CNT33 L4 | a3 = (0,0,2.459) | z | 8.61 A | 100 % | yes | converges |
+| Si film L3 nk5 | a1 = (0,2.734,2.734) | x | 1.37 A | 100 % | yes | converges |
+| Si film L8 nk9 | a1 | x | 1.37 A | 100 % | yes | converges |
+
+MoS2 is the only system whose device extends past the cutoff along the
+axis the mask measures, and it is the only one that fails. The CNT is
+short along transport (2.46 A per cell, 8.6 A over four cells), so 10 A
+covers it whole.
+
+Si is dense for a subtler reason worth recording, because it is a latent
+trap rather than a property of the material. `transport_ind` is used
+**twice with different meanings**: as a lattice-vector index when the
+device is tiled
+(`create_coordinate_grid`, `inputs.py:99-106`, `coords + i *
+lattice_vectors[transport_ind]`) and as a **cartesian axis** when the
+mask is built (`compute_sparsity_pattern(..., strategy="box")`, which
+compares `positions[:, axis]`). Those agree only for an axis-aligned
+lattice. Si's film is the FCC primitive with
+`a1 = (0, 2.734, 2.734)` -- zero x-component -- so tiling along a1 never
+extends the device along x, the Si device has an x-extent of 1.37 A at
+*any* length, and the box mask is unconditionally dense. Si is therefore
+immune to this bug by accident of its cell orientation, not because its
+self-energy is local.
+
+That also corrects the earlier reading in §6.6/§6.8, which attributed
+Si's cleanliness to the locality of its Sigma. The locality is real (the
+block-distance profile falls three orders in one block) but it is not
+what protects Si here: Si simply never has a mask to be damaged by.
+
+**Consequence:** the box strategy is only meaningful when the transport
+lattice vector is parallel to the named cartesian axis. For any device
+where it is not, the cutoff silently does something other than what it
+says. That is worth a validator.
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity
