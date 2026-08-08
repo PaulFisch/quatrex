@@ -107,3 +107,75 @@ bubble balance *improves* to 2e-9.
   turned on is the one the thesis never writes down. It should be
   stated as `P_in = P_out` with the pre-mixing caveat, and the numbers
   above are its first measurement on the film.
+
+---
+
+# Why h_L = -h_R: the film runs on a GAIN state (2026-08-08)
+
+`lead balance = 2` is exactly `h_L = -h_R`: the two ends carry equal and
+opposite interface currents, so the device is a net energy **source**
+rather than a conduit. Measured cause, on every locally available run
+(`phonon/studies/_lead_balance_gain.py`,
+`out/grid_audit/lead_balance_gain.json`):
+
+| run | lead balance | gain fraction | worst / max | where |
+|---|---|---|---|---|
+| MoS2 ballistic, nu grid **(control)** | 2.9e-14 | **0** | −2.6e-16 | — |
+| MoS2 ballistic, u121 **(control)** | 5.7e-14 | **0** | −1.1e-15 | — |
+| MoS2 lowmask 55 it | 0.32 | 0.020 | −1.2e-2 | 2.93 THz, slab 1 |
+| MoS2 conv 55 it | 1.01 | 0.071 | **−1.00** | 0.13 THz, slab 1 |
+| MoS2 nu 20 it | **2.00** | 0.045 | **−1.00** | 1.20 THz, slab 2 |
+| MoS2 long, diverged | **2.00** | 0.124 | −0.32 | 2.76 THz, slab 2 |
+| Si film L3 SCBA **(control, converged)** | 1.7e-6 | **0** | 0.0 | — |
+| Si film L5 SCBA **(control, converged)** | 3.0e-5 | **0** | 0.0 | — |
+| CNT L4 g_band2 **(control, converged)** | 1.7e-5 | **0** | 0.0 | — |
+
+The test is the occupation positivity `(-i G^<)_ii >= 0`, which the
+saved `gl_diag_imag` gives directly. Every failing state violates it;
+**every control satisfies it exactly**. In the worst cases the most
+negative occupation equals the largest positive one in magnitude
+(`worst/max = -1.00`).
+
+**This localises the defect to the self-energy, not the solver.** The
+Keldysh equation `G^< = G^R Sigma^<_tot (G^R)^dagger` is a congruence,
+and congruence preserves positive semi-definiteness, so
+
+    -i Sigma^<_tot >= 0   ==>   -i G^< >= 0.
+
+A measured negative occupation therefore *proves* `-i Sigma^<_tot` has a
+negative eigenvalue. The contact part `i n_alpha Gamma_alpha` is PSD by
+construction, so the gain enters through the phonon-phonon bubble.
+This is assumption **A7** of the conservation audit — the one
+`appendices/conservation.tex:9` flags as never quantified. It is now
+quantified, and on this system it fails.
+
+Note what this does *not* say. The bubble still satisfies the
+Phi-derivable balance `P_in = P_out` to 1e-9 throughout (measured
+pre-mixing at every grid, including 15001 points), and the ballistic
+state is clean. So the energy bookkeeping is right while the state is
+unphysical: **conservation and positivity are independent gates, and
+only the first was ever checked.**
+
+Threshold caveat worth keeping: the gain test must normalise by the
+GLOBAL scale. Normalising per frequency makes the gapped high-omega
+bins (pure 1e-13 noise) look like 100 % gain and even the ballistic
+control "fails" — that error was made and caught here.
+
+## Open: where does the gain first enter?
+
+A PSD-preserving chain would forbid it — the bubble of PSD legs is PSD,
+linear mixing of PSD is PSD, the aux-grid interpolation is a convex
+combination (the code says so at `sse_phonon_phonon.py:136`), and
+zeroing masked bins keeps PSD. Yet iteration 1 starts ballistic (clean)
+and the state ends up with gain. The next measurement is therefore an
+**iteration-resolved positivity trace** — the first iteration at which
+`-i Sigma^<` loses PSD, and on which slab/frequency — via
+`phonon/solver/diagnostics.py:check_broadening_sign` (dense path) or
+`phonon.studies.conservation.sigma_convention` (one SSE evaluation on
+the production path). Candidates to separate there: `retarded_method =
+"half"` (the film runs it; the CNT control runs `"fft"`, and the thesis
+says the half rule "is not the Phi-derivable partner of the bubble and
+breaks per-interface conservation" at eta = 0, `results/60_eta0.tex:52`)
+versus the eta = 0 near-singular acoustic resolvent feeding the bubble.
+Note `sse_g_band` is NOT a candidate here: L3 has 3 blocks, so band 2 is
+the complete band, not a truncation.
