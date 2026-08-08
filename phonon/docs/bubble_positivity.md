@@ -616,6 +616,56 @@ config, same eta = 0, `interaction_cutoff` raised past the device
 length. If the gain disappears, H6 is confirmed causal; if it does not,
 the remaining candidate is H4 (the eta = 0 resolvent).
 
+### 6.9 CONFIRMED: the cutoff is causal (single-variable A/B)
+
+Same device (2 cells, 2 blocks, 36 dof -- so the block band is complete
+and H2 is absent), same 15001-point grid, same eta = 0, same linear
+mixing, same everything. **The only variable is
+`phonon.interaction_cutoff`.** Daint jobs 4383378 / 4383393.
+
+| cutoff | pattern | residual trace | lead balance | gain | worst/max |
+|---|---|---|---|---|---|
+| **30 A** (> the 24.6 A device) | dense, no mask | 1.000 -> 0.889 -> 0.777 -> 0.674 -> 0.579 -> 0.490 -> 0.406 -> **0.337**, monotone | **6.1e-05** | **0.00000** | **0.000e+00** |
+| **10 A** (production default) | box-masked | 1.000 -> **3.7e+07**, ABORTED at it 4 | 1.3e-01 | 0.02169 | **-1.000** |
+
+Removing the locality cutoff turns a run that explodes by seven orders
+of magnitude in one iteration into a clean monotone descent with
+**exactly zero negative occupation**. That is Theorems 1 and 2 verified
+end to end on a production run: with no Hadamard mask anywhere in the
+chain, positivity is preserved exactly, as the congruence argument says
+it must be.
+
+**Verdict for the campaign.** The MoS2 film instability is not a
+physical loop-gain, not a soft mode, not the infrared channel, not the
+dual grid, and not the block band. It is the **locality assumption
+built into the interaction sparsity pattern** -- a 10 A box cutoff
+applied to a device 25-200 A long whose propagator does not decay
+(§6.6). The mask is indefinite (§6.8), it hits the G legs before the
+bubble even runs, and it is what injects the gain.
+
+Caveats, stated plainly:
+
+- One device, one grid. The 2-cell device is the shortest that admits a
+  complete block band, and it has no interior slab, so it settles the
+  positivity question and nothing about the heat profile.
+- This shows the instability is removed, not that the resulting
+  transport number is converged.
+- Cost is the real obstacle to using this in production: an adequate
+  cutoff means a dense pattern, and memory goes as
+  `n_fft x nq x nnz` over the SSE tau workspaces (the term that OOMed
+  two attempts here). L6 dense at 15001 points needs ~140 GB/rank; the
+  binding constraint is the tau buffers, not the G/Sigma buffers.
+
+**Consequence for every earlier MoS2 result.** All of them ran at the
+10 A default on devices of 37 A (L3) and longer, so the divergence that
+dominated this campaign is very likely an artefact of that default
+rather than physics. The kappa_z ladder needs re-running against a
+cutoff ladder before any of it is trusted.
+
+Immediate follow-ups: a cutoff ladder (10, 15, 20, 25, 30 A) on one
+fixed device to locate the turnover; then a length ladder at
+cutoff >= device length, to find where memory binds.
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity
