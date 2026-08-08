@@ -559,6 +559,63 @@ known to persist at 4001 and 15001 points for the standard blocking. A
 15001-point, 8-iteration confirmation of the untruncated leg is running
 (job 4383310).
 
+### 6.8 The assumption that actually breaks: H6, the storage pattern
+
+If the 2-block run has no Sigma truncation, why is it still not PSD?
+Because the block band is not the only mask. G and Sigma are stored in
+buffers allocated on the **interaction sparsity pattern** -- a box
+cutoff along transport, `compute_sparsity_pattern(grid,
+max_interaction_cutoff, strategy="box")` (`scba.py:107-113`), unioned
+with the `g_band` blocks (`:126-150`) and the FC2 pattern
+(`solver.py:104`). Every entry outside it is silently dropped, on the
+G legs *and* on the Sigma output. That is an **orbital-level** 0/1
+Hadamard mask, and it is completely independent of the blocking.
+
+The cutoff defaults to `interaction_cutoff = 10.0` Angstrom
+(`config.py:1261`). The MoS2 transport cell is 12.294 A, so the 6-cell
+device is **74 A** long: the mask discards most of the operator.
+
+Measured on the full production pattern (Gamma slice, ballistic legs):
+
+| device | fill | mask lambda_min / lambda_max | legs after mask | Sigma after mask |
+|---|---|---|---|---|
+| 6 blocks x 1 cell | 80.3 % | -13.75 / 88.7 | 6.7e-02 | **1.000** |
+| 2 blocks x 3 cells | 41.4 % | -11.16 / 47.0 | 2.1e-01 | **1.000** |
+
+against `6e-14` for the same Sigma unmasked. `worst_rel = 1.000` means
+the most negative eigenvalue equals the largest in magnitude -- exactly
+the `worst/max = -1.00` the `mos2f6x1` run reports, so the offline model
+reproduces the observed gain signature.
+
+Three things follow.
+
+1. **The mask hits the legs first.** `-i G^<` is already indefinite
+   (6.7e-2 / 2.1e-1) *before* the bubble runs, so Theorem 1's premise
+   fails at the input, not at the output. No amount of care inside the
+   bubble can recover it.
+2. **It is blocking-independent**, which is precisely why removing the
+   block truncation (§6.7) changed nothing and why the two blockings
+   produced identical residual sequences.
+3. **The mask encodes an assumption of locality**, and MoS2 at eta = 0
+   violates it. §6.6 measured `-i G^<` as flat across six cells; a 10 A
+   box cutoff on a 74 A coherent propagator throws away the majority of
+   a non-negligible operator. For a genuinely local self-energy (Si,
+   whose Sigma falls three orders in one block) the same mask is nearly
+   the identity and harmless -- which is the discriminant between the
+   failing and the clean systems.
+
+So H2 and H6 are the same disease at two scales: Hadamard-masking an
+object that is not local. H2 is the block-level instance and is not
+sufficient on its own; H6 is the orbital-level instance and is
+saturating.
+
+**The prescription this implies** is a cutoff at least as long as the
+device, so the pattern is dense and no locality is assumed. That is
+cheap for short devices (L3 is 54 dof) and is the next test: same
+config, same eta = 0, `interaction_cutoff` raised past the device
+length. If the gain disappears, H6 is confirmed causal; if it does not,
+the remaining candidate is H4 (the eta = 0 resolvent).
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity
