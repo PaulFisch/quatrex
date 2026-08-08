@@ -69,3 +69,6 @@ Future rows continue from that number. Charging submitted walltime
 remains the pre-launch policy (it is the only figure known before a
 run starts); this reconciliation corrects the accumulated total to
 what was actually used.
+| 2026-08-08 | 4383302 | mos2f6x3 | 1 | 01:00:00 | 1.00 | 104.00 |
+| 2026-08-08 | 4383303 | mos2f6x1 | 1 | 01:00:00 | 1.00 | 105.00 |
+| 2026-08-08 | 4383310 | mos2f6x3 | 2 | 02:00:00 | 4.00 | 109.00 |

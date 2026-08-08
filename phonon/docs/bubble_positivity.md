@@ -520,6 +520,45 @@ legs are equally undamped, decays steeply anyway, so the difference
 between the two systems is material rather than an artefact of using
 ballistic legs.
 
+### 6.7 The decisive run: zero truncation does NOT stop the divergence
+
+The 2-block device is the configuration in which the `|I-J| <= 1`
+output band is complete, so **no Hadamard mask is applied at all** and
+positivity is preserved exactly by Theorems 1 and 2. If H2 were the
+driver, that run has to behave differently. It does not.
+
+Same 108-dof 6-cell film, same vertex, same eta = 0 config, 121-point
+grid, daint jobs 4383302 / 4383303:
+
+| run | blocks | Sigma truncation | balance | gain frac | worst/max | outcome |
+|---|---|---|---|---|---|---|
+| `mos2f6x1` | 6 | maximal (71 % discarded) | 2.000 | 0.41 % | -1.00 | diverged, it 28 |
+| `mos2f6x3` | 2 | **none** | 1.051 | **13.2 %** | -0.80 | diverged, it 28 |
+
+Both abort at the *same* iteration, and the untruncated run carries
+**more** gain, not less. The `Sigma^R` residual sequence is identical to
+five significant figures for the first eight iterations
+(1.0000, 2.7687, 2.2241, 1.7580, 1.0562, 0.74565, 0.99637, 0.99856)
+across the two blockings; only the per-slab internal spread differs. So
+the trajectory is set by something the blocking does not touch.
+
+**Verdict on H2: real, provable, measurable -- and not the cause.** The
+band mask is a genuine PSD defect (Theorem 3, and 3.3e-2 to 1.6e-1 of
+injected negative eigenvalue in §6.5), but removing it entirely leaves
+the MoS2 divergence untouched. This closes the structural line of
+enquiry: H1 clean, H3 anti-correlated, H2 falsified as a driver, the
+dual grid exonerated. What remains is H4 -- amplification of an O(1e-16)
+seed by the eta = 0 near-singular acoustic resolvent -- which is
+consistent with the CNT L4 carrying the largest injected negativity of
+any system measured here and still converging.
+
+Grid caveat: 121 points is far below the resolution the grid audit says
+is needed for converged transport numbers. It is adequate for *this*
+comparison, because both legs use the same grid and the divergence is
+known to persist at 4001 and 15001 points for the standard blocking. A
+15001-point, 8-iteration confirmation of the untruncated leg is running
+(job 4383310).
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity
