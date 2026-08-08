@@ -1,0 +1,238 @@
+{
+ "MoS2 film L3 (u121, FAILS)": {
+  "fc3": "cluster/mos2f3/fc3_blocks.hdf5",
+  "block_sizes": [
+   18,
+   18,
+   18
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 3.9551864532624236e+18,
+   "rel": 1.2945028156072853e-16,
+   "worst_block": [
+    0,
+    0,
+    0
+   ],
+   "n_blocks": 3,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 6.472514078036426e-17,
+   "worst_block": [
+    0,
+    0,
+    0
+   ]
+  },
+  "qfold": {
+   "scale": 3.9551864532624236e+18,
+   "rel": 1.2945028156072853e-16,
+   "worst": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "n_q_pairs": 625,
+   "n_missing_q_partner": 0,
+   "nk_shape": [
+    5,
+    5
+   ],
+   "n_q": 625
+  }
+ },
+ "MoS2 film L3 (nu grid, FAILS)": {
+  "fc3": "cluster/mos2f3nu/fc3_blocks.hdf5",
+  "block_sizes": [
+   18,
+   18,
+   18
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 3.9551864532624236e+18,
+   "rel": 1.2945028156072853e-16,
+   "worst_block": [
+    0,
+    0,
+    0
+   ],
+   "n_blocks": 3,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 6.472514078036426e-17,
+   "worst_block": [
+    0,
+    0,
+    0
+   ]
+  },
+  "qfold": {
+   "scale": 3.9551864532624236e+18,
+   "rel": 1.2945028156072853e-16,
+   "worst": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "n_q_pairs": 625,
+   "n_missing_q_partner": 0,
+   "nk_shape": [
+    5,
+    5
+   ],
+   "n_q": 625
+  }
+ },
+ "MoS2 film L3 (o4 vertex)": {
+  "fc3": "cluster/mos2f3o4/fc3_blocks.hdf5",
+  "block_sizes": [
+   18,
+   18,
+   18
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 4.685742326116165e+18,
+   "rel": 2.1853527760002866e-16,
+   "worst_block": [
+    0,
+    0,
+    0
+   ],
+   "n_blocks": 15,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 2.1853527760002866e-16,
+   "worst_block": [
+    0,
+    0,
+    0
+   ]
+  }
+ },
+ "MoS2 film L3 (scp vertex)": {
+  "fc3": "cluster/mos2f3scp/fc3_blocks.hdf5",
+  "block_sizes": [
+   18,
+   18,
+   18
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 4.661065972243083e+18,
+   "rel": 1.6476917610123613e-16,
+   "worst_block": [
+    0,
+    0,
+    0
+   ],
+   "n_blocks": 15,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 2.1969223480164817e-16,
+   "worst_block": [
+    0,
+    0,
+    0
+   ]
+  }
+ },
+ "Si film nk9r (control)": {
+  "fc3": "cluster/sifilm_nk9r/fc3_blocks.hdf5",
+  "block_sizes": [
+   6,
+   6,
+   6
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 5.101939075913229e+18,
+   "rel": 7.795245218900074e-17,
+   "worst_block": [
+    0,
+    0,
+    0
+   ],
+   "n_blocks": 15,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 5.017700058564045e-17,
+   "worst_block": [
+    0,
+    0,
+    0
+   ]
+  },
+  "qfold": {
+   "scale": 5.101939075913229e+18,
+   "rel": 2.243983684330776e-16,
+   "worst": [
+    9,
+    50,
+    0,
+    0,
+    0
+   ],
+   "n_q_pairs": 6561,
+   "n_missing_q_partner": 0,
+   "nk_shape": [
+    9,
+    9
+   ],
+   "n_q": 6561
+  }
+ },
+ "CNT33 L4 (control)": {
+  "fc3": "cluster/l4gpu/fc3_blocks.hdf5",
+  "block_sizes": [
+   36,
+   36,
+   36,
+   36
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 1.178220102062912e+20,
+   "rel": 0.0,
+   "worst_block": null,
+   "n_blocks": 22,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 0.0,
+   "worst_block": null
+  }
+ },
+ "CNT33 cal (control)": {
+  "fc3": "cluster/cnt_cal/fc3_blocks.hdf5",
+  "block_sizes": [
+   36,
+   36,
+   36,
+   36
+  ],
+  "reality_rel": 0.0,
+  "exchange": {
+   "scale": 1.178220102062912e+20,
+   "rel": 0.0,
+   "worst_block": null,
+   "n_blocks": 22,
+   "n_missing_partner": 0
+  },
+  "s3": {
+   "rel": 0.0,
+   "worst_block": null
+  }
+ }
+}

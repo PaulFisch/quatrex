@@ -1,0 +1,183 @@
+{
+ "MoS2 film L3 (nu vertex, FAILS)": {
+  "dir": "cluster/mos2f3",
+  "nslab": 3,
+  "nd": 18,
+  "gamma_worst_neg": 2.5273842812110508e-11,
+  "leg_lesser_worst_neg": 2.88579139639055e-16,
+  "leg_greater_worst_neg": 3.479225148645217e-16,
+  "fold_terms_worst_neg": [
+   8.331024765209792e-12,
+   1.0049722630311457e-13,
+   1.0001309449552951e-13
+  ],
+  "sigma_unmasked_worst_neg": 9.826415498634838e-14,
+  "block_profile_all_omega": {
+   "0": 1.0,
+   "1": 0.6790004376897578,
+   "2": 0.5498093385372251
+  },
+  "block_profile_mid_omega": {
+   "0": 1.0,
+   "1": 0.438283361643468,
+   "2": 0.47626530416670787
+  },
+  "mid_omega_thz": 8.0,
+  "masks": {
+   "1 cell/block (3 blocks)": {
+    "worst_rel": 0.033124851737815104,
+    "discarded": 0.41404265000793583,
+    "omega_at_worst": 3.6
+   },
+   "no mask": {
+    "worst_rel": 9.826415498634838e-14,
+    "discarded": 0.0,
+    "omega_at_worst": 8.266666666666666
+   },
+   "bartlett band-1, 1 cell/block": {
+    "worst_rel": 3.315574365601749e-14,
+    "discarded": 0.48661733878711133
+   }
+  }
+ },
+ "MoS2 film L3 (scp 15-blk vertex)": {
+  "dir": "cluster/mos2f3",
+  "nslab": 3,
+  "nd": 18,
+  "gamma_worst_neg": 2.5273842812110508e-11,
+  "leg_lesser_worst_neg": 2.88579139639055e-16,
+  "leg_greater_worst_neg": 3.479225148645217e-16,
+  "fold_terms_worst_neg": [
+   5.783738451978261e-15,
+   1.8562182557061818e-14,
+   1.882206239802131e-14
+  ],
+  "sigma_unmasked_worst_neg": 8.431667191072458e-15,
+  "block_profile_all_omega": {
+   "0": 1.0,
+   "1": 0.1489230075688321,
+   "2": 0.20652997797690553
+  },
+  "block_profile_mid_omega": {
+   "0": 1.0,
+   "1": 0.6039549398643365,
+   "2": 0.3596672528026656
+  },
+  "mid_omega_thz": 8.0,
+  "masks": {
+   "1 cell/block (3 blocks)": {
+    "worst_rel": 0.004029475481799835,
+    "discarded": 0.20014392398674966,
+    "omega_at_worst": 1.7333333333333334
+   },
+   "no mask": {
+    "worst_rel": 8.431667191072458e-15,
+    "discarded": 0.0,
+    "omega_at_worst": 8.266666666666666
+   },
+   "bartlett band-1, 1 cell/block": {
+    "worst_rel": 3.1737030473260934e-15,
+    "discarded": 0.212754614932388
+   }
+  }
+ },
+ "Si film L8 (control)": {
+  "dir": "cluster/prod/geom/sifilm_L8_nk9",
+  "nslab": 8,
+  "nd": 6,
+  "gamma_worst_neg": 6.593742476994822e-05,
+  "leg_lesser_worst_neg": 3.190300717851111e-16,
+  "leg_greater_worst_neg": 3.5225588807464433e-16,
+  "fold_terms_worst_neg": [
+   1.0713472648118904e-16,
+   1.613087332409947e-17,
+   1.6325367542865494e-17
+  ],
+  "sigma_unmasked_worst_neg": -1.3766131615329916e-09,
+  "block_profile_all_omega": {
+   "0": 1.0,
+   "1": 0.002104090592919566,
+   "2": 0.0011358948132940273,
+   "3": 0.00109936427409113,
+   "4": 0.0011147664795189127,
+   "5": 0.001130533366986909,
+   "6": 0.0011398906021628952,
+   "7": 0.8289561539696205
+  },
+  "block_profile_mid_omega": {
+   "0": 1.0,
+   "1": 0.015080250903345464,
+   "2": 0.005658709198071192,
+   "3": 0.005200613412002254,
+   "4": 0.00467814388655384,
+   "5": 0.004627468539282374,
+   "6": 0.004081108502869558,
+   "7": 0.24116245543229142
+  },
+  "mid_omega_thz": 7.5,
+  "masks": {
+   "1 cell/block (8 blocks)": {
+    "worst_rel": 0.00019793498705244594,
+    "discarded": 0.6381943714273637,
+    "omega_at_worst": 0.125
+   },
+   "2 cell/block (4 blocks)": {
+    "worst_rel": 0.00010690314146672403,
+    "discarded": 0.6381932913901455,
+    "omega_at_worst": 0.125
+   },
+   "4 cell/block (2 blocks)": {
+    "worst_rel": -1.3766131615329916e-09,
+    "discarded": 0.0,
+    "omega_at_worst": 3.0
+   },
+   "bartlett band-1, 1 cell/block": {
+    "worst_rel": -4.0792697560915503e-07,
+    "discarded": 0.6381948853817316
+   }
+  }
+ },
+ "CNT33 L4 (control)": {
+  "dir": "cluster/l4gpu",
+  "nslab": 4,
+  "nd": 36,
+  "gamma_worst_neg": 0.0017483357897627202,
+  "leg_lesser_worst_neg": 2.2912494969306774e-13,
+  "leg_greater_worst_neg": 1.741745239186374e-13,
+  "fold_terms_worst_neg": [
+   3.642915278864074e-14,
+   1.1775038388259699e-16,
+   1.202623321732575e-16
+  ],
+  "sigma_unmasked_worst_neg": -2.7322700337008303e-08,
+  "block_profile_all_omega": {
+   "0": 1.0,
+   "1": 0.6803020027971963,
+   "2": 0.4323136944011817,
+   "3": 0.3940679751925826
+  },
+  "block_profile_mid_omega": {
+   "0": 1.0,
+   "1": 0.535664680947734,
+   "2": 0.25991871209725464,
+   "3": 0.18013932580991746
+  },
+  "mid_omega_thz": 27.5,
+  "masks": {
+   "1 cell/block (4 blocks)": {
+    "worst_rel": 0.15826840297829903,
+    "discarded": 0.4354038147288267,
+    "omega_at_worst": 2.75
+   },
+   "2 cell/block (2 blocks)": {
+    "worst_rel": -2.7322700337008303e-08,
+    "discarded": 0.0,
+    "omega_at_worst": 55.0
+   },
+   "bartlett band-1, 1 cell/block": {
+    "worst_rel": -6.684276417393074e-07,
+    "discarded": 0.5036644340156575
+   }
+  }
+ }
+}
