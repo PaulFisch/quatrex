@@ -143,6 +143,35 @@ def _merge(blocks: dict, n_prim: int, c: int, nd: int) -> dict:
     return out
 
 
+def _write_fc3_blocks(phi_blocks: dict, block_sizes, path: Path,
+                      units: str = "THz^2") -> None:
+    """Write fc3_blocks.hdf5 in the production schema.
+
+    Inlined rather than imported from phonon_inputs.quatrex_writer: that
+    module pulls in phonopy at import time, which is not installed in
+    the daint venv, and this tool must run wherever the device inputs
+    live. Schema mirrors quatrex_writer.write_fc3_blocks exactly (the
+    parity of the two writers is pinned by
+    tests/quatrex/phonon/test_reblock_device.py).
+    """
+    import h5py
+
+    block_sizes = np.asarray(block_sizes, dtype=np.int64)
+    keys = sorted(phi_blocks)
+    with h5py.File(str(path), "w") as f:
+        meta = f.create_group("meta")
+        meta.create_dataset("block_sizes", data=block_sizes)
+        meta.attrs["units"] = units
+        meta.create_dataset("keys", data=np.asarray(keys, dtype=np.int64))
+        grp = f.create_group("fc3_blocks")
+        for (I, J, K) in keys:
+            blk = np.asarray(phi_blocks[(I, J, K)])
+            ds = grp.create_dataset(f"{I}_{J}_{K}",
+                                    data=blk.astype(np.complex128))
+            ds.attrs["I"], ds.attrs["J"], ds.attrs["K"] = I, J, K
+            ds.attrs["b_I"], ds.attrs["b_J"], ds.attrs["b_K"] = blk.shape
+
+
 def _dense_vertex(blocks: dict, nb: int, ndn: int) -> np.ndarray:
     n = nb * ndn
     phi = np.zeros((n, n, n), complex)
@@ -248,10 +277,6 @@ def main() -> None:
     print(f"dynamical_matrix.mat: {len(new_mats)} keys of {ndn}x{ndn}")
 
     # ---- Gamma fc3 ------------------------------------------------------
-    from phonon_inputs.quatrex_writer import (  # noqa: E402
-        write_fc3_blocks, write_structure_xyz,
-    )
-
     prim = _replicate(fc3, n_src, n_cells)
     merged = _merge(prim, n_cells, c, nd)
     ref = _dense_vertex(prim, n_cells, nd)
@@ -261,10 +286,9 @@ def main() -> None:
         raise SystemExit(f"fc3 merge changed the dense vertex: {err:.2e}")
     print(f"  fc3 merge exact (dense {n_cells}-cell vertex unchanged, "
           f"{len(prim)} primitive -> {len(merged)} merged blocks)")
-    write_fc3_blocks({k: np.ascontiguousarray(v.astype(complex))
-                      for k, v in merged.items()},
-                     np.array([ndn] * nb), out / "fc3_blocks.hdf5",
-                     units="THz^2")
+    _write_fc3_blocks({k: np.ascontiguousarray(v.astype(complex))
+                       for k, v in merged.items()},
+                      np.array([ndn] * nb), out / "fc3_blocks.hdf5")
 
     # ---- q-folded vertices ---------------------------------------------
     qf = src / "qfold_vertices.npz"
