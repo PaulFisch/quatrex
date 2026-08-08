@@ -52,3 +52,20 @@ Hard cap 200 node-hours committed (nodes x walltime at submission; raised from 1
 | 2026-08-07 | 4377176 | mos2f3-u2001-lm05and | 1 | 12:00:00 | 12.00 | 164.00 |
 | 2026-08-07 | 4378427 | mos2f3-bbcheck | 1 | 00:30:00 | 0.50 | 164.50 |
 | 2026-08-07 | 4378429 | mos2f3-bbcheck-lm15 | 1 | 00:30:00 | 0.50 | 165.00 |
+| 2026-08-07 | 4379988 | mos2f3-g4001-lm075and | 1 | 12:00:00 | 12.00 | 177.00 |
+| 2026-08-07 | 4381525 | mos2f3-g15001-lm075 | 2 | 04:00:00 | 8.00 | 185.00 |
+| 2026-08-08 | 4382327 | mos2f3-g15001-lm075b | 4 | 03:00:00 | 12.00 | 197.00 |
+
+## Reconciliation 2026-08-08 (CSCS accounting)
+
+The rows above charge **submitted walltime x nodes**, but many jobs were
+killed early (mask-ladder runs cancelled mid-wall, the OOM'd 15001-point
+attempt, the CM-subtraction runs, the bbcheck probes). CSCS reports the
+**actual consumption at 103 nh**, against 197 committed here. Paul
+reset the running total to the measured figure on 2026-08-08.
+
+Running total from here: **103.00 nh** consumed / 200 cap.
+Future rows continue from that number. Charging submitted walltime
+remains the pre-launch policy (it is the only figure known before a
+run starts); this reconciliation corrects the accumulated total to
+what was actually used.

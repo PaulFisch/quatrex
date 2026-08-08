@@ -129,13 +129,28 @@ def _walltime_hours(t: str) -> float:
 
 
 def _ledger_committed() -> float:
-    """Sum of committed node-hours (nodes x walltime AT SUBMISSION --
-    worst case, so the cap cannot be exceeded by construction)."""
+    """Node-hours charged so far.
+
+    Rows charge nodes x walltime AT SUBMISSION (worst case, the only
+    figure known before a run starts, so the cap cannot be exceeded by
+    construction). Jobs killed early therefore over-charge: on
+    2026-08-08 CSCS reported 103 nh actually consumed against 197
+    committed here. A "Running total from here: **N nh**" line in the
+    ledger reconciles the accumulated figure to measured usage; when
+    present, the LAST such line replaces everything above it and only
+    rows after it are added.
+    """
     if not NORMAL_LEDGER.exists():
         return 0.0
+    import re
+
     total = 0.0
     for line in NORMAL_LEDGER.read_text().splitlines():
-        if line.startswith("| 2"):          # data rows: | 2026-.. |
+        m = re.match(r"Running total from here: \*\*([\d.]+) nh\*\*", line)
+        if m:                                # reset: discard everything above
+            total = float(m.group(1))
+            continue
+        if line.startswith("| 2"):           # data rows: | 2026-.. |
             try:
                 total += float(line.split("|")[6])
             except (IndexError, ValueError):
