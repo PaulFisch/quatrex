@@ -666,6 +666,48 @@ Immediate follow-ups: a cutoff ladder (10, 15, 20, 25, 30 A) on one
 fixed device to locate the turnover; then a length ladder at
 cutoff >= device length, to find where memory binds.
 
+### 6.10 The cutoff ladder: the criterion is mask PSD-ness, to 1.4 %
+
+2-cell / 2-block device (block band complete, so the box pattern is the
+only mask), nf = 15001, eta = 0, 8 iterations, only
+`interaction_cutoff` varying. The device's orbital z-span is
+**21.569 A**, so the pattern is dense -- and the mask PSD -- for any
+cutoff above that.
+
+| cutoff | fill | mask lambda_min | mask PSD | outcome |
+|---|---|---|---|---|
+| 10 A | 65.3 % | -4.99 | no | diverged 3.7e+07 |
+| 12 A | 70.8 % | -4.23 | no | diverged 1.7e+08 |
+| 15 A | 84.7 % | -4.41 | no | diverged 1.1e+08 |
+| 20 A | 95.8 % | -3.45 | no | diverged 5.5e+06 |
+| **21 A** | **98.6 %** | **-2.53** | **no** | **diverged 4.5e+06** |
+| **22 A** | **100 %** | **0.00** | **yes** | **converged, zero gain** |
+| 30 A | 100 % | 0.00 | yes | converged, zero gain |
+
+The turnover is exactly at the dense threshold, and the 21/22 pair is
+the sharp version: **1.4 % of missing entries is the difference between
+a clean monotone descent and divergence by six orders of magnitude.**
+That rules out the reading in which the cutoff was merely too short to
+capture real coupling -- 98.6 % of the weight is present at 21 A. What
+matters is not how much is kept but whether what is kept is a PSD mask.
+
+Two further checks. 22 A and 30 A agree **bit-identically**
+(lead_current 2487.39 both), as they must once both patterns are dense:
+so the result is cutoff-independent above the threshold, i.e. the cutoff
+is converged. And the aux bubble grid preserves stability and zero gain
+but is not accurate -- at `sse_aux_grid_dw_thz = 0.02` the current moves
+to 2741.1, **+10.2 %**. The aux grid is a reachability lever, not a free
+one.
+
+Memory, measured rather than modelled: the SSE tau buffers scale with
+the *aux* grid (`n_fft = 2*ne_conv - 1`) and shrink with it, but the
+primary G/Sigma buffers scale with the *primary* `nf` and do not. Both
+a 6-cell and a 4-cell dense run at nf = 15001 OOM at ~100 GB/GPU on two
+nodes, so the fully-unmasked ladder currently reaches 2 cells at full
+resolution. Going longer needs a non-uniform primary grid
+(`frequency_grid = "file"`, see `make_grid.py`) rather than more nodes,
+since the 2-node cap binds first.
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity
