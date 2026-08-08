@@ -484,14 +484,18 @@ def cmd_blocking() -> None:
         print(f"    Sigma^< UNMASKED worst neg        {full['worst_rel']:.2e}"
               f"   <- Theorem 1 on real inputs")
 
-        iw = int(np.argmin(np.abs(ws - 0.5 * ws.max())))
+        # Sample at the bin carrying the MOST weight, never at a fixed
+        # "mid band" omega: at eta = 0 the spectrum is a comb of sharp
+        # poles, so a fixed frequency can land between them where G is
+        # ~1e-20 and every ratio is denormal noise.
+        iw = int(np.argmax(np.linalg.norm(sl.reshape(len(ws), -1), axis=1)))
         prof_all = _block_profile(sl, nslab, nd)
-        prof_mid = _block_profile(sl[iw], nslab, nd)
+        prof_pk = _block_profile(sl[iw], nslab, nd)
         print("    ||Sigma_d||/||Sigma_0|| by block distance d:")
         print("      all omega  " + "  ".join(
             f"d{d}={v:.3f}" for d, v in prof_all.items()))
-        print(f"      w={ws[iw]:.2f} THz " + "  ".join(
-            f"d{d}={v:.3f}" for d, v in prof_mid.items()))
+        print(f"      peak w={ws[iw]:.2f} " + "  ".join(
+            f"d{d}={v:.3f}" for d, v in prof_pk.items()))
 
         rows = {}
         fro = np.linalg.norm(sl)
@@ -520,8 +524,8 @@ def cmd_blocking() -> None:
                       "fold_terms_worst_neg": tm,
                       "sigma_unmasked_worst_neg": full["worst_rel"],
                       "block_profile_all_omega": prof_all,
-                      "block_profile_mid_omega": prof_mid,
-                      "mid_omega_thz": float(ws[iw]),
+                      "block_profile_peak_omega": prof_pk,
+                      "peak_omega_thz": float(ws[iw]),
                       "masks": rows}
         print()
     (OUT / "blocking.json").write_text(json.dumps(rep, indent=1))

@@ -388,15 +388,22 @@ law of Theorem 3(b), which predicts 0.879/0.618 = 1.42 against the
 measured 1.85. Blocking buys positivity through mask conditioning
 first and retained weight second.
 
-**The discriminant is the block-distance profile.** `||Sigma_d||/||Sigma_0||`
-at mid band:
+**The discriminant is the block-distance profile.** `||Sigma_d||/||Sigma_0||`,
+omega-integrated (the peak-weight bin agrees to within a few per cent):
 
 | device | d=1 | d=2 | d=3 | far corner |
 |---|---|---|---|---|
-| MoS2 L3 (nu) | 0.438 | **0.476** | -- | -- |
-| MoS2 L3 (scp) | 0.604 | 0.360 | -- | -- |
-| CNT L4 | 0.536 | 0.260 | 0.180 | -- |
-| Si film L8 | 0.015 | 0.006 | 0.005 | 0.241 (d=7) |
+| MoS2 L3 (nu) | 0.679 | **0.550** | -- | -- |
+| MoS2 L3 (scp) | 0.149 | 0.207 | -- | -- |
+| CNT L4 | 0.680 | 0.432 | 0.394 | -- |
+| Si film L8 | 0.002 | 0.001 | 0.001 | 0.829 (d=7) |
+
+Sample the profile at the bin carrying the most weight, never at a fixed
+"mid band" frequency: at eta = 0 the spectral function is a comb of
+sharp poles, so a fixed omega can land between them where G is ~1e-20
+and every ratio is denormal noise. That mistake was made and caught
+here -- an earlier draft of this table quoted numbers taken at
+omega = 8 THz, which for the MoS2 film is a null between poles.
 
 For MoS2 with the production (intra-slab-only) vertex the **dropped
 Sigma_02 block is larger than the retained Sigma_01** -- the profile has
@@ -447,19 +454,56 @@ moves the same way). Note the 2-cell blocking discards *less* weight
 bound nor the block-count law predicts the sign here. Both are upper
 bounds, not estimates.
 
-The block-distance profile explains it. At mid band:
+The block-distance profile explains it (omega-integrated):
 
 | device | d1 | d2 | d3 | d4 | d5 |
 |---|---|---|---|---|---|
-| MoS2 6 cells | 0.490 | 0.674 | 0.708 | 0.330 | 0.546 |
-| Si film L8 | 0.015 | 0.006 | 0.005 | 0.005 | 0.005 |
+| MoS2 6 cells | 0.759 | 0.778 | 0.635 | 0.561 | 0.551 |
+| Si film L8 | 0.002 | 0.001 | 0.001 | 0.001 | 0.001 |
 
-Si's Sigma decays by two orders of magnitude in one block, so widening
+Si's Sigma decays by three orders of magnitude in one block, so widening
 the retained band captures essentially all of it and the mask tends to
 the identity. MoS2's does not decay **at all** over six cells (~74 A) --
-d3 exceeds d1. For such a delocalised Sigma, a wider block retains more
+d2 exceeds d1. For such a delocalised Sigma, a wider block retains more
 coherent off-band weight but still cuts it off, and the discontinuity at
 the band edge grows rather than shrinks.
+
+### Why MoS2's Sigma is delocalised (it is not the force constants)
+
+The natural worry is that the fc3/fc2 range was cut too short. It was
+not, and two measurements separate the candidates.
+
+**Not the force constants.** The FC2 interlayer coupling is
+`|D(+-1)|/|D(0)| = 0.0075` -- 0.75 %, the vdW gap -- and the fitted fc3
+is intra-slab only. Both are short-ranged, which is the physically
+correct description of a van der Waals stack, not an under-converged
+fit.
+
+**Not the infrared channel either.** The near-DC legs (`omega < 1.5` THz)
+carry **96 %** of `||G^<||` (the `1/omega^2` uniform-translation
+channel), yet building Sigma from them alone gives `||Sigma|| = 0.049`
+against `205.9` from the rest -- **0.02 %**. The vertex annihilates that
+channel: `||Phi.G|| / (||Phi|| ||G||)` is suppressed to `2.4e-4` at the
+dominant bin. This independently re-confirms the ASR vertex-cancellation
+established by `_ir_killtest.py` (`ir_residue_derivation.md`), and it
+rules the IR channel out as the source of the delocalisation.
+
+**It is the propagator.** In the window that actually builds Sigma
+(`omega >= 1.5` THz), the ballistic `-i G^<` block profile is
+
+    d = 0..5 :  1.000  0.920  1.069  0.866  0.624  0.570
+
+i.e. no decay across six cells. At eta = 0 with ballistic leads there is
+no damping anywhere in the problem, so a propagating mode is coherent
+end to end by construction and `G_IJ` cannot fall off with `|I-J|`. With
+the intra-slab MoS2 vertex `Sigma_IJ = M_I (G_IJ (x) G_IJ) M_J^dagger`,
+so Sigma inherits exactly that delocalisation.
+
+The consequence is structural rather than parametric: **no block size
+localises a coherent propagator.** Blocking can only help a self-energy
+that already decays, which is why Si improves and MoS2 does not, and why
+the only blocking that removes the defect for MoS2 is the one that
+leaves no truncation at all.
 
 **Rule, on two systems:** blocking buys positivity only when Sigma
 actually decays with block distance. It is a convergence knob for local
