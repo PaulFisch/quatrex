@@ -412,6 +412,70 @@ eigenvalue is 2.5e-11 for MoS2, against 6.6e-05 for Si and 1.8e-03 for
 the CNT. The failing system has the *cleanest* contact, so this is
 anti-correlated with the disease.
 
+### 6.6 The 6-cell MoS2 pair: blocking helps only where Sigma decays
+
+Built with `phonon/studies/engine/reblock_device.py` (exact re-partition
+plus replication along transport -- no DFT, no refit, no q-fold rerun,
+since the MoS2 per-slab vertex blocks are bit-identical across slabs for
+all 625 q-pairs). Two devices, the SAME 108-dof physical film:
+
+- `cluster/mos2f6x1` -- 6 blocks x 1 cell (18)
+- `cluster/mos2f6x2` -- 3 blocks x 2 cells (36), written with the 2-cell
+  block as the unit cell so the production loader reads it back with no
+  change to `src/quatrex`.
+
+Build gates: the dense 6-cell FC2 operator and the dense vertex are
+unchanged by the re-blocking, and the offline re-blocking of `6x1` to
+three blocks reproduces the `6x2` device file **bit-identically**
+(1.484e-01 worst neg, 48.48 % discarded, both ways). Unmasked Sigma is
+PSD for both (7.1e-14, 6.7e-14), legs PSD to 5e-16.
+
+On a common normalisation (the unmasked Sigma's global max |eigenvalue|,
+69.3), the masked worst negative eigenvalue is
+
+| blocking | lambda_min | relative | discarded |
+|---|---|---|---|
+| 6 blocks x 1 cell | **-2.73** | 0.039 | 71.3 % |
+| 3 blocks x 2 cells | **-7.75** | 0.112 | 48.5 % |
+| 2 blocks x 3 cells | -4.9e-12 | 0.000 | 0 % |
+
+**Doubling the slab makes MoS2 worse by 2.8x**, the opposite of the Si
+result, and it is not a normalisation artefact (the absolute eigenvalue
+moves the same way). Note the 2-cell blocking discards *less* weight
+(48.5 % vs 71.3 %) and has a better-conditioned mask
+(-0.414 vs -0.802) and is still worse -- so neither Proposition 4's
+bound nor the block-count law predicts the sign here. Both are upper
+bounds, not estimates.
+
+The block-distance profile explains it. At mid band:
+
+| device | d1 | d2 | d3 | d4 | d5 |
+|---|---|---|---|---|---|
+| MoS2 6 cells | 0.490 | 0.674 | 0.708 | 0.330 | 0.546 |
+| Si film L8 | 0.015 | 0.006 | 0.005 | 0.005 | 0.005 |
+
+Si's Sigma decays by two orders of magnitude in one block, so widening
+the retained band captures essentially all of it and the mask tends to
+the identity. MoS2's does not decay **at all** over six cells (~74 A) --
+d3 exceeds d1. For such a delocalised Sigma, a wider block retains more
+coherent off-band weight but still cuts it off, and the discontinuity at
+the band edge grows rather than shrinks.
+
+**Rule, on two systems:** blocking buys positivity only when Sigma
+actually decays with block distance. It is a convergence knob for local
+self-energies, not a repair for delocalised ones. For MoS2 the only
+blocking that restores PSD is the degenerate one where the device is at
+most two blocks, i.e. no truncation at all.
+
+Caveat to keep: these are **ballistic legs**. At eta = 0 the
+non-interacting G carries no damping, so nothing forces G_IJ to decay;
+a converged interacting state would provide its own damping and steepen
+the profile. That said, the failing runs diverge from near the ballistic
+state, so this is the profile that governs the onset -- and Si, whose
+legs are equally undamped, decays steeply anyway, so the difference
+between the two systems is material rather than an artefact of using
+ballistic legs.
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity

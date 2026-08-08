@@ -218,6 +218,12 @@ DEVICES = [
     ("MoS2 film L3 (nu vertex, FAILS)", "cluster/mos2f3", 2, (1, 3), None),
     ("MoS2 film L3 (scp 15-blk vertex)", "cluster/mos2f3", 2, (1, 3),
      "cluster/mos2f3scp/fc3_blocks.hdf5"),
+    # The 6-cell MoS2 pair (phonon/studies/engine/reblock_device.py): same
+    # 108-dof device, two blockings. mos2f6x1's c=2 rung must reproduce
+    # mos2f6x2's c=1 rung exactly -- that cross-check validates the build.
+    ("MoS2 film 6 cells, 6x1 blocking", "cluster/mos2f6x1", 2,
+     (1, 2, 3, 6), None),
+    ("MoS2 film 6 cells, 3x2 blocking", "cluster/mos2f6x2", 2, (1, 3), None),
     ("Si film L8 (control)", "cluster/prod/geom/sifilm_L8_nk9", 0,
      (1, 2, 4), None),
     ("CNT33 L4 (control)", "cluster/l4gpu", 2, (1, 2), None),

@@ -81,6 +81,104 @@
    }
   }
  },
+ "MoS2 film 6 cells, 6x1 blocking": {
+  "dir": "cluster/mos2f6x1",
+  "nslab": 6,
+  "nd": 18,
+  "gamma_worst_neg": 2.5273842812110508e-11,
+  "leg_lesser_worst_neg": 5.149436371068291e-16,
+  "leg_greater_worst_neg": 4.650744864072445e-16,
+  "fold_terms_worst_neg": [
+   7.416631192333676e-12,
+   6.999593662793697e-14,
+   6.901601712500893e-14
+  ],
+  "sigma_unmasked_worst_neg": 7.119106510174574e-14,
+  "block_profile_all_omega": {
+   "0": 1.0,
+   "1": 0.7591455677132012,
+   "2": 0.777547823278719,
+   "3": 0.6354807565249044,
+   "4": 0.560541400314383,
+   "5": 0.551204266579001
+  },
+  "block_profile_mid_omega": {
+   "0": 1.0,
+   "1": 0.49001569502038783,
+   "2": 0.6735408524408318,
+   "3": 0.7084592189605671,
+   "4": 0.3299641047065348,
+   "5": 0.5457626307091822
+  },
+  "mid_omega_thz": 8.0,
+  "masks": {
+   "1 cell/block (6 blocks)": {
+    "worst_rel": 0.060528961488124144,
+    "discarded": 0.7126210581618678,
+    "omega_at_worst": 3.6
+   },
+   "2 cell/block (3 blocks)": {
+    "worst_rel": 0.1484228904728265,
+    "discarded": 0.48476740666888163,
+    "omega_at_worst": 5.6
+   },
+   "3 cell/block (2 blocks)": {
+    "worst_rel": 7.119106510174574e-14,
+    "discarded": 0.0,
+    "omega_at_worst": 8.266666666666666
+   },
+   "no mask": {
+    "worst_rel": 7.119106510174574e-14,
+    "discarded": 0.0,
+    "omega_at_worst": 8.266666666666666
+   },
+   "bartlett band-1, 1 cell/block": {
+    "worst_rel": 2.7240944282756406e-14,
+    "discarded": 0.7435144180521069
+   }
+  }
+ },
+ "MoS2 film 6 cells, 3x2 blocking": {
+  "dir": "cluster/mos2f6x2",
+  "nslab": 3,
+  "nd": 36,
+  "gamma_worst_neg": 7.336814617392527e-10,
+  "leg_lesser_worst_neg": 5.212671334631754e-16,
+  "leg_greater_worst_neg": 5.29578497268938e-16,
+  "fold_terms_worst_neg": [
+   6.842925687445324e-12,
+   6.726101142541646e-14,
+   6.726891148562266e-14
+  ],
+  "sigma_unmasked_worst_neg": 6.740645560221808e-14,
+  "block_profile_all_omega": {
+   "0": 1.0,
+   "1": 0.905860407567999,
+   "2": 0.747838442594176
+  },
+  "block_profile_mid_omega": {
+   "0": 1.0,
+   "1": 0.8791781191770942,
+   "2": 0.708343905674489
+  },
+  "mid_omega_thz": 8.0,
+  "masks": {
+   "1 cell/block (3 blocks)": {
+    "worst_rel": 0.14842289047282645,
+    "discarded": 0.48476740666888485,
+    "omega_at_worst": 5.6
+   },
+   "no mask": {
+    "worst_rel": 6.740645560221808e-14,
+    "discarded": 0.0,
+    "omega_at_worst": 8.266666666666666
+   },
+   "bartlett band-1, 1 cell/block": {
+    "worst_rel": 8.167025983590471e-14,
+    "discarded": 0.5667457445685333
+   }
+  }
+ },
  "Si film L8 (control)": {
   "dir": "cluster/prod/geom/sifilm_L8_nk9",
   "nslab": 8,
