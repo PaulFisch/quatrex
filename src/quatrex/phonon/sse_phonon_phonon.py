@@ -373,11 +373,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         # PSD taper of the band mask (sse_g_band_taper = "bartlett"): the
         # boxcar mask above is indefinite, so the masked kernel loses
-        # PSD-ness; Bartlett weights w_d = 1 - d/(g_band+1) make the mask
-        # matrix PSD (Fejer kernel) so -+i Sigma^{<,>} stays PSD (Schur
-        # product theorem) at ANY band, and applying the SAME taper to the
-        # inner G legs and the Sigma output blocks is the Phi-derivable
-        # pair (Phi[M o G] chain rule) -- energy conservation retained.
+        # PSD-ness; Bartlett weights w_d = 1 - d/(g_band+1) make the LEG
+        # mask PSD (Fejer kernel) at any band, and applying the SAME taper
+        # to the inner G legs and the Sigma output blocks is the
+        # Phi-derivable pair (Phi[M o G] chain rule) -- energy
+        # conservation retained.
+        #
+        # CAVEAT (measured 2026-08-08, phonon/docs/bubble_positivity.md
+        # Thm 3): the OUTPUT band is pinned at |I-J| <= 1 (see the pair
+        # index below) regardless of g_band, so the effective output mask
+        # is w[|I-J|] restricted to the tridiagonal, whose Toeplitz symbol
+        # 1 + 2*w_1*cos(theta) is non-negative only for w_1 <= 1/2, i.e.
+        # only for g_band = 1 (w_1 = 1/2). At g_band >= 2 (w_1 = 2/3, 3/4)
+        # the taper does NOT restore output positivity -- it is not a
+        # PSD repair "at any band". Decoupling the output weights from the
+        # leg weights would fix positivity but break the Phi-derivable
+        # pairing above, so the combination is warned about, not silently
+        # changed. Test: test_taper_is_psd_only_at_band_one.
         # Implementation: the ring is linear in each factor, so the two
         # G-leg weights and the output weight collapse to ONE scalar per
         # quad, w(K1,K1') * w(K2,K2') * w(I,J), folded into the left
@@ -389,6 +401,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             [1.0 - d / (self.g_band + 1.0) for d in range(self.g_band + 1)]
             if _taper == "bartlett" else None
         )
+        if self._taper_w is not None and self.g_band > 1:
+            warnings.warn(
+                f"sse_g_band_taper='bartlett' with sse_g_band="
+                f"{self.g_band} only restores PSD-ness of the inner G "
+                "legs, not of Sigma: the output band is pinned at "
+                "|I-J| <= 1, whose tapered Toeplitz symbol "
+                f"1 + 2*{self._taper_w[1]:.3g}*cos(theta) is indefinite "
+                "(needs w_1 <= 1/2, i.e. g_band = 1). Use g_band = 1 with "
+                "the taper, or g_band > 1 without it and treat the result "
+                "as the non-PSD upper bracket. See "
+                "phonon/docs/bubble_positivity.md.",
+                stacklevel=2,
+            )
         if (self._taper_w is not None and self._vfactors is not None
                 and self._vf_kernel == "gram"):
             raise NotImplementedError(

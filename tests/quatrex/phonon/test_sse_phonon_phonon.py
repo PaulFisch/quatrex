@@ -9,6 +9,8 @@ check the bosonic Keldysh symmetries that the SCBA loop relies on.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -727,6 +729,207 @@ def test_taper_restores_causality_psd() -> None:
         assert lam >= -1e-9 * scale, (
             f"tapered Sigma^{tag} lost PSD-ness: min eig {lam:.3e} vs "
             f"scale {scale:.3e}")
+
+
+def _psd_orientation(blocks, offs, N, ne):
+    """Phase z in {1,-1,i,-i} that makes Sigma hermitian PSD.
+
+    Decouples the assertions from the production sign convention exactly
+    as test_taper_restores_causality_psd does (the fixture feeds PSD
+    matrices as G directly, not as -iG, so the convention differs by i).
+    """
+    S = _assemble(blocks, offs, N, ne)
+    for z in (1.0, -1.0, 1j, -1j):
+        M = z * S
+        if np.linalg.norm(M - M.conj().swapaxes(-1, -2)) > 1e-8 * np.linalg.norm(M):
+            continue
+        if np.linalg.eigvalsh(M).min() >= -1e-10 * np.abs(M).max():
+            return z
+    return None
+
+
+def _worst_neg(blocks, offs, N, ne, z):
+    S = z * _assemble(blocks, offs, N, ne)
+    S = 0.5 * (S + S.conj().swapaxes(-1, -2))
+    return np.linalg.eigvalsh(S).min(), np.abs(S).max()
+
+
+def test_bubble_psd_gamma_complete_band() -> None:
+    """Theorem 1 at nq=1: PSD legs + a real, leg-exchange-symmetric vertex
+    give a PSD Sigma^{<,>} when NO band mask is active.
+
+    Two blocks is the largest device whose hard-wired output band
+    |I-J| <= 1 (sse_phonon_phonon.py:410) is complete, so this isolates
+    the congruence M (A x B) M^dagger from the masking of
+    test_taper_restores_causality_psd. See phonon/docs/bubble_positivity.md.
+    """
+    ne, n_blocks, nbs = 15, 2, 3
+    phi_blocks, _, _, block_sizes, offs, make_buffers = (
+        _taper_fixture(n_blocks, nbs, ne))
+    N = int(block_sizes.sum())
+    out_l, out_g = _run_sigma(phi_blocks, block_sizes, ne, make_buffers,
+                              taper="none")
+    z = _psd_orientation(out_l, offs, N, ne)
+    assert z is not None, "no PSD orientation found for the unmasked bubble"
+    for tag, blocks in (("<", out_l), (">", out_g)):
+        lam, scale = _worst_neg(blocks, offs, N, ne, z)
+        assert lam >= -1e-9 * scale, (
+            f"unmasked Sigma^{tag} is not PSD: min eig {lam:.3e} "
+            f"vs scale {scale:.3e}")
+
+
+def test_bubble_psd_broken_by_asymmetric_vertex() -> None:
+    """The leg-exchange symmetry is load-bearing, not decorative.
+
+    Same complete-band device as above, but with Phi(I,K2,K1) no longer
+    the (0,2,1)-transpose of Phi(I,K1,K2): the ring stops being a
+    congruence and Sigma goes indefinite.
+    """
+    ne, n_blocks, nbs = 15, 2, 3
+    phi_blocks, _, _, block_sizes, offs, make_buffers = (
+        _taper_fixture(n_blocks, nbs, ne))
+    N = int(block_sizes.sum())
+    good_l, _ = _run_sigma(phi_blocks, block_sizes, ne, make_buffers,
+                           taper="none")
+    z = _psd_orientation(good_l, offs, N, ne)
+    assert z is not None
+
+    rng = np.random.default_rng(11)
+    bad = dict(phi_blocks)
+    for (I, K1, K2) in list(bad):
+        if K1 != K2:                       # break only the exchange pair
+            bad[(I, K1, K2)] = rng.standard_normal((nbs, nbs, nbs))
+    bad_l, _ = _run_sigma(bad, block_sizes, ne, make_buffers, taper="none")
+    lam, scale = _worst_neg(bad_l, offs, N, ne, z)
+    assert lam < -1e-6 * scale, (
+        "an asymmetric vertex should destroy PSD-ness of the bubble; "
+        f"got min eig {lam:.3e} vs scale {scale:.3e}")
+
+
+def test_bubble_psd_coupled_q_complete_band() -> None:
+    """Theorem 1 at nq>1 -- the case with no coverage before.
+
+    At coupled q the left vertex factor is CONJUGATED
+    (sse_phonon_phonon.py:1846-1848), so the congruence needs only the
+    q-carrying leg exchange
+
+        Phi(q2,q1)[(J,Kb,Ka)][a,d,b] = Phi(q1,q2)[(J,Ka,Kb)][a,b,d],
+
+    and NOT a real vertex. The fixture enforces exactly that and nothing
+    else, so a PSD result is evidence for the conjugation being right.
+    """
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+    rng = np.random.default_rng(3)
+    n_blocks, nbs, ne, nq = 2, 3, 13, 3
+    block_sizes = np.array([nbs] * n_blocks)
+    N = int(block_sizes.sum())
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    q_diff_map = np.array([[(a - b) % nq for b in range(nq)]
+                           for a in range(nq)])
+    keys = [(I, K1, K2) for I in range(n_blocks)
+            for K1 in range(n_blocks) for K2 in range(n_blocks)]
+
+    # Vertices satisfying (1') BY CONSTRUCTION: fix the (q1,q2,Ka,Kb)
+    # entry freely, then define its (q2,q1,Kb,Ka) partner as the
+    # (0,2,1)-transpose. Complex on purpose -- reality is not required.
+    qv: dict[tuple[int, int], dict] = {(a, b): {} for a in range(nq)
+                                       for b in range(nq)}
+    for a in range(nq):
+        for b in range(nq):
+            for (I, K1, K2) in keys:
+                if (I, K1, K2) in qv[(a, b)]:
+                    continue
+                T = (rng.standard_normal((nbs, nbs, nbs))
+                     + 1j * rng.standard_normal((nbs, nbs, nbs)))
+                if (a, K1) == (b, K2):
+                    T = 0.5 * (T + T.transpose(0, 2, 1))
+                qv[(a, b)][(I, K1, K2)] = T
+                qv[(b, a)][(I, K2, K1)] = T.transpose(0, 2, 1)
+    for a in range(nq):
+        for b in range(nq):
+            for (I, K1, K2) in keys:
+                assert np.allclose(qv[(b, a)][(I, K2, K1)],
+                                   qv[(a, b)][(I, K1, K2)].transpose(0, 2, 1))
+
+    # PSD legs per (omega, q); the fold partner G^>(-q)^T is then the
+    # transpose of a PSD matrix, hence PSD.
+    def psd_stack():
+        out = np.empty((ne, nq, N, N), complex)
+        for k in range(ne):
+            for iq in range(nq):
+                c = (rng.standard_normal((N, 1))
+                     + 1j * rng.standard_normal((N, 1)))
+                out[k, iq] = c @ c.conj().T + 1e-6 * np.eye(N)
+        return out
+
+    P_l, P_g = psd_stack(), psd_stack()
+    rows, cols = [], []
+    for I in range(n_blocks):
+        for J in range(n_blocks):
+            for i in range(nbs):
+                for j in range(nbs):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = _dev_pattern(csr_matrix(
+        (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
+        shape=(N, N)))
+    mk = lambda: DSDBCOO.from_sparray(pattern, block_sizes,
+                                      global_stack_shape=(ne, nq))
+    g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+    for m in (g_l, g_g, s_l, s_g, s_r):
+        m.data[:] = 0.0
+    glv, ggv = g_l.stack[...], g_g.stack[...]
+    for K in range(n_blocks):
+        for Kp in range(n_blocks):
+            sK = slice(offs[K], offs[K + 1])
+            sKp = slice(offs[Kp], offs[Kp + 1])
+            glv.blocks[K, Kp] = xp.asarray(P_l[:, :, sK, sKp])
+            ggv.blocks[K, Kp] = xp.asarray(P_g[:, :, sK, sKp])
+
+    ssp = SigmaPhononPhonon(
+        _make_cfg("half", g_band=1),
+        phonon_frequencies=np.linspace(0.0, 16.0, ne),
+        block_sizes=block_sizes, qfold=(qv, q_diff_map, nq))
+    ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+
+    slv, sgv = s_l.stack[...], s_g.stack[...]
+    for tag, view in (("<", slv), (">", sgv)):
+        S = np.zeros((ne, nq, N, N), complex)
+        for I in range(n_blocks):
+            for J in range(n_blocks):
+                S[:, :, offs[I]:offs[I + 1], offs[J]:offs[J + 1]] = (
+                    np.asarray(get_host(view.blocks[I, J])))
+        z = None
+        for cand in (1.0, -1.0, 1j, -1j):
+            M = cand * S
+            if np.linalg.norm(M - M.conj().swapaxes(-1, -2)) > 1e-8 * np.linalg.norm(M):
+                continue
+            if np.linalg.eigvalsh(M).min() >= -1e-10 * np.abs(M).max():
+                z = cand
+                break
+        assert z is not None, (
+            f"coupled-q Sigma^{tag} has no PSD orientation -- the ring is "
+            "not behaving as a congruence at nq>1")
+        M = 0.5 * (z * S + (z * S).conj().swapaxes(-1, -2))
+        lam = np.linalg.eigvalsh(M).min()
+        assert lam >= -1e-9 * np.abs(M).max(), (
+            f"coupled-q Sigma^{tag} lost PSD-ness: min eig {lam:.3e}")
+
+
+def test_taper_above_band_one_warns() -> None:
+    """Combining the taper with g_band > 1 must not look safe."""
+    _, _, _, block_sizes, _, _ = _taper_fixture(5, 2, 9)
+    phi_blocks = _taper_fixture(5, 2, 9)[0]
+    cfg = _make_cfg("fft", g_band=2)
+    cfg.phonon.sse_g_band_taper = "bartlett"
+    with pytest.warns(UserWarning, match="only restores.*g_band = 1"):
+        SigmaPhononPhonon(
+            cfg, phonon_frequencies=np.linspace(0.0, 16.0, 9),
+            block_sizes=block_sizes, phi_blocks=phi_blocks)
 
 
 def test_fc3_writer_roundtrip(tmp_path) -> None:
