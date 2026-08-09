@@ -265,6 +265,38 @@ Caveat: every rung above is capped at 6 iterations, so "residual after 6"
 measures the early trajectory, not a fixed point. It is the right
 comparison for a stability question and the wrong one for a value.
 
+### The cure: damping. Both candidates stop the divergence
+
+Same nf = 2001 rung that reached 553 after 6 iterations at the production
+`mixing_factor = 0.1`, now given 14 iterations. Residual traces:
+
+    mixing 0.02  1.00  31.6  30.0  28.5  27.1  25.7  24.4  23.2  22.0
+                 20.9  19.9  18.9  17.9  17.0
+    anderson     1.00  1272  1062  17.0  16.6  16.6  12.9  1.00  0.92
+                 5.41  2.54  2.61  3.12  1.51
+
+Neither reaches `scba_tol`, and both are honestly reported as NOT
+CONVERGED after 14 iterations. But both have stopped diverging, which is
+the question that was asked:
+
+* **`mixing_factor = 0.02` gives a monotone descent** -- it peaks at 31.6
+  on iteration 2 and falls every iteration after, ~5 % per step. Slow
+  (order 60-80 more iterations to 1e-3) but unconditionally downhill.
+* **Anderson gets two orders further, faster, but oscillates** -- a bad
+  overshoot to 1272 early, then 17 -> 1.0 by iteration 8, then wandering
+  in 1-5. Acceleration on a map this stiff needs a damped warm start, not
+  a cold one.
+
+So the Si film is not broken and its fine grids are not unusable: the
+production `mixing_factor = 0.1` is simply outside the stability radius
+of the refined map, and the SCBA never had a chance to descend. The
+recommended recipe is damping to ~0.02 (monotone, safe) or Anderson
+started from a few damped iterations (faster, needs a guard on the
+overshoot). Nothing here requires eta.
+
+Not established: the converged value. Every number above is a
+non-converged iterate, so none of them is a transport result.
+
 ## Method traps found (both would have produced wrong verdicts)
 
 1. **A naive extent ladder is confounded by re-registration.** Holding

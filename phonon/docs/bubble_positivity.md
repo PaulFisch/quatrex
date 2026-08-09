@@ -733,6 +733,61 @@ device the physical current changes by **0.31 % from nf = 15001 to
 the expensive axis instead: `aux_dw = 0.01` costs **+2.84 %** and 0.02
 costs **+10.20 %**, i.e. roughly second order in `dw`.
 
+### 6.10b The PSD taper on device: positivity fixed, divergence not
+
+`phonon.interaction_cutoff_taper = "triangular"` weights the retained
+entries by `max(0, 1 - |z_i - z_j|/R)`, which is positive definite, so
+the mask is PSD at every radius (section 4 and `cutoff_mask.json`). Run
+on the 2-cell film at R = 12 A against the boxcar at the same radius,
+same 15001-point grid, same 8 iterations, eta = 0:
+
+| run | mask | worst occupation | bins < 0 | S_median | outcome |
+|---|---|---|---|---|---|
+| mos2f2c22 | dense (22 A) | +9.9e-15 | 0.0 % | 0.99 | converges |
+| mos2f2c12 | boxcar 12 A | **-1.00** | **84.5 %** | 0.00 | diverged 1.7e+08 |
+| tapT12b | **triangular 12 A** | **+2.0e-08** | **0.0 %** | 0.40 | diverged 3.7e+07 |
+
+**The taper does exactly what it was designed to do.** Negative
+occupation goes from -1.00 on 84.5 % of the live bins to zero, on the
+same device at the same radius: positivity is restored end to end, which
+is the strongest confirmation yet that the mechanism of section 6.9 is
+correctly identified and that a PD mask is its cure.
+
+**And the run still diverges.** So for this device at this radius,
+mask PSD-ness is necessary but not sufficient. The reason is visible in
+the sum rule: S_median falls from 0.99 (dense) to 0.40, i.e. the R = 12
+triangle discards about 60 % of the spectral weight of a device whose
+span is 21.57 A. What is left is a PSD but severely truncated model, and
+*that* model diverges by amplitude with positivity intact -- the same
+signature as the Si film (`grid_audit.md`), not the mask signature.
+
+**The R = 30 control settles it, negatively.** At R = 30 A the support
+already covers the 21.57 A device, so the BOXCAR at that radius is the
+dense reference and converges (2487.39). Adding the triangular weight to
+that same complete support -- w = 0.28 at the device span -- makes it
+**diverge at 1.76e+06**. The taper therefore does not merely fail to
+rescue a truncated model: applied to a model that was converging, it
+breaks it.
+
+That is decisive against the taper as a scaling route here. Reweighting
+the long-range part of G and Sigma sharpens the resolvent, and at eta = 0
+the amplitude instability that the Si film shows (`grid_audit.md`) takes
+over. The 6-cell run at R = 25 A (span 70.7 A) diverged at 9.8e+03, same
+picture.
+
+The honest reading: the taper is a correct and verified cure for the
+POSITIVITY defect -- negative occupation goes to exactly zero -- and it
+is not a cure for the run. It buys stability against the mask mechanism
+and loses it to the resolvent mechanism. The earlier hope that a cheap
+PSD mask buys long devices for free is withdrawn. What it is still good
+for is diagnosis: it cleanly separates the two failure modes, which is
+how the 2-cell device at R = 12 was shown to be suffering from both.
+
+Any future use needs the amplitude side handled first (damping to ~0.02
+or a damped-warm-started Anderson, which is what makes the refined Si
+grids descend), and then an R-ladder to find whether a PSD radius exists
+that is mild enough to be accurate.
+
 ### 6.11 Why only MoS2: the mask is PSD for every clean system
 
 The same box mask, evaluated at the production default 10 A on each
