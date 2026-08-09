@@ -76,6 +76,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         dynamical_matrix: DSDBSparse | None = None,
         qfold: tuple | None = None,
         vfactors=None,
+        orbital_grid: NDArray | None = None,
     ) -> None:
         self.local_frequencies = np.asarray(phonon_frequencies)
 
@@ -98,6 +99,27 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._tau_chunk_bytes = int(config.phonon.sse_tau_chunk_bytes)
         self._release_legs = bool(
             getattr(config.phonon, "sse_release_leg_blocks", False))
+        # Positive-definite interaction cutoff (see
+        # phonon.interaction_cutoff_taper). The taper is a function of the
+        # transport-axis separation only, matching strategy="box".
+        self._cut_taper = str(
+            getattr(config.phonon, "interaction_cutoff_taper", "none")
+            or "none")
+        self._cut_radius = float(
+            getattr(config.phonon, "interaction_cutoff", 0.0) or 0.0)
+        _tdir = getattr(getattr(config, "device", None),
+                        "transport_direction", "z")
+        self._cut_axis = {"x": 0, "y": 1, "z": 2}.get(str(_tdir), 2)
+        self._orbital_grid = (None if orbital_grid is None
+                              else np.asarray(get_host(orbital_grid)))
+        self._taper_cache: dict[int, NDArray] = {}
+        if self._cut_taper != "none" and self._orbital_grid is None:
+            raise ValueError(
+                "phonon.interaction_cutoff_taper is set but no orbital grid "
+                "was supplied to SigmaPhononPhonon; the taper needs the "
+                "orbital positions the sparsity pattern was built from. "
+                "Refusing to run an untapered boxcar silently."
+            )
         self._perm_share = str(
             getattr(config.phonon, "sse_perm_cache_share", "off") or "off")
         self._pool_scope = str(
@@ -1024,6 +1046,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if m.distribution_state != "nnz":
                     m.dtranspose(discard=True)
             gl_in, gg_in = g_lesser.data, g_greater.data
+            # Positive-definite interaction cutoff on the LEGS. Theorem 1
+            # needs -i G^< >= 0 at the input; the stored boxcar pattern
+            # already destroys that whenever it truncates, so the taper has
+            # to hit the legs before the bubble runs, not just the output.
+            _tw = self._cutoff_taper(g_lesser, xp)
+            if _tw is not None:
+                gl_in = gl_in * _tw
+                gg_in = gg_in * _tw
             if self._cm_sub_enabled:
                 # Subtract the exact CM (lead-driven translation) channel
                 # from the legs at the q = Gamma pair, on the PRIMARY grid
@@ -1724,6 +1754,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # TEXTBOOK-signed sigma^{<,>} (-i sigma^{<,>} <= 0) -- the exact
             # negative of what the Keldysh feedback G^{<,>} = G^R sigma^{<,>} G^A
             # expects (unflipped it injects anti-dissipation), so negate here.
+            # ... and on the OUTPUT, with the same PSD mask, so the Sigma the
+            # solver stores is a congruence-preserving Hadamard product of
+            # the untruncated one rather than a boxcar slice of it. Applied
+            # to THIS call's contribution, never to the accumulated buffer.
+            _tw_out = self._cutoff_taper(sigma_lesser, xp)
+            if _tw_out is not None:
+                sl_data = sl_data * _tw_out
+                sg_data = sg_data * _tw_out
             sigma_lesser.data[:] = sigma_lesser.data - sl_data
             sigma_greater.data[:] = sigma_greater.data - sg_data
             # Sigma^R contribution (from the RAW, textbook-signed values:
@@ -1742,6 +1780,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if bool(out_mask.any()):
                     # post-mask the retarded consistently with Sigma^<>
                     hil[out_mask] = 0.0
+                if _tw_out is not None:
+                    hil = hil * _tw_out
                 sigma_retarded.data[:] = sigma_retarded.data + hil
 
         # Self-consistent SCP cubic-tadpole static self-energy
@@ -1822,6 +1862,44 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             f"model={flops / 1e9:.1f} GFLOP/pass",
             flush=True,
         )
+
+    def _cutoff_taper(self, buf, xp):
+        """Length-nnz weights of the positive-definite interaction cutoff.
+
+        Returns ``None`` when the taper is off, so the legacy boxcar path is
+        untouched. Otherwise ``w[n] = max(0, 1 - |z_i - z_j| / R)`` for the
+        n-th stored entry, aligned with the LAST axis of ``buf.data`` in the
+        stack distribution state (which spans the full nnz).
+
+        Applying this to the G legs and to the Sigma contribution is exactly
+        the Hadamard product ``A -> A o M`` of the positivity note, with
+        ``M_ij = f(z_i - z_j)`` and ``f`` positive definite -- so by Bochner
+        and the Schur product theorem it preserves ``-i G^< >= 0``, which the
+        boxcar does not.
+        """
+        if self._cut_taper == "none":
+            return None
+        nnz = int(buf.data.shape[-1])
+        w = self._taper_cache.get(nnz)
+        if w is None:
+            rows, cols = buf.spy()
+            rows = np.asarray(get_host(rows), dtype=int)
+            cols = np.asarray(get_host(cols), dtype=int)
+            if rows.size != nnz:
+                raise ValueError(
+                    f"interaction_cutoff_taper: spy() gave {rows.size} "
+                    f"entries but the buffer's nnz axis is {nnz}; the taper "
+                    f"can only be applied in the stack distribution state."
+                )
+            z = self._orbital_grid[:, self._cut_axis]
+            d = np.abs(z[rows] - z[cols])
+            if self._cut_taper == "triangular":
+                w = np.clip(1.0 - d / self._cut_radius, 0.0, None)
+            else:                                   # pragma: no cover
+                raise ValueError(self._cut_taper)
+            w = xp.asarray(w)
+            self._taper_cache[nnz] = w
+        return w
 
     @staticmethod
     def _qfold_is_translation_invariant(qv, xp) -> bool:

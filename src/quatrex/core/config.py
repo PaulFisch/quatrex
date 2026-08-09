@@ -1260,6 +1260,34 @@ class PhononConfig(BaseModel):
 
     interaction_cutoff: PositiveFloat = 10.0  # Angstrom
 
+    interaction_cutoff_taper: Literal["none", "triangular"] = "none"
+    """Shape of the spatial interaction cutoff applied to the phonon SSE.
+
+    ``compute_sparsity_pattern(strategy="box")`` keeps every orbital pair with
+    ``|z_i - z_j| < interaction_cutoff`` and drops the rest, i.e. it
+    Hadamard-multiplies both the G legs and the Sigma output by a BOXCAR of
+    the transport-axis separation. A boxcar is not a positive-definite
+    function -- its Fourier transform ``2 sin(kR)/k`` changes sign -- so the
+    mask is indefinite whenever it truncates anything, which destroys the
+    ``-i G^< >= 0`` premise the bubble positivity theorem needs. That is the
+    measured cause of the MoS2 film instability: at 21 A the pattern keeps
+    98.6 % of its entries and still diverges, at 22 A it is dense and
+    converges (`phonon/docs/bubble_positivity.md`, 6.9-6.11).
+
+    ``"triangular"`` multiplies the retained entries by
+    ``max(0, 1 - |z_i - z_j| / interaction_cutoff)``. That function has
+    Fourier transform ``R sinc^2(kR/2) >= 0``, so by Bochner the mask is PSD
+    for ANY orbital arrangement and ANY radius, with exactly the same support
+    -- same nnz, same memory, same ring cost. Measured worst relative negative
+    eigenvalue of ``-i Sigma^<`` on the 6-cell MoS2 film: boxcar 4.5e-02 to
+    2.0e-01 over R = 10-30 A, triangular 3e-14 throughout.
+
+    The trade is accuracy, not stability: at equal radius the taper discards
+    slightly MORE weight than the boxcar, and its error falls only as 1/R. It
+    is for devices too long to make the pattern dense, where the alternative
+    is a divergent run -- not a default. ``"none"`` reproduces the legacy
+    boxcar exactly."""
+
     solver: SolverConfig = SolverConfig()
     obc: OBCConfig = OBCConfig()
     lyapunov: LyapunovConfig = LyapunovConfig()

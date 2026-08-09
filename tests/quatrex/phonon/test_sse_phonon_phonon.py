@@ -1759,3 +1759,96 @@ def test_qfold_translation_invariance_gate() -> None:
     assert gate(qv_rand, xp) is False
     # Nothing to share must NOT be reported as invariance.
     assert gate({(0, 0): {(0, 0, 0): xp.ones((2, 2, 2))}}, xp) is False
+
+
+# ---------------------------------------------------------------------------
+# Positive-definite interaction cutoff (phonon.interaction_cutoff_taper)
+# ---------------------------------------------------------------------------
+def _run_sigma_cut(phi_blocks, block_sizes, ne, make_buffers, *,
+                   taper="none", radius=10.0, grid=None, tdir="z"):
+    """Production bubble with the interaction-cutoff taper configured."""
+    cfg = _make_cfg("fft")
+    cfg.phonon.interaction_cutoff_taper = taper
+    cfg.phonon.interaction_cutoff = radius
+
+    class _Dev:
+        transport_direction = tdir
+    cfg.device = _Dev()
+    gl, gg, sl, sg, sr = make_buffers()
+    ssp = SigmaPhononPhonon(
+        cfg, phonon_frequencies=np.linspace(0.0, 16.0, ne),
+        block_sizes=block_sizes, phi_blocks=phi_blocks, orbital_grid=grid)
+    ssp.compute(gl, gg, out=(sl, sg, sr))
+    return (np.asarray(get_host(sl.data)).copy(),
+            np.asarray(get_host(sg.data)).copy(), ssp, sl)
+
+
+def _chain_grid(N: int, spacing: float = 1.0, axis: int = 2) -> np.ndarray:
+    g = np.zeros((N, 3))
+    g[:, axis] = spacing * np.arange(N)
+    return g
+
+
+def test_cutoff_taper_weight_vector() -> None:
+    """The weights are exactly max(0, 1 - |z_i - z_j|/R) on the stored
+    entries: unity on the diagonal (the local channel is never reweighted),
+    linear in separation, zero beyond R."""
+    ne, n_blocks, nbs = 9, 2, 3
+    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
+    N = int(block_sizes.sum())
+    R = 4.0
+    grid = _chain_grid(N)
+    _, _, ssp, sl = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
+                                   taper="triangular", radius=R, grid=grid)
+    w = np.asarray(get_host(ssp._cutoff_taper(sl, xp)))
+    rows, cols = (np.asarray(get_host(a)) for a in sl.spy())
+    d = np.abs(grid[rows, 2] - grid[cols, 2])
+    np.testing.assert_allclose(w, np.clip(1.0 - d / R, 0.0, None), atol=1e-14)
+    assert np.all(w[rows == cols] == 1.0)
+    assert np.all(w[d >= R] == 0.0)
+
+
+def test_cutoff_taper_none_is_legacy() -> None:
+    """Supplying positions must change nothing while the taper is off."""
+    ne, n_blocks, nbs = 9, 2, 3
+    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
+    N = int(block_sizes.sum())
+    a_l, a_g, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
+                                    taper="none", grid=_chain_grid(N))
+    b_l, b_g, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
+                                    taper="none", grid=None)
+    np.testing.assert_array_equal(a_l, b_l)
+    np.testing.assert_array_equal(a_g, b_g)
+
+
+def test_cutoff_taper_tends_to_untapered_at_large_radius() -> None:
+    """As R -> infinity the triangle tends to the all-ones mask, so the
+    tapered Sigma must tend to the untapered one. This pins the
+    normalisation (f(0) = 1) and that the weights multiply rather than
+    replace."""
+    ne, n_blocks, nbs = 9, 2, 3
+    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
+    N = int(block_sizes.sum())
+    grid = _chain_grid(N)
+    ref_l, ref_g, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
+                                        taper="none", grid=grid)
+    prev = None
+    for R in (1e3, 1e5, 1e7):
+        got_l, _, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
+                                        taper="triangular", radius=R,
+                                        grid=grid)
+        err = (np.abs(got_l - ref_l).max()
+               / max(np.abs(ref_l).max(), 1e-300))
+        if prev is not None:
+            assert err < prev, f"error must fall with R: {err} !< {prev}"
+        prev = err
+    assert prev < 1e-5, f"residual error at R=1e7 too large: {prev}"
+
+
+def test_cutoff_taper_requires_orbital_grid() -> None:
+    """Refuse to run a boxcar silently when a taper was asked for."""
+    ne, n_blocks, nbs = 9, 2, 3
+    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
+    with pytest.raises(ValueError, match="orbital grid"):
+        _run_sigma_cut(phi, block_sizes, ne, make_buffers,
+                       taper="triangular", grid=None)
