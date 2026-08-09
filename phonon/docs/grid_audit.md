@@ -221,6 +221,50 @@ and restriction numbers are iterate comparisons, and the ordering of
 before it is believed -- `adjoint` is the one with the conservation
 argument behind it (commits `be46591c`, `8a74edca`).
 
+## Si stops converging when the grid is refined -- and it is NOT positivity
+
+Si film, 3 cells, transport along x, nk = [1,9,9], eta = 0, corrected
+20 THz window, 6 iterations from a cold start, single variable
+`energy_window_num`. Relative Sigma^R residual after those 6 iterations:
+
+| nf | 121 | 501 | 1001 | 2001 | 4001 | 15001 |
+|---|---|---|---|---|---|---|
+| residual | converges to 9.6e-08 | 7.7e-01 | 2.1e+01 | 5.5e+02 | 1.6e+04 | ABORT 2.4e+06 |
+
+Each doubling of `nf` multiplies the residual by ~27, i.e. it grows as
+roughly **nf^4.8**, monotonically. There is no threshold; the 121-point
+run is simply the only rung slow enough to converge.
+
+**It is not the MoS2 mechanism.** Si's transport axis is x, on which the
+fcc cell has a 1.37 A extent, so the 10 A box cutoff never truncates and
+the interaction mask is the identity (section 6.11 of
+`bubble_positivity.md`). Measured on the saved runs
+(`phonon/studies/_si_divergence.py`, artefacts in
+`out/si_divergence/`):
+
+| run | nf | worst occupation | bins < 0 | S_median |
+|---|---|---|---|---|
+| sichk_ext | 121 | +1.9e-07 | 0.0 % | 0.96 |
+| sires501 | 501 | +1.5e-08 | 0.0 % | 0.98 |
+| sires1001 | 1001 | +1.4e-08 | 0.0 % | 0.98 |
+| sires2001 | 2001 | +2.1e-08 | 0.0 % | 0.97 |
+
+**No negative occupation anywhere**, at any resolution -- so `-i Sigma^<`
+keeps its positivity and the congruence argument is not violated. And the
+per-orbital spectral sum rule is saturated at ~0.97 even on the coarsest
+rung, so this is *not* the blind regime either: unlike the synthetic bed,
+Si's grid registers its resonances from the start.
+
+What diverges is the AMPLITUDE of the fixed-point iteration, with
+positivity intact throughout. That makes it an iteration problem rather
+than a physics or truncation one, so the cures to test are damping and
+acceleration (`mixing_factor`, `mixing_method`), not anything that
+touches the model -- and certainly not eta.
+
+Caveat: every rung above is capped at 6 iterations, so "residual after 6"
+measures the early trajectory, not a fixed point. It is the right
+comparison for a stability question and the wrong one for a value.
+
 ## Method traps found (both would have produced wrong verdicts)
 
 1. **A naive extent ladder is confounded by re-registration.** Holding
