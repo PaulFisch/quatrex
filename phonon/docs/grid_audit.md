@@ -167,6 +167,60 @@ different statement and the one the thesis under-weights. Refining the
 grid does not monotonically help stability, and on this bed it hurt
 (ρ peaked at dw/Γ ≈ 7).
 
+## Device scale: which grid actually costs accuracy (2026-08-09)
+
+First device-scale run of the two synthetic verdicts, on the one MoS2
+configuration that is stable by construction (2-cell, dense pattern, so
+the interaction mask is PSD): `mos2f2dense`, eta = 0, cutoff 30 A, 8
+iterations from a cold start, linear 0.1. Reference `mos2f2c22`:
+nf = 15001 with the **aux grid off**, so the bubble runs at full primary
+resolution.
+
+**Convention trap, and it is a big one.** `lead_current` is the legacy
+UNWEIGHTED sum on a uniform grid, i.e. `(1/dw) x integral`. Comparing it
+across grids without multiplying by `dw` makes it trivially proportional
+to `nf`: the raw numbers 2487.39 / 665.33 / 331.58 at nf =
+15001 / 4001 / 2001 look like a catastrophic grid dependence and are in
+fact the same answer three times.
+
+| rung | job | raw | `J = raw x dw` | vs ref |
+|---|---|---|---|---|
+| nf 15001, aux off (ref) | mos2f2c22 | 2487.39 | 2.65321 | -- |
+| nf 4001, aux off | 4384261 | 665.33 | 2.66132 | **+0.31 %** |
+| nf 2001, aux off | 4384264 | 331.58 | 2.65268 | **-0.02 %** |
+| nf 4001, aux 0.01 | 4384268 | 682.14 | 2.72856 | +2.84 % |
+| nf 15001, aux 0.02 | mos2f2aux | 2741.10 | 2.92384 | +10.20 % |
+| nf 15001, aux 0.01 | 4384266 | 2679.89 | 2.85854 | +7.74 % |
+| nf 15001, aux 0.005 | 4384267 | 2595.95 | 2.76902 | +4.36 % |
+| nf 15001, aux 0.01, `sample` | 4384271 | 2512.10 | 2.67957 | +0.99 % |
+
+Three readings.
+
+1. **The primary grid is ~7x finer than the observable needs.** 2001
+   points reproduce 15001 to 0.02 %, 4001 to 0.31 %. This is confirmed
+   independently and at zero cost by decimating the converged reference
+   spectrum and re-integrating: the spread over sub-cell offsets is
+   0.18 % at 7501 points, 0.61 % at 3001, 1.98 % at 1501. Two
+   independent legs, so this one is solid. Note the offset SPREAD is the
+   honest measure -- a single-offset difference is one draw of the
+   registration lottery.
+2. **The auxiliary grid is the expensive axis, and it is not converged.**
+   +10.20 / +7.74 / +4.36 % at `aux_dw` = 0.02 / 0.01 / 0.005, monotone
+   but slow. The production 0.01 carries a ~8 % error against the exact
+   (aux-off) bubble on this device. The aux grid is a reachability
+   lever, not a free one, and "aux on" is not a converged setting.
+3. **`sse_aux_restrict` matters at the several-percent level** -- open
+   item #23 now has a named device A/B. `sample` lands at +0.99 % where
+   the conserving `adjoint` lands at +7.74 %, at identical grids.
+
+**Caveat that limits all three.** Every rung is 8 iterations at residual
+0.34-0.46; none is converged. The primary-grid conclusion survives that
+(it is corroborated by the converged-spectrum decimation), but the aux
+and restriction numbers are iterate comparisons, and the ordering of
+`adjoint` vs `sample` in particular must be re-measured at convergence
+before it is believed -- `adjoint` is the one with the conservation
+argument behind it (commits `be46591c`, `8a74edca`).
+
 ## Method traps found (both would have produced wrong verdicts)
 
 1. **A naive extent ladder is confounded by re-registration.** Holding

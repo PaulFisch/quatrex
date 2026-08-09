@@ -651,10 +651,26 @@ Caveats, stated plainly:
 - This shows the instability is removed, not that the resulting
   transport number is converged.
 - Cost is the real obstacle to using this in production: an adequate
-  cutoff means a dense pattern, and memory goes as
-  `n_fft x nq x nnz` over the SSE tau workspaces (the term that OOMed
-  two attempts here). L6 dense at 15001 points needs ~140 GB/rank; the
-  binding constraint is the tau buffers, not the G/Sigma buffers.
+  cutoff means a dense pattern, and `nnz` then grows as `L^2` rather
+  than `L r_c`.
+
+  **Correction (2026-08-09).** The claim that "the binding constraint is
+  the tau buffers" was wrong, and so was the reading of the traceback
+  that put `perm_cache` at 97 GB. The accounting is now a validated
+  model, `phonon/studies/_memory_model.py`, gated on all three measured
+  OOMs. On the 6-cell film the SSE phase is **100.1 GB against 97.4
+  observed**, spread over the tau buffers (20.9), the band-link dicts
+  (13.9), the `_stack` duplicate (13.9), the per-pair outputs (13.9) and
+  `perm_cache` (11.7). No single term dominates. The ~39000 allocations
+  in the `perm_cache` traceback are `phi_perms` CALLS, not live entries
+  (4 quads x 25^2 q-pairs x 2 perms = 2500 entries = 12.6 GB).
+
+  Three of those terms were avoidable and are now fixed behind opt-in
+  switches (commit `bf4fdd31`): `sse_release_leg_blocks` (-13.9 GB),
+  `sse_perm_cache_share="auto"` (-8.8 GB, the offset key collapses the
+  cache to ONE distinct key on every shipped device), and a
+  `--max-batch` default of 512 instead of 100000, which is what actually
+  OOMed `mos2f4dense` through the ~21 RGF backward temporaries.
 
 **Consequence for every earlier MoS2 result.** All of them ran at the
 10 A default on devices of 37 A (L3) and longer, so the divergence that
@@ -699,14 +715,23 @@ but is not accurate -- at `sse_aux_grid_dw_thz = 0.02` the current moves
 to 2741.1, **+10.2 %**. The aux grid is a reachability lever, not a free
 one.
 
-Memory, measured rather than modelled: the SSE tau buffers scale with
-the *aux* grid (`n_fft = 2*ne_conv - 1`) and shrink with it, but the
-primary G/Sigma buffers scale with the *primary* `nf` and do not. Both
-a 6-cell and a 4-cell dense run at nf = 15001 OOM at ~100 GB/GPU on two
-nodes, so the fully-unmasked ladder currently reaches 2 cells at full
-resolution. Going longer needs a non-uniform primary grid
-(`frequency_grid = "file"`, see `make_grid.py`) rather than more nodes,
-since the 2-node cap binds first.
+Memory: the SSE tau buffers scale with the *aux* grid
+(`n_fft = 2*ne_conv - 1`), the primary G/Sigma buffers with the primary
+`nf`. Both a 6-cell and a 4-cell dense run at nf = 15001 OOMed at
+~100 GB/GPU on two nodes.
+
+**Superseded (2026-08-09).** The conclusion drawn here -- that going
+longer needs a non-uniform grid "rather than more nodes, since the
+2-node cap binds first" -- was wrong on both halves. The node cap was a
+policy limit, not a physical one (4 nodes ran the 4-cell device at
+15001), and the grid lever is far larger than assumed: on this same
+device the physical current changes by **0.31 % from nf = 15001 to
+4001 and -0.02 % to 2001** (jobs 4384261/4384264), because the reported
+`lead_current` is the legacy unweighted sum and must be multiplied by
+`dw` before any cross-grid comparison. What the grid buys is memory
+(`B_G ∝ ne`), and 7.5x of it is available for ~0.3 %. The aux grid is
+the expensive axis instead: `aux_dw = 0.01` costs **+2.84 %** and 0.02
+costs **+10.20 %**, i.e. roughly second order in `dw`.
 
 ### 6.11 Why only MoS2: the mask is PSD for every clean system
 
