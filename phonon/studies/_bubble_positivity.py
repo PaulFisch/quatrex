@@ -26,6 +26,7 @@ Run:  QTX_ARRAY_MODULE=numpy python phonon/studies/_bubble_positivity.py vertex
 """
 from __future__ import annotations
 
+import re
 import json
 import sys
 from pathlib import Path
@@ -444,6 +445,121 @@ def _mask(nslab, nd, cells, taper=None):
     return np.kron(w, np.ones((nd, nd)))
 
 
+# ---------------------------------------------------------------------------
+# Orbital-level distance masks: the interaction cutoff, and how to make it PSD
+# ---------------------------------------------------------------------------
+def _orbital_z(dirpath: Path, nslab: int, nd: int, axis: int) -> np.ndarray:
+    """Transport-axis coordinate of every dof, tiled over the slabs.
+
+    Mirrors create_coordinate_grid (device/inputs.py:70-106) for an
+    axis-aligned lattice, which is what every shipped film uses.
+    """
+    lines = (dirpath / "structure.xyz").read_text().splitlines()
+    lat = [float(x) for x in
+           re.search(r'Lattice="([^"]+)"', lines[1]).group(1).split()]
+    cell = np.asarray(lat, float).reshape(3, 3)[axis, axis]
+    n_at = int(lines[0])
+    pos = np.array([[float(v) for v in ln.split()[1:4]]
+                    for ln in lines[2:2 + n_at]])
+    per_cell = np.repeat(pos[:, axis], 3)
+    n_cells = (nslab * nd) // per_cell.size
+    return np.concatenate([per_cell + k * cell for k in range(n_cells)])
+
+
+def _dist_mask(z: np.ndarray, radius: float, kind: str) -> np.ndarray:
+    """Hadamard mask as a function of transport-axis separation.
+
+    ``"boxcar"`` is what `compute_sparsity_pattern(strategy="box")` applies
+    today (core/utils.py:45-74, strict `<`). ``"triangular"`` is the
+    positive-definite replacement: f(z) = max(0, 1-|z|/R) has Fourier
+    transform R sinc^2(kR/2) >= 0, so by Bochner M_ij = f(z_i - z_j) is PSD
+    for ANY point set and ANY R, with exactly the same support -- same nnz,
+    same memory. The boxcar's transform 2 sin(kR)/k changes sign, so it is
+    never PSD once it truncates anything.
+    """
+    d = np.abs(z[:, None] - z[None, :])
+    if kind == "boxcar":
+        return (d < radius).astype(float)
+    if kind == "triangular":
+        return np.clip(1.0 - d / radius, 0.0, None)
+    raise ValueError(kind)
+
+
+def cmd_cutoff() -> None:
+    """The interaction cutoff as a Hadamard mask: boxcar vs a PSD taper.
+
+    Section 6.10 established that the criterion is not how much weight the
+    mask keeps but whether the mask is PSD (21 A keeps 98.6 % and diverges;
+    22 A is dense and converges). If that is the criterion, then a mask that
+    is PSD BY CONSTRUCTION at every radius should be stable at every radius,
+    and the only question left is what it costs in accuracy.
+    """
+    OUT.mkdir(parents=True, exist_ok=True)
+    rep = {}
+    print("Orbital-level interaction cutoff: boxcar (production) vs")
+    print("triangular (positive-definite). Gamma slice, eta = 0.\n")
+    for label, rel, tdir, _ladder, vtx in DEVICES:
+        d = ROOT / rel
+        fc3 = Path(vtx) if vtx else (d / "fc3_blocks.hdf5")
+        fc3 = ROOT / fc3 if not fc3.is_absolute() else fc3
+        if not (d / "dynamical_matrix.mat").exists() or not fc3.exists():
+            print(f"{label}: MISSING inputs")
+            continue
+        if not (d / "structure.xyz").exists():
+            print(f"{label}: no structure.xyz, skipping")
+            continue
+        import h5py
+        with h5py.File(str(fc3), "r") as f:
+            sizes = np.asarray(f["meta/block_sizes"], int)
+        nslab, nd = len(sizes), int(sizes[0])
+        ws = np.load(d / "phonon_energies.npy")
+        dw = float(ws[1] - ws[0])
+        try:
+            z = _orbital_z(d, nslab, nd, tdir)
+        except Exception as exc:            # noqa: BLE001
+            print(f"{label}: cannot read positions ({exc})")
+            continue
+        if z.size != nslab * nd:
+            print(f"{label}: position count {z.size} != {nslab*nd}, skipping")
+            continue
+        span = float(z.max() - z.min())
+
+        d00, d01, d10 = _gamma_blocks(d, tdir, nd)
+        gl, gg, _ = _ballistic_g(ws, d00, d01, d10, nslab, nd, 305.0, 295.0)
+        phi = _dense_vertex(fc3, nslab, nd)
+        terms = _sigma_dense(phi, gl, gg, dw)
+        sl = terms[0] + terms[1] + terms[2]
+        base = _psd_metric(sl, ws)["worst_rel"]
+        nrm = float(np.linalg.norm(sl))
+
+        print(f"--- {label}   ({nslab}x{nd} dof, z-span {span:.2f} A)")
+        print(f"    unmasked Sigma^< worst neg  {base:.2e}")
+        print("      R(A)   fill%  | boxcar: mask_lmin  Sigma_neg  lost |"
+              "  triangular: mask_lmin  Sigma_neg  lost")
+        rows = []
+        for R in (10.0, 15.0, 20.0, 30.0, max(50.0, span * 1.5)):
+            out = {"radius": R}
+            cells = []
+            for kind in ("boxcar", "triangular"):
+                m = _dist_mask(z, R, kind)
+                lmin = float(np.linalg.eigvalsh(m).min())
+                sm = sl * m
+                neg = _psd_metric(sm, ws)["worst_rel"]
+                lost = float(np.linalg.norm(sl - sm)) / max(nrm, 1e-300)
+                out[kind] = {"mask_lmin": lmin, "sigma_worst_rel": neg,
+                             "lost_weight": lost}
+                cells.append(f"{lmin:10.3f} {neg:10.2e} {lost:6.3f}")
+            fill = 100.0 * float((_dist_mask(z, R, "boxcar")).mean())
+            out["fill_pct"] = fill
+            rows.append(out)
+            print(f"     {R:5.1f} {fill:6.1f}  |  {cells[0]}  |     {cells[1]}")
+        rep[label] = {"nslab": nslab, "nd": nd, "span": span,
+                      "unmasked_worst_rel": base, "ladder": rows}
+        print()
+    (OUT / "cutoff_mask.json").write_text(json.dumps(rep, indent=2))
+    print(f"wrote {OUT / 'cutoff_mask.json'}")
+
+
 def cmd_blocking() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     rep = {}
@@ -532,7 +648,8 @@ def cmd_blocking() -> None:
     print(f"wrote {OUT / 'blocking.json'}")
 
 
-COMMANDS = {"vertex": cmd_vertex, "blocking": cmd_blocking}
+COMMANDS = {"vertex": cmd_vertex, "blocking": cmd_blocking,
+        "cutoff": cmd_cutoff}
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "vertex"
