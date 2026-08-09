@@ -1879,26 +1879,52 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         """
         if self._cut_taper == "none":
             return None
-        nnz = int(buf.data.shape[-1])
-        w = self._taper_cache.get(nnz)
-        if w is None:
-            rows, cols = buf.spy()
-            rows = np.asarray(get_host(rows), dtype=int)
-            cols = np.asarray(get_host(cols), dtype=int)
-            if rows.size != nnz:
+        nnz_local = int(buf.data.shape[-1])
+        state = getattr(buf, "distribution_state", "stack")
+        key = (nnz_local, state)
+        w = self._taper_cache.get(key)
+        if w is not None:
+            return w
+
+        rows, cols = buf.spy()
+        rows = np.asarray(get_host(rows), dtype=int)
+        cols = np.asarray(get_host(cols), dtype=int)
+        z = self._orbital_grid[:, self._cut_axis]
+        d = np.abs(z[rows] - z[cols])
+        if self._cut_taper != "triangular":         # pragma: no cover
+            raise ValueError(self._cut_taper)
+        w_full = np.clip(1.0 - d / self._cut_radius, 0.0, None)
+
+        if w_full.size != nnz_local:
+            # In the "nnz" distribution state the last axis is this rank's
+            # greedy section of the global nnz axis, padded up to the largest
+            # section (dsdbsparse.py:232-252). `spy()` is global, so it has to
+            # be cut to the same section -- getting this wrong silently
+            # misaligns weights with entries, so anything unexpected raises
+            # rather than broadcasts.
+            offs = getattr(buf, "nnz_section_offsets", None)
+            sizes = getattr(buf, "nnz_section_sizes", None)
+            if offs is None or sizes is None:
                 raise ValueError(
-                    f"interaction_cutoff_taper: spy() gave {rows.size} "
-                    f"entries but the buffer's nnz axis is {nnz}; the taper "
-                    f"can only be applied in the stack distribution state."
-                )
-            z = self._orbital_grid[:, self._cut_axis]
-            d = np.abs(z[rows] - z[cols])
-            if self._cut_taper == "triangular":
-                w = np.clip(1.0 - d / self._cut_radius, 0.0, None)
-            else:                                   # pragma: no cover
-                raise ValueError(self._cut_taper)
-            w = xp.asarray(w)
-            self._taper_cache[nnz] = w
+                    f"interaction_cutoff_taper: buffer has {nnz_local} local "
+                    f"entries against {w_full.size} in the pattern, and "
+                    f"exposes no nnz sectioning to reconcile them.")
+            offs = np.asarray(get_host(offs), dtype=int)
+            sizes = np.asarray(get_host(sizes), dtype=int)
+            r = int(ranks.stack.rank)
+            if r >= sizes.size or nnz_local < int(sizes[r]):
+                raise ValueError(
+                    f"interaction_cutoff_taper: stack rank {r} has "
+                    f"{nnz_local} local entries but its nnz section is "
+                    f"{sizes[r] if r < sizes.size else 'absent'}.")
+            lo, n = int(offs[r]), int(sizes[r])
+            # Entries past this rank's section are allocation padding and are
+            # never read; zero is the safe filler.
+            seg = np.zeros(nnz_local, dtype=float)
+            seg[:n] = w_full[lo:lo + n]
+            w_full = seg
+        w = xp.asarray(w_full)
+        self._taper_cache[key] = w
         return w
 
     @staticmethod

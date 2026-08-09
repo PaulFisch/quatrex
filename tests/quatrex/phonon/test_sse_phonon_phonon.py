@@ -1852,3 +1852,61 @@ def test_cutoff_taper_requires_orbital_grid() -> None:
     with pytest.raises(ValueError, match="orbital grid"):
         _run_sigma_cut(phi, block_sizes, ne, make_buffers,
                        taper="triangular", grid=None)
+
+
+def test_cutoff_taper_nnz_distributed_slice(monkeypatch) -> None:
+    """In the "nnz" distribution state the buffer's last axis is this rank's
+    section of the global nnz axis, not the whole of it. spy() is global, so
+    the weights must be cut to the same section -- a mismatch here silently
+    misaligns every weight with the wrong entry, which is how the first
+    multi-rank taper run failed.
+    """
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+    ne, n_blocks, nbs = 9, 2, 3
+    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
+    N = int(block_sizes.sum())
+    grid = _chain_grid(N)
+    R = 4.0
+    cfg = _make_cfg("fft")
+    cfg.phonon.interaction_cutoff_taper = "triangular"
+    cfg.phonon.interaction_cutoff = R
+
+    class _Dev:
+        transport_direction = "z"
+    cfg.device = _Dev()
+    ssp = SigmaPhononPhonon(cfg, phonon_frequencies=np.linspace(0.0, 16.0, ne),
+                            block_sizes=block_sizes, phi_blocks=phi,
+                            orbital_grid=grid)
+    gl, *_ = make_buffers()
+    rows, cols = (np.asarray(get_host(a)) for a in gl.spy())
+    full = np.clip(1.0 - np.abs(grid[rows, 2] - grid[cols, 2]) / R, 0.0, None)
+    nnz = full.size
+
+    # Two fake sections; rank 1 is the short one, padded up to the longest.
+    n0 = nnz // 2
+    sizes = np.array([n0, nnz - n0])
+    offs = np.array([0, n0, nnz])
+    pad = int(sizes.max())
+
+    class _Buf:
+        distribution_state = "nnz"
+        nnz_section_sizes = sizes
+        nnz_section_offsets = offs
+
+        def __init__(self):
+            self.data = np.zeros((ne, pad), dtype=complex)
+
+        def spy(self):
+            return rows, cols
+
+    import quatrex.phonon.sse_phonon_phonon as _m
+    for r in (0, 1):
+        monkeypatch.setattr(_m.ranks.stack, "rank", r, raising=False)
+        ssp._taper_cache.clear()
+        w = np.asarray(get_host(ssp._cutoff_taper(_Buf(), xp)))
+        assert w.size == pad
+        n = int(sizes[r])
+        np.testing.assert_allclose(w[:n], full[offs[r]:offs[r] + n],
+                                   atol=1e-14)
+        assert np.all(w[n:] == 0.0), "padding beyond the section must be zero"
