@@ -105,6 +105,19 @@ if cfg.phonon.frequency_grid == "file" and os.environ.get("QX_NE"):
 if os.environ.get("QX_AUXDW"):    cfg.phonon.sse_aux_grid_dw_thz = float(os.environ["QX_AUXDW"])
 if os.environ.get("QX_AUXFMAX"):  cfg.phonon.sse_aux_grid_fmax_thz = float(os.environ["QX_AUXFMAX"])
 
+# Memory knobs. Neither had an override before, and both are the ones that
+# actually decide whether a run fits: QX_MAXBATCH bounds the ~21 RGF backward
+# temporaries of (batch, nq, b, b), QX_TAUCHUNK bounds the coupled-q ring
+# intermediates. Both are exact -- they change only how the work is split.
+if os.environ.get("QX_MAXBATCH"):
+    cfg.phonon.solver.max_batch_size = int(os.environ["QX_MAXBATCH"])
+if os.environ.get("QX_TAUCHUNK"):
+    cfg.phonon.sse_tau_chunk_bytes = int(os.environ["QX_TAUCHUNK"])
+if os.environ.get("QX_RELEASE_LEGS"):
+    cfg.phonon.sse_release_leg_blocks = bool(int(os.environ["QX_RELEASE_LEGS"]))
+if os.environ.get("QX_PERMSHARE"):
+    cfg.phonon.sse_perm_cache_share = os.environ["QX_PERMSHARE"]
+
 # Honor the (possibly-overridden) comm grid + threading + profiler.
 setup_context(cfg)
 

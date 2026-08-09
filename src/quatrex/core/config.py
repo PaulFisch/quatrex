@@ -1494,6 +1494,38 @@ class PhononConfig(BaseModel):
     bins (see there). Small (~0.01-0.03) to damp the IR marginal mode; the rest
     of the spectrum keeps ``scba.mixing_factor``."""
 
+    sse_release_leg_blocks: bool = False
+    """Free the densified G leg blocks once the batched coupled-q kernel has
+    stacked them.
+
+    ``.blocks[K, Kp]`` densifies into a fresh array (it is not a view), so the
+    four ``*_blk`` dicts hold ``4 L`` arrays of ``(n_tau, N_q, b, b)``; the
+    batched kernel then calls ``xp.stack`` and builds a SECOND full copy before
+    the tau-chunk loop that would have bounded it. Both live simultaneously --
+    2 x 13.9 GB of a 100 GB SSE phase on the 6-cell MoS2 film.
+
+    With this set the leg dicts (and their halo sources) are released as soon
+    as the stacks exist, followed by a memory-pool flush. Purely an allocation
+    lifetime change: the stacks hold the same values, so results are bit
+    identical. Default ``False`` keeps the legacy lifetime."""
+
+    sse_perm_cache_share: Literal["off", "auto"] = "off"
+    """Share pre-permuted vertex pairs across the block row in the dense
+    q-folded ring.
+
+    The permuted pairs are cached under a key that, for a dense q-folded
+    vertex, carries the ABSOLUTE block indices ``(I, K1, K2, J, K2p, K1p)``,
+    on the grounds that only the factor-reconstructed vertex is known to be
+    translationally invariant. For a bulk-homogeneous device the dense blocks
+    repeat across the block row too, and then the transport-offset key
+    ``(K1-I, K2-I, K2p-J, K1p-J)`` is equivalent and collapses the cache by
+    4-16x on every shipped device (to a single distinct key).
+
+    ``"auto"`` VERIFIES translational invariance of the q-folded vertex
+    exactly, once, before switching keys, and silently keeps the absolute key
+    if the check fails -- so it can never silently share blocks that differ.
+    Default ``"off"`` keeps the legacy key."""
+
     sse_tau_chunk_bytes: PositiveInt = 256 * 1024 * 1024
     """Memory cap on one tau chunk of the decomposed (``"gram"``) SSE kernel.
 

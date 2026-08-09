@@ -26,7 +26,7 @@ from qttools import NDArray, sparse, xp
 from qttools.comm import comm as ranks
 from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
-from qttools.utils.gpu_utils import get_host
+from qttools.utils.gpu_utils import free_mempool, get_host
 from qttools.utils.mpi_utils import get_section_sizes
 
 from quatrex.core.config import QuatrexConfig
@@ -96,6 +96,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._tau_min_chunk = int(
             getattr(config.phonon, "sse_tau_min_chunk", 4))
         self._tau_chunk_bytes = int(config.phonon.sse_tau_chunk_bytes)
+        self._release_legs = bool(
+            getattr(config.phonon, "sse_release_leg_blocks", False))
+        self._perm_share = str(
+            getattr(config.phonon, "sse_perm_cache_share", "off") or "off")
         self._pool_scope = str(
             getattr(config.phonon, "sse_pool_scope", "tau"))
         self._ring_c64 = (
@@ -1598,6 +1602,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 gg_q = _qflat(gg_blk)
                 glr_q = _qflat(glr_blk)
                 ggr_q = _qflat(ggr_blk)
+
+                def _release_leg_blocks():
+                    """Drop every reference to the densified leg blocks.
+
+                    `_qflat` returns reshape VIEWS, and the halo dicts alias
+                    the same arrays, so all three levels have to let go
+                    before the pool can reclaim anything. Called by the
+                    batched coupled-q kernel once its stacks hold the same
+                    values; see `phonon.sse_release_leg_blocks`.
+                    """
+                    for _d in (gl_blk, gg_blk, glr_blk, ggr_blk,
+                               gl_q, gg_q, glr_q, ggr_q,
+                               halo_l, halo_g, halo_lr, halo_gr):
+                        _d.clear()
+                    free_mempool()
                 n_tau = next(iter(gl_q.values())).shape[0]
                 dtype = next(iter(gl_q.values())).dtype
                 # Distribute the EXTERNAL-q loop over comm.q. The q-folded
@@ -1620,6 +1639,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     stlv, stgv, start, xp,
                     fast_now=fast_now, verify_now=verify_now,
                     stxv=stx.stack[...] if fast_now else None,
+                    release=(_release_leg_blocks
+                             if self._release_legs else None),
                 )
                 if fast_now:
                     # ji-transpose the cross terms in the stack state (same
@@ -1802,11 +1823,37 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             flush=True,
         )
 
+    @staticmethod
+    def _qfold_is_translation_invariant(qv, xp) -> bool:
+        """Exact test: does every q-folded vertex block satisfy
+        ``Phi[(I+1, K1+1, K2+1)] == Phi[(I, K1, K2)]``?
+
+        Only shifts whose image is also present are compared, and at least
+        one such pair must exist -- otherwise there is nothing to share and
+        we must not claim invariance. Any mismatch (including a missing
+        partner where a present one is expected) returns False, so the
+        caller falls back to the absolute key.
+        """
+        compared = 0
+        for phi in qv.values():
+            if not isinstance(phi, dict):
+                return False
+            for (I, K1, K2), blk in phi.items():
+                shifted = phi.get((I + 1, K1 + 1, K2 + 1))
+                if shifted is None:
+                    continue
+                a = xp.asarray(blk)
+                b = xp.asarray(shifted)
+                if a.shape != b.shape or not bool(xp.all(a == b)):
+                    return False
+                compared += 1
+        return compared > 0
+
     def _contract_dense_q(
         self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
         gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
         stlv, stgv, start, xp,
-        fast_now=False, verify_now=False, stxv=None,
+        fast_now=False, verify_now=False, stxv=None, release=None,
     ):
         """DENSE coupled-q vertex-pair contraction (the reference path).
 
@@ -1839,6 +1886,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             qtasks = self._qtasks_cache
         else:
             bulk_vertex = self._vfactors is not None
+            if not bulk_vertex and self._perm_share == "auto":
+                # The dense q-folded vertex is I-dependent in general, but
+                # for a bulk-homogeneous device its blocks repeat along the
+                # block row. Verify that EXACTLY (once) rather than assume
+                # it; on success the transport-offset key is equivalent and
+                # collapses the cache to a single distinct key on every
+                # device shipped so far.
+                bulk_vertex = self._qfold_is_translation_invariant(qv, xp)
+                if ranks.rank == 0:
+                    print(f"PhPh SSE perm cache: q-folded vertex "
+                          f"{'IS' if bulk_vertex else 'is NOT'} translation "
+                          f"invariant -> "
+                          f"{'offset' if bulk_vertex else 'absolute'} key",
+                          flush=True)
             perm_cache: dict[tuple, tuple] = {}
             qtasks = {}
             for iq_ext in range(q_lo, q_hi):
@@ -2037,6 +2098,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             GLR, _glr_i = (GG, gg_i) if fast_now else _stack(glr_q)
             if GL is None or GG is None or GGR is None or GLR is None:
                 return _contract_tau_q(lo, hi)
+            if release is not None:
+                # The stacks now hold every value the leg dicts did, and the
+                # dicts are dead from here on (the fallback above already
+                # returned). Releasing them here rather than at the end of
+                # the SSE removes one full copy of 4L (n_tau, N_q, b, b)
+                # from the peak -- 13.9 GB of a 100 GB phase on 6-cell MoS2.
+                release()
 
             need_x = fast_now or verify_now
             res = {}

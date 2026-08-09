@@ -445,7 +445,14 @@ def main():
     p.add_argument("--numba-threads", type=int, default=1)
     p.add_argument("--blas-threads", type=int, default=1)
     p.add_argument("--algorithm", default="rgf", choices=["rgf","inv"])
-    p.add_argument("--max-batch", dest="max_batch", type=int, default=100000)
+    # RGF batches over the LOCAL frequency slice and keeps ~21 temporaries of
+    # (batch, nq, b, b) alive through the backward sweep (rgf.py:161-163,
+    # :350-401). The old 100000 default meant "never batch", so every cluster
+    # run carried the full local stack: that is what OOMed mos2f4dense at
+    # 0.97 GB per temporary. 512 x nq is still a wide GEMM batch, so this is a
+    # memory fix, not a throughput knob, and RGF batching is exact -- results
+    # are unchanged.
+    p.add_argument("--max-batch", dest="max_batch", type=int, default=512)
     p.add_argument("--profile", action="store_true", help="enable per-phase profiler JSON dump")
     a = p.parse_args()
     a.tL = a.temperature + a.dt / 2.0

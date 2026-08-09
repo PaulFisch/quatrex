@@ -1648,3 +1648,114 @@ def test_cross_slab_scale_matches_manual_ablation() -> None:
         np.asarray(get_host(sl_c.data)), np.asarray(get_host(sl_d.data)),
         atol=1e-40, rtol=1e-12,
         err_msg="scale 1.0 must match the default path")
+
+
+# ---------------------------------------------------------------------------
+# Memory-lifetime options: both must be exactly inert on the numbers.
+# ---------------------------------------------------------------------------
+def _coupled_q_fixture(bulk: bool, seed: int = 11):
+    """Coupled-q inputs. ``bulk=True`` builds a translationally invariant
+    q-folded vertex (blocks depend only on the transport offsets), which is
+    the premise `sse_perm_cache_share="auto"` has to detect."""
+    n_blocks, nbs, ne, nq = 3, 3, 13, 3
+    rng = np.random.default_rng(seed)
+    block_sizes = np.array([nbs] * n_blocks)
+    q_diff_map = np.array([[(a - b) % nq for b in range(nq)]
+                           for a in range(nq)])
+    keys = [(I, K1, K2)
+            for I in range(n_blocks)
+            for K1 in range(max(0, I - 1), min(n_blocks, I + 2))
+            for K2 in range(max(0, I - 1), min(n_blocks, I + 2))
+            if abs(K1 - K2) <= 1]
+
+    def _phi():
+        if bulk:
+            proto = {}
+            for (I, K1, K2) in keys:
+                off = (K1 - I, K2 - I)
+                if off not in proto:
+                    proto[off] = (rng.standard_normal((nbs, nbs, nbs))
+                                  + 1j * rng.standard_normal((nbs, nbs, nbs)))
+            return {k: proto[(k[1] - k[0], k[2] - k[0])] for k in keys}
+        return {k: rng.standard_normal((nbs, nbs, nbs))
+                + 1j * rng.standard_normal((nbs, nbs, nbs)) for k in keys}
+
+    qvertices = {(a, b): _phi() for a in range(nq) for b in range(nq)}
+    return n_blocks, nbs, ne, nq, block_sizes, q_diff_map, qvertices
+
+
+def _run_coupled_q(bulk: bool, *, release: bool, share: str, seed: int = 11):
+    from qttools.datastructures import DSDBCOO
+    from scipy.sparse import csr_matrix
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+    n_blocks, nbs, ne, nq, block_sizes, qdm, qv = _coupled_q_fixture(bulk, seed)
+    N = int(block_sizes.sum())
+    rng = np.random.default_rng(seed + 1)
+    rows, cols = [], []
+    offs = np.concatenate(([0], np.cumsum(block_sizes)))
+    for I in range(n_blocks):
+        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+            for i in range(block_sizes[I]):
+                for j in range(block_sizes[J]):
+                    rows.append(offs[I] + i)
+                    cols.append(offs[J] + j)
+    pattern = _dev_pattern(csr_matrix(
+        (np.ones(len(rows), np.complex128), (np.array(rows), np.array(cols))),
+        shape=(N, N)))
+    mk = lambda: DSDBCOO.from_sparray(pattern, block_sizes,
+                                      global_stack_shape=(ne, nq))
+    g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+    for m in (g_l, g_g, s_l, s_g, s_r):
+        m.data[:] = 0.0
+    glv, ggv = g_l.stack[...], g_g.stack[...]
+    for K in range(n_blocks):
+        for Kp in range(max(0, K - 1), min(n_blocks, K + 2)):
+            glv.blocks[K, Kp] = xp.asarray(
+                rng.standard_normal((ne, nq, nbs, nbs))
+                + 1j * rng.standard_normal((ne, nq, nbs, nbs)))
+            ggv.blocks[K, Kp] = xp.asarray(
+                rng.standard_normal((ne, nq, nbs, nbs))
+                + 1j * rng.standard_normal((ne, nq, nbs, nbs)))
+
+    cfg = _make_cfg("half", g_band=1)
+    cfg.phonon.sse_release_leg_blocks = release
+    cfg.phonon.sse_perm_cache_share = share
+    ssp = SigmaPhononPhonon(cfg, phonon_frequencies=np.linspace(0.0, 16.0, ne),
+                            block_sizes=block_sizes, qfold=(qv, qdm, nq))
+    ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+    return (np.asarray(get_host(s_l.data)).copy(),
+            np.asarray(get_host(s_g.data)).copy())
+
+
+@pytest.mark.parametrize("bulk", [True, False])
+def test_release_leg_blocks_is_bit_identical(bulk: bool) -> None:
+    """`sse_release_leg_blocks` only changes when the leg dicts are freed."""
+    ref = _run_coupled_q(bulk, release=False, share="off")
+    got = _run_coupled_q(bulk, release=True, share="off")
+    for a, b in zip(ref, got):
+        np.testing.assert_array_equal(a, b)
+
+
+@pytest.mark.parametrize("bulk", [True, False])
+def test_perm_cache_share_is_bit_identical(bulk: bool) -> None:
+    """`sse_perm_cache_share="auto"` must be inert on the numbers whether or
+    not the vertex passes the invariance gate -- on a non-bulk vertex it has
+    to fall back to the absolute key rather than share blocks that differ."""
+    ref = _run_coupled_q(bulk, release=False, share="off")
+    got = _run_coupled_q(bulk, release=False, share="auto")
+    for a, b in zip(ref, got):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_qfold_translation_invariance_gate() -> None:
+    """The gate must accept a bulk vertex and reject a per-block-random one."""
+    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
+
+    gate = SigmaPhononPhonon._qfold_is_translation_invariant
+    *_, qv_bulk = _coupled_q_fixture(bulk=True)
+    *_, qv_rand = _coupled_q_fixture(bulk=False)
+    assert gate(qv_bulk, xp) is True
+    assert gate(qv_rand, xp) is False
+    # Nothing to share must NOT be reported as invariance.
+    assert gate({(0, 0): {(0, 0, 0): xp.ones((2, 2, 2))}}, xp) is False
