@@ -222,6 +222,11 @@ class PhononSolver(SubsystemSolver):
         self._pole_cfg = _ps
         self._pole = None            # PoleSector, built lazily
         self.pole_state = None       # last PoleSectorState, read by the interaction
+        self.psd_report = {}         # last positivity gate result, if enabled
+        # A congruence is PSD exactly, so anything above roundoff on the
+        # normalised eigenvalue is structural rather than numerical. The
+        # normalisation is global, so this is a single scale-free number.
+        self._psd_tol = 1e-10
 
     @profiler.profile(label="PhononSolver: OBC", level="default", comm=comm)
     def _compute_obc(self) -> None:
@@ -549,6 +554,42 @@ class PhononSolver(SubsystemSolver):
         return out
 
     @profiler.profile(label="PhononSolver: Pole sector", level="default", comm=comm)
+    def _check_positivity(self, out: tuple) -> None:
+        """Positivity gate on the RECONSTRUCTED TOTAL ``G^{<,>}``.
+
+        ``bubble_positivity.md`` Thm 1-2: the solver stores ``-i G^{<,>} >= 0``,
+        and the bubble is a congruence of it. The gate is on the total and
+        never on a sector -- ``G_PP`` and ``G_BB`` are separately PSD, but
+        ``G_PP + G_PB + G_BP`` is not, so a per-sector check would report
+        violations that are not there.
+
+        Off by default (``pole_sector.psd_check``): it costs a batched
+        eigen-decomposition per block window. This closes
+        ``bubble_positivity.md``'s open item "a production positivity gate
+        behind a flag".
+        """
+        cfg = getattr(self.config.phonon, "pole_sector", None)
+        if cfg is None or not getattr(cfg, "psd_check", False):
+            return
+        from quatrex.phonon.pole_audit import psd_residual
+
+        g_lesser, g_greater = out[0], out[1]
+        n_freq = int(self.local_frequencies.shape[0])
+        for name, buf, sign in (("g_lesser", g_lesser, -1.0),
+                                ("g_greater", g_greater, +1.0)):
+            rep = psd_residual(
+                buf.data.reshape(n_freq, -1), buf.rows, buf.cols,
+                self.block_sizes, sign=sign,
+            )
+            self.psd_report[name] = rep
+            if rep["worst"] < -self._psd_tol and comm.rank == 0:
+                print(
+                    f"  positivity: -i {name} has a normalised eigenvalue "
+                    f"{rep['worst']:.3e} at frequency index "
+                    f"{rep['omega_index']} (tol {self._psd_tol:.1e})",
+                    flush=True,
+                )
+
     def _update_pole_sector(self, sse_lesser, sse_greater) -> None:
         """Refresh the pole set from the current (mixed) self-energy.
 
@@ -706,5 +747,6 @@ class PhononSolver(SubsystemSolver):
         # Must run BEFORE free_data(): the pole solve reads the assembled
         # operator's blocks.
         self._update_pole_sector(sse_lesser, sse_greater)
+        self._check_positivity(out)
 
         self.system_matrix.free_data()

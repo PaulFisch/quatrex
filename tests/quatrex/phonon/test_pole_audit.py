@@ -327,3 +327,80 @@ def test_psd_is_empty_safe():
     vals, rows, cols, sizes, _ = _congruence_lesser()
     rep = psd_residual(np.zeros_like(vals), rows, cols, sizes)
     assert rep["worst"] == 0.0 and rep["scale"] == 0.0
+
+
+# --------------------------------------------------------------------------
+# Gate 3, wired: the solver's production positivity check
+# --------------------------------------------------------------------------
+
+class _StubBuffer:
+    def __init__(self, data, rows, cols):
+        self.data, self.rows, self.cols = data, rows, cols
+
+
+class _StubSolver:
+    """Just enough of PhononSolver to exercise ``_check_positivity``."""
+
+    from quatrex.phonon.solver import PhononSolver
+    _check_positivity = PhononSolver._check_positivity
+
+    def __init__(self, cfg, out, block_sizes, n_freq):
+        import types
+        self.config = types.SimpleNamespace(
+            phonon=types.SimpleNamespace(pole_sector=cfg))
+        self.block_sizes = block_sizes
+        self.local_frequencies = np.zeros(n_freq)
+        self.psd_report = {}
+        self._psd_tol = 1e-10
+        self._out = out
+
+
+def _psd_bed(sizes=np.array([2, 2]), ne=3, seed=0):
+    rows, cols, _ = _pattern(sizes)
+    rng = np.random.default_rng(seed)
+    n = int(sizes.sum())
+    a = rng.normal(size=(ne, n, n)) + 1j * rng.normal(size=(ne, n, n))
+    psd = a @ np.conj(np.swapaxes(a, -1, -2))
+    gl = (1j * psd)[:, rows, cols]
+    gg = (-1j * psd)[:, rows, cols]
+    return (_StubBuffer(gl, rows, cols), _StubBuffer(gg, rows, cols)), sizes, ne
+
+
+def test_positivity_gate_is_a_no_op_when_disabled():
+    """Off by default, and off means it costs nothing and records nothing."""
+    from quatrex.core.config import PoleSectorConfig
+
+    out, sizes, ne = _psd_bed()
+    s = _StubSolver(PoleSectorConfig(), out, sizes, ne)
+    s._check_positivity(out)
+    assert s.psd_report == {}
+
+    s2 = _StubSolver(None, out, sizes, ne)
+    s2._check_positivity(out)
+    assert s2.psd_report == {}
+
+
+def test_positivity_gate_reports_both_buffers_when_enabled():
+    from quatrex.core.config import PoleSectorConfig
+
+    out, sizes, ne = _psd_bed()
+    cfg = PoleSectorConfig(enabled=True, psd_check=True)
+    s = _StubSolver(cfg, out, sizes, ne)
+    s._check_positivity(out)
+    assert set(s.psd_report) == {"g_lesser", "g_greater"}
+    # A congruence passes on BOTH sign conventions.
+    for name in ("g_lesser", "g_greater"):
+        assert s.psd_report[name]["worst"] > -1e-12
+
+
+def test_positivity_gate_sees_an_indefinite_total():
+    from quatrex.core.config import PoleSectorConfig
+
+    out, sizes, ne = _psd_bed(seed=3)
+    bad = out[0].data.copy()
+    bad[:, 0] -= 50.0j * np.abs(bad).max()      # wreck one diagonal entry
+    out = (_StubBuffer(bad, out[0].rows, out[0].cols), out[1])
+    cfg = PoleSectorConfig(enabled=True, psd_check=True)
+    s = _StubSolver(cfg, out, sizes, ne)
+    s._check_positivity(out)
+    assert s.psd_report["g_lesser"]["worst"] < -1e-6
