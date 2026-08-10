@@ -237,3 +237,57 @@ reference.
 - **Step 7 (A/B ladder)** needs 5 and 6 for the beds that matter, though a
   CNT-only ladder on `l16/l24/l32` is possible today and would already
   measure `R` on a Gamma-only device.
+
+## Sector ladder, measured -- and SR/RS fails the energy-balance gate
+
+All three sector settings ran to 4 iterations with zero exceptions
+(`QX_MAXIT=4`, a smoke setting; nothing converged, so the currents are not
+physics yet). What matters is the conservation column:
+
+| leg | sectors | lead_current | bubble balance | heat profile |
+|---|---|---|---|---|
+| `base` | off | 64.03312144 | 3.2e-08 | 64.27 61.06 60.63 61.40 64.27 |
+| `np0` | empty window | 64.03312144 | 3.2e-08 | identical to base |
+| `rr` | `rr` | 64.27197051 | 6.8e-07 | 64.27 61.06 60.63 61.40 64.27 |
+| `rrss` | `rr_ss` | 64.24186400 | 5.4e-08 | 64.14 60.99 60.60 61.44 64.34 |
+| `full` | `rr_ss_sr` | 71.98161136 | **2.6e-02** | **-7.44 70.05 60.14 51.52 136.52** |
+
+`rr` -> `rrss` behaves exactly as the decomposition predicts: `rr` alone
+DROPS the SS, SR and RS processes, so its balance degrades to 6.8e-07;
+adding the analytic `Sigma_SS` back recovers 5.4e-08, slightly better than
+the baseline's own residual. That is evidence the pole leg subtraction and
+the closed-form pole-pole channel are consistent with each other.
+
+`full` is broken. The balance is five orders of magnitude worse than every
+other leg, and the heat profile is not merely noisy -- it is NEGATIVE at the
+left contact and non-monotonic across the device, which a conserving steady
+state cannot be. This is the gate-4 signal firing, and it is a real defect in
+the mixed sectors, not a tolerance question.
+
+Worth being precise about what is new here: `sectors="rr_ss_sr"` had NEVER
+run at device scale before this job. The pattern-level contraction refused
+above 4096 entries, and every bed is past that, so the only prior evidence
+for SR/RS was unit tests on hand-built beds. The blocked contraction agrees
+with the pattern-level one to 1e-12, so both would inherit a shared error --
+agreement between them is not evidence of correctness.
+
+Candidates, in the order I would check them:
+
+1. **The single-frequency source.** `core/interaction.py` evaluates the
+   projected source at ONE index, `mid = argmin|freqs - Re(cl.z[0])|`, and
+   uses it for the whole convolution. For a cluster carrying several poles at
+   different frequencies that is crude, and it is the least defensible line in
+   the mixed path.
+2. **Placement.** The mixed terms are added BEFORE `delta` is formed so the
+   existing Hilbert transform covers them. If that transform is also seeing
+   the `Sigma_SS` contribution, or if the analytic retarded partner is added
+   on top, the retarded half is double counted -- which `eps_KI` would catch
+   directly and cheaply.
+3. **Leg convention.** `Sigma_RS` is not `Sigma_SR` transposed, and the two
+   are built from independent `leg`/`conjugate` pairs. A swapped pair would
+   survive every existing test except conservation.
+
+The next step is NOT a bigger run. It is to evaluate `eps_KI` and the sector
+sum on this bed (both are implemented and cost nothing), because they
+localise the error to a specific channel; a grid ladder on a non-conserving
+self-energy would only measure the defect.
