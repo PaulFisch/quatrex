@@ -428,3 +428,46 @@ def test_a_lost_pole_set_triggers_a_reseed():
         sol.z = complex(sol.z.real + 5.0, -1.0)
     recovered = sec.refresh()
     assert recovered.n_poles > 0, "the sector did not recover from a lost pole set"
+
+
+def test_operator_reduces_a_frequency_resolved_contact_block():
+    """M(z) is ONE matrix, so the contacts must be sampled, not carried.
+
+    Regression from the first production run: ``obc_blocks.retarded[0]`` is
+    ``(n_freq, b, b)``, and passing it through unreduced assembled M at every
+    frequency at once. The bordered Newton then received a stack it could not
+    interpret. Holding the contact flat at the grid point nearest ``Re z`` is
+    the approximation ``set_operator_context`` documents.
+    """
+    import numpy as np
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_sector import PoleSector
+
+    freqs = np.linspace(0.0, 20.0, 41)
+    sizes = np.array([2, 2])
+    n = int(sizes.sum())
+    sec = PoleSector(PoleSectorConfig(enabled=True), freqs)
+
+    rng = np.random.default_rng(0)
+    d_blocks = {(i, j): rng.normal(size=(2, 2)) + 0j
+                for i in range(2) for j in range(2) if abs(i - j) <= 1}
+    rows, cols = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    delta = (rng.normal(size=(freqs.size, n * n))
+             + 1j * rng.normal(size=(freqs.size, n * n)))
+    obc = rng.normal(size=(freqs.size, 2, 2)) + 1j * rng.normal(
+        size=(freqs.size, 2, 2))
+
+    sec.set_operator_context(
+        delta=delta, d_blocks=d_blocks, obc_left=obc, obc_right=obc,
+        block_sizes=sizes, rows=rows.ravel(), cols=cols.ravel(),
+    )
+    m_blocks, _ = sec.operator()
+    a_ii, a_ij, a_ji = m_blocks(9.0 - 0.05j)
+    for b in (*a_ii, *a_ij, *a_ji):
+        assert b.ndim == 2, f"M(z) block carries a stack axis: {b.shape}"
+
+    # And it really is the nearest grid point that was used.
+    k = int(np.argmin(np.abs(freqs - 9.0)))
+    other = m_blocks(freqs[k] - 0.05j)
+    assert np.abs(_h(a_ii[0]) - _h(other[0][0])).max() < 1e-9

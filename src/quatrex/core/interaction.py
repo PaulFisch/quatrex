@@ -202,7 +202,8 @@ class PhononPhononInteraction(Interaction):
             return
 
         from quatrex.phonon.pole_bridge import (
-            mixed_self_energy_sparse, modal_vertex_blocks, ss_self_energy_sparse,
+            mixed_self_energy_blocked, modal_vertex_blocks,
+            ss_self_energy_sparse,
         )
 
         ssp = self.sigma_phonon_phonon
@@ -268,8 +269,12 @@ class PhononPhononInteraction(Interaction):
             mid = int(xp.argmin(xp.abs(freqs - float(xp.real(cl.z[0])))))
             common = dict(freqs=freqs, phi_blocks=ssp.phi_blocks,
                           block_sizes=ssp.block_sizes, rows=rows, cols=cols)
-            a = mixed_self_energy_sparse(freqs, cl, s_l[mid], reg_l, **common)
-            b = mixed_self_energy_sparse(freqs, cl, s_g[mid], reg_g, **common)
+            # Blocked, not pattern-level: the pattern contraction is
+            # O(nnz_out * nnz_in) and refuses above 4096 entries, which no
+            # real device is under. Same object, pinned to 1e-12 against the
+            # pattern form in test_pole_blocked.py.
+            a = mixed_self_energy_blocked(freqs, cl, s_l[mid], reg_l, **common)
+            b = mixed_self_energy_blocked(freqs, cl, s_g[mid], reg_g, **common)
             mx_l = a if mx_l is None else mx_l + a
             mx_g = b if mx_g is None else mx_g + b
         ssp.set_pole_mixed(mx_l.reshape(shape), mx_g.reshape(shape))

@@ -274,7 +274,16 @@ class PoleSector:
             d = d.reshape(d.shape[0], d.shape[-1])
         self._delta = d
         self._d_blocks = d_blocks
-        self._obc = (obc_left, obc_right)
+        # The contact blocks arrive on the WHOLE frequency grid,
+        # ``(n_freq, b, b)``. M(z) is a single matrix, so they have to be
+        # sampled at one frequency; holding them flat at the grid point
+        # nearest Re z is exactly the approximation this docstring states.
+        # Passing the full array instead silently assembles M at every
+        # frequency at once and hands the bordered Newton a stack it cannot
+        # interpret -- which is what happened on the first production run.
+        self._obc = tuple(
+            None if o is None else xp.asarray(o) for o in (obc_left, obc_right)
+        )
         self._block_sizes = np.asarray(_host(block_sizes), dtype=int)
         self._rows, self._cols = rows, cols
 
@@ -288,12 +297,27 @@ class PoleSector:
         return nnz_to_blocks(val, self._rows, self._cols, self._block_sizes,
                              band=1)
 
+    def _obc_at(self, z: complex):
+        """Contact blocks sampled at the grid frequency nearest ``Re z``.
+
+        A leading frequency axis is reduced here and nowhere else, so
+        ``assemble_m_blocks`` always sees one matrix per block.
+        """
+        out = []
+        for o in self._obc:
+            if o is None or o.ndim < 3:
+                out.append(o)
+                continue
+            k = int(np.argmin(np.abs(np.asarray(_host(self.freqs)) - z.real)))
+            out.append(o[k])
+        return out[0], out[1]
+
     def operator(self):
         """``(m_blocks, dm_blocks)`` closures over the stored context."""
-        obc_l, obc_r = self._obc
 
         def m_blocks(z):
             sig = {k: v[0] for k, v in self._sigma_blocks_at(z, 0).items()}
+            obc_l, obc_r = self._obc_at(z)
             return assemble_m_blocks(
                 z, self._d_blocks, sig, obc_left=obc_l, obc_right=obc_r,
                 block_sizes=self._block_sizes,

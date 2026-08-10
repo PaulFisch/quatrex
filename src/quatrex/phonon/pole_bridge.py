@@ -369,3 +369,214 @@ def mixed_self_energy_sparse(
         **kw,
     )
     return sr + rs
+
+
+# ---------------------------------------------------------------------------
+# Block-structured mixed contraction
+#
+# ``_mixed_one_sector`` contracts at the pattern level, which is O(nnz_out *
+# nnz_in) and hopeless at device scale (nnz ~ 1e5 gives 1e10 entries in a
+# single intermediate). The contraction is really a matrix triple product,
+#
+#     Sigma[I, J] = sum_{a, b} BL[I, a] M[a, b] BR[J, b]^T,
+#
+# and every factor is block-banded: M lives on G's block-tridiagonal pattern,
+# and BL/BR inherit the cubic vertex's |I - a| <= 1. So each output block needs
+# only a handful of b x b GEMMs, and the dense (n_dof, n_dof) vertex -- 1.5 GB
+# per pole at production size -- is never formed either.
+# ---------------------------------------------------------------------------
+
+def block_offsets(block_sizes: NDArray) -> NDArray:
+    """Cumulative block offsets, ``(n_blocks + 1,)`` on the host."""
+    sizes = np.asarray(_host(block_sizes), dtype=int)
+    return np.concatenate(([0], np.cumsum(sizes)))
+
+
+def blocks_from_pattern(
+    values: NDArray, rows: NDArray, cols: NDArray, block_sizes: NDArray
+) -> dict[tuple[int, int], NDArray]:
+    """Scatter ``(n_omega, nnz)`` pattern values into dense ``(n_omega, b_i,
+    b_j)`` blocks, one per occupied block pair."""
+    off = block_offsets(block_sizes)
+    r = np.asarray(_host(rows), dtype=np.int64)
+    c = np.asarray(_host(cols), dtype=np.int64)
+    br = np.searchsorted(off, r, side="right") - 1
+    bc = np.searchsorted(off, c, side="right") - 1
+    out: dict[tuple[int, int], NDArray] = {}
+    for key in {(int(i), int(j)) for i, j in zip(br, bc)}:
+        i, j = key
+        sel = np.flatnonzero((br == i) & (bc == j))
+        blk = xp.zeros(
+            (values.shape[0], int(off[i + 1] - off[i]), int(off[j + 1] - off[j])),
+            dtype=values.dtype,
+        )
+        blk[:, xp.asarray(r[sel] - off[i]), xp.asarray(c[sel] - off[j])] = \
+            values[:, xp.asarray(sel)]
+        out[key] = blk
+    return out
+
+
+def pattern_from_blocks(
+    blocks: dict[tuple[int, int], NDArray],
+    rows: NDArray,
+    cols: NDArray,
+    block_sizes: NDArray,
+    n_omega: int,
+    dtype=None,
+) -> NDArray:
+    """Gather dense blocks back onto ``(n_omega, nnz)`` pattern values.
+
+    Block pairs absent from ``blocks`` contribute zero -- that is how the
+    ``|I - J| <= 1`` output pin is applied, rather than by masking afterwards.
+    """
+    off = block_offsets(block_sizes)
+    r = np.asarray(_host(rows), dtype=np.int64)
+    c = np.asarray(_host(cols), dtype=np.int64)
+    br = np.searchsorted(off, r, side="right") - 1
+    bc = np.searchsorted(off, c, side="right") - 1
+    if dtype is None:
+        dtype = next(iter(blocks.values())).dtype if blocks else xp.complex128
+    out = xp.zeros((n_omega, r.size), dtype=dtype)
+    for (i, j), blk in blocks.items():
+        sel = np.flatnonzero((br == i) & (bc == j))
+        if sel.size == 0:
+            continue
+        out[:, xp.asarray(sel)] = blk[
+            :, xp.asarray(r[sel] - off[i]), xp.asarray(c[sel] - off[j])]
+    return out
+
+
+def mixed_vertex_block_dict(
+    phi_blocks: dict, block_sizes: NDArray, u: NDArray, *, leg: int,
+    conjugate: bool,
+) -> dict[tuple[int, int], NDArray]:
+    """Block-sparse form of :func:`mixed_vertex_blocks`.
+
+    Same object, ``(b_i, b_j, Np)`` per occupied block pair instead of one
+    dense ``(n_dof, n_dof, Np)`` array. ``leg`` and ``conjugate`` mean exactly
+    what they do there and remain independent.
+    """
+    if leg not in (0, 1):
+        raise ValueError(f"leg must be 0 or 1 (got {leg}).")
+    off = block_offsets(block_sizes)
+    npp = int(u.shape[1])
+    uu = xp.conj(u) if conjugate else u
+    out: dict[tuple[int, int], NDArray] = {}
+    for (i, k1, k2), blk in phi_blocks.items():
+        b = xp.asarray(blk, dtype=xp.complex128)
+        surv = k2 if leg == 0 else k1
+        red = k1 if leg == 0 else k2
+        spec = "mab,aA->mbA" if leg == 0 else "mab,bA->maA"
+        contrib = xp.einsum(spec, b, uu[off[red]:off[red + 1]])
+        key = (int(i), int(surv))
+        if key in out:
+            out[key] = out[key] + contrib
+        else:
+            out[key] = contrib
+    return out
+
+
+def _mixed_one_sector_blocked(
+    omega: NDArray,
+    cluster: PoleCluster,
+    source: NDArray,
+    g_reg: NDArray,
+    bl: dict[tuple[int, int], NDArray],
+    br: dict[tuple[int, int], NDArray],
+    freqs: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    block_sizes: NDArray,
+    prefactor: complex | None = None,
+) -> NDArray:
+    """ONE mixed sector via the block triple product. See
+    :func:`_mixed_one_sector` for the physics; this is the same object at
+    device-scale cost."""
+    from quatrex.phonon.pole_bubble import leg_partial_fractions
+    from quatrex.phonon.pole_mixed import mixed_convolution_batched
+
+    if prefactor is None:
+        prefactor = analytic_prefactor()
+
+    poles, coeffs = leg_partial_fractions(cluster, source)
+    npp = cluster.n_poles
+    n_omega = int(omega.shape[0])
+
+    # The pole set is shared by every sector, so both the convolved M and its
+    # block view are built once and reused across output blocks.
+    m_blocks = {}
+    for al in range(npp):
+        for dl in range(npp):
+            m = None
+            for j in range(2):
+                term = mixed_convolution_batched(
+                    omega, complex(poles[al, dl, j]), complex(coeffs[al, dl, j]),
+                    g_reg, freqs,
+                )
+                m = term if m is None else m + term
+            m_blocks[(al, dl)] = blocks_from_pattern(m, rows, cols, block_sizes)
+
+    # Output pattern -> which block pairs must be produced.
+    off = block_offsets(block_sizes)
+    r = np.asarray(_host(rows), dtype=np.int64)
+    c = np.asarray(_host(cols), dtype=np.int64)
+    out_pairs = {(int(i), int(j)) for i, j in zip(
+        np.searchsorted(off, r, side="right") - 1,
+        np.searchsorted(off, c, side="right") - 1)}
+
+    acc: dict[tuple[int, int], NDArray] = {}
+    for (i_out, j_out) in out_pairs:
+        total = None
+        for al in range(npp):
+            for dl in range(npp):
+                for (a, b), mab in m_blocks[(al, dl)].items():
+                    left = bl.get((i_out, a))
+                    right = br.get((j_out, b))
+                    if left is None or right is None:
+                        continue
+                    term = xp.einsum(
+                        "ip,wpq,jq->wij",
+                        left[..., al], mab, right[..., dl])
+                    total = term if total is None else total + term
+        if total is not None:
+            acc[(i_out, j_out)] = total
+
+    return prefactor * pattern_from_blocks(
+        acc, rows, cols, block_sizes, n_omega, dtype=xp.complex128)
+
+
+def mixed_self_energy_blocked(
+    omega: NDArray,
+    cluster: PoleCluster,
+    source: NDArray,
+    g_reg: NDArray,
+    freqs: NDArray,
+    phi_blocks: dict,
+    block_sizes: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    prefactor: complex | None = None,
+) -> NDArray:
+    """``Sigma_SR + Sigma_RS`` at device scale.
+
+    Drop-in replacement for :func:`mixed_self_energy_sparse` with no ``nnz``
+    guard: the pattern-level O(nnz^2) intermediate is replaced by block
+    triple products. Pinned against the pattern-level form, which stays as the
+    small-size reference.
+    """
+    kw = dict(freqs=freqs, rows=rows, cols=cols, block_sizes=block_sizes,
+              prefactor=prefactor)
+    vd = mixed_vertex_block_dict
+    sr = _mixed_one_sector_blocked(
+        omega, cluster, source, g_reg,
+        bl=vd(phi_blocks, block_sizes, cluster.u, leg=0, conjugate=False),
+        br=vd(phi_blocks, block_sizes, cluster.u, leg=1, conjugate=True),
+        **kw,
+    )
+    rs = _mixed_one_sector_blocked(
+        omega, cluster, source, g_reg,
+        bl=vd(phi_blocks, block_sizes, cluster.u, leg=1, conjugate=False),
+        br=vd(phi_blocks, block_sizes, cluster.u, leg=0, conjugate=True),
+        **kw,
+    )
+    return sr + rs

@@ -137,3 +137,57 @@ one matmul); `moments` is the refinement, flat in gamma.
   transform covers them. They carry one narrow factor against a smooth
   background, so the numerical transform is the right tool and a second analytic
   reconstruction would double-count.
+
+## First production runs (daint debug, 2026-08-10)
+
+Bed `pgate`: the Gamma-only 4-cell CNT from `cluster/l4gpu` (12 atoms/cell,
+144 DOF, `retarded_method` forced to `fft`), `QX_NE=201`, `QX_MAXIT=4`,
+`QX_BBCHECK=1`, one GH200. Two debug jobs, 1.0 nh total.
+
+**Gate 0 passes.** Baseline (`QX_POLE=0`) against a pole-enabled run whose
+window sits ABOVE the whole spectrum (`QX_POLE_WMIN=200`, `WMAX=400`, so the
+screening runs and finds nothing) is bit-identical on the GPU path:
+
+    energies, final_heat, last_heat, lead_current, iter_heat, iter_sigma_max,
+    iter_bubble_balance, final_bubble_balance, slab_absorption, gr_diag_imag,
+    gl_diag_imag, bubble_balance_spectrum, current_spectrum
+    -- all max_rel = 0.000e+00 at rtol = atol = 0.  PARITY: PASS
+
+Note the zero-pole gate cannot be spelled `max_poles = 0`: the field is a
+`PositiveInt`. An empty window is the right way to express it anyway, because
+it exercises screening and windowing rather than skipping them.
+
+**Two real bugs, both found only by running.** Neither is a GPU bug; both
+reproduce on numpy and both had passed 157 unit tests.
+
+1. `btd_matvec` allocated its output with `zeros_like(x)`. The production
+   assembly hands it blocks carrying a probe axis the vector does not have, so
+   the in-place `+=` raised instead of broadcasting. Every unit test fed
+   unstacked blocks. Fixed by allocating at the broadcast shape; `_matvec` now
+   refuses a non-singleton stack rather than reshaping it into the row index.
+2. That refusal immediately caught the second one: `set_operator_context` was
+   handed `obc_blocks.retarded[0]`, which is `(n_freq, b, b)` -- the contact on
+   the WHOLE grid. `M(z)` is a single matrix, so this assembled M at 201
+   frequencies at once. The contacts are now sampled at the grid point nearest
+   `Re z`, which is exactly the flat-contact approximation the docstring
+   already claimed.
+
+The lesson is worth keeping: the unit tests all built their own operators, so
+none of them ever saw a production-shaped one. A shape that only the real
+assembly produces is invisible to a suite of hand-built beds.
+
+## Step 4 landed: the blocked mixed contraction
+
+`_mixed_one_sector` contracts at the pattern level, `O(nnz_out * nnz_in)`,
+guarded at 4096 entries -- which no real device is under (the 144-DOF smoke bed
+already has ~13k). The contraction is a matrix triple product
+
+    Sigma[I, J] = sum_{a,b} BL[I, a] M[a, b] BR[J, b]^T
+
+in which every factor is block-banded: `M` lives on G's block-tridiagonal
+pattern, and `BL`/`BR` inherit the cubic vertex's `|I - a| <= 1`. So each output
+block costs a handful of `b x b` GEMMs, and the dense `(n_dof, n_dof)` vertex --
+1.5 GB per pole at production size -- is never formed either.
+`mixed_self_energy_blocked` is pinned to 1e-12 against the pattern-level form on
+two block layouts, and the interaction bridge now calls it. The pattern-level
+routine stays as the small-size reference.
