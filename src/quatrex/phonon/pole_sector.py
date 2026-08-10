@@ -118,10 +118,32 @@ class PoleSector:
 
     """
 
-    def __init__(self, config, freqs: NDArray, band_edges: NDArray | None = None):
+    def __init__(self, config, freqs: NDArray, band_edges: NDArray | None = None,
+                 *, global_freqs: NDArray | None = None, freq_offset: int = 0,
+                 reduce=None):
+        """
+        Parameters
+        ----------
+        freqs : NDArray
+            The frequencies THIS rank owns.
+        global_freqs : NDArray, optional
+            The whole frequency axis. The continuation sums over all of it, so
+            the weights are built here even though only the local columns are
+            contracted. Defaults to ``freqs`` (serial).
+        freq_offset : int, optional
+            Index of ``freqs[0]`` within ``global_freqs``.
+        reduce : callable, optional
+            ``arr -> summed arr`` across the frequency communicator. Defaults
+            to the identity (serial).
+
+        """
         self.cfg = config
         self.freqs = xp.asarray(freqs, dtype=float)
-        self.h = float(_host(self.freqs)[1] - _host(self.freqs)[0])
+        self.global_freqs = (self.freqs if global_freqs is None
+                             else xp.asarray(global_freqs, dtype=float))
+        self._freq_offset = int(freq_offset)
+        self._reduce = (lambda a: a) if reduce is None else reduce
+        self.h = float(_host(self.global_freqs)[1] - _host(self.global_freqs)[0])
         self.band_edges = (None if band_edges is None
                            else np.asarray(_host(band_edges), dtype=float))
         self.tracker = PoleTracker(
@@ -295,13 +317,38 @@ class PoleSector:
         self._block_sizes = np.asarray(_host(block_sizes), dtype=int)
         self._rows, self._cols = rows, cols
 
+    def continue_sigma(self, z: NDArray, order: int = 0) -> NDArray:
+        r"""``Sigma_s^{R,II}(z)`` (or its ``order``-th derivative) on the pattern.
+
+        Distributed by construction. Both terms of the continuation --
+        ``F(z)`` and the second-sheet ``Delta_an(z)`` -- are LINEAR in Delta
+        with coefficients that depend only on the grid, and neither reindexes
+        the frequency axis. So the weights are built for the global grid, each
+        rank contracts only the columns it owns, and one sum-reduction
+        completes the answer. No transposition of the distributed buffer is
+        needed, and in the serial case the reduction is the identity, so this
+        is bit-identical to the undistributed path.
+        """
+        from quatrex.phonon.pole_kernel import (
+            contract_delta, continuation_weights, local_fit_weights,
+        )
+
+        zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+        w_pos, w_mir = continuation_weights(zz, self.global_freqs, order=order)
+        f_pos, f_mir = local_fit_weights(
+            self.global_freqs, zz, order=self.cfg.delta_fit_order,
+            window=self.cfg.delta_fit_window_cells, deriv=order,
+        )
+        lo = self._freq_offset
+        hi = lo + int(self._delta.shape[0])
+        val = contract_delta(self._delta,
+                             w_pos[:, lo:hi] + f_pos[:, lo:hi],
+                             w_mir[:, lo:hi] + f_mir[:, lo:hi])
+        return self._reduce(val)
+
     def _sigma_blocks_at(self, z: complex, order: int):
         """Scattering self-energy blocks at complex ``z``."""
-        val = sigma_retarded_at_z(
-            self._delta, self.freqs, xp.asarray([z]), sheet="II", order=order,
-            delta_order=self.cfg.delta_fit_order,
-            delta_window=self.cfg.delta_fit_window_cells,
-        )
+        val = self.continue_sigma(xp.asarray([z]), order=order)
         return nnz_to_blocks(val, self._rows, self._cols, self._block_sizes,
                              band=1)
 
@@ -465,12 +512,17 @@ class PoleSector:
         return out
 
     def _sigma_blocks_at_from(self, delta, z: complex, order: int):
-        """:meth:`_sigma_blocks_at` against an explicit ``Delta``."""
-        val = sigma_retarded_at_z(
-            delta, self.freqs, xp.asarray([z]), sheet="II", order=order,
-            delta_order=self.cfg.delta_fit_order,
-            delta_window=self.cfg.delta_fit_window_cells,
-        )
+        """:meth:`_sigma_blocks_at` against an explicit ``Delta``.
+
+        Routed through the same distributed contraction, so the predictor sees
+        the whole frequency axis too. Continuing a rank-local slice here would
+        make the predicted shift depend on the rank decomposition.
+        """
+        saved, self._delta = self._delta, delta
+        try:
+            val = self.continue_sigma(xp.asarray([z]), order=order)
+        finally:
+            self._delta = saved
         return nnz_to_blocks(val, self._rows, self._cols, self._block_sizes,
                              band=1)
 

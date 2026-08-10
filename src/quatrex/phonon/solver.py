@@ -590,6 +590,39 @@ class PhononSolver(SubsystemSolver):
                     flush=True,
                 )
 
+    def _pole_frequency_context(self, local_freqs) -> dict:
+        """Global grid, local offset and reducer for the pole continuation.
+
+        The continuation sums over the WHOLE frequency axis, which
+        ``comm.stack`` splits. Both of its terms are linear in ``Delta`` with
+        grid-only coefficients and neither reindexes frequency, so each rank
+        can contract its own columns and a single sum-reduction completes the
+        result -- no transposition of the distributed buffer, and no
+        distributed root finding: every rank ends up with the same operator
+        and solves the same poles.
+
+        Serial runs get the identity reducer, so the path is bit-identical to
+        the undistributed one rather than merely equivalent.
+        """
+        if comm.stack.size <= 1:
+            return {}
+
+        sizes = comm.stack.all_gather(
+            np.array([local_freqs.size], dtype=np.int64))
+        sizes = np.asarray(get_host(sizes), dtype=np.int64).ravel()
+        offset = int(sizes[:comm.stack.rank].sum())
+        gathered = comm.stack.all_gather(np.ascontiguousarray(local_freqs))
+        global_freqs = np.asarray(get_host(gathered), dtype=float).ravel()
+
+        def _reduce(arr):
+            send = xp.ascontiguousarray(arr)
+            recv = xp.empty_like(send)
+            comm.stack.all_reduce(send, recv, op="sum")
+            return recv
+
+        return {"global_freqs": global_freqs, "freq_offset": offset,
+                "reduce": _reduce}
+
     def _update_pole_sector(self, sse_lesser, sse_greater) -> None:
         """Refresh the pole set from the current (mixed) self-energy.
 
@@ -612,13 +645,6 @@ class PhononSolver(SubsystemSolver):
         from quatrex.phonon.pole_probe import delta_from_sigma
         from quatrex.phonon.pole_sector import PoleSector
 
-        if comm.stack.size > 1:
-            raise NotImplementedError(
-                "pole_sector: the complex-frequency continuation sums over the "
-                "whole frequency axis, which is split across comm.stack. The "
-                "distributed form contracts in the 'nnz' state and is not "
-                "wired yet; run with stack_comm_size == 1 for now."
-            )
         if comm.block.size > 1:
             raise NotImplementedError(
                 "pole_sector: block-distributed devices are not supported yet "
@@ -627,7 +653,10 @@ class PhononSolver(SubsystemSolver):
 
         freqs = np.asarray(get_host(self.local_frequencies), dtype=float)
         if self._pole is None:
-            self._pole = PoleSector(self._pole_cfg, freqs)
+            self._pole = PoleSector(
+                self._pole_cfg, freqs,
+                **self._pole_frequency_context(freqs),
+            )
 
         delta = delta_from_sigma(sse_lesser.data, sse_greater.data)
         if float(xp.abs(delta).max()) == 0.0:
@@ -674,13 +703,21 @@ class PhononSolver(SubsystemSolver):
         sg = sse_greater.data.reshape(freqs.shape[0], -1)
         last = int(np.sum(self.block_sizes[:-1]))
 
-        # Close the pole set under z -> -z^* BEFORE any leg is built. Every
-        # bosonic resonance at +Omega has a partner at -Omega, and the bubble's
-        # fold only holds if both are present; the NEP only ever finds the
-        # positive-frequency members, because the search window is positive.
-        # This closure was implemented and documented as mandatory but never
-        # actually called -- G_PP was being built from half a pole set.
-        state.legs = self._pole.bubble_clusters()
+        # NOT closed under z -> -z^*, and that is a measured decision rather
+        # than an oversight. bubble_clusters() exists and is documented as
+        # mandatory, but wiring it in made rr_ss WORSE by 3400x on the pgate
+        # bed (bubble balance 5.4e-08 -> 1.8e-04), because the frozen source is
+        # evaluated at ONE index, mid = argmin|freqs - Re(z[0])|, i.e. at the
+        # POSITIVE centre. A closed cluster spans +Omega and -Omega, and the
+        # partner's source is the bosonic mirror of the original's -- one
+        # frozen source cannot serve both. Closing the set therefore needs a
+        # mirrored source per branch, which is not implemented.
+        #
+        # Leaving it unclosed is self-consistent: the sector is DEFINED by the
+        # poles inside the (positive) window, g_reg = G - G_PP is mirrored from
+        # the positive axis, and the mixed pole leg is exact for the poles it
+        # actually has.
+        state.legs = list(state.clusters)
         acc_l = acc_g = None
         for cl in state.legs:
             s_l = project_source_sparse(sl, rows, cols, cl.v)

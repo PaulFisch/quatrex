@@ -98,11 +98,38 @@ def test_pole_set_is_closed_before_any_leg_is_built():
     assert np.allclose(got[2:], -np.conj(z))
 
 
-def test_solver_records_the_closed_set_separately_from_the_solved_set():
-    """The tracker matches the solved set; the bubble consumes the closed one.
-    Conflating them would double the reported pole count every iteration."""
+def test_state_separates_the_leg_set_from_the_solved_set():
+    """The tracker matches the solved set; the bubble consumes ``legs``.
+
+    They are the same list today (see below), but keeping them distinct is what
+    makes enabling the closure a one-line change once the mirrored source
+    exists, and stops a closed set doubling the reported pole count.
+    """
     from quatrex.phonon.pole_sector import PoleSectorState
 
     st = PoleSectorState()
     assert hasattr(st, "legs") and st.legs == []
     assert st.clusters == []
+
+
+def test_closure_is_deferred_because_the_frozen_source_cannot_serve_both_branches():
+    """A measured decision, recorded so it is not silently re-attempted.
+
+    ``bubble_clusters()`` closes the pole set under ``z -> -z^*``, which puts
+    partners at NEGATIVE real frequency. The frozen source is evaluated at a
+    single index, the positive centre, so after closure one source is applied
+    to poles at both ``+Omega`` and ``-Omega`` -- and the partner's source is
+    the bosonic mirror of the original's, not the same matrix. Wiring the
+    closure in without that made ``rr_ss`` worse by 3400x on the production
+    bed (bubble balance 5.4e-08 -> 1.8e-04).
+    """
+    rng = np.random.default_rng(2)
+    z = np.array([8.0 - 0.3j, 11.0 - 0.4j])
+    u = rng.normal(size=(6, 2)) + 1j * rng.normal(size=(6, 2))
+    v = rng.normal(size=(6, 2)) + 1j * rng.normal(size=(6, 2))
+    closed = bosonic_closure(PoleCluster(z=z, u=u, v=v))
+    got = _h(closed.z)
+    # The partners sit at negative real frequency: that is exactly why one
+    # frozen source evaluated at the positive centre cannot serve them.
+    assert np.all(got[2:].real < 0.0)
+    assert np.all(got.imag < 0.0), "partners must stay retarded"

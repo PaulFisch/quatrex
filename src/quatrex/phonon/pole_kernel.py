@@ -256,6 +256,84 @@ def contract_delta(
     return out.reshape((w_pos.shape[0],) + tail)
 
 
+def local_fit_weights(
+    energies: NDArray,
+    z: NDArray,
+    *,
+    order: int = 2,
+    window: int = 4,
+    deriv: int = 0,
+) -> tuple[NDArray, NDArray]:
+    r"""``(P, K)`` weights of :math:`\Delta_{\rm an}(z)`, as a linear map on Delta.
+
+    Same object as :func:`delta_local_fit`, expressed the way
+    :func:`continuation_weights` is: the least-squares fit is linear in the
+    sampled values, and its coefficients depend only on the GRID, so
+    ``coeff = pinv(vander) @ src`` and the whole continuation collapses to a
+    weight matrix.
+
+    That matters for more than tidiness. It is what makes the pole sector
+    work on a distributed frequency axis: every rank can build the weights for
+    the global grid, contract only the columns it owns, and one
+    ``all_reduce(sum)`` completes the continuation. Neither branch reindexes
+    the frequency axis -- the mirror is elementwise (a conjugation plus a
+    transverse ``q -> -q``), and the negative-frequency reflection lives in the
+    ``z + omega_k`` argument -- so a rank never needs a frequency another rank
+    owns.
+
+    Returns
+    -------
+    tuple[NDArray, NDArray]
+        ``(w_pos, w_mir)``, to be used exactly like
+        :func:`continuation_weights`' output in :func:`contract_delta`.
+
+    """
+    h = cell_width(energies)
+    e = xp.asarray(energies, dtype=xp.float64)
+    n_freq = int(e.shape[0])
+    if 2 * window < order + 1:
+        raise ValueError(
+            f"window={window} gives {2 * window} samples, too few for a "
+            f"degree-{order} fit."
+        )
+    zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+    n_probe = int(zz.shape[0])
+    w_pos = xp.zeros((n_probe, n_freq), dtype=xp.complex128)
+    w_mir = xp.zeros((n_probe, n_freq), dtype=xp.complex128)
+
+    for p in range(n_probe):
+        zp = complex(zz[p])
+        positive = zp.real >= 0.0
+        w_c = zp.real if positive else -zp.real
+        centre = int(np.clip(round(w_c / h), 0, n_freq - 1))
+        lo = int(np.clip(centre - window, 0, max(0, n_freq - 2 * window)))
+        hi = min(n_freq, lo + 2 * window)
+        lo = max(0, hi - 2 * window)
+        idx = xp.arange(lo, hi)
+        t = (e[idx] - w_c) / h
+        vander = xp.stack([t**m for m in range(order + 1)], axis=1)
+        pinv = xp.linalg.pinv(vander.astype(xp.complex128))     # (order+1, 2*window)
+
+        if positive:
+            s, ds_dz = (zp.real - w_c + 1j * zp.imag) / h, 1.0 / h
+        else:
+            s, ds_dz = (-zp.real - w_c - 1j * zp.imag) / h, -1.0 / h
+        pw = []
+        for m in range(order + 1):
+            if m < deriv:
+                pw.append(0.0 * s)
+                continue
+            fall = 1.0
+            for j in range(deriv):
+                fall *= m - j
+            pw.append(fall * s ** (m - deriv) * ds_dz**deriv)
+        powers = xp.asarray(pw, dtype=xp.complex128)            # (order+1,)
+        row = powers @ pinv                                     # (2*window,)
+        target = w_pos if positive else w_mir
+        target[p, lo:hi] = row
+    return w_pos, w_mir
+
+
 def delta_local_fit(
     a: NDArray,
     energies: NDArray,
