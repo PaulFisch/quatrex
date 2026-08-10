@@ -291,3 +291,83 @@ The next step is NOT a bigger run. It is to evaluate `eps_KI` and the sector
 sum on this bed (both are implemented and cost nothing), because they
 localise the error to a specific channel; a grid ladder on a non-conserving
 self-energy would only measure the defect.
+
+## The SR/RS conservation break: diagnosis and fix (2026-08-10)
+
+The break was a **missing half of the frequency axis**, not a sign, prefactor
+or leg-convention error.
+
+The mixed convolution runs over the whole axis, but the solver only ever holds
+`G` for `omega >= 0`. The negative half is fixed by `R(-w) = R(w)^*` -- it is
+not missing information -- but it has to be SUPPLIED, because
+`cell_resolvent_weights` integrates exactly the cells it is given and its
+docstring says so outright ("No bosonic mirror is applied").
+
+Measured against a wide-axis reference on a background built to satisfy the
+relation exactly: the one-sided integral is **wrong by 28%**, mirroring brings
+it to **2.5e-4**. On the device that moved the bubble balance from **2.6e-02 to
+2.6e-05**.
+
+`bosonic_extend` in `pole_mixed.py` does it, and refuses a grid not anchored at
+zero rather than guessing where the mirror axis is.
+
+### Three wrong turns on the way, all worth keeping
+
+1. **A first anti-Hermiticity probe reported the mixed sector as exactly
+   Hermitian** (residual 2.0, i.e. `M^H = M`) -- an apparent factor of `i`.
+   It was the TEST that was wrong: it fed a PSD Hermitian source, whereas a
+   physical Keldysh source `S = V^dag Sigma^< V` is anti-Hermitian
+   (`Sigma^< = i * PSD`). With the right source both SS and mixed sit at 3e-16.
+   Nearly "fixed" correct code.
+2. **A code audit claimed the cell kernel already returns a KK-complete
+   retarded object**, so the numerical Hilbert transform was double counting.
+   Wrong: `leg_partial_fractions` returns poles in BOTH half planes and the
+   kernel matches `pair_convolution` to quadrature error. Checking the claim
+   against the exact reference took one command and saved a wrong fix.
+3. **The brute-force ring reference in `test_pole_mixed_sectors` was ALSO
+   one-sided**, so the old agreement was two identical mistakes matching. It
+   now integrates the full axis while the kernel gets only the non-negative
+   half, so it tests the reconstruction too. Its background had to be made
+   genuinely bosonic: a single Lorentzian is not, and neither is a
+   conjugate-symmetric pair times a COMPLEX matrix.
+
+### The bosonic closure is deferred, and that is measured
+
+`bubble_clusters()` closes the pole set under `z -> -z^*` and is documented as
+mandatory. Wiring it in made `rr_ss` **worse by 3400x** (bubble balance
+5.4e-08 -> 1.8e-04). The reason: closure puts partners at NEGATIVE real
+frequency, while the frozen source is evaluated at ONE index,
+`mid = argmin|freqs - Re(z[0])|`, the positive centre. One frozen source
+cannot serve both branches -- the partner's is the bosonic mirror of the
+original's. Closing therefore needs a per-branch mirrored source, which is not
+implemented.
+
+Unclosed is self-consistent: the sector is DEFINED by the poles inside the
+(positive) window, `g_reg` is mirrored from the positive axis, and the mixed
+pole leg is exact for the poles it has. `state.legs` is kept distinct from
+`state.clusters` so enabling the closure later is a one-line change plus the
+source work.
+
+## Step 5 landed differently from the design note
+
+The note prescribed contracting in the `"nnz"` state and `dtranspose`-ing to
+`"stack"`. That is unnecessary. Both terms of the continuation are LINEAR in
+`Delta` with grid-only coefficients, and neither reindexes frequency (the
+mirror is elementwise; the negative-frequency reflection lives in the
+`z + omega_k` argument). So every rank builds the weights for the global grid,
+contracts its own columns, and one `all_reduce` finishes it.
+
+That moves `(P, nnz)` instead of the whole buffer, and avoids distributed root
+finding entirely -- every rank ends with the same operator and solves the same
+poles. `contract_delta`'s docstring already anticipated it.
+
+`local_fit_weights` expresses the least-squares second-sheet continuation as a
+weight matrix; pinned to `delta_local_fit` at 5e-15 for derivative orders 0-2.
+Serial runs get the identity reducer, so the path is bit-identical rather than
+merely equivalent. Verified on 4 real MPI ranks at 1e-12.
+
+**Test-infrastructure trap**: the conda env links MPICH while `/usr/bin/mpirun`
+is the system OpenMPI. Mixing them does not fail -- it starts N independent
+one-rank jobs, so every MPI test skips with "only 1 MPI processes specified"
+and the suite still reports success. Use the launcher from the same prefix as
+mpi4py.
