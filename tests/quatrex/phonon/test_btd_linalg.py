@@ -95,3 +95,46 @@ def test_rhs_size_mismatch_raises():
     fac = BTDFactorization.factorize(*_blocks(rng, (3, 3)))
     with pytest.raises(ValueError, match="rows"):
         fac.solve(np.zeros((5, 1), dtype=complex))
+
+
+def test_matvec_accepts_blocks_carrying_a_singleton_stack_axis():
+    """The production assembly hands blocks a probe axis the vector lacks.
+
+    Regression: ``btd_matvec`` allocated its output with ``zeros_like(x)``, so
+    an in-place ``+=`` of a ``(1, b, nrhs)`` product into a ``(b, nrhs)``
+    buffer raised instead of broadcasting. Every unit test fed unstacked
+    blocks, so this only surfaced on the first production run.
+    """
+    b, nb = 3, 3
+    rng = np.random.default_rng(0)
+    a_ii = [rng.standard_normal((1, b, b)) + 0j for _ in range(nb)]
+    a_ij = [rng.standard_normal((1, b, b)) + 0j for _ in range(nb - 1)]
+    a_ji = [rng.standard_normal((1, b, b)) + 0j for _ in range(nb - 1)]
+    x = rng.standard_normal((nb * b, 1)) + 0j
+
+    n = nb * b
+    dense = np.zeros((n, n), dtype=complex)
+    off = [i * b for i in range(nb + 1)]
+    for i in range(nb):
+        dense[off[i]:off[i + 1], off[i]:off[i + 1]] = a_ii[i][0]
+    for i in range(nb - 1):
+        dense[off[i]:off[i + 1], off[i + 1]:off[i + 2]] = a_ij[i][0]
+        dense[off[i + 1]:off[i + 2], off[i]:off[i + 1]] = a_ji[i][0]
+
+    got = _h(btd_matvec(a_ii, a_ij, a_ji, x))
+    assert got.shape == (1, n, 1)
+    assert np.abs(got[0] - dense @ x).max() < 1e-12
+
+
+def test_bordered_newton_matvec_refuses_a_real_stack_axis():
+    """A non-singleton stack must raise, not be reshaped into the row index."""
+    from quatrex.phonon.pole_nevp import _matvec
+
+    b, nb = 2, 2
+    rng = np.random.default_rng(1)
+    a_ii = [rng.standard_normal((4, b, b)) + 0j for _ in range(nb)]
+    a_ij = [rng.standard_normal((4, b, b)) + 0j for _ in range(nb - 1)]
+    a_ji = [rng.standard_normal((4, b, b)) + 0j for _ in range(nb - 1)]
+    v = rng.standard_normal(nb * b) + 0j
+    with pytest.raises(ValueError, match="non-singleton stack axis"):
+        _matvec((a_ii, a_ij, a_ji), v)

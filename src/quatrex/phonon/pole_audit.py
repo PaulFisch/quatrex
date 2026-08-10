@@ -1,0 +1,222 @@
+# Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
+"""Correctness gates for the pole-subtracted SCBA sector.
+
+Four checks, each one a configuration under which the hybrid would return a
+confidently wrong answer rather than a noisy one:
+
+1. **Sector sum** -- ``B(G, G) == B(G_S,G_S) + B(G_S,G_R) + B(G_R,G_S) +
+   B(G_R,G_R)``. The split ``G = G_S + G_R`` is exact and the bubble is
+   bilinear, so the four sectors must reassemble the undecomposed answer when
+   all four are evaluated with the SAME quadrature. This is the test that a
+   term is neither dropped nor double counted; it is the reason
+   ``sectors="rr"`` and ``"rr_ss"`` are staging settings and not physics.
+2. **Keldysh identity** -- ``Sigma^R - Sigma^A == Sigma^< - Sigma^>`` (the
+   solver's occupation-positive stored convention, ``core/scba.py``: the skew
+   part of ``Sigma^R`` is assembled as ``(Sigma^< - Sigma^>)/2``). Purely
+   algebraic, so it must sit at roundoff. It fails exactly when an injected
+   analytic ``Sigma^R`` carries more than the Kramers-Kronig half, or when an
+   analytic ``Sigma^{<,>}`` is not a congruence.
+3. **Positivity** -- ``-i G^{<,>} >= 0`` on the RECONSTRUCTED TOTAL, never on a
+   sector. ``G_PP`` and ``G_BB`` are separately congruences and separately
+   PSD, but ``G_PP + G_PB + G_BP`` is not; only the full sum is
+   (``bubble_positivity.md`` Thm 1-2).
+4. **Energy balance** -- the bubble in/out identity, which is only testable
+   PRE-mixing (``QX_BBCHECK=1``); the saved arrays are post-mixing and measure
+   the SCBA residual instead (``phonon_conservation_measurement_trap``).
+
+Every function is pure and backend-agnostic; nothing here holds state or
+touches the distribution.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from qttools import NDArray, xp
+
+
+def _host(a):
+    return a.get() if hasattr(a, "get") else np.asarray(a)
+
+
+def transpose_index(rows: NDArray, cols: NDArray) -> NDArray:
+    """Permutation ``t`` with ``(rows[t[k]], cols[t[k]]) == (cols[k], rows[k])``.
+
+    The adjoint of a matrix stored on a structurally symmetric pattern is a
+    permutation of the values plus a conjugation, so no densification is
+    needed. Raises if the pattern is not structurally symmetric -- in that case
+    the adjoint is not representable and the Keldysh identity cannot be
+    evaluated on the pattern at all.
+    """
+    r = np.asarray(_host(rows), dtype=np.int64)
+    c = np.asarray(_host(cols), dtype=np.int64)
+    n = int(max(r.max(), c.max())) + 1
+    key = r * n + c
+    tkey = c * n + r
+    order = np.argsort(key, kind="stable")
+    pos = np.searchsorted(key[order], tkey)
+    if np.any(pos >= key.size) or np.any(key[order][np.minimum(pos, key.size - 1)] != tkey):
+        raise ValueError(
+            "transpose_index: the stored pattern is not structurally "
+            "symmetric, so Sigma^A is not representable on it."
+        )
+    return order[pos]
+
+
+def keldysh_identity(
+    sigma_retarded: NDArray,
+    sigma_lesser: NDArray,
+    sigma_greater: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+) -> dict[str, float]:
+    r"""``eps_KI`` and the two failure modes it decomposes into.
+
+    In the solver's stored convention ``Sigma^R = H + \tfrac12(Sigma^< -
+    Sigma^>)`` with ``H`` the Hermitian Kramers-Kronig part, so
+
+    .. math:: \Sigma^R - \Sigma^A = \Sigma^< - \Sigma^>
+
+    holds identically provided ``H`` really is Hermitian and ``Sigma^< -
+    Sigma^>`` really is anti-Hermitian. Those are the two independent things
+    that break when an analytic contribution is injected wrongly, so each is
+    reported alongside the identity residual.
+
+    Note that ``Sigma^R - Sigma^A`` is anti-Hermitian by construction, so
+    splitting the RESIDUAL into Hermitian and anti-Hermitian projections
+    measures nothing. The two auxiliary numbers here are therefore built from
+    the inputs, not from a projection of the residual: ``eps_delta_skew``
+    tests ``Sigma^< - Sigma^>`` directly, and ``eps_kk_hermitian`` tests the
+    Kramers-Kronig part recovered as ``Sigma^R - \tfrac12(Sigma^< -
+    Sigma^>)``.
+
+    Parameters
+    ----------
+    sigma_retarded, sigma_lesser, sigma_greater : NDArray
+        ``(n_omega, nnz)`` values on the stored pattern.
+    rows, cols : NDArray
+        ``(nnz,)`` global indices.
+
+    Returns
+    -------
+    dict
+        ``eps_ki`` (the identity residual -- the only one that sees a pure
+        magnitude error such as a double-counted retarded half),
+        ``eps_delta_skew`` (non-anti-Hermiticity of ``Sigma^< - Sigma^>``,
+        i.e. an analytic ``Sigma^{<,>}`` that is not a congruence) and
+        ``eps_kk_hermitian`` (non-Hermiticity of the recovered KK part), each
+        relative to ``||Sigma^< - Sigma^>||_F``.
+
+    """
+    t = xp.asarray(transpose_index(rows, cols))
+    delta = sigma_lesser - sigma_greater
+    scale = float(xp.linalg.norm(delta))
+    if scale == 0.0:
+        return {"eps_ki": 0.0, "eps_delta_skew": 0.0, "eps_kk_hermitian": 0.0}
+
+    adjoint = xp.conj(sigma_retarded[:, t])
+    ki = float(xp.linalg.norm(sigma_retarded - adjoint - delta)) / scale
+
+    d_skew = float(xp.linalg.norm(delta + xp.conj(delta[:, t]))) / scale
+    kk = sigma_retarded - 0.5 * delta
+    kk_h = float(xp.linalg.norm(kk - xp.conj(kk[:, t]))) / scale
+    return {"eps_ki": ki, "eps_delta_skew": d_skew, "eps_kk_hermitian": kk_h}
+
+
+def psd_residual(
+    values: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    block_sizes: NDArray,
+    sign: float = -1.0,
+    window: int = 2,
+) -> dict[str, float]:
+    r"""Worst normalised eigenvalue of ``sign * i * G`` over the diagonal blocks.
+
+    Positive semidefiniteness of the whole matrix implies it for every
+    principal submatrix, so a sliding window of ``window`` consecutive blocks
+    is a valid NECESSARY test and the only affordable one -- the full
+    ``(n_dof, n_dof)`` matrix is never formed. A negative return value is a
+    genuine violation; a non-negative one is evidence, not proof.
+
+    ``window`` must be at least 2 to see the failure mode this gate exists
+    for. A block-distance (boxcar) mask on ``G`` only ever zeroes OFF-diagonal
+    blocks, so a window of 1 is blind to it by construction, and
+    ``bubble_positivity.md`` Thm 3 -- the indefiniteness of exactly that mask
+    -- would go unmeasured.
+
+    The normalisation is GLOBAL (the largest eigenvalue over all blocks and all
+    frequencies), not per-frequency: a per-omega normalisation turns the
+    numerically empty tails of the window into apparent failures, which is the
+    recorded trap that once made a ballistic control "fail".
+
+    Parameters
+    ----------
+    values : NDArray
+        ``(n_omega, nnz)`` ``G^<`` or ``G^>`` on the stored pattern.
+    sign : float
+        ``-1`` for ``G^<`` (``-i G^< >= 0``), ``+1`` for ``G^>``.
+
+    Returns
+    -------
+    dict
+        ``worst`` (most negative normalised eigenvalue; 0 if none),
+        ``scale`` (the global normalisation) and ``omega_index`` of the worst.
+
+    """
+    sizes = np.asarray(_host(block_sizes), dtype=int)
+    off = np.concatenate(([0], np.cumsum(sizes)))
+    r = np.asarray(_host(rows), dtype=np.int64)
+    c = np.asarray(_host(cols), dtype=np.int64)
+
+    if window < 1:
+        raise ValueError("psd_residual: window must be >= 1")
+    evs = []
+    for i in range(max(1, sizes.size - window + 1)):
+        lo, hi = int(off[i]), int(off[min(i + window, sizes.size)])
+        sel = np.flatnonzero((r >= lo) & (r < hi) & (c >= lo) & (c < hi))
+        if sel.size == 0:
+            continue
+        b = hi - lo
+        dense = xp.zeros((values.shape[0], b, b), dtype=values.dtype)
+        dense[:, xp.asarray(r[sel] - lo), xp.asarray(c[sel] - lo)] = \
+            values[:, xp.asarray(sel)]
+        herm = sign * 1j * dense
+        herm = 0.5 * (herm + xp.conj(xp.swapaxes(herm, -1, -2)))
+        evs.append(xp.linalg.eigvalsh(herm))          # (n_omega, b)
+
+    if not evs:
+        return {"worst": 0.0, "scale": 0.0, "omega_index": -1}
+
+    scale = max(float(xp.abs(ev).max()) for ev in evs)
+    if scale == 0.0:
+        return {"worst": 0.0, "scale": 0.0, "omega_index": -1}
+
+    worst, worst_w = 0.0, -1
+    for ev in evs:
+        m = float(ev.min()) / scale
+        if m < worst:
+            worst = m
+            worst_w = int(_host(xp.argmin(ev.min(axis=-1))))
+    return {"worst": worst, "scale": scale, "omega_index": worst_w}
+
+
+def sector_sum_residual(
+    total: NDArray, sectors: dict[str, NDArray]
+) -> dict[str, float]:
+    """Relative residual of ``sum(sectors) - total``, plus each sector's weight.
+
+    The weights matter as much as the residual: a sector-sum test passes
+    vacuously if three of the four sectors are numerically zero, so the report
+    carries the fraction of the total each one contributes.
+    """
+    acc = None
+    weights = {}
+    for name, s in sectors.items():
+        acc = s if acc is None else acc + s
+        weights[f"weight_{name}"] = float(xp.linalg.norm(s))
+    scale = float(xp.linalg.norm(total))
+    out = {"residual": float(xp.linalg.norm(acc - total)) / (scale or 1.0),
+           "scale": scale}
+    for k, v in weights.items():
+        out[k] = v / (scale or 1.0)
+    return out

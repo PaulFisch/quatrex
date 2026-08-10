@@ -99,7 +99,20 @@ def _flat_solve(fac: BTDFactorization, v: NDArray) -> NDArray:
 
 
 def _matvec(blocks: Blocks, v: NDArray) -> NDArray:
-    return btd_matvec(*blocks, v.reshape(-1, 1))[..., 0]
+    out = btd_matvec(*blocks, v.reshape(-1, 1))[..., 0]
+    if out.ndim > 1:
+        # The bordered Newton corrects ONE pole at a time, so whatever leading
+        # axes the assembled blocks carry are singleton. Drop them explicitly:
+        # a bare reshape would fold a genuine stack axis into the row index and
+        # return a plausible-looking vector of the wrong length.
+        if int(np.prod(out.shape[:-1])) != 1:
+            raise ValueError(
+                f"_matvec: blocks carry a non-singleton stack axis "
+                f"{tuple(out.shape[:-1])}; the bordered Newton solves one "
+                "pole at a time."
+            )
+        out = out.reshape(-1)
+    return out
 
 
 def bordered_newton(

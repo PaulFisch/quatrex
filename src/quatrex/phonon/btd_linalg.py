@@ -62,7 +62,19 @@ def btd_matvec(
     """
     sizes = [int(b.shape[-1]) for b in a_ii]
     off = _offsets(sizes)
-    out = xp.zeros_like(x)
+    # The operator may carry stack axes the vector does not (the pole solve
+    # hands a single flat null-vector to blocks assembled with a probe axis),
+    # so the output is allocated at the BROADCAST shape rather than
+    # ``zeros_like(x)``. An in-place ``+=`` into the narrower buffer raises
+    # instead of broadcasting, which is how this surfaced: the unit tests fed
+    # unstacked blocks and only the production assembly carried the axis.
+    stack = xp.broadcast_shapes(
+        *(b.shape[:-2] for b in a_ii),
+        *(b.shape[:-2] for b in a_ij),
+        *(b.shape[:-2] for b in a_ji),
+        x.shape[:-2],
+    )
+    out = xp.zeros((*stack, x.shape[-2], x.shape[-1]), dtype=x.dtype)
     # Accumulate throughout: the sub-diagonal term of block i lands in block
     # i+1, so a plain assignment on the next iteration would clobber it.
     for i in range(len(a_ii)):
