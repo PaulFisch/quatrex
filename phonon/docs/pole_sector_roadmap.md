@@ -191,3 +191,49 @@ block costs a handful of `b x b` GEMMs, and the dense `(n_dof, n_dof)` vertex --
 `mixed_self_energy_blocked` is pinned to 1e-12 against the pattern-level form on
 two block layouts, and the interaction bridge now calls it. The pattern-level
 routine stays as the small-size reference.
+
+## The sector engages (daint debug, job 4392169)
+
+First end-to-end run of the pole-subtracted SCBA on a real device. Same
+`pgate` bed, `sectors="rr"`, `QX_POLE_NP=8`, window 1-55 THz:
+
+    pole sector: iteration 1, 3 cluster(s), 6 pole(s)
+    pole sector: iteration 2, 3 cluster(s), 5 pole(s)
+    pole sector: iteration 3, 2 cluster(s), 2 pole(s)
+    lead_current = 64.27197  (baseline 64.03312, +0.37%)
+
+Poles are found, clustered, tracked across iterations and subtracted from
+the bubble legs, and the run completes its 4 iterations. The pole count
+falling 6 -> 5 -> 2 is the screening working as the self-energy builds and
+modes broaden past `q_out`; it is the expected direction, but the ladder in
+Experiment I is what will show the split is algebraic rather than merely
+plausible.
+
+Neither leg converged in 4 iterations -- `QX_MAXIT=4` is a smoke setting, not
+a convergence test. No physics conclusion should be drawn from the 0.37%
+until the A/B ladder runs at matched iteration counts and a resolved
+reference.
+
+### Gate status
+
+| Gate | State |
+|---|---|
+| Zero-pole bit identity | **PASS**, GPU path, rtol = atol = 0, 13 observables |
+| Sector sum `SS+SR+RS+RR` | implemented + tested (`test_pole_audit.py`) |
+| `eps_KI` Keldysh identity | implemented + tested; catches double-counting and non-congruent `Sigma^{<,>}` |
+| Positivity | implemented, wired behind `psd_check`, tested |
+| Energy balance (`QX_BBCHECK=1`) | runs; `bubble_balance_last ~ 2.5e-8` |
+
+## What is left, and why it stopped here
+
+- **Step 5 (nnz-state contraction)** removes the `comm.stack.size > 1`
+  refusal. It is distributed code, and a single-rank debug job exercises
+  none of it -- landing it without a multi-rank test would repeat exactly
+  the failure this campaign already hit twice (a shape only the real
+  assembly produces).
+- **Step 6 (coupled-q)** is what unblocks MoS2 and Si. Both beds exist on
+  daint; neither can run the sector until the pole set is made per-q and the
+  vertex fold follows it.
+- **Step 7 (A/B ladder)** needs 5 and 6 for the beds that matter, though a
+  CNT-only ladder on `l16/l24/l32` is possible today and would already
+  measure `R` on a Gamma-only device.
