@@ -60,6 +60,14 @@ class PoleSectorState:
     """
 
     clusters: list[PoleCluster] = field(default_factory=list)
+    legs: list[PoleCluster] = field(default_factory=list)
+    """Clusters CLOSED under the bosonic partner map, as the bubble needs them.
+
+    Kept separate from ``clusters`` because the two have different jobs: the
+    tracker matches against the solved set, while every leg the bubble builds
+    must come from a set closed under ``z -> -z^*`` or the fold
+    ``Sigma^<(q,-w) = Sigma^>(-q,w)^T`` does not hold. Sources are indexed
+    alongside THIS list, not ``clusters``."""
     source_lesser: list = field(default_factory=list)
     source_greater: list = field(default_factory=list)
     g_pp_lesser: object = None

@@ -221,7 +221,9 @@ class PhononPhononInteraction(Interaction):
         freqs = xp.asarray(solver.local_frequencies, dtype=float)
         shape = scba.data.sigma_lesser.data.shape
         acc_l = acc_g = acc_r = None
-        for cl, s_l, s_g in zip(state.clusters, state.source_lesser,
+        # state.legs, not state.clusters: the sources are indexed alongside
+        # the bosonically closed set the solver built them from.
+        for cl, s_l, s_g in zip(state.legs, state.source_lesser,
                                 state.source_greater):
             vl = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
                                      conjugate=False)
@@ -264,7 +266,9 @@ class PhononPhononInteraction(Interaction):
         reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
         reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
         mx_l = mx_g = None
-        for cl, s_l, s_g in zip(state.clusters, state.source_lesser,
+        # state.legs, not state.clusters: the sources are indexed alongside
+        # the bosonically closed set the solver built them from.
+        for cl, s_l, s_g in zip(state.legs, state.source_lesser,
                                 state.source_greater):
             mid = int(xp.argmin(xp.abs(freqs - float(xp.real(cl.z[0])))))
             common = dict(freqs=freqs, phi_blocks=ssp.phi_blocks,

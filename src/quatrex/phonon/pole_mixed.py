@@ -44,7 +44,7 @@ import numpy as np
 from qttools import NDArray, xp
 
 __all__ = ["mixed_convolution", "cell_resolvent_weights",
-           "mixed_convolution_batched", "METHODS"]
+           "mixed_convolution_batched", "bosonic_extend", "METHODS"]
 
 METHODS = ("grid", "cells", "moments", "rational")
 
@@ -220,6 +220,64 @@ def cell_resolvent_weights(z: NDArray, freqs: NDArray) -> NDArray:
     h = float(_host(freqs)[1] - _host(freqs)[0])
     d = zz - w
     return (xp.log(d + 0.5 * h) - xp.log(d - 0.5 * h)) / (2.0 * np.pi)
+
+
+def bosonic_extend(
+    r_vals: NDArray, freqs: NDArray, transverse_shape: tuple | None = None
+) -> tuple[NDArray, NDArray]:
+    r"""Mirror a one-sided background onto the full frequency axis.
+
+    The mixed convolution :math:`\int d\omega'\, F(\omega') R(\omega-\omega')`
+    runs over the WHOLE axis, but the solver only ever holds :math:`R` for
+    :math:`\omega \ge 0`. The negative half is not missing information -- it is
+    fixed by the bosonic relation :math:`R(-\omega) = R(\omega)^*` (with
+    :math:`q \to -q` on the transverse axes) -- but it does have to be supplied,
+    because :func:`cell_resolvent_weights` integrates exactly the cells it is
+    given and nothing else.
+
+    Omitting it is not a small error. Measured against a wide-axis reference on
+    a background built to satisfy the relation exactly, the one-sided integral
+    is wrong by **28%**, and mirroring brings it to 2.5e-4. That is the size of
+    defect that breaks the Phi-derivable energy balance rather than merely
+    degrading it.
+
+    The RR ring never had this problem: the FFT route builds the bosonic fold
+    explicitly before transforming. The pole-pole channel closes its pole SET
+    instead (:func:`~quatrex.phonon.pole_bubble.bosonic_closure`). This is the
+    same physical statement, applied to a sampled leg.
+
+    Parameters
+    ----------
+    r_vals : NDArray
+        ``(n_freq, ...)`` background on a grid starting at (or near) zero.
+    freqs : NDArray
+        ``(n_freq,)`` non-negative, uniformly spaced.
+    transverse_shape : tuple, optional
+        Transverse momentum grid. The mirror carries ``q -> -q`` on these axes;
+        the plain conjugate is only correct at ``nq == 1``.
+
+    Returns
+    -------
+    tuple[NDArray, NDArray]
+        ``(r_full, freqs_full)`` on ``[-w_max, w_max]``, ascending, with the
+        zero bin present exactly once.
+
+    """
+    w = xp.asarray(freqs, dtype=float)
+    r = xp.asarray(r_vals)
+    zero_anchored = bool(abs(float(_host(w)[0])) < 1e-12)
+    if not zero_anchored:
+        raise NotImplementedError(
+            "bosonic_extend needs a zero-anchored grid: the mirror is defined "
+            f"about omega = 0 and this grid starts at {float(_host(w)[0]):g}."
+        )
+    mirror = xp.conj(r[:0:-1])
+    if transverse_shape:
+        # R(-q, -w) = R(q, w)^*: the conjugate alone is the nq == 1 shortcut.
+        for ax, k in enumerate(transverse_shape, start=1):
+            mirror = xp.take(mirror, (-xp.arange(k)) % k, axis=ax)
+    return (xp.concatenate([mirror, r], axis=0),
+            xp.concatenate([-w[:0:-1], w]))
 
 
 def mixed_convolution_batched(

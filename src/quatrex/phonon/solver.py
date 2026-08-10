@@ -674,8 +674,15 @@ class PhononSolver(SubsystemSolver):
         sg = sse_greater.data.reshape(freqs.shape[0], -1)
         last = int(np.sum(self.block_sizes[:-1]))
 
+        # Close the pole set under z -> -z^* BEFORE any leg is built. Every
+        # bosonic resonance at +Omega has a partner at -Omega, and the bubble's
+        # fold only holds if both are present; the NEP only ever finds the
+        # positive-frequency members, because the search window is positive.
+        # This closure was implemented and documented as mandatory but never
+        # actually called -- G_PP was being built from half a pole set.
+        state.legs = self._pole.bubble_clusters()
         acc_l = acc_g = None
-        for cl in state.clusters:
+        for cl in state.legs:
             s_l = project_source_sparse(sl, rows, cols, cl.v)
             s_g = project_source_sparse(sg, rows, cols, cl.v)
             for corner_l, corner_g, off in (

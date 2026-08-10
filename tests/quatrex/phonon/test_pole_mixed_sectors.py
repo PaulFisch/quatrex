@@ -73,7 +73,12 @@ def _brute_ring(phi, off, a_leg, b_leg, w, rows, cols):
     dense = np.zeros((n, n, n))
     for (i, k1, k2), blk in phi.items():
         dense[off[i]:off[i + 1], off[k1]:off[k1 + 1], off[k2]:off[k2 + 1]] = blk
-    # Discrete convolution over the grid.
+    # Discrete convolution over the grid. ``w`` must span the FULL axis: the
+    # ring integral runs over all omega', and restricting it to omega' >= 0
+    # drops roughly a quarter of the answer. The original version of this
+    # reference was one-sided, which meant it agreed with a one-sided kernel --
+    # two identical mistakes matching, and the defect that broke energy
+    # conservation on the first device-scale run.
     conv = np.zeros((w.size, n, n, n, n), dtype=complex)   # [w, c, b, e, d]
     for iw, om in enumerate(w):
         idx = np.rint((om - w - w[0]) / h).astype(int)
@@ -84,26 +89,51 @@ def _brute_ring(phi, off, a_leg, b_leg, w, rows, cols):
 
 
 def test_mixed_sectors_match_the_brute_force_ring():
+    """Index bookkeeping against a direct ring, on the FULL frequency axis.
+
+    The kernel is handed the background on ``[0, w_max]`` only -- exactly what
+    the solver holds -- and must reconstruct the negative half from
+    ``R(-w) = R(w)^*``. The brute force integrates the full axis directly. So
+    this now tests the reconstruction as well as the leg conventions.
+
+    The background is built conjugate-symmetric on purpose: a single Lorentzian
+    does NOT satisfy the bosonic relation, and with a non-bosonic bed the test
+    would measure the bed rather than the kernel.
+    """
     gamma = 0.5
-    w = np.arange(0.0, 24.0 + 1e-9, 0.1)          # gamma/h = 5: sampling is fine
+    h = 0.1
+    w_pos = np.arange(0.0, 24.0 + 1e-9, h)         # gamma/h = 5: sampling is fine
+    w_full = np.concatenate([-w_pos[:0:-1], w_pos])
     phi, cl, src, off = _bed(gamma)
     rows, cols = _pattern()
     rng = np.random.default_rng(3)
-    # A smooth regular background on the pattern.
-    g_reg_dense = np.einsum(
-        "w,ij->wij", 1.0 / ((w - 9.0) ** 2 + 16.0),
-        rng.normal(size=(N_DOF, N_DOF)) + 1j * rng.normal(size=(N_DOF, N_DOF)))
-    g_reg = g_reg_dense[:, rows, cols]
 
+    # REAL: the scalar Lorentzian pair below is conjugate-symmetric, but a
+    # complex matrix factor would break a(-w) = conj(a(w)) again.
+    mat = rng.normal(size=(N_DOF, N_DOF))
+
+    def _bg(x):
+        """Conjugate-symmetric background: a(-w) == conj(a(w))."""
+        lor = (1.0 / (x - 9.0 + 4.0j) - 1.0 / (x + 9.0 + 4.0j))
+        return np.einsum("w,ij->wij", lor, mat)
+
+    g_reg_full = _bg(w_full)
+    assert np.allclose(_bg(-w_pos[1:]), np.conj(_bg(w_pos[1:]))), \
+        "the background bed must satisfy the bosonic relation"
+
+    # The kernel gets ONLY the non-negative half, as production does.
+    g_reg_pos = _bg(w_pos)[:, rows, cols]
     got = _h(mixed_self_energy_sparse(
-        w, cl, src, g_reg, w, phi, SIZES, rows, cols))
+        w_pos, cl, src, g_reg_pos, w_pos, phi, SIZES, rows, cols))
 
-    gs = _dense_gs(w, cl, src)
-    ref = (_brute_ring(phi, off, gs, g_reg_dense, w, rows, cols)
-           + _brute_ring(phi, off, g_reg_dense, gs, w, rows, cols))
-
-    sel = (w > 4.0) & (w < 20.0)
-    err = np.abs(got[sel] - ref[sel]).max() / np.abs(ref[sel]).max()
+    gs_full = _dense_gs(w_full, cl, src)
+    ref = (_brute_ring(phi, off, gs_full, g_reg_full, w_full, rows, cols)
+           + _brute_ring(phi, off, g_reg_full, gs_full, w_full, rows, cols))
+    # Compare on the positive half, away from the window edges.
+    keep = (w_full > 4.0) & (w_full < 20.0)
+    sel_pos = (w_pos > 4.0) & (w_pos < 20.0)
+    err = (np.abs(got[sel_pos] - ref[keep]).max()
+           / np.abs(ref[keep]).max())
     assert err < 5e-2, f"mixed sectors vs brute-force ring: {err:.3e}"
 
 

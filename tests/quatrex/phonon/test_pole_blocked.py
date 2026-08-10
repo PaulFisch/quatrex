@@ -116,7 +116,7 @@ def test_blocked_contraction_matches_the_pattern_level_reference(sizes):
     """The load-bearing test: same object, device-scale cost."""
     phi, cl, src, _ = _bed(sizes, seed=2)
     rows, cols, _ = _pattern(sizes)
-    freqs = np.linspace(2.0, 20.0, 96)
+    freqs = np.linspace(0.0, 20.0, 96)   # zero-anchored, as the solver grid is
     omega = np.linspace(6.0, 16.0, 9)
     rng = np.random.default_rng(3)
     g_reg = (rng.normal(size=(freqs.size, rows.size))
@@ -139,7 +139,7 @@ def test_blocked_contraction_has_no_nnz_guard():
     sizes = np.array([2, 2])
     phi, cl, src, _ = _bed(sizes, seed=4)
     rows, cols, _ = _pattern(sizes)
-    freqs = np.linspace(2.0, 20.0, 64)
+    freqs = np.linspace(0.0, 20.0, 64)   # zero-anchored, as the solver grid is
     omega = np.linspace(6.0, 16.0, 5)
     rng = np.random.default_rng(5)
     g_reg = (rng.normal(size=(freqs.size, rows.size))
@@ -163,7 +163,7 @@ def test_blocked_sr_and_rs_remain_distinct():
     sizes = np.array([2, 2])
     phi, cl, src, _ = _bed(sizes, seed=6)
     rows, cols, _ = _pattern(sizes)
-    freqs = np.linspace(2.0, 20.0, 64)
+    freqs = np.linspace(0.0, 20.0, 64)   # zero-anchored, as the solver grid is
     omega = np.linspace(6.0, 16.0, 5)
     rng = np.random.default_rng(7)
     g_reg = (rng.normal(size=(freqs.size, rows.size))

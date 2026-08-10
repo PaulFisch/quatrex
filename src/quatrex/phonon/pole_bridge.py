@@ -292,7 +292,7 @@ def _mixed_one_sector(
 
     """
     from quatrex.phonon.pole_bubble import leg_partial_fractions
-    from quatrex.phonon.pole_mixed import mixed_convolution_batched
+    from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     nnz = int(np.asarray(_host(rows)).size)
     if nnz > max_nnz:
@@ -304,6 +304,10 @@ def _mixed_one_sector(
         )
     if prefactor is None:
         prefactor = analytic_prefactor()
+
+    # See _mixed_one_sector_blocked: the negative half of the axis is fixed by
+    # R(-w) = R(w)^* but must be supplied explicitly.
+    g_reg, freqs = bosonic_extend(g_reg, freqs)
 
     poles, coeffs = leg_partial_fractions(cluster, source)
     npp = cluster.n_poles
@@ -493,10 +497,18 @@ def _mixed_one_sector_blocked(
     :func:`_mixed_one_sector` for the physics; this is the same object at
     device-scale cost."""
     from quatrex.phonon.pole_bubble import leg_partial_fractions
-    from quatrex.phonon.pole_mixed import mixed_convolution_batched
+    from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     if prefactor is None:
         prefactor = analytic_prefactor()
+
+    # The convolution runs over the WHOLE frequency axis; the solver only holds
+    # G for omega >= 0. The negative half follows from R(-w) = R(w)^*, but it
+    # has to be supplied -- the cell kernel integrates exactly the cells it is
+    # given. Omitting it is a ~28% error, i.e. large enough to break the
+    # Phi-derivable energy balance rather than merely degrade it. Extended once
+    # here, not per pole pair.
+    g_reg, freqs = bosonic_extend(g_reg, freqs)
 
     poles, coeffs = leg_partial_fractions(cluster, source)
     npp = cluster.n_poles
