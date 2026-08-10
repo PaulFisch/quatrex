@@ -1,0 +1,95 @@
+simulation_dir = "/home/paul/Documents/ETH/master/quatrex/phonon/studies/out/units_parity/cnt33_L4"
+input_dir = "/home/paul/Documents/ETH/master/quatrex/phonon/studies/out/units_parity/cnt33_L4"
+output_dir = "/home/paul/Documents/ETH/master/quatrex/phonon/studies/out/units_parity/cnt33_L4/out"
+formalism = "negf"
+simulation_type = "phonon"
+
+[device]
+transport_direction = "z"
+construct_from_unit_cell = true
+num_transport_cells = 4
+neighbor_cell_cutoff = [0, 0, 1]
+kpoint_grid = [1, 1, 1]
+kpoint_shift = [0, 0, 0]
+[device.num_orbitals_per_atom]
+C = 3
+
+[scba]
+max_iterations = 40
+min_iterations = 3
+mixing_factor = 0.2
+mixing_method = "linear"
+anderson_depth = 5
+anderson_period = 1
+anderson_warmup_iters = 0
+anderson_restart = 0
+anderson_ridge = 0.0
+phonon = true
+
+[scba.experimental_mixer]
+rre_cycle = 8
+broyden_warmup_iters = 0
+broyden_ridge = 1e-08
+broyden_trust = 0.3
+rpm_max_subspace = 6
+jfnk_warmup_iters = 10
+jfnk_max_krylov = 30
+jfnk_inner_tol = 0.1
+jfnk_forcing = "ew"
+jfnk_max_newton = 60
+jfnk_eps = 1e-07
+jfnk_trust = 0.5
+jfnk_trust_max = 0.0
+jfnk_newton_damp = 1.0
+jfnk_ptc = 0.0
+
+[electron]
+energy_window_min = 0.0
+energy_window_max = 55.0
+energy_window_num = 361
+
+[phonon]
+eta = 0.0
+eta_obc = 0.0
+left_temperature = 305.0
+right_temperature = 295.0
+model = "negf"
+fc3_path = "/home/paul/Documents/ETH/master/quatrex/phonon/studies/out/units_parity/cnt33_L4/fc3_blocks.hdf5"
+retarded_method = "fft"
+scp_tadpole = false
+sse_ramp_iterations = 0
+sse_vertex_scale = 1.0
+eta_ramp_iterations = 0
+eta_final = 0.0
+eta_obc_ramp_iterations = 0
+eta_obc_final = 0.0
+eta_ir_floor_cells = 0.0
+eta_ir_floor_final_cells = 0.0
+eta_ir_floor_ramp_iterations = 0
+low_freq_mixing_thz = 0.0
+low_freq_mixing_factor = 0.02
+sigma_convergence_tol = 0.001
+heat_flow_conservation_tol = 1e-2
+frequency_grid = "window"
+sse_aux_grid_dw_thz = 0.0
+sse_aux_grid_fmax_thz = 0.0
+[phonon.solver]
+compute_current = true
+max_batch_size = 100000
+algorithm = "rgf"
+[phonon.obc]
+algorithm = "spectral"
+nevp_solver = "full"
+block_sections = 1
+
+[outputs]
+save_profiling_results = false
+profiling_save_format = "json"
+
+[compute]
+numba_num_threads = 1
+blas_num_threads = 1
+
+[compute.comm]
+block_comm_size = 1
+q_comm_size = 1

@@ -11,7 +11,10 @@ Env overrides (optional, on top of the TOML):
   QX_BCS QX_QCS (comm sizes -- override the TOML for a one-config rank sweep),
   QX_COMM_BACKEND=host_mpi|device_mpi|nccl (all per-op comm selectors at once),
   QX_FREQGRID=file (non-uniform grid from phonon_energies.npy),
-  QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz).
+  QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz),
+  QX_POLE=1 (pole-subtracted SCBA sector) with QX_POLE_NP QX_POLE_SECTORS
+  QX_POLE_WMIN QX_POLE_WMAX QX_POLE_SHEET QX_POLE_PGAMMA QX_POLE_AUDIT
+  QX_POLE_PSD.
 
 Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
 (qttools default "cupy" with silent NumPy fallback); set it explicitly for
@@ -84,6 +87,23 @@ if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_preco
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
 if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
 if os.environ.get("QX_SSE_CMSUB"): cfg.phonon.sse_cm_subtraction = bool(int(os.environ["QX_SSE_CMSUB"]))
+# Pole-subtracted SCBA sector (phonon/docs/pole_subtracted_modal_scba.md).
+# The config validators refuse the combinations that would be silently wrong
+# (retarded="half", an IR broadening floor, a pole window overlapping either the
+# low-frequency mask or the CM channel), so these overrides cannot smuggle one in.
+if os.environ.get("QX_POLE"):     cfg.phonon.pole_sector.enabled = bool(int(os.environ["QX_POLE"]))
+if os.environ.get("QX_POLE_NP"):  cfg.phonon.pole_sector.max_poles = int(os.environ["QX_POLE_NP"])
+if os.environ.get("QX_POLE_SECTORS"): cfg.phonon.pole_sector.sectors = os.environ["QX_POLE_SECTORS"]
+if os.environ.get("QX_POLE_WMIN"): cfg.phonon.pole_sector.omega_min_thz = float(os.environ["QX_POLE_WMIN"])
+if os.environ.get("QX_POLE_WMAX"): cfg.phonon.pole_sector.omega_max_thz = float(os.environ["QX_POLE_WMAX"])
+if os.environ.get("QX_POLE_SHEET"): cfg.phonon.pole_sector.sheet = os.environ["QX_POLE_SHEET"]
+if os.environ.get("QX_POLE_PGAMMA"): cfg.phonon.pole_sector.samples_per_halfwidth = float(os.environ["QX_POLE_PGAMMA"])
+if os.environ.get("QX_POLE_AUDIT"): cfg.phonon.pole_sector.audit_frequencies = int(os.environ["QX_POLE_AUDIT"])
+if os.environ.get("QX_POLE_PSD"): cfg.phonon.pole_sector.psd_check = bool(int(os.environ["QX_POLE_PSD"]))
+if os.environ.get("QX_POLE"):
+    # Re-validate: the pole gates are cross-field, so an override that creates
+    # an inconsistent combination must fail here rather than at iteration 40.
+    cfg.phonon = type(cfg.phonon).model_validate(cfg.phonon.model_dump())
 if os.environ.get("QX_RING_DTYPE"): cfg.phonon.sse_ring_dtype = os.environ["QX_RING_DTYPE"]
 if os.environ.get("QX_QBATCH"):   cfg.phonon.sse_dense_q_batched = bool(int(os.environ["QX_QBATCH"]))
 if os.environ.get("QX_SCP_TADPOLE"): cfg.phonon.scp_tadpole = bool(int(os.environ["QX_SCP_TADPOLE"]))

@@ -28,8 +28,8 @@ figure `d5a_grid_ladder`, `eta0_knob_{ablation,sensitivity}`.
 | `band_limit_sse` (band-top mask) + `band_support_margin_thz` (hard support mask) | zeroes Σ^≷ outside the harmonic support (hard edges) | **unphysical** for the same support reason (+ Gibbs ringing of hard edges through the KK Σ^R) | default off; flagged — remove after the raw-d5a verdict; note the cnt33 bare ladder ran with the band-top mask on, effect above 52 THz only (re-verify off) |
 | `sse_freeze_occupation` | zeroes Σ at thermally-frozen bins | unphysical in principle (frozen modes still have zero-point Σ^> structure), negligible where used | default off; flagged |
 | `spectral_sharp_cap` / hysteresis masks | live-A(ω) masks | unphysical + limit-cycle-prone (G-dependent mask) | default off; superseded |
-| `sse_zero_bands_thz` | hard-zeroes Σ in arbitrary [lo,hi] THz windows | **diagnostic only** — the bisection tool for localising η=0 runaway seeds (added 2026-07-06); same two-phonon deletion as any hard mask | never in production |
-| `sse_low_freq_cutoff_thz` | zeroes Σ below ω_c (transport stays ballistic there) | **defensible approximation** — the phono3py `cutoff_frequency` analog (PRB 91, 094306 practice); hard edge needs the consistent post-Hilbert mask (in place) | opt-in, off by default |
+| `sse_zero_bands_thz` (REMOVED from the schema) | hard-zeroes Σ in arbitrary [lo,hi] THz windows | **diagnostic only** — the bisection tool for localising η=0 runaway seeds (added 2026-07-06); same two-phonon deletion as any hard mask | never in production |
+| `sse_low_freq_cutoff_thz` (now `sse_low_freq_mask_thz`) | zeroes Σ below ω_c (transport stays ballistic there) | **defensible approximation** — the phono3py `cutoff_frequency` analog (PRB 91, 094306 practice); hard edge needs the consistent post-Hilbert mask (in place) | opt-in, off by default |
 | `eta_ir_floor_cells` (+anneal) | broadening floor η = c·dω | **defensible numerics** — the grid-ADAPTIVE smearing of the BTE literature (Phoebe arXiv:2111.14999, Yates-style); vanishes with the grid; annealable to 0 | the designated fallback if raw d5a stays divergent |
 | ω=0 single-bin zero of Σ^≷ (+ post-Hilbert) | one bin | benign (zero measure, zero heat, tames the singular acoustic G^R(0)) | keep |
 | `eta` / `eta_obc` | uniform (contact) broadening | standard NEGF regularisation, η→0 extrapolable (the conservation appendix quantifies the commutator budget) | keep; η=0 program supersedes |
@@ -56,6 +56,6 @@ cnt33-class (dispersive): **fully raw** — fft retarded, plain linear, no masks
 taper, grid-refine (bare G·dω Cauchy at 12.86: 181→361→541 = 13.62/12.91/12.86, and
 convergence gets FASTER on finer grids).
 d5a-class (soft modes): SETTLED by the ablation bisection (d5a_eta0_bisection.md) —
-raw + `sse_low_freq_cutoff_thz` ≈ 1.5 THz (the citable phono3py-style exclusion of the
+raw + `sse_low_freq_mask_thz` ≈ 1.5 THz (the citable phono3py-style exclusion of the
 sub-grid soft twist modes, the proven necessary-and-sufficient seed treatment) + RRE.
 The flat bands/stretch island are amplifiers only; grids do not fix the seed.

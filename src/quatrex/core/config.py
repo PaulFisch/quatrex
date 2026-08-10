@@ -145,6 +145,188 @@ class QTBMConfig(BaseModel):
     """
 
 
+class PoleSectorConfig(BaseModel):
+    """Pole-subtracted SCBA: carry narrow resonances of G analytically.
+
+    A uniform real-frequency grid must resolve the SHARPEST linewidth in the
+    problem, and a grid that does not is not merely imprecise: the discrete
+    three-phonon convolution of two sub-grid modes overshoots by orders of
+    magnitude depending on where the bins fall (measured: 6.4x too large at
+    dw/gamma = 20 on the elementary pair convolution), and an under-resolved
+    run reports its own grid spacing as the physics
+    (``phonon/docs/grid_audit.md``).
+
+    This sector removes those modes from the grid instead. Poles of
+    ``G^R = M^R(z)^{-1}`` are found by a nonlinear eigenvalue solve, subtracted
+    from the bubble legs, convolved in closed form, and their retarded partner
+    reconstructed analytically rather than through the Hilbert transform. The
+    self-energy that the pole solve needs is SMOOTH -- it is a convolution -- so
+    a grid far too coarse to resolve the line still samples it perfectly well.
+
+    The construction is a change of representation, not of the diagram: the
+    split ``G = G_S + G_R`` is exact, and all four bubble sectors are retained.
+    See ``phonon/docs/pole_subtracted_modal_scba.md``. Research use only;
+    ``enabled = False`` is legacy (bit-identical)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    """Master switch. False = legacy (bit-identical): no probe is assembled and
+    no call site is entered."""
+
+    sectors: Literal["rr", "rr_ss", "rr_ss_sr"] = "rr_ss_sr"
+    """Which bubble sectors the hybrid evaluates, as a staging control.
+    ``"rr_ss_sr"`` is the complete method: the existing FFT ring on the
+    remainder (RR), the analytic pole-pole convolution (SS), and the mixed
+    pole-background terms (SR + RS) through the existing linearised bubble.
+    ``"rr_ss"`` and ``"rr"`` DROP physical three-phonon processes and exist only
+    to measure the size of what they drop -- neither is a production setting."""
+
+    omega_min_thz: NonNegativeFloat = 0.0
+    """Lower edge of the pole search (THz). Below it the quasiparticle picture
+    does not apply: the Bose factor carries its own 1/omega pole, the acoustic
+    resolvent is near-singular, and the lead-driven translation channel lives
+    there. 0 = auto, resolved to ``max(4*dw, sse_low_freq_mask_thz + 2*dw)``."""
+    omega_max_thz: NonNegativeFloat = 0.0
+    """Upper edge of the pole search (THz). 0 = the top of the frequency grid."""
+    max_poles: PositiveInt = 16
+    """Cap on simultaneously tracked poles. The coherent pole-pole bubble scales
+    as the fourth power of this, so it is a cost control, not a fidelity one."""
+
+    sheet: Literal["physical", "outgoing"] = "physical"
+    """Which sheet the contact self-energy is continued onto. ``"physical"``
+    keeps the |lambda| < 1 selection and is correct for modes in a lead gap or
+    quasi-bound states with negligible contact broadening. ``"outgoing"``
+    continues the lead Bloch roots from the real axis and is what an IN-BAND
+    resonance requires; it needs the spectral OBC, which exposes the modes."""
+
+    samples_per_halfwidth: PositiveFloat = 2.0
+    """``p_Gamma``: samples per half-width below which a mode counts as
+    under-resolved and is promoted."""
+    q_in: PositiveFloat = 1.0
+    """Promote when the resolution score falls below this."""
+    q_out: PositiveFloat = 2.0
+    """Demote only above this. The gap to ``q_in`` is hysteresis: a mode that
+    changes sector every iteration makes the fixed-point map discontinuous."""
+
+    isolation_min: PositiveFloat = 2.0
+    """``eta_iso``: below this a group of poles is carried as one COHERENT
+    cluster with its full projected-source matrix. Independent scalar
+    occupations discard the modal coherences, which is wrong by ~30% for
+    overlapping resonances (measured) and fine once separated."""
+    cluster_factor: PositiveFloat = 3.0
+    """Single-linkage clustering radius, in units of the summed half-widths."""
+    condition_max: PositiveFloat = 1e3
+    """Above this pole conditioning, force the mode into a cluster: individual
+    eigenvectors are no longer a good numerical object even where the invariant
+    subspace still is."""
+    condition_reject: PositiveFloat = 1e5
+    """Above this, refuse to promote at all -- near a defective point the
+    simple-pole expansion itself fails."""
+    edge_factor: PositiveFloat = 5.0
+    """Refuse promotion within this many half-widths of a contact band edge.
+    Band edges are branch points, not simple poles; forcing one into a
+    single-pole fit is the failure mode of Sec. 41."""
+    weight_min: NonNegativeFloat = 1e-4
+    """Drop a mode only when BOTH its spectral weight and its vertex-weighted
+    importance fall below this. An unresolved-but-relevant mode is promoted,
+    never ignored."""
+
+    newton_tol: PositiveFloat = 1e-10
+    """Acceptance threshold on the scaled nonlinear-eigenvalue residual."""
+    newton_max_iterations: PositiveInt = 8
+    """Bordered-Newton steps per pole per SCBA iteration."""
+    trust_radius_cells: PositiveFloat = 0.25
+    """Cap on a Newton step, in grid cells. Keeps the step inside the window
+    where the local model of Sigma^R(z) is valid."""
+    taylor_order: Literal[1, 2] = 2
+    """Order of the local model of Sigma^R(z) built from the probe derivatives."""
+    delta_fit_order: NonNegativeInt = 2
+    """Degree of the local polynomial continuation of Sigma^> - Sigma^<, which
+    is the second-sheet term."""
+    delta_fit_window_cells: PositiveInt = 4
+    """Half-width of that fit window, in grid cells."""
+    contour_quad_points: PositiveInt = 32
+    """Quadrature nodes on the Beyn contour used for initialisation, audit and
+    recovery."""
+    rescan_iterations: PositiveInt = 10
+    """Force a contour audit every N SCBA iterations even when tracking looks
+    healthy."""
+    subspace_angle_tol: PositiveFloat = 0.35
+    """Largest principal angle (rad) still accepted as the same cluster.
+    Subspaces are tracked, not individual modes: near a crossing the
+    eigenvectors rotate arbitrarily while the invariant subspace is smooth."""
+    epoch_iterations: PositiveInt = 5
+    """Hold sector membership fixed for this many SCBA iterations. An
+    approximate implementation is not invariant under repartitioning, so a mode
+    that jumps sector every iteration changes the fixed-point map itself."""
+
+    keldysh_split: Literal["pp", "pp_pb_bp"] = "pp"
+    """How the Keldysh function is split. ``"pp"``: ``G_S = G_PP``,
+    ``G_R = G_direct - G_PP``. Both halves are then computable, they sum to the
+    untouched G identically, and the pole-background interference is retained
+    (carried on the grid, where it is smooth: it has one narrow denominator, not
+    two). ``"pp_pb_bp"`` additionally moves the mixed terms into the analytic
+    sector; those coefficients are device-sized in one index, so it is not a
+    cheap option."""
+    source_model: Literal["frozen", "poly"] = "poly"
+    """Representation of the projected source across a pole window. ``"frozen"``
+    is the smooth-source approximation; ``"poly"`` fits a local polynomial,
+    whose integrals against the pole denominators are still closed form."""
+    source_order: NonNegativeInt = 2
+    """Degree of that polynomial."""
+    source_fit_tol: PositiveFloat = 0.1
+    """Relative fit residual above which the cluster is DEMOTED rather than
+    approximated. A source that is not smooth across its own pole window has no
+    business being carried analytically."""
+    ss_kernel: Literal["residue", "lorentz"] = "residue"
+    """Pole-pole convolution kernel. ``"residue"`` is exact for the full
+    coherent cluster. ``"lorentz"`` uses the Lorentzian composition identity,
+    which is a fast path valid only for a diagonal source."""
+
+    linear_solver: Literal["btd", "dense"] = "btd"
+    """Linear solver behind the pole solve. ``"dense"`` is for tests and very
+    small systems."""
+    psd_check: bool = False
+    """Per-iteration positivity gate on the reconstructed total (never on
+    individual sectors -- only their sum is constrained). Nothing in the solver
+    checks this today, and the sector is the first thing that can break it
+    structurally."""
+    audit_frequencies: NonNegativeInt = 0
+    """Extra frequencies per pole at which to measure the reconstruction error
+    against a direct solve. 0 = off."""
+
+    @model_validator(mode="after")
+    def check_pole_sector_consistency(self) -> Self:
+        """Internal consistency of the pole block."""
+        if not self.enabled:
+            return self
+        if self.q_out <= self.q_in:
+            raise ValueError(
+                f"pole_sector: q_out ({self.q_out}) must exceed q_in "
+                f"({self.q_in}); the gap IS the hysteresis that stops a mode "
+                "changing sector every iteration."
+            )
+        if self.condition_reject <= self.condition_max:
+            raise ValueError(
+                f"pole_sector: condition_reject ({self.condition_reject:g}) must "
+                f"exceed condition_max ({self.condition_max:g})."
+            )
+        if 2 * self.delta_fit_window_cells < self.delta_fit_order + 1:
+            raise ValueError(
+                f"pole_sector: delta_fit_window_cells "
+                f"({self.delta_fit_window_cells}) gives "
+                f"{2 * self.delta_fit_window_cells} samples, too few for a "
+                f"degree-{self.delta_fit_order} fit."
+            )
+        if self.omega_max_thz and self.omega_max_thz <= self.omega_min_thz:
+            raise ValueError(
+                f"pole_sector: omega_max_thz ({self.omega_max_thz}) must exceed "
+                f"omega_min_thz ({self.omega_min_thz})."
+            )
+        return self
+
+
 class ExperimentalMixerConfig(BaseModel):
     """Experimental SCBA root-finders for the iteration-UNSTABLE eta->0 fixed
     point, kept out of the shared SCBA surface. Damped/Anderson mixing
@@ -1449,6 +1631,10 @@ class PhononConfig(BaseModel):
     ballistic Dyson/transport content but contribute no three-phonon
     scattering. 0 = legacy (only the omega = 0 bin is masked)."""
 
+    pole_sector: PoleSectorConfig = PoleSectorConfig()
+    """Pole-subtracted SCBA (see :class:`PoleSectorConfig`). Disabled by
+    default = legacy (bit-identical)."""
+
     sse_cm_subtraction: bool = False
     """Subtract the exact centre-of-mass (lead-driven translation)
     channel from the SSE bubble legs at the q = Gamma pair (env
@@ -1811,6 +1997,64 @@ class PhononConfig(BaseModel):
                 "'fc3_path' must be set for model='negf'."
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def check_pole_sector_preconditions(self) -> Self:
+        """Hard gates for the pole sector against the rest of the phonon setup.
+
+        These are refusals, not warnings. Each one is a configuration under
+        which the sector would produce a confidently wrong answer rather than a
+        noisy one.
+        """
+        ps = self.pole_sector
+        if not ps.enabled:
+            return self
+
+        if self.retarded_method != "fft":
+            raise ValueError(
+                "pole_sector requires retarded_method='fft'. With 'half' the "
+                "Kramers-Kronig real part of Sigma^R is never built, so the "
+                "operator whose poles are being sought is not causal and its "
+                "roots are not resonances."
+            )
+        if self.eta_ir_floor_cells > 0.0:
+            raise ValueError(
+                "pole_sector refuses eta_ir_floor_cells > 0: the floor "
+                "fabricates a broadening on exactly the unresolved soft modes "
+                "the sector exists to treat exactly, so the two cannot be "
+                "combined without double counting the linewidth."
+            )
+        if self.sse_cm_subtraction and ps.omega_min_thz <= 0.0:
+            raise ValueError(
+                "pole_sector needs an explicit omega_min_thz > 0 when "
+                "sse_cm_subtraction is on: the CM channel already carries the "
+                "omega -> 0 lead-driven translation physics, and the two "
+                "subtractions must stay disjoint."
+            )
+        if ps.omega_min_thz and self.sse_low_freq_mask_thz:
+            if ps.omega_min_thz <= self.sse_low_freq_mask_thz:
+                raise ValueError(
+                    f"pole_sector: omega_min_thz ({ps.omega_min_thz}) must sit "
+                    f"ABOVE sse_low_freq_mask_thz "
+                    f"({self.sse_low_freq_mask_thz}). Sigma is identically zero "
+                    "below the mask, so the continuation has no cut there while "
+                    "the device Green's function still does."
+                )
+        if ps.sheet == "outgoing" and self.obc.algorithm != "spectral":
+            raise ValueError(
+                f"pole_sector: sheet='outgoing' requires obc.algorithm="
+                f"'spectral' (got {self.obc.algorithm!r}); the outgoing-sheet "
+                "continuation tracks the lead Bloch roots, which only the "
+                "spectral solver exposes."
+            )
+        if ps.sectors != "rr_ss_sr":
+            warnings.warn(
+                f"pole_sector.sectors={ps.sectors!r} DROPS physical "
+                "three-phonon processes and is a staging setting, not a "
+                "production one. The complete method is 'rr_ss_sr'.",
+                stacklevel=2,
+            )
         return self
 
     @model_validator(mode="after")

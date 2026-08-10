@@ -212,6 +212,17 @@ class PhononSolver(SubsystemSolver):
         self.obc_blocks = OBCBlocks(num_blocks=self.system_matrix.num_local_blocks)
         self.block_sections = config.phonon.obc.block_sections
 
+        # Pole-subtracted SCBA sector. The pole set is a deterministic function
+        # of the mixed self-energy, so it is recomputed every iteration and only
+        # warm-started from the previous one -- it is deliberately NOT part of
+        # the mixed state (that would make the Anderson/RRE least-squares
+        # rank-deficient and invalidate the exact Newton JVP).
+        _ps = getattr(config.phonon, "pole_sector", None)
+        self._pole_enabled = bool(_ps is not None and _ps.enabled)
+        self._pole_cfg = _ps
+        self._pole = None            # PoleSector, built lazily
+        self.pole_state = None       # last PoleSectorState, read by the interaction
+
     @profiler.profile(label="PhononSolver: OBC", level="default", comm=comm)
     def _compute_obc(self) -> None:
         """Computes open boundary conditions."""
@@ -527,6 +538,122 @@ class PhononSolver(SubsystemSolver):
         new[..., dof] = nloc
         self._probe_np = 0.5 * self._probe_np + 0.5 * new
 
+    def _pole_blocks(self, matrix, index_slice=()):
+        """Dense block-tridiagonal view of a DSDBSparse for one stack element."""
+        view = matrix.stack[index_slice] if index_slice else matrix.stack[...]
+        n = matrix.num_local_blocks
+        out = {}
+        for i in range(n):
+            for j in range(max(0, i - 1), min(n, i + 2)):
+                out[(i, j)] = view.blocks[i, j]
+        return out
+
+    @profiler.profile(label="PhononSolver: Pole sector", level="default", comm=comm)
+    def _update_pole_sector(self, sse_lesser, sse_greater) -> None:
+        """Refresh the pole set from the current (mixed) self-energy.
+
+        Runs in the ``"stack"`` distribution state, right after the selected
+        solve and before the system matrix is released. Rebuilds
+        ``Delta = Sigma^> - Sigma^<`` from the buffers the Dyson operator was
+        just built from -- never from a cache, which could drift out of step
+        with ``Sigma^R`` across the mixer -- continues it to complex frequency,
+        and corrects the previous iterate's poles.
+
+        Staging note: the frequency axis is split across ``comm.stack``, while
+        the continuation sums over ALL frequencies. The distributed form
+        contracts in the ``"nnz"`` state, where every rank owns the whole axis,
+        and is deferred; until it lands this refuses a split stack rather than
+        silently continuing an incomplete self-energy.
+        """
+        if not self._pole_enabled:
+            return
+
+        from quatrex.phonon.pole_probe import delta_from_sigma
+        from quatrex.phonon.pole_sector import PoleSector
+
+        if comm.stack.size > 1:
+            raise NotImplementedError(
+                "pole_sector: the complex-frequency continuation sums over the "
+                "whole frequency axis, which is split across comm.stack. The "
+                "distributed form contracts in the 'nnz' state and is not "
+                "wired yet; run with stack_comm_size == 1 for now."
+            )
+        if comm.block.size > 1:
+            raise NotImplementedError(
+                "pole_sector: block-distributed devices are not supported yet "
+                "(the pole solve needs the whole operator on one rank)."
+            )
+
+        freqs = np.asarray(get_host(self.local_frequencies), dtype=float)
+        if self._pole is None:
+            self._pole = PoleSector(self._pole_cfg, freqs)
+
+        delta = delta_from_sigma(sse_lesser.data, sse_greater.data)
+        if float(xp.abs(delta).max()) == 0.0:
+            # Iteration 0: no scattering yet, so every pole sits on the real
+            # axis and none is a resonance. Nothing to promote.
+            self.pole_state = None
+            return
+
+        self._pole.set_operator_context(
+            delta=delta,
+            d_blocks=self._pole_blocks(self.dynamical_matrix),
+            obc_left=(self.obc_blocks.retarded[0]
+                      if self.obc_blocks.retarded[0] is not None else None),
+            obc_right=(self.obc_blocks.retarded[-1]
+                       if self.obc_blocks.retarded[-1] is not None else None),
+            block_sizes=self.block_sizes,
+            rows=sse_lesser.rows,
+            cols=sse_lesser.cols,
+        )
+        self.pole_state = self._pole.refresh()
+        self._build_pole_keldysh(sse_lesser, sse_greater)
+        if comm.rank == 0 and self.pole_state is not None:
+            print(self.pole_state.report(), flush=True)
+
+    def _build_pole_keldysh(self, sse_lesser, sse_greater) -> None:
+        """Project the Keldysh source and reduce ``G_PP`` onto the pattern.
+
+        Done here, in the ``"stack"`` state, because this is where the contact
+        blocks live: ``Sigma_tot`` is the scattering self-energy that entered
+        the Dyson solve PLUS both contacts, and it is the contact part that
+        drives the device. Everything stays on the stored sparsity pattern --
+        the dense intermediate would be ``(n_omega, n_dof, n_dof)``.
+        """
+        from quatrex.phonon.pole_bridge import (
+            add_contact_source, pole_keldysh_sparse, project_source_sparse,
+        )
+
+        state = self.pole_state
+        if state is None or not state.clusters:
+            return
+        freqs = xp.asarray(self.local_frequencies, dtype=float)
+        rows, cols = sse_lesser.rows, sse_lesser.cols
+        sl = sse_lesser.data.reshape(freqs.shape[0], -1)
+        sg = sse_greater.data.reshape(freqs.shape[0], -1)
+        last = int(np.sum(self.block_sizes[:-1]))
+
+        acc_l = acc_g = None
+        for cl in state.clusters:
+            s_l = project_source_sparse(sl, rows, cols, cl.v)
+            s_g = project_source_sparse(sg, rows, cols, cl.v)
+            for corner_l, corner_g, off in (
+                (self.obc_blocks.lesser[0], self.obc_blocks.greater[0], 0),
+                (self.obc_blocks.lesser[-1], self.obc_blocks.greater[-1], last),
+            ):
+                if corner_l is not None:
+                    s_l = add_contact_source(s_l, corner_l, cl.v, off)
+                if corner_g is not None:
+                    s_g = add_contact_source(s_g, corner_g, cl.v, off)
+            state.source_lesser.append(s_l)
+            state.source_greater.append(s_g)
+            g_l = pole_keldysh_sparse(freqs, cl, s_l, rows, cols)
+            g_g = pole_keldysh_sparse(freqs, cl, s_g, rows, cols)
+            acc_l = g_l if acc_l is None else acc_l + g_l
+            acc_g = g_g if acc_g is None else acc_g + g_g
+        state.g_pp_lesser = acc_l.reshape(sse_lesser.data.shape)
+        state.g_pp_greater = acc_g.reshape(sse_greater.data.shape)
+
     @profiler.profile(label="PhononSolver", level="default", comm=comm)
     def solve(
         self,
@@ -575,5 +702,9 @@ class PhononSolver(SubsystemSolver):
         self._selected_solve(sse_lesser, sse_greater, out)
         self._restore_buttiker_probe(sse_lesser, sse_greater)
         self._update_buttiker_probe(out)
+
+        # Must run BEFORE free_data(): the pole solve reads the assembled
+        # operator's blocks.
+        self._update_pole_sector(sse_lesser, sse_greater)
 
         self.system_matrix.free_data()

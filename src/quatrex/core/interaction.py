@@ -170,6 +170,7 @@ class PhononPhononInteraction(Interaction):
             self.sigma_phonon_phonon.set_cm_channel(
                 *compute_cm_channel(scba.config, n_blocks)
             )
+        self._inject_pole_sector(scba)
         self.sigma_phonon_phonon.compute(
             data.g_lesser,
             data.g_greater,
@@ -179,6 +180,104 @@ class PhononPhononInteraction(Interaction):
                 data.sigma_retarded_hermitian,
             ),
         )
+
+    def _inject_pole_sector(self, scba: "SCBA") -> None:
+        """Hand the solver's pole clusters to the bubble.
+
+        The solver has already found the poles, projected the Keldysh source and
+        reduced ``G_PP`` onto the sparsity pattern. What is left is the piece
+        that needs the VERTEX, which lives here: contract the analytic pole-pole
+        self-energy and inject both halves.
+
+        The split is exact -- ``G_S + G_R`` is the untouched ``G`` -- so the
+        bubble sees a different representation of the same object, not a
+        different object.
+        """
+        ps = getattr(scba.config.phonon, "pole_sector", None)
+        if ps is None or not ps.enabled:
+            return
+        solver = getattr(scba, "phonon_solver", None)
+        state = getattr(solver, "pole_state", None)
+        if state is None or not state.clusters:
+            return
+
+        from quatrex.phonon.pole_bridge import (
+            mixed_self_energy_sparse, modal_vertex_blocks, ss_self_energy_sparse,
+        )
+
+        ssp = self.sigma_phonon_phonon
+        # (1) The legs: remove the pole sector before the FFT ring sees them.
+        ssp.set_pole_channel(state.g_pp_lesser, state.g_pp_greater)
+        if ps.sectors == "rr":
+            # Deliberately incomplete: SS/SR/RS are not added back, so this
+            # DROPS real three-phonon processes. It is a staging setting whose
+            # purpose is to measure how large they are.
+            return
+
+        # (2) The analytic pole-pole channel, contracted against the vertex on
+        # the stored pattern.
+        rows, cols = data_rows_cols(scba)
+        freqs = xp.asarray(solver.local_frequencies, dtype=float)
+        shape = scba.data.sigma_lesser.data.shape
+        acc_l = acc_g = acc_r = None
+        for cl, s_l, s_g in zip(state.clusters, state.source_lesser,
+                                state.source_greater):
+            vl = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
+                                     conjugate=False)
+            vr = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
+                                     conjugate=True)
+            # Frozen-source approximation: S evaluated at the cluster centre.
+            # The polynomial model is the next refinement and its fit residual
+            # is what decides whether it is needed.
+            mid = int(xp.argmin(xp.abs(freqs - float(xp.real(cl.z[0])))))
+            sa, sb = s_l[mid], s_g[mid]
+            kw = dict(rows=rows, cols=cols)
+            ss_l = ss_self_energy_sparse(freqs, cl, sa, sa, vl, vr, **kw)
+            ss_g = ss_self_energy_sparse(freqs, cl, sb, sb, vl, vr, **kw)
+            # The CAUSAL part of each, from the two-retarded pole pairings.
+            rr_l = ss_self_energy_sparse(freqs, cl, sa, sa, vl, vr,
+                                         retarded_only=True, **kw)
+            rr_g = ss_self_energy_sparse(freqs, cl, sb, sb, vl, vr,
+                                         retarded_only=True, **kw)
+            acc_l = ss_l if acc_l is None else acc_l + ss_l
+            acc_g = ss_g if acc_g is None else acc_g + ss_g
+            rr = rr_g - rr_l
+            acc_r = rr if acc_r is None else acc_r + rr
+
+        # (3) Inject only the KRAMERS-KRONIG HALF of Sigma^R. The driver
+        # (core/scba.py) already adds 0.5*(sigma^< - sigma^>) globally for the
+        # total stored self-energy, which now includes this analytic term, so
+        # supplying the full Sigma_SS^R here would double-count the half term
+        # and break causality.
+        kk_half = acc_r - 0.5 * (acc_g - acc_l)
+        ssp.set_pole_self_energy(acc_l.reshape(shape), acc_g.reshape(shape),
+                                 kk_half.reshape(shape))
+        if ps.sectors != "rr_ss_sr":
+            return
+
+        # (4) The mixed pole-background sectors. They must be evaluated as a
+        # symmetric pair with the same quadrature, or the Phi-derivable energy
+        # balance that makes the decomposition conserving is lost.
+        g_l = scba.data.g_lesser.data.reshape(freqs.shape[0], -1)
+        g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
+        reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
+        reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
+        mx_l = mx_g = None
+        for cl, s_l, s_g in zip(state.clusters, state.source_lesser,
+                                state.source_greater):
+            mid = int(xp.argmin(xp.abs(freqs - float(xp.real(cl.z[0])))))
+            common = dict(freqs=freqs, phi_blocks=ssp.phi_blocks,
+                          block_sizes=ssp.block_sizes, rows=rows, cols=cols)
+            a = mixed_self_energy_sparse(freqs, cl, s_l[mid], reg_l, **common)
+            b = mixed_self_energy_sparse(freqs, cl, s_g[mid], reg_g, **common)
+            mx_l = a if mx_l is None else mx_l + a
+            mx_g = b if mx_g is None else mx_g + b
+        ssp.set_pole_mixed(mx_l.reshape(shape), mx_g.reshape(shape))
+
+
+def data_rows_cols(scba: "SCBA"):
+    """Row/column indices of the shared sparsity pattern."""
+    return scba.data.sigma_lesser.rows, scba.data.sigma_lesser.cols
 
 
 class PseudoScatteringPhononInteraction(Interaction):

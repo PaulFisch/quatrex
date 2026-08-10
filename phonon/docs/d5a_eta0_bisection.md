@@ -6,7 +6,26 @@ appendix continuity work. Data: `phonon/studies/out/d5a_bisect/` (ablation tree)
 (cnt33 bare ladder). All runs: sinw_d5a L2, T=300 K, η=1e-12, retarded=fft, linear 0.1
 (unless stated), NO taper, NO window, NO masks — fully raw except the stated ablation.
 Tool: `sse_zero_bands_thz` (diagnostic hard-zero of Σ in [lo,hi] windows, consistently on
-the bubble input G legs, the output Σ^≷ and the KK Σ^R).
+the bubble input G legs, the output Σ^≷ and the KK Σ^R) -- since removed, see the schema
+drift note below.
+
+## Schema drift (corrected 2026-08-10)
+
+Two knobs this study was run with have since been removed from `PhononConfig`,
+which is `extra="forbid"` -- so neither the recipe below nor the driver
+`phonon/studies/_run_d5a_bisect.py` could be rerun as written (the stored
+template config was rejected outright on `fermi_level` before any ablation was
+even applied):
+
+- `sse_low_freq_cutoff_thz` -> **`sse_low_freq_mask_thz`** (env `QX_SSE_LOWMASK`),
+  identical semantics: zero the bubble legs and outputs below omega_c, masked
+  bins keeping their ballistic Dyson/transport content. Every `ircut` statement
+  below carries over unchanged.
+- `sse_zero_bands_thz` -> **removed, no replacement**. The band-ablation arms
+  (`gapzero`, `flatzero`, `ir_gap`, `ir_flat`, `ir_gap_flat`) cannot be rerun
+  until that diagnostic is reintroduced. Their rows below document stored data
+  and remain valid as recorded results; the driver now refuses those arms
+  rather than silently running them unablated.
 
 ## The verdict
 
@@ -76,7 +95,7 @@ regularizer needed at all.
 ## The η=0 recipe (post-bisection)
 
 - dispersive (cnt33-class): fully raw + grid refinement + RRE.
-- soft-mode systems (d5a-class): raw + `sse_low_freq_cutoff_thz` ≈ 1.5 THz (above the
+- soft-mode systems (d5a-class): raw + `sse_low_freq_mask_thz` ≈ 1.5 THz (above the
   soft modes, below the transport-relevant acoustics — sweep ω_c for the extrapolation)
   + RRE. Everything else (windows, tapers, freezes, floors) off.
 - open: the ω_c sweep + grid ladder ON the cut recipe (the flat-band resolution

@@ -166,6 +166,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._cm_sub_enabled = bool(
             getattr(config.phonon, "sse_cm_subtraction", False))
         self._cm_channel = None
+
+        # Pole-subtracted SCBA sector. Narrow resonances of G are removed from
+        # the bubble LEGS and re-added analytically, so the frequency grid no
+        # longer has to resolve the sharpest linewidth in the problem. The
+        # split G = G_S + G_R is exact: this changes the representation, not
+        # the diagram. See phonon/docs/pole_subtracted_modal_scba.md.
+        _ps = getattr(config.phonon, "pole_sector", None)
+        self._pole_cfg = _ps
+        self._pole_enabled = bool(_ps is not None and _ps.enabled)
+        self._pole_channel = None   # (g_pp_lesser, g_pp_greater) on the primary grid
+        self._pole_sigma_ss = None  # (sigma_ss_l, sigma_ss_g, sigma_ss_r)
+        self._pole_sigma_mixed = None  # (sigma_sr_l, sigma_sr_g)
         self._cm_arrays = None
         # Auxiliary uniform bubble grid (sse_aux_grid_dw_thz): the FFT
         # convolution, the bosonic fold and the Hilbert transform only exist
@@ -1076,6 +1088,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 gg_in = gg_in.copy()
                 gl_in[gamma_idx] = gl_in[gamma_idx] - s_l
                 gg_in[gamma_idx] = gg_in[gamma_idx] - s_g
+            if self._pole_enabled and self._pole_channel is not None:
+                # Remove the pole sector from the LEGS, on the primary grid and
+                # before the DC mask and the aux interpolation: interpolating a
+                # narrow Lorentzian through the coarse bridge is precisely the
+                # error being eliminated. What is left is G_R = G - G_PP, which
+                # is smooth enough for the existing FFT ring.
+                p_l, p_g = self._pole_channel
+                gl_in = gl_in - p_l
+                gg_in = gg_in - p_g
             # The omega=0 bin never enters the bubble (Bose divergence at DC;
             # the zero-measure convention of the theory). The Green's functions
             # stay intact for Dyson/observables; only the copies fed into the
@@ -1729,6 +1750,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stg.data[1:] += xs[:0:-1]
             sl_conv = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_conv]
             sg_conv = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_conv]
+            if self._pole_enabled and self._pole_sigma_mixed is not None:
+                # The mixed sectors join the RAW bubble output here, before the
+                # masks and before delta is formed, so the existing
+                # Kramers-Kronig transform covers them along with Sigma_RR.
+                _mx_l, _mx_g = self._pole_sigma_mixed
+                sl_conv = sl_conv + _mx_l
+                sg_conv = sg_conv + _mx_g
             # OUTPUT mask, completing the input masking above: the scattering
             # Sigma is NOT applied below the SSE cutoff (transport there stays
             # ballistic), and never at the omega=0 bin (a nonzero Sigma^{<,>}(0)
@@ -1758,6 +1786,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # solver stores is a congruence-preserving Hadamard product of
             # the untruncated one rather than a boxcar slice of it. Applied
             # to THIS call's contribution, never to the accumulated buffer.
+            if self._pole_enabled and self._pole_sigma_ss is not None:
+                # Add the analytic pole-pole contribution on the PRIMARY grid.
+                # It is placed after _restrict_from_aux deliberately: it never
+                # crosses the energy-weighted adjoint transfer, so it cannot
+                # leak energy through it.
+                _ss_l, _ss_g, _ss_r = self._pole_sigma_ss
+                if bool(out_mask.any()):
+                    # The omega = 0 bin carries no scattering by convention (a
+                    # nonzero Sigma^{<,>}(0) hits the near-singular acoustic
+                    # G^R(0)). The analytic term obeys the same mask as the
+                    # numerical one, or the two halves of Sigma disagree about
+                    # which bins exist.
+                    _ss_l = _ss_l.copy(); _ss_l[out_mask] = 0.0
+                    _ss_g = _ss_g.copy(); _ss_g[out_mask] = 0.0
+                sl_data = sl_data + _ss_l
+                sg_data = sg_data + _ss_g
             _tw_out = self._cutoff_taper(sigma_lesser, xp)
             if _tw_out is not None:
                 sl_data = sl_data * _tw_out
@@ -1783,6 +1827,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if _tw_out is not None:
                     hil = hil * _tw_out
                 sigma_retarded.data[:] = sigma_retarded.data + hil
+            if self._pole_enabled and self._pole_sigma_ss is not None:
+                # Closed-form Kramers-Kronig partner of the analytic sector.
+                # Routing it through the discrete Hilbert transform would both
+                # cost resolution and put back the grid dependence the sector
+                # removes. Masked and tapered exactly like the numerical half.
+                _ss_r = self._pole_sigma_ss[2]
+                if bool(out_mask.any()):
+                    _ss_r = _ss_r.copy()
+                    _ss_r[out_mask] = 0.0
+                if _tw_out is not None:
+                    _ss_r = _ss_r * _tw_out
+                sigma_retarded.data[:] = sigma_retarded.data + _ss_r
+            # Never let an injected channel survive into the next iteration: it
+            # was built from THIS iterate's self-energy.
+            self._pole_channel = None
+            self._pole_sigma_ss = None
+            self._pole_sigma_mixed = None
 
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
@@ -2809,6 +2870,44 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             zero_freq_idx=None,
             xp=xp,
         )
+
+    def set_pole_channel(self, g_pp_lesser, g_pp_greater) -> None:
+        """Inject the pole-sector Keldysh legs for this SCBA iteration.
+
+        ``g_pp_{lesser,greater}`` are ``G_PP^{<,>}`` already projected onto the
+        stored sparsity pattern, on the PRIMARY grid and in the solver's
+        occupation-positive convention. They are subtracted from the bubble legs
+        before any interpolation or masking; the matching analytic contribution
+        is supplied separately through :meth:`set_pole_self_energy`.
+
+        Cleared after every :meth:`compute` so a stale channel can never be
+        consumed against a self-energy it was not built from.
+        """
+        self._pole_channel = (g_pp_lesser, g_pp_greater)
+
+    def set_pole_mixed(self, sigma_l, sigma_g) -> None:
+        """Inject the mixed pole-background sectors ``Sigma_SR + Sigma_RS``.
+
+        These go in BEFORE the Kramers-Kronig transform, unlike the pole-pole
+        channel. They carry only ONE narrow factor against a smooth background,
+        so they are ordinary grid objects and the existing numerical Hilbert
+        transform is the right tool for their retarded partner -- no separate
+        analytic reconstruction is needed, and using one would risk
+        double-counting against the transform that already sees them.
+        """
+        self._pole_sigma_mixed = (sigma_l, sigma_g)
+
+    def set_pole_self_energy(self, sigma_l, sigma_g, sigma_r) -> None:
+        """Inject the analytic pole-sector self-energy for this iteration.
+
+        Added to the output AFTER the auxiliary-grid restriction, so it never
+        passes through the interpolation bridge -- putting a narrow analytic
+        term through the coarse-grid transfer is exactly what this sector
+        exists to avoid. ``sigma_r`` bypasses the numerical Hilbert transform:
+        for a pole sum the Kramers-Kronig partner is the lower-half-plane part
+        of the same sum, in closed form.
+        """
+        self._pole_sigma_ss = (sigma_l, sigma_g, sigma_r)
 
     def set_cm_channel(self, t_dev, v_l, v_r, t_left, t_right) -> None:
         """Inject the CM-channel data (see quatrex.phonon.cm_channel).
