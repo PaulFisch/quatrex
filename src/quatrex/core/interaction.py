@@ -244,7 +244,12 @@ class PhononPhononInteraction(Interaction):
             # keeps G_PP decaying like 1/w^2 (see source_at_poles).
             sa = source_at_poles(s_l, freqs, cl)
             sb = source_at_poles(s_g, freqs, cl)
-            kw = dict(rows=rows, cols=cols)
+            # Cell width, so the analytic sector lands in the SAME
+            # representation the grid solver integrates: piecewise constant
+            # with weight dw, not a point sample.
+            _h = float(xp.real(freqs[1] - freqs[0])) if freqs.shape[0] > 1 else 0.0
+            kw = dict(rows=rows, cols=cols,
+                      cell=_h if getattr(ps, "cell_average", True) else None)
             ss_l = ss_self_energy_sparse(freqs, cl, sa, sa, vl, vr, **kw)
             ss_g = ss_self_energy_sparse(freqs, cl, sb, sb, vl, vr, **kw)
             # The CAUSAL part of each, from the two-retarded pole pairings.

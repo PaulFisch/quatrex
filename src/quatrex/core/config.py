@@ -287,6 +287,18 @@ class PoleSectorConfig(BaseModel):
     or wrongly signed; if it appears abruptly, the cause is elsewhere. Kept
     because the alternative is guessing mechanisms, which cost four wrong
     hypotheses on this sector."""
+    cell_average: bool = True
+    """Emit the analytic sectors as CELL AVERAGES rather than point samples.
+
+    The grid solver treats every array as piecewise constant over its cell and
+    integrates with weight ``dw``. Handing it the value AT ``omega_m`` instead
+    re-imports the registration error the sector exists to remove, right at
+    the interface -- measured 16.5 % at ``gamma/h = 0.4`` and 286 % at 0.08,
+    against a cell average that is exact to 1e-16 at every width. Promoted
+    poles satisfy ``gamma/h < q_in`` by construction, so the sector always
+    operates where this matters.
+
+    ``False`` restores point sampling, for reproducing earlier results."""
     ss_kernel: Literal["residue", "lorentz"] = "residue"
     """Pole-pole convolution kernel. ``"residue"`` is exact for the full
     coherent cluster. ``"lorentz"`` uses the Lorentzian composition identity,

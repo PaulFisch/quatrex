@@ -177,6 +177,7 @@ def ss_self_energy_sparse(
     cols: NDArray,
     prefactor: complex | None = None,
     retarded_only: bool = False,
+    cell: float | None = None,
 ) -> NDArray:
     r"""Analytic pole-pole self-energy, evaluated on the stored pattern.
 
@@ -199,7 +200,7 @@ def ss_self_energy_sparse(
     if prefactor is None:
         prefactor = analytic_prefactor()
     c = modal_convolution(omega, cluster, source_a, source_b,
-                          retarded_only=retarded_only)
+                          retarded_only=retarded_only, cell=cell)
     left = xp.take(vl, xp.asarray(rows), axis=0)           # (nnz, Np, Np)
     right = xp.take(vr, xp.asarray(cols), axis=0)          # (nnz, Np, Np)
     return prefactor * xp.einsum("kAB,kGD,wADBG->wk", left, right, c)

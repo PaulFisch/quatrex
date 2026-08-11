@@ -394,3 +394,49 @@ def test_retarded_only_is_causal():
     # The (0, 0) pairing is z_alpha + z_beta, both retarded.
     combined = pa[..., 0][:, :, None, None] + pa[..., 0][None, None, :, :]
     assert (combined.imag < 0).all(), "a retained pairing left the lower half plane"
+
+
+def test_cell_average_is_exact_where_point_sampling_is_not():
+    """The analytic sector must enter the grid solver's own representation.
+
+    The solver treats every array as piecewise constant over its cell and
+    integrates with weight ``dw``. A point sample of a narrow pole is not that
+    average, and the discrepancy is the same registration error the sector
+    exists to remove -- reappearing at the interface between the analytic and
+    grid sectors.
+
+    Promoted poles satisfy ``gamma/h < q_in = 1`` by construction, so the
+    sector always operates in the regime tested here.
+    """
+    h = 0.25
+    w = np.arange(0.0, 40.0, h)
+    # The pair convolution has COMBINED width 2*gamma, so it is better
+    # resolved than either pole; the thresholds below are measured, not
+    # guessed. At 2*gamma/h = 0.40 point sampling is 16.5 % wrong, at 0.16 it
+    # is 108 %, at 0.04 it is 653 %.
+    for gamma, min_sample_err in ((0.05, 0.1), (0.02, 1.0), (0.005, 5.0)):
+        p = np.array([4.0 - 1j * gamma])
+        q = np.array([5.0 - 1j * gamma])
+        pq = complex(p[0] + q[0])
+        exact = -1j * (np.log(w[-1] + h / 2 - pq) - np.log(w[0] - h / 2 - pq))
+
+        sample = _h(pair_convolution(p, q, w))[:, 0]
+        cell = _h(pair_convolution(p, q, w, cell=h))[:, 0]
+
+        cell_err = abs((cell * h).sum() - exact) / abs(exact)
+        samp_err = abs((sample * h).sum() - exact) / abs(exact)
+        assert cell_err < 1e-12, f"cell average must be exact: {cell_err:.3e}"
+        assert samp_err > min_sample_err, (
+            f"point sampling must be visibly wrong at gamma/h={gamma/h:.2f}: "
+            f"{samp_err:.3e}")
+
+
+def test_cell_average_reduces_to_the_point_sample_when_resolved():
+    """At ``gamma >> h`` the two agree, so enabling it changes nothing where
+    the grid was already adequate."""
+    h = 0.05
+    w = np.arange(0.0, 40.0, h)
+    p, q = np.array([4.0 - 2.0j]), np.array([5.0 - 2.0j])
+    sample = _h(pair_convolution(p, q, w))[:, 0]
+    cell = _h(pair_convolution(p, q, w, cell=h))[:, 0]
+    assert np.abs(cell - sample).max() / np.abs(sample).max() < 1e-3
