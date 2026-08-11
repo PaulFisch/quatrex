@@ -279,6 +279,14 @@ class PoleSectorConfig(BaseModel):
     """Relative fit residual above which the cluster is DEMOTED rather than
     approximated. A source that is not smooth across its own pole window has no
     business being carried analytically."""
+    mixed_scale: float = 1.0
+    """DIAGNOSTIC scale on the injected ``Sigma_SR + Sigma_RS``.
+
+    Not a physics knob -- 1.0 is the method. It exists to bisect a failure:
+    if a defect grows linearly with this, the mixed term is simply too large
+    or wrongly signed; if it appears abruptly, the cause is elsewhere. Kept
+    because the alternative is guessing mechanisms, which cost four wrong
+    hypotheses on this sector."""
     ss_kernel: Literal["residue", "lorentz"] = "residue"
     """Pole-pole convolution kernel. ``"residue"`` is exact for the full
     coherent cluster. ``"lorentz"`` uses the Lorentzian composition identity,

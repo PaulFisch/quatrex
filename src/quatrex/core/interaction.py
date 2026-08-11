@@ -290,7 +290,9 @@ class PhononPhononInteraction(Interaction):
                 freqs, cl, source_at_poles(s_g, freqs, cl), reg_g, **common)
             mx_l = a if mx_l is None else mx_l + a
             mx_g = b if mx_g is None else mx_g + b
-        ssp.set_pole_mixed(mx_l.reshape(shape), mx_g.reshape(shape))
+        scale = float(getattr(ps, "mixed_scale", 1.0))
+        ssp.set_pole_mixed((scale * mx_l).reshape(shape),
+                           (scale * mx_g).reshape(shape))
 
 
 def data_rows_cols(scba: "SCBA"):
