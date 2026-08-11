@@ -14,23 +14,30 @@ Sources: `cluster/cnt-*/run.log` and `cluster/newton-*/run.log` (tortin,
 
 ## 1. The beds
 
-Two families, and they are not interchangeable.
+Three families, and they are not interchangeable. All CNT (3,3), 12 atoms per
+cell, 305/295 K.
 
-| | tortin `cnt33_L*_linear` | daint `cluster/pgate` |
-|---|---|---|
-| cells | 3, 4, 5, 6, 7, 8, 10 | 4 |
-| `ne` | 181 | 201 |
-| `energy_window_max` | 55.0 THz | 55.0 THz |
-| `retarded_method` | fft | fft |
-| `eta` | 0 or 1e-12 | 0 |
-| `mixing_factor` | **0.2** | 0.02 - 0.1 |
-| `max_iterations` | **450** | 50 (overridden to 80) |
-| converges? | yes, L3-L7 | **no — the budget is 4-40x too small** |
+| | daint `l16, l24, l32` | tortin `cnt33_L*_linear` | daint `pgate` |
+|---|---|---|---|
+| cells | 16, 24, 32 | 3 - 10 | 4 |
+| `ne` | 161 (also 361) | 181 | 201 |
+| `retarded_method` | **half** | **fft** | **fft** |
+| `sse_g_band` | 3, or 1+taper | 2 | 3 (default) |
+| `eta` | 0 | 0 or 1e-12 | 0 |
+| `mixing_factor` | — | 0.2 | 0.02 - 0.1 |
+| `max_iterations` | — | 450 | 50 (overridden to 80) |
+| converges? | yes, all six | yes L3-L7, no L8/L10 | **no — budget 4-40x too small** |
 
-Every pole-sector A/B so far has run on `pgate`, at a mixing factor and
-iteration budget on which the SCBA does not converge with the sector on OR
-off. Those comparisons are between two unconverged transients. The converged
-CNT recipe is the tortin one.
+Two things follow immediately.
+
+**No single family is "the" CNT bed.** The longest converged runs (`l32`,
+32 cells) do NOT carry the Kramers-Kronig half of `Sigma^R`; the family that
+does (`cnt33_L*`) runs at `g_band = 2` and stops at 7 cells. Any statement
+about "converged CNT" has to name which.
+
+**Every pole-sector A/B so far has run on `pgate`**, at a mixing factor and
+iteration budget on which the SCBA does not converge with the sector on or
+off. Those comparisons are between two unconverged transients.
 
 `eta = 0` and `eta = 1e-12` are numerically identical here: `cnt-L3-eta0` and
 `cnt-L3-gband2` differ only in that setting and produce the same 209
@@ -38,51 +45,103 @@ iterations and the same `final_heat` to every printed digit.
 
 ---
 
-## 2. The length series — the physics result
+## 2. Two length series, and `sse_g_band` is what separates them
 
-`g_band = 2`, `ne = 181`, `eta ~ 0`, `retarded = fft`, linear mixing 0.2.
-`final_heat` is the per-slab heat current; a conserving solution has it
-uniform along the device.
+There are two CNT (3,3) families on disk, both at 305/295 K, and they differ in
+more than length. Do not read them as one series.
 
-| cells | converged in | mean heat | % of ballistic | edge-to-interior spread |
+| | daint `cluster/l16, l24, l32` | tortin `cnt33_L*_linear` |
+|---|---|---|
+| cells | 16, 24, 32 | 3 - 10 |
+| atoms/cell | 12 | 12 |
+| `retarded_method` | **half** (no KK part) | **fft** |
+| `ne` | 161 | 181 |
+| `sse_g_band` | 3, or 1+taper | 2 |
+
+### The `g_band` comparison — the dominant effect on conservation
+
+Same device, same length, only the spatial bandwidth of the bubble's legs
+changed. `final_heat` is per-slab; a conserving solution has it uniform.
+
+| cells | `g_band = 3` mean | spread | `g_band = 1` + taper mean | spread |
 |---|---|---|---|---|
-| ballistic | — | 77.67 | 100 % | 0 |
+| 16 | 8.688 | **2.4 %** | 2.878 | **39.9 %** |
+| 24 | 9.156 | **5.1 %** | 2.024 | **66.1 %** |
+| 32 | 10.696 | **11.8 %** | 1.545 | **82.8 %** |
+
+All six converged (97, 96, 176 iterations for `g3`; 66, 70, 70 for `g1t`), so
+this is not a convergence artefact — it is what the converged answers are.
+
+`g_band = 1` with a Bartlett taper is catastrophically non-conserving, up to
+83 % at L32, and its answer collapses with length (2.88 → 1.55) in a way the
+`g3` answer does not. The taper is recorded as incorrect elsewhere; this is
+the measurement.
+
+**`g_band = 3` reaches 32 cells.** That is the correction to an earlier version
+of this section, which reported the series breaking at L8. Those were
+`g_band = 2` runs (`cnt-L*-gband2`), and the failure is a property of that
+setting, not of the device or the method.
+
+### But truncation still bites at length
+
+Even at `g_band = 3` the conservation spread grows steadily with the device:
+2.4 % → 5.1 % → 11.8 % from 16 to 32 cells. `sse_g_band` truncates the
+self-energy at a fixed number of BLOCKS, so a longer device is not covered
+better by the same band. Sec. 3 is the controlled version of that statement.
+
+### The `g_band = 2` series (tortin, `fft`)
+
+Kept for the record, because it is the only family with the Kramers-Kronig
+half included. `ne = 181`, mixing 0.2, ballistic reference 77.67.
+
+| cells | converged in | mean heat | % of ballistic | spread |
+|---|---|---|---|---|
 | 3 | 209 it | 37.24 | 48 % | 8.5 % |
 | 4 | 311 it | 33.53 | 43 % | 8.2 % |
 | 5 | 304 it | 30.61 | 39 % | 9.1 % |
 | 6 | 239 it | 29.15 | 38 % | 8.3 % |
 | 7 | 313 it | 26.37 | 34 % | 8.6 % |
-| 8 | **diverged** | — | — | — |
-| 10 | **diverged** | — | — | — |
+| 8 | diverged after 63 it (best 1.9e-01, ends 4.0e+03) | — | — | — |
+| 10 | diverged after 119 it (best 9.2e-02, ends 8.1e+03) | — | — | — |
 
-Per-slab, for reference: L4 is `35.22, 32.33, 32.50, 32.40, 35.22` and L7 is
-`28.10, 25.78, 25.72, 25.71, 25.68, 26.01, 25.89, 28.05`.
+Smooth and monotone where it converges, 8-9 % non-conserving throughout, and
+it stops at 7 — at `g_band = 2`. No sign inversions are logged at L8/L10, so
+that failure is not the anti-damping signature the pole-sector work chased.
 
-Two things to read off it.
-
-**The series is smooth and monotone.** The current falls from 48 % to 34 % of
-ballistic between 3 and 7 cells. That is the expected approach to diffusive
-transport and it is the one clean physics result in this whole set.
-
-**The heat profile is NOT uniform, by a consistent 8-9 %.** The first and last
-entries sit above the interior at every length. A conserving solution cannot
-do that, so roughly 8-9 % of the answer is a conservation error, and it does
-not shrink with length. Sec. 4 shows where it lives.
+**Caution on comparing the two families.** They differ in `g_band`, in `ne`,
+and in whether `Sigma^R` carries its Kramers-Kronig half. The `g3` family's
+mean heat also RISES with length (8.69 → 10.70), which is not what a
+fixed-`dT` diffusive device should do; whether `final_heat` is a per-slab
+absorbed power (which would grow with slab count) or a current has to be
+settled before that is read as physics.
 
 ---
 
-## 3. Where it breaks: L8 and beyond
+## 3. Si: the same device converges or not depending on how it is BLOCKED
 
-`L8` and `L10` do not fail to start — they nearly converge and then blow up:
+The controlled version of the truncation statement, on Si. One physical device
+— 8 atoms — partitioned two ways, everything else identical (`ne = 2801`,
+`eta = 0`, `retarded = half`):
 
-| | iterations | best `rel Sigma` | final `rel Sigma` |
-|---|---|---|---|
-| L8 | 63 | 1.9e-01 | **4.0e+03** |
-| L10 | 119 | 9.2e-02 | **8.1e+03** |
+| run | partition | atoms/block | iterations | `rel Sigma` trajectory |
+|---|---|---|---|---|
+| `si4x1` | 4 blocks x 1 cell | 2 | 9 | 1.0 → **20.97, rising** |
+| `si4x2` | 2 blocks x 2 cells | 4 | 12 | 1.0 → 0.317, falling |
+| `si4x2b` | 2 blocks x 2 cells | 4 | 46 | 1.0 → **6.96e-03**, falling |
 
-No sign inversions are logged, so this is not the anti-damping signature the
-pole-sector work chased; it is a late-stage instability of the bubble-only
-model, and it is the reason the length series stops at 7.
+Nothing about the physics changed — only the block partition. With four small
+blocks the SCBA diverges; with two large ones it converges by three orders.
+
+`sse_g_band` truncates `Sigma` at a fixed number of BLOCKS, so the physical
+range retained is `g_band x (cells per block)`. Halving the block size halves
+that range at fixed `g_band`, and on this device that is the difference
+between converging and not.
+
+This is the concrete motivation for the spatial-decomposition work: the
+quantity that matters is the retained physical range, and it is currently
+controlled only indirectly, through a block count that is chosen for solver
+reasons. It also explains the trend in Sec. 2 — conservation degrading from
+2.4 % to 11.8 % as the CNT grows at fixed `g_band`.
 
 ---
 
@@ -196,22 +255,35 @@ Both cannot be right, and which one gives is the open question.
 
 Established:
 
-* a smooth, monotone, converged length series L3-L7 against a ballistic
-  reference, at `eta = 0` with the Kramers-Kronig half included;
-* a ~9 % conservation error at every length, which the 2 THz low-frequency
-  mask removes entirely while raising the answer 68 %;
-* a late-stage instability at L8 and beyond;
+* **`sse_g_band` is the dominant control on conservation.** At 32 cells,
+  `g_band = 3` gives an 11.8 % spread and `g_band = 1` + taper gives 82.8 %,
+  both converged. `g_band = 3` reaches 32 cells; `g_band = 2` stops at 7.
+* **Spatial truncation is set by the retained physical range, not by
+  `g_band` alone.** On Si, the same 8-atom device diverges partitioned into
+  4 small blocks and converges by three orders into 2 large ones. This is the
+  concrete case for the spatial-decomposition work.
+* conservation still degrades with length at `g_band = 3` (2.4 % → 11.8 %
+  from 16 to 32 cells), consistent with the same mechanism;
+* a smooth, monotone, converged length series L3-L7 with the Kramers-Kronig
+  half included, at `g_band = 2`, 8-9 % non-conserving;
+* the 2 THz low-frequency mask removes the conservation error almost entirely
+  (8.5 % → 0.6 %) while raising the answer 68 %;
 * the pole-sector acceptance criterion was in the wrong units, worth
   2/144 -> 11/144.
 
 Not established:
 
 * any grid-converged CNT number — the `ne` ladder is non-monotone and moves
-  the answer 13-47 % where it converges at all;
+  the answer 13-47 % where it converges at all, and `l16` moves 2.2x between
+  `ne = 161` and 361;
 * the mechanism of that ladder;
-* whether CNT at 300 K has a population of narrow isolated modes at
-  CONVERGENCE, which is what decides whether the pole sector can help;
-* which of the two low-frequency treatments is the physics.
+* what `final_heat` rising with length in the `g3` family means — per-slab
+  absorbed power would grow with slab count, a current should not;
+* whether CNT at 300 K has narrow isolated modes at CONVERGENCE, which is what
+  decides whether the pole sector can help;
+* which of the two low-frequency treatments is the physics;
+* a converged long-device run WITH the Kramers-Kronig half — no family
+  currently has both.
 
-The first two Not-Established items block any production CNT result,
+The last item and the first two block any production CNT result,
 independently of the pole sector.
