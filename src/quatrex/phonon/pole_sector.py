@@ -92,10 +92,14 @@ class PoleSectorState:
     """``max |sum_p p_p q_p^T|`` per leg -- the ``1/w`` tail coefficient of
     the analytic leg, which the bosonic closure must drive to zero."""
     mixed_fit: list = field(default_factory=list)
-    """Measured variation of ``c_rs`` across its pole window. ``source_fit``
-    covers ``c_ss`` only; the analytic route freezes all three, and this is
-    the one that carries the retarded background and can move fast where
-    ``V^dagger Sigma V`` does not."""
+    """``(eps_fit, eps_reg)`` per leg for the mixed coefficient ``c_rs``.
+
+    Replaces a variation measure that asked the wrong question. Under the
+    principal-part split ``c(omega)/(omega-z) = c(z)/(omega-z) +
+    [c(omega)-c(z)]/(omega-z)`` the second term has a removable singularity,
+    so ``c`` moving across the window is not an error. What can be an error is
+    the local model's own residual (``eps_fit``) and whether the grid carries
+    the regular remainder (``eps_reg``)."""
     g_pp_lesser: object = None
     g_pp_greater: object = None
     solutions: list[PoleSolution] = field(default_factory=list)

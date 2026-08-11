@@ -1015,3 +1015,39 @@ def test_pattern_chunk_bounds_the_working_set_as_poles_are_added():
     # ... and a small problem is still done in one shot, so nothing that
     # already worked pays a Python-loop tax.
     assert _pattern_chunk(n_w, 2, 500, budget) == 500
+
+
+# --- what the additive route is and is not required to satisfy ------------- #
+
+def test_an_additive_remainder_may_be_indefinite_while_the_total_is_fine():
+    """``G_R = G - G_S`` is a DIFFERENCE, so its sign is unconstrained.
+
+    The congruence route's leg is built as a positive cell-averaged
+    congruence, so ring-leg positivity is a real gate there. The analytic
+    route's leg is an additive remainder, and requiring it to be PSD is a
+    category error -- the same one ``bubble_positivity.md`` records when it
+    says the gate is on the total and never on a sector.
+
+    What the additive route must satisfy is the sector sum and the positivity
+    of the TOTAL, and both are tested elsewhere. This pins the negative
+    statement so it is not re-litigated from a scary-looking leg number.
+    """
+    rng = np.random.default_rng(2)
+    n = 6
+
+    def psd(seed):
+        a = (rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n)))
+        return a @ np.conj(a.T)
+
+    g = psd(0)                       # -i G, physical
+    g_s = psd(1)                     # -i G_S, also physical on its own
+    g_r = g - g_s                    # the remainder the ring is handed
+
+    lam = lambda m: float(np.linalg.eigvalsh(0.5 * (m + np.conj(m.T))).min())
+    assert lam(g) > -1e-10 and lam(g_s) > -1e-10
+    assert lam(g_r) < -1e-6, (
+        "the bed must actually exhibit an indefinite remainder, or the test "
+        "asserts nothing")
+    # ... and the two still sum to the physical object, which is the only
+    # thing the decomposition promises.
+    np.testing.assert_allclose(g_s + g_r, g, atol=1e-12)

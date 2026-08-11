@@ -73,7 +73,8 @@ __all__ = [
     "cell_weights",
     "coefficients_at_poles",
     "residue_sum",
-    "coefficient_variation",
+    "fit_residual",
+    "remainder_resolution",
     "partial_fraction_legs",
     "pf_leg_sample",
     "pf_self_energy",
@@ -662,50 +663,100 @@ def coefficients_at_poles(
     return sr, rs, ss
 
 
-def coefficient_variation(
-    c_rs: NDArray, frozen: NDArray, freqs: NDArray, cluster: PoleCluster,
-    window: int = 4,
+def fit_residual(
+    values: NDArray, freqs: NDArray, cluster: PoleCluster,
+    order: int = 2, window: int = 4,
 ) -> float:
-    r"""How far the MIXED coefficient strays from its frozen per-pole value.
+    r"""``eps_fit`` -- how well the local model reproduces its own samples.
 
-    ``source_variation`` gates ``c_ss = V^dagger \Sigma V`` and nothing else,
-    but the analytic route freezes three coefficients, and the mixed one is
+    Doc Eq. 38. The analytic route needs the coefficient AT the pole, which no
+    amount of grid data gives directly; it comes from a local polynomial model,
+    and this is that model's residual against the data it was fitted to.
 
-    .. math:: c_{rs}(\omega) = G^R(\omega_k)\Sigma(\omega) V
-                              - U D(\omega_k)\, c_{ss}(\omega),
-
-    which carries the full retarded background. It can vary rapidly across a
-    pole window while ``V^dagger \Sigma V`` is perfectly smooth -- a nearby
-    unpromoted resonance, a contact band edge, or sharp self-consistent
-    structure in ``Sigma`` all do it. Freezing an unsmooth coefficient is the
-    same error the source gate exists to refuse, applied to a different object.
-
-    Same convention as :func:`~quatrex.phonon.pole_bridge.source_variation`:
-    the max over the ``window`` cells either side of each pole, normalised
-    GLOBALLY rather than per frequency (a per-omega denominator turns the
-    numerically empty tails into apparent failures).
-
-    Parameters
-    ----------
-    c_rs : NDArray
-        ``(n_omega, n_dof, Np)`` per-cell coefficient.
-    frozen : NDArray
-        ``(n_dof, Np)``, the value :func:`coefficients_at_poles` froze.
-
+    Distinct from :func:`remainder_resolution`, and the two must not be
+    conflated: a perfect fit whose regularized remainder the grid cannot carry
+    is useless, and so is a resolvable remainder built on a bad fit.
     """
+    from quatrex.phonon.pole_kernel import delta_local_fit
+
     w = np.asarray(_h(freqs), dtype=float)
     z = np.asarray(_h(cluster.z))
-    c = np.asarray(_h(c_rs))
-    f = np.asarray(_h(frozen))
-    scale = float(np.abs(c).max())
-    if scale == 0.0:
-        return 0.0
+    v = np.asarray(_h(values))
+    flat = v.reshape(v.shape[0], -1)
     worst = 0.0
     for b in range(int(z.size)):
-        k0 = int(np.argmin(np.abs(w - abs(float(np.real(z[b]))))))
+        anchor = float(np.real(z[b]))
+        k0 = int(np.argmin(np.abs(w - abs(anchor))))
         lo, hi = max(0, k0 - window), min(w.size, k0 + window + 1)
-        worst = max(worst, float(np.abs(c[lo:hi, :, b] - f[:, b]).max()))
-    return worst / scale
+        if hi - lo < 2:
+            continue
+        model = np.asarray(_h(delta_local_fit(
+            xp.asarray(flat), xp.asarray(w), xp.asarray(w[lo:hi] + 0j),
+            order=order, window=window, anchor=anchor)))
+        num = float(np.linalg.norm(model - flat[lo:hi]))
+        den = float(np.linalg.norm(flat[lo:hi]))
+        worst = max(worst, num / (den + 1e-300))
+    return worst
+
+
+def remainder_resolution(
+    values: NDArray, frozen: NDArray, freqs: NDArray, cluster: PoleCluster,
+    order: int = 2, window: int = 4, refine: int = 16,
+) -> float:
+    r"""``eps_reg,int`` -- is the REGULARIZED remainder carried by the grid?
+
+    This replaces the coefficient-variation gate, which asked the wrong
+    question. For :math:`F = c(\omega)/(\omega - z)` with locally analytic
+    ``c``, the principal part is exactly :math:`c(z)/(\omega - z)` and
+
+    .. math::
+        F(\omega) - \frac{c(z)}{\omega - z}
+            = \frac{c(\omega) - c(z)}{\omega - z}
+
+    has a REMOVABLE singularity, tending to :math:`c'(z)`. So ``c`` varying
+    across the pole window is not an error and not grounds for refusing the
+    pole -- the variation lands in a regular function, and the only question is
+    whether the grid can integrate that function. Measuring the variation
+    instead (the retired ``coefficient_variation``) reported 0.908 on a bed
+    where nothing was wrong with the principal-part split.
+
+    Measured as doc Eq. 37: the grid's own midpoint rule over the pole's
+    window against a ``refine``-times denser quadrature of the same interval,
+    both applied to the local model of the remainder.
+    """
+    from quatrex.phonon.pole_kernel import delta_local_fit
+
+    w = np.asarray(_h(freqs), dtype=float)
+    z = np.asarray(_h(cluster.z))
+    v = np.asarray(_h(values))                       # (n_omega, n_dof, Np)
+    fr = np.asarray(_h(frozen))                      # (n_dof, Np)
+    worst = 0.0
+    for b in range(int(z.size)):
+        zb = complex(np.conj(z[b]))
+        anchor = float(np.real(z[b]))
+        k0 = int(np.argmin(np.abs(w - abs(anchor))))
+        lo, hi = max(0, k0 - window), min(w.size, k0 + window + 1)
+        if hi - lo < 3:
+            continue
+        data = xp.asarray(v[:, :, b])                # (n_omega, n_dof)
+        c_at_pole = fr[:, b].reshape(1, -1)
+
+        def _rem(grid):
+            model = np.asarray(_h(delta_local_fit(
+                data, xp.asarray(w), xp.asarray(grid + 0j),
+                order=order, window=window, anchor=anchor)))
+            return (model.reshape(grid.size, -1) - c_at_pole) / (
+                grid[:, None] - zb)
+
+        g_c = w[lo:hi]
+        g_f = np.linspace(g_c[0], g_c[-1], (hi - lo - 1) * refine + 1)
+        # The grid's own rule -- a dw-weighted sum -- against a dense
+        # trapezoid of the same interval. The gap IS the unresolved part.
+        i_c = np.asarray(_rem(g_c)).sum(axis=0) * float(w[1] - w[0])
+        i_f = np.trapezoid(np.asarray(_rem(g_f)), g_f, axis=0)
+        den = float(np.linalg.norm(i_f))
+        worst = max(worst, float(np.linalg.norm(i_c - i_f)) / (den + 1e-300))
+    return worst
 
 
 def residue_sum(p_row: NDArray, q_col: NDArray) -> float:

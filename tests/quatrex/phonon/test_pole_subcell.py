@@ -239,13 +239,15 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     # exactly -- which is precisely the "gate is blind" case the print flags.
     for key in ("lesser", "greater"):
         assert rep[key]["worst"] == rep[f"{key}_control"]["worst"]
-    # ... and the analytic route reports through the same branch, because its
-    # leg is also G - g_pp and not the superseded P + R_k.
+    # ... and the analytic route must NOT report through this branch. Its leg
+    # is the additive remainder G - G_S, a DIFFERENCE of PSD objects, so it
+    # may be indefinite with nothing wrong; only the total -i Sigma^{<,>} is
+    # constrained. Reporting a ring-leg violation there invites reading it as
+    # a defect, which is exactly the category error it caused once.
     solver.psd_report = {}
     solver.config.phonon.pole_sector.leg = "congruence_analytic"
     solver._report_subcell((_Buf(a), _Buf(a), _Buf(a)))
-    assert "ring_leg" in solver.psd_report
-    assert "subcell" not in solver.psd_report
+    assert "ring_leg" not in solver.psd_report
 
 
 def test_ring_leg_gate_excludes_the_bins_the_ring_masks():

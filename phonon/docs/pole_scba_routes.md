@@ -408,20 +408,34 @@ The two new gates fire, at iteration 1, before anything has diverged:
     ring leg positivity greater  worst=-4.095e-01 at w[127]   pole-off control=-3.001e-03
     pole analytic leg: eps_tail=1.650e-03  eps_c_rs=9.076e-01  ABOVE source_fit_tol (1.00e-01)
 
-**The leg the ring convolves is indefinite by 0.41**, against a pole-off
-control of 7.97e-04 -- a factor 500. That is review Sec. 20 measured rather
-than argued: the analytic route hands the ring the frozen remainder, and it is
-a difference of PSD objects. The SAME gate on `cong` reads exactly its control
-at every iteration (`[== control: gate is blind]`), i.e. the cell-average
-correction does the ring no damage at all. The two routes are distinguished by
-one number, which is what the gate was rebuilt for.
+**Both of those readings were withdrawn on 2026-08-11.** A later review
+(`analytic_pole_treatment_math_and_next_steps.md` Sec. 8, 16, 31) showed each
+measures the wrong thing, and it is right on both.
 
-**`eps_c_rs = 0.908` against a tolerance of 0.1.** The mixed coefficient varies
-by 91 % of its own scale across the pole window, so freezing it -- which the
-partial-fraction flattening requires -- is not justified on this bed. That is
-review Sec. 28, and it is a first-order reason the analytic leg is a bad
-approximation independently of the positivity failure. `eps_tail = 1.7e-03`, so
-the closure is doing its job and the tail is not the problem.
+*The ring leg is allowed to be indefinite here.* `G_R = G - G_S` is an
+additive remainder, a DIFFERENCE of PSD objects, so its sign is unconstrained;
+only the TOTAL `-i Sigma^{<,>}` is (`bubble_positivity.md` Thm 1-2, the same
+reason the gate is never applied per sector). Reading `-4.088e-01` as the cause
+was a category error. The gate is still valid on `congruence`, whose leg is
+built as a positive cell-averaged congruence, and it is no longer reported on
+the analytic route at all.
+
+*Coefficient variation is not a rejection criterion.* For
+`F = c(w)/(w - z)` the principal part is exactly `c(z)/(w - z)`, and
+`[c(w) - c(z)]/(w - z)` has a REMOVABLE singularity tending to `c'(z)`. So `c`
+moving across the window is not an error -- and the code already implements
+that split: `coefficients_at_poles` evaluates at the poles,
+`partial_fraction_legs` builds `G_S` from those values, and `reg` is the
+regular remainder. `eps_c_rs = 0.908` measured a quantity the construction is
+designed to tolerate. It is replaced by `eps_fit` (the local model's residual
+against its own samples) and `eps_reg` (whether the grid integrates the
+regular remainder), which are separate errors and cannot be carried by one
+number.
+
+What DOES still stand is the gate that binds: `positivity sigma_lesser
+worst = -4.199e-01 VIOLATION` on the total, where base and cong read
+`+0.000 ok`. `eps_tail = 1.7e-03`, so the closure is fine and the tail is not
+the problem.
 
 `congruence_analytic` is therefore not viable as constructed. The next route is
 Sec. 6's `|P|^2` cell-pair correction, which forms no frozen remainder and

@@ -711,9 +711,10 @@ class PhononSolver(SubsystemSolver):
             source_at_poles, source_variation,
         )
         from quatrex.phonon.pole_congruence import (
-            apply_sparse, background_coefficients, coefficient_variation,
-            coefficients_at_poles, partial_fraction_legs, pf_leg_sample,
-            residue_sum, sector_cell_average, sector_grid_sample,
+            apply_sparse, background_coefficients, coefficients_at_poles,
+            fit_residual, partial_fraction_legs, pf_leg_sample,
+            remainder_resolution, residue_sum, sector_cell_average,
+            sector_grid_sample,
         )
 
         state = self.pole_state
@@ -811,13 +812,20 @@ class PhononSolver(SubsystemSolver):
                         (state.pf_lesser if g_out == "l"
                          else state.pf_greater).append((zeta, p_row, q_col))
                         state.residue_sum.append(residue_sum(p_row, q_col))
-                        # source_fit_tol gates c_ss; c_rs = G^R_k Sigma V -
-                        # U D_k c_ss carries the whole retarded background and
-                        # can move fast where V^dag Sigma V does not. It is
-                        # frozen by the same approximation, so it needs the
-                        # same measurement.
-                        state.mixed_fit.append(coefficient_variation(
-                            co[1], frozen[1], freqs, cl))
+                        # source_fit_tol gates c_ss and nothing else. The
+                        # mixed coefficient c_rs = G^R_k Sigma V - U D_k c_ss
+                        # is frozen by the same approximation and carries the
+                        # whole retarded background, so it needs its own
+                        # measurement -- but of the right thing. Its VARIATION
+                        # across the window is not an error: the principal
+                        # part is c(z)/(w-z) exactly and the variation lands
+                        # in [c(w)-c(z)]/(w-z), which is regular. What can go
+                        # wrong is the local model's own residual, and whether
+                        # the grid carries that regular remainder.
+                        state.mixed_fit.append((
+                            fit_residual(co[1], freqs, cl),
+                            remainder_resolution(co[1], frozen[1], freqs, cl),
+                        ))
                         smp = pf_leg_sample(zeta, p_row, q_col, freqs,
                                             rows, cols)
                     else:
@@ -928,15 +936,19 @@ class PhononSolver(SubsystemSolver):
             # a bosonically CLOSED set, and only if freezing preserved the
             # cancellation; a truncated set does not, and this says so.
             #
-            # eps_c_rs is source_fit_tol's missing half: see
-            # coefficient_variation.
+            # eps_fit is the local model's residual against its own
+            # samples; eps_reg is whether the grid integrates the regular
+            # remainder. They are separate errors and a single number cannot
+            # stand for both.
             tail = max(state.residue_sum) if state.residue_sum else 0.0
-            mixed = max(state.mixed_fit) if state.mixed_fit else 0.0
-            flag = ("" if mixed <= self._pole_cfg.source_fit_tol
-                    else f"  ABOVE source_fit_tol "
+            fits = [a for a, _ in state.mixed_fit] or [0.0]
+            regs = [b for _, b in state.mixed_fit] or [0.0]
+            flag = ("" if max(regs) <= self._pole_cfg.source_fit_tol
+                    else f"  eps_reg ABOVE source_fit_tol "
                          f"({self._pole_cfg.source_fit_tol:.2e})")
             print(f"  pole analytic leg: eps_tail={tail:.3e}  "
-                  f"eps_c_rs={mixed:.3e}{flag}", flush=True)
+                  f"eps_fit={max(fits):.3e}  eps_reg={max(regs):.3e}{flag}",
+                  flush=True)
 
     def _report_subcell(self, out) -> None:
         """Is the reconstruction physical BETWEEN grid points?
@@ -965,7 +977,7 @@ class PhononSolver(SubsystemSolver):
         if state is None or not state.legs:
             return
 
-        if getattr(cfg, "leg", "congruence").startswith("congruence"):
+        if getattr(cfg, "leg", "congruence") == "congruence":
             # The rest of this routine measures the SUPERSEDED reconstruction
             # -- it rebuilds P^{<,>} through pole_keldysh_pf_sparse and asks
             # whether P + R_k is physical. On this route that object is not
@@ -990,6 +1002,16 @@ class PhononSolver(SubsystemSolver):
             #   * the same gate on the UNCORRECTED leg is printed beside it as
             #     the control. If the two agree, the gate is not measuring the
             #     pole sector, whatever value it shows.
+            #
+            # This branch is deliberately NOT taken on congruence_analytic.
+            # There the leg is G - G_S, an additive remainder, and a remainder
+            # is a DIFFERENCE of PSD objects: it may be indefinite with
+            # nothing wrong. Only the total -i Sigma^{<,>} is constrained
+            # (bubble_positivity.md Thm 1-2, and the same reason the gate is
+            # never applied per sector). Reading -4.09e-01 there as the cause
+            # of that route's divergence was a category error; the gates that
+            # DO bind on it are the sector sum, the total positivity, the
+            # Keldysh identity and conservation.
             rows, cols = out[0].rows, out[0].cols
             n_freq = int(self.local_frequencies.shape[0])
             low = max(1e-6, float(

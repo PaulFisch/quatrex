@@ -48,7 +48,7 @@ baseline cannot".
   the ring's weight sitting on pole-cell PAIRS.
 * `pole sector: N/M pole(s) promoted, refused: <histogram>` — the promotion
   yield, not a bare count.
-* `eps_tail` and `eps_c_rs` on the analytic route.
+* `eps_tail`, `eps_fit` and `eps_reg` on the analytic route.
 * Sector sum against a high-order quadrature of the same hybrid (offline).
 
 Everything above was added because a number was being read without its
@@ -158,7 +158,14 @@ Fixed (all three were in the assembly, none in the kernels):
 2. the low-frequency leg mask was not applied to the background leg;
 3. `mixed_scale` was ignored.
 
-Still diverges, and the gates say why at iteration 1, before anything blows up:
+Still diverges. Two of the readings first cited here have since been withdrawn
+(see `pole_scba_routes.md` Sec. 4.2): a ring leg that is indefinite is expected
+for an additive remainder, and coefficient variation is not a rejection
+criterion under the principal-part split. The gate that binds is the total,
+`positivity sigma_lesser worst = -4.199e-01 VIOLATION`, where base and cong
+read `+0.000 ok`.
+
+The withdrawn text, kept because the reasoning is the recurring failure mode:
 
     ring leg positivity lesser  worst=-4.088e-01 at w[127]  pole-off control=-7.971e-04
     pole analytic leg: eps_tail=1.650e-03  eps_c_rs=9.076e-01  ABOVE source_fit_tol (1.00e-01)
