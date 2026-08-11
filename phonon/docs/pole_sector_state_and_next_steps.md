@@ -13,11 +13,19 @@ The method is not blocked on its own algebra. Every route's kernels are
 verified, the default route is device-stable, and the failure modes that were
 open a day ago are now measured rather than argued.
 
-It is blocked on the fact that **every pole-sector A/B so far has been run on
-`cluster/pgate` — a bed and an iteration budget on which the SCBA does not
-converge, with or without the pole sector.** A converged, `eta = 0`,
-Hilbert-corrected CNT recipe exists and has existed for a while; the pole
-sector has never been run on it.
+It is blocked on two things, and the second is the important one.
+
+**Every pole-sector A/B so far ran on `cluster/pgate`**, at a mixing factor
+and iteration budget on which the SCBA does not converge with or without the
+sector. A converged `eta = 0`, Hilbert-corrected CNT recipe exists and has
+existed for a while; the sector has never been run on it.
+
+And **the converged baseline has no grid limit to be compared against.**
+Refining the frequency grid does not improve the CNT answer, it destroys it
+(Sec. 2). That is the pathology the pole subtraction exists to cure, so the
+success criterion is not "agrees with a fine-grid baseline" — there is no
+fine-grid baseline. It is "gives a stable answer on a coarse grid where the
+baseline cannot".
 
 ---
 
@@ -61,10 +69,38 @@ half — `retarded_method = "fft"`, which is what the pole sector requires.
 
 ---
 
-## 2. The blocker: the A/B bed is not the production bed
+## 2. The target: grid independence, not a converged reference
+
+CNT L4, `retarded = fft`, `eta ~ 0`, production recipe, measured
+(`cluster/cnt-L4-nescan`, `cnt-L4-ne361`, `cnt-L4-gband2`):
+
+| `ne` | outcome | `final_heat` |
+|---|---|---|
+| 161 | **diverged** | ~ -2.4e+22 |
+| 181 | converged, 311 it (`g_band = 2`) | [35.2, 32.3, 32.5, 32.4, 35.2] |
+| 201 | converged, 249 it | [39.8, 36.7, 37.1, 36.6, 39.5] |
+| 271 | did not converge | [51.6, 47.1, 47.4, 46.5, 50.3] |
+| 361 | **diverged** | ~ +3.9e+19 |
+
+The SCBA is stable only in a narrow window around `ne ~ 181-201`, the answer
+moves by ~13 % across it, and refining past it diverges. (The 181 entry is
+`g_band = 2` against the default 3, so that one comparison is confounded; the
+161/271/361 outcomes are not.)
+
+So "converge the baseline on a fine grid and compare" is not available. The
+baseline has no fine-grid limit. **That is the problem the pole subtraction is
+for**, and it sets the actual success criterion:
+
+> does the sector give an answer on a coarse grid that is STABLE under
+> refinement, where the baseline is not?
+
+A comparison at a single `ne` cannot show that, and neither can agreement with
+a number the baseline only produces inside its stability window.
+
+### Why the `pgate` A/Bs cannot answer it either
 
 `cluster/pgate` (daint) and `cnt33_L4_linear` (tortin) are both 4-cell CNT,
-both `fft`, both `eta = 0`. What differs is the iteration budget:
+both `fft`, both `eta = 0`. What differs is the budget:
 
 | | `pgate` staging runs | production recipe |
 |---|---|---|
@@ -73,16 +109,11 @@ both `fft`, both `eta = 0`. What differs is the iteration budget:
 | `ne` | 201 | 181 |
 
 At `QX_MIX=0.02, QX_MAXIT=80` the pole-free baseline plateaus at
-`rel Sigma ~ 2.5e-01` and never converges; under Anderson it plateaus at
-`2.5e-02`. Both are transients of a run that was stopped an order of magnitude
-too early, not a property of the solver.
-
-Consequence: **every conclusion drawn from `pgate` about whether the pole
-sector changes the answer is a statement about two unconverged transients.**
-That includes "cong differs from baseline only in the fourth digit". It is not
+`rel Sigma ~ 2.5e-01`; under Anderson at `2.5e-02`. Both are transients of a
+run stopped an order of magnitude early. So every `pgate` conclusion about
+whether the sector changes the answer — including "cong differs from baseline
+only in the fourth digit" — compares two unconverged transients and is not
 evidence either way.
-
----
 
 ## 3. The second blocker: promotion yield, and a hard size limit
 
@@ -161,22 +192,39 @@ Do not re-litigate these without new evidence.
 * **Zero-filled-pattern positivity**: a hard band mask is indefinite, but a
   block-banded pattern leaves the gate's two-block window fully populated, so
   it is a genuine principal submatrix. Only within-window sparsity is exposed.
-* **Registration error size**: real but bounded. Pole-cell pairs carry 6e-05 %
-  of the ring's weight on `pgate`, 2.6 % at the single worst bin.
+* **Registration error size**: bounded for the PROMOTED set only. Pole-cell
+  pairs carry 6e-05 % of the ring's weight on `pgate`, 2.6 % at the single
+  worst bin. That is a bound on the 2 poles the sector promoted, **not** on
+  the physical narrow-line content: 142 candidates were refused. Read with
+  Sec. 2, this is the one entry on this list that is not settled -- the
+  registration mechanism (a line's weight placed at its cell centre, so its
+  combination frequency moves by up to a full cell) is exactly the kind of
+  thing that makes an answer jump discontinuously under refinement, and the
+  measured bound cannot see the 142 modes that were never promoted.
 
 ---
 
 ## 6. Next steps, in order
 
-### N1. Move the A/B onto a bed that converges
+### N1. Reproduce the baseline's grid ladder, then run the sector on the same one
 
-Run `base` / `cong` on `cnt33_L4_linear` at the production recipe —
-`mixing_factor = 0.2`, `max_iterations = 450`, `ne = 181`, `eta = 0`,
-`sse_g_band = 3` — and compare CONVERGED answers, not iteration-6 transients.
-This is the first result that would mean anything, and it needs no new code.
+`base` on `cnt33_L4_linear` at the production recipe (`mixing_factor = 0.2`,
+`max_iterations = 450`, `eta = 0`, `sse_g_band = 3`) across
+`ne = 161, 181, 201, 241, 271, 361`, to re-establish Sec. 2's ladder under
+matched settings — the existing points come from runs that differ in
+`g_band` and in whether a low-frequency mask was on.
 
-`cnt33_L3_linear` with the 2 THz low-frequency mask converges in 52
-iterations and is the cheapest place to start.
+Then the same ladder with `leg = "congruence"`. The deliverable is the two
+ladders on one axis. Success is a FLAT pole curve where the baseline curve
+moves 13 % and then diverges; it is not agreement at any single `ne`.
+
+`cnt33_L3_linear` with the 2 THz mask converges in 52 iterations and is the
+cheapest place to establish the harness before spending L4 time.
+
+Note the interaction with N2/N3: at a fixed pole window, refining `ne` changes
+which modes are grid-resolved and therefore how many are promoted. The ladder
+must report the promotion yield at every rung, or a flat curve could be a flat
+curve for the wrong reason.
 
 ### N2. Chunk the `(n_omega, Np, nnz)` temporaries
 
@@ -195,16 +243,19 @@ it is a statement about the operator and the seeds.
 
 ### N4. Then, and only then, the method comparison
 
-With a converged bed, a working solve and a known pole set: does the sector
-change `lead_current` and the heat profile, and in which direction relative to
-the grid ladder. That is the headline A/B (existing task #6) and it is not
-answerable before N1-N3.
+With a converged bed, a solve that can carry more than a handful of poles, and
+a known promotion yield: is the pole ladder flat where the baseline's is not?
+That is the headline A/B (existing task #6). N1 can start immediately -- the
+baseline half of the ladder needs nothing -- but the pole half is only
+meaningful once N2 and N3 land, because a sector that promotes 2 modes out of
+144 cannot cure a grid pathology caused by the other 142.
 
 ### Deferred
 
-* The `|P|^2` cell-pair product-integration correction (review Sec. 38). Worth
-  having; measured at ~2 % at one bin on `pgate`, so not urgent until a bed
-  exists where poles carry weight.
+* The `|P|^2` cell-pair product-integration correction (review Sec. 38).
+  Measured at ~2 % at one bin on `pgate` -- but over 2 promoted poles, so that
+  number is not a bound on the physical effect. Revisit once N3 says how many
+  modes the sector should be carrying.
 * `congruence_analytic` — Sec. 4.
 * Coupled-q support (task #5).
 
