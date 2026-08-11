@@ -71,6 +71,9 @@ __all__ = [
     "sector_grid_sample",
     "sector_cell_average",
     "cell_weights",
+    "partial_fraction_legs",
+    "pf_leg_sample",
+    "pf_self_energy",
     "reconstruct",
 ]
 
@@ -326,3 +329,152 @@ def sector_cell_average(
     rs = xp.einsum("wka,wa,ka->wk", xp.take(c_rs, r, axis=1), xp.conj(d1), uc)
     ss = xp.einsum("ka,wab,wab,kb->wk", ur, d2, c_ss, uc)
     return sr + rs + ss
+
+
+def partial_fraction_legs(
+    cluster: PoleCluster,
+    coefficients: tuple[NDArray, NDArray, NDArray],
+) -> tuple[NDArray, NDArray, NDArray]:
+    r"""Flatten the congruence into simple poles with rank-1 residues.
+
+    .. math::
+        \tilde G(\omega) - B^R \Sigma B^A
+            = \sum_p \frac{p_p\, q_p^{\mathsf T}}{\omega - \zeta_p},
+        \qquad p = 1 \dots 2N_p,
+
+    by partial-fractioning ``SS``'s double pole and collecting every term that
+    shares a pole. For :math:`\zeta_p = z_a` the row factor is :math:`u_a` and
+    everything else lands in the column factor; for :math:`\zeta_p = \bar z_b`
+    it is the other way round:
+
+    .. math::
+        q_a = c^{SR}_{a,:} + \sum_b \frac{c^{SS}_{ab}}{z_a - \bar z_b}\,
+              \bar u_b, \qquad
+        y_b = c^{RS}_{:,b} - \sum_a \frac{c^{SS}_{ab}}{z_a - \bar z_b}\, u_a .
+
+    This is what makes the analytic convolution affordable. A leg with an OPEN
+    (non-modal) index would force the cubic vertex to be re-contracted at every
+    frequency; here both families are fixed vectors, so the vertex is projected
+    onto them once per iteration exactly as it is onto ``U`` today, and the
+    bubble of two such legs is the existing pole-pole algebra over ``2 Np``
+    poles instead of ``Np``.
+
+    The coefficients must already be FROZEN -- one value per pole, not one per
+    cell -- for the families to be frequency independent. That is the same
+    approximation :func:`~quatrex.phonon.pole_bridge.source_at_poles` makes for
+    the source, and it is better justified here: the poles have been removed
+    from :math:`B^R` by construction, so it is the smooth part being sampled.
+
+    Parameters
+    ----------
+    cluster : PoleCluster
+    coefficients : tuple
+        ``(c_sr, c_rs, c_ss)`` of shapes ``(Np, n_dof)``, ``(n_dof, Np)`` and
+        ``(Np, Np)`` -- :func:`background_coefficients` output with the
+        frequency axis already reduced to the poles.
+
+    Returns
+    -------
+    zeta : NDArray
+        ``(2 Np,)`` poles, the first ``Np`` retarded and the rest their
+        conjugates.
+    p_row, q_col : NDArray
+        ``(n_dof, 2 Np)`` row and column families.
+
+    """
+    c_sr, c_rs, c_ss = (xp.asarray(a, dtype=xp.complex128)
+                        for a in coefficients)
+    z = xp.asarray(cluster.z)
+    u, zb = cluster.u, xp.conj(z)
+    gap = z[:, None] - zb[None, :]                            # (Np, Np)
+    if bool(xp.any(xp.abs(gap) < 1e-300)):
+        raise ValueError(
+            "a pole coincides with a partner's conjugate; the simple-pole "
+            "split is undefined there (defective/exceptional cluster).")
+    w = c_sr + xp.einsum("ab,jb->aj", c_ss / gap, xp.conj(u))
+    y = c_rs - xp.einsum("ab,ja->jb", c_ss / gap, u)
+    zeta = xp.concatenate([z, zb])
+    p_row = xp.concatenate([u, y], axis=1)
+    q_col = xp.concatenate([xp.swapaxes(w, 0, 1), xp.conj(u)], axis=1)
+    return zeta, p_row, q_col
+
+
+def pf_leg_sample(
+    zeta: NDArray,
+    p_row: NDArray,
+    q_col: NDArray,
+    omega: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+) -> NDArray:
+    r"""The partial-fraction leg on the stored pattern.
+
+    Used for BOTH sides of the decomposition: this sample is what the ring
+    gives up, and the analytic convolution of the same object is what is put
+    back. ``G_reg = G - G_S`` is exact for any ``G_S``, but only if the leg
+    subtracted and the leg restored are literally the same function -- using
+    the per-cell coefficients on one side and the pole-frozen ones on the
+    other is what once broke the spatial balance while leaving the scalar
+    ``P_in = P_out`` nearly intact.
+    """
+    w = xp.asarray(omega, dtype=xp.complex128)[:, None]
+    d = 1.0 / (w - xp.asarray(zeta)[None, :])                 # (n_omega, 2Np)
+    pr = xp.take(p_row, xp.asarray(rows), axis=0)             # (nnz, 2Np)
+    qc = xp.take(q_col, xp.asarray(cols), axis=0)
+    return xp.einsum("kp,wp,kp->wk", pr, d, qc)
+
+
+def pf_self_energy(
+    omega: NDArray,
+    zeta: NDArray,
+    vl: NDArray,
+    vr: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    prefactor: complex | None = None,
+    retarded_only: bool = False,
+    cell=None,
+    chunk: int = 1 << 17,
+) -> NDArray:
+    r"""Analytic bubble of two partial-fraction legs, on the stored pattern.
+
+    .. math::
+        \Sigma(\omega)_{\mu\nu} = \mathcal{P} \sum_{pq}
+            \bar\Phi^{L}_{\mu, pq}\, \bar\Phi^{R}_{\nu, qp}\,
+            \int\!\frac{d\omega'}{2\pi}
+            \frac{1}{\omega' - \zeta_p}\,\frac{1}{\omega-\omega' - \zeta_q}
+
+    -- the same algebra as the pole-pole sector, over ``2 Np`` simple poles
+    with unit coefficients instead of ``Np`` poles carrying a source matrix.
+    The residue coefficients live in the vertex projections, because the
+    residues are rank one: ``vl`` is the cubic vertex projected onto the ROW
+    family and ``vr`` onto the COLUMN family, each through
+    :func:`~quatrex.phonon.pole_bridge.modal_vertex_blocks`.
+
+    ``retarded_only`` keeps the pairings of two poles in the lower half plane,
+    whose combined pole ``zeta_p + zeta_q`` also lies there. That is the causal
+    part in closed form, with no Hilbert transform.
+
+    Chunked over the pattern: ``vl[rows]`` is ``(nnz, 2Np, 2Np)``, four times
+    the pole-pole sector's footprint, and at ``max_poles = 16`` that is 1024
+    complex numbers per stored entry.
+    """
+    from quatrex.phonon.pole_bridge import analytic_prefactor
+    from quatrex.phonon.pole_bubble import pair_convolution
+
+    if prefactor is None:
+        prefactor = analytic_prefactor()
+    z = xp.asarray(zeta, dtype=xp.complex128)
+    c = pair_convolution(z[:, None], z[None, :], omega, cell=cell)
+    if retarded_only:
+        keep = (xp.imag(z) < 0.0)
+        c = c * (keep[None, :, None] & keep[None, None, :])
+    r, cc = xp.asarray(rows), xp.asarray(cols)
+    n = int(r.shape[0])
+    out = xp.empty((c.shape[0], n), dtype=xp.complex128)
+    for s in range(0, n, chunk):
+        e = min(s + chunk, n)
+        out[:, s:e] = xp.einsum(
+            "kpq,kqp,wpq->wk", xp.take(vl, r[s:e], axis=0),
+            xp.take(vr, cc[s:e], axis=0), c)
+    return prefactor * out

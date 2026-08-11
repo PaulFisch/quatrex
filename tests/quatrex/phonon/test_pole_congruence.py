@@ -204,3 +204,105 @@ def test_correction_vanishes_as_the_grid_resolves_the_line():
             assert err < prev / 8.0, f"h={h}: {err:.3e} vs {prev:.3e}"
         prev = err
     assert prev < 1e-3
+
+
+def test_partial_fraction_legs_reproduce_the_sectors():
+    """The flattening is algebra, not a model: with the SAME coefficients the
+    2Np simple poles must give back SR + RS + SS at every frequency."""
+    from quatrex.phonon.pole_congruence import (
+        partial_fraction_legs, pf_leg_sample, sector_terms,
+    )
+
+    cl, w, gk, sig = _bed()
+    co = _coeffs(cl, w, gk, sig)
+    rows, cols = (np.repeat(np.arange(N_DOF), N_DOF),
+                  np.tile(np.arange(N_DOF), N_DOF))
+    for i in range(N_W):                      # freeze on cell i, probe anywhere
+        frozen = (co[0][i], co[1][i], co[2][i])
+        zeta, pr, qc = partial_fraction_legs(cl, frozen)
+        assert zeta.shape[0] == 2 * N_P
+        probe = np.array([w[0] - 0.7, w[2], w[-1] + 1.3, 0.5 * (w[1] + w[2])])
+        got = np.asarray(pf_leg_sample(zeta, pr, qc, probe, rows, cols))
+        # the same three sectors, evaluated directly with cell i's coefficients
+        cof = tuple(np.repeat(c[i:i + 1], probe.size, axis=0) for c in co)
+        want = sum(np.asarray(t) for t in
+                   sector_terms(cl, probe, cof, rows, cols, probe=probe))
+        assert np.abs(got - want).max() < 1e-9 * np.abs(want).max()
+
+
+def _phi_bed(seed=5, sizes=(2, 2)):
+    """A block-structured cubic vertex, and its dense equivalent."""
+    rng = np.random.default_rng(seed)
+    off = np.concatenate(([0], np.cumsum(sizes)))
+    n = int(off[-1])
+    blocks, dense = {}, np.zeros((n, n, n), dtype=complex)
+    for i in range(len(sizes)):
+        for k1 in range(len(sizes)):
+            for k2 in range(len(sizes)):
+                b = (rng.normal(size=(sizes[i], sizes[k1], sizes[k2]))
+                     + 1j * rng.normal(size=(sizes[i], sizes[k1], sizes[k2])))
+                blocks[(i, k1, k2)] = b
+                dense[off[i]:off[i + 1], off[k1]:off[k1 + 1],
+                      off[k2]:off[k2 + 1]] = b
+    return blocks, dense, np.array(sizes), n
+
+
+def test_pair_convolution_is_the_residue_formula():
+    """Independent check of the closed form the analytic sector rests on.
+
+    Closing the contour upward, the integrand ``1/(w'-p) 1/(w-w'-q)`` encloses
+    only ``w' = w - q``, and only when ``p`` and ``q`` sit in the SAME half
+    plane; otherwise both poles fall on the same side and the integral is zero.
+    """
+    from quatrex.phonon.pole_bubble import pair_convolution
+
+    w = np.linspace(-3.0, 7.0, 11)
+    lo = np.array([2.0 - 0.3j, 5.0 - 0.1j])
+    for p in lo:
+        for q in lo:
+            got = np.asarray(pair_convolution(p, q, w))
+            assert np.abs(got - (-1j / (w - p - q))).max() < 1e-12
+            # conjugate pair: both in the upper half plane
+            got = np.asarray(pair_convolution(np.conj(p), np.conj(q), w))
+            assert np.abs(got - (1j / (w - np.conj(p) - np.conj(q)))).max() < 1e-12
+            # mixed half planes: nothing is enclosed
+            assert np.abs(np.asarray(pair_convolution(p, np.conj(q), w))).max() < 1e-12
+
+
+def test_pf_self_energy_matches_a_dense_contraction():
+    """The one index structure that cannot be checked by inspection.
+
+    Builds the same object densely -- vertex, leg families and the residue
+    formula -- and compares. A transposed vertex leg or a swapped (p, q) would
+    survive every other test in this file.
+    """
+    from quatrex.phonon.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.pole_congruence import pf_self_energy
+
+    blocks, phi, sizes, n = _phi_bed()
+    rng = np.random.default_rng(9)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    npq = 4
+    zeta = np.concatenate([cx(npq // 2).real + 2.0 - 0.2j * np.arange(1, 3)])
+    zeta = np.concatenate([zeta, np.conj(zeta)])
+    pr, qc = cx(n, zeta.size), cx(n, zeta.size)
+    rows, cols = (np.repeat(np.arange(n), n), np.tile(np.arange(n), n))
+    w = np.linspace(1.0, 9.0, 7)
+
+    vl = np.asarray(modal_vertex_blocks(blocks, sizes, pr, conjugate=False))
+    vr = np.asarray(modal_vertex_blocks(blocks, sizes, qc, conjugate=False))
+    got = np.asarray(pf_self_energy(w, zeta, vl, vr, rows, cols,
+                                    prefactor=1.0)).reshape(-1, n, n)
+
+    # dense reference, built from the residue formula rather than the code
+    j = np.where(
+        (np.imag(zeta)[:, None] < 0) == (np.imag(zeta)[None, :] < 0),
+        np.where(np.imag(zeta)[:, None] < 0, -1j, 1j)
+        / (w[:, None, None] - zeta[None, :, None] - zeta[None, None, :]),
+        0.0)
+    ref = np.einsum("mce,ndb,cp,bp,eq,dq,wpq->wmn",
+                    phi, phi, pr, qc, pr, qc, j)
+    assert np.abs(got - ref).max() < 1e-9 * np.abs(ref).max()

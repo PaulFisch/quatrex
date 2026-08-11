@@ -297,12 +297,44 @@ an empty pole set.
 **Open, in order.**
 
 1. **The pole is resolved in the leg WEIGHT, not inside the convolution.** The
-   output frequency resolution is still the grid's. Carrying `SR`/`RS`
-   analytically beside the ring needs the vertex contracted against per-pole
-   pattern-valued coefficients (`c_sr[k, a, :]`), which the current
-   `modal_vertex_blocks` route cannot express -- it factorises through `U` on
-   both sides. This is the remaining architectural work, and it is what would
-   make the method more than a better quadrature.
+   output frequency resolution is still the grid's.
+
+   The obstruction, and how it is removed, are now settled. Any leg term with
+   an OPEN (non-modal) index forces the cubic vertex to be re-contracted at
+   every frequency, which is why the original design made `G_PP` modal on both
+   sides. Partial-fractioning the congruence removes it: collecting every term
+   that shares a pole gives
+
+       G~(w) - B^R S B^A = sum_p p_p q_p^T / (w - zeta_p),   p = 1 .. 2 Np
+
+   with `zeta = [z_a, conj(z_b)]` and, for `zeta_p = z_a`, row factor `u_a`
+   and column factor `q_a = c^SR_{a,:} + sum_b c^SS_{ab} conj(u_b)/(z_a -
+   conj(z_b))`; for `zeta_p = conj(z_b)`, row factor `y_b = c^RS_{:,b} - sum_a
+   c^SS_{ab} u_a/(z_a - conj(z_b))` and column factor `conj(u_b)`.
+
+   Every residue is rank one with one fixed row vector and one fixed column
+   vector, so the vertex is projected onto the two families ONCE per
+   iteration, exactly as it is onto `U` today, and the bubble is the existing
+   pole-pole algebra over `2 Np` poles rather than `Np`. The convolution is
+   the same residue formula, `J(p,q;w) = -i/(w - p - q)`, nonzero only for
+   like-half-plane pairs.
+
+   Cost: `(2 Np)^4`, sixteen times the pole-pole sector, and `vl[rows]` is
+   `(nnz, 2Np, 2Np)`. `max_poles` is already the control for this.
+
+   The families must be FROZEN at the poles -- one value each, not one per
+   cell -- or they are not frequency independent and the whole reduction
+   fails. That is the approximation `source_at_poles` already makes, and it is
+   better justified here, since the poles have been removed from `B^R` by
+   construction and it is the smooth part being sampled.
+
+   `partial_fraction_legs`, `pf_leg_sample` and `pf_self_energy` implement and
+   test this. Not yet wired: freezing `c_sr`/`c_rs` at the poles, switching
+   `g_pp` to `pf_leg_sample` (the leg subtracted and the leg restored must be
+   the SAME function), and regenerating the MIXED sectors -- with an analytic
+   `G_S` the decomposition is `SS + SR + RS + RR` again, and
+   `mixed_self_energy_blocked` assumes a pole leg that is modal on both sides,
+   so it needs the same two-family generalisation.
 2. **Cell-constant sources.** `Sigma_k` is frozen per cell in the congruence,
    the same approximation `source_at_poles` makes and `source_fit_tol`
    measures. The two should be one gate.
