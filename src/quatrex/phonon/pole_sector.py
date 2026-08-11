@@ -68,6 +68,9 @@ class PoleSectorState:
     must come from a set closed under ``z -> -z^*`` or the fold
     ``Sigma^<(q,-w) = Sigma^>(-q,w)^T`` does not hold. Sources are indexed
     alongside THIS list, not ``clusters``."""
+    source_fit: list = field(default_factory=list)
+    """Measured source variation across each cluster's pole window, the
+    quantity ``source_fit_tol`` gates on."""
     source_lesser: list = field(default_factory=list)
     source_greater: list = field(default_factory=list)
     g_pp_lesser: object = None

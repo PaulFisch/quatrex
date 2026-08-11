@@ -705,7 +705,7 @@ class PhononSolver(SubsystemSolver):
         """
         from quatrex.phonon.pole_bridge import (
             add_contact_source, pole_keldysh_pf_sparse, project_source_sparse,
-            source_at_poles,
+            source_at_poles, source_variation,
         )
 
         state = self.pole_state
@@ -745,6 +745,19 @@ class PhononSolver(SubsystemSolver):
                     s_l = add_contact_source(s_l, corner_l, cl.v, off)
                 if corner_g is not None:
                     s_g = add_contact_source(s_g, corner_g, cl.v, off)
+            # source_fit_tol as a real gate: carrying a source analytically
+            # presumes it is smooth across its own pole window, and this is
+            # the measured statement of that. Above the tolerance the cluster
+            # is reported rather than silently approximated -- an asymptotic
+            # error estimate cannot see a source with structure of its own.
+            eps_fit = max(source_variation(s_l, freqs, cl),
+                          source_variation(s_g, freqs, cl))
+            state.source_fit.append(eps_fit)
+            if eps_fit > self._pole_cfg.source_fit_tol and comm.rank == 0:
+                print(f"  pole sector: cluster {cl.label} source varies by "
+                      f"{eps_fit:.2e} across its window (tol "
+                      f"{self._pole_cfg.source_fit_tol:.2e}); the analytic "
+                      "source model is not justified there", flush=True)
             state.source_lesser.append(s_l)
             state.source_greater.append(s_g)
             # PARTIAL-FRACTION form, not U D^R S(w) D^A U^dag. The analytic

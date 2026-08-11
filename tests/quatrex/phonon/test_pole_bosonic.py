@@ -397,3 +397,41 @@ def test_resolved_and_partial_fraction_legs_differ_when_the_source_varies():
             assert rel < tol, f"{label}: {rel:.2e}"
         else:
             assert rel > 1e-3, f"{label} should differ, got {rel:.2e}"
+
+
+def test_source_variation_is_a_measured_residual_not_an_asymptotic_claim():
+    """``source_fit_tol`` gates on THIS, not on ``O((|Im z|/h)^(p+1))``.
+
+    The asymptotic estimate omits the analyticity radius and higher
+    derivatives of the source, the pole's offset from the fit centre, the
+    window width and the conditioning of the fit. A source with structure of
+    its own is invisible to it and obvious here.
+    """
+    from quatrex.phonon.pole_bridge import source_variation
+
+    w = np.linspace(0.0, 40.0, 4001)
+    z = np.array([9.0 - 0.5j, 14.0 - 0.7j])
+    cl = PoleCluster(z=z, u=np.zeros((4, 2), complex),
+                     v=np.zeros((4, 2), complex))
+    base = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    flat = np.broadcast_to(base + 0j, (w.size, 2, 2)).copy()
+    assert source_variation(flat, w, cl) == 0.0
+
+    gentle = np.einsum("w,ab->wab", 1.0 + 0.03 * w, base) + 0j
+    assert source_variation(gentle, w, cl) < 1e-2
+
+    # A source with a resonance of its own inside the pole window: exactly the
+    # case an analytic model has no business carrying.
+    sharp = np.einsum("w,ab->wab", 1.0 / ((w - 9.0) ** 2 + 0.05 ** 2), base) + 0j
+    assert source_variation(sharp, w, cl) > 5e-2
+
+    # And it is scale free.
+    assert np.isclose(source_variation(1e6 * sharp, w, cl),
+                      source_variation(sharp, w, cl))
+
+
+def test_state_records_the_source_fit_per_cluster():
+    from quatrex.phonon.pole_sector import PoleSectorState
+
+    assert PoleSectorState().source_fit == []

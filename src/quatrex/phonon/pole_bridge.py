@@ -34,6 +34,7 @@ from quatrex.phonon.units import HBAR_SI
 
 __all__ = [
     "source_at_poles",
+    "source_variation",
     "pole_keldysh_pf_sparse",
     "mixed_vertex_blocks",
     "mixed_self_energy_sparse",
@@ -651,6 +652,51 @@ def source_at_poles(
     ])
     neg = xp.asarray(centre < 0.0)
     return xp.where(neg, xp.conj(out), out)
+
+
+def source_variation(
+    source: NDArray, freqs: NDArray, cluster: PoleCluster, window: int = 4
+) -> float:
+    r"""How far the projected source strays from its per-pair value.
+
+    A MEASURED residual, replacing the asymptotic
+    ``O((|Im z|/h)^(p+1))`` claim, which omits the analyticity radius and
+    higher derivatives of the source, the pole's offset from the fit centre,
+    the window width and the conditioning of the fit.
+
+    .. math::
+        \epsilon_{\rm fit} = \max_{k \in \mathcal K}
+          \frac{\|S(\omega_k) - S_{\rm pair}\|}{\max_j \|S(\omega_j)\| + \epsilon_0}
+
+    over the ``window`` cells either side of each pole. Carrying a source
+    analytically presumes it is smooth across its own pole window; this is the
+    number that says whether it is. Above ``source_fit_tol`` the cluster
+    should be demoted rather than approximated.
+
+    The normalisation is GLOBAL, not per-frequency: a per-omega denominator
+    turns the numerically empty tails of the window into apparent failures,
+    which is the recorded trap that once made a ballistic control "fail".
+    """
+    w = np.asarray(_host(freqs), dtype=float)
+    z = np.asarray(_host(cluster.z))
+    src = np.asarray(_host(source))
+    pair = np.asarray(_host(source_at_poles(source, freqs, cluster)))
+
+    scale = float(np.abs(src).max())
+    if scale == 0.0:
+        return 0.0
+    worst = 0.0
+    npp = int(z.size)
+    centre = 0.5 * (z.real[:, None] + np.conj(z).real[None, :])
+    for a in range(npp):
+        for b in range(npp):
+            k0 = int(np.argmin(np.abs(w - abs(centre[a, b]))))
+            lo, hi = max(0, k0 - window), min(w.size, k0 + window + 1)
+            local = src[lo:hi, a, b]
+            if abs(centre[a, b]) < 0.0 or centre[a, b] < 0.0:
+                local = np.conj(local)
+            worst = max(worst, float(np.abs(local - pair[a, b]).max()))
+    return worst / scale
 
 
 def pole_keldysh_pf_sparse(
