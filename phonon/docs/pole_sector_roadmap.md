@@ -512,3 +512,62 @@ unphysical, which is the third time this pair has disagreed. `P_in = P_out` is
 a scalar trace identity; it is necessary, not sufficient, and the heat profile
 is the observable that actually discriminates. Any future gate on this sector
 should read the profile first.
+
+## Localised: the mixed sector integrated a leg the ring excludes
+
+Found by BISECTION, after four mechanism guesses had each been proposed and
+refuted by measurement (residue mis-scaling, mixed quadratures breaking PSD, a
+non-congruent `G_PP`, an indefinite `G_reg`). Scaling the injected
+`Sigma_SR + Sigma_RS` by `lambda`:
+
+| lambda | `Sigma^>` worst | / lambda |
+|---|---|---|
+| 0.0 | -2.0e-04 (w[1], DC edge) | -- |
+| 0.25 | -3.805e-02 (w[128]) | 0.152 |
+| 0.5 | -7.678e-02 (w[128]) | 0.154 |
+| 1.0 | -1.506e-01 (w[128]) | 0.151 |
+
+Strictly linear, so no cancellation is involved: the term simply adds
+something that should not be there. A delicate approximation failure would
+have been nonlinear. That single measurement constrained the answer more than
+all four mechanism guesses combined.
+
+Cause: the ring zeroes the `omega = 0` bin of its legs -- its own comment says
+that bin carries the near-singular acoustic peak, `|G^>(0)| >> neighbours` --
+while `interaction.py` built `reg_l = g - g_pp` straight from the Green's
+function with no mask. The two sectors were integrating different data.
+
+### A prior bug in the gate itself
+
+The positivity gate reported `sigma_greater worst = -1.000e+00` on the
+POLE-FREE baseline. Exactly -1 is uniformly negative, i.e. a flipped sign.
+This solver uses `sigma^{<,>} = +i n(+1) Gamma`, so BOTH components satisfy
+`-i sigma >= 0`; the textbook `+i G^> >= 0` does not apply. Every `greater`
+reading before that fix was meaningless. Now pinned with a test asserting a
+wrong sign looks OBVIOUSLY wrong (worst < -0.99), so it cannot recur as a
+marginal-looking number. Lesson: validate a diagnostic against a known-good
+run before trusting it to localise a defect.
+
+### Open: can the mask be dropped entirely? (Paul, 2026-08-11)
+
+The mask is a grid convention, not physics -- it implements "omega = 0 has
+measure zero in the integral", which a single grid SAMPLE violates. The code
+states the device `G^<` has no `1/omega` pole, so the lesser leg is regular at
+DC and its cell integral is unproblematic.
+
+Two things stand in the way of simply removing it for the analytic route:
+
+1. `cell_resolvent_weights` models `R` as cell-wise CONSTANT, so integrating
+   the DC cell reproduces the same sampling artefact rather than curing it.
+   Doing it properly means modelling the `omega -> 0` form of the leg --
+   and it is `G^>`, not `G^<`, that is near-singular there
+   (`G^> = G^< + (G^R - G^A)`, with the acoustic spectral weight in the
+   difference).
+2. Sector consistency is binding: the ring masks, and changing that breaks
+   legacy bit-identity. Dropping the mask must happen on BOTH sides together,
+   or the sectors disagree again -- which is exactly the 15% violation
+   measured above.
+
+So the analytic DC treatment is the right destination and a well-defined
+follow-up: model the DC cell in the mixed route, drop the ring's mask behind
+the same flag, and quantify the remaining O(h) disagreement.
