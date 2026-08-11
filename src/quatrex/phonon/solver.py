@@ -780,6 +780,54 @@ class PhononSolver(SubsystemSolver):
         state.g_pp_lesser = acc_l.reshape(sse_lesser.data.shape)
         state.g_pp_greater = acc_g.reshape(sse_greater.data.shape)
 
+    def _report_subcell(self, out) -> None:
+        """Is the reconstruction physical BETWEEN grid points?
+
+        The sectors act on ``G~_h(w) = P(w) + R_k``, not on ``G``. That equals
+        ``G`` at the cell centres and nowhere else, and ``R_k = G - P`` is a
+        DIFFERENCE of PSD objects. Offline, a crude pole model gives
+        ``lambda_min = -1.000`` five percent of a cell off centre while the
+        true ``G`` stays at ``+2.3e-02``; an EXACT residue keeps it healthy.
+        So this measures whether the production pole model is good enough, and
+        it is measured rather than assumed.
+
+        Report only: the threshold at which a pole should be refused is not
+        yet established, and gating on a guess would hide the answer.
+        """
+        from quatrex.phonon.pole_audit import subcell_positivity
+
+        cfg = getattr(self.config.phonon, "pole_sector", None)
+        if cfg is None or not getattr(cfg, "psd_check", False):
+            return
+        if state is None or not state.legs:
+            return
+        rows, cols = out[0].rows, out[0].cols
+        freqs = xp.asarray(self.local_frequencies, dtype=float)
+        g_l = out[0].data.reshape(freqs.shape[0], -1)
+        w = np.asarray(get_host(freqs), dtype=float)
+        centres = np.array([int(np.argmin(np.abs(w - float(np.real(z)))))
+                            for cl in state.legs for z in np.asarray(
+                                get_host(cl.z)) if float(np.real(z)) >= 0.0])
+        if centres.size == 0:
+            return
+
+        def _pole_at(omega):
+            acc = None
+            for cl, s_l in zip(state.legs, state.source_lesser):
+                v = pole_keldysh_pf_sparse(
+                    omega, cl, source_at_poles(s_l, freqs, cl), rows, cols)
+                acc = v if acc is None else acc + v
+            return acc
+
+        rep = subcell_positivity(
+            g_l, state.g_pp_lesser.reshape(freqs.shape[0], -1), _pole_at,
+            freqs, rows, cols, self.block_sizes, centres=centres, window=1)
+        self.psd_report["subcell"] = rep
+        if comm.rank == 0:
+            print(f"  subcell positivity: worst={rep['worst']:+.3e} at "
+                  f"w[{rep['worst_centre']}], at-centres="
+                  f"{rep['at_centres']:+.3e}", flush=True)
+
     @profiler.profile(label="PhononSolver", level="default", comm=comm)
     def solve(
         self,
@@ -835,5 +883,6 @@ class PhononSolver(SubsystemSolver):
         self._psd_sigma = (sse_lesser, sse_greater)
         self._check_positivity(out)
         self._psd_sigma = None
+        self._report_subcell(out)
 
         self.system_matrix.free_data()

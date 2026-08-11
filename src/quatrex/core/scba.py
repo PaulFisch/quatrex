@@ -879,9 +879,18 @@ class SCBA(TransportSolver):
                 self._last_heat_current = heat.copy()
                 self._last_heat_spread = spread
                 if comm.rank == 0:
+                    # lead balance is a SIGN gate, not a magnitude one: both
+                    # currents count positive left-to-right, so a steady state
+                    # has heat[0] == heat[-1] and balance -> 0, while
+                    # heat[-1] == -heat[0] gives EXACTLY 2. That is the device
+                    # emitting into both leads -- anti-damping -- and it is a
+                    # different failure from "somewhat unbalanced". Say so,
+                    # because reading 2.0 as a large imbalance costs days.
+                    _sign = ("  [SIGN INVERSION: emitting into both leads]"
+                             if balance > 1.5 else "")
                     print(f"Phonon: rel Sigma^R residual {rel_sigma:.4e}; "
                           f"lead balance {balance:.4e}; "
-                          f"internal spread {spread:.4e}", flush=True)
+                          f"internal spread {spread:.4e}{_sign}", flush=True)
                 # NOTE: G survives the back-transpose only when
                 # bubble_balance_check keeps it; on discarded G the traces
                 # would evaluate to a spurious machine-perfect 0 == 0.
@@ -896,6 +905,11 @@ class SCBA(TransportSolver):
                         self._bubble_balance_history.append(
                             (p_in.real, p_out.real, bres))
                         if comm.rank == 0:
+                            # resid is a RATIO and therefore blind to a
+                            # blow-up: it read 1.9e-14 while P_in grew from
+                            # 2.6e+05 to 4.4e+32. |P_in| is printed beside it
+                            # for exactly that reason, and the convergence
+                            # criterion is rel Sigma^R above, not this.
                             print(f"Bubble energy balance: P_in={p_in.real:.6e} "
                                   f"P_out={p_out.real:.6e} resid={bres:.3e}",
                                   flush=True)
