@@ -430,3 +430,13 @@ def test_pf_mixed_sectors_match_the_brute_force_ring():
     sel = (w_pos > 4.0) & (w_pos < 20.0)
     err = np.abs(got[sel] - ref[keep]).max() / np.abs(ref[keep]).max()
     assert err < 5e-3, f"pf mixed sectors vs brute-force ring: {err:.3e}"
+
+
+def test_interaction_class_keeps_its_pole_hook():
+    """A module-level helper inserted into the class body once truncated it,
+    moving _inject_pole_sector out of the class. Every local test passed --
+    none of them call it -- and three device runs died on the attribute."""
+    from quatrex.core.interaction import PhononPhononInteraction
+
+    for name in ("compute", "_inject_pole_sector"):
+        assert callable(getattr(PhononPhononInteraction, name, None)), name
