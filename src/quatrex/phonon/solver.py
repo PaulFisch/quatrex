@@ -842,7 +842,7 @@ class PhononSolver(SubsystemSolver):
         Report only: the threshold at which a pole should be refused is not
         yet established, and gating on a guess would hide the answer.
         """
-        from quatrex.phonon.pole_audit import subcell_positivity
+        from quatrex.phonon.pole_audit import psd_residual, subcell_positivity
         from quatrex.phonon.pole_bridge import (
             pole_keldysh_pf_sparse, source_at_poles,
         )
@@ -853,6 +853,34 @@ class PhononSolver(SubsystemSolver):
             return
         state = self.pole_state
         if state is None or not state.legs:
+            return
+
+        if getattr(cfg, "leg", "congruence") == "congruence":
+            # The rest of this routine measures the SUPERSEDED reconstruction
+            # -- it rebuilds P^{<,>} through pole_keldysh_pf_sparse and asks
+            # whether P + R_k is physical. On this route that object is not
+            # what anything consumes, so reporting it would be measuring a
+            # function the solver no longer uses.
+            #
+            # What the ring actually convolves is G^{<,>}_k - g_pp = <G~>_k,
+            # an average of PSD matrices. That is PSD by construction, so this
+            # is a check on the IMPLEMENTATION rather than on the maths: it
+            # catches a sign, an index or a cell width being wrong, which the
+            # offline tests cannot see.
+            rows, cols = out[0].rows, out[0].cols
+            n_freq = int(self.local_frequencies.shape[0])
+            worst = None
+            for got, pp in ((out[0], state.g_pp_lesser),
+                            (out[1], state.g_pp_greater)):
+                leg = got.data.reshape(n_freq, -1) - pp.reshape(n_freq, -1)
+                rep = psd_residual(leg, rows, cols, self.block_sizes,
+                                   sign=-1.0)
+                worst = (rep["worst"] if worst is None
+                         else min(worst, rep["worst"]))
+            self.psd_report["ring_leg"] = {"worst": worst}
+            if comm.rank == 0:
+                print(f"  ring leg positivity (cell-averaged congruence): "
+                      f"worst={worst:+.3e}", flush=True)
             return
         rows, cols = out[0].rows, out[0].cols
         freqs = xp.asarray(self.local_frequencies, dtype=float)

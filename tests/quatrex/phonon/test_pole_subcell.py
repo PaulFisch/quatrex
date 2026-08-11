@@ -197,7 +197,9 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     st.legs = list(st.clusters)
     # (n_omega, Np, Np), as project_source_sparse produces in production.
     st.source_lesser = [np.full((freqs.size, 1, 1), 1.0 + 0.5j)]
+    st.source_greater = [np.full((freqs.size, 1, 1), 1.0 - 0.5j)]
     st.g_pp_lesser = np.zeros((freqs.size, rows.size), dtype=complex)
+    st.g_pp_greater = np.zeros((freqs.size, rows.size), dtype=complex)
 
     solver = object.__new__(PhononSolver)
     solver.config = types.SimpleNamespace(
@@ -209,12 +211,25 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     solver.psd_report = {}
     solver._psd_sigma_lesser = a          # Sigma^< on the pattern
     # out = (g_lesser, g_greater, g_retarded); the congruence route needs G^R.
+    # leg="keldysh": the superseded reconstruction and its in-situ comparison
+    solver.config.phonon.pole_sector.leg = "keldysh"
     solver._report_subcell((_Buf(a), _Buf(a), _Buf(a)))
     assert "subcell" in solver.psd_report
     assert "subcell_congruence" in solver.psd_report, (
         "the in-situ comparison against the congruence must also run")
     for key in ("worst", "worst_centre", "at_centres"):
         assert key in solver.psd_report["subcell"]
+
+    # leg="congruence": the superseded metric is not reported, because it
+    # would be measuring a function nothing consumes. What is reported is the
+    # positivity of the leg the ring actually convolves.
+    solver.psd_report = {}
+    solver.config.phonon.pole_sector.leg = "congruence"
+    solver._report_subcell((_Buf(a), _Buf(a), _Buf(a)))
+    assert "ring_leg" in solver.psd_report
+    assert "subcell" not in solver.psd_report
+    # g_pp is zero here, so the leg IS G^{<,>} and the metric is finite
+    assert np.isfinite(solver.psd_report["ring_leg"]["worst"])
 
 
 # --------------------------------------------------------------------------

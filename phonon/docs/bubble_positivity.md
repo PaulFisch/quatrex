@@ -832,6 +832,62 @@ lattice vector is parallel to the named cartesian axis. For any device
 where it is not, the cutoff silently does something other than what it
 says. That is worth a validator.
 
+### 6.11a Neither mask is active on Si (2026-08-10)
+
+Two masks could in principle damage a Si run, and at the production
+settings neither does. This closes the "is the Si divergence a
+truncation artefact" question without a run.
+
+The **band mask** is complete. `sse_g_band` is clamped to `n_blocks - 1`
+(`sse_phonon_phonon.py:372`), so on the short Si devices the default
+`sse_g_band = 3` never truncates: 4 blocks give band 3, 3 blocks band 2,
+2 blocks band 1, and in each case the band reaches every block pair. The
+mask is the all-ones matrix, whose `lambda_min` is 0. A blocking ladder
+over these devices therefore cannot vary mask positivity at all; the
+band-mask row of §4 applies only where `sse_g_band < n_blocks - 1`.
+cvSiA ran with no `QX_GBAND` override, so it had complete coverage.
+
+**But blocking is not thereby irrelevant, and the ladder measured it.**
+si4x1 and si4x2 are the same 4-primitive-cell device (the reblock
+verifies the dense FC2 and fc3 operators are unchanged, and the
+iteration-0 currents are bit-identical: 216.8884, 86.1743, 29.377), and
+they differ only in BTD partition -- 4 blocks of 6 dof against 2 blocks
+of 12 dof. Their SCBA paths do not resemble each other:
+
+| iteration | 1 | 3 | 5 | 7 | 9 | 11 | per-it factor |
+|---|---|---|---|---|---|---|---|
+| si4x1, 4x6 | 29.79 | 26.95 | 24.38 | 22.05 | 20.97 | -- | 0.951 |
+| si4x2, 2x12 | 0.978 | 0.764 | 0.628 | 0.510 | 0.407 | 0.317 | 0.900 |
+
+Both have a complete, PSD mask and identical ballistic transport, so
+neither mask positivity nor the physics accounts for the factor ~30 in
+iterate amplitude. Whatever drives the Si instability is carried by the
+block partition itself, not by the truncation the partition implies.
+Candidate channels, none yet tested: the count of independent
+off-diagonal Sigma blocks the SSE assembles (16 pairs against 4), the
+RGF off-diagonal post-pass at band 3 against band 1, and the OBC NEVP
+conditioning of a 6-dof against a 12-dof lead cell. The practical
+reading is that coarser blocking is the stabler way to run Si.
+
+The **box mask** is inert for the §6.11 reason, and the margin is
+thinner than that section implies. Measuring separation along the
+cartesian x (what the code does) gives a 1.37 A extent at any length.
+Measuring it along the tiling vector a1 itself (what the cutoff means)
+gives 3.87 A per cell:
+
+| Si cells | span on x (code) | fill @ 10 A | span on a1 (intended) | fill @ 10 A | lambda_min |
+|---|---|---|---|---|---|
+| 3 (cvSiA) | 1.37 A | 100 % | 9.67 A | 100 % | -6.1e-15 |
+| 4 (si4x1/2) | 1.37 A | 100 % | 13.53 A | 90.6 % | **-2.77** |
+
+At 3 cells the device is shorter than the cutoff on either reading, so
+the convention bug is invisible and the mask is dense either way. At 4
+cells the two readings part company: the intended cutoff would truncate
+and inject a first-order PSD defect, and only the axis bug keeps the run
+dense. Fixing the validator called for in §6.11 would therefore change
+the behaviour of 4-cell Si, and any such fix must be landed together
+with a cutoff larger than the device, not on its own.
+
 **What this does and does not settle.** H2 is confirmed as a real,
 first-order PSD defect present in every production run. It is not by
 itself sufficient: the CNT L4 carries the largest injected negativity
