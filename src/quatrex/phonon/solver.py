@@ -965,7 +965,21 @@ class PhononSolver(SubsystemSolver):
             n_freq = int(self.local_frequencies.shape[0])
             low = max(1e-6, float(
                 getattr(self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
-            skip = xp.abs(xp.asarray(self.local_frequencies)) < low
+            w_host = np.asarray(get_host(self.local_frequencies), dtype=float)
+            skip = xp.asarray(np.abs(w_host) < low)
+            # ... and a second reading restricted to the CELLS THE POLES
+            # TOUCH. The global worst is whatever the baseline's own worst bin
+            # is, and the correction is localised, so the global number goes
+            # blind against its control by construction. This one cannot.
+            near = np.zeros(n_freq, dtype=bool)
+            for cl in state.legs:
+                for z in np.asarray(get_host(cl.z)):
+                    x = float(np.real(z))
+                    if x < 0.0:
+                        continue
+                    k = int(np.argmin(np.abs(w_host - x)))
+                    near[max(0, k - 2):min(n_freq, k + 3)] = True
+            skip_far = xp.asarray((np.abs(w_host) < low) | ~near)
             rep_all = {}
             for name, got, pp in (("lesser", out[0], state.g_pp_lesser),
                                   ("greater", out[1], state.g_pp_greater)):
@@ -974,16 +988,28 @@ class PhononSolver(SubsystemSolver):
                                  (f"{name}_control", raw)):
                     rep_all[tag] = psd_residual(
                         leg, rows, cols, self.block_sizes, sign=-1.0, skip=skip)
+                    rep_all[f"{tag}_poles"] = psd_residual(
+                        leg, rows, cols, self.block_sizes, sign=-1.0,
+                        skip=skip_far)
             self.psd_report["ring_leg"] = rep_all
             if comm.rank == 0:
                 for name in ("lesser", "greater"):
                     a, b = rep_all[name], rep_all[f"{name}_control"]
-                    same = "  [== control: gate is blind]" if abs(
-                        a["worst"] - b["worst"]) <= 1e-12 else ""
+                    # RELATIVE, not absolute: the two agreeing to a part in
+                    # 1e3 already means the worst bin is one the pole
+                    # correction does not touch, and the gate is reporting the
+                    # baseline's own worst bin whatever the sector does.
+                    scale = max(abs(a["worst"]), abs(b["worst"]), 1e-300)
+                    same = ("  [== control: gate is blind]"
+                            if abs(a["worst"] - b["worst"]) <= 1e-3 * scale
+                            else "")
+                    pa = rep_all[f"{name}_poles"]
+                    pb = rep_all[f"{name}_control_poles"]
                     print(f"  ring leg positivity {name:8s} "
                           f"worst={a['worst']:+.3e} at w[{a['omega_index']}]"
-                          f"   pole-off control={b['worst']:+.3e}{same}",
-                          flush=True)
+                          f"   pole-off control={b['worst']:+.3e}{same}"
+                          f"   | in pole cells {pa['worst']:+.3e} vs "
+                          f"{pb['worst']:+.3e}", flush=True)
             return
         rows, cols = out[0].rows, out[0].cols
         freqs = xp.asarray(self.local_frequencies, dtype=float)

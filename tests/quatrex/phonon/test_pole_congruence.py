@@ -805,3 +805,85 @@ def test_registration_error_is_dominated_by_pole_cell_PAIRS():
     assert both > 20 * one, (
         f"the two cases must be orders apart, or restricting the correction "
         f"to pole-cell PAIRS is not justified: {both:.3e} vs {one:.3e}")
+
+
+# --- conjugate-pole residue symmetry, review Sec. 21 ------------------------ #
+
+def _flat_bed(closed, n_dof=6, n_p=2, n_w=41, seed=4):
+    """Coefficients -> freeze -> flatten, on a smooth anti-Hermitian source."""
+    from quatrex.phonon.pole_congruence import (
+        background_coefficients, coefficients_at_poles, partial_fraction_legs,
+    )
+
+    rng = np.random.default_rng(seed)
+    cx = lambda *s: rng.normal(size=s) + 1j * rng.normal(size=s)
+    w = np.linspace(4.0, 14.0, n_w)
+    zc = np.array([8.0 - 0.3j, 11.0 - 0.25j])[:n_p]
+    z = np.concatenate([zc, -np.conj(zc)]) if closed else zc
+    cl = PoleCluster(z=z, u=cx(n_dof, z.size), v=cx(n_dof, z.size), label="ah")
+
+    # -i Sigma PSD  =>  Sigma^dagger = -Sigma, and smooth across the window so
+    # the local fit is a fair one.
+    a0, a1 = cx(n_dof, n_dof), cx(n_dof, n_dof)
+    sig = np.stack([1j * ((a0 + 0.03 * x * a1)
+                          @ np.conj((a0 + 0.03 * x * a1).T)) for x in w])
+    gk = np.stack([cx(n_dof, n_dof) for _ in w])
+    sv = np.einsum("wij,ja->wia", sig, np.asarray(cl.v))
+    co = background_coefficients(cl, w, sv, np.einsum("wij,wja->wia", gk, sv))
+    frozen = coefficients_at_poles(cl, w, co)
+    return cl, co, frozen, partial_fraction_legs(cl, frozen)
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_flattened_residues_keep_the_conjugate_pole_antisymmetry(closed):
+    r"""``R_{conj z} = -R_z^dagger``, and it survives the freeze.
+
+    On the real axis the Keldysh leg must be anti-Hermitian, so a simple-pole
+    expansion has to pair each residue with minus the adjoint of its
+    conjugate partner's. The concern (review Sec. 21) is that ``c_sr`` and
+    ``c_rs`` are fitted INDEPENDENTLY, at different poles, so nothing
+    obviously enforces it.
+
+    It is enforced, and by two things that are easy to break by accident:
+
+    * ``conj(c_ss[b,a]) = -c_ss[a,b]`` survives ``source_at_poles`` because it
+      shares ``0.5*(P(z_a) + P(conj z_b))`` between the pair, evaluated from
+      ONE fit with a common anchor. A per-pole value would not.
+    * ``c_sr(z_a) = -c_rs(conj z_a)^dagger`` survives ``coefficients_at_poles``
+      because both fits run through the same REAL design matrix, so the fitted
+      coefficient matrices inherit ``A_n = -B_n^dagger`` from the data.
+
+    Change the anchor, the window, or the weighting on one side and this
+    breaks silently, which is why it is measured rather than argued.
+    """
+    cl, co, frozen, (zeta, p_row, q_col) = _flat_bed(closed)
+
+    # the two identities the result rests on, before and after freezing
+    assert np.abs(np.conj(np.swapaxes(co[2], 1, 2)) + co[2]).max() < 1e-10
+    assert np.abs(np.conj(frozen[2].T) + frozen[2]).max() < 1e-9, (
+        "the pair-shared source freeze lost c_ss^dagger = -c_ss")
+    assert np.abs(frozen[0] + np.conj(frozen[1].T)).max() < 1e-10, (
+        "the two independent fits lost c_sr = -c_rs^dagger")
+
+    n = int(np.asarray(cl.z).size)
+    res = np.einsum("ip,jp->pij", p_row, q_col)
+    eps = max(np.linalg.norm(res[n + a] + np.conj(res[a].T))
+              / (np.linalg.norm(res[a]) + np.linalg.norm(res[n + a]))
+              for a in range(n))
+    assert eps < 1e-12, f"eps_AH,res = {eps:.3e}"
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_flattened_leg_is_anti_hermitian_on_the_real_axis(closed):
+    """The same statement where it is actually consumed: ``-i G_S`` Hermitian.
+
+    The residue test above can pass while the assembled leg does not, if a
+    pole were paired with the wrong partner in ``zeta``.
+    """
+    _, _, _, (zeta, p_row, q_col) = _flat_bed(closed)
+    w = np.linspace(5.0, 13.0, 17)
+    d = 1.0 / (w[:, None] - zeta[None, :])
+    gs = np.einsum("ip,wp,jp->wij", p_row, d, q_col)
+    eps = (np.abs(gs + np.conj(np.swapaxes(gs, 1, 2))).max()
+           / np.abs(gs).max())
+    assert eps < 1e-12, f"eps_AH(w) = {eps:.3e}"

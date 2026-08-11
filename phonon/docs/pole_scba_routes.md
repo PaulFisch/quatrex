@@ -373,14 +373,73 @@ Two things that were suspected and are NOT the cause:
   design matrix is real, so `conj(S[b,a]) = -S[a,b]` exactly;
   `coefficients_at_poles` fits `c_sr` at `z_a` and `c_rs` at `conj(z_a)` through
   that same design matrix, so `c_sr(z_a) = -c_rs(conj z_a)^dagger` exactly.
+  Measured on the bed, open and closed pole sets alike: `eps_AH,res` and
+  `eps_AH(w)` both at 2e-16
+  (`test_flattened_residues_keep_the_conjugate_pole_antisymmetry`,
+  `test_flattened_leg_is_anti_hermitian_on_the_real_axis`). It depends on the
+  shared anchor and the real design matrix, so it is measured rather than
+  argued -- changing either breaks it silently.
 
 **What remains, and it is structural.** `reg = G(w_k) - G_S(w_k)` is frozen per
 cell while `G_S(w)` varies across it. That is the same additive
 signed-pole-plus-frozen-remainder construction that made `keldysh` diverge
 (Sec. 1), reintroduced. The congruence route avoids it by adding no sectors at
-all and correcting the leg by a cell average instead. Fixing (a)-(c) removes
-three defects; it does not remove this, and the device A/B is what says whether
-it bites.
+all and correcting the leg by a cell average instead. Fixing (a)-(c) removed
+three real defects; it did not remove this. Sec. 4.5 is the measurement.
+
+### 4.5 After the fixes (job 4398979) -- still diverges, and now we know why
+
+Same bed. `gate0` is the analytic route with an EMPTY pole window.
+
+| | base | gate0 | cong | anal |
+|---|---|---|---|---|
+| `rel Sigma`, it 1 | 5.6983e-01 | 5.6983e-01 | 5.6966e-01 | 1.0148e+00 |
+| `lead balance`, it 2 | 8.53e-06 | 8.53e-06 | 8.07e-06 | **2.0000** |
+| `positivity sigma_*` | ok | ok | ok | **-4.20e-01 VIOLATION** |
+| `P_in` vs `P_out`, it 1 | -1.353e+04 / match | match | -1.355e+04 / match | +1.760e+04 / -1.444e+04 |
+
+`gate0` reproduces `base` digit for digit at every iteration, so the analytic
+route is bit-identical to the grid solver on an empty pole set -- the
+correctness precondition, now checked on this route too.
+
+The two new gates fire, at iteration 1, before anything has diverged:
+
+    ring leg positivity lesser   worst=-4.088e-01 at w[127]   pole-off control=-7.971e-04
+    ring leg positivity greater  worst=-4.095e-01 at w[127]   pole-off control=-3.001e-03
+    pole analytic leg: eps_tail=1.650e-03  eps_c_rs=9.076e-01  ABOVE source_fit_tol (1.00e-01)
+
+**The leg the ring convolves is indefinite by 0.41**, against a pole-off
+control of 7.97e-04 -- a factor 500. That is review Sec. 20 measured rather
+than argued: the analytic route hands the ring the frozen remainder, and it is
+a difference of PSD objects. The SAME gate on `cong` reads exactly its control
+at every iteration (`[== control: gate is blind]`), i.e. the cell-average
+correction does the ring no damage at all. The two routes are distinguished by
+one number, which is what the gate was rebuilt for.
+
+**`eps_c_rs = 0.908` against a tolerance of 0.1.** The mixed coefficient varies
+by 91 % of its own scale across the pole window, so freezing it -- which the
+partial-fraction flattening requires -- is not justified on this bed. That is
+review Sec. 28, and it is a first-order reason the analytic leg is a bad
+approximation independently of the positivity failure. `eps_tail = 1.7e-03`, so
+the closure is doing its job and the tail is not the problem.
+
+`congruence_analytic` is therefore not viable as constructed. The next route is
+Sec. 6's `|P|^2` cell-pair correction, which forms no frozen remainder and
+freezes no coefficient.
+
+### 4.6 The registration number on the real bed
+
+`cong`, every iteration: **0.245 to 0.265 cells**. That is the 1.79 column of
+Sec. 2's table -- close to the worst placement, not the benign one. So the
+production route's bubble misplaces the pole-pair contribution by about half a
+cell and gets its peak wrong by order 80 %, on this bed, today. (The analytic
+route's own poles drift to 0.41-0.46 cells once it starts diverging, which is
+a symptom rather than a cause.)
+
+What that does NOT yet say is how much of `Sigma` comes from pole-pair
+pairings on this bed, and therefore how much of the transport observable moves.
+That is what the `sectors` staging settings measure, and it is the next number
+to get.
 
 ### 4.3 The `-1.000` ring-leg gate -- RESOLVED, it was the gate
 
@@ -404,11 +463,24 @@ same measure on the UNCORRECTED leg beside it; if the two agree it says
 `[== control: gate is blind]` rather than showing a number that means nothing.
 
 A separate hypothesis -- that zero-filling the sparsity pattern (`M .* X`, a
-Hadamard product with a non-PSD mask) breaks positivity -- remains untested. It
-cannot be what fired here, since the same `-1.000` appears with the pole sector
-off, but it is worth measuring now that `w = 0` no longer masks everything: the
-four objects to compare are the dense congruence, a genuine principal
-submatrix, the zero-filled pattern, and the production tapered pattern.
+Hadamard product with a non-PSD mask) breaks positivity -- is real as a
+mechanism but conditional, and the condition decides it here
+(`test_when_the_zero_filled_pattern_can_and_cannot_invent_a_violation`).
+
+A hard band mask IS indefinite: the 3x3 boxcar has eigenvalue -0.414, its
+Fejer taper +0.293. But a BLOCK-BANDED pattern of bandwidth >= 1 leaves the
+gate's two-block window FULLY populated -- zero entries inside it are masked --
+so the window is a genuine principal submatrix and the gate is exact there.
+Only a pattern sparse WITHIN the window is exposed, and then the zero fill
+invents violations of order 0.1 (measured -1.9e-01 at 55 % within-window
+density, against 0 for the true submatrix).
+
+The device says which case applies: the pole-free baseline reads
+`g_lesser worst = -1.842e-11`, not a healthy negative number, so the
+production pattern is dense inside the window and the mask is not what fired.
+A negative reading from this gate is therefore evidence of a defect -- but
+only once the pattern's within-window density is known, which is why that is
+now written down.
 
 ### 4.4 The tail sum rule
 
@@ -495,4 +567,5 @@ for `k in P` -- so the sum is PSD.
 Jobs: 4398590 (`pcong2`), 4398779 (`panal`, wasted -- a module-level helper
 inserted into the class body truncated `PhononPhononInteraction` and all three
 runs died on `AttributeError`; every local test passed because none call
-`_inject_pole_sector`), 4398805 (`panal2`). 237.26 / 300 nh, all debug.
+`_inject_pole_sector`), 4398805 (`panal2`), 4398979 (`panal3`).
+237.76 / 300 nh, all debug.

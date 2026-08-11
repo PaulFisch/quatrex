@@ -230,7 +230,9 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     assert "subcell" not in solver.psd_report
     # Lesser and greater are reported SEPARATELY, each beside the pole-off
     # control -- collapsing them to one min is what hid the w[0] saturation.
-    for key in ("lesser", "greater", "lesser_control", "greater_control"):
+    for key in ("lesser", "greater", "lesser_control", "greater_control",
+                "lesser_poles", "greater_poles", "lesser_control_poles",
+                "greater_control_poles"):
         assert np.isfinite(rep[key]["worst"]), key
         assert "omega_index" in rep[key]
     # g_pp is zero here, so the leg IS the control and the two must agree
@@ -446,3 +448,58 @@ def test_reconstruction_recovers_the_cell_average():
     n = np.abs(exact).max()
     assert np.abs(avg(cong) - exact).max() / n < 1e-2     # measured 4.1e-3
     assert np.abs(g_l(wk) - exact).max() / n > 0.5        # measured 8.2e-1
+
+
+def test_when_the_zero_filled_pattern_can_and_cannot_invent_a_violation():
+    """``psd_residual`` eigendecomposes ``M .* X``, and ``M`` is not PSD.
+
+    A hard mask is a Hadamard product with an indefinite matrix, so the
+    masked object need not inherit ``X``'s positivity. Whether that can fire
+    depends entirely on the pattern, and the two cases must not be confused
+    when a gate reading is interpreted:
+
+    * A BLOCK-BANDED pattern of bandwidth >= 1 leaves the two-block window
+      FULLY populated -- nothing inside it is masked -- so the window is a
+      genuine principal submatrix and the gate is exact. This is why the
+      pole-free baseline reads ``g_lesser worst = -1.8e-11`` on the device
+      rather than a healthy negative number.
+    * A pattern that is sparse WITHIN the window is a different object, and
+      there the zero fill really does invent violations of order 0.1.
+
+    So a negative reading is evidence of a defect only once the pattern's
+    within-window density is known. The boxcar/Fejer eigenvalues below are the
+    reason, and they are the same statement as ``bubble_positivity.md`` Thm 3.
+    """
+    rng = np.random.default_rng(1)
+    n, nbs = 12, 4
+    idx = np.arange(n) // nbs
+
+    def lam_min(a):
+        a = 0.5 * (a + np.conj(a.T))
+        e = np.linalg.eigvalsh(a)
+        return e.min() / max(abs(e).max(), 1e-300)
+
+    # A hard band mask is indefinite; its Fejer taper is PSD.
+    d = np.abs(np.subtract.outer(np.arange(3), np.arange(3)))
+    assert np.linalg.eigvalsh((d <= 1).astype(float)).min() < -0.4
+    assert np.linalg.eigvalsh(np.maximum(0.0, 1.0 - d / 2.0)).min() > 0.2
+
+    # (i) block-banded: nothing inside a two-block window is masked at all
+    box = np.abs(idx[:, None] - idx[None, :]) <= 1
+    assert int((~box[:2 * nbs, :2 * nbs]).sum()) == 0
+
+    # (ii) sparse within the window: the zero fill can and does break it
+    worst_principal = worst_masked = 0.0
+    for _ in range(200):
+        m = rng.random((2 * nbs, 2 * nbs)) < 0.55
+        m = m | m.T
+        np.fill_diagonal(m, True)
+        b = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+        ell = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+        x = b @ (ell @ np.conj(ell.T)) @ np.conj(b.T)     # PSD congruence
+        sub = x[:2 * nbs, :2 * nbs]
+        worst_principal = min(worst_principal, lam_min(sub))
+        worst_masked = min(worst_masked, lam_min(m * sub))
+    assert worst_principal > -1e-9, "a principal submatrix of a PSD matrix"
+    assert worst_masked < -0.05, (
+        f"the zero fill must be able to invent a violation: {worst_masked:.3e}")
