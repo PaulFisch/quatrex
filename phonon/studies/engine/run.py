@@ -14,7 +14,7 @@ Env overrides (optional, on top of the TOML):
   QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz),
   QX_POLE=1 (pole-subtracted SCBA sector) with QX_POLE_NP QX_POLE_SECTORS
   QX_POLE_WMIN QX_POLE_WMAX QX_POLE_SHEET QX_POLE_PGAMMA QX_POLE_AUDIT
-  QX_POLE_PSD QX_POLE_LEG.
+  QX_POLE_PSD QX_POLE_LEG QX_POLE_NEWTIT QX_POLE_TRUST.
 
 Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
 (qttools default "cupy" with silent NumPy fallback); set it explicitly for
@@ -103,6 +103,12 @@ if os.environ.get("QX_POLE_PSD"): cfg.phonon.pole_sector.psd_check = bool(int(os
 if os.environ.get("QX_POLE_MIXSCALE"): cfg.phonon.pole_sector.mixed_scale = float(os.environ["QX_POLE_MIXSCALE"])
 if os.environ.get("QX_POLE_LEG"): cfg.phonon.pole_sector.leg = os.environ["QX_POLE_LEG"]
 if os.environ.get("QX_POLE_CELLAVG"): cfg.phonon.pole_sector.cell_average = bool(int(os.environ["QX_POLE_CELLAVG"]))
+# Newton BUDGET, not tolerance: eps_nep refusals are "did not reach 1e-10 in
+# max_iter steps", and with trust_radius_cells = 0.25 a run of 8 steps can
+# travel at most 2 cells from its seed. Raising either admits no worse pole --
+# newton_tol is untouched -- it only lets the solve finish.
+if os.environ.get("QX_POLE_NEWTIT"): cfg.phonon.pole_sector.newton_max_iterations = int(os.environ["QX_POLE_NEWTIT"])
+if os.environ.get("QX_POLE_TRUST"): cfg.phonon.pole_sector.trust_radius_cells = float(os.environ["QX_POLE_TRUST"])
 if os.environ.get("QX_POLE"):
     # Re-validate: the pole gates are cross-field, so an override that creates
     # an inconsistent combination must fail here rather than at iteration 40.
