@@ -196,3 +196,69 @@ def test_invalid_leg_raises():
     phi, cl, src, off = _bed(0.5)
     with pytest.raises(ValueError, match="leg must be"):
         mixed_vertex_blocks(phi, SIZES, cl.u, leg=2, conjugate=False)
+
+
+def test_production_kernel_matches_an_explicit_ring():
+    """The production path against an explicit ring, end to end.
+
+    Everything else in this campaign tested the DECOMPOSITION (sector sum) or
+    the kernel against another form of itself. This pins
+    ``mixed_self_energy_blocked`` -- the routine the interaction actually calls
+    -- against a direct evaluation of ``B(G_S,G_R) + B(G_R,G_S)``, with ``G_S``
+    built as exactly the partial-fraction object the kernel represents.
+
+    Run at ``gamma/h = 40`` so the discrete ring is itself accurate; the
+    kernel's advantage at small ``gamma`` is measured in ``test_pole_mixed.py``
+    and is not what is under test here.
+    """
+    from quatrex.phonon.pole_bridge import (analytic_prefactor,
+                                            mixed_self_energy_blocked)
+
+    sizes = np.array([2, 2])
+    off = np.concatenate(([0], np.cumsum(sizes)))
+    n = int(sizes.sum())
+    rows, cols = _pattern()
+    rng = np.random.default_rng(0)
+    phi = {(i, k1, k2): rng.normal(size=(2, 2, 2))
+           for i in range(2) for k1 in range(2) for k2 in range(2)}
+
+    h = 0.05
+    w_pos = np.arange(0.0, 60.0 + 1e-9, h)
+    w = np.concatenate([-w_pos[:0:-1], w_pos])       # zero exactly on the grid
+    z = np.array([8.0 - 2.0j, 12.0 - 2.0j])
+    u = rng.normal(size=(n, 2)) + 1j * rng.normal(size=(n, 2))
+    cl = PoleCluster(z=z, u=u, v=u)
+    s_a = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+    s_b = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+
+    za, zb = z[:, None], np.conj(z)[None, :]
+    gap = za - zb
+    f = ((s_a / gap)[None] / (w[:, None, None] - za[None])
+         - (s_b / gap)[None] / (w[:, None, None] - zb[None]))
+    gs = np.einsum("ia,wab,jb->wij", u, f, np.conj(u))
+    mat = rng.normal(size=(n, n))
+    lor = 1.0 / (w - 9.0 + 6.0j) - 1.0 / (w + 9.0 + 6.0j)
+    gr = np.einsum("w,ij->wij", lor, mat)
+
+    dense = np.zeros((n, n, n))
+    for (i, k1, k2), blk in phi.items():
+        dense[off[i]:off[i + 1], off[k1]:off[k1 + 1], off[k2]:off[k2 + 1]] = blk
+
+    def _ring(a_leg, b_leg):
+        conv = np.zeros((w.size, n, n, n, n), dtype=complex)
+        for iw, om in enumerate(w):
+            idx = np.rint((om - w - w[0]) / h).astype(int)
+            ok = (idx >= 0) & (idx < w.size)
+            conv[iw] = np.einsum("kcb,ked->cbed", a_leg[ok], b_leg[idx[ok]]) * h
+        return analytic_prefactor() * np.einsum(
+            "ace,Jdb,wcbed->waJ", dense, dense, conv)[:, rows, cols] / (2 * np.pi)
+
+    ref = _ring(gs, gr) + _ring(gr, gs)
+    npos = w_pos.size
+    got = _h(mixed_self_energy_blocked(
+        w_pos, cl, (s_a, s_b), gr[-npos:][:, rows, cols], w_pos,
+        phi, sizes, rows, cols))
+    sel = (w_pos > 3.0) & (w_pos < 17.0)
+    keep = (w > 3.0) & (w < 17.0)
+    err = np.abs(got[sel] - ref[keep]).max() / np.abs(ref[keep]).max()
+    assert err < 1e-2, f"production kernel vs explicit ring: {err:.3e}"
