@@ -571,3 +571,25 @@ Two things stand in the way of simply removing it for the analytic route:
 So the analytic DC treatment is the right destination and a well-defined
 follow-up: model the DC cell in the mixed route, drop the ring's mask behind
 the same flag, and quantify the remaining O(h) disagreement.
+
+### Mask fix verified: the linear error is gone, a quadratic one remains
+
+Same bisection, with the mixed background leg masked like the ring's:
+
+| lambda | `Sigma^>` before | after | factor |
+|---|---|---|---|
+| 0.25 | -3.81e-02 | -7.88e-04 | 48 |
+| 0.5 | -7.68e-02 | -2.44e-03 | 31 |
+| 1.0 | -1.506e-01 | **-9.24e-03** | 16 |
+
+The magnitude matters less than the change in SIGNATURE: the scaling went from
+linear to **quadratic** in `lambda` (predicted from the `lambda = 1` value:
+5.8e-4 and 2.3e-3 against measured 7.9e-4 and 2.4e-3). A wrong sign or a
+missing factor cannot produce `lambda^2`; a second-order effect can -- the
+self-consistent feedback of the modified `Sigma` through `G`, or a genuine
+`O(term^2)` quadrature term. So the first-order injected error is fixed and
+what remains is a different, smaller problem.
+
+Heat spread at `lambda = 1` narrowed from 30.6 to 19.0, so the observable
+improved too but is not yet flat. The converged comparison is what decides
+whether the residual 1e-2 violation matters.
