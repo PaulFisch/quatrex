@@ -485,3 +485,30 @@ iteration count -- a larger self-energy legitimately takes longer to settle.
 And run the localising gate before proposing a mechanism: the sector sum took
 one local command and would have ruled out three of the four hypotheses
 immediately.
+
+### Correction to the correction: rr_ss_sr IS broken
+
+The "it was only a transient" reading above does not survive a longer run. At
+80 iterations, mixing 0.02, on the same bed:
+
+| leg | iters | resid | heat profile | non-uniformity |
+|---|---|---|---|---|
+| `cbase` | 80 | 7.11e-08 | 53.80 51.84 51.90 52.07 53.83 | 0.038 |
+| `cfull` | 80 | 1.00e-04 | **-27.44** 49.00 39.06 33.62 **135.57** | **3.56** |
+
+The 25-iteration snapshot (non-uniformity 0.42, all-positive) was itself a
+transient passing through, not convergence. `rr_ss_sr` is genuinely broken:
+the iteration wanders rather than settling, and the converged-ish profile is
+negative at the left contact.
+
+Note also that `cbase` reports NOT CONVERGED after 80 iterations and its
+`lead_current` drifted 64.03 -> 53.81 from the 4-iteration snapshot, a 16%
+move. Every number quoted from the 4-iteration runs, baseline included, was a
+transient. Matched-iteration comparison on this bed is meaningless; matched
+RESIDUAL is the only fair basis.
+
+Once more the balance residual is small (1e-4) while the profile is
+unphysical, which is the third time this pair has disagreed. `P_in = P_out` is
+a scalar trace identity; it is necessary, not sufficient, and the heat profile
+is the observable that actually discriminates. Any future gate on this sector
+should read the profile first.
