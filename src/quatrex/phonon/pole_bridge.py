@@ -34,6 +34,7 @@ from quatrex.phonon.units import HBAR_SI
 
 __all__ = [
     "source_at_poles",
+    "pole_keldysh_pf_sparse",
     "mixed_vertex_blocks",
     "mixed_self_energy_sparse",
     "project_source_sparse",
@@ -653,3 +654,57 @@ def source_at_poles(
     # S_b[a, b] = S_{ab}(conj(z_b)): pick the column-pole slice.
     s_b = xp.stack([cols[b, :, b] for b in range(z.size)], axis=1)
     return s_a, s_b
+
+
+def pole_keldysh_pf_sparse(
+    omega: NDArray,
+    cluster: PoleCluster,
+    s_a: NDArray,
+    s_b: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+) -> NDArray:
+    r"""``G_PP`` in the PARTIAL-FRACTION representation the sectors use.
+
+    :func:`pole_keldysh_sparse` builds ``U D^R S(w) D^A U^dag`` from the
+    frequency-resolved source. The analytic sectors cannot represent that: they
+    split every leg into simple poles, which carries only a rational source. So
+    the two are different functions whenever ``S`` varies with frequency --
+    measured 7e-3 apart on a source with a 2%/THz slope, against 7e-16 for a
+    constant one.
+
+    That difference is not a small inaccuracy, it is a broken decomposition.
+    ``G_reg = G - G_PP`` is exact for ANY ``G_PP``, so the sector sum
+    ``B(G,G) = SS + SR + RS + RR`` holds only if the leg SUBTRACTED from the
+    ring and the leg the sectors PUT BACK are literally the same object. Using
+    the resolved form on one side and partial fractions on the other violates
+    doc Sec. 37's "same reconstructed G on both legs", and it breaks the
+    balance spatially while leaving the scalar ``P_in = P_out`` nearly intact.
+
+    This builds the leg from the same coefficients
+    :func:`~quatrex.phonon.pole_bubble.leg_partial_fractions` produces, so the
+    two agree to roundoff by construction.
+
+    Parameters
+    ----------
+    s_a, s_b : NDArray
+        ``(Np, Np)`` source at the row pole and at the column pole, from
+        :func:`source_at_poles`.
+
+    Returns
+    -------
+    NDArray
+        ``(n_omega, nnz)`` on the stored pattern.
+
+    """
+    w = xp.asarray(omega, dtype=xp.complex128)[:, None, None]
+    za = cluster.z[None, :, None]
+    zb = xp.conj(cluster.z)[None, None, :]
+    gap = cluster.z[:, None] - xp.conj(cluster.z)[None, :]
+    ca = xp.asarray(s_a, dtype=xp.complex128) / gap
+    cb = -xp.asarray(s_b, dtype=xp.complex128) / gap
+    f = ca[None] / (w - za) + cb[None] / (w - zb)          # (n_omega, Np, Np)
+
+    lr = xp.take(cluster.u, xp.asarray(rows), axis=0)      # (nnz, Np)
+    lc = xp.conj(xp.take(cluster.u, xp.asarray(cols), axis=0))
+    return xp.einsum("ka,wab,kb->wk", lr, f, lc)

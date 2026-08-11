@@ -236,3 +236,79 @@ def test_negative_frequency_poles_use_the_bosonic_mirror():
     got = _h(s_a)
     assert np.allclose(got[1], np.conj(got[0])), \
         "the -Omega partner must carry the conjugated source"
+
+
+def test_gpp_partial_fraction_form_matches_what_the_sectors_represent():
+    """The leg subtracted from the ring must BE the leg the sectors put back.
+
+    ``G_reg = G - G_PP`` is exact for any ``G_PP``, so the sector sum
+    ``B(G,G) = SS + SR + RS + RR`` holds iff both sides use literally the same
+    object. The resolved form ``U D^R S(w) D^A U^dag`` and the partial-fraction
+    form agree only when ``S`` is constant in frequency; otherwise they are
+    different functions and the decomposition is broken.
+    """
+    from quatrex.phonon.pole_bridge import pole_keldysh_pf_sparse
+    from quatrex.phonon.pole_bubble import leg_partial_fractions
+
+    rng = np.random.default_rng(0)
+    n, ne = 4, 128
+    w = np.linspace(0.0, 40.0, ne)
+    z = np.array([9.0 - 0.8j, 14.0 - 1.1j])
+    u = rng.normal(size=(n, 2)) + 1j * rng.normal(size=(n, 2))
+    cl = PoleCluster(z=z, u=u, v=u)
+    s_a = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+    s_b = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+    r, c = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    r, c = r.ravel(), c.ravel()
+
+    got = _h(pole_keldysh_pf_sparse(w, cl, s_a, s_b, r, c))
+    p, coef = leg_partial_fractions(cl, s_a, source_b=s_b)
+    f = np.zeros((ne, 2, 2), dtype=complex)
+    for a in range(2):
+        for b in range(2):
+            f[:, a, b] = (_h(coef)[a, b, 0] / (w - _h(p)[a, b, 0])
+                          + _h(coef)[a, b, 1] / (w - _h(p)[a, b, 1]))
+    ref = np.einsum("ia,wab,jb->wij", _h(u), f, np.conj(_h(u)))[:, r, c]
+    assert np.abs(got - ref).max() == 0.0, "must be the SAME object, not close"
+
+
+def test_resolved_and_partial_fraction_legs_differ_when_the_source_varies():
+    """Negative control: the two forms are NOT interchangeable.
+
+    Measured 7e-3 apart on a source with a 2%/THz slope, which is the size of
+    inconsistency that broke the spatial energy balance.
+    """
+    from quatrex.phonon.pole_keldysh import pole_keldysh
+
+    rng = np.random.default_rng(0)
+    n, ne = 4, 512
+    w = np.linspace(0.0, 40.0, ne)
+    z = np.array([9.0 - 0.8j, 14.0 - 1.1j])
+    u = rng.normal(size=(n, 2)) + 1j * rng.normal(size=(n, 2))
+    cl = PoleCluster(z=z, u=u, v=u)
+    m = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+    s0 = 1j * (m @ m.conj().T)
+
+    za, zb = z[:, None], np.conj(z)[None, :]
+    gap = za - zb
+
+    def _pf(sa, sb):
+        f = (sa / gap)[None] / (w[:, None, None] - za[None]) \
+            - (sb / gap)[None] / (w[:, None, None] - zb[None])
+        return np.einsum("ia,wab,jb->wij", _h(u), f, np.conj(_h(u)))
+
+    def _pick(src, centres):
+        return np.array([[src[int(np.argmin(abs(w - centres[a].real))), a, b]
+                          for b in range(2)] for a in range(2)])
+
+    for label, src, tol in (
+        ("constant", np.broadcast_to(s0, (ne, 2, 2)).copy(), 1e-12),
+        ("varying", np.einsum("w,ab->wab", 1.0 + 0.02 * w, s0), None),
+    ):
+        resolved = _h(pole_keldysh(w, cl, src))
+        pf = _pf(_pick(src, z), _pick(src, np.conj(z)))
+        rel = np.abs(resolved - pf).max() / np.abs(resolved).max()
+        if tol is not None:
+            assert rel < tol, f"{label}: {rel:.2e}"
+        else:
+            assert rel > 1e-3, f"{label} should differ, got {rel:.2e}"

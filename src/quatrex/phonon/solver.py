@@ -691,7 +691,8 @@ class PhononSolver(SubsystemSolver):
         the dense intermediate would be ``(n_omega, n_dof, n_dof)``.
         """
         from quatrex.phonon.pole_bridge import (
-            add_contact_source, pole_keldysh_sparse, project_source_sparse,
+            add_contact_source, pole_keldysh_pf_sparse, project_source_sparse,
+            source_at_poles,
         )
 
         state = self.pole_state
@@ -718,12 +719,6 @@ class PhononSolver(SubsystemSolver):
         # which optimised a staging setting while the production one
         # regressed; the closed set is kept because it is the correct object.
         #
-        # Neither variant conserves: the heat profile is unphysical at
-        # rr_ss_sr in both. The known missing piece is the frozen source --
-        # it is evaluated at ONE index, mid = argmin|freqs - Re(z[0])|, the
-        # positive centre, so a closed cluster spanning +Omega and -Omega gets
-        # one source where the partner needs the bosonic mirror of it. That,
-        # not the closure, is the next thing to fix.
         state.legs = self._pole.bubble_clusters()
         acc_l = acc_g = None
         for cl in state.legs:
@@ -739,8 +734,21 @@ class PhononSolver(SubsystemSolver):
                     s_g = add_contact_source(s_g, corner_g, cl.v, off)
             state.source_lesser.append(s_l)
             state.source_greater.append(s_g)
-            g_l = pole_keldysh_sparse(freqs, cl, s_l, rows, cols)
-            g_g = pole_keldysh_sparse(freqs, cl, s_g, rows, cols)
+            # PARTIAL-FRACTION form, not U D^R S(w) D^A U^dag. The analytic
+            # sectors split every leg into simple poles, which carries only a
+            # rational source, so the resolved form is a DIFFERENT function
+            # whenever S varies with frequency (measured 7e-3 apart at a
+            # 2%/THz slope, against 7e-16 for a constant source).
+            #
+            # G_reg = G - G_PP is exact for ANY G_PP, so the sector sum holds
+            # iff the leg subtracted here and the leg the sectors put back are
+            # literally the same object. Using the resolved form on one side
+            # and partial fractions on the other is what broke the SPATIAL
+            # balance while leaving the scalar P_in = P_out nearly intact.
+            g_l = pole_keldysh_pf_sparse(freqs, cl, *source_at_poles(s_l, freqs, cl),
+                                         rows=rows, cols=cols)
+            g_g = pole_keldysh_pf_sparse(freqs, cl, *source_at_poles(s_g, freqs, cl),
+                                         rows=rows, cols=cols)
             acc_l = g_l if acc_l is None else acc_l + g_l
             acc_g = g_g if acc_g is None else acc_g + g_g
         state.g_pp_lesser = acc_l.reshape(sse_lesser.data.shape)
