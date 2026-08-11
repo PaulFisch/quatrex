@@ -153,7 +153,14 @@ class PoleSector:
             epoch_iterations=config.epoch_iterations,
         )
         self.state = PoleSectorState()
-        self._promoted: set[int] = set()
+        # Promoted poles are remembered by LOCATION, not by object identity.
+        # bordered_newton builds a fresh PoleSolution every iteration, so a set
+        # of id(sol) can never match across iterations -- and CPython recycles
+        # ids of freed objects, so it could match arbitrarily. That left the
+        # hysteresis permanently disengaged: every pole was judged at the
+        # strict q_in instead of the lenient q_out once promoted, and
+        # membership churned exactly as this config field warns.
+        self._promoted_z: list[complex] = []
 
     # -- window ------------------------------------------------------------ #
 
@@ -177,6 +184,19 @@ class PoleSector:
         candidate; above it the grid already carries the line.
         """
         return gamma / (self.cfg.samples_per_halfwidth * self.h)
+
+    def _was_promoted(self, z: complex) -> bool:
+        """Was a pole at this location in the sector last iteration?
+
+        Identity across SCBA iterations is carried by position: a pole moves by
+        at most the predictor shift between iterates, so anything within a
+        cluster width of a previously promoted pole is the same mode. This is
+        what makes the ``q_in``/``q_out`` hysteresis actually apply.
+        """
+        if not self._promoted_z:
+            return False
+        tol = self.cfg.cluster_factor * self.h
+        return any(abs(complex(z) - p) <= tol for p in self._promoted_z)
 
     def screen(self, sol: PoleSolution, was_promoted: bool) -> str | None:
         """Reason to refuse a pole, or ``None`` to accept it.
@@ -243,7 +263,7 @@ class PoleSector:
         """Group accepted poles into coherent clusters and project the source."""
         accepted, rejected = [], []
         for sol in solutions:
-            why = self.screen(sol, id(sol) in self._promoted)
+            why = self.screen(sol, self._was_promoted(sol.z))
             (rejected if why else accepted).append(
                 (sol.z, why) if why else sol
             )
@@ -275,7 +295,7 @@ class PoleSector:
             clusters=clusters, solutions=accepted, rejected=rejected,
             coherence=coherence, iteration=self.state.iteration + 1,
         )
-        self._promoted = {id(s) for s in accepted}
+        self._promoted_z = [complex(s.z) for s in accepted]
         return self.state
 
     # -- operator context --------------------------------------------------- #

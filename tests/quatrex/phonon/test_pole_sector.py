@@ -471,3 +471,49 @@ def test_operator_reduces_a_frequency_resolved_contact_block():
     k = int(np.argmin(np.abs(freqs - 9.0)))
     other = m_blocks(freqs[k] - 0.05j)
     assert np.abs(_h(a_ii[0]) - _h(other[0][0])).max() < 1e-9
+
+
+def test_hysteresis_survives_across_iterations():
+    """A promoted pole is judged at ``q_out``, not ``q_in``, next iteration.
+
+    Regression, and the cause of the sector's non-convergence: the promoted
+    set was stored as ``{id(sol)}``. ``bordered_newton`` builds a fresh
+    ``PoleSolution`` every iteration, so those CPython ids never matched and
+    the hysteresis was permanently disengaged -- every pole was screened at
+    the strict ``q_in``. Membership then churned between iterations (measured:
+    3 poles -> 0 -> 1 -> 0 over 25 SCBA iterations), which makes the
+    fixed-point map discontinuous and produces a limit cycle rather than
+    convergence. Identity across iterations must be carried by POSITION.
+    """
+    import numpy as np
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_sector import PoleSector
+
+    freqs = np.linspace(0.0, 20.0, 41)               # h = 0.5
+    sec = PoleSector(PoleSectorConfig(enabled=True, omega_min_thz=1.0,
+                                      omega_max_thz=19.0), freqs)
+    h = sec.h
+
+    class _Sol:
+        converged = True
+        eps_nep = 0.0
+        kappa = 1.0
+        def __init__(self, z): self.z = z
+
+    # gamma chosen so q_omega sits BETWEEN q_in and q_out: such a pole is
+    # refused on first sight but retained once promoted. That gap is the
+    # hysteresis, and it is what stops membership oscillating.
+    q_mid = 0.5 * (sec.cfg.q_in + sec.cfg.q_out)
+    gamma = q_mid * sec.cfg.samples_per_halfwidth * h
+    sol = _Sol(complex(9.0, -gamma))
+
+    assert sec.screen(sol, was_promoted=False) is not None, "refused when new"
+    assert sec.screen(sol, was_promoted=True) is None, "kept once promoted"
+
+    # And the memory must survive a NEW object at the same location.
+    sec._promoted_z = [complex(9.0, -gamma)]
+    assert sec._was_promoted(_Sol(complex(9.0 + 0.1 * h, -gamma)).z), \
+        "a pole that moved slightly is the same mode"
+    assert not sec._was_promoted(complex(15.0, -gamma)), \
+        "a genuinely different pole is not"
