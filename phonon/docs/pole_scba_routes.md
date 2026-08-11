@@ -436,10 +436,49 @@ cell and gets its peak wrong by order 80 %, on this bed, today. (The analytic
 route's own poles drift to 0.41-0.46 cells once it starts diverging, which is
 a symptom rather than a cause.)
 
-What that does NOT yet say is how much of `Sigma` comes from pole-pair
-pairings on this bed, and therefore how much of the transport observable moves.
-That is what the `sectors` staging settings measure, and it is the next number
-to get.
+### 4.7 ... and how little it can move (job 4399102)
+
+The registration error is order one ONLY on ring cell pairs `(k, m-k)` with
+BOTH ends in a pole cell (Sec. 2), so the error in `Sigma` is bounded by the
+fraction of the ring's weight sitting on those pairs. Measured:
+
+    pole-cell PAIRS carry 0.00381% of the ring's weight, up to 2.59% at w=41.80
+
+So the 0.265-cell offset bounds an error in `Sigma` of about **2 % at one
+frequency** and about **0.003 % integrated** -- times the ~0.8 factor. Real,
+but not what is holding this bed back. (Scalar-norm proxy for the vertex
+contraction, hence an upper bound: small is conclusive.)
+
+The reason it is that small is the reason everything else on this bed is
+small, and it is not a property of the quadrature:
+
+    pole sector: iteration 1, 2 cluster(s), 2/144 pole(s) promoted  refused: eps_nep x142, weight x3
+      pole sector: cluster c0+partner source varies by 2.02e+02 across its window (tol 1.00e-01)
+      pole sector: cluster c1+partner source varies by 5.71e+02 across its window (tol 1.00e-01)
+
+**142 of 144 candidates are refused on `eps_nep` alone**, against
+`newton_tol = 1e-10`; the rejected residuals run from 4.8e-10 to 2.8e-02. And
+the two that survive fail the source-smoothness gate by 2000x and 5700x, so
+even those are carried on a source model the solver itself says is not
+justified. `max_poles` is irrelevant here -- 2, 8 and 24 give byte-identical
+output, because screening binds long before the cap does.
+
+That is the honest account of why `cong` differs from the baseline only in the
+fourth digit: **the sector promotes 2 of 144 candidates, and both violate its
+own source gate.** Two poles out of 201 frequency bins cannot move a bubble
+whose weight is spread over the whole band, whatever quadrature they get.
+
+Consequences for what to do next:
+
+* Sec. 6's `|P|^2` correction would be fixing a 2 %-at-one-bin error on this
+  bed. Worth having, not urgent.
+* The blocking questions are upstream, in the pole SOLVE and its screening:
+  whether `eps_nep` at 1e-9 to 1e-8 really means "not a pole", and why the
+  projected source varies by 200x across a promoted pole's own window. The
+  second is not a threshold to loosen -- it says the smooth-source premise
+  fails on this bed, which is a statement about the physics, not the code.
+* No conclusion about the METHOD should be drawn from this bed until one of
+  those moves. It is not currently a test of the pole sector.
 
 ### 4.3 The `-1.000` ring-leg gate -- RESOLVED, it was the gate
 

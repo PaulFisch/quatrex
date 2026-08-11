@@ -108,9 +108,25 @@ class PoleSectorState:
         return sum(c.n_poles for c in self.clusters)
 
     def report(self) -> str:
-        """One-line-per-cluster summary for the iteration log."""
+        """One-line-per-cluster summary for the iteration log.
+
+        The header carries the promotion YIELD, not just the count. On the CNT
+        bed it reads ``2/144``: 142 candidates are refused on ``eps_nep``
+        alone, and that -- not any property of the sector's quadrature -- is
+        why the route moves the answer only in the fourth digit and why
+        pole-cell pairs carry under 0.005 % of the ring's weight. A bare "2
+        pole(s)" reads like a small system; "2/144" reads like a threshold.
+        """
+        seen = self.n_poles + len(self.rejected)
+        why = {}
+        for _, reason in self.rejected:
+            key = reason.split("=")[0].split(":")[0].strip()
+            why[key] = why.get(key, 0) + 1
+        tail = ("" if not why else "  refused: " + ", ".join(
+            f"{k} x{v}" for k, v in sorted(why.items(), key=lambda kv: -kv[1])))
         lines = [f"pole sector: iteration {self.iteration}, "
-                 f"{len(self.clusters)} cluster(s), {self.n_poles} pole(s)"]
+                 f"{len(self.clusters)} cluster(s), "
+                 f"{self.n_poles}/{seen} pole(s) promoted{tail}"]
         for c, eps in zip(self.clusters, self.coherence):
             om = np.asarray(_host(c.omega)).ravel()
             ga = np.asarray(_host(c.gamma)).ravel()

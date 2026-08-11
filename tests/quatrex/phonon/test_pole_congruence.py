@@ -938,3 +938,27 @@ def test_pole_pair_weight_bounds_where_the_registration_error_can_live():
     allp = pole_pair_weight(g, np.ones(n, dtype=bool), freqs=w, skip=mask0)
     assert abs(allp["mean"] - 1.0) < 1e-12
     assert abs(allp["worst"] - 1.0) < 1e-12
+
+
+def test_state_report_carries_the_promotion_yield():
+    """"2 pole(s)" reads like a small system; "2/144" reads like a threshold.
+
+    On the CNT bed 142 of 144 candidates are refused on ``eps_nep`` alone, and
+    that is why the sector moves the answer only in the fourth digit -- not
+    any property of its quadrature. The header has to say so, or the next
+    reader draws the same wrong conclusion from the same log.
+    """
+    from quatrex.phonon.pole_keldysh import PoleCluster
+    from quatrex.phonon.pole_sector import PoleSectorState
+
+    st = PoleSectorState()
+    st.iteration = 1
+    st.clusters = [PoleCluster(z=np.array([9.0 - 0.1j]),
+                               u=np.ones((2, 1), dtype=complex),
+                               v=np.ones((2, 1), dtype=complex))]
+    st.coherence = [1.0]
+    st.rejected = ([(3.0 - 0.2j, "eps_nep=5.7e-03 above tolerance")] * 4
+                   + [(4.0 - 0.2j, "weight below weight_min")])
+    head = st.report().splitlines()[0]
+    assert "1/6 pole(s) promoted" in head, head
+    assert "eps_nep x4" in head and "weight below weight_min x1" in head, head

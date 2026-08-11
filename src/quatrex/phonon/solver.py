@@ -913,8 +913,8 @@ class PhononSolver(SubsystemSolver):
             print(f"  pole registration: worst sub-cell offset "
                   f"{off_worst:.3f} cells (0 = on a grid point, 0.5 = on a "
                   f"cell boundary); pole-cell PAIRS carry "
-                  f"{100 * pw['mean']:.2f}% of the ring's weight, up to "
-                  f"{100 * pw['worst']:.2f}% at w={pw['omega']:.2f}",
+                  f"{100 * pw['mean']:.3g}% of the ring's weight, up to "
+                  f"{100 * pw['worst']:.3g}% at w={pw['omega']:.2f}",
                   flush=True)
         if analytic and comm.rank == 0:
             # Two numbers that decide whether the analytic leg is a legitimate
