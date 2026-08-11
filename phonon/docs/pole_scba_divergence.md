@@ -275,23 +275,44 @@ representation entirely.
 
 ---
 
-## 5. The open problems, in order
+## 5. State, and what is still open
 
-1. **Wire the retarded split into the bubble.** Sec. 3.3b is derived, measured
-   and pinned by tests, but the sectors still carry the old coefficients. The
-   quadratures do not change; the coefficients do, and the regular leg stops
-   being a subtraction.
-2. **Cell-constant sources.** `S_k` is frozen per cell in the congruence.
-   That is the same approximation `source_at_poles` already makes, and
-   `source_fit_tol` already measures it, but the two should be the same gate.
+**Implemented (2026-08-11).** `pole_sector.leg = "congruence"`, the default.
+The retarded split is built per leg, and what reaches the FFT ring is the CELL
+AVERAGE of the reconstruction,
+
+    ring leg = G^{<,>}_k - [<SR+RS+SS>_point - <SR+RS+SS>_cellavg]
+             = <G~^{<,>}>_k .
+
+An average of PSD matrices is PSD, so the leg cannot anti-damp however wrong
+the pole model is. The cell weights are analytic -- `<D_a>` from a difference
+of two complex Logs, `<D_a conj(D_b)>` by partial fractions -- verified
+against Gauss-Legendre to 1e-9, per-bin so a non-uniform grid works, and the
+correction falls off like `h^2` under refinement, which is the statement that
+it is a discretisation fix and not added physics.
+
+`leg = "keldysh"` reproduces the superseded runs. Both are bit-identical for
+an empty pole set.
+
+**Open, in order.**
+
+1. **The pole is resolved in the leg WEIGHT, not inside the convolution.** The
+   output frequency resolution is still the grid's. Carrying `SR`/`RS`
+   analytically beside the ring needs the vertex contracted against per-pole
+   pattern-valued coefficients (`c_sr[k, a, :]`), which the current
+   `modal_vertex_blocks` route cannot express -- it factorises through `U` on
+   both sides. This is the remaining architectural work, and it is what would
+   make the method more than a better quadrature.
+2. **Cell-constant sources.** `Sigma_k` is frozen per cell in the congruence,
+   the same approximation `source_at_poles` makes and `source_fit_tol`
+   measures. The two should be one gate.
 3. **Observables** (review Sec. 16) still integrate narrow poles on the grid.
-   The reconstruction of Sec. 3.3b is the object they should be integrating
-   too, not only the bubble.
-4. **`Phi`-derivability** (review Sec. 15) is unresolved. It is a weaker worry
-   now that the leg is a congruence, but it is not answered.
+   `<G~>` is the object they should be integrating too, not only the bubble.
+4. **`Phi`-derivability** (review Sec. 15). Weaker now that the leg is a
+   congruence, but unanswered.
 5. **Sec. 3.4's dilemma is resolved, not open.** The centred split gives the
-   grid sample at the centre (what Dyson wants) and the correct cell integral
-   over the cell (what the bubble wants), from one object.
+   grid sample at the centre, which is what Dyson wants, and the correct cell
+   integral over the cell, which is what the bubble wants, from one object.
 
 ---
 
