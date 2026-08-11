@@ -119,18 +119,112 @@ and broken.
 That accounts for `rr_ss`. It does **not** account for `rr_ss_sr`, which is
 `Q(1)` and should be PSD. That is the open problem.
 
-### 3.3 Why `Q(1)` can still fail: three quadratures
+### 3.3 The reconstruction, and why it inverts the sign
 
-`Q(1) = B(G,G)` holds in the CONTINUUM. The discrete realisation uses three
-different quadratures:
+The sectors never see `G`. They see
 
-    SS      analytic residues,        J(p,q;w) = -i/(w-p-q)
-    SR/RS   cell resolvents,          W_ik = [Log(z_i-w_k+h/2) - Log(z_i-w_k-h/2)]/2pi
-    RR      FFT/grid convolution
+    G~_h(w) = P(w) + R_k ,      R_k = G(w_k) - P(w_k)
 
-so the discrete sum is `B(G,G) + (quadrature mismatch)`, and positivity is
-guaranteed only for the exact object. The mismatch is not small where the
-sector operates, because that is precisely where the grid fails.
+with `P` the analytic pole sum and `R_k` frozen across cell `k`. That equals
+`G` at the cell centre and nowhere else.
+
+An earlier revision of this note blamed a mismatch between the three
+quadratures (residues for `SS`, cell resolvents for `SR`/`RS`, FFT for `RR`).
+That is **wrong**, and review Sec. 9 settles it: at cell centres
+
+    SS_residue + SR_cell + RS_cell + RR_FFT  =  B(G~_h, G~_h)
+
+exactly. The three quadratures are mutually consistent. What is not consistent
+is the function they are applied to.
+
+`R_k` is a DIFFERENCE of PSD objects, so it is generically indefinite -- and
+it is frozen, while `P(w)` is not. At the centre `P(w_k)` cancels `R_k`
+exactly; away from it `P` has moved and the frozen indefinite remainder is
+left exposed. `SR`, `RS` and `RR` all integrate over whole cells, so the
+bubble sees the exposed region and acquires **gain**, which is anti-damping,
+even though every stored sample is physical.
+
+The condition under which this fires is sharper than "the pole model is
+approximate". Measured on the 2x2 bed of `test_pole_subcell.py`, corrupting
+only the residue and scanning the whole cell:
+
+| residue error | worst `lambda_min` of `P + R_k` | of the congruence | true `G^<` |
+|---|---|---|---|
+| exact | +2.15e-06 | +2.05e-06 | +2.02e-06 |
+| +20 % | **-1.000** | +1.45e-06 | +2.02e-06 |
+| x2 | **-1.000** | +5.21e-07 | +2.02e-06 |
+| wrong phase | **-1.000** | +1.62e-06 | +2.02e-06 |
+| half (under-subtracted) | +7.95e-06 | +7.19e-06 | +2.02e-06 |
+
+A **twenty percent** residue error is enough to invert the sign. Over-
+subtraction is what does it; under-subtraction is harmless. On the device the
+residue is a Newton solution of a truncated cluster fitted against a source
+that is itself only approximately constant across the pole window, so 20 % is
+not a comfortable margin -- and nothing in the code was checking it.
+
+This also disposes of the `Q(0)` attribution in Sec. 3.2. That argument is
+true as far as it goes, but it is not what fires: the bisection shows `rr`
+ALONE diverging, and `rr` subtracts the legs and adds nothing back. The defect
+is in the leg reconstruction, and it needs only one pole.
+
+### 3.3b The fix: decompose the RETARDED function
+
+The Keldysh remainder is not smooth, and that is the whole of it. Writing the
+exact Keldysh relation with a retarded split `G^R = P^R + B^R`,
+
+    G^< = G^R S G^A
+        = P^R S P^A  +  P^R S B^A  +  B^R S P^A  +  B^R S B^A
+
+the remainder `G^< - P^R S P^A` still contains `P^R(w)` in two of its terms.
+It carries the sharp structure. Freezing it per cell is therefore illegitimate,
+whereas freezing `B^R` -- from which the poles have been removed by
+construction -- is exactly the approximation the split was designed to license.
+
+So decompose `G^R`, not `G^{<,>}`. Anchoring the split at the cell centre,
+
+    G~^R(w) = G^R_k + U [D^R(w) - D^R(w_k)] V^dagger ,
+              D^R_ab(w) = delta_ab / (w - z_a)
+
+    G~^{<,>}(w) = G~^R(w) S^{<,>}_k G~^A(w)
+
+with `G^R_k`, `S_k` the stored grid samples. Two properties follow immediately.
+
+`-i G~^{<,>} >= 0` at **every** `w`, not merely at grid points, because it is a
+congruence `G (-i S) G^dagger` of a PSD matrix. It holds for any pole set, any
+residue, right or wrong -- which is precisely what the table above shows and
+what the old form does not have.
+
+The correction **vanishes at the cell centre**: `D^R(w_k) - D^R(w_k) = 0`, so
+`G~^{<,>}(w_k)` is the untouched ring `G^R_k S_k G^A_k`. The pole supplies
+sub-cell structure and nothing else, and an empty pole set reproduces the
+baseline bit-for-bit rather than approximately.
+
+Expanding the congruence gives the four sectors as an identity, with
+`dD = D^R(w) - D^R(w_k)`:
+
+    RR = G^R_k S G^A_k                      the untouched grid ring
+    SR = U dD [V^dagger S G^A_k]            pole x cell-constant
+    RS = [G^R_k S V] dD^dagger U^dagger     cell-constant x pole
+    SS = U dD [V^dagger S V] dD^dagger U^dagger    pole x pole
+
+`RR + SR + RS + SS = G~^{<}` to 1e-14 on the bed
+(`test_four_sectors_are_the_congruence`). Every piece falls into a category
+the existing machinery already handles -- pole x pole analytically, pole x
+cell-constant by the cell resolvent, cell-constant x cell-constant by FFT --
+so the redesign changes the COEFFICIENTS the sectors carry, not the
+quadratures.
+
+The two structural changes against the current code are that the regular leg
+becomes the untouched, PSD, grid-sampled ring with no subtraction at all, and
+that the pole contributions are centred on their cell rather than absolute.
+
+Measured on the same bed at `h = 20 gamma`, on the cell average -- which is
+what the bubble actually integrates:
+
+| leg | rel. error vs exact cell average |
+|---|---|
+| congruence reconstruction | 4.1e-03 |
+| raw grid sample `G^<(w_k)` | 8.2e-01 |
 
 ### 3.4 Point value versus cell average -- a genuine dilemma
 
@@ -176,21 +270,28 @@ representation entirely.
 | `Sigma_SS` sign inverted relative to the ring | same sign, ratio 1.000037, rel diff 3.1e-05 against a brute-force ring on the same legs |
 | the instability is a property of the bed | the pole-free baseline and the empty-window control are both healthy (`eps_lead ~ 1e-5`) |
 | residue mis-scaling | `l^H M' r = 1.000000`; left vector matches an SVD null vector to `1 - 1e-10` |
+| **mismatch between the three quadratures** | review Sec. 9: at cell centres `SS + SR + RS + RR = B(G~_h, G~_h)` exactly. The quadratures agree; the FUNCTION is wrong (Sec. 3.3) |
+| **`rr_ss`'s failure is `Q(0)` non-positivity** | true but not what fires: `rr` ALONE diverges, and it adds nothing back |
 
 ---
 
 ## 5. The open problems, in order
 
-1. **`rr_ss_sr` diverges although `Q(1)` is PSD in the continuum.** The
-   candidates are the quadrature mismatch of Sec. 3.3 and the point-vs-cell
-   dilemma of Sec. 3.4. A bisection over `cell_average`, sector, and pole
-   count is running; it is the discriminating experiment.
-2. **`rr_ss` is structurally non-conserving** and should be relabelled from
-   "staging setting" to "expected to anti-damp": it is `Q(0)`, and the
-   measured `Q(0)` is non-PSD.
-3. **`Phi`-derivability of a three-quadrature scheme** (review Sec. 15) is
-   unresolved and is the root of 1.
-4. **Observables** (review Sec. 16) still integrate narrow poles on the grid.
+1. **Wire the retarded split into the bubble.** Sec. 3.3b is derived, measured
+   and pinned by tests, but the sectors still carry the old coefficients. The
+   quadratures do not change; the coefficients do, and the regular leg stops
+   being a subtraction.
+2. **Cell-constant sources.** `S_k` is frozen per cell in the congruence.
+   That is the same approximation `source_at_poles` already makes, and
+   `source_fit_tol` already measures it, but the two should be the same gate.
+3. **Observables** (review Sec. 16) still integrate narrow poles on the grid.
+   The reconstruction of Sec. 3.3b is the object they should be integrating
+   too, not only the bubble.
+4. **`Phi`-derivability** (review Sec. 15) is unresolved. It is a weaker worry
+   now that the leg is a congruence, but it is not answered.
+5. **Sec. 3.4's dilemma is resolved, not open.** The centred split gives the
+   grid sample at the centre (what Dyson wants) and the correct cell integral
+   over the cell (what the bubble wants), from one object.
 
 ---
 

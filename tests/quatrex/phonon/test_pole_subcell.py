@@ -215,3 +215,125 @@ def test_report_subcell_runs_on_a_production_shaped_state():
         "the in-situ comparison against the congruence must also run")
     for key in ("worst", "worst_centre", "at_centres"):
         assert key in solver.psd_report["subcell"]
+
+
+# --------------------------------------------------------------------------
+# The retarded split: G~^R = G^R_k + [P^R(w) - P^R(w_k)],  G~^< = G~^R S G~^A.
+#
+# Written that way the correction VANISHES at the cell centre, so the leg is
+# the untouched grid sample there and the pole only supplies the sub-cell
+# structure the grid cannot hold. Expanding the congruence gives the four
+# sectors, and the point of the exercise is that they are not an approximation
+# of it -- they ARE it.
+# --------------------------------------------------------------------------
+
+
+def _exact_pole():
+    """Pole, residue and linewidth of the bed's resonance, in ``w`` (not w^2).
+
+    ``g_r = inv(w^2 - (d - i gam))`` has its pole where ``w^2`` is an
+    eigenvalue; near it ``w^2 - lam = 2 w0 (w - w0)``, so the residue is the
+    spectral projector over ``2 w0``.
+    """
+    d, gam, _, _, _, _ = _device()
+    lam, vec = np.linalg.eig(d - 1j * gam)
+    k = int(np.argmin(np.abs(np.sqrt(lam).real - OMEGA)))
+    w0 = np.sqrt(lam[k])
+    w0 = w0 if w0.imag < 0 else -w0
+    left = np.linalg.inv(vec).conj().T
+    return w0, np.outer(vec[:, k], left[:, k].conj()) / (2.0 * w0), -w0.imag
+
+
+def _cell(scale=1.0, width=20.0):
+    """A cell holding the resonance well off its centre, plus the pieces the
+    reconstruction needs. ``scale`` corrupts the residue deliberately."""
+    _, _, g_r, sigma_l, g_l, _ = _device()
+    w0, res, gw = _exact_pole()
+    res = res * scale
+    h = width * gw
+    wk = w0.real + 0.31 * h
+    s = sigma_l(wk)
+
+    def pole(w):
+        return res / (w - w0)
+
+    def cong(w):
+        g = g_r(wk) + (pole(w) - pole(wk))
+        return g @ s @ g.conj().T
+
+    def old(w):
+        pl = lambda x: pole(x) @ s @ pole(x).conj().T  # noqa: E731
+        return pl(w) + (g_l(wk) - pl(wk))
+
+    return w0, res, h, wk, s, g_r, g_l, pole, cong, old
+
+
+def test_four_sectors_are_the_congruence():
+    """The sector split is an identity, not a model.
+
+    ``G~^R S G~^A`` with ``G~^R = G^R_k + U dD V^H`` expands into
+
+        RR = G^R_k S G^A_k              (the untouched ring at the grid point)
+        SR = U dD [V^H S G^A_k]
+        RS = [G^R_k S V] dD^H U^H
+        SS = U dD [V^H S V] dD^H U^H
+
+    and the four sum to it exactly. ``dD = D(w) - D(w_k)`` vanishes at the
+    centre, so ``RR`` alone is the leg there and the rest is pure sub-cell
+    structure.
+    """
+    w0, res, h, wk, s, g_r, _, _, cong, _ = _cell()
+    gk = g_r(wk)
+    for f in (0.0, 0.05, 0.2, -0.31, 0.5):
+        w = wk + f * h
+        dd = 1.0 / (w - w0) - 1.0 / (wk - w0)
+        rr = gk @ s @ gk.conj().T
+        sr = (res * dd) @ (s @ gk.conj().T)
+        rs = (gk @ s) @ (res * dd).conj().T
+        ss = (res * dd) @ s @ (res * dd).conj().T
+        assert np.abs(cong(w) - (rr + sr + rs + ss)).max() < 1e-14
+        if f == 0.0:
+            assert np.abs(sr).max() == np.abs(ss).max() == 0.0
+
+
+def test_congruence_survives_a_wrong_residue_and_the_old_form_does_not():
+    """Why the redesign is necessary rather than merely tidier.
+
+    On the device the residue is a Newton solution of a truncated cluster
+    against a fitted source; it is never exact. The old reconstruction needs
+    it accurate to better than ~20 percent JUST TO KEEP THE SIGN, and nothing
+    enforced that. The congruence has no such requirement: it is a congruence
+    of a PSD source, so ``-i G~^< >= 0`` for ANY pole model, right or wrong.
+    """
+    offs = np.linspace(-0.5, 0.5, 41)
+    worst = {}
+    for tag, scale in (("exact", 1.0), ("over", 1.2), ("double", 2.0),
+                       ("phase", 1.0 + 0.4j)):
+        _, _, h, wk, _, _, _, _, cong, old = _cell(scale=scale)
+        worst[tag] = (min(_lam(old(wk + f * h)) for f in offs),
+                      min(_lam(cong(wk + f * h)) for f in offs))
+
+    # the congruence is positive in every case, corrupted model or not
+    for tag, (_, c) in worst.items():
+        assert c > 0.0, f"congruence went negative for {tag}: {c:.3e}"
+
+    # ... and a 20% residue error is already enough to invert the old form
+    assert worst["exact"][0] > 0.0
+    for tag in ("over", "double", "phase"):
+        assert worst[tag][0] < -0.5, f"{tag}: {worst[tag][0]:.3e}"
+
+
+def test_reconstruction_recovers_the_cell_average():
+    """What the bubble actually consumes is the cell INTEGRAL, and the raw
+    grid sample of an under-resolved pole is wrong by order one."""
+    _, _, h, wk, _, _, g_l, _, cong, _ = _cell(width=20.0)
+    x, wt = np.polynomial.legendre.leggauss(400)
+    xs, wts = wk + 0.5 * h * x, 0.5 * wt
+
+    def avg(fn):
+        return sum(wi * fn(xx) for xx, wi in zip(xs, wts))
+
+    exact = avg(g_l)
+    n = np.abs(exact).max()
+    assert np.abs(avg(cong) - exact).max() / n < 1e-2     # measured 4.1e-3
+    assert np.abs(g_l(wk) - exact).max() / n > 0.5        # measured 8.2e-1
