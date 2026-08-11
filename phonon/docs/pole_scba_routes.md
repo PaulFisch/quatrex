@@ -466,7 +466,7 @@ contraction, hence an upper bound: small is conclusive.)
 The reason it is that small is the reason everything else on this bed is
 small, and it is not a property of the quadrature:
 
-    pole sector: iteration 1, 2 cluster(s), 2/144 pole(s) promoted  refused: eps_nep x142, weight x3
+    pole sector: iteration 1, 2 cluster(s), 2/144 pole(s) promoted  refused: eps_nep x142
       pole sector: cluster c0+partner source varies by 2.02e+02 across its window (tol 1.00e-01)
       pole sector: cluster c1+partner source varies by 5.71e+02 across its window (tol 1.00e-01)
 
