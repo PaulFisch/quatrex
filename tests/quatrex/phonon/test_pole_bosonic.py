@@ -442,3 +442,65 @@ def test_state_records_the_source_fit_per_cluster():
     from quatrex.phonon.pole_sector import PoleSectorState
 
     assert PoleSectorState().source_fit == []
+
+
+def test_sr_and_rs_are_computed_independently():
+    """The two mixed sectors must stay separate paths, not one doubled.
+
+    They ARE equal on a leg-exchange-symmetric vertex at Gamma -- that is
+    measured elsewhere in this module -- but the equality is a Gamma-only,
+    symmetrised-vertex fact, not a general identity. For ``q_perp != 0`` it
+    may additionally require exchanging the internal momenta, relabelling the
+    momentum sum, the full FC3 permutation symmetry, and a
+    conjugation/transposition. Until that is derived and tested for coupled
+    ``q``, neither path may be inferred from the other.
+
+    Perturbing ONE leg's vertex must therefore move exactly one of them.
+    """
+    from quatrex.phonon.pole_bridge import (
+        _mixed_one_sector_blocked, mixed_vertex_block_dict)
+
+    sizes = np.array([2, 2])
+    off = np.concatenate(([0], np.cumsum(sizes)))
+    nb, n_dof = len(sizes), int(sizes.sum())
+    rows, cols, _ = _pattern(sizes)
+    rng = np.random.default_rng(11)
+    phi = {(i, k1, k2): rng.normal(size=(2, 2, 2))
+           for i in range(nb) for k1 in range(nb) for k2 in range(nb)}
+
+    npp = 2
+    u = rng.normal(size=(n_dof, npp)) + 1j * rng.normal(size=(n_dof, npp))
+    cl = PoleCluster(z=np.array([8.0 - 0.3j, 11.0 - 0.4j]), u=u, v=u)
+    freqs = np.linspace(0.0, 30.0, 128)
+    omega = np.linspace(5.0, 15.0, 5)
+    a = (rng.normal(size=(freqs.size, rows.size))
+         + 1j * rng.normal(size=(freqs.size, rows.size)))
+    b = (rng.normal(size=(freqs.size, rows.size))
+         + 1j * rng.normal(size=(freqs.size, rows.size)))
+    m = rng.normal(size=(npp, npp)) + 1j * rng.normal(size=(npp, npp))
+    src = 1j * (m @ m.conj().T)
+
+    vd = mixed_vertex_block_dict
+    kw = dict(freqs=freqs, rows=rows, cols=cols, block_sizes=sizes,
+              g_partner=b)
+
+    def _pair(phi_l, phi_r):
+        sr = _h(_mixed_one_sector_blocked(
+            omega, cl, src, a,
+            bl=vd(phi_l, sizes, cl.u, leg=0, conjugate=False),
+            br=vd(phi_r, sizes, cl.u, leg=1, conjugate=True), **kw))
+        rs = _h(_mixed_one_sector_blocked(
+            omega, cl, src, a,
+            bl=vd(phi_l, sizes, cl.u, leg=1, conjugate=False),
+            br=vd(phi_r, sizes, cl.u, leg=0, conjugate=True), **kw))
+        return sr, rs
+
+    sr0, rs0 = _pair(phi, phi)
+    bumped = dict(phi)
+    bumped[(0, 1, 0)] = bumped[(0, 1, 0)] + 1.0        # breaks leg symmetry
+    sr1, rs1 = _pair(bumped, phi)
+
+    assert np.abs(sr1 - sr0).max() > 1e-12 * np.abs(sr0).max()
+    assert np.abs(rs1 - rs0).max() > 1e-12 * np.abs(rs0).max()
+    # ... and they no longer agree, i.e. neither was derived from the other.
+    assert np.abs(sr1 - rs1).max() / np.abs(sr1).max() > 1e-6

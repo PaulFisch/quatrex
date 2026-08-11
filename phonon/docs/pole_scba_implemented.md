@@ -326,9 +326,15 @@ per pole at production size — is never formed.
 `Σ_SR` and `Σ_RS` are built from independent `leg`/`conjugate` pairs.
 
 > **Measured.** On a leg-exchange-symmetric vertex — what hiphive's
-> `symmetrize=True` produces, hence every real device — they are **exactly
-> equal** (`1.3e-15`). They differ only on the random, unsymmetrised Φ that
-> unit-test beds use.
+> `symmetrize=True` produces — they are **exactly equal** (`1.3e-15`). They
+> differ only on the random, unsymmetrised Φ that unit-test beds use.
+>
+> This is a **Γ-only, symmetrised-vertex fact, not a general identity**, and
+> neither path may be inferred from the other. At `q_perp != 0` the equality
+> may additionally require exchanging the internal momenta, relabelling the
+> momentum sum, the full FC3 permutation symmetry, and a
+> conjugation/transposition. The two are therefore computed independently and
+> a test asserts that perturbing one leg's vertex moves them apart.
 
 ---
 
@@ -407,9 +413,25 @@ conserving and wrong.
 | contribution | added | reason |
 |---|---|---|
 | leg subtraction `G − G_PP` | before the DC mask and the aux bridge | interpolating a narrow Lorentzian through the coarse bridge is the error being removed |
-| `Σ_SS^{<,>}` | **after** `_restrict_from_aux` | never crosses the energy-weighted adjoint transfer, so it cannot leak energy through it |
+| `Σ_SS^{<,>}` | **after** `_restrict_from_aux` | never crosses the energy-weighted adjoint transfer, so it cannot leak energy through **that operator** — see the caveat below |
 | `Σ_SS^R` | separately, closed form | routing it through the discrete Hilbert transform would restore the grid dependence the sector removes |
 | `Σ_SR + Σ_RS` | to the raw conv-grid output, before `Δ` is formed | one narrow factor against a smooth background; the numerical transform is the right tool |
+
+**Placement is necessary, not sufficient.** Putting `Σ_SS` after
+`_restrict_from_aux` means the interpolation/restriction pair cannot distort
+it, and that is all it means. It does **not** make the hybrid discrete SCBA
+conserving. The original bubble is conserving because both internal lines are
+the same dressed `G` and one discrete functional is differentiated
+consistently; the hybrid now uses **three different quadratures** —
+
+    SS     analytic residues
+    SR/RS  cell resolvents
+    RR     FFT/grid convolution
+
+— so while the continuum expression is still the same diagram, the discrete
+realisation is **not automatically Φ-derivable**. The only honest test is the
+measured pre-mixing balance (`QX_BBCHECK=1`), and the heat profile, which has
+disagreed with the scalar residual three times in this campaign.
 
 The mixed background leg is masked **exactly as the ring masks its own legs**
 (`|ω| < max(1e-6, sse_low_freq_mask_thz)`). The ω = 0 bin carries the
@@ -613,7 +635,70 @@ mask's edge rather than in the band. That is a direct argument for treating
 the `omega -> 0` region analytically instead of masking it: the present
 treatment displaces the artefact to the boundary rather than removing it.
 
-## 11. Open
+## 11. Review accounting
+
+External review: `pole_scba_implementation_review.md`. Every substantive claim
+was checked numerically before being accepted or rejected.
+
+### Treated
+
+| § | issue | resolution |
+|---|---|---|
+| 2 | `M(z)` non-holomorphic | anchor pinned per solve; 3.08e-01 jump -> 1.26e-02 |
+| 4 | wrong lesser/greater mirror | Keldysh partner, transposed; 244 % error removed |
+| 5 | invalid positivity proof | **withdrawn**; reviewer correct |
+| 6 | sign convention | Sec. 0 states both mappings; the code was already consistent |
+| 7 | `SS` retarded double counting | injection identity tested at roundoff |
+| 8 | left-vector conditioning | iterated to its own residual; `eps_left` reported; pinned against an SVD null vector (overlap 1 - 1e-10) |
+| 11 | `S(z_alpha)` needs an estimator | `source_variation` + `source_fit_tol`, now a live gate |
+| 12 | high-order source fits | local fit evaluated AT the complex poles, sharing the pair mean |
+| 13 | apparent inconsistency | resolved: 2.2e-16 is the exact-moment split, 8.3e-03 was sampling at `Re(pole)`; the gap is `b Im z`. Now 3.1e-14 |
+| 14 | position-only pole identity | optimal assignment on displacement AND eigenvector overlap |
+| 17 | spurious `1/w` tail | per-pair source; ratio 1.0000 to `w = 1e6` |
+| 19 | `SR = RS` hard-coded | it never was; now guarded by a test and the claim is scoped to Gamma |
+| 20 | error estimate too strong | replaced by the measured residual |
+| 21 | "converged" mislabel | relabelled, with the 16 % drift stated |
+
+### Refuted
+
+* **§6's implied code bug.** The code is self-consistent: feeding `-Delta`
+  through the production assembly is wrong by 1.96 relative. Only this
+  document conflated the theory and stored conventions.
+* **§2's derivative concern.** `dM/dz` was always the true complex derivative
+  *within* a stencil (2.8e-08, clean `eps^2`). The defect was the jumps
+  between stencils, not the formula.
+* **§13's incompatibility.** Both reported numbers were correct and measured
+  different objects; see the table above.
+
+### Not addressed, and what each needs
+
+* **§3 complex-`z` contacts.** `_obc_at` samples the contact at the anchor,
+  which removes the jump but keeps the contact *flat* in `z`. A genuine
+  continuation needs `g_s^R(z)` from the lead pencil, i.e. the outgoing-sheet
+  work (Phase 6). Until then the pole classes supported are those in a contact
+  gap or weakly coupled, where the contact is flat over a window narrower than
+  its own scale.
+* **§9 Newton elimination.** A reconsideration, not a stated defect. The
+  current elimination converges in ~3 iterations to `|M(z)| = 1e-14`; any
+  replacement should be measured against that.
+* **§15 Phi-derivability.** The sharpest open item. Placement after
+  `_restrict_from_aux` prevents one specific leak and nothing more; with three
+  quadratures the discrete functional is not automatically conserving. The
+  reviewer's suggestion is an energy-weighted cell projection of the analytic
+  contributions back onto the regular solver's piecewise-constant
+  representation. Needs deriving, not just implementing.
+* **§16 hybrid observables.** `J_L`, `J_R` and the other frequency integrals
+  still sample narrow poles on the grid, so the observable can carry the
+  registration error the self-energy no longer does. The pole contributions
+  are analytic and should be integrated as such.
+* **§18 analytic DC cell.** The mask is a grid convention, not physics
+  (`G^<` has no `1/omega` pole). Two obstacles: `cell_resolvent_weights`
+  models `R` as cell-wise CONSTANT, so integrating the DC cell reproduces the
+  artefact rather than curing it -- and it is `G^>`, not `G^<`, that is
+  near-singular there; and the ring must drop its mask in the same change or
+  the sectors disagree again.
+
+## 12. Open
 
 * Verify the hysteresis fix stabilises membership and lets `rr_ss_sr` converge.
 * The residual second-order (λ²) positivity violation, `−9.2e-3` at λ = 1.
