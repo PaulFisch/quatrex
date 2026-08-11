@@ -193,6 +193,30 @@ def background_coefficients(
     return c_sr, c_rs, c_ss
 
 
+def _pattern_chunk(n_omega: int, n_p: int, nnz: int,
+                   budget_bytes: int = 1 << 28) -> int:
+    r"""Pattern rows per chunk, sized so the working set fits ``budget_bytes``.
+
+    The natural way to write these contractions materialises
+    ``(n_omega, N_p, nnz)`` -- ``take(c_sr, cols, axis=2)`` and its ``c_rs``
+    partner. At the two poles the CNT bed promotes that is invisible; at a few
+    dozen it is hundreds of gigabytes, and raising the Newton budget on that
+    bed died with
+
+        OutOfMemoryError: allocating 290,488,467,456 bytes
+
+    so the route could never be asked to carry the pole count the physics
+    needs. Chunking over the pattern makes the peak
+    ``O(n_omega * N_p * chunk)`` with ``chunk`` set here rather than by the
+    device size.
+
+    The default budget is 256 MB of complex128, which keeps the chunk count in
+    the hundreds for a production pattern rather than the thousands.
+    """
+    per = max(1, 16 * n_omega * max(n_p, 1))
+    return int(max(1, min(nnz, budget_bytes // per)))
+
+
 def sector_terms(
     cluster: PoleCluster,
     omega: NDArray,
@@ -200,6 +224,7 @@ def sector_terms(
     rows: NDArray,
     cols: NDArray,
     probe: NDArray | None = None,
+    chunk_bytes: int = 1 << 28,
 ) -> tuple[NDArray, NDArray, NDArray]:
     r"""``SR``, ``RS`` and ``SS`` on the stored pattern.
 
@@ -214,12 +239,21 @@ def sector_terms(
     d = 1.0 / (wp[:, None] - z[None, :])                      # (n_omega, Np)
     c_sr, c_rs, c_ss = coefficients
     r, c = xp.asarray(rows), xp.asarray(cols)
-    ur = xp.take(cluster.u, r, axis=0)                        # (nnz, Np)
-    uc = xp.conj(xp.take(cluster.u, c, axis=0))
-
-    sr = xp.einsum("ka,wa,wak->wk", ur, d, xp.take(c_sr, c, axis=2))
-    rs = xp.einsum("wka,wa,ka->wk", xp.take(c_rs, r, axis=1), xp.conj(d), uc)
-    ss = xp.einsum("ka,wa,wab,wb,kb->wk", ur, d, c_ss, xp.conj(d), uc)
+    n_w, n_p, nnz = int(d.shape[0]), int(d.shape[1]), int(r.shape[0])
+    sr = xp.empty((n_w, nnz), dtype=xp.complex128)
+    rs = xp.empty_like(sr)
+    ss = xp.empty_like(sr)
+    step = _pattern_chunk(n_w, n_p, nnz, budget_bytes=chunk_bytes)
+    for lo in range(0, nnz, step):
+        hi = min(lo + step, nnz)
+        ur = xp.take(cluster.u, r[lo:hi], axis=0)             # (chunk, Np)
+        uc = xp.conj(xp.take(cluster.u, c[lo:hi], axis=0))
+        sr[:, lo:hi] = xp.einsum(
+            "ka,wa,wak->wk", ur, d, xp.take(c_sr, c[lo:hi], axis=2))
+        rs[:, lo:hi] = xp.einsum(
+            "wka,wa,ka->wk", xp.take(c_rs, r[lo:hi], axis=1), xp.conj(d), uc)
+        ss[:, lo:hi] = xp.einsum(
+            "ka,wa,wab,wb,kb->wk", ur, d, c_ss, xp.conj(d), uc)
     return sr, rs, ss
 
 
@@ -229,6 +263,7 @@ def sector_grid_sample(
     coefficients: tuple[NDArray, NDArray, NDArray],
     rows: NDArray,
     cols: NDArray,
+    chunk_bytes: int = 1 << 28,
 ) -> NDArray:
     r"""``SR + RS + SS`` AT the cell centres, on the stored pattern.
 
@@ -237,7 +272,8 @@ def sector_grid_sample(
     the indefinite Keldysh remainder. The superseded code removed the ``SS``
     sample alone, dropping two terms that are FIRST order in the pole.
     """
-    return sum(sector_terms(cluster, omega, coefficients, rows, cols))
+    return sum(sector_terms(cluster, omega, coefficients, rows, cols,
+                            chunk_bytes=chunk_bytes))
 
 
 def reconstruct(
@@ -314,6 +350,7 @@ def sector_cell_average(
     rows: NDArray,
     cols: NDArray,
     h,
+    chunk_bytes: int = 1 << 28,
 ) -> NDArray:
     r"""``<SR + RS + SS>_k`` -- the analytic sectors averaged over their cell.
 
@@ -327,12 +364,20 @@ def sector_cell_average(
     c_sr, c_rs, c_ss = coefficients
     d1, d2 = cell_weights(cluster, omega, h)
     r, c = xp.asarray(rows), xp.asarray(cols)
-    ur = xp.take(cluster.u, r, axis=0)                        # (nnz, Np)
-    uc = xp.conj(xp.take(cluster.u, c, axis=0))
-    sr = xp.einsum("ka,wa,wak->wk", ur, d1, xp.take(c_sr, c, axis=2))
-    rs = xp.einsum("wka,wa,ka->wk", xp.take(c_rs, r, axis=1), xp.conj(d1), uc)
-    ss = xp.einsum("ka,wab,wab,kb->wk", ur, d2, c_ss, uc)
-    return sr + rs + ss
+    n_w, n_p, nnz = int(d1.shape[0]), int(d1.shape[1]), int(r.shape[0])
+    out = xp.empty((n_w, nnz), dtype=xp.complex128)
+    step = _pattern_chunk(n_w, n_p, nnz, budget_bytes=chunk_bytes)
+    for lo in range(0, nnz, step):
+        hi = min(lo + step, nnz)
+        ur = xp.take(cluster.u, r[lo:hi], axis=0)             # (chunk, Np)
+        uc = xp.conj(xp.take(cluster.u, c[lo:hi], axis=0))
+        out[:, lo:hi] = (
+            xp.einsum("ka,wa,wak->wk", ur, d1,
+                      xp.take(c_sr, c[lo:hi], axis=2))
+            + xp.einsum("wka,wa,ka->wk",
+                        xp.take(c_rs, r[lo:hi], axis=1), xp.conj(d1), uc)
+            + xp.einsum("ka,wab,wab,kb->wk", ur, d2, c_ss, uc))
+    return out
 
 
 def partial_fraction_legs(

@@ -962,3 +962,56 @@ def test_state_report_carries_the_promotion_yield():
     head = st.report().splitlines()[0]
     assert "1/6 pole(s) promoted" in head, head
     assert "eps_nep x4" in head and "weight below weight_min x1" in head, head
+
+
+# --- memory: the sector must be able to carry more than a handful of poles -- #
+
+def test_chunked_sector_kernels_match_the_unchunked_result_exactly():
+    """Chunking is a memory transform, not a numerical one.
+
+    The contraction that had to be broken up is ``take(c_sr, cols, axis=2)``,
+    shaped ``(n_omega, Np, nnz)``. Two of those per Keldysh component per call
+    is invisible at the 2 poles the CNT bed promotes and 290 GB at a few
+    dozen -- so the route could never be asked to carry the pole count the
+    physics needs. Splitting the pattern must not move a single bit.
+    """
+    from quatrex.phonon.pole_congruence import (
+        sector_cell_average, sector_grid_sample,
+    )
+
+    cl, w, gk, sig = _bed()
+    co = _coeffs(cl, w, gk, sig)
+    rows, cols = np.meshgrid(np.arange(N_DOF), np.arange(N_DOF), indexing="ij")
+    rows, cols = rows.ravel(), cols.ravel()
+    h = np.full(w.size, float(w[1] - w[0]))
+
+    # a budget big enough for one shot, and one that forces many chunks
+    one = 1 << 40
+    many = 1 << 10
+    for fn, args in ((sector_grid_sample, ()), (sector_cell_average, (h,))):
+        whole = np.asarray(fn(cl, w, co, rows, cols, *args, chunk_bytes=one))
+        split = np.asarray(fn(cl, w, co, rows, cols, *args, chunk_bytes=many))
+        np.testing.assert_array_equal(whole, split)
+
+
+def test_pattern_chunk_bounds_the_working_set_as_poles_are_added():
+    """The peak must scale with the budget, not with Np * nnz.
+
+    This is the number that decides whether a promotion-yield experiment
+    measures physics or memory.
+    """
+    from quatrex.phonon.pole_congruence import _pattern_chunk
+
+    n_w, nnz, budget = 201, 700_000, 1 << 28
+    prev = None
+    for n_p in (2, 8, 32, 128):
+        step = _pattern_chunk(n_w, n_p, nnz, budget)
+        peak = 16 * n_w * n_p * step
+        assert peak <= budget, f"Np={n_p}: peak {peak / 1e9:.2f} GB"
+        assert step >= 1
+        if prev is not None:
+            assert step <= prev, "chunk must shrink as poles are added"
+        prev = step
+    # ... and a small problem is still done in one shot, so nothing that
+    # already worked pays a Python-loop tax.
+    assert _pattern_chunk(n_w, 2, 500, budget) == 500
