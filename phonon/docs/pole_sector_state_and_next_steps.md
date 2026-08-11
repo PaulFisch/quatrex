@@ -127,12 +127,53 @@ Two poles out of 144 candidates, and both violate the sector's own
 source-smoothness gate by 2000x and 5700x. `max_poles` is inert: 2, 8 and 24
 give byte-identical output, because screening binds long before the cap.
 
-An `eps_nep` refusal means "the bordered Newton did not reach
-`newton_tol = 1e-10` within `newton_max_iterations = 8` steps". With
-`trust_radius_cells = 0.25`, eight steps travel at most two cells from the
-seed, so a seed further out cannot arrive however good the pole is. The
-rejected residuals run from 4.8e-10 (one step short) to 2.8e-02 (nowhere
-near), which is the signature of a budget, not of an absent pole.
+### Measured, one knob at a time (job 4399332)
+
+| arm | acceptance | trust region | promoted |
+|---|---|---|---|
+| legacy | scaled matrix residual | grid-tied | 2/144 |
+| trust | scaled matrix residual | physical | 2/144 |
+| locate | **frequency error** | grid-tied | **11/144** |
+| both | frequency error | physical | 9/144 |
+
+**The acceptance criterion is the whole effect; the trust region does not bind
+on this bed.** `eps_nep` is a scaled MATRIX residual, `||M(z)r|| /
+((|z|^2 + ||M||)||r||)`, and its denominator is `1e3-1e4 THz^2` for a phonon
+operator, so testing it against 1e-10 asks a question about matrix norms
+rather than about frequency. Gating instead on
+`eps_z = |dz_est| / min(gamma, separation, h)` -- the estimated remaining
+frequency error against the smallest scale the pole must be resolved against --
+is worth 5.5x on its own.
+
+An earlier version of this section attributed 2/144 to the Newton BUDGET: with
+`trust_radius_cells = 0.25`, eight steps travel at most two cells, so a distant
+seed could not arrive. That mechanism is real and is fixed (the radius is now
+`trust_factor * min(nearest seed, nearest band edge)` in THz, and on the
+sector's own synthetic bed the old radius loses 3 of 9 poles), but the `trust`
+arm above shows it is **not** what was binding on the CNT bed. The seeds there
+are already close enough. Newton ITERATIONS remain untested at scale -- the
+earlier attempt OOM'd before finishing, which is what the chunking fixed.
+
+**The remaining 133 refusals are genuine, not gate artefacts.** Their `eps_z`
+distribution:
+
+    min 5.0e-02   p25 4.5e-01   median 9.7e-01   p75 2.4e+00   max 2.9e+01
+
+The median refused candidate is displaced by about a FULL limiting scale. These
+are not poles sitting just outside a tolerance; they are not located. 38 of
+them fall under `eps_z = 0.5`, so loosening `locate_tol` from 0.05 to 0.5 would
+give roughly 49/144 -- at the price of admitting poles displaced by half their
+own linewidth, which is a materially wrong residue. That is a physics judgement
+and is left as a knob (`QX_POLE_LOCTOL`) with the trade-off measured rather
+than chosen silently.
+
+So the dominant remaining loss is a root-finding failure, and the next place to
+look is the SEEDS, not the gate.
+
+**Coverage moves with it, as predicted.** At 11 promoted poles the ring weight
+sitting on pole-cell PAIRS rises from 4.2 % to 15.4 % at the worst bin
+(`w = 52.25`). That is the mechanism the sector needs in order to matter at
+all, appearing exactly where Sec. 2 says it should.
 
 **Raising the budget promotes more poles and then runs out of memory.**
 `QX_POLE_NEWTIT=40` on the same bed died with
