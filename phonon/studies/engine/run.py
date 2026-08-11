@@ -14,7 +14,8 @@ Env overrides (optional, on top of the TOML):
   QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz),
   QX_POLE=1 (pole-subtracted SCBA sector) with QX_POLE_NP QX_POLE_SECTORS
   QX_POLE_WMIN QX_POLE_WMAX QX_POLE_SHEET QX_POLE_PGAMMA QX_POLE_AUDIT
-  QX_POLE_PSD QX_POLE_LEG QX_POLE_NEWTIT QX_POLE_TRUST.
+  QX_POLE_PSD QX_POLE_LEG QX_POLE_NEWTIT QX_POLE_TRUST
+  QX_POLE_ACCEPT QX_POLE_LOCTOL QX_POLE_TRUSTF.
 
 Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
 (qttools default "cupy" with silent NumPy fallback); set it explicitly for
@@ -109,6 +110,15 @@ if os.environ.get("QX_POLE_CELLAVG"): cfg.phonon.pole_sector.cell_average = bool
 # newton_tol is untouched -- it only lets the solve finish.
 if os.environ.get("QX_POLE_NEWTIT"): cfg.phonon.pole_sector.newton_max_iterations = int(os.environ["QX_POLE_NEWTIT"])
 if os.environ.get("QX_POLE_TRUST"): cfg.phonon.pole_sector.trust_radius_cells = float(os.environ["QX_POLE_TRUST"])
+# Which quantity decides a pole was FOUND. "locate" gates on the frequency
+# error eps_z; "residual" is the legacy scaled-matrix-residual gate, kept so
+# old runs reproduce. newton_tol is untouched by either.
+if os.environ.get("QX_POLE_ACCEPT"): cfg.phonon.pole_sector.accept = os.environ["QX_POLE_ACCEPT"]
+if os.environ.get("QX_POLE_LOCTOL"): cfg.phonon.pole_sector.locate_tol = float(os.environ["QX_POLE_LOCTOL"])
+# Physical trust radius as a fraction of min(nearest seed, nearest band edge).
+# Set tiny to reproduce the old grid-tied radius, which floors it at
+# trust_radius_cells * h.
+if os.environ.get("QX_POLE_TRUSTF"): cfg.phonon.pole_sector.trust_factor = float(os.environ["QX_POLE_TRUSTF"])
 if os.environ.get("QX_POLE"):
     # Re-validate: the pole gates are cross-field, so an override that creates
     # an inconsistent combination must fail here rather than at iteration 40.
