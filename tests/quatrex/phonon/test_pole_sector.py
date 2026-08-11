@@ -605,3 +605,83 @@ def test_hysteresis_survives_across_iterations():
     rotated = _S2(complex(9.0, -gamma), np.array([0.0, 1.0, 0.0, 0.0]))
     assert sec._match_previous([rotated]) == [False], \
         "position alone must not carry identity through a crossing"
+
+
+# --- attributing a low promotion yield ------------------------------------- #
+
+def test_coverage_chain_separates_the_reasons_a_candidate_is_lost():
+    """"2/144" says the sector carries little; it does not say why.
+
+    A mode absent because the grid already resolves it, one absent because
+    Newton never reached it, and one absent because the representation was
+    refused need three different fixes. The chain is what tells them apart,
+    and each refusal must land in exactly one stage.
+    """
+    from quatrex.phonon.pole_sector import PoleSectorState
+
+    st = PoleSectorState()
+    st.clusters, st.coherence = [], []
+    st.rejected = [
+        (1 + 0j, "outside the pole window [1, 55]"),
+        (2 + 0j, "grid-resolved (q_omega=2 >= 1)"),
+        (3 + 0j, "grid-resolved (q_omega=3 >= 1)"),
+        (4 + 0j, "eps_z=1.20e-01 above locate_tol (eps_nep=5.7e-03)"),
+        (5 + 0j, "ill-conditioned (kappa=1.00e+06)"),
+        (6 + 0j, "within 2 half-widths of a band edge"),
+        (7 + 0j, "over max_poles"),
+    ]
+    chain = dict(st.coverage_chain())
+    assert chain["candidates"] == 7
+    assert chain["in window"] == 6
+    assert chain["unresolved"] == 4
+    assert chain["important"] == 4          # not implemented: nothing is lost
+    assert chain["root solved"] == 3
+    assert chain["representation valid"] == 1
+    assert chain["active"] == 0
+    # every refusal is attributed to exactly one stage
+    assert chain["candidates"] - chain["active"] == len(st.rejected)
+    assert "coverage:" in st.report()
+
+
+def test_the_important_stage_is_not_implemented_and_says_so():
+    """``weight_min`` is in the config and nothing reads it.
+
+    So no candidate is ever refused for carrying too little spectral or
+    vertex-weighted weight, and the review's ``important`` stage is a gap
+    rather than a pass. It is listed with its input count so the gap is
+    visible; if this ever starts filtering, this test is the reminder to give
+    it its own stage semantics.
+    """
+    import inspect
+
+    from quatrex.phonon import pole_sector as ps
+
+    # Look for USE, not mention: coverage_chain's own docstring names it.
+    src = inspect.getsource(ps)
+    assert "cfg.weight_min" not in src and "config.weight_min" not in src, (
+        "weight_min is now read; give the 'important' stage real semantics "
+        "and update coverage_chain")
+
+
+def test_audit_reports_candidates_without_allocating_a_sector():
+    """Root finding and sector allocation fail for unrelated reasons."""
+    freqs, d, delta, sizes = _bed(401)
+    m_blocks, dm_blocks = _operator(d, freqs, delta, sizes)
+    sec = PoleSector(PoleSectorConfig(enabled=True), freqs)
+    lam = np.linalg.eigvalsh(_dense_d(d, sizes))
+    lo, hi = sec.window()
+    seeds = [complex(np.sqrt(l), -0.01) for l in lam if lo <= np.sqrt(l) <= hi]
+
+    rows = sec.audit(m_blocks, dm_blocks, seeds)
+    assert len(rows) == len(seeds)
+    for row in rows:
+        for key in ("z", "gamma", "separation", "q_omega", "eps_z", "eps_nep",
+                    "kappa", "iterations", "trust_radius", "refused"):
+            assert key in row, key
+        assert np.isfinite(row["eps_z"]) and np.isfinite(row["eps_nep"])
+    # the audit must not have built a sector
+    assert sec.state.n_poles == 0 and not sec.state.clusters
+    # ... and it must agree with what build_clusters would decide
+    sols = sec.solve_poles(m_blocks, dm_blocks, seeds)
+    state = sec.build_clusters(sols)
+    assert sum(r["refused"] is None for r in rows) == len(state.solutions)

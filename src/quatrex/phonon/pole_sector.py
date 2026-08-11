@@ -111,6 +111,42 @@ class PoleSectorState:
     def n_poles(self) -> int:
         return sum(c.n_poles for c in self.clusters)
 
+    def coverage_chain(self) -> list[tuple[str, int]]:
+        """How many candidates survive each stage of promotion, in order.
+
+        Doc Sec. 28. A single yield ("2/144") says the sector is not carrying
+        much; it does not say whether that is because the modes are already
+        resolved, because the root solve failed, or because the representation
+        was refused. Those have completely different fixes, and the chain
+        separates them.
+
+        The ``important`` stage is NOT implemented: ``weight_min`` exists in
+        the config and nothing reads it, so no candidate is ever refused for
+        carrying too little spectral or vertex-weighted weight. It is listed
+        with its input count so the gap is visible rather than silently
+        absent.
+        """
+        stages = [("in window", ("outside the pole window",
+                                 "pole is not in the lower half plane")),
+                  ("unresolved", ("grid-resolved",)),
+                  ("important", ()),                   # not implemented
+                  ("root solved", ("eps_z", "eps_nep")),
+                  ("representation valid", ("ill-conditioned",
+                                            "half-widths of a band edge")),
+                  ("active", ("over max_poles",))]
+        lost = {name: 0 for name, _ in stages}
+        for _, why in self.rejected:
+            for name, keys in stages:
+                if any(k in why for k in keys):
+                    lost[name] += 1
+                    break
+        n = self.n_poles + len(self.rejected)
+        chain = [("candidates", n)]
+        for name, _ in stages:
+            n -= lost[name]
+            chain.append((name, n))
+        return chain
+
     def report(self) -> str:
         """One-line-per-cluster summary for the iteration log.
 
@@ -130,7 +166,9 @@ class PoleSectorState:
             f"{k} x{v}" for k, v in sorted(why.items(), key=lambda kv: -kv[1])))
         lines = [f"pole sector: iteration {self.iteration}, "
                  f"{len(self.clusters)} cluster(s), "
-                 f"{self.n_poles}/{seen} pole(s) promoted{tail}"]
+                 f"{self.n_poles}/{seen} pole(s) promoted{tail}",
+                 "  coverage: " + " -> ".join(
+                     f"{k} {v}" for k, v in self.coverage_chain())]
         for c, eps in zip(self.clusters, self.coherence):
             om = np.asarray(_host(c.omega)).ravel()
             ga = np.asarray(_host(c.gamma)).ravel()
@@ -404,6 +442,40 @@ class PoleSector:
         finally:
             self._fit_anchor = saved
         return out
+
+    def audit(self, m_blocks, dm_blocks, seeds: list[complex],
+              seed_vectors: list[NDArray] | None = None) -> list[dict]:
+        """Solve the candidates and report, WITHOUT allocating a sector.
+
+        Doc Sec. 27. Root finding and sector allocation fail for unrelated
+        reasons, and mixing them makes a low yield uninterpretable: a pole
+        missing because Newton did not reach it and a pole missing because
+        the representation was refused need opposite fixes. This stops after
+        the solve, so the root-finding question can be answered on its own.
+
+        Returns one row per candidate with the location, both acceptance
+        metrics, the conditioning, and the refusal reason it would receive.
+        """
+        sols = self.solve_poles(m_blocks, dm_blocks, seeds, seed_vectors)
+        seps = self.separations(sols)
+        promoted = self._match_previous(sols)
+        rows = []
+        for k, sol in enumerate(sols):
+            rows.append({
+                "z": complex(sol.z),
+                "gamma": float(-np.imag(complex(sol.z))),
+                "separation": float(seps[k]),
+                "q_omega": self.resolution_score(
+                    max(-float(np.imag(complex(sol.z))), 0.0)),
+                "eps_z": self.locate_error(sol, seps[k]),
+                "eps_nep": float(sol.eps_nep),
+                "eps_left": float(sol.eps_left),
+                "kappa": float(sol.kappa),
+                "iterations": int(sol.iterations),
+                "trust_radius": self.trust_radius(seeds[k], seeds, k),
+                "refused": self.screen(sol, promoted[k], seps[k]),
+            })
+        return rows
 
     def predict(self, dsigma_at: dict[int, NDArray]) -> list[complex]:
         """Warm-start seeds from the previous iterate (doc Eq. 43)."""
