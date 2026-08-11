@@ -10,6 +10,28 @@ spatial/modal half (Part II) is not started.
 
 ---
 
+## 0. Two sign conventions, stated once
+
+Both appear below and they differ by an overall sign. Every formula names
+which it uses.
+
+**Theory.** `Delta = Sigma^> - Sigma^<` and
+`Sigma^R = 1/2 Delta + i/2 H[Delta]`, consistent with
+`Sigma^R - Sigma^A = Sigma^> - Sigma^<`.
+
+**Stored.** The solver keeps the occupation-positive convention
+`sigma^{<,>} = +i n(+1) Gamma`, i.e. `sigma_stored = -sigma_theory`. Hence
+`-i sigma^<` and `-i sigma^>` are BOTH positive semidefinite, and
+
+    Sigma^R - Sigma^A = sigma_stored^< - sigma_stored^>
+
+which is why the Keldysh gate in Sec. 8 is written with that ordering. The
+code is self-consistent: feeding `Delta = Sigma^R - Sigma^A` through the
+production assembly returns `Sigma^R`, while negating it is wrong by a factor
+of order one (measured 1.96 relative).
+
+---
+
 ## 1. Analytic continuation of the scattering self-energy
 
 ### 1.1 The identity the method rests on
@@ -36,6 +58,15 @@ dropped from the mirror sum. The pole cell contributes
 > **Measured.** `max|F(ω+i0) − (½Δ + ½i·H[Δ])| / max|Σ^R| = 8.1e-14` against a
 > faithful re-implementation of the production kernel. The jump across the cut
 > is exactly `Δ` to 8 digits.
+>
+> This validates the continuation against the **production discretisation**,
+> not against the continuum. Both sides model `Δ` as cell-wise constant, so
+> the agreement says the complex-`z` formula reproduces the real-axis one
+> exactly -- which is the claim being made -- and says nothing about the
+> distance to the true `Σ^R`. That distance is a genuine quadrature error:
+> a round trip on an exact bosonic pole pair gives 1.03e-02 at
+> `dw/γ = 0.037`, improving to 4.1e-03 under a 32× refinement in `dw` and
+> 8.7e-03 under 16× in `fmax`.
 
 Order of the branches is load-bearing: `Log(z-ω_k+h/2) - Log(z-ω_k-h/2)`
 reversed gives exactly `−1×` the answer.
@@ -44,10 +75,23 @@ reversed gives exactly `−1×` the answer.
 
 $$\Sigma_s^{R,\mathrm{II}}(z) = F(z) + \Delta_{\rm an}(z)$$
 
-`Δ_an` is a degree-`p` least-squares polynomial in `t = (ω − Re z)/h` over the
-nearest `window` cells on each side, evaluated at `z`. Error
-`O((|Im z|/h)^{p+1})`, controlled precisely because promoted poles satisfy
-`γ ≪ h`. Negative-`Re z` probes are served by the mirrored branch.
+`Δ_an` is a degree-`p` least-squares polynomial in `t = (ω − Ω_anchor)/h` over
+the nearest `window` cells on each side, evaluated at `z`. Negative-anchor
+probes are served by the mirrored branch.
+
+The asymptotic `O((|Im z|/h)^{p+1})` is **not** the whole error: it also
+depends on the analyticity radius and higher derivatives of `Δ`, the offset of
+the pole from the fit centre, the window width, the conditioning of the
+Vandermonde pseudo-inverse, and noise in the sampled self-energy. It should be
+replaced by a measured local residual gating promotion — that is what the
+declared-but-unconsumed `source_fit_tol` is for.
+
+**The anchor is pinned per pole solve, not derived from `Re z`.** Choosing the
+stencil by `round(Re z / h)` makes it switch discretely as `z` moves, so
+`Δ_an` — and hence `M(z)` — is only *piecewise* holomorphic. Measured at
+`h = 0.25` across the boundary at `Re z = 9.375`: a **3.08e-01 jump** against
+~3.4e-03 within a stencil, on a field of typical magnitude 1.79. Pinned, the
+sweep is smooth (max step 1.26e-02 against a median of 1.21e-02).
 
 ### 1.3 Both terms are linear in Δ — which is what makes it distributable
 
@@ -155,13 +199,24 @@ partial-fraction form.
 `S(ω) = V†Σ_tot(ω)V`, projected on the stored pattern, plus both contact
 corners projected separately (they live on dense corners, not the pattern).
 
-Per-pole evaluation, not one frozen value per cluster: the residue at
-`z_α` carries `S(z_α)`. Negative-frequency partners are served by the bosonic
-mirror `S(−ω) = S(ω)^*` rather than by extrapolating a model across the band.
+One value per pole **pair**, shared by both residues, evaluated at that
+pair's own frequency (the midpoint of the two poles' real parts). Negative
+partners are served by `S(−ω) = S(ω)^*`.
 
-> **Measured.** On a cluster with poles at 8 and 11 THz and a frequency-varying
-> source, the frozen value (read at the first pole) is **27 % off** on the
-> second.
+The sharing is not a convenience. The leg's large-`ω` behaviour is
+`(c_a + c_b)/ω`, while the congruence it models decays as `1/ω²`, so the two
+agree only if `c_a + c_b = 0` — that is, only if the same source serves both
+residues. For the dominant `α = β` terms the pair frequency IS `Re z_α`, so
+no accuracy is lost where it matters; only the cross terms, whose
+coefficients carry a large `gap`, are averaged.
+
+> **Measured.** A frozen value read at the cluster's *first* pole is 27 % off
+> on a second pole at 11 THz. Using a *different* source at each pole fixes
+> that but gives `G_PP` a spurious `1/ω` tail: against the congruence, **17×**
+> too large at `ω = 1e2`, **579×** at `3e3`, **18364×** at `1e5` — which is
+> what made `rr_ss` regress from 5.4e-08 to 4.9e-05. Per-pair evaluation has
+> `c_a + c_b = 0` exactly and tracks the congruence to ratio 1.0000 out to
+> `ω = 1e6`.
 
 ---
 
@@ -230,10 +285,29 @@ $$W_{ik} = \frac{1}{2\pi}\Big[\mathrm{Log}\big(z_i-\omega_k+\tfrac h2\big)
 so the narrow denominator is integrated, never sampled.
 
 **The integral runs over the whole axis** while the solver holds `G` only for
-`ω ≥ 0`. The negative half follows from `R(−ω) = R(ω)^*` but must be supplied
-explicitly — the cell kernel integrates exactly the cells it is given.
+`ω ≥ 0`. The negative half must be supplied explicitly — the cell kernel
+integrates exactly the cells it is given — and it comes from the Keldysh
+**partner**:
 
-> **Measured.** One-sided integral wrong by **28 %**; mirrored, `2.5e-4`.
+$$G^<_{ij}(\mathbf q, -\omega) = G^>_{ji}(-\mathbf q, \omega)$$
+
+i.e. swap component, transpose, negate `q`, **no conjugation**. The
+same-component relation `R(−ω) = R(ω)^*` is correct for
+`Δ = Σ^> − Σ^<` (which is why `bosonic_partner` and the production Hilbert
+transform use it) and **wrong for a lesser or greater leg**.
+
+> **Measured** on an equilibrium bed (`G^< = i n_B A`, `G^> = i(n_B+1)A`,
+> `A` odd):
+>
+> | identity | residual |
+> |---|---|
+> | `G^<(−ω) = G^>(ω)` | 8.9e-16 |
+> | `G^<(−ω) = conj(G^<(ω))` | 7.65, i.e. **244 %** |
+> | `Δ(−ω) = conj(Δ(ω))` | 5.6e-17 |
+>
+> Omitting the extension entirely is a 28 % error; the conjugate relation is
+> worse, because it is wrong in a way that looks right at equilibrium and at
+> `Γ`.
 
 **Blocked contraction.** The pattern-level form is `O(nnz_out × nnz_in)` and
 refuses above 4096 entries, which no real device is under. The contraction is a
@@ -258,24 +332,37 @@ per pole at production size — is never formed.
 
 ---
 
-## 5. Why the decomposition is positive by construction
+## 5. Positivity: what is and is not guaranteed
 
-With `A = G_PP`, `B = G_reg`, and the mixed sectors scaled by `λ`:
+With `A = G_PP`, `B = G_reg`, and the mixed sectors scaled by `lambda`:
 
 $$Q(\lambda) = B(A,A) + B(B,B) + \lambda\big[B(A,B)+B(B,A)\big]
  = \lambda\,B(A{+}B,A{+}B) + (1-\lambda)\big[B(A,A)+B(B,B)\big]$$
 
-`B(A+B,A+B) = B(G,G)` is PSD and `B(A,A) + B(B,B)` is a sum of PSD objects, so
-`Q(λ)` is a **convex combination of two PSD objects — PSD for every λ ∈ [0,1]**.
+The algebraic identity is correct. **The PSD conclusion drawn from it in an
+earlier version of this note was not**, and is withdrawn.
 
-> **Measured.** `+1.05e-06, +1.66e-06, +2.23e-06, +2.77e-06, +3.28e-06` at
-> `λ = 0, 0.25, 0.5, 0.75, 1`, i.e. PSD and improving with λ. Under grid
-> refinement the hybrid stays `+3.3e-06` from `dw/γ = 6.7` to `0.42`.
+A convex combination of PSD objects is PSD, but that requires `B(A,A)` and
+`B(B,B)` to be individually PSD, hence `A` and `B` individually PSD.
+`G_reg = G - G_PP` is a **difference** of PSD objects and is not. Measured
+with a deliberately over-subtracted `G_PP`:
 
-So neither the decomposition nor a sector-quadrature mismatch can produce a
-positivity violation. Any violation observed on a device is a bug elsewhere.
+| quantity | worst normalised eigenvalue |
+|---|---|
+| `G_reg` | -1.00 |
+| `B(B,B)` -- the term the argument assumed PSD | **-0.708** |
+| `Q(0)` | **-7.35e-02** |
+| `Q(0.25)` | **-1.29e-02** |
+| `Q(1)` | +2.24e-04 |
 
----
+**What is guaranteed** is only `Q(1) = B(G,G)`, which is PSD because `G` is,
+and only when the four sectors are evaluated exactly. At `lambda < 1`, or
+when the sectors use mismatched quadratures, positivity is not guaranteed.
+
+The earlier claim that "neither the decomposition nor a sector-quadrature
+mismatch can produce a positivity violation" is **false**. It was used to rule
+out a class of explanations for an observed device violation, and that
+reasoning is withdrawn with it.
 
 ## 6. The prize
 
@@ -422,6 +509,32 @@ It reported `sigma_greater worst = −1.000e+00` — uniformly negative — on t
 meaningless. Lesson: validate a diagnostic against a known-good run before
 trusting it to localise a defect.
 
+### 9.6 Three bugs found by external review
+
+All three were confirmed numerically before being fixed, and all three are
+defects introduced by the work described above.
+
+**The lesser/greater mirror was the same-component conjugate** (§4 above).
+Wrong by 244 % on an equilibrium bed. Worse, the original "mirror fix" was
+validated against a conjugate-symmetric background — a bed constructed to
+satisfy the assumption under test — so the test confirmed the assumption
+rather than the physics.
+
+**Per-pole sources gave `G_PP` a spurious `1/ω` tail** (§3 above), 18364× too
+large at `ω = 1e5`, which explains a regression observed at the time and left
+unexplained.
+
+**`M(z)` was only piecewise holomorphic**: the fit stencil `round(Re z / h)`
+switches discretely, giving a 17 % jump at each boundary, with Newton's trust
+radius routinely crossing one.
+
+The pattern is worth naming: two of the three were "validated" against beds
+built to satisfy the assumption being tested. **A bed used to test a symmetry
+must first be checked against the physical identity, and the check must show
+the WRONG relation failing by a large margin — not merely the right one
+passing.** Every symmetry test in `test_pole_bosonic.py` and
+`test_pole_retarded_assembly.py` now carries that negative control.
+
 ### Hypotheses proposed and refuted, for the record
 
 | hypothesis | refuted by |
@@ -441,7 +554,12 @@ together constrained the answer more than all four.
 Bed `pgate`: the Γ-only 4-cell CNT from `cluster/l4gpu` (12 atoms/cell, 144
 DOF), `retarded_method = "fft"`, one GH200.
 
-**Converged comparison**, 80 iterations, mixing 0.02, all pre-hysteresis-fix:
+**80-iteration comparison**, mixing 0.02, all pre-hysteresis-fix. NOT
+converged — the label used earlier was wrong. Every run below reports NOT
+CONVERGED, the two mixers disagree (`lead_current` 53.81 linear vs 48.56
+Anderson), and the baseline's own current drifted 16 % between iteration 4
+and 80. These are matched-ITERATION comparisons, which on this bed are not
+interpretable as physics; only matched-residual comparisons are.
 
 | leg | resid | heat profile | non-uniformity | lead_current |
 |---|---|---|---|---|
