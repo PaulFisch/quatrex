@@ -887,3 +887,54 @@ def test_flattened_leg_is_anti_hermitian_on_the_real_axis(closed):
     eps = (np.abs(gs + np.conj(np.swapaxes(gs, 1, 2))).max()
            / np.abs(gs).max())
     assert eps < 1e-12, f"eps_AH(w) = {eps:.3e}"
+
+
+def test_pole_pair_weight_bounds_where_the_registration_error_can_live():
+    """How much of the ring's weight sits on cell pairs with BOTH ends poled.
+
+    That is the only place the registration error is order one, so the error
+    in ``Sigma`` is bounded by this fraction times ~0.8. The measure has to
+    get three things right or the bound is not a bound.
+    """
+    from quatrex.phonon.pole_audit import pole_pair_weight
+
+    n = 41
+    w = np.arange(n, dtype=float)
+    mask0 = w < 0.5                                # the ring's own w = 0 mask
+
+    # (i) one pole cell against an otherwise flat leg. It pairs with itself
+    #     at the DIFFERENCE frequency 0 and at the SUM frequency 2*w0; the
+    #     former is the bin the ring zeroes, so it must not decide `worst`.
+    g = np.ones(n)
+    g[10] = 50.0
+    p = np.zeros(n, dtype=bool)
+    p[10] = True
+    assert pole_pair_weight(g, p, freqs=w)["omega_index"] == 0
+    rep = pole_pair_weight(g, p, freqs=w, skip=mask0)
+    assert rep["omega_index"] == 20, rep           # 10 + 10
+    assert rep["worst"] > 0.9
+    assert 0.0 < rep["mean"] < 0.5
+
+    # (ii) the negative half must be folded back, or every DIFFERENCE
+    #      frequency pairing is silently dropped -- roughly half the
+    #      convolution, and exactly the half that carries Omega_a - Omega_b.
+    g = np.ones(n)
+    g[[10, 16]] = 50.0
+    p = np.zeros(n, dtype=bool)
+    p[[10, 16]] = True
+    rep = pole_pair_weight(g, p, freqs=w, skip=mask0)
+    k = np.arange(n)
+    gp = g * p
+    frac6 = float(gp[k] @ gp[np.abs(6 - k)]) / float(g[k] @ g[np.abs(6 - k)])
+    assert frac6 > 0.1, f"difference-frequency pairing dropped: {frac6:.3e}"
+    assert rep["worst"] >= frac6 - 1e-12
+
+    # (iii) no poles -> no bound to report, and no division by zero
+    empty = pole_pair_weight(g, np.zeros(n, dtype=bool), freqs=w)
+    assert empty["mean"] == 0.0 and empty["omega_index"] == -1
+
+    # (iv) every cell poled -> the fraction is exactly 1, so the bound is
+    #      vacuous and says so rather than reading small by accident
+    allp = pole_pair_weight(g, np.ones(n, dtype=bool), freqs=w, skip=mask0)
+    assert abs(allp["mean"] - 1.0) < 1e-12
+    assert abs(allp["worst"] - 1.0) < 1e-12

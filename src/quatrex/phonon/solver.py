@@ -637,7 +637,7 @@ class PhononSolver(SubsystemSolver):
                 "reduce": _reduce}
 
     def _update_pole_sector(self, sse_lesser, sse_greater,
-                            g_retarded=None) -> None:
+                            g_retarded=None, g_lesser=None) -> None:
         """Refresh the pole set from the current (mixed) self-energy.
 
         Runs in the ``"stack"`` distribution state, right after the selected
@@ -691,12 +691,13 @@ class PhononSolver(SubsystemSolver):
             cols=sse_lesser.cols,
         )
         self.pole_state = self._pole.refresh()
-        self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded)
+        self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
+                                 g_lesser)
         if comm.rank == 0 and self.pole_state is not None:
             print(self.pole_state.report(), flush=True)
 
     def _build_pole_keldysh(self, sse_lesser, sse_greater,
-                            g_retarded=None) -> None:
+                            g_retarded=None, g_lesser=None) -> None:
         """Project the Keldysh source and reduce ``G_PP`` onto the pattern.
 
         Done here, in the ``"stack"`` state, because this is where the contact
@@ -872,21 +873,49 @@ class PhononSolver(SubsystemSolver):
             # and it gets WORSE with h/gamma, not better. The congruence
             # route's accuracy is therefore an accident of registration
             # unless this number is small.
+            from quatrex.phonon.pole_audit import pole_pair_weight
+
             w_host = np.asarray(get_host(freqs), dtype=float)
             hw = np.asarray(get_host(self.local_frequency_weights), dtype=float)
             off_worst = 0.0
+            pole_cells = np.zeros(w_host.size, dtype=bool)
             for cl in state.legs:
                 for z in np.asarray(get_host(cl.z)):
                     x = float(np.real(z))
                     if x < 0.0:
                         continue
                     k = int(np.argmin(np.abs(w_host - x)))
+                    pole_cells[k] = True
                     hk = float(hw[k]) if k < hw.size else 0.0
                     if hk > 0.0:
                         off_worst = max(off_worst, abs(x - w_host[k]) / hk)
+            # ... and how much of the ring's weight the offset can actually
+            # move. The registration error is order one ONLY on cell pairs
+            # (k, m-k) with both ends in a pole cell -- one displaced leg
+            # against a resolved partner costs O((delta/Gamma)^2) instead --
+            # so the error in Sigma is bounded by this fraction times ~0.8.
+            # A scalar-norm proxy for the vertex contraction, hence an upper
+            # bound: a small value is conclusive, a large one is a reason to
+            # measure properly.
+            # The RING's leg, G^< - g_pp -- not Sigma, and not the raw G^<:
+            # the whole point is what the convolution is fed.
+            if g_lesser is not None:
+                gl = (g_lesser.data.reshape(w_host.size, -1)
+                      - acc_l.reshape(w_host.size, -1))
+                low = max(1e-6, float(getattr(
+                    self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
+                pw = pole_pair_weight(
+                    np.linalg.norm(np.asarray(get_host(gl)), axis=1),
+                    pole_cells, freqs=w_host, skip=np.abs(w_host) < low)
+            else:
+                pw = {"mean": float("nan"), "worst": float("nan"),
+                      "omega": float("nan")}
             print(f"  pole registration: worst sub-cell offset "
                   f"{off_worst:.3f} cells (0 = on a grid point, 0.5 = on a "
-                  f"cell boundary)", flush=True)
+                  f"cell boundary); pole-cell PAIRS carry "
+                  f"{100 * pw['mean']:.2f}% of the ring's weight, up to "
+                  f"{100 * pw['worst']:.2f}% at w={pw['omega']:.2f}",
+                  flush=True)
         if analytic and comm.rank == 0:
             # Two numbers that decide whether the analytic leg is a legitimate
             # object at all, and neither was reported before.
@@ -1117,7 +1146,7 @@ class PhononSolver(SubsystemSolver):
 
         # Must run BEFORE free_data(): the pole solve reads the assembled
         # operator's blocks.
-        self._update_pole_sector(sse_lesser, sse_greater, out[2])
+        self._update_pole_sector(sse_lesser, sse_greater, out[2], out[0])
         self._psd_sigma = (sse_lesser, sse_greater)
         self._check_positivity(out)
         self._psd_sigma = None

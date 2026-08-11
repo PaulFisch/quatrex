@@ -218,6 +218,84 @@ def psd_residual(
     return {"worst": worst, "scale": scale, "omega_index": worst_w}
 
 
+def pole_pair_weight(
+    leg_norms: NDArray, pole_cells: NDArray, freqs: NDArray | None = None,
+    skip: NDArray | None = None,
+) -> dict[str, float]:
+    r"""What fraction of the ring's weight comes from POLE-CELL PAIRS.
+
+    The bubble's registration error is confined to output bins whose ring sum
+    is fed by cell pairs :math:`(k, m-k)` with BOTH ends in a pole cell:
+    displacing one leg to its cell centre against a resolved partner costs
+    :math:`O((\delta/\Gamma)^2)` (2 % at the worst placement), while
+    displacing both moves the combination line a full cell and costs order one
+    (46-79 %). So the error in :math:`\Sigma` is bounded by this fraction
+    times that factor, and nothing else in the solver measures it.
+
+    The weight used is :math:`\|\bar G_k\|\,\|\bar G_{m-k}\|`, a scalar
+    PROXY for the actual vertex contraction: it ignores the cubic vertex's
+    selectivity and cannot see cancellation between pairings, so it is an
+    upper bound on the fraction rather than the fraction. That is the right
+    direction for a gate -- a small value here is conclusive, a large one is a
+    reason to measure properly.
+
+    The sum runs over the FULL axis via the bosonic mirror ``|m - k|``: the
+    solver holds ``omega >= 0`` and the ring folds the negative half back, so
+    restricting to ``k <= m`` would drop roughly the half of the convolution
+    that carries the difference-frequency (``Omega_a - Omega_b``) pairings.
+
+    Parameters
+    ----------
+    leg_norms : NDArray
+        ``(n_omega,)`` per-bin norm of the leg the ring convolves.
+    pole_cells : NDArray
+        ``(n_omega,)`` boolean, True where a promoted pole sits.
+    freqs : NDArray, optional
+        Only used to report where the worst bin is.
+    skip : NDArray, optional
+        ``(n_omega,)`` boolean over OUTPUT bins, excluded from ``worst`` and
+        ``mean``. Pass the ring's own mask: a single pole pairs with itself at
+        the DIFFERENCE frequency ``omega = 0``, where the fraction is ~1 by
+        construction and where the ring sets ``Sigma`` to zero anyway, so an
+        unmasked report is pinned there and says nothing.
+
+    Returns
+    -------
+    dict
+        ``worst`` (largest pair fraction over output bins), ``omega_index``
+        and ``omega`` of that bin, and ``mean`` (weighted by total ring
+        weight, i.e. the fraction of ALL the ring's weight that sits on pole
+        cell pairs).
+
+    """
+    g = np.abs(np.asarray(_host(leg_norms), dtype=float)).ravel()
+    p = np.asarray(_host(pole_cells), dtype=bool).ravel()
+    n = g.size
+    if n == 0 or not p.any():
+        return {"worst": 0.0, "omega_index": -1, "omega": float("nan"),
+                "mean": 0.0}
+    gp = g * p
+    k = np.arange(n)
+    tot = np.empty(n)
+    par = np.empty(n)
+    for m in range(n):
+        j = np.abs(m - k)                  # bosonic mirror onto omega >= 0
+        tot[m] = float(g[k] @ g[j])
+        par[m] = float(gp[k] @ gp[j])
+    frac = par / np.where(tot > 0.0, tot, 1.0)
+    live = np.ones(n, dtype=bool)
+    if skip is not None:
+        live = ~np.asarray(_host(skip), dtype=bool).ravel()[:n]
+    if not live.any():
+        return {"worst": 0.0, "omega_index": -1, "omega": float("nan"),
+                "mean": 0.0}
+    i = int(np.flatnonzero(live)[np.argmax(frac[live])])
+    w = (float("nan") if freqs is None
+         else float(np.asarray(_host(freqs), dtype=float).ravel()[i]))
+    return {"worst": float(frac[i]), "omega_index": i, "omega": w,
+            "mean": float(par[live].sum() / (tot[live].sum() or 1.0))}
+
+
 def sector_sum_residual(
     total: NDArray, sectors: dict[str, NDArray]
 ) -> dict[str, float]:
