@@ -259,12 +259,19 @@ def test_pair_source_is_exact_on_the_diagonal_and_averaged_off_it():
     src = np.einsum("w,ab->wab", w, base) + 0j
 
     got = _h(source_at_poles(src, w, cl))
-    # diagonal: evaluated at 8 and 11 exactly
-    assert np.isclose(got[0, 0], 8.0 * base[0, 0])
-    assert np.isclose(got[1, 1], 11.0 * base[1, 1])
-    # off diagonal: the midpoint 9.5, shared by (0,1) and (1,0)
-    assert np.isclose(got[0, 1], 9.5 * base[0, 1])
-    assert np.isclose(got[1, 0], 9.5 * base[1, 0])
+    # Diagonal: z_a and conj(z_a) are complex conjugates, so their mean is
+    # real and equals the source at Re z_a for a source linear in w.
+    assert np.isclose(got[0, 0], 8.0 * base[0, 0], atol=1e-9)
+    assert np.isclose(got[1, 1], 11.0 * base[1, 1], atol=1e-9)
+    assert abs(got[0, 0].imag) < 1e-9 and abs(got[1, 1].imag) < 1e-9
+
+    # Off diagonal: the two poles have DIFFERENT half-widths, so the mean of
+    # S(z_a) and S(conj(z_b)) keeps a small imaginary part, (gam_b - gam_a)/2
+    # times the slope. Real part is the midpoint value.
+    assert np.isclose(got[0, 1].real, 9.5 * base[0, 1], atol=1e-9)
+    assert np.isclose(got[1, 0].real, 9.5 * base[1, 0], atol=1e-9)
+    slope = base[0, 1]                       # dS/dw for this bed
+    assert np.isclose(got[0, 1].imag, 0.5 * (0.4 - 0.3) * slope, atol=1e-9)
 
 
 def test_gpp_decays_like_one_over_omega_squared():
@@ -416,7 +423,7 @@ def test_source_variation_is_a_measured_residual_not_an_asymptotic_claim():
     base = np.array([[1.0, 2.0], [3.0, 4.0]])
 
     flat = np.broadcast_to(base + 0j, (w.size, 2, 2)).copy()
-    assert source_variation(flat, w, cl) == 0.0
+    assert source_variation(flat, w, cl) < 1e-10      # fit roundoff only
 
     gentle = np.einsum("w,ab->wab", 1.0 + 0.03 * w, base) + 0j
     assert source_variation(gentle, w, cl) < 1e-2

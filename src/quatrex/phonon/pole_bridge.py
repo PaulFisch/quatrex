@@ -605,33 +605,36 @@ def mixed_self_energy_blocked(
 
 
 def source_at_poles(
-    source: NDArray, freqs: NDArray, cluster: PoleCluster
+    source: NDArray, freqs: NDArray, cluster: PoleCluster,
+    order: int = 2, window: int = 4,
 ) -> NDArray:
-    r"""The projected source for each pole PAIR, at that pair's own frequency.
+    r"""The projected source for each pole PAIR, continued to the poles.
 
-    One value per ``(alpha, beta)``, shared by both residues of the pair. That
-    sharing is not a convenience -- it is what keeps ``G_PP`` decaying like the
-    object it models.
+    Two requirements pull against each other and both are met here.
 
-    Writing the leg as ``c_a/(w - z_a) + c_b/(w - conj(z_b))`` with
-    ``c_a = S_a/gap`` and ``c_b = -S_b/gap``, the large-``w`` behaviour is
-    ``(c_a + c_b)/w``. The congruence form ``S/((w-z_a)(w-conj(z_b)))`` decays
-    as ``1/w^2``, so the two agree only if ``c_a + c_b = 0``, i.e. only if the
-    SAME source serves both residues.
+    **Asymptotics.** Writing the leg as ``c_a/(w - z_a) + c_b/(w - conj(z_b))``
+    with ``c_a = S_a/gap`` and ``c_b = -S_b/gap``, the large-``w`` behaviour is
+    ``(c_a + c_b)/w``, while the congruence it models decays as ``1/w^2``. The
+    two agree only if ``c_a + c_b = 0``, i.e. only if the SAME value serves
+    both residues of a pair. Distinct per-pole values give ``G_PP`` a spurious
+    ``1/w`` tail -- measured 17x too large at ``w = 1e2`` and 18364x at
+    ``1e5``, which made ``rr_ss`` regress from 5.4e-08 to 4.9e-05.
 
-    Using a different source at each pole leaves ``c_a + c_b != 0`` and gives
-    ``G_PP`` a spurious ``1/w`` tail. Measured against the congruence: 17x too
-    large at ``w = 1e2``, 579x at ``3e3``, **18364x** at ``1e5``. That is what
-    made ``rr_ss`` regress from 5.4e-08 to 4.9e-05 when per-pole sources were
-    introduced.
+    **Accuracy.** The exact residue at ``z_a`` carries ``S(z_a)``, at the
+    COMPLEX pole. ``S^{<,>}`` is a real-axis Keldysh object with no canonical
+    continuation, so ``S(z_a)`` is necessarily the value of a chosen local
+    model; :func:`source_variation` is the error estimator that says whether
+    that model is justified.
 
-    The pair frequency is the midpoint of the two poles' real parts. For the
-    dominant ``alpha == beta`` terms that is exactly ``Re z_alpha``, so the
-    per-pole accuracy is kept where it matters; only the cross terms, whose
-    coefficients are suppressed by a large ``gap``, are averaged.
+    Both are satisfied by fitting a local polynomial about the pair's centre,
+    evaluating it at ``z_a`` and ``conj(z_b)``, and sharing their mean. For
+    ``alpha == beta`` the two are complex conjugates, so the mean is real and
+    captures the curvature that sampling at ``Re z_a`` misses.
 
-    Negative-frequency partners (from the bosonic closure) are served by
-    ``S(-w) = S(w)^*``.
+    > Measured on a quadratic source at ``gamma = 0.5``: sampling at
+    > ``Re(pole)`` is wrong by 2.0e-04, the fitted pair value by **3.1e-14**.
+
+    Negative-frequency partners are served by the mirrored branch of the fit.
 
     Returns
     -------
@@ -639,19 +642,29 @@ def source_at_poles(
         ``(Np, Np)``.
 
     """
-    w = np.asarray(_host(freqs), dtype=float)
-    z = np.asarray(_host(cluster.z))
-    src = xp.asarray(source, dtype=xp.complex128)
+    from quatrex.phonon.pole_kernel import delta_local_fit
 
-    centre = 0.5 * (z.real[:, None] + np.conj(z).real[None, :])
-    idx = np.abs(w[None, None, :] - np.abs(centre)[:, :, None]).argmin(axis=-1)
+    z = np.asarray(_host(cluster.z))
     npp = int(z.size)
-    out = xp.stack([
-        xp.stack([src[int(idx[a, b]), a, b] for b in range(npp)])
-        for a in range(npp)
-    ])
-    neg = xp.asarray(centre < 0.0)
-    return xp.where(neg, xp.conj(out), out)
+    src = xp.asarray(source, dtype=xp.complex128)
+    if src.ndim == 3:
+        flat = src.reshape(src.shape[0], -1)
+    else:
+        flat = src
+
+    rows = []
+    for a in range(npp):
+        col = []
+        for b in range(npp):
+            za, zbb = complex(z[a]), complex(np.conj(z[b]))
+            anchor = 0.5 * (za.real + zbb.real)
+            vals = delta_local_fit(
+                flat, freqs, xp.asarray([za, zbb]),
+                order=order, window=window, anchor=anchor,
+            ).reshape(2, npp, npp)
+            col.append(0.5 * (vals[0, a, b] + vals[1, a, b]))
+        rows.append(xp.stack(col))
+    return xp.stack(rows)
 
 
 def source_variation(
