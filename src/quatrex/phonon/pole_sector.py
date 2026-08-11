@@ -44,7 +44,9 @@ from quatrex.phonon.pole_keldysh import (
 from quatrex.phonon.pole_kernel import sigma_retarded_at_z
 from quatrex.phonon.pole_nevp import PoleSolution, bordered_newton
 from quatrex.phonon.pole_probe import assemble_m_blocks, nnz_to_blocks
-from quatrex.phonon.pole_tracker import PoleTracker, cluster_poles, predict_shift
+from quatrex.phonon.pole_tracker import (
+    PoleTracker, cluster_poles, match_cost, match_poles, predict_shift,
+)
 
 __all__ = ["PoleSectorState", "PoleSector"]
 
@@ -163,7 +165,12 @@ class PoleSector:
         # hysteresis permanently disengaged: every pole was judged at the
         # strict q_in instead of the lenient q_out once promoted, and
         # membership churned exactly as this config field warns.
-        self._promoted_z: list[complex] = []
+        self._promoted: list[tuple[complex, NDArray]] = []
+        # Two modes count as the same one only if their eigenvectors are not
+        # nearly orthogonal. Half is a deliberate midpoint: it admits the
+        # smooth rotation a pole undergoes between SCBA iterations and refuses
+        # the swap that happens at a crossing.
+        self._match_min_overlap = 0.5
         # Fit anchor for the current pole solve. Pinning it makes M(z) a
         # genuine analytic function of z for the whole Newton iteration;
         # deriving the stencil from Re z instead makes M only PIECEWISE
@@ -193,18 +200,52 @@ class PoleSector:
         """
         return gamma / (self.cfg.samples_per_halfwidth * self.h)
 
-    def _was_promoted(self, z: complex) -> bool:
-        """Was a pole at this location in the sector last iteration?
+    def _match_previous(self, solutions: list[PoleSolution]) -> list[bool]:
+        """Which of these were in the sector last iteration.
 
-        Identity across SCBA iterations is carried by position: a pole moves by
-        at most the predictor shift between iterates, so anything within a
-        cluster width of a previously promoted pole is the same mode. This is
-        what makes the ``q_in``/``q_out`` hysteresis actually apply.
+        Identity across SCBA iterations is carried by an optimal ASSIGNMENT on
+        both displacement and eigenvector overlap
+        (:func:`~quatrex.phonon.pole_tracker.match_poles`), not by position
+        alone. Position is sufficient for well-separated poles and fails
+        exactly where it matters: at degeneracies, avoided crossings, pole
+        splitting and satellite generation, an eigenvector rotates smoothly
+        while its frequency ordering does not.
+
+        Displacement is measured in grid cells so the threshold is the same
+        ``cluster_factor`` that defines "the same mode" elsewhere.
         """
-        if not self._promoted_z:
-            return False
-        tol = self.cfg.cluster_factor * self.h
-        return any(abs(complex(z) - p) <= tol for p in self._promoted_z)
+        if not self._promoted or not solutions:
+            return [False] * len(solutions)
+
+        z_old = xp.asarray([p[0] for p in self._promoted])
+        r_old = xp.stack([xp.asarray(p[1]).reshape(-1)
+                          for p in self._promoted], axis=1)
+        z_new = xp.asarray([complex(s.z) for s in solutions])
+        r_new = xp.stack([xp.asarray(s.r).reshape(-1) for s in solutions], axis=1)
+
+        # The optimal assignment uses the combined cost; acceptance then
+        # tests the two ingredients SEPARATELY. Their sum is too permissive:
+        # an orthogonal eigenvector contributes only 1.0, which sits under
+        # cluster_factor, so a summed threshold would carry identity straight
+        # through a crossing -- the very case position alone already fails.
+        assign = match_poles(z_old, r_old, z_new, r_new, s_z=self.h)
+        zo = np.asarray(_host(z_old))
+        zn = np.asarray(_host(z_new))
+        ro = np.asarray(_host(r_old))
+        rn = np.asarray(_host(r_new))
+        ro = ro / np.linalg.norm(ro, axis=0, keepdims=True)
+        rn = rn / np.linalg.norm(rn, axis=0, keepdims=True)
+        overlap = np.abs(np.conj(ro).T @ rn)
+
+        flags = [False] * len(solutions)
+        for old_i, new_j in enumerate(assign):
+            if new_j < 0:
+                continue
+            near = abs(zo[old_i] - zn[new_j]) <= self.cfg.cluster_factor * self.h
+            aligned = overlap[old_i, new_j] >= self._match_min_overlap
+            if near and aligned:
+                flags[int(new_j)] = True
+        return flags
 
     def screen(self, sol: PoleSolution, was_promoted: bool) -> str | None:
         """Reason to refuse a pole, or ``None`` to accept it.
@@ -278,8 +319,9 @@ class PoleSector:
     ) -> PoleSectorState:
         """Group accepted poles into coherent clusters and project the source."""
         accepted, rejected = [], []
-        for sol in solutions:
-            why = self.screen(sol, self._was_promoted(sol.z))
+        promoted = self._match_previous(solutions)
+        for k, sol in enumerate(solutions):
+            why = self.screen(sol, promoted[k])
             (rejected if why else accepted).append(
                 (sol.z, why) if why else sol
             )
@@ -311,7 +353,7 @@ class PoleSector:
             clusters=clusters, solutions=accepted, rejected=rejected,
             coherence=coherence, iteration=self.state.iteration + 1,
         )
-        self._promoted_z = [complex(s.z) for s in accepted]
+        self._promoted = [(complex(s.z), s.r) for s in accepted]
         return self.state
 
     # -- operator context --------------------------------------------------- #

@@ -72,6 +72,13 @@ class PoleSolution:
         Whether ``eps_nep`` met the tolerance.
     iterations : int
         Newton steps taken.
+    eps_left : float
+        ``||M^H l|| / ||M||``: how well the left vector annihilates ``M^H``.
+        ``M(z_alpha)`` is singular at the pole, so the adjoint inverse
+        iteration that produces ``l`` becomes worse conditioned the better the
+        pole solve gets. This reports that rather than leaving it implicit --
+        a large value means the residue ``R = r l^H`` is unreliable even
+        though ``eps_nep`` looks fine.
 
     """
 
@@ -82,6 +89,7 @@ class PoleSolution:
     kappa: float
     converged: bool
     iterations: int
+    eps_left: float = float("nan")
 
     def residue(self) -> NDArray:
         """Residue matrix ``R = r l^H`` (doc Eq. 50)."""
@@ -96,6 +104,14 @@ def residue(r: NDArray, l: NDArray) -> NDArray:
 def _flat_solve(fac: BTDFactorization, v: NDArray) -> NDArray:
     """Solve for a single vector, hiding the (n, nrhs) convention."""
     return fac.solve(v.reshape(-1, 1))[..., 0]
+
+
+def _adjoint_blocks(blocks: Blocks) -> Blocks:
+    """Blocks of ``M^H`` from those of ``M``: conjugate-transpose each block
+    and swap the super- and sub-diagonals."""
+    a_ii, a_ij, a_ji = blocks
+    h = lambda b: xp.conj(xp.swapaxes(b, -1, -2))
+    return ([h(b) for b in a_ii], [h(b) for b in a_ji], [h(b) for b in a_ij])
 
 
 def _matvec(blocks: Blocks, v: NDArray) -> NDArray:
@@ -125,6 +141,7 @@ def bordered_newton(
     max_iter: int = 8,
     trust_radius: float = np.inf,
     norm_power: int = 12,
+    left_iters: int = 3,
 ) -> PoleSolution:
     r"""Correct a predicted pole with the bordered Newton iteration.
 
@@ -220,10 +237,31 @@ def bordered_newton(
     scale = abs(z) ** 2 + m_norm
     eps_nep = resid / (scale * float(xp.linalg.norm(r)))
 
-    # Left null vector by one step of inverse iteration on M^H, then the
-    # normalisation l^H M' r = 1 that makes d_alpha = 1 (doc Eqs. 49-50).
-    l = fac.solve_hermitian(c.reshape(-1, 1))[..., 0]
-    l = l / xp.linalg.norm(l)
+    # Left null vector by inverse iteration on M^H, then the normalisation
+    # l^H M' r = 1 that makes d_alpha = 1 (doc Eqs. 49-50).
+    #
+    # M(z_alpha) is singular at the pole, so M^{-H} does not exist there and
+    # this is adjoint inverse iteration at a slightly unconverged z. That is
+    # well posed for the DIRECTION -- the solve amplifies precisely the null
+    # component being sought -- but the conditioning worsens as the pole solve
+    # improves, so the result is iterated until its own residual stops falling
+    # and that residual is reported rather than assumed.
+    l = c
+    eps_left = float("inf")
+    for _ in range(left_iters):
+        cand = fac.solve_hermitian(l.reshape(-1, 1))[..., 0]
+        nrm = float(xp.linalg.norm(cand))
+        if not np.isfinite(nrm) or nrm == 0.0:
+            break
+        cand = cand / nrm
+        # ||M^H l|| / (||M|| ||l||): how well l annihilates M^H.
+        res = float(xp.linalg.norm(
+            xp.conj(_matvec(_adjoint_blocks(blocks), xp.conj(cand)))))
+        cand_eps = res / max(m_norm, 1e-300)
+        if cand_eps > eps_left:
+            break                      # stop when it stops improving
+        l, eps_left = cand, cand_eps
+
     d = complex(xp.vdot(l, _matvec(dblocks, r)))
     if d != 0.0:
         l = l / np.conj(d)
@@ -235,7 +273,7 @@ def bordered_newton(
 
     return PoleSolution(
         z=z, r=r, l=l, eps_nep=eps_nep, kappa=kappa,
-        converged=bool(eps_nep < tol), iterations=it,
+        converged=bool(eps_nep < tol), iterations=it, eps_left=eps_left,
     )
 
 

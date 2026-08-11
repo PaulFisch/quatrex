@@ -511,9 +511,26 @@ def test_hysteresis_survives_across_iterations():
     assert sec.screen(sol, was_promoted=False) is not None, "refused when new"
     assert sec.screen(sol, was_promoted=True) is None, "kept once promoted"
 
-    # And the memory must survive a NEW object at the same location.
-    sec._promoted_z = [complex(9.0, -gamma)]
-    assert sec._was_promoted(_Sol(complex(9.0 + 0.1 * h, -gamma)).z), \
-        "a pole that moved slightly is the same mode"
-    assert not sec._was_promoted(complex(15.0, -gamma)), \
-        "a genuinely different pole is not"
+    # And the memory must survive a NEW object, matched by displacement AND
+    # eigenvector overlap rather than by position alone.
+    import numpy as np
+
+    v = np.array([1.0, 0.0, 0.0, 0.0])
+    sec._promoted = [(complex(9.0, -gamma), v)]
+
+    class _S2(_Sol):
+        def __init__(self, z, r):
+            super().__init__(z)
+            self.r = r
+
+    moved = _S2(complex(9.0 + 0.1 * h, -gamma), v)
+    elsewhere = _S2(complex(15.0, -gamma), v)
+    assert sec._match_previous([moved]) == [True], \
+        "a pole that moved slightly, with the same eigenvector, is the same mode"
+    assert sec._match_previous([elsewhere]) == [False], \
+        "a pole at a different frequency is not"
+
+    # Eigenvector overlap must count: same position, orthogonal vector.
+    rotated = _S2(complex(9.0, -gamma), np.array([0.0, 1.0, 0.0, 0.0]))
+    assert sec._match_previous([rotated]) == [False], \
+        "position alone must not carry identity through a crossing"

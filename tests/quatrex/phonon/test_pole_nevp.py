@@ -269,3 +269,52 @@ def test_dense_spectrum_needs_the_contour_not_a_crude_guess():
     hit = int(np.argmin(np.abs(z_ex - sol.z)))
     assert np.min(np.abs(z_ex - sol.z)) < 1e-8, "not on any exact pole"
     assert hit != k, "guess was not actually crude enough to demonstrate the point"
+
+
+def test_left_vector_matches_an_svd_null_space():
+    """``M(z_alpha)`` is singular, so ``M^{-H}`` does not exist at the pole.
+
+    The adjoint inverse iteration that produces ``l`` is therefore worse
+    conditioned the better the pole solve gets. It is well posed for the
+    DIRECTION -- the solve amplifies exactly the null component sought -- and
+    this pins that against an independent SVD null vector, while ``eps_left``
+    reports the residual rather than leaving it implicit.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    b, nb = 3, 3
+    n = b * nb
+    d = rng.normal(size=(n, n))
+    d = d + d.T
+    sig = 0.05 * (rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n)))
+    mask = np.zeros((n, n), dtype=bool)
+    for i in range(nb):
+        for j in range(max(0, i - 1), min(nb, i + 2)):
+            mask[i * b:(i + 1) * b, j * b:(j + 1) * b] = True
+    d, sig = d * mask, sig * mask
+
+    def dense(z):
+        return z * z * np.eye(n) - d - sig
+
+    def blocks(a):
+        return ([a[i * b:(i + 1) * b, i * b:(i + 1) * b] for i in range(nb)],
+                [a[i * b:(i + 1) * b, (i + 1) * b:(i + 2) * b] for i in range(nb - 1)],
+                [a[(i + 1) * b:(i + 2) * b, i * b:(i + 1) * b] for i in range(nb - 1)])
+
+    ev = np.linalg.eigvals(d + sig)
+    z0 = complex(np.sqrt(ev[np.argsort(ev.real)[n // 2]]))
+    sol = bordered_newton(lambda z: blocks(dense(z)),
+                          lambda z: blocks(2 * z * np.eye(n)), z0)
+
+    u, _, _ = np.linalg.svd(dense(sol.z))
+    l = _h(sol.l)
+    l = l / np.linalg.norm(l)
+    assert abs(np.vdot(u[:, -1], l)) > 1 - 1e-9, "same direction as the SVD null vector"
+
+    # The normalisation that makes R = r l^H the residue.
+    d_alpha = np.vdot(_h(sol.l), 2 * sol.z * _h(sol.r))
+    assert abs(d_alpha - 1.0) < 1e-10
+
+    # And the conditioning is reported, not assumed.
+    assert np.isfinite(sol.eps_left)
