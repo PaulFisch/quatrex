@@ -14,7 +14,7 @@ Env overrides (optional, on top of the TOML):
   QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz),
   QX_POLE=1 (pole-subtracted SCBA sector) with QX_POLE_NP QX_POLE_SECTORS
   QX_POLE_WMIN QX_POLE_WMAX QX_POLE_SHEET QX_POLE_PGAMMA QX_POLE_AUDIT
-  QX_POLE_PSD.
+  QX_POLE_PSD QX_POLE_LEG.
 
 Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
 (qttools default "cupy" with silent NumPy fallback); set it explicitly for
@@ -101,6 +101,7 @@ if os.environ.get("QX_POLE_PGAMMA"): cfg.phonon.pole_sector.samples_per_halfwidt
 if os.environ.get("QX_POLE_AUDIT"): cfg.phonon.pole_sector.audit_frequencies = int(os.environ["QX_POLE_AUDIT"])
 if os.environ.get("QX_POLE_PSD"): cfg.phonon.pole_sector.psd_check = bool(int(os.environ["QX_POLE_PSD"]))
 if os.environ.get("QX_POLE_MIXSCALE"): cfg.phonon.pole_sector.mixed_scale = float(os.environ["QX_POLE_MIXSCALE"])
+if os.environ.get("QX_POLE_LEG"): cfg.phonon.pole_sector.leg = os.environ["QX_POLE_LEG"]
 if os.environ.get("QX_POLE_CELLAVG"): cfg.phonon.pole_sector.cell_average = bool(int(os.environ["QX_POLE_CELLAVG"]))
 if os.environ.get("QX_POLE"):
     # Re-validate: the pole gates are cross-field, so an override that creates
