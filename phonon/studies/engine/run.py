@@ -101,6 +101,7 @@ if os.environ.get("QX_POLE_PGAMMA"): cfg.phonon.pole_sector.samples_per_halfwidt
 if os.environ.get("QX_POLE_AUDIT"): cfg.phonon.pole_sector.audit_frequencies = int(os.environ["QX_POLE_AUDIT"])
 if os.environ.get("QX_POLE_PSD"): cfg.phonon.pole_sector.psd_check = bool(int(os.environ["QX_POLE_PSD"]))
 if os.environ.get("QX_POLE_MIXSCALE"): cfg.phonon.pole_sector.mixed_scale = float(os.environ["QX_POLE_MIXSCALE"])
+if os.environ.get("QX_POLE_CELLAVG"): cfg.phonon.pole_sector.cell_average = bool(int(os.environ["QX_POLE_CELLAVG"]))
 if os.environ.get("QX_POLE"):
     # Re-validate: the pole gates are cross-field, so an override that creates
     # an inconsistent combination must fail here rather than at iteration 40.
