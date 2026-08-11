@@ -247,6 +247,21 @@ def test_a_congruence_is_psd():
     assert rep["worst"] > -1e-12
 
 
+def test_both_keldysh_components_use_the_same_sign():
+    """``sign=-1`` for lesser AND greater, in this solver's convention.
+
+    ``sigma^{<,>} = +i n(+1) Gamma``, so ``-i sigma^<`` and ``-i sigma^>`` are
+    both positive semidefinite. The textbook convention has ``+i G^> >= 0``,
+    and using it here reports a uniformly negative spectrum (worst exactly
+    -1.000) on data that is perfectly fine -- which is how this surfaced.
+    """
+    vals, rows, cols, sizes, _ = _congruence_lesser(seed=7)
+    assert psd_residual(vals, rows, cols, sizes, sign=-1.0)["worst"] > -1e-12
+    flipped = psd_residual(vals, rows, cols, sizes, sign=+1.0)
+    assert flipped["worst"] < -0.99, (
+        "the wrong sign must look obviously wrong, not marginally wrong")
+
+
 def _full_pattern(sizes):
     """Every block, not just the tridiagonal ones -- a band mask needs
     something outside the band to remove."""
@@ -362,8 +377,11 @@ def _psd_bed(sizes=np.array([2, 2]), ne=3, seed=0):
     n = int(sizes.sum())
     a = rng.normal(size=(ne, n, n)) + 1j * rng.normal(size=(ne, n, n))
     psd = a @ np.conj(np.swapaxes(a, -1, -2))
+    # BOTH components are +i*(PSD) in this solver's convention, so both pass
+    # the gate at sign = -1. Building greater as -i*PSD would encode the
+    # textbook convention and hide the sign the gate actually uses.
     gl = (1j * psd)[:, rows, cols]
-    gg = (-1j * psd)[:, rows, cols]
+    gg = (1j * psd)[:, rows, cols]
     return (_StubBuffer(gl, rows, cols), _StubBuffer(gg, rows, cols)), sizes, ne
 
 

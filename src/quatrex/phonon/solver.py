@@ -579,11 +579,19 @@ class PhononSolver(SubsystemSolver):
         # a non-PSD G. If G^< fails, Sigma^< must have failed first, and
         # reporting only G would send the search to the wrong place.
         n_freq = int(self.local_frequencies.shape[0])
-        targets = [("g_lesser", out[0], -1.0), ("g_greater", out[1], +1.0)]
+        # BOTH lesser and greater carry sign -1. This solver uses the
+        # occupation-positive convention sigma^{<,>} = +i n(+1) Gamma, so
+        # -i sigma^< = n Gamma >= 0 AND -i sigma^> = (n+1) Gamma >= 0
+        # (bubble_positivity.md: "the solver stores -i G^{<,>} >= 0").
+        # The textbook convention has +i G^> >= 0, and borrowing it here made
+        # the gate report worst = -1.000 -- uniformly negative -- on the
+        # pole-free baseline, which is what a flipped sign looks like rather
+        # than a physics result.
+        targets = [("g_lesser", out[0], -1.0), ("g_greater", out[1], -1.0)]
         if self._psd_sigma is not None:
             sl, sg = self._psd_sigma
             targets = [("sigma_lesser", sl, -1.0),
-                       ("sigma_greater", sg, +1.0)] + targets
+                       ("sigma_greater", sg, -1.0)] + targets
         for name, buf, sign in targets:
             rep = psd_residual(
                 buf.data.reshape(n_freq, -1), buf.rows, buf.cols,
