@@ -263,6 +263,7 @@ def local_fit_weights(
     order: int = 2,
     window: int = 4,
     deriv: int = 0,
+    anchor: float | None = None,
 ) -> tuple[NDArray, NDArray]:
     r"""``(P, K)`` weights of :math:`\Delta_{\rm an}(z)`, as a linear map on Delta.
 
@@ -303,8 +304,17 @@ def local_fit_weights(
 
     for p in range(n_probe):
         zp = complex(zz[p])
-        positive = zp.real >= 0.0
-        w_c = zp.real if positive else -zp.real
+        # The fit centre and stencil are chosen from ``anchor`` when given, so
+        # that Delta_an is a genuine analytic function of z. Deriving them from
+        # Re z instead makes M(z) only PIECEWISE holomorphic: the stencil index
+        # is round(Re z / h), so it switches discretely and the value jumps.
+        # Measured on a random Delta at h = 0.25: a 3.08e-01 step at the
+        # boundary against ~3.4e-03 within a stencil and a typical scale of
+        # 1.79, i.e. a 17 % discontinuity. Newton's trust radius is
+        # trust_radius_cells * h, so steps routinely cross one.
+        ref = zp.real if anchor is None else float(anchor)
+        positive = ref >= 0.0
+        w_c = ref if positive else -ref
         centre = int(np.clip(round(w_c / h), 0, n_freq - 1))
         lo = int(np.clip(centre - window, 0, max(0, n_freq - 2 * window)))
         hi = min(n_freq, lo + 2 * window)
@@ -343,6 +353,7 @@ def delta_local_fit(
     window: int = 4,
     deriv: int = 0,
     transverse_shape: tuple = (),
+    anchor: float | None = None,
 ) -> NDArray:
     r"""Local polynomial continuation :math:`\Delta_{\rm an}(z)` of ``Delta``.
 
@@ -401,7 +412,10 @@ def delta_local_fit(
     for p in range(int(zz.shape[0])):
         zp = complex(zz[p])
         # Negative-frequency z is served by the mirrored branch: Delta(-w) = Dbar(w).
-        src, w_c = (flat, zp.real) if zp.real >= 0.0 else (mirror, -zp.real)
+        # ``anchor`` pins the branch AND the stencil so the result is analytic
+        # in z; see local_fit_weights for the measured 17 % jump without it.
+        ref = zp.real if anchor is None else float(anchor)
+        src, w_c = (flat, ref) if ref >= 0.0 else (mirror, -ref)
         centre = int(np.clip(round(w_c / h), 0, n_freq - 1))
         lo = int(np.clip(centre - window, 0, max(0, n_freq - 2 * window)))
         hi = min(n_freq, lo + 2 * window)
@@ -414,7 +428,7 @@ def delta_local_fit(
         )
         # Fit variable and its derivative w.r.t. z. On the mirror branch the
         # model is a function of -z, so the chain rule flips the sign.
-        if zp.real >= 0.0:
+        if ref >= 0.0:
             s, ds_dz = (zp.real - w_c + 1j * zp.imag) / h, 1.0 / h
         else:
             s, ds_dz = (-zp.real - w_c - 1j * zp.imag) / h, -1.0 / h
@@ -442,6 +456,7 @@ def sigma_retarded_at_z(
     transverse_shape: tuple = (),
     delta_order: int = 2,
     delta_window: int = 4,
+    anchor: float | None = None,
 ) -> NDArray:
     r"""Scattering :math:`\Sigma^R_s(z)` at complex frequency, or its derivative.
 
@@ -484,7 +499,7 @@ def sigma_retarded_at_z(
         return out
     return out + delta_local_fit(
         a, energies, z, order=delta_order, window=delta_window, deriv=order,
-        transverse_shape=transverse_shape,
+        transverse_shape=transverse_shape, anchor=anchor,
     )
 
 

@@ -311,3 +311,62 @@ def test_bosonic_partner_negates_transverse_axes():
     got = _h(bosonic_partner(a, (3,)))
     for iq in range(3):
         assert np.allclose(got[:, iq], np.conj(a[:, (-iq) % 3]))
+
+
+def test_pinned_anchor_makes_the_local_fit_continuous():
+    """``M(z)`` must be holomorphic, not piecewise holomorphic.
+
+    The fit stencil is chosen by ``round(Re z / h)``, so without an anchor it
+    switches discretely as ``z`` moves and ``Delta_an`` jumps. Newton's trust
+    radius is ``trust_radius_cells * h``, so steps routinely cross a boundary,
+    and a pole sitting near one can flip between SCBA iterations.
+
+    Measured at ``h = 0.25`` across the boundary at ``Re z = 9.375``: a
+    3.08e-01 step against ~3.4e-03 within a stencil, on a field of typical
+    magnitude 1.79 -- a 17 % discontinuity.
+    """
+    import numpy as np
+
+    from quatrex.phonon.pole_kernel import delta_local_fit
+
+    rng = np.random.default_rng(0)
+    e = np.linspace(0.0, 20.0, 81)
+    a = rng.normal(size=(81, 3)) + 1j * rng.normal(size=(81, 3))
+    probes = np.linspace(9.35, 9.40, 11)
+
+    def _steps(anchor):
+        v = [delta_local_fit(a, e, np.array([w - 0.02j]), order=2, window=4,
+                             anchor=anchor)[0, 0] for w in probes]
+        return np.abs(np.diff(_h(np.array(v))))
+
+    free = _steps(None)
+    pinned = _steps(9.30)
+    # Unanchored: one step is an order of magnitude above the rest.
+    assert free.max() / np.median(free) > 10.0
+    # Pinned: the sweep is smooth, so max and median agree.
+    assert pinned.max() / np.median(pinned) < 1.5
+    assert pinned.max() < 0.1 * free.max()
+
+
+def test_pinned_anchor_keeps_the_derivative_exact():
+    """Pinning must not break ``dM/dz``: the fit stays a polynomial in
+    ``(z - anchor)/h``, so the analytic derivative is still the true one."""
+    import numpy as np
+
+    from quatrex.phonon.pole_kernel import sigma_retarded_at_z
+
+    rng = np.random.default_rng(1)
+    e = np.linspace(0.0, 20.0, 81)
+    a = rng.normal(size=(81, 3)) + 1j * rng.normal(size=(81, 3))
+    z0, anchor = 9.10 - 0.02j, 9.10
+    prev = None
+    for eps in (1e-3, 1e-4, 1e-5):
+        kw = dict(sheet="II", anchor=anchor)
+        f1 = _h(sigma_retarded_at_z(a, e, np.array([z0 + eps]), order=0, **kw))[0, 0]
+        f0 = _h(sigma_retarded_at_z(a, e, np.array([z0 - eps]), order=0, **kw))[0, 0]
+        an = _h(sigma_retarded_at_z(a, e, np.array([z0]), order=1, **kw))[0, 0]
+        err = abs((f1 - f0) / (2 * eps) - an) / abs(an)
+        if prev is not None:
+            assert err < prev / 50.0, "must converge as eps^2"
+        prev = err
+    assert prev < 1e-7

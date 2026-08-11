@@ -161,6 +161,11 @@ class PoleSector:
         # strict q_in instead of the lenient q_out once promoted, and
         # membership churned exactly as this config field warns.
         self._promoted_z: list[complex] = []
+        # Fit anchor for the current pole solve. Pinning it makes M(z) a
+        # genuine analytic function of z for the whole Newton iteration;
+        # deriving the stencil from Re z instead makes M only PIECEWISE
+        # holomorphic, with a measured 17 % jump at each stencil boundary.
+        self._fit_anchor: float | None = None
 
     # -- window ------------------------------------------------------------ #
 
@@ -232,16 +237,24 @@ class PoleSector:
     ) -> list[PoleSolution]:
         """Correct a list of seeds with the bordered Newton iteration."""
         out = []
-        for k, z0 in enumerate(seeds):
-            r0 = None if seed_vectors is None else seed_vectors[k]
-            out.append(
-                bordered_newton(
-                    m_blocks, dm_blocks, z0, r0,
-                    tol=self.cfg.newton_tol,
-                    max_iter=self.cfg.newton_max_iterations,
-                    trust_radius=self.cfg.trust_radius_cells * self.h,
+        saved = self._fit_anchor
+        try:
+            for k, z0 in enumerate(seeds):
+                r0 = None if seed_vectors is None else seed_vectors[k]
+                # Pin the fit centre and the contact sample to THIS seed for
+                # the whole Newton solve, so the operator Newton differentiates
+                # is the operator it evaluates.
+                self._fit_anchor = float(complex(z0).real)
+                out.append(
+                    bordered_newton(
+                        m_blocks, dm_blocks, z0, r0,
+                        tol=self.cfg.newton_tol,
+                        max_iter=self.cfg.newton_max_iterations,
+                        trust_radius=self.cfg.trust_radius_cells * self.h,
+                    )
                 )
-            )
+        finally:
+            self._fit_anchor = saved
         return out
 
     def predict(self, dsigma_at: dict[int, NDArray]) -> list[complex]:
@@ -358,6 +371,7 @@ class PoleSector:
         f_pos, f_mir = local_fit_weights(
             self.global_freqs, zz, order=self.cfg.delta_fit_order,
             window=self.cfg.delta_fit_window_cells, deriv=order,
+            anchor=self._fit_anchor,
         )
         lo = self._freq_offset
         hi = lo + int(self._delta.shape[0])
@@ -383,7 +397,10 @@ class PoleSector:
             if o is None or o.ndim < 3:
                 out.append(o)
                 continue
-            k = int(np.argmin(np.abs(np.asarray(_host(self.freqs)) - z.real)))
+            # Pinned to the same anchor as the fit: sampling the contact at
+            # the point nearest Re z would reintroduce a jump into M(z).
+            ref = z.real if self._fit_anchor is None else self._fit_anchor
+            k = int(np.argmin(np.abs(np.asarray(_host(self.freqs)) - ref)))
             out.append(o[k])
         return out[0], out[1]
 
