@@ -207,8 +207,11 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     solver.local_frequencies = freqs
     solver.block_sizes = np.array([N])
     solver.psd_report = {}
-
-    solver._report_subcell((_Buf(a), _Buf(a)))
+    solver._psd_sigma_lesser = a          # Sigma^< on the pattern
+    # out = (g_lesser, g_greater, g_retarded); the congruence route needs G^R.
+    solver._report_subcell((_Buf(a), _Buf(a), _Buf(a)))
     assert "subcell" in solver.psd_report
+    assert "subcell_congruence" in solver.psd_report, (
+        "the in-situ comparison against the congruence must also run")
     for key in ("worst", "worst_centre", "at_centres"):
         assert key in solver.psd_report["subcell"]

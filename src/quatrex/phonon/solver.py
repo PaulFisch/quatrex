@@ -798,6 +798,7 @@ class PhononSolver(SubsystemSolver):
         from quatrex.phonon.pole_bridge import (
             pole_keldysh_pf_sparse, source_at_poles,
         )
+        from quatrex.phonon.pole_keldysh import pole_retarded
 
         cfg = getattr(self.config.phonon, "pole_sector", None)
         if cfg is None or not getattr(cfg, "psd_check", False):
@@ -827,10 +828,38 @@ class PhononSolver(SubsystemSolver):
             g_l, state.g_pp_lesser.reshape(freqs.shape[0], -1), _pole_at,
             freqs, rows, cols, self.block_sizes, centres=centres, window=1)
         self.psd_report["subcell"] = rep
+
+        # ... and the same measure for the CONGRUENCE reconstruction, which
+        # rebuilds the Keldysh component from the retarded split instead of
+        # freezing the Keldysh remainder. Offline the two differ completely
+        # (-1.000 against +1.3e-05); this is the in-situ comparison that says
+        # whether the redesign is worth its cost on a real device.
+        cong = None
+        try:
+            from quatrex.phonon.pole_audit import subcell_congruence
+
+            def _pole_ret_at(omega):
+                acc = None
+                for cl in state.legs:
+                    v = pole_retarded(omega, cl)
+                    acc = v if acc is None else acc + v
+                return acc[:, rows, cols]
+
+            cong = subcell_congruence(
+                out[2].data.reshape(freqs.shape[0], -1),
+                self._psd_sigma_lesser, _pole_ret_at, freqs, rows, cols,
+                centres=centres)
+            self.psd_report["subcell_congruence"] = cong
+        except NotImplementedError as exc:
+            if comm.rank == 0:
+                print(f"  subcell congruence: skipped ({exc})", flush=True)
+
         if comm.rank == 0:
+            tail = ("" if cong is None
+                    else f"   congruence worst={cong['worst']:+.3e}")
             print(f"  subcell positivity: worst={rep['worst']:+.3e} at "
                   f"w[{rep['worst_centre']}], at-centres="
-                  f"{rep['at_centres']:+.3e}", flush=True)
+                  f"{rep['at_centres']:+.3e}{tail}", flush=True)
 
     @profiler.profile(label="PhononSolver", level="default", comm=comm)
     def solve(
@@ -887,6 +916,9 @@ class PhononSolver(SubsystemSolver):
         self._psd_sigma = (sse_lesser, sse_greater)
         self._check_positivity(out)
         self._psd_sigma = None
+        n_freq = int(self.local_frequencies.shape[0])
+        self._psd_sigma_lesser = sse_lesser.data.reshape(n_freq, -1)
         self._report_subcell(out)
+        self._psd_sigma_lesser = None
 
         self.system_matrix.free_data()
