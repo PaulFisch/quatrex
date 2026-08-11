@@ -106,6 +106,8 @@ class PoleSectorState:
     rejected: list[tuple[complex, str]] = field(default_factory=list)
     coherence: list[float] = field(default_factory=list)
     iteration: int = 0
+    _h_for_report: float = 0.0
+    """Grid spacing, carried only so ``population()`` can report h/gamma."""
 
     @property
     def n_poles(self) -> int:
@@ -147,6 +149,41 @@ class PoleSectorState:
             chain.append((name, n))
         return chain
 
+    def population(self) -> dict[str, float]:
+        r"""Is there a population of NARROW, ISOLATED modes to extract at all?
+
+        Two ratios decide whether the sector can do anything, and both are
+        properties of the physics rather than of the solver:
+
+        ``h_over_gamma``
+            How badly the grid mis-weights the line. A ``dw``-weighted sum of
+            point samples carries 98-102 % of a Lorentzian's total weight at
+            ``h/gamma = 1.35`` and between 15 % and 660 % at ``h/gamma = 20``
+            -- so below roughly 3 there is nothing for an exact cell average
+            to recover.
+        ``gamma_over_spacing``
+            Whether a simple pole exists to be found. Above about one half the
+            line overlaps its neighbour, no isolated pole is well defined, and
+            a bordered Newton reports exactly that by failing to localise.
+
+        On the CNT bed at 300 K the refused candidates have median
+        ``h/gamma = 1.35`` and median ``gamma/spacing = 2.67``, with 85 %
+        overlapping. That is not a screening failure: the bed has no narrow
+        isolated resonances, and the low yield is the correct answer.
+        """
+        z = [complex(s.z) for s in self.solutions]
+        z += [complex(a) for a, _ in self.rejected]
+        if not z:
+            return {}
+        om = np.asarray([x.real for x in z])
+        ga = np.asarray([max(-x.imag, 1e-300) for x in z])
+        d = np.abs(om[:, None] - om[None, :])
+        np.fill_diagonal(d, np.inf)
+        nn = np.maximum(d.min(axis=1), 1e-300)
+        return {"h_over_gamma": float(np.median(self._h_for_report / ga)),
+                "gamma_over_spacing": float(np.median(ga / nn)),
+                "frac_overlapping": float((ga / nn > 0.5).mean())}
+
     def report(self) -> str:
         """One-line-per-cluster summary for the iteration log.
 
@@ -169,6 +206,14 @@ class PoleSectorState:
                  f"{self.n_poles}/{seen} pole(s) promoted{tail}",
                  "  coverage: " + " -> ".join(
                      f"{k} {v}" for k, v in self.coverage_chain())]
+        pop = self.population()
+        if pop:
+            lines.append(
+                f"  population: median h/gamma={pop['h_over_gamma']:.2f} "
+                f"(needs >~3 for the grid to be wrong), median "
+                f"gamma/spacing={pop['gamma_over_spacing']:.2f}, "
+                f"{100 * pop['frac_overlapping']:.0f}% overlapping "
+                f"(needs <0.5 for an isolated pole to exist)")
         for c, eps in zip(self.clusters, self.coherence):
             om = np.asarray(_host(c.omega)).ravel()
             ga = np.asarray(_host(c.gamma)).ravel()
@@ -529,6 +574,7 @@ class PoleSector:
         self.state = PoleSectorState(
             clusters=clusters, solutions=accepted, rejected=rejected,
             coherence=coherence, iteration=self.state.iteration + 1,
+            _h_for_report=self.h,
         )
         self._promoted = [(complex(s.z), s.r) for s in accepted]
         return self.state

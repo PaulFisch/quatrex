@@ -685,3 +685,74 @@ def test_audit_reports_candidates_without_allocating_a_sector():
     sols = sec.solve_poles(m_blocks, dm_blocks, seeds)
     state = sec.build_clusters(sols)
     assert sum(r["refused"] is None for r in rows) == len(state.solutions)
+
+
+def test_population_says_whether_there_is_anything_to_extract():
+    """Two ratios decide it, and both are physics rather than solver state.
+
+    Measured on the CNT bed at 300 K: median ``h/gamma = 1.35`` and median
+    ``gamma/spacing = 2.67`` with 85 % overlapping. At ``h/gamma = 1.35`` a
+    dw-weighted sum of point samples already carries 98-102 % of a
+    Lorentzian's total weight, so an exact cell average has nothing to
+    recover; and above ``gamma/spacing = 0.5`` no isolated simple pole exists
+    to be found. The low promotion yield there is the correct answer, not a
+    screening failure, and this is the number that says so.
+    """
+    from quatrex.phonon.pole_keldysh import PoleCluster
+    from quatrex.phonon.pole_sector import PoleSectorState
+
+    def _state(zs, h):
+        st = PoleSectorState()
+        st._h_for_report = h
+        st.rejected = [(z, "eps_z=1 above locate_tol") for z in zs]
+        return st
+
+    # (a) narrow and well separated -- the regime the sector exists for
+    good = _state([complex(10.0 + 3.0 * k, -0.01) for k in range(5)], h=0.275)
+    p = good.population()
+    assert p["h_over_gamma"] > 20
+    assert p["gamma_over_spacing"] < 0.01
+    assert p["frac_overlapping"] == 0.0
+
+    # (b) the CNT bed: barely under-resolved AND overlapping
+    bad = _state([complex(10.0 + 0.2 * k, -0.203) for k in range(20)],
+                 h=0.275)
+    p = bad.population()
+    assert 1.0 < p["h_over_gamma"] < 2.0
+    assert p["gamma_over_spacing"] > 1.0
+    assert p["frac_overlapping"] == 1.0
+
+    assert "population:" in bad.report()
+
+
+def test_the_grid_already_carries_a_barely_unresolved_line():
+    """Why ``h/gamma ~ 1.35`` means the sector has nothing to add.
+
+    The whole value of the pole treatment is that a dw-weighted sum of point
+    samples mis-weights a narrow line while an exact cell average does not.
+    That gap closes completely once the grid nearly resolves the line, and the
+    CNT bed sits there -- which is the real reason its promotion yield is low.
+    """
+    w_max = 4000.0
+    # A Lorentzian's tails are heavy: the weight outside +-w_max is
+    # 2/(pi * w_max/gamma) exactly, and that -- not the method -- is the floor
+    # on how close to 1 either estimator can come here.
+    tail = 2.0 / (np.pi * w_max)
+
+    def total_weight(h_over_gamma, offset):
+        gam = 1.0
+        h = h_over_gamma * gam
+        n = int(2 * w_max / h) // 2 * 2 + 1
+        wk = (np.arange(n) - n // 2) * h
+        c = offset * h
+        point = h * ((gam / np.pi) / ((wk - c) ** 2 + gam ** 2)).sum()
+        cell = h * ((np.arctan((wk + h / 2 - c) / gam)
+                     - np.arctan((wk - h / 2 - c) / gam)) / (np.pi * h)).sum()
+        return point, cell
+
+    for r, lo, hi in ((1.35, 0.97, 1.03), (20.0, 0.15, 6.7)):
+        pts = [total_weight(r, x)[0] for x in (0.0, 0.25, 0.5)]
+        assert lo <= min(pts) and max(pts) <= hi, (r, pts)
+        # the cell average is exact at every offset in both regimes
+        for x in (0.0, 0.25, 0.5):
+            assert abs(total_weight(r, x)[1] - 1.0) < 2 * tail

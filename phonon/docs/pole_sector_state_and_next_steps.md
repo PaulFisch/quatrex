@@ -167,8 +167,51 @@ own linewidth, which is a materially wrong residue. That is a physics judgement
 and is left as a knob (`QX_POLE_LOCTOL`) with the trade-off measured rather
 than chosen silently.
 
-So the dominant remaining loss is a root-finding failure, and the next place to
-look is the SEEDS, not the gate.
+### It is not the seeds either -- the bed has no narrow isolated modes
+
+The obvious next suspect was the seeding: the real part comes from eigenvalues
+of the BARE frequency-independent part, with no `Re Sigma^R` and no contacts.
+It is not that. Measured on the 133 refused candidates
+(`h = 55/200 = 0.275 THz`):
+
+| | median | |
+|---|---|---|
+| `gamma` | 0.203 THz | |
+| `h / gamma` | **1.35** | the grid nearly resolves them |
+| nearest-neighbour spacing | 0.199 THz | |
+| `gamma / spacing` | **2.67** | 85 % overlap their neighbour |
+
+Both ratios say the same thing, and neither is about the solver.
+
+**The grid already carries these lines.** A `dw`-weighted sum of point samples
+recovers 98.1-101.9 % of a Lorentzian's total weight at `h/gamma = 1.35`. The
+exact cell average recovers 100.0 %. So on the median refused mode the sector
+can buy about 2 %. Only the narrow tail of the distribution
+(`gamma = 0.013`, `h/gamma = 20.7`) is in the regime where the point sample
+ranges from 15 % to 663 % and the treatment is worth a factor of 44.
+
+**And there is no isolated pole to find.** A typical candidate's linewidth is
+2.7x its distance to its nearest neighbour. In that regime a simple pole is
+not well defined, a bordered Newton for one cannot localise, and
+`eps_z ~ 1` is the correct report rather than a failure.
+
+So the low yield on this bed is the right answer. CNT at 300 K is
+anharmonically broadened into a quasi-continuum; it has no population of
+narrow isolated resonances, which is the population the sector is built for.
+`population()` now prints both ratios every iteration so this is visible
+before any conclusion is drawn from a yield.
+
+Two things this does expose, and neither should be changed silently:
+
+* **The resolution criterion is miscalibrated.** `q_omega = gamma/(2h) < 1`
+  promotes anything with `gamma < 2h`, i.e. `h/gamma > 0.5` -- deep into the
+  regime where the grid carries 98 % of the weight. The measurement above says
+  the sector starts mattering around `h/gamma ~ 3-5`. `samples_per_halfwidth`
+  is the knob; the calibration is a physics choice.
+* **Nothing refuses an overlapping candidate.** `cluster_factor` groups poles
+  after acceptance, but no criterion refuses one whose linewidth exceeds its
+  spacing, where the extraction is ill-posed. 85 % of this bed's candidates
+  are in that state.
 
 **Coverage moves with it, as predicted.** At 11 promoted poles the ring weight
 sitting on pole-cell PAIRS rises from 4.2 % to 15.4 % at the worst bin
