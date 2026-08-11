@@ -438,3 +438,50 @@ unconsumed) exists to make its leg match `G_PP`.
 
 Next step: route `sectors="rr_ss_sr"` through `compute_linearized(dg=G_PP)`,
 and keep the analytic route behind `source_model` for when it is complete.
+
+## Correction: much of the "conservation break" was an iteration transient
+
+The `rr_ss_sr` verdict above was reached from 4-iteration runs at mixing 0.1.
+That was a bad comparison, and the error is worth recording because it cost
+four hypotheses and five cluster jobs.
+
+Re-run at 25 iterations, mixing 0.02, same bed and same code:
+
+| | 4 it, mix 0.1 | 25 it, mix 0.02 |
+|---|---|---|
+| balance residual | 1.25e-01 | **5.08e-05** |
+| heat non-uniformity | 2.79 | **0.42** |
+| min heat | -9.1 (negative) | **50.8** (all positive) |
+| lead_current | 64.69 | **63.66** (base 64.03) |
+
+The mixed sectors add roughly 15% to Sigma (measured from the sector-sum
+weights: SR + RS = 0.077 + 0.077 against SS 0.96 and RR 0.11), so the hybrid
+has a LONGER transient than the baseline. Judging both at iteration 4 compared
+a converged-ish baseline against a diverging hybrid transient and read the
+difference as a defect in the self-energy.
+
+None of the four fixes attempted before this was validated against a converged
+run. Two of them are independently correct and stay (the bosonic mirror, 28%
+error without it; per-pole sources, frozen was 27% off on a cluster's second
+pole). The others were reverted or re-derived.
+
+### What the mathematics actually says, all now pinned as tests
+
+| check | result |
+|---|---|
+| sector sum `B(G,G) = SS+SR+RS+RR` | exact, **8.7e-16**, all sectors weighted |
+| production kernel vs explicit ring | **3.6e-3** at `gamma/h = 40`, magnitudes within 0.2% |
+| `G_PP` subtracted == `G_PP` put back | **0.0** (same object, after the partial-fraction fix) |
+| `Sigma_SR` vs `Sigma_RS` on a leg-symmetric vertex | **equal**, 1.3e-15 |
+| Gate 0 (empty window) | bit-identical, `rtol = atol = 0` |
+
+So the decomposition algebra and the kernel are both correct. Whatever remains
+after convergence is a question about the fixed point, not about the bubble.
+
+### Process lesson
+
+Judge a hybrid against a baseline only at MATCHED convergence, never at a fixed
+iteration count -- a larger self-energy legitimately takes longer to settle.
+And run the localising gate before proposing a mechanism: the sector sum took
+one local command and would have ruled out three of the four hypotheses
+immediately.
