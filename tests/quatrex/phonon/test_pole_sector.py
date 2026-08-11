@@ -134,20 +134,82 @@ def test_screening_rejects_a_grid_resolved_mode():
 def test_uncertifiable_poles_are_refused_not_promoted():
     """A pole the corrector cannot certify must be rejected, not carried.
 
-    ``_run`` deliberately seeds every mode with the same crude linewidth guess,
-    which for the narrowest modes is orders of magnitude too large and lands the
-    corrector outside their basin. Those poles never reach tolerance, and the
-    screen refuses them on ``eps_nep`` rather than promoting a residue it cannot
-    stand behind. (The driver's own quasiparticle seeding does not have this
-    problem -- see ``test_quasiparticle_seeding_beats_a_fixed_guess`` -- so this
-    is a test of the SCREEN, not a statement about the bed.)
+    Built directly rather than by arranging for the corrector to fail: the
+    physical trust region now rescues the crude-seed case this used to rely on
+    (see ``test_physical_trust_region_rescues_a_crude_seed``), and a screen
+    test should not depend on a solver failure it no longer has.
+
+    Both acceptance modes are covered. ``locate`` refuses on the FREQUENCY
+    error, which is the physical question; ``residual`` is the legacy gate.
     """
     sec, sols, *_ = _run()
-    state = sec.build_clusters(sols)
-    reasons = [why for _, why in state.rejected]
-    assert any("eps_nep" in why for why in reasons), reasons
-    for sol in state.solutions:
-        assert sol.converged and sol.eps_nep < sec.cfg.newton_tol
+    good = sols[0]
+    sep = sec.separations(sols)[0]
+    gamma = -good.z.imag
+
+    assert sec.screen(good, was_promoted=False, separation=sep) is None
+
+    class _Bad:
+        """Converged by the residual, but displaced by a full linewidth."""
+        z, r, l = good.z, good.r, good.l
+        eps_nep, kappa, converged = good.eps_nep, good.kappa, True
+        dz_est = complex(gamma, 0.0)
+
+    why = sec.screen(_Bad(), was_promoted=False, separation=sep)
+    assert why is not None and "eps_z" in why, why
+
+    # ... and the legacy route still refuses on the matrix residual.
+    sec.cfg.accept = "residual"
+    class _Unconverged(_Bad):
+        eps_nep, converged, dz_est = 1.0, False, 0.0 + 0.0j
+    why = sec.screen(_Unconverged(), was_promoted=False, separation=sep)
+    assert why is not None and "eps_nep" in why, why
+
+
+def test_physical_trust_region_rescues_a_crude_seed():
+    """A pole is a property of ``M(z)``, not of the storage grid.
+
+    ``trust_radius_cells * h`` ties the Newton search to the frequency grid,
+    so refining the grid shrinks the physical search domain -- and on a grid
+    ladder the sector then finds fewer poles on the fine rungs for a reason
+    unrelated to the poles. Measured here on the crude constant-linewidth
+    seeding, which is exactly the hard case:
+
+        radius 0.25 cells = 0.019 THz  ->  3 of 9 fail to converge
+        radius 0.5*min(sep, edge) = 0.53 THz  ->  0 of 9 fail
+    """
+    freqs, d, delta, sizes = _bed(401)
+    m_blocks, dm_blocks = _operator(d, freqs, delta, sizes)
+    lam = np.linalg.eigvalsh(_dense_d(d, sizes))
+
+    def _fails(trust_factor):
+        cfg = PoleSectorConfig(enabled=True, trust_factor=trust_factor)
+        sec = PoleSector(cfg, freqs)
+        lo, hi = sec.window()
+        seeds = [complex(np.sqrt(l), -0.01)
+                 for l in lam if lo <= np.sqrt(l) <= hi]
+        sols = sec.solve_poles(m_blocks, dm_blocks, seeds)
+        return sum(1 for s in sols if s.eps_nep > cfg.newton_tol), len(sols)
+
+    grid_tied, n = _fails(1e-9)          # radius collapses to the cell floor
+    physical, _ = _fails(0.5)
+    assert grid_tied >= 3, f"the hard case is not hard here: {grid_tied}/{n}"
+    assert physical == 0, f"physical radius still loses {physical}/{n}"
+
+
+def test_trust_radius_does_not_shrink_with_the_grid():
+    """The point of the change: refinement must not suppress the sector."""
+    seeds = [complex(5.0, -0.01), complex(8.0, -0.01)]
+    radii = []
+    for nf in (401, 1601):
+        freqs, d, delta, sizes = _bed(nf)
+        sec = PoleSector(PoleSectorConfig(enabled=True), freqs)
+        radii.append(sec.trust_radius(seeds[0], seeds, 0))
+    assert radii[1] >= radii[0] - 1e-12, (
+        f"4x finer grid shrank the pole search: {radii[0]:.4f} -> "
+        f"{radii[1]:.4f} THz")
+    # ... and it is set by the pole separation, not by h
+    assert abs(radii[0] - 0.5 * 3.0) < 1e-9, radii[0]
 
 
 def test_window_lifts_clear_of_a_low_frequency_mask():
@@ -333,9 +395,17 @@ def test_quasiparticle_seeding_beats_a_fixed_guess():
         rel = abs(abs(near.imag) - abs(sol.z.imag)) / abs(sol.z.imag)
         assert rel < 0.05, f"seed linewidth off by {rel:.1%} at {sol.z.real:.3f} THz"
 
-    # A fixed guess of the kind _run uses cannot certify them all.
-    sec_man, sols, *_ = _run()
-    assert sec_man.build_clusters(sols).rejected
+    # A fixed guess of the kind _run uses starts the corrector far from the
+    # narrow modes. It no longer LOSES them -- the physical trust region gets
+    # there anyway -- but it still costs Newton steps, and that is the honest
+    # statement of what the golden-rule seed buys.
+    sec_man, sols_man, *_ = _run()
+    assert not sec_man.build_clusters(sols_man).rejected, (
+        "the physical trust region should now certify the crude seeding too")
+    assert (max(s.iterations for s in sols_man)
+            > max(s.iterations for s in state.solutions)), (
+        "the crude seed should still need more Newton steps than the "
+        "quasiparticle seed")
 
 
 def test_refresh_warm_starts_from_the_previous_iterate():
@@ -499,6 +569,7 @@ def test_hysteresis_survives_across_iterations():
         converged = True
         eps_nep = 0.0
         kappa = 1.0
+        dz_est = 0.0 + 0.0j     # perfectly located, so eps_z cannot refuse it
         def __init__(self, z): self.z = z
 
     # gamma chosen so q_omega sits BETWEEN q_in and q_out: such a pole is

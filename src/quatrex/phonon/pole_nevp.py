@@ -79,6 +79,18 @@ class PoleSolution:
         pole solve gets. This reports that rather than leaving it implicit --
         a large value means the residue ``R = r l^H`` is unreliable even
         though ``eps_nep`` looks fine.
+    dz_est : complex
+        Estimated remaining FREQUENCY error, ``-l^H M(z) r`` under the
+        normalisation ``l^H M'(z) r = 1``, in THz.
+
+        This is the number the physics cares about, and it is not
+        ``eps_nep``. That is a scaled matrix residual whose denominator
+        ``|z|^2 + ||M||`` runs to ``1e3-1e4 THz^2`` for a phonon operator, so
+        a candidate refused at ``eps_nep = 1e-9`` can be sitting within
+        ``1e-5`` of its own linewidth. On the CNT bed that gate refused 142 of
+        144 candidates. The caller divides this by the smallest scale the pole
+        has to be resolved against -- its width, its separation from the next
+        pole, the local cell -- to get the acceptance metric.
 
     """
 
@@ -90,6 +102,7 @@ class PoleSolution:
     converged: bool
     iterations: int
     eps_left: float = float("nan")
+    dz_est: complex = 0.0 + 0.0j
 
     def residue(self) -> NDArray:
         """Residue matrix ``R = r l^H`` (doc Eq. 50)."""
@@ -266,6 +279,12 @@ def bordered_newton(
     if d != 0.0:
         l = l / np.conj(d)
 
+    # One more bordered-Newton step's worth of information, in THz. With the
+    # normalisation above, l^H M'(z) r = 1, so the Newton correction is just
+    # -l^H M(z) r -- no extra solve. Reported, never applied: applying it
+    # would be a ninth iteration taken outside the trust region.
+    dz_est = -complex(xp.vdot(l, _matvec(blocks, r))) if d != 0.0 else 0.0j
+
     # M'(z) is routinely singular (for the phonon operator it is essentially
     # 2z*I plus lead derivatives), so take its norm without factorising it.
     dm_norm = float(xp.asarray(btd_norm2(*dblocks, n_power=norm_power)).reshape(-1)[0])
@@ -274,6 +293,7 @@ def bordered_newton(
     return PoleSolution(
         z=z, r=r, l=l, eps_nep=eps_nep, kappa=kappa,
         converged=bool(eps_nep < tol), iterations=it, eps_left=eps_left,
+        dz_est=dz_est,
     )
 
 

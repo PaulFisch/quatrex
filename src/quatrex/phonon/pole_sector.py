@@ -237,6 +237,38 @@ class PoleSector:
         """
         return gamma / (self.cfg.samples_per_halfwidth * self.h)
 
+    def locate_error(self, sol: PoleSolution, separation: float) -> float:
+        r"""``eps_z = |dz_est| / min(gamma, separation, h)`` -- doc Eq. 49.
+
+        The acceptance metric in the units the physics is in. ``eps_nep`` is a
+        scaled matrix residual whose denominator ``|z|^2 + ||M||`` is
+        ``1e3-1e4 THz^2`` here, so it answers a different question: on the CNT
+        bed it refused 142 of 144 candidates, with residuals from 4.8e-10 to
+        2.8e-02, while a candidate at 1e-9 is within about ``1e-5`` of its own
+        linewidth.
+
+        The three scales are the three ways a mislocated pole does damage. Its
+        own width, because a residue displaced by more than ``gamma`` is the
+        wrong residue. Its separation from the next pole, because beyond that
+        the simple-pole split assigns weight to the wrong mode. The local
+        cell, because a displacement larger than ``h`` moves the line into a
+        different bin, which is the registration error the sector exists to
+        remove.
+        """
+        gamma = max(-float(np.imag(sol.z)), 0.0)
+        scale = min(x for x in (gamma, float(separation), self.h) if x > 0.0)
+        return abs(complex(sol.dz_est)) / max(scale, 1e-300)
+
+    @staticmethod
+    def separations(solutions: list[PoleSolution]) -> list[float]:
+        """Distance from each pole to its nearest neighbour in the set (THz)."""
+        z = np.asarray([complex(s.z) for s in solutions])
+        if z.size < 2:
+            return [float("inf")] * z.size
+        d = np.abs(z[:, None] - z[None, :])
+        np.fill_diagonal(d, np.inf)
+        return [float(x) for x in d.min(axis=1)]
+
     def _match_previous(self, solutions: list[PoleSolution]) -> list[bool]:
         """Which of these were in the sector last iteration.
 
@@ -284,13 +316,19 @@ class PoleSector:
                 flags[int(new_j)] = True
         return flags
 
-    def screen(self, sol: PoleSolution, was_promoted: bool) -> str | None:
+    def screen(self, sol: PoleSolution, was_promoted: bool,
+               separation: float = float("inf")) -> str | None:
         """Reason to refuse a pole, or ``None`` to accept it.
 
         Hysteresis is applied here: a mode already in the sector is only demoted
         once it is comfortably resolved, so membership cannot oscillate.
         """
-        if not sol.converged:
+        if getattr(self.cfg, "accept", "locate") == "locate":
+            eps_z = self.locate_error(sol, separation)
+            if not np.isfinite(eps_z) or eps_z > self.cfg.locate_tol:
+                return (f"eps_z={eps_z:.2e} above locate_tol "
+                        f"(eps_nep={sol.eps_nep:.2e})")
+        elif not sol.converged:
             return f"eps_nep={sol.eps_nep:.2e} above tolerance"
         gamma = -sol.z.imag
         if gamma <= 0.0:
@@ -309,6 +347,31 @@ class PoleSector:
             if d < self.cfg.edge_factor * gamma:
                 return f"within {d / gamma:.2g} half-widths of a band edge"
         return None
+
+    def trust_radius(self, z0: complex, seeds: list[complex], k: int) -> float:
+        r"""Newton trust radius for one seed, in THz -- doc Eq. 50.
+
+        A pole is a property of :math:`M(z)`, not of the storage grid, so the
+        search region is set by the scales that can actually mislead the solve:
+        the nearest competing seed (step past its midpoint and the iteration
+        can converge onto the neighbour's pole) and the nearest contact band
+        edge (a branch point, where the local model of ``Sigma^R(z)`` stops
+        being a simple-pole model at all).
+
+        ``trust_radius_cells * h`` survives only as a FLOOR. As the radius
+        itself it made grid refinement shrink the physical pole search, so a
+        grid ladder would find fewer poles on its fine rungs for a reason
+        entirely unrelated to the poles.
+        """
+        scales = [abs(complex(z0) - complex(s))
+                  for j, s in enumerate(seeds) if j != k]
+        if self.band_edges is not None and self.band_edges.size:
+            scales.append(
+                float(np.min(np.abs(self.band_edges - complex(z0).real))))
+        floor = self.cfg.trust_radius_cells * self.h
+        if not scales:
+            return float("inf")
+        return max(floor, self.cfg.trust_factor * min(scales))
 
     # -- update ------------------------------------------------------------ #
 
@@ -331,7 +394,7 @@ class PoleSector:
                         m_blocks, dm_blocks, z0, r0,
                         tol=self.cfg.newton_tol,
                         max_iter=self.cfg.newton_max_iterations,
-                        trust_radius=self.cfg.trust_radius_cells * self.h,
+                        trust_radius=self.trust_radius(z0, seeds, k),
                     )
                 )
         finally:
@@ -357,8 +420,9 @@ class PoleSector:
         """Group accepted poles into coherent clusters and project the source."""
         accepted, rejected = [], []
         promoted = self._match_previous(solutions)
+        seps = self.separations(solutions)
         for k, sol in enumerate(solutions):
-            why = self.screen(sol, promoted[k])
+            why = self.screen(sol, promoted[k], seps[k])
             (rejected if why else accepted).append(
                 (sol.z, why) if why else sol
             )

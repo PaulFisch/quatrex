@@ -262,11 +262,49 @@ class PoleSectorConfig(BaseModel):
 
     newton_tol: PositiveFloat = 1e-10
     """Acceptance threshold on the scaled nonlinear-eigenvalue residual."""
+    accept: Literal["locate", "residual"] = "locate"
+    """Which quantity decides that a pole was found.
+
+    ``"residual"`` is the legacy gate: ``eps_nep < newton_tol``, on the SCALED
+    MATRIX residual ``||M(z)r|| / ((|z|^2 + ||M||)||r||)``. Its denominator is
+    ``1e3-1e4 THz^2`` for a phonon operator, so it is not a statement about
+    frequency at all -- on the CNT bed it refused 142 of 144 candidates, whose
+    residuals ran from 4.8e-10 to 2.8e-02, while a candidate at 1e-9 sits
+    within roughly ``1e-5`` of its own linewidth.
+
+    ``"locate"`` gates on ``eps_z = |dz_est| / min(gamma, separation,
+    h_local)`` instead: the estimated remaining frequency error measured
+    against the smallest scale the pole must be resolved against. Same solver,
+    same ``newton_tol`` (still reported), different question.
+    """
+    locate_tol: PositiveFloat = 0.05
+    """Acceptance threshold on ``eps_z`` under ``accept="locate"``.
+
+    A pole located to 5 % of the smallest of its own width, its separation
+    from its neighbour, and the local cell is located well enough for a
+    simple-pole representation: the residue it carries is wrong at that order,
+    and the sector's whole purpose is to replace a grid weight that is wrong
+    by factors of 6 to 1000 (see ``pole_sector_state_and_next_steps.md``).
+    """
     newton_max_iterations: PositiveInt = 8
     """Bordered-Newton steps per pole per SCBA iteration."""
     trust_radius_cells: PositiveFloat = 0.25
-    """Cap on a Newton step, in grid cells. Keeps the step inside the window
-    where the local model of Sigma^R(z) is valid."""
+    """FLOOR on the Newton trust radius, in grid cells.
+
+    Was the trust radius itself. A pole is a property of ``M(z)``, not of the
+    storage grid, so a radius of ``trust_radius_cells * h`` means refining the
+    frequency grid SHRINKS the physical pole search -- the sector then finds
+    fewer poles on the fine rungs of a grid ladder for a reason that has
+    nothing to do with the poles. It is kept as a lower bound so a coarse grid
+    still gets at least the old radius."""
+    trust_factor: PositiveFloat = 0.5
+    """Physical trust radius as a fraction of the nearest competing scale.
+
+    ``r = trust_factor * min(distance to the nearest other seed, distance to
+    the nearest contact band edge)``, in THz, floored at
+    ``trust_radius_cells * h``. Below one half the step cannot reach the
+    midpoint between two seeds, which is what stops a Newton solve from
+    walking onto its neighbour's pole."""
     taylor_order: Literal[1, 2] = 2
     """Order of the local model of Sigma^R(z) built from the probe derivatives."""
     delta_fit_order: NonNegativeInt = 2

@@ -318,3 +318,62 @@ def test_left_vector_matches_an_svd_null_space():
 
     # And the conditioning is reported, not assumed.
     assert np.isfinite(sol.eps_left)
+
+
+# --- the acceptance metric, in frequency units ----------------------------- #
+
+def test_dz_est_is_the_actual_frequency_error():
+    """``dz_est`` must predict the remaining distance to the true pole.
+
+    This is the whole basis for gating on ``eps_z`` rather than ``eps_nep``:
+    if ``dz_est`` were not the frequency error, moving the gate would just be
+    swapping one opaque number for another.
+    """
+    d = _dynamical(seed=6)
+    m_blocks, dm_blocks = _operator(*d)
+    z_ex, _, _ = _exact_poles(_dense(*d))
+    target = z_ex[0]
+
+    # Stop early on purpose, at a few different distances, and check that
+    # dz_est tracks z -> target rather than merely correlating with it.
+    for n_it in (1, 2, 3):
+        sol = bordered_newton(
+            m_blocks, dm_blocks, complex(target.real + 0.30, target.imag),
+            max_iter=n_it, tol=1e-30, trust_radius=1.0,
+        )
+        true_err = abs(complex(sol.z) - complex(target))
+        if true_err < 1e-12:
+            continue
+        rel = abs(abs(complex(sol.dz_est)) - true_err) / true_err
+        assert rel < 0.25, (
+            f"{n_it} it: |dz_est|={abs(sol.dz_est):.3e} vs true "
+            f"{true_err:.3e} (rel {rel:.2f})")
+
+
+def test_the_two_gates_disagree_and_the_frequency_one_is_the_physical_test():
+    """A pole located to a tiny fraction of its width can fail ``eps_nep``.
+
+    That is the arithmetic behind 142 of 144 refusals on the CNT bed:
+    ``eps_nep`` divides by ``|z|^2 + ||M||``, which is ``1e3-1e4 THz^2`` for a
+    phonon operator, so it is not a statement about frequency. The bed here
+    has the same shape, so the same thing must be visible on it.
+    """
+    d = _dynamical(seed=7)
+    m_blocks, dm_blocks = _operator(*d)
+    z_ex, _, _ = _exact_poles(_dense(*d))
+    target = z_ex[0]
+    gamma = abs(target.imag)
+
+    sol = bordered_newton(
+        m_blocks, dm_blocks, complex(target.real + 0.05, target.imag),
+        max_iter=3, tol=1e-10, trust_radius=1.0,
+    )
+    located = abs(complex(sol.z) - complex(target)) / gamma
+    # Located to a small fraction of its own linewidth ...
+    assert located < 1e-3, f"located to {located:.2e} of gamma"
+    # ... and dz_est agrees that it is.
+    assert abs(complex(sol.dz_est)) / gamma < 1e-2
+    # The scaled matrix residual is a different, much larger-looking number:
+    # it is normalised by |z|^2 + ||M||, not by gamma.
+    assert sol.eps_nep < 1e-6
+    assert sol.eps_nep * (abs(sol.z) ** 2) > abs(complex(sol.dz_est)) * 1e-6
