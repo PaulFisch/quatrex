@@ -240,6 +240,8 @@ class PhononPhononInteraction(Interaction):
             # source -- and the pole leg put back by the sectors different
             # functions, which breaks the SPATIAL balance while leaving the
             # scalar P_in = P_out identity nearly intact.
+            # One source per pole PAIR: shared by both residues, which is what
+            # keeps G_PP decaying like 1/w^2 (see source_at_poles).
             sa = source_at_poles(s_l, freqs, cl)
             sb = source_at_poles(s_g, freqs, cl)
             kw = dict(rows=rows, cols=cols)

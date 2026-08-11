@@ -241,12 +241,13 @@ def test_sr_equals_rs_on_a_leg_symmetric_vertex():
     assert np.abs(sr - rs).max() / np.abs(sr).max() < 1e-13
 
 
-def test_per_pole_sources_beat_a_frozen_one_on_a_multi_pole_cluster():
-    """The exact residues use S at EACH pole, not one value for the cluster.
+def test_pair_source_is_exact_on_the_diagonal_and_averaged_off_it():
+    """One source per pole PAIR, at that pair's own frequency.
 
-    With a cluster holding poles at 8 and 11 THz and a source that varies with
-    frequency, the frozen value (taken at the first pole) misrepresents the
-    second. The per-pole evaluation is exact for a source linear in omega.
+    For ``alpha == beta`` the two poles share a real part, so the pair
+    frequency IS ``Re z_alpha`` and no accuracy is lost relative to a per-pole
+    evaluation. Only the cross terms are averaged, and their coefficients are
+    suppressed by a large ``gap``.
     """
     from quatrex.phonon.pole_bridge import source_at_poles
 
@@ -257,15 +258,56 @@ def test_per_pole_sources_beat_a_frozen_one_on_a_multi_pole_cluster():
     base = np.array([[1.0, 2.0], [3.0, 4.0]])
     src = np.einsum("w,ab->wab", w, base) + 0j
 
-    s_a, s_b = source_at_poles(src, w, cl)
-    # Row pole picks Re z_a; column pole picks Re z_b.
-    assert np.allclose(_h(s_a), np.array([[8.0, 16.0], [33.0, 44.0]]))
-    assert np.allclose(_h(s_b), np.array([[8.0, 22.0], [24.0, 44.0]]))
+    got = _h(source_at_poles(src, w, cl))
+    # diagonal: evaluated at 8 and 11 exactly
+    assert np.isclose(got[0, 0], 8.0 * base[0, 0])
+    assert np.isclose(got[1, 1], 11.0 * base[1, 1])
+    # off diagonal: the midpoint 9.5, shared by (0,1) and (1,0)
+    assert np.isclose(got[0, 1], 9.5 * base[0, 1])
+    assert np.isclose(got[1, 0], 9.5 * base[1, 0])
 
-    # The frozen value would use omega = 8 everywhere, which is wrong by 27%
-    # on the second pole -- and the sector carries that error into the bubble.
-    frozen = src[int(np.argmin(np.abs(w - 8.0)))]
-    assert abs(_h(s_a)[1, 1] - frozen[1, 1]) / abs(_h(s_a)[1, 1]) > 0.2
+
+def test_gpp_decays_like_one_over_omega_squared():
+    """The asymptotics gate: ``c_a + c_b`` must vanish.
+
+    Writing the leg as ``c_a/(w-z_a) + c_b/(w-conj(z_b))``, the large-``w``
+    behaviour is ``(c_a+c_b)/w`` while the congruence it models decays as
+    ``1/w^2``. Using a DIFFERENT source at each pole leaves the sum nonzero
+    and gives ``G_PP`` a spurious ``1/w`` tail -- measured 17x too large at
+    ``w = 1e2`` and 18364x at ``1e5``, which is what made ``rr_ss`` regress
+    from 5.4e-08 to 4.9e-05.
+    """
+    from quatrex.phonon.pole_bridge import source_at_poles
+
+    w = np.linspace(0.0, 40.0, 4001)
+    z = np.array([9.0 - 0.5j, 14.0 - 0.7j])
+    cl = PoleCluster(z=z, u=np.zeros((4, 2), complex),
+                     v=np.zeros((4, 2), complex))
+    src = np.einsum("w,ab->wab", 1.0 + 0.03 * w,
+                    np.array([[1.0, 2.0], [3.0, 4.0]])) + 0j
+    s_pair = _h(source_at_poles(src, w, cl))
+
+    za, zb = z[:, None], np.conj(z)[None, :]
+    gap = za - zb
+    ca, cb = s_pair / gap, -s_pair / gap
+    assert np.abs(ca + cb).max() == 0.0, "the 1/w coefficient must vanish"
+
+    wl = np.logspace(2, 6, 5)
+    for a in range(2):
+        for b in range(2):
+            pf = ca[a, b] / (wl - z[a]) + cb[a, b] / (wl - np.conj(z[b]))
+            cong = s_pair[a, b] / ((wl - z[a]) * (wl - np.conj(z[b])))
+            assert np.allclose(np.abs(pf / cong), 1.0, rtol=1e-10), \
+                f"pair ({a},{b}) must track the congruence out to w = 1e6"
+
+    # Negative control: distinct sources reintroduce the tail.
+    bad_a, bad_b = s_pair, s_pair * 1.4
+    r = (bad_a - bad_b) / gap
+    assert np.abs(r).max() > 0.1
+    pf_bad = bad_a[0, 1] / (wl - z[0]) - bad_b[0, 1] / (wl - np.conj(z[1]))
+    cong = s_pair[0, 1] / ((wl - z[0]) * (wl - np.conj(z[1])))
+    assert np.abs(pf_bad / cong)[-1] > 100.0, \
+        "distinct sources must show a visibly wrong tail"
 
 
 def test_negative_frequency_poles_use_the_bosonic_mirror():
@@ -277,9 +319,8 @@ def test_negative_frequency_poles_use_the_bosonic_mirror():
     cl = PoleCluster(z=z, u=np.zeros((4, 2), complex),
                      v=np.zeros((4, 2), complex))
     src = np.einsum("w,ab->wab", w, np.ones((2, 2))) * (1 + 2j)
-    s_a, _ = source_at_poles(src, w, cl)
-    got = _h(s_a)
-    assert np.allclose(got[1], np.conj(got[0])), \
+    got = _h(source_at_poles(src, w, cl))
+    assert np.allclose(got[1, 1], np.conj(got[0, 0])), \
         "the -Omega partner must carry the conjugated source"
 
 
@@ -302,12 +343,11 @@ def test_gpp_partial_fraction_form_matches_what_the_sectors_represent():
     u = rng.normal(size=(n, 2)) + 1j * rng.normal(size=(n, 2))
     cl = PoleCluster(z=z, u=u, v=u)
     s_a = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
-    s_b = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
     r, c = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
     r, c = r.ravel(), c.ravel()
 
-    got = _h(pole_keldysh_pf_sparse(w, cl, s_a, s_b, r, c))
-    p, coef = leg_partial_fractions(cl, s_a, source_b=s_b)
+    got = _h(pole_keldysh_pf_sparse(w, cl, s_a, r, c))
+    p, coef = leg_partial_fractions(cl, s_a)
     f = np.zeros((ne, 2, 2), dtype=complex)
     for a in range(2):
         for b in range(2):

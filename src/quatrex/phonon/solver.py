@@ -758,10 +758,10 @@ class PhononSolver(SubsystemSolver):
             # literally the same object. Using the resolved form on one side
             # and partial fractions on the other is what broke the SPATIAL
             # balance while leaving the scalar P_in = P_out nearly intact.
-            g_l = pole_keldysh_pf_sparse(freqs, cl, *source_at_poles(s_l, freqs, cl),
-                                         rows=rows, cols=cols)
-            g_g = pole_keldysh_pf_sparse(freqs, cl, *source_at_poles(s_g, freqs, cl),
-                                         rows=rows, cols=cols)
+            g_l = pole_keldysh_pf_sparse(
+                freqs, cl, source_at_poles(s_l, freqs, cl), rows, cols)
+            g_g = pole_keldysh_pf_sparse(
+                freqs, cl, source_at_poles(s_g, freqs, cl), rows, cols)
             acc_l = g_l if acc_l is None else acc_l + g_l
             acc_g = g_g if acc_g is None else acc_g + g_g
         state.g_pp_lesser = acc_l.reshape(sse_lesser.data.shape)

@@ -605,69 +605,58 @@ def mixed_self_energy_blocked(
 
 def source_at_poles(
     source: NDArray, freqs: NDArray, cluster: PoleCluster
-) -> tuple[NDArray, NDArray]:
-    r"""The projected source evaluated at each pole's OWN frequency.
+) -> NDArray:
+    r"""The projected source for each pole PAIR, at that pair's own frequency.
 
-    The exact partial-fraction residues of
-    ``S(w)/((w - z_a)(w - conj(z_b)))`` are ``S(z_a)/gap`` and
-    ``S(conj(z_b))/gap``: each leg carries the source where ITS pole sits.
-    The frozen approximation instead uses one value for the whole cluster,
-    taken at ``Re z[0]``, which is wrong as soon as a cluster holds more than
-    one pole and badly wrong once it is closed under ``z -> -z^*`` -- the
-    partner is at ``-Omega`` while the frozen value is read at ``+Omega``.
+    One value per ``(alpha, beta)``, shared by both residues of the pair. That
+    sharing is not a convenience -- it is what keeps ``G_PP`` decaying like the
+    object it models.
 
-    Getting this wrong does not break the scalar balance ``P_in = P_out``; it
-    breaks the SPATIAL balance, because the pole leg subtracted from the ring
-    (``G_PP``, built from the frequency-resolved source) and the pole leg put
-    back by the mixed sectors stop being the same function. That is the
-    condition doc Sec. 37 requires, and its violation is what put negative heat
-    at a contact.
+    Writing the leg as ``c_a/(w - z_a) + c_b/(w - conj(z_b))`` with
+    ``c_a = S_a/gap`` and ``c_b = -S_b/gap``, the large-``w`` behaviour is
+    ``(c_a + c_b)/w``. The congruence form ``S/((w-z_a)(w-conj(z_b)))`` decays
+    as ``1/w^2``, so the two agree only if ``c_a + c_b = 0``, i.e. only if the
+    SAME source serves both residues.
 
-    Negative-frequency poles are served by the bosonic mirror
-    ``S(-w) = S(w)^*`` rather than by extrapolating a model across the band.
+    Using a different source at each pole leaves ``c_a + c_b != 0`` and gives
+    ``G_PP`` a spurious ``1/w`` tail. Measured against the congruence: 17x too
+    large at ``w = 1e2``, 579x at ``3e3``, **18364x** at ``1e5``. That is what
+    made ``rr_ss`` regress from 5.4e-08 to 4.9e-05 when per-pole sources were
+    introduced.
 
-    Parameters
-    ----------
-    source : NDArray
-        ``(n_omega, Np, Np)`` frequency-resolved projected source.
-    freqs : NDArray
-        ``(n_omega,)`` the grid it is sampled on.
-    cluster : PoleCluster
+    The pair frequency is the midpoint of the two poles' real parts. For the
+    dominant ``alpha == beta`` terms that is exactly ``Re z_alpha``, so the
+    per-pole accuracy is kept where it matters; only the cross terms, whose
+    coefficients are suppressed by a large ``gap``, are averaged.
+
+    Negative-frequency partners (from the bosonic closure) are served by
+    ``S(-w) = S(w)^*``.
 
     Returns
     -------
-    tuple[NDArray, NDArray]
-        ``(S_a, S_b)``, each ``(Np, Np)``: the source at ``z_alpha`` indexed by
-        the ROW pole, and at ``conj(z_beta)`` indexed by the COLUMN pole.
+    NDArray
+        ``(Np, Np)``.
 
     """
     w = np.asarray(_host(freqs), dtype=float)
     z = np.asarray(_host(cluster.z))
     src = xp.asarray(source, dtype=xp.complex128)
 
-    def _at(centres):
-        idx = np.array([int(np.argmin(np.abs(w - abs(float(c))))) for c in centres])
-        vals = xp.take(src, xp.asarray(idx), axis=0)          # (Np, Np, Np)
-        neg = np.asarray(centres) < 0.0
-        if neg.any():
-            mirrored = xp.conj(vals)
-            vals = xp.where(xp.asarray(neg)[:, None, None], mirrored, vals)
-        return vals
-
-    rows = _at(z.real)                    # source at each ROW pole
-    cols = _at(np.conj(z).real)           # source at each COLUMN pole
-    # S_a[a, b] = S_{ab}(z_a): pick the row-pole slice, keep (a, b).
-    s_a = xp.stack([rows[a, a, :] for a in range(z.size)], axis=0)
-    # S_b[a, b] = S_{ab}(conj(z_b)): pick the column-pole slice.
-    s_b = xp.stack([cols[b, :, b] for b in range(z.size)], axis=1)
-    return s_a, s_b
+    centre = 0.5 * (z.real[:, None] + np.conj(z).real[None, :])
+    idx = np.abs(w[None, None, :] - np.abs(centre)[:, :, None]).argmin(axis=-1)
+    npp = int(z.size)
+    out = xp.stack([
+        xp.stack([src[int(idx[a, b]), a, b] for b in range(npp)])
+        for a in range(npp)
+    ])
+    neg = xp.asarray(centre < 0.0)
+    return xp.where(neg, xp.conj(out), out)
 
 
 def pole_keldysh_pf_sparse(
     omega: NDArray,
     cluster: PoleCluster,
-    s_a: NDArray,
-    s_b: NDArray,
+    source: NDArray,
     rows: NDArray,
     cols: NDArray,
 ) -> NDArray:
@@ -708,8 +697,8 @@ def pole_keldysh_pf_sparse(
     za = cluster.z[None, :, None]
     zb = xp.conj(cluster.z)[None, None, :]
     gap = cluster.z[:, None] - xp.conj(cluster.z)[None, :]
-    ca = xp.asarray(s_a, dtype=xp.complex128) / gap
-    cb = -xp.asarray(s_b, dtype=xp.complex128) / gap
+    ss = xp.asarray(source, dtype=xp.complex128)
+    ca, cb = ss / gap, -ss / gap          # equal and opposite: 1/w^2 by design
     f = ca[None] / (w - za) + cb[None] / (w - zb)          # (n_omega, Np, Np)
 
     lr = xp.take(cluster.u, xp.asarray(rows), axis=0)      # (nnz, Np)
