@@ -460,6 +460,41 @@ count — the baseline's own current drifted 16 % between iteration 4 and 80.
 
 ---
 
+## 10b. Hysteresis fix, measured
+
+Same bed, 40 iterations, mixing 0.05, `rr_ss_sr`, WITH the position-keyed
+hysteresis:
+
+Membership over 39 iterations:
+
+    3x 2 poles -> 7x 1 -> 2x 0 -> 7x 1 -> 3x 0 -> 3x 2 -> 2x 4 -> 2x 3 -> 10x 1
+
+It still churns early but **settles to a stable 1-pole set for the last 10
+iterations**. Before the fix it never settled -- it was still flipping 1 -> 0
+at iteration 25 of 80.
+
+Balance residual over exactly those stable iterations:
+
+    2.113e-03 -> 2.078e-03 -> 2.047e-03 -> 2.018e-03
+
+Smooth and **monotonically decreasing**, against `5e-3 -> 3.6e-2 -> 1e-4`
+before. So the chain is confirmed: stable membership gives a continuous
+fixed-point map, and the iteration then converges -- slowly (~1.5 % per
+iteration at mixing 0.05), but monotonically, which it never did before.
+
+### The residual positivity violation has moved to the mask boundary
+
+| stage | `Sigma^>` worst | where |
+|---|---|---|
+| original | -1.506e-01 | w[128], mid-band |
+| after the leg mask fix | -9.24e-03 | w[75] |
+| after the hysteresis fix | -4.71e-02 | **w[1], adjacent to the masked DC bin** |
+
+Three different defects in sequence, and what survives now sits at the hard
+mask's edge rather than in the band. That is a direct argument for treating
+the `omega -> 0` region analytically instead of masking it: the present
+treatment displaces the artefact to the boundary rather than removing it.
+
 ## 11. Open
 
 * Verify the hysteresis fix stabilises membership and lets `rr_ss_sr` converge.
