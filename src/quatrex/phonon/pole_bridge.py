@@ -258,6 +258,7 @@ def _mixed_one_sector(
     br: NDArray,
     rows: NDArray,
     cols: NDArray,
+    g_partner: NDArray,
     prefactor: complex | None = None,
     max_nnz: int = 4096,
 ) -> NDArray:
@@ -293,6 +294,7 @@ def _mixed_one_sector(
         quietly running for hours.
 
     """
+    from quatrex.phonon.pole_audit import transpose_index
     from quatrex.phonon.pole_bubble import _split_leg
     from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
@@ -307,9 +309,10 @@ def _mixed_one_sector(
     if prefactor is None:
         prefactor = analytic_prefactor()
 
-    # See _mixed_one_sector_blocked: the negative half of the axis is fixed by
-    # R(-w) = R(w)^* but must be supplied explicitly.
-    g_reg, freqs = bosonic_extend(g_reg, freqs)
+    # See _mixed_one_sector_blocked: the negative half comes from the PARTNER
+    # Keldysh component, transposed.
+    g_reg, freqs = bosonic_extend(
+        g_reg, g_partner, freqs, transpose_index=transpose_index(rows, cols))
 
     poles, coeffs = _split_leg(cluster, source)
     npp = cluster.n_poles
@@ -339,6 +342,7 @@ def mixed_self_energy_sparse(
     cluster: PoleCluster,
     source: NDArray,
     g_reg: NDArray,
+    g_partner: NDArray,
     freqs: NDArray,
     phi_blocks: dict,
     block_sizes: NDArray,
@@ -360,8 +364,8 @@ def mixed_self_energy_sparse(
     ``M`` is formed once per pole pair and reused.
     """
     m_vertex = mixed_vertex_blocks
-    kw = dict(freqs=freqs, rows=rows, cols=cols, prefactor=prefactor,
-              max_nnz=max_nnz)
+    kw = dict(freqs=freqs, rows=rows, cols=cols, g_partner=g_partner,
+              prefactor=prefactor, max_nnz=max_nnz)
     sr = _mixed_one_sector(
         omega, cluster, source, g_reg,
         bl=m_vertex(phi_blocks, block_sizes, cluster.u, leg=0, conjugate=False),
@@ -493,11 +497,13 @@ def _mixed_one_sector_blocked(
     rows: NDArray,
     cols: NDArray,
     block_sizes: NDArray,
+    g_partner: NDArray,
     prefactor: complex | None = None,
 ) -> NDArray:
     """ONE mixed sector via the block triple product. See
     :func:`_mixed_one_sector` for the physics; this is the same object at
     device-scale cost."""
+    from quatrex.phonon.pole_audit import transpose_index
     from quatrex.phonon.pole_bubble import _split_leg
     from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
@@ -505,12 +511,12 @@ def _mixed_one_sector_blocked(
         prefactor = analytic_prefactor()
 
     # The convolution runs over the WHOLE frequency axis; the solver only holds
-    # G for omega >= 0. The negative half follows from R(-w) = R(w)^*, but it
-    # has to be supplied -- the cell kernel integrates exactly the cells it is
-    # given. Omitting it is a ~28% error, i.e. large enough to break the
-    # Phi-derivable energy balance rather than merely degrade it. Extended once
-    # here, not per pole pair.
-    g_reg, freqs = bosonic_extend(g_reg, freqs)
+    # G for omega >= 0. The negative half is fixed by the bosonic relation
+    # G^<(q,-w) = G^>(-q,w)^T -- it comes from the PARTNER component,
+    # transposed, NOT from conjugating this one. Extended once here, not per
+    # pole pair.
+    g_reg, freqs = bosonic_extend(
+        g_reg, g_partner, freqs, transpose_index=transpose_index(rows, cols))
 
     poles, coeffs = _split_leg(cluster, source)
     npp = cluster.n_poles
@@ -564,6 +570,7 @@ def mixed_self_energy_blocked(
     cluster: PoleCluster,
     source: NDArray,
     g_reg: NDArray,
+    g_partner: NDArray,
     freqs: NDArray,
     phi_blocks: dict,
     block_sizes: NDArray,
@@ -579,7 +586,7 @@ def mixed_self_energy_blocked(
     small-size reference.
     """
     kw = dict(freqs=freqs, rows=rows, cols=cols, block_sizes=block_sizes,
-              prefactor=prefactor)
+              g_partner=g_partner, prefactor=prefactor)
     vd = mixed_vertex_block_dict
     sr = _mixed_one_sector_blocked(
         omega, cluster, source, g_reg,

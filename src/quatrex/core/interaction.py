@@ -300,10 +300,16 @@ class PhononPhononInteraction(Interaction):
             # O(nnz_out * nnz_in) and refuses above 4096 entries, which no
             # real device is under. Same object, pinned to 1e-12 against the
             # pattern form in test_pole_blocked.py.
+            # Each component is extended onto the negative axis from its
+            # Keldysh PARTNER: G^<(q,-w) = G^>(-q,w)^T. Passing the same
+            # component twice would restore the conjugate mirror, which is
+            # correct for Delta but wrong for a lesser/greater leg by 244 %.
             a = mixed_self_energy_blocked(
-                freqs, cl, source_at_poles(s_l, freqs, cl), reg_l, **common)
+                freqs, cl, source_at_poles(s_l, freqs, cl),
+                reg_l, reg_g, **common)
             b = mixed_self_energy_blocked(
-                freqs, cl, source_at_poles(s_g, freqs, cl), reg_g, **common)
+                freqs, cl, source_at_poles(s_g, freqs, cl),
+                reg_g, reg_l, **common)
             mx_l = a if mx_l is None else mx_l + a
             mx_g = b if mx_g is None else mx_g + b
         scale = float(getattr(ps, "mixed_scale", 1.0))

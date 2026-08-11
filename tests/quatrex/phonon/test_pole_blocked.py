@@ -121,11 +121,15 @@ def test_blocked_contraction_matches_the_pattern_level_reference(sizes):
     rng = np.random.default_rng(3)
     g_reg = (rng.normal(size=(freqs.size, rows.size))
              + 1j * rng.normal(size=(freqs.size, rows.size)))
+    # The Keldysh partner supplies the negative frequency axis; these tests
+    # exercise the contraction, so a distinct array is enough.
+    g_partner = (rng.normal(size=(freqs.size, rows.size))
+                 + 1j * rng.normal(size=(freqs.size, rows.size)))
 
     ref = _h(mixed_self_energy_sparse(
-        omega, cl, src, g_reg, freqs, phi, sizes, rows, cols))
+        omega, cl, src, g_reg, g_partner, freqs, phi, sizes, rows, cols))
     got = _h(mixed_self_energy_blocked(
-        omega, cl, src, g_reg, freqs, phi, sizes, rows, cols))
+        omega, cl, src, g_reg, g_partner, freqs, phi, sizes, rows, cols))
     assert np.abs(got - ref).max() / np.abs(ref).max() < 1e-12
 
 
@@ -144,15 +148,20 @@ def test_blocked_contraction_has_no_nnz_guard():
     rng = np.random.default_rng(5)
     g_reg = (rng.normal(size=(freqs.size, rows.size))
              + 1j * rng.normal(size=(freqs.size, rows.size)))
+    # The Keldysh partner supplies the negative frequency axis; these tests
+    # exercise the contraction, so a distinct array is enough.
+    g_partner = (rng.normal(size=(freqs.size, rows.size))
+                 + 1j * rng.normal(size=(freqs.size, rows.size)))
 
     with pytest.raises(NotImplementedError, match="exceeds the"):
         mixed_self_energy_sparse(
-            omega, cl, src, g_reg, freqs, phi, sizes, rows, cols, max_nnz=4)
+            omega, cl, src, g_reg, g_partner, freqs, phi, sizes, rows, cols,
+            max_nnz=4)
     # Same arguments, no guard, and still the right answer.
     ref = _h(mixed_self_energy_sparse(
-        omega, cl, src, g_reg, freqs, phi, sizes, rows, cols))
+        omega, cl, src, g_reg, g_partner, freqs, phi, sizes, rows, cols))
     got = _h(mixed_self_energy_blocked(
-        omega, cl, src, g_reg, freqs, phi, sizes, rows, cols))
+        omega, cl, src, g_reg, g_partner, freqs, phi, sizes, rows, cols))
     assert np.abs(got - ref).max() / np.abs(ref).max() < 1e-12
 
 
@@ -178,8 +187,13 @@ def test_blocked_sr_and_rs_remain_distinct():
     rng = np.random.default_rng(7)
     g_reg = (rng.normal(size=(freqs.size, rows.size))
              + 1j * rng.normal(size=(freqs.size, rows.size)))
+    # The Keldysh partner supplies the negative frequency axis; these tests
+    # exercise the contraction, so a distinct array is enough.
+    g_partner = (rng.normal(size=(freqs.size, rows.size))
+                 + 1j * rng.normal(size=(freqs.size, rows.size)))
     vd = mixed_vertex_block_dict
-    kw = dict(freqs=freqs, rows=rows, cols=cols, block_sizes=sizes)
+    kw = dict(freqs=freqs, rows=rows, cols=cols, block_sizes=sizes,
+              g_partner=g_partner)
     sr = _h(_mixed_one_sector_blocked(
         omega, cl, src, g_reg,
         bl=vd(phi, sizes, cl.u, leg=0, conjugate=False),

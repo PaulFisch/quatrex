@@ -24,56 +24,90 @@ def _h(a):
     return a.get() if hasattr(a, "get") else np.asarray(a)
 
 
-def _bosonic_background(u, centre=11.0, gamma=0.4):
-    """A background that genuinely satisfies ``a(-w) = conj(a(w))``.
+def _pattern(sizes):
+    off = np.concatenate(([0], np.cumsum(sizes)))
+    rows, cols = [], []
+    for i in range(len(sizes)):
+        for j in range(max(0, i - 1), min(len(sizes), i + 2)):
+            for a in range(off[i], off[i + 1]):
+                for b in range(off[j], off[j + 1]):
+                    rows.append(a)
+                    cols.append(b)
+    return np.array(rows), np.array(cols), off
 
-    A single Lorentzian does NOT satisfy it; the conjugate-symmetric pair does.
-    Getting this wrong makes the test measure the bed rather than the kernel.
+
+def _keldysh_pair(u, centre=11.0, gamma=0.4, kt=25.0):
+    """A physically valid ``(G^<, G^>)`` pair at equilibrium.
+
+    ``G^< = i n_B(w) A(w)``, ``G^> = i (n_B(w)+1) A(w)`` with ``A`` ODD in
+    ``w``. This pair satisfies the true bosonic relation
+    ``G^<(-w) = G^>(w)``; it does NOT satisfy ``G^<(-w) = conj(G^<(w))``.
+
+    Building the bed from the physics rather than from the relation under test
+    is the point: an earlier version of this module used a conjugate-symmetric
+    function, which made the wrong mirror look right.
     """
-    return 1.0 / (u - centre + 1j * gamma) - 1.0 / (u + centre + 1j * gamma)
+    n_b = 1.0 / np.expm1(u / kt)
+    a = (gamma / ((u - centre) ** 2 + gamma ** 2)
+         - gamma / ((u + centre) ** 2 + gamma ** 2))
+    return 1j * n_b * a, 1j * (n_b + 1.0) * a
 
 
-def test_background_bed_really_is_bosonic():
-    """Guard the guard: the whole test rests on this identity holding."""
-    u = np.linspace(0.5, 40.0, 97)
-    assert np.allclose(_bosonic_background(-u), np.conj(_bosonic_background(u)))
+def test_the_bed_satisfies_the_physical_relation_and_not_the_conjugate_one():
+    """Guard the guard, and pin the negative control.
 
-
-def test_one_sided_convolution_is_badly_wrong():
-    """The negative half is not a correction -- it is ~a quarter of the answer.
-
-    This is the regression: before the fix the production path integrated only
-    ``[0, w_max]``.
+    Everything below rests on the bed being right, and the failure mode this
+    module exists to catch is a bed that satisfies the WRONG relation.
     """
-    pole = 8.0 - 0.3j
-    omega = np.array([9.0, 12.5, 15.0])
-    wide = np.linspace(-200.0, 200.0, 200001)
-    ref = _h(mixed_convolution_batched(
-        omega, pole, 1.0 + 0j, _bosonic_background(wide)[:, None], wide))[:, 0]
+    u = np.linspace(0.5, 30.0, 121)
+    gl_pos, gg_pos = _keldysh_pair(u)
+    gl_neg, _ = _keldysh_pair(-u)
 
-    half = np.linspace(0.0, 60.0, 20001)
-    one_sided = _h(mixed_convolution_batched(
-        omega, pole, 1.0 + 0j, _bosonic_background(half)[:, None], half))[:, 0]
-    err = np.abs(one_sided - ref).max() / np.abs(ref).max()
-    assert err > 0.1, f"one-sided error should be large, got {err:.2e}"
-
-    r_full, w_full = bosonic_extend(_bosonic_background(half)[:, None], half)
-    fixed = _h(mixed_convolution_batched(
-        omega, pole, 1.0 + 0j, r_full, w_full))[:, 0]
-    assert np.abs(fixed - ref).max() / np.abs(ref).max() < 1e-3
+    assert np.abs(gl_neg - gg_pos).max() < 1e-14, "G^<(-w) == G^>(w)"
+    wrong = np.abs(gl_neg - np.conj(gl_pos)).max()
+    assert wrong / np.abs(gl_pos).max() > 1.0, (
+        "the conjugate relation must fail by a LARGE margin, not marginally: "
+        f"got {wrong:.3e}")
 
 
-def test_bosonic_extend_shapes_and_symmetry():
-    freqs = np.linspace(0.0, 10.0, 11)
+def test_bosonic_extend_uses_the_partner_component():
+    """The negative axis must come from ``G^>``, not from ``conj(G^<)``."""
+    w = np.linspace(0.0, 30.0, 301)
+    gl, gg = _keldysh_pair(w)
+    full, w_full = bosonic_extend(gl[:, None], gg[:, None], w)
+    full, w_full = _h(full)[:, 0], _h(w_full)
+
+    assert w_full.shape == (2 * w.size - 1,)          # zero bin once
+    # n_B diverges at w = 0 (a real Bose pole), so compare away from it.
+    sel = np.abs(w_full) > 0.5
+    exact_l, _ = _keldysh_pair(w_full[sel])
+    scale = np.abs(exact_l).max()
+    err = np.abs(full[sel] - exact_l).max() / scale
+    assert err < 1e-12, f"extended lesser vs exact G^<(w) on the full axis: {err:.3e}"
+
+    # Negative control: the old same-component conjugate mirror.
+    old_style, _ = bosonic_extend(gl[:, None], np.conj(gl)[:, None], w)
+    bad = np.abs(_h(old_style)[sel, 0] - exact_l).max() / scale
+    assert bad > 0.5, f"the conjugate mirror must be visibly wrong: {bad:.3e}"
+
+
+def test_bosonic_extend_transposes_the_partner_on_the_pattern():
+    """``G^<_ij(-w) = G^>_ji(w)``: the index swap is part of the relation."""
+    from quatrex.phonon.pole_audit import transpose_index
+
+    sizes = np.array([2, 2])
+    rows, cols, _ = _pattern(sizes)
+    t = transpose_index(rows, cols)
+    w = np.linspace(0.0, 10.0, 51)
     rng = np.random.default_rng(0)
-    r = rng.normal(size=(11, 4)) + 1j * rng.normal(size=(11, 4))
-    r_full, w_full = bosonic_extend(r, freqs)
-    assert w_full.shape == (21,)                      # zero bin exactly once
-    assert r_full.shape == (21, 4)
-    assert np.allclose(_h(w_full), np.concatenate([-freqs[:0:-1], freqs]))
-    # a(-w) = conj(a(w)) on the constructed half
-    assert np.allclose(_h(r_full)[:10], np.conj(_h(r)[:0:-1]))
-    assert np.allclose(_h(r_full)[10:], _h(r))
+    gl = rng.normal(size=(w.size, rows.size)) + 1j * rng.normal(size=(w.size, rows.size))
+    gg = rng.normal(size=(w.size, rows.size)) + 1j * rng.normal(size=(w.size, rows.size))
+
+    full, _ = bosonic_extend(gl, gg, w, transpose_index=t)
+    got = _h(full)
+    # the negative half is the partner, reversed in w AND index-transposed
+    assert np.allclose(got[:w.size - 1], _h(gg)[:0:-1][:, t])
+    assert np.allclose(got[w.size - 1:], _h(gl))
 
 
 def test_bosonic_extend_refuses_a_grid_not_anchored_at_zero():
@@ -82,7 +116,14 @@ def test_bosonic_extend_refuses_a_grid_not_anchored_at_zero():
     freqs = np.linspace(1.5, 10.0, 18)
     r = np.zeros((18, 2), dtype=complex)
     with pytest.raises(NotImplementedError, match="zero-anchored"):
-        bosonic_extend(r, freqs)
+        bosonic_extend(r, r, freqs)
+
+
+def test_bosonic_extend_refuses_a_mismatched_partner():
+    freqs = np.linspace(0.0, 10.0, 11)
+    with pytest.raises(ValueError, match="share the grid and pattern"):
+        bosonic_extend(np.zeros((11, 4), dtype=complex),
+                       np.zeros((11, 3), dtype=complex), freqs)
 
 
 def test_pole_set_is_closed_before_any_leg_is_built():
@@ -180,11 +221,15 @@ def test_sr_equals_rs_on_a_leg_symmetric_vertex():
     a = (rng.normal(size=(freqs.size, rows.size))
          + 1j * rng.normal(size=(freqs.size, rows.size)))
     g_reg = a - np.conj(a[:, t])
+    b = (rng.normal(size=(freqs.size, rows.size))
+         + 1j * rng.normal(size=(freqs.size, rows.size)))
+    g_partner = b - np.conj(b[:, t])          # a distinct Keldysh partner
     m = rng.normal(size=(npp, npp)) + 1j * rng.normal(size=(npp, npp))
     src = 1j * (m @ m.conj().T)
 
     vd, kw = mixed_vertex_block_dict, dict(
-        freqs=freqs, rows=rows, cols=cols, block_sizes=sizes)
+        freqs=freqs, rows=rows, cols=cols, block_sizes=sizes,
+        g_partner=g_partner)
     sr = _h(_mixed_one_sector_blocked(
         omega, cl, src, g_reg,
         bl=vd(phi, sizes, cl.u, leg=0, conjugate=False),

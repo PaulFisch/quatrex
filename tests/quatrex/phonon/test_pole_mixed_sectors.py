@@ -19,6 +19,8 @@ from quatrex.phonon.pole_bridge import (
     mixed_self_energy_sparse,
     mixed_vertex_blocks,
 )
+from quatrex.phonon.pole_audit import transpose_index
+from quatrex.phonon.pole_mixed import bosonic_extend
 from quatrex.phonon.pole_keldysh import PoleCluster
 
 SIZES = np.array([2, 2])
@@ -111,20 +113,33 @@ def test_mixed_sectors_match_the_brute_force_ring():
     # REAL: the scalar Lorentzian pair below is conjugate-symmetric, but a
     # complex matrix factor would break a(-w) = conj(a(w)) again.
     mat = rng.normal(size=(N_DOF, N_DOF))
+    mat = mat + mat.T                     # symmetric, so the transpose is trivial
 
-    def _bg(x):
-        """Conjugate-symmetric background: a(-w) == conj(a(w))."""
-        lor = (1.0 / (x - 9.0 + 4.0j) - 1.0 / (x + 9.0 + 4.0j))
-        return np.einsum("w,ij->wij", lor, mat)
+    def _pair(x):
+        """A physical (G^<, G^>) pair: G^< = i n_B A, G^> = i(n_B+1) A, A odd.
 
-    g_reg_full = _bg(w_full)
-    assert np.allclose(_bg(-w_pos[1:]), np.conj(_bg(w_pos[1:]))), \
-        "the background bed must satisfy the bosonic relation"
+        Built from the physics, NOT from the relation under test. An earlier
+        version used a conjugate-symmetric background, which satisfies the
+        WRONG mirror and therefore validated the wrong code.
+        """
+        kt = 25.0
+        n_b = 1.0 / np.expm1(np.where(np.abs(x) < 1e-9, 1e-9, x) / kt)
+        a = (4.0 / ((x - 9.0) ** 2 + 16.0) - 4.0 / ((x + 9.0) ** 2 + 16.0))
+        return (np.einsum("w,ij->wij", 1j * n_b * a, mat),
+                np.einsum("w,ij->wij", 1j * (n_b + 1.0) * a, mat))
 
-    # The kernel gets ONLY the non-negative half, as production does.
-    g_reg_pos = _bg(w_pos)[:, rows, cols]
+    gl_full, gg_full = _pair(w_full)
+    gl_neg, _ = _pair(-w_pos[1:])
+    _, gg_pos = _pair(w_pos[1:])
+    assert np.abs(gl_neg - gg_pos).max() < 1e-10, \
+        "the bed must satisfy G^<(-w) = G^>(w)"
+
+    g_reg_full = gl_full
+    # The kernel gets ONLY the non-negative half plus the PARTNER, as
+    # production does; it must rebuild the negative axis itself.
+    gl_pos_v, gg_pos_v = (x[:, rows, cols] for x in _pair(w_pos))
     got = _h(mixed_self_energy_sparse(
-        w_pos, cl, src, g_reg_pos, w_pos, phi, SIZES, rows, cols))
+        w_pos, cl, src, gl_pos_v, gg_pos_v, w_pos, phi, SIZES, rows, cols))
 
     gs_full = _dense_gs(w_full, cl, src)
     ref = (_brute_ring(phi, off, gs_full, g_reg_full, w_full, rows, cols)
@@ -149,7 +164,7 @@ def test_rs_is_not_a_doubling_of_sr():
     g_reg = np.einsum("w,k->wk", 1.0 / ((w - 9.0) ** 2 + 16.0),
                       rng.normal(size=rows.size) + 0j)
 
-    kw = dict(freqs=w, rows=rows, cols=cols)
+    kw = dict(freqs=w, rows=rows, cols=cols, g_partner=g_reg)
     mv = mixed_vertex_blocks
     sr = _h(_mixed_one_sector(
         w, cl, src, g_reg,
@@ -188,8 +203,8 @@ def test_oversized_pattern_is_refused():
     w = np.arange(0.0, 4.0, 0.1)
     g_reg = np.zeros((w.size, rows.size), dtype=complex)
     with pytest.raises(NotImplementedError, match="exceeds the"):
-        mixed_self_energy_sparse(w, cl, src, g_reg, w, phi, SIZES, rows, cols,
-                                 max_nnz=2)
+        mixed_self_energy_sparse(w, cl, src, g_reg, g_reg, w, phi, SIZES,
+                                 rows, cols, max_nnz=2)
 
 
 def test_invalid_leg_raises():
@@ -236,7 +251,10 @@ def test_production_kernel_matches_an_explicit_ring():
     f = ((s_a / gap)[None] / (w[:, None, None] - za[None])
          - (s_b / gap)[None] / (w[:, None, None] - zb[None]))
     gs = np.einsum("ia,wab,jb->wij", u, f, np.conj(u))
-    mat = rng.normal(size=(n, n))
+    # SYMMETRIC: the bosonic relation carries an index transpose
+    # (G^<_ij(-w) = G^>_ji(w)), so an asymmetric bed would make the reference
+    # ambiguous about which of the two the negative axis should hold.
+    mat = rng.normal(size=(n, n)); mat = mat + mat.T
     lor = 1.0 / (w - 9.0 + 6.0j) - 1.0 / (w + 9.0 + 6.0j)
     gr = np.einsum("w,ij->wij", lor, mat)
 
@@ -255,9 +273,18 @@ def test_production_kernel_matches_an_explicit_ring():
 
     ref = _ring(gs, gr) + _ring(gr, gs)
     npos = w_pos.size
+    # The kernel is handed the positive half plus the PARTNER, and must
+    # rebuild the negative axis. The partner is by definition the background
+    # at negative frequencies, indexed so that partner[j] = gr(-w_pos[j]).
+    gr_pat = gr[:, rows, cols]
+    gr_partner = gr_pat[npos - 1::-1]
+    _chk, _ = bosonic_extend(gr_pat[-npos:], gr_partner, w_pos,
+                             transpose_index=transpose_index(rows, cols))
+    assert np.abs(_h(_chk) - gr_pat).max() < 1e-12, \
+        "the partner must reconstruct the full-axis background exactly"
     got = _h(mixed_self_energy_blocked(
-        w_pos, cl, (s_a, s_b), gr[-npos:][:, rows, cols], w_pos,
-        phi, sizes, rows, cols))
+        w_pos, cl, (s_a, s_b), gr_pat[-npos:], gr_partner,
+        w_pos, phi, sizes, rows, cols))
     sel = (w_pos > 3.0) & (w_pos < 17.0)
     keep = (w > 3.0) & (w < 17.0)
     err = np.abs(got[sel] - ref[keep]).max() / np.abs(ref[keep]).max()

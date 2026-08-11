@@ -223,38 +223,61 @@ def cell_resolvent_weights(z: NDArray, freqs: NDArray) -> NDArray:
 
 
 def bosonic_extend(
-    r_vals: NDArray, freqs: NDArray, transverse_shape: tuple | None = None
+    r_same: NDArray,
+    r_other: NDArray,
+    freqs: NDArray,
+    transpose_index: NDArray | None = None,
+    transverse_shape: tuple | None = None,
 ) -> tuple[NDArray, NDArray]:
-    r"""Mirror a one-sided background onto the full frequency axis.
+    r"""Extend a Keldysh component onto the full frequency axis.
 
-    The mixed convolution :math:`\int d\omega'\, F(\omega') R(\omega-\omega')`
-    runs over the WHOLE axis, but the solver only ever holds :math:`R` for
-    :math:`\omega \ge 0`. The negative half is not missing information -- it is
-    fixed by the bosonic relation :math:`R(-\omega) = R(\omega)^*` (with
-    :math:`q \to -q` on the transverse axes) -- but it does have to be supplied,
-    because :func:`cell_resolvent_weights` integrates exactly the cells it is
-    given and nothing else.
+    The mixed convolution
+    :math:`\int d\omega' F(\omega') R(\omega-\omega')` runs over the WHOLE
+    axis, but the solver only holds :math:`R` for :math:`\omega \ge 0`. The
+    negative half is fixed by the bosonic steady-state relation
 
-    Omitting it is not a small error. Measured against a wide-axis reference on
-    a background built to satisfy the relation exactly, the one-sided integral
-    is wrong by **28%**, and mirroring brings it to 2.5e-4. That is the size of
-    defect that breaks the Phi-derivable energy balance rather than merely
-    degrading it.
+    .. math:: G^<_{ij}(\mathbf q, -\omega) = G^>_{ji}(-\mathbf q, \omega)
 
-    The RR ring never had this problem: the FFT route builds the bosonic fold
-    explicitly before transforming. The pole-pole channel closes its pole SET
-    instead (:func:`~quatrex.phonon.pole_bubble.bosonic_closure`). This is the
-    same physical statement, applied to a sampled leg.
+    and its partner with :math:`<` and :math:`>` exchanged. So the negative
+    axis of a LESSER component is built from the GREATER one, transposed and
+    with :math:`\mathbf q \to -\mathbf q` -- **not** by conjugating the same
+    component.
+
+    An earlier version used ``R(-w) = R(w)^*``. That is the correct relation
+    for :math:`\Delta = \Sigma^> - \Sigma^<` (which is why
+    :func:`~quatrex.phonon.pole_kernel.bosonic_partner` and the production
+    Hilbert transform use it) but it is **wrong for a lesser or greater
+    component**. Measured on an equilibrium bed
+    (:math:`G^< = i n_B A`, :math:`G^> = i(n_B{+}1)A`, :math:`A` odd):
+
+    ========================================  ==========
+    identity                                  residual
+    ========================================  ==========
+    ``G^<(-w) == G^>(w)``                     8.9e-16
+    ``G^<(-w) == conj(G^<(w))``               7.65 (244 % relative)
+    ``D(-w) == conj(D(w))``, ``D = S^>-S^<``  5.6e-17
+    ========================================  ==========
+
+    Omitting the extension entirely is a 28 % error; using the conjugate
+    relation is worse than that, because it is wrong in a way that looks
+    plausible at equilibrium and at :math:`\Gamma`.
 
     Parameters
     ----------
-    r_vals : NDArray
-        ``(n_freq, ...)`` background on a grid starting at (or near) zero.
+    r_same : NDArray
+        ``(n_freq, nnz)`` the component being extended, on ``w >= 0``.
+    r_other : NDArray
+        Its Keldysh partner on the same grid: pass ``G^>`` when extending
+        ``G^<``, and ``G^<`` when extending ``G^>``.
     freqs : NDArray
-        ``(n_freq,)`` non-negative, uniformly spaced.
+        ``(n_freq,)`` non-negative, uniform, zero-anchored.
+    transpose_index : NDArray, optional
+        Permutation taking pattern entry ``(i, j)`` to ``(j, i)``, from
+        :func:`~quatrex.phonon.pole_audit.transpose_index`. Required whenever
+        the pattern is not symmetric under the index swap; omitting it assumes
+        the transpose is the identity, which holds only for a diagonal bed.
     transverse_shape : tuple, optional
-        Transverse momentum grid. The mirror carries ``q -> -q`` on these axes;
-        the plain conjugate is only correct at ``nq == 1``.
+        Transverse momentum grid; the mirror carries ``q -> -q``.
 
     Returns
     -------
@@ -264,19 +287,26 @@ def bosonic_extend(
 
     """
     w = xp.asarray(freqs, dtype=float)
-    r = xp.asarray(r_vals)
-    zero_anchored = bool(abs(float(_host(w)[0])) < 1e-12)
-    if not zero_anchored:
+    same = xp.asarray(r_same)
+    other = xp.asarray(r_other)
+    if other.shape != same.shape:
+        raise ValueError(
+            f"the Keldysh partner must share the grid and pattern: "
+            f"{other.shape} vs {same.shape}."
+        )
+    if not bool(abs(float(_host(w)[0])) < 1e-12):
         raise NotImplementedError(
             "bosonic_extend needs a zero-anchored grid: the mirror is defined "
             f"about omega = 0 and this grid starts at {float(_host(w)[0]):g}."
         )
-    mirror = xp.conj(r[:0:-1])
-    if transverse_shape:
-        # R(-q, -w) = R(q, w)^*: the conjugate alone is the nq == 1 shortcut.
-        for ax, k in enumerate(transverse_shape, start=1):
-            mirror = xp.take(mirror, (-xp.arange(k)) % k, axis=ax)
-    return (xp.concatenate([mirror, r], axis=0),
+
+    mirror = other[:0:-1]                       # G^>(+w) reversed in w
+    if transpose_index is not None:             # ... and index-transposed
+        mirror = mirror[:, xp.asarray(transpose_index)]
+    if transverse_shape:                        # ... and q -> -q
+        for ax, k in enumerate(transverse_shape, start=2):
+            mirror = xp.take(mirror, (-xp.arange(int(k))) % int(k), axis=ax)
+    return (xp.concatenate([mirror, same], axis=0),
             xp.concatenate([-w[:0:-1], w]))
 
 
