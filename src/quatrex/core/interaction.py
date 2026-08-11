@@ -273,6 +273,22 @@ class PhononPhononInteraction(Interaction):
         g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
         reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
         reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
+        # Mask the background leg EXACTLY as the ring masks its own legs
+        # (sse_phonon_phonon: gl_in[conv_mask] = 0). The omega = 0 bin carries
+        # the near-singular acoustic spectral peak -- the ring's own comment
+        # says |G^>(0)| >> neighbours -- and the ring excludes it. Feeding the
+        # mixed convolution an UNMASKED leg makes the two sectors integrate
+        # different data, and injects that peak straight into Sigma.
+        #
+        # Measured: without this, Sigma^> is non-PSD by 0.15 at mid-band and
+        # the violation is strictly LINEAR in the injected mixed term, i.e. no
+        # cancellation at all -- the signature of a term that simply should
+        # not be there.
+        low = max(1e-6, float(getattr(ssp, "_low_freq_mask", 0.0) or 0.0))
+        leg_mask = xp.abs(freqs) < low
+        if bool(leg_mask.any()):
+            reg_l = reg_l.copy(); reg_l[leg_mask] = 0.0
+            reg_g = reg_g.copy(); reg_g[leg_mask] = 0.0
         mx_l = mx_g = None
         # state.legs, not state.clusters: the sources are indexed alongside
         # the bosonically closed set the solver built them from.
