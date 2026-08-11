@@ -194,3 +194,45 @@ def test_sr_equals_rs_on_a_leg_symmetric_vertex():
         bl=vd(phi, sizes, cl.u, leg=1, conjugate=False),
         br=vd(phi, sizes, cl.u, leg=0, conjugate=True), **kw))
     assert np.abs(sr - rs).max() / np.abs(sr).max() < 1e-13
+
+
+def test_per_pole_sources_beat_a_frozen_one_on_a_multi_pole_cluster():
+    """The exact residues use S at EACH pole, not one value for the cluster.
+
+    With a cluster holding poles at 8 and 11 THz and a source that varies with
+    frequency, the frozen value (taken at the first pole) misrepresents the
+    second. The per-pole evaluation is exact for a source linear in omega.
+    """
+    from quatrex.phonon.pole_bridge import source_at_poles
+
+    w = np.linspace(0.0, 20.0, 401)
+    z = np.array([8.0 - 0.3j, 11.0 - 0.4j])
+    cl = PoleCluster(z=z, u=np.zeros((4, 2), complex),
+                     v=np.zeros((4, 2), complex))
+    base = np.array([[1.0, 2.0], [3.0, 4.0]])
+    src = np.einsum("w,ab->wab", w, base) + 0j
+
+    s_a, s_b = source_at_poles(src, w, cl)
+    # Row pole picks Re z_a; column pole picks Re z_b.
+    assert np.allclose(_h(s_a), np.array([[8.0, 16.0], [33.0, 44.0]]))
+    assert np.allclose(_h(s_b), np.array([[8.0, 22.0], [24.0, 44.0]]))
+
+    # The frozen value would use omega = 8 everywhere, which is wrong by 27%
+    # on the second pole -- and the sector carries that error into the bubble.
+    frozen = src[int(np.argmin(np.abs(w - 8.0)))]
+    assert abs(_h(s_a)[1, 1] - frozen[1, 1]) / abs(_h(s_a)[1, 1]) > 0.2
+
+
+def test_negative_frequency_poles_use_the_bosonic_mirror():
+    """A partner at -Omega takes S(-w) = conj(S(w)), not an extrapolation."""
+    from quatrex.phonon.pole_bridge import source_at_poles
+
+    w = np.linspace(0.0, 20.0, 401)
+    z = np.array([8.0 - 0.3j, -8.0 - 0.3j])          # a closed pair
+    cl = PoleCluster(z=z, u=np.zeros((4, 2), complex),
+                     v=np.zeros((4, 2), complex))
+    src = np.einsum("w,ab->wab", w, np.ones((2, 2))) * (1 + 2j)
+    s_a, _ = source_at_poles(src, w, cl)
+    got = _h(s_a)
+    assert np.allclose(got[1], np.conj(got[0])), \
+        "the -Omega partner must carry the conjugated source"

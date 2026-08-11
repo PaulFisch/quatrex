@@ -203,7 +203,7 @@ class PhononPhononInteraction(Interaction):
 
         from quatrex.phonon.pole_bridge import (
             mixed_self_energy_blocked, modal_vertex_blocks,
-            ss_self_energy_sparse,
+            source_at_poles, ss_self_energy_sparse,
         )
 
         ssp = self.sigma_phonon_phonon
@@ -229,11 +229,19 @@ class PhononPhononInteraction(Interaction):
                                      conjugate=False)
             vr = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
                                      conjugate=True)
-            # Frozen-source approximation: S evaluated at the cluster centre.
-            # The polynomial model is the next refinement and its fit residual
-            # is what decides whether it is needed.
-            mid = int(xp.argmin(xp.abs(freqs - float(xp.real(cl.z[0])))))
-            sa, sb = s_l[mid], s_g[mid]
+            # Per-pole sources, NOT a single frozen value at the cluster
+            # centre. The exact residue at z_alpha is S(z_alpha)/gap, so each
+            # leg must carry the source where its own pole sits; one frozen
+            # value is wrong as soon as a cluster holds more than one pole, and
+            # badly wrong once the set is closed under z -> -z^* (the partner
+            # is at -Omega while the frozen value was read at +Omega).
+            #
+            # This is what made G_PP -- built from the frequency-resolved
+            # source -- and the pole leg put back by the sectors different
+            # functions, which breaks the SPATIAL balance while leaving the
+            # scalar P_in = P_out identity nearly intact.
+            sa = source_at_poles(s_l, freqs, cl)
+            sb = source_at_poles(s_g, freqs, cl)
             kw = dict(rows=rows, cols=cols)
             ss_l = ss_self_energy_sparse(freqs, cl, sa, sa, vl, vr, **kw)
             ss_g = ss_self_energy_sparse(freqs, cl, sb, sb, vl, vr, **kw)
@@ -270,15 +278,16 @@ class PhononPhononInteraction(Interaction):
         # the bosonically closed set the solver built them from.
         for cl, s_l, s_g in zip(state.legs, state.source_lesser,
                                 state.source_greater):
-            mid = int(xp.argmin(xp.abs(freqs - float(xp.real(cl.z[0])))))
             common = dict(freqs=freqs, phi_blocks=ssp.phi_blocks,
                           block_sizes=ssp.block_sizes, rows=rows, cols=cols)
             # Blocked, not pattern-level: the pattern contraction is
             # O(nnz_out * nnz_in) and refuses above 4096 entries, which no
             # real device is under. Same object, pinned to 1e-12 against the
             # pattern form in test_pole_blocked.py.
-            a = mixed_self_energy_blocked(freqs, cl, s_l[mid], reg_l, **common)
-            b = mixed_self_energy_blocked(freqs, cl, s_g[mid], reg_g, **common)
+            a = mixed_self_energy_blocked(
+                freqs, cl, source_at_poles(s_l, freqs, cl), reg_l, **common)
+            b = mixed_self_energy_blocked(
+                freqs, cl, source_at_poles(s_g, freqs, cl), reg_g, **common)
             mx_l = a if mx_l is None else mx_l + a
             mx_g = b if mx_g is None else mx_g + b
         ssp.set_pole_mixed(mx_l.reshape(shape), mx_g.reshape(shape))

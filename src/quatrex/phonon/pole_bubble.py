@@ -111,7 +111,8 @@ def pair_convolution(p: NDArray, q: NDArray, omega: NDArray) -> NDArray:
 
 
 def leg_partial_fractions(
-    cluster: PoleCluster, source: NDArray
+    cluster: PoleCluster, source: NDArray, *, source_b: NDArray | None = None,
+    centre: float | None = None, scale: float | None = None,
 ) -> tuple[NDArray, NDArray]:
     r"""Split every modal leg into two simple poles.
 
@@ -152,11 +153,81 @@ def leg_partial_fractions(
             "a pole coincides with a partner's conjugate; the simple-pole "
             "split is undefined there (defective/exceptional cluster)."
         )
-    c = s / gap
+
+    if source_b is not None:
+        # Per-pole sources: the EXACT residues. Writing
+        # S(w)/((w-z_a)(w-zb_b)), the residue at z_a is S(z_a)/gap and the one
+        # at conj(z_b) is S(conj(z_b))/gap -- each leg carries the source at
+        # ITS OWN pole, not one value shared by the whole cluster.
+        #
+        # This is what the frozen approximation gets wrong once a cluster holds
+        # more than one pole, and badly wrong once it is closed under
+        # z -> -z^*: the partner sits at -Omega while the frozen value is taken
+        # at +Omega. A polynomial model in (w - Omega_c)/h cannot fix that
+        # either, because it would EXTRAPOLATE across the whole band; the
+        # source at a negative-frequency pole is the bosonic mirror of the
+        # positive one, not a continuation of it.
+        sb = xp.asarray(source_b, dtype=xp.complex128)
+        if sb.shape != s.shape:
+            raise ValueError(
+                f"source_b must match source: {sb.shape} vs {s.shape}.")
+        poles = xp.stack([xp.broadcast_to(za, gap.shape),
+                          xp.broadcast_to(zb, gap.shape)], axis=-1)
+        return poles, xp.stack([s / gap, -sb / gap], axis=-1)
+
+    if s.ndim == 2:                       # frozen source: S constant in omega
+        c = s / gap
+    elif s.ndim == 3:                     # polynomial source: S = sum_m S_m t^m
+        if centre is None or scale is None:
+            raise ValueError(
+                "a polynomial source needs the centre and scale of its fit "
+                "variable t = (omega - centre)/scale."
+            )
+        n_moments = int(s.shape[0])
+        if n_moments > 2:
+            # t^m/((t-t_a)(t-t_b)) leaves a polynomial quotient of degree m-2,
+            # which is NOT a simple pole and convolves to moments of the
+            # background rather than to a resolvent. Refusing beats silently
+            # dropping it: the dropped piece is the smooth part of the source,
+            # so the answer would look reasonable and be wrong.
+            raise NotImplementedError(
+                f"source_order={n_moments - 1} needs the degree-"
+                f"{n_moments - 2} polynomial remainder of the partial-fraction "
+                "split, which is not implemented. Orders 0 and 1 are exact "
+                "here (the quotient is empty)."
+            )
+        ta = (za - complex(centre)) / float(scale)
+        tb = (zb - complex(centre)) / float(scale)
+        # Residue at z_alpha carries t_a^m, at conj(z_beta) carries t_b^m; both
+        # over the SAME gap, so m = 0 reduces to the frozen expression exactly.
+        ca = sum(s[m] * ta**m for m in range(n_moments)) / gap
+        cb = sum(s[m] * tb**m for m in range(n_moments)) / gap
+        poles = xp.stack([xp.broadcast_to(za, gap.shape),
+                          xp.broadcast_to(zb, gap.shape)], axis=-1)
+        return poles, xp.stack([ca, -cb], axis=-1)
+    else:
+        raise ValueError(
+            f"source must be (Np, Np) or (n_moments, Np, Np), got {s.shape}."
+        )
+
     poles = xp.stack([xp.broadcast_to(za, gap.shape),
                       xp.broadcast_to(zb, gap.shape)], axis=-1)
     coeffs = xp.stack([c, -c], axis=-1)
     return poles, coeffs
+
+
+def _split_leg(cluster, src):
+    """Partial-fraction one leg, accepting a per-pole source pair.
+
+    ``src`` is either a single ``(Np, Np)`` matrix (the frozen source, kept for
+    the analytic tests and for backwards compatibility) or a
+    ``(S_at_row_pole, S_at_col_pole)`` pair from
+    :func:`~quatrex.phonon.pole_bridge.source_at_poles`, which carries the
+    exact residues.
+    """
+    if isinstance(src, tuple):
+        return leg_partial_fractions(cluster, src[0], source_b=src[1])
+    return leg_partial_fractions(cluster, src)
 
 
 def modal_convolution(
@@ -195,8 +266,8 @@ def modal_convolution(
         ``(n_omega, Np, Np, Np, Np)`` indexed ``[w, alpha, delta, beta, gamma]``.
 
     """
-    pa, ca = leg_partial_fractions(cluster, source_a)   # (Np,Np,2)
-    pb, cb = leg_partial_fractions(cluster, source_b)
+    pa, ca = _split_leg(cluster, source_a)             # (Np,Np,2)
+    pb, cb = _split_leg(cluster, source_b)
 
     # Sum over the 2x2 pole pairings; only like-half-plane pairs survive. Index
     # 0 of the partial fraction is z_alpha (retarded), index 1 is conj(z_beta)

@@ -33,6 +33,7 @@ from quatrex.phonon.pole_keldysh import PoleCluster, modal_denominator
 from quatrex.phonon.units import HBAR_SI
 
 __all__ = [
+    "source_at_poles",
     "mixed_vertex_blocks",
     "mixed_self_energy_sparse",
     "project_source_sparse",
@@ -291,7 +292,7 @@ def _mixed_one_sector(
         quietly running for hours.
 
     """
-    from quatrex.phonon.pole_bubble import leg_partial_fractions
+    from quatrex.phonon.pole_bubble import _split_leg
     from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     nnz = int(np.asarray(_host(rows)).size)
@@ -309,7 +310,7 @@ def _mixed_one_sector(
     # R(-w) = R(w)^* but must be supplied explicitly.
     g_reg, freqs = bosonic_extend(g_reg, freqs)
 
-    poles, coeffs = leg_partial_fractions(cluster, source)
+    poles, coeffs = _split_leg(cluster, source)
     npp = cluster.n_poles
     r_idx, c_idx = xp.asarray(rows), xp.asarray(cols)
     out = None
@@ -496,7 +497,7 @@ def _mixed_one_sector_blocked(
     """ONE mixed sector via the block triple product. See
     :func:`_mixed_one_sector` for the physics; this is the same object at
     device-scale cost."""
-    from quatrex.phonon.pole_bubble import leg_partial_fractions
+    from quatrex.phonon.pole_bubble import _split_leg
     from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     if prefactor is None:
@@ -510,7 +511,7 @@ def _mixed_one_sector_blocked(
     # here, not per pole pair.
     g_reg, freqs = bosonic_extend(g_reg, freqs)
 
-    poles, coeffs = leg_partial_fractions(cluster, source)
+    poles, coeffs = _split_leg(cluster, source)
     npp = cluster.n_poles
     n_omega = int(omega.shape[0])
 
@@ -592,3 +593,63 @@ def mixed_self_energy_blocked(
         **kw,
     )
     return sr + rs
+
+
+def source_at_poles(
+    source: NDArray, freqs: NDArray, cluster: PoleCluster
+) -> tuple[NDArray, NDArray]:
+    r"""The projected source evaluated at each pole's OWN frequency.
+
+    The exact partial-fraction residues of
+    ``S(w)/((w - z_a)(w - conj(z_b)))`` are ``S(z_a)/gap`` and
+    ``S(conj(z_b))/gap``: each leg carries the source where ITS pole sits.
+    The frozen approximation instead uses one value for the whole cluster,
+    taken at ``Re z[0]``, which is wrong as soon as a cluster holds more than
+    one pole and badly wrong once it is closed under ``z -> -z^*`` -- the
+    partner is at ``-Omega`` while the frozen value is read at ``+Omega``.
+
+    Getting this wrong does not break the scalar balance ``P_in = P_out``; it
+    breaks the SPATIAL balance, because the pole leg subtracted from the ring
+    (``G_PP``, built from the frequency-resolved source) and the pole leg put
+    back by the mixed sectors stop being the same function. That is the
+    condition doc Sec. 37 requires, and its violation is what put negative heat
+    at a contact.
+
+    Negative-frequency poles are served by the bosonic mirror
+    ``S(-w) = S(w)^*`` rather than by extrapolating a model across the band.
+
+    Parameters
+    ----------
+    source : NDArray
+        ``(n_omega, Np, Np)`` frequency-resolved projected source.
+    freqs : NDArray
+        ``(n_omega,)`` the grid it is sampled on.
+    cluster : PoleCluster
+
+    Returns
+    -------
+    tuple[NDArray, NDArray]
+        ``(S_a, S_b)``, each ``(Np, Np)``: the source at ``z_alpha`` indexed by
+        the ROW pole, and at ``conj(z_beta)`` indexed by the COLUMN pole.
+
+    """
+    w = np.asarray(_host(freqs), dtype=float)
+    z = np.asarray(_host(cluster.z))
+    src = xp.asarray(source, dtype=xp.complex128)
+
+    def _at(centres):
+        idx = np.array([int(np.argmin(np.abs(w - abs(float(c))))) for c in centres])
+        vals = xp.take(src, xp.asarray(idx), axis=0)          # (Np, Np, Np)
+        neg = np.asarray(centres) < 0.0
+        if neg.any():
+            mirrored = xp.conj(vals)
+            vals = xp.where(xp.asarray(neg)[:, None, None], mirrored, vals)
+        return vals
+
+    rows = _at(z.real)                    # source at each ROW pole
+    cols = _at(np.conj(z).real)           # source at each COLUMN pole
+    # S_a[a, b] = S_{ab}(z_a): pick the row-pole slice, keep (a, b).
+    s_a = xp.stack([rows[a, a, :] for a in range(z.size)], axis=0)
+    # S_b[a, b] = S_{ab}(conj(z_b)): pick the column-pole slice.
+    s_b = xp.stack([cols[b, :, b] for b in range(z.size)], axis=1)
+    return s_a, s_b
