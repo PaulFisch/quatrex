@@ -161,3 +161,54 @@ def test_subcell_metric_reports_the_failure():
     assert rep["at_centres"] > -1e-9, (
         "and must confirm the centres themselves are fine, so the failure is "
         "localised to the sub-cell reconstruction")
+
+
+def test_report_subcell_runs_on_a_production_shaped_state():
+    """Exercise the solver hook itself, not just the metric.
+
+    The first device run of this diagnostic died with ``NameError: state`` --
+    a parameter dropped during a refactor. Nothing local caught it because
+    ``psd_check`` is off by default, so the whole function body was dead in
+    every test. This calls it with the flag ON and a state shaped like the
+    production one.
+    """
+    import types
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_keldysh import PoleCluster
+    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.solver import PhononSolver
+
+    rows, cols = np.meshgrid(np.arange(N), np.arange(N), indexing="ij")
+    rows, cols = rows.ravel(), cols.ravel()
+    freqs = np.linspace(0.0, 20.0, 81)
+
+    class _Buf:
+        def __init__(self, data):
+            self.data, self.rows, self.cols = data, rows, cols
+
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=(freqs.size, rows.size)) + 1j * rng.normal(
+        size=(freqs.size, rows.size))
+
+    st = PoleSectorState()
+    u = rng.normal(size=(N, 1)) + 1j * rng.normal(size=(N, 1))
+    st.clusters = [PoleCluster(z=np.array([OMEGA - 1j * GAMMA]), u=u, v=u)]
+    st.legs = list(st.clusters)
+    # (n_omega, Np, Np), as project_source_sparse produces in production.
+    st.source_lesser = [np.full((freqs.size, 1, 1), 1.0 + 0.5j)]
+    st.g_pp_lesser = np.zeros((freqs.size, rows.size), dtype=complex)
+
+    solver = object.__new__(PhononSolver)
+    solver.config = types.SimpleNamespace(
+        phonon=types.SimpleNamespace(
+            pole_sector=PoleSectorConfig(enabled=True, psd_check=True)))
+    solver.pole_state = st
+    solver.local_frequencies = freqs
+    solver.block_sizes = np.array([N])
+    solver.psd_report = {}
+
+    solver._report_subcell((_Buf(a), _Buf(a)))
+    assert "subcell" in solver.psd_report
+    for key in ("worst", "worst_centre", "at_centres"):
+        assert key in solver.psd_report["subcell"]

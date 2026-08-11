@@ -795,10 +795,14 @@ class PhononSolver(SubsystemSolver):
         yet established, and gating on a guess would hide the answer.
         """
         from quatrex.phonon.pole_audit import subcell_positivity
+        from quatrex.phonon.pole_bridge import (
+            pole_keldysh_pf_sparse, source_at_poles,
+        )
 
         cfg = getattr(self.config.phonon, "pole_sector", None)
         if cfg is None or not getattr(cfg, "psd_check", False):
             return
+        state = self.pole_state
         if state is None or not state.legs:
             return
         rows, cols = out[0].rows, out[0].cols
