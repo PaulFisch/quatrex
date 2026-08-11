@@ -703,21 +703,28 @@ class PhononSolver(SubsystemSolver):
         sg = sse_greater.data.reshape(freqs.shape[0], -1)
         last = int(np.sum(self.block_sizes[:-1]))
 
-        # NOT closed under z -> -z^*, and that is a measured decision rather
-        # than an oversight. bubble_clusters() exists and is documented as
-        # mandatory, but wiring it in made rr_ss WORSE by 3400x on the pgate
-        # bed (bubble balance 5.4e-08 -> 1.8e-04), because the frozen source is
-        # evaluated at ONE index, mid = argmin|freqs - Re(z[0])|, i.e. at the
-        # POSITIVE centre. A closed cluster spans +Omega and -Omega, and the
-        # partner's source is the bosonic mirror of the original's -- one
-        # frozen source cannot serve both. Closing the set therefore needs a
-        # mirrored source per branch, which is not implemented.
+        # Closed under z -> -z^*. Bosonic symmetry of the pole set is
+        # physics, not a tuning knob: every resonance at +Omega has a partner
+        # at -Omega, and the NEP only finds the positive members because the
+        # search window is positive.
         #
-        # Leaving it unclosed is self-consistent: the sector is DEFINED by the
-        # poles inside the (positive) window, g_reg = G - G_PP is mirrored from
-        # the positive axis, and the mixed pole leg is exact for the poles it
-        # actually has.
-        state.legs = list(state.clusters)
+        # Measured both ways on the pgate bed (pre-mixing balance residual):
+        #
+        #   closed      rr_ss 1.8e-04   rr_ss_sr 2.6e-05
+        #   unclosed    rr_ss 5.4e-08   rr_ss_sr 1.5e-01
+        #
+        # Unclosed flatters rr_ss and costs the COMPLETE method four orders.
+        # An earlier revision deferred the closure on the rr_ss number alone,
+        # which optimised a staging setting while the production one
+        # regressed; the closed set is kept because it is the correct object.
+        #
+        # Neither variant conserves: the heat profile is unphysical at
+        # rr_ss_sr in both. The known missing piece is the frozen source --
+        # it is evaluated at ONE index, mid = argmin|freqs - Re(z[0])|, the
+        # positive centre, so a closed cluster spanning +Omega and -Omega gets
+        # one source where the partner needs the bosonic mirror of it. That,
+        # not the closure, is the next thing to fix.
+        state.legs = self._pole.bubble_clusters()
         acc_l = acc_g = None
         for cl in state.legs:
             s_l = project_source_sparse(sl, rows, cols, cl.v)

@@ -371,3 +371,70 @@ is the system OpenMPI. Mixing them does not fail -- it starts N independent
 one-rank jobs, so every MPI test skips with "only 1 MPI processes specified"
 and the suite still reports success. Use the launcher from the same prefix as
 mpi4py.
+
+## The mixed sectors are still broken, and the cause is now identified
+
+All six legs, same pre-mixing conservation identity (`QX_BBCHECK=1`, printed to
+the log; the saved `iter_bubble_balance` agrees with it here):
+
+| leg | config | resid | heat non-uniformity | min heat |
+|---|---|---|---|---|
+| `base` | pole off | 3.22e-08 | 0.060 | 60.32 |
+| `rrss` | pre-fix | 5.37e-08 | 0.060 | 60.60 |
+| `full` | pre-fix | 2.574e-02 | 2.316 | -7.44 |
+| `rrssf` | mirror + closure | 1.847e-04 | 0.071 | 60.76 |
+| `fullf` | mirror + closure | 2.582e-05 | 3.104 | -22.02 |
+| `fullg` | mirror, closure deferred | 1.488e-01 | 2.789 | -9.10 |
+
+**The bosonic mirror did NOT fix `rr_ss_sr`.** It improved the balance residual
+by three orders, but the heat profile got worse, and no variant is physical:
+every `rr_ss_sr` run has negative heat at the left contact. Reading the
+improving metric while the physical observable moved the other way was an error
+of analysis, recorded here so it is not repeated -- `P_in = P_out` is a scalar
+trace identity and a spatially wrong Sigma can satisfy it.
+
+Deferring the closure was also wrong: it flatters `rr_ss` (a staging setting)
+and costs the complete method four orders. The closure is restored.
+
+### Ruled out: the leg convention
+
+On a leg-exchange-symmetric vertex -- `Phi[i,a,b] == Phi[i,b,a]`, which is what
+hiphive's `symmetrize=True` produces and therefore what every real device uses
+-- `Sigma_SR` and `Sigma_RS` are **exactly equal** (measured 0.0). They differ
+only on the random, unsymmetrised Phi the unit-test beds use. So the recorded
+`out + out` "error" was never wrong for real physics, and two tests asserting
+SR != RS are measuring an artefact of their own bed. Both are now annotated,
+and the symmetry is pinned in `test_pole_bosonic.py`.
+
+### The actual cause: the two pole legs are different objects
+
+`pole_keldysh_sparse` takes a **frequency-resolved** source, `(n_omega, Np,
+Np)`, so `G_PP` -- the leg SUBTRACTED from the bubble -- is built with the full
+frequency dependence. The mixed sector instead freezes the source at one index,
+`s_l[mid]`, `mid = argmin|freqs - Re(z[0])|`.
+
+So the pole leg removed from the ring and the pole leg put back by `Sigma_SR` /
+`Sigma_RS` are not the same function. That is precisely the condition the
+decomposition needs (doc Sec. 37: the SAME reconstructed G on both legs), and
+violating it breaks the balance spatially rather than in the trace -- which is
+exactly the signature observed. It also explains why the closure makes it
+worse: more poles means more frozen-source error, and why `rr_ss` is
+comparatively immune: `Sigma_SS` is localised at the poles, where the frozen
+source is evaluated and is therefore accurate.
+
+### The fix is the route the design note originally prescribed
+
+> `Sigma_SR + Sigma_RS = B(G_S,G_R) + B(G_R,G_S)` is exactly the bilinear form
+> `compute_linearized` already implements. Call it with `dG = G_PP`: zero new
+> bubble code, exact, symmetric by construction, cost independent of `N_p`.
+
+Both `G_PP` and `G_reg = G - G_PP` are already known on the grid, on the stored
+pattern, with the resolved source. The mixed term is a straight convolution of
+two known grid functions and needs no partial fractions and no source model at
+all. The analytic pole-convolution route built instead buys cell-exact
+treatment of the narrow pole, but only pays off once the polynomial source
+model (`source_model` / `source_order` / `source_fit_tol`, all still
+unconsumed) exists to make its leg match `G_PP`.
+
+Next step: route `sectors="rr_ss_sr"` through `compute_linearized(dg=G_PP)`,
+and keep the analytic route behind `source_model` for when it is complete.

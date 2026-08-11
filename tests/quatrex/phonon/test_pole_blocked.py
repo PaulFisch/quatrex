@@ -157,7 +157,17 @@ def test_blocked_contraction_has_no_nnz_guard():
 
 
 def test_blocked_sr_and_rs_remain_distinct():
-    """Guards the recorded ``out + out`` error at the blocked layer too."""
+    """SR and RS on a NON-leg-symmetric vertex.
+
+    Read this carefully before trusting it: the bed uses random Phi blocks,
+    which do NOT have the leg-exchange symmetry that hiphive imposes with
+    ``symmetrize=True``. On a leg-symmetric vertex -- i.e. on every real
+    device -- ``Sigma_SR`` and ``Sigma_RS`` are EXACTLY equal (measured 0.0),
+    so the ``out + out`` this was written to guard against was never wrong for
+    real physics. What the independent ``leg``/``conjugate`` parameters buy is
+    correctness on an unsymmetrised vertex, which the code does not otherwise
+    assume away.
+    """
     from quatrex.phonon.pole_bridge import _mixed_one_sector_blocked
 
     sizes = np.array([2, 2])

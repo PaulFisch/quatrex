@@ -16,6 +16,7 @@ import pytest
 
 from quatrex.phonon.pole_bubble import bosonic_closure
 from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.pole_audit import transpose_index
 from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
 
 
@@ -133,3 +134,63 @@ def test_closure_is_deferred_because_the_frozen_source_cannot_serve_both_branche
     # frozen source evaluated at the positive centre cannot serve them.
     assert np.all(got[2:].real < 0.0)
     assert np.all(got.imag < 0.0), "partners must stay retarded"
+
+
+def test_sr_equals_rs_on_a_leg_symmetric_vertex():
+    """On a real vertex the two mixed sectors are the SAME object.
+
+    hiphive's ``symmetrize=True`` gives ``Phi[i,a,b] == Phi[i,b,a]``, and under
+    that symmetry ``Sigma_SR`` and ``Sigma_RS`` coincide exactly. Tests that
+    assert they differ are measuring the asymmetry of a random test vertex, not
+    physics -- worth pinning, because that asymmetry was once read as evidence
+    of a bug.
+    """
+    from quatrex.phonon.pole_bridge import (
+        _mixed_one_sector_blocked, mixed_vertex_block_dict)
+
+    sizes = np.array([3, 3, 3])
+    off = np.concatenate(([0], np.cumsum(sizes)))
+    nb, n_dof = len(sizes), int(sizes.sum())
+    rows, cols = [], []
+    for i in range(nb):
+        for j in range(max(0, i - 1), min(nb, i + 2)):
+            for a in range(off[i], off[i + 1]):
+                for b in range(off[j], off[j + 1]):
+                    rows.append(a)
+                    cols.append(b)
+    rows, cols = np.array(rows), np.array(cols)
+
+    rng = np.random.default_rng(0)
+    raw = {(i, k1, k2): rng.normal(size=(sizes[i], sizes[k1], sizes[k2]))
+           for i in range(nb)
+           for k1 in range(max(0, i - 1), min(nb, i + 2))
+           for k2 in range(max(0, i - 1), min(nb, i + 2))}
+    phi = {k: 0.5 * (v + np.swapaxes(raw[(k[0], k[2], k[1])], 1, 2))
+           for k, v in raw.items()}
+    assert max(np.abs(phi[(i, a, b)] - np.swapaxes(phi[(i, b, a)], 1, 2)).max()
+               for (i, a, b) in phi) == 0.0
+
+    npp = 2
+    u = rng.normal(size=(n_dof, npp)) + 1j * rng.normal(size=(n_dof, npp))
+    v = rng.normal(size=(n_dof, npp)) + 1j * rng.normal(size=(n_dof, npp))
+    cl = PoleCluster(z=np.array([8.0 - 0.3j, 11.0 - 0.4j]), u=u, v=v)
+    freqs = np.linspace(0.0, 30.0, 128)
+    omega = np.linspace(5.0, 15.0, 5)
+    t = transpose_index(rows, cols)
+    a = (rng.normal(size=(freqs.size, rows.size))
+         + 1j * rng.normal(size=(freqs.size, rows.size)))
+    g_reg = a - np.conj(a[:, t])
+    m = rng.normal(size=(npp, npp)) + 1j * rng.normal(size=(npp, npp))
+    src = 1j * (m @ m.conj().T)
+
+    vd, kw = mixed_vertex_block_dict, dict(
+        freqs=freqs, rows=rows, cols=cols, block_sizes=sizes)
+    sr = _h(_mixed_one_sector_blocked(
+        omega, cl, src, g_reg,
+        bl=vd(phi, sizes, cl.u, leg=0, conjugate=False),
+        br=vd(phi, sizes, cl.u, leg=1, conjugate=True), **kw))
+    rs = _h(_mixed_one_sector_blocked(
+        omega, cl, src, g_reg,
+        bl=vd(phi, sizes, cl.u, leg=1, conjugate=False),
+        br=vd(phi, sizes, cl.u, leg=0, conjugate=True), **kw))
+    assert np.abs(sr - rs).max() / np.abs(sr).max() < 1e-13
