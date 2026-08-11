@@ -636,7 +636,8 @@ class PhononSolver(SubsystemSolver):
         return {"global_freqs": global_freqs, "freq_offset": offset,
                 "reduce": _reduce}
 
-    def _update_pole_sector(self, sse_lesser, sse_greater) -> None:
+    def _update_pole_sector(self, sse_lesser, sse_greater,
+                            g_retarded=None) -> None:
         """Refresh the pole set from the current (mixed) self-energy.
 
         Runs in the ``"stack"`` distribution state, right after the selected
@@ -690,11 +691,12 @@ class PhononSolver(SubsystemSolver):
             cols=sse_lesser.cols,
         )
         self.pole_state = self._pole.refresh()
-        self._build_pole_keldysh(sse_lesser, sse_greater)
+        self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded)
         if comm.rank == 0 and self.pole_state is not None:
             print(self.pole_state.report(), flush=True)
 
-    def _build_pole_keldysh(self, sse_lesser, sse_greater) -> None:
+    def _build_pole_keldysh(self, sse_lesser, sse_greater,
+                            g_retarded=None) -> None:
         """Project the Keldysh source and reduce ``G_PP`` onto the pattern.
 
         Done here, in the ``"stack"`` state, because this is where the contact
@@ -706,6 +708,10 @@ class PhononSolver(SubsystemSolver):
         from quatrex.phonon.pole_bridge import (
             add_contact_source, pole_keldysh_pf_sparse, project_source_sparse,
             source_at_poles, source_variation,
+        )
+        from quatrex.phonon.pole_congruence import (
+            apply_sparse, background_coefficients, sector_cell_average,
+            sector_grid_sample,
         )
 
         state = self.pole_state
@@ -734,6 +740,20 @@ class PhononSolver(SubsystemSolver):
         #
         state.legs = self._pole.bubble_clusters()
         acc_l = acc_g = None
+        congruence = getattr(self._pole_cfg, "leg", "congruence") == "congruence"
+        if congruence:
+            if g_retarded is None:
+                raise ValueError(
+                    "pole_sector.leg='congruence' needs G^R: the retarded "
+                    "background B^R_k = G^R_k - U D(w_k) V^dagger is what the "
+                    "regular leg is made of.")
+            n_dof = int(np.sum(self.block_sizes))
+            gr = g_retarded.data.reshape(freqs.shape[0], -1)
+            corners_l = ((self.obc_blocks.lesser[0], 0),
+                         (self.obc_blocks.lesser[-1], last))
+            corners_g = ((self.obc_blocks.greater[0], 0),
+                         (self.obc_blocks.greater[-1], last))
+            cell_widths = xp.asarray(self.local_frequency_weights, dtype=float)
         for cl in state.legs:
             s_l = project_source_sparse(sl, rows, cols, cl.v)
             s_g = project_source_sparse(sg, rows, cols, cl.v)
@@ -760,6 +780,34 @@ class PhononSolver(SubsystemSolver):
                       "source model is not justified there", flush=True)
             state.source_lesser.append(s_l)
             state.source_greater.append(s_g)
+            if congruence:
+                # Split the RETARDED function and let the Keldysh components
+                # follow, so the leg the ring keeps is B^R_k Sigma B^A_k -- a
+                # congruence of a PSD source, hence PSD -- instead of the
+                # indefinite frozen remainder. See pole_congruence.py.
+                for src, corn, c_out, g_out in (
+                    (sl, corners_l, state.c_lesser, "l"),
+                    (sg, corners_g, state.c_greater, "g"),
+                ):
+                    sv = apply_sparse(src, rows, cols, cl.v, n_dof,
+                                      corners=corn)
+                    co = background_coefficients(
+                        cl, freqs, sv,
+                        apply_sparse(gr, rows, cols, sv, n_dof))
+                    c_out.append(co)
+                    # What the ring must give up is the difference between the
+                    # POINT sample it would otherwise use and the CELL AVERAGE
+                    # the bubble's dw-weighted sum actually wants. Subtracting
+                    # it leaves the ring holding <G~^{<,>}>_k, an average of
+                    # PSD matrices, hence PSD whatever the pole model does.
+                    smp = (sector_grid_sample(cl, freqs, co, rows, cols)
+                           - sector_cell_average(cl, freqs, co, rows, cols,
+                                                 cell_widths))
+                    if g_out == "l":
+                        acc_l = smp if acc_l is None else acc_l + smp
+                    else:
+                        acc_g = smp if acc_g is None else acc_g + smp
+                continue
             # PARTIAL-FRACTION form, not U D^R S(w) D^A U^dag. The analytic
             # sectors split every leg into simple poles, which carries only a
             # rational source, so the resolved form is a DIFFERENT function
@@ -912,7 +960,7 @@ class PhononSolver(SubsystemSolver):
 
         # Must run BEFORE free_data(): the pole solve reads the assembled
         # operator's blocks.
-        self._update_pole_sector(sse_lesser, sse_greater)
+        self._update_pole_sector(sse_lesser, sse_greater, out[2])
         self._psd_sigma = (sse_lesser, sse_greater)
         self._check_positivity(out)
         self._psd_sigma = None

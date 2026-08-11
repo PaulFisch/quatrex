@@ -92,8 +92,20 @@ def test_outgoing_sheet_requires_the_spectral_obc():
 
 
 def test_incomplete_sector_set_warns():
-    """Dropping SR/RS drops real three-phonon processes; that must be loud."""
+    """Dropping SR/RS drops real three-phonon processes; that must be loud.
+
+    Only on the ``leg="keldysh"`` route, where the sectors are separate terms
+    added beside the ring and switching one off really does remove a diagram.
+    """
     with pytest.warns(UserWarning, match="DROPS physical"):
+        PhononConfig(**_phonon(sectors="rr_ss", leg="keldysh"))
+
+
+def test_sector_set_is_inert_on_the_congruence_route():
+    """There, the pole enters as a cell-average correction to the ring's own
+    leg, so there is no analytic sector to switch off. Silently accepting the
+    setting would read as if there still were."""
+    with pytest.warns(UserWarning, match="ignored when leg='congruence'"):
         PhononConfig(**_phonon(sectors="rr_ss"))
 
 

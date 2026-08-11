@@ -182,6 +182,34 @@ class PoleSectorConfig(BaseModel):
     ``"rr_ss"`` and ``"rr"`` DROP physical three-phonon processes and exist only
     to measure the size of what they drop -- neither is a production setting."""
 
+    leg: Literal["congruence", "keldysh"] = "congruence"
+    """WHICH Green's function the pole split is applied to.
+
+    ``"congruence"`` splits the RETARDED function, ``G~^R = G^R_k + U[D(w) -
+    D(w_k)]V^dagger``, and forms the Keldysh components from it as ``G~^{<,>} =
+    G~^R Sigma G~^A``. Being a congruence of a PSD source, ``-i G~^{<,>}`` is
+    PSD at EVERY frequency and for ANY pole set, right or wrong.
+
+    What reaches the bubble is the CELL AVERAGE of that reconstruction: the
+    ring's dw-weighted sum is a midpoint rule, and for a line narrower than a
+    cell the point sample is wrong by order one (8.2e-01 relative at
+    ``h = 20 gamma``) while the average is analytic and exact. An average of
+    PSD matrices is PSD, so the corrected leg cannot anti-damp. The pole is
+    therefore resolved in the leg WEIGHT but not yet inside the convolution --
+    the output frequency resolution is still the grid's, and carrying SR/RS
+    analytically beside the ring is the remaining work.
+
+    ``"keldysh"`` is the superseded route: split ``G^{<,>}`` directly and
+    freeze the remainder ``G^{<,>}(w_k) - P^{<,>}(w_k)`` across the cell. That
+    remainder is a difference of PSD objects, and two of the three terms it
+    hides still carry ``P^R(w)``, so it is neither positive nor smooth. It
+    inverts the sign of the reconstruction at a 20 % residue error
+    (``test_pole_subcell.py``), which is the anti-damping this sector showed.
+
+    Kept selectable to reproduce runs made before 2026-08-11. It is not a
+    production setting. Both routes are bit-identical for an empty pole set,
+    so no baseline result depends on this."""
+
     omega_min_thz: NonNegativeFloat = 0.0
     """Lower edge of the pole search (THz). Below it the quasiparticle picture
     does not apply: the Bose factor carries its own 1/omega pole, the acoustic
@@ -2068,7 +2096,20 @@ class PhononConfig(BaseModel):
                 "continuation tracks the lead Bloch roots, which only the "
                 "spectral solver exposes."
             )
-        if ps.sectors != "rr_ss_sr":
+        if getattr(ps, "leg", "congruence") == "congruence":
+            # sectors is inert on this route: the correction goes into the
+            # ring's leg, not into analytic terms beside it, so there is no
+            # sector to switch off. Saying so beats letting the setting read
+            # as if it still selected something.
+            if ps.sectors != "rr_ss_sr":
+                warnings.warn(
+                    f"pole_sector.sectors={ps.sectors!r} is ignored when "
+                    "leg='congruence': the pole enters as a cell-average "
+                    "correction to the ring's leg and no analytic sector is "
+                    "added beside it.",
+                    stacklevel=2,
+                )
+        elif ps.sectors != "rr_ss_sr":
             warnings.warn(
                 f"pole_sector.sectors={ps.sectors!r} DROPS physical "
                 "three-phonon processes and is a staging setting, not a "

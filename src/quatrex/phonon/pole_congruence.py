@@ -65,11 +65,73 @@ from qttools import NDArray, xp
 from quatrex.phonon.pole_keldysh import PoleCluster
 
 __all__ = [
+    "apply_sparse",
     "sector_terms",
     "background_coefficients",
     "sector_grid_sample",
+    "sector_cell_average",
+    "cell_weights",
     "reconstruct",
 ]
+
+
+def apply_sparse(
+    values: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    v: NDArray,
+    n_dof: int,
+    corners: tuple = (),
+) -> NDArray:
+    r"""``out[w, i, a] = sum_j A[w, i, j] v[j, a]`` for ``A`` on the pattern.
+
+    The congruence needs two such applies per Keldysh component,
+    :math:`\Sigma V` and :math:`G^R (\Sigma V)`, and nothing else touches the
+    full operator. Done one pole-column at a time so the intermediate is the
+    size of the stored self-energy rather than ``N_p`` times it.
+
+    Parameters
+    ----------
+    values : NDArray
+        ``(n_omega, nnz)`` on the stored pattern.
+    rows, cols : NDArray
+        ``(nnz,)`` global indices.
+    v : NDArray
+        ``(n_dof, Np)`` dense columns, or ``(n_omega, n_dof, Np)`` when the
+        right-hand side is itself frequency dependent -- which it is for the
+        second apply, ``G^R_k (\Sigma V)``.
+    n_dof : int
+        Rows of the operator.
+    corners : tuple
+        ``(block, offset)`` pairs for operators held as dense corners rather
+        than on the pattern -- the lead self-energies. Omitting them drops the
+        injection that drives the device, and then ``G^R Sigma G^A`` is not
+        ``G^<`` at all.
+
+    """
+    r, c = xp.asarray(rows), xp.asarray(cols)
+    n_w, n_p = int(values.shape[0]), int(v.shape[-1])
+    out = xp.zeros((n_w, n_dof, n_p), dtype=xp.complex128)
+    for a in range(n_p):
+        va = v[..., a]                                        # (n_dof,) | (w, n_dof)
+        # (nnz,) broadcasts against (n_omega, nnz); (n_omega, nnz) is already
+        # the frequency-dependent case, and both cost one self-energy.
+        contrib = values * xp.take(va, c, axis=va.ndim - 1)
+        tgt = out[:, :, a].T                                  # (n_dof, n_omega) view
+        if xp is np:
+            np.add.at(tgt, r, contrib.T)
+        else:                                                 # no complex add.at
+            import cupyx
+            cupyx.scatter_add(tgt.real, r, contrib.T.real)
+            cupyx.scatter_add(tgt.imag, r, contrib.T.imag)
+    for block, off in corners:
+        if block is None:
+            continue
+        b = int(block.shape[-1])
+        vb = v[off:off + b] if v.ndim == 2 else v[:, off:off + b]
+        out[:, off:off + b, :] += xp.einsum(
+            "wij,ja->wia" if v.ndim == 2 else "wij,wja->wia", block, vb)
+    return out
 
 
 def background_coefficients(
@@ -198,3 +260,69 @@ def reconstruct(
 
 def _h(a):
     return a.get() if hasattr(a, "get") else np.asarray(a)
+
+
+def cell_weights(
+    cluster: PoleCluster, omega: NDArray, h
+) -> tuple[NDArray, NDArray]:
+    r"""Cell averages of the pole factors over ``[w_k - h/2, w_k + h/2]``.
+
+    .. math::
+        \langle D_a \rangle_k = \frac{1}{h}\big[
+            \mathrm{Log}(\omega_k + h/2 - z_a)
+          - \mathrm{Log}(\omega_k - h/2 - z_a)\big],
+
+    .. math::
+        \langle D_a \bar D_b \rangle_k =
+            \frac{\langle D_a\rangle_k - \overline{\langle D_b\rangle_k}}
+                 {z_a - \bar z_b},
+
+    the second by partial fractions. The poles sit off the real axis, so the
+    difference of Logs has no branch ambiguity: the ``2 pi i`` cancels.
+
+    Returns ``(d1, d2)`` of shapes ``(n_omega, Np)`` and
+    ``(n_omega, Np, Np)``.
+    """
+    z = xp.asarray(cluster.z)
+    w = xp.asarray(omega, dtype=xp.complex128)[:, None]
+    # per-bin widths, because the frequency grid need not be uniform
+    hh = xp.asarray(h, dtype=float).reshape(-1, 1)
+    if bool(xp.all(hh <= 0.0)):
+        d1 = 1.0 / (w - z[None, :])
+        return d1, d1[:, :, None] * xp.conj(d1)[:, None, :]
+    d1 = (xp.log(w + 0.5 * hh - z[None, :])
+          - xp.log(w - 0.5 * hh - z[None, :])) / hh
+    gap = z[:, None] - xp.conj(z)[None, :]                    # (Np, Np)
+    # z_a - conj(z_b) has imaginary part -(gamma_a + gamma_b) < 0, so it never
+    # vanishes: the retarded poles are strictly in the lower half plane and
+    # their conjugates strictly in the upper one.
+    d2 = (d1[:, :, None] - xp.conj(d1)[:, None, :]) / gap[None]
+    return d1, d2
+
+
+def sector_cell_average(
+    cluster: PoleCluster,
+    omega: NDArray,
+    coefficients: tuple[NDArray, NDArray, NDArray],
+    rows: NDArray,
+    cols: NDArray,
+    h,
+) -> NDArray:
+    r"""``<SR + RS + SS>_k`` -- the analytic sectors averaged over their cell.
+
+    The bubble integrates its legs with weight ``dw``, so what it wants is the
+    cell average, and for an under-resolved pole that differs from the point
+    sample by order one (measured 8.2e-01 relative on the ``h = 20 gamma``
+    bed). Averaging the RECONSTRUCTION rather than resampling it keeps the
+    result PSD: an average of PSD matrices is PSD, so no accuracy is demanded
+    of the pole model for the sign to come out right.
+    """
+    c_sr, c_rs, c_ss = coefficients
+    d1, d2 = cell_weights(cluster, omega, h)
+    r, c = xp.asarray(rows), xp.asarray(cols)
+    ur = xp.take(cluster.u, r, axis=0)                        # (nnz, Np)
+    uc = xp.conj(xp.take(cluster.u, c, axis=0))
+    sr = xp.einsum("ka,wa,wak->wk", ur, d1, xp.take(c_sr, c, axis=2))
+    rs = xp.einsum("wka,wa,ka->wk", xp.take(c_rs, r, axis=1), xp.conj(d1), uc)
+    ss = xp.einsum("ka,wab,wab,kb->wk", ur, d2, c_ss, uc)
+    return sr + rs + ss

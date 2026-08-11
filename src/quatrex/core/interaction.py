@@ -209,6 +209,24 @@ class PhononPhononInteraction(Interaction):
         ssp = self.sigma_phonon_phonon
         # (1) The legs: remove the pole sector before the FFT ring sees them.
         ssp.set_pole_channel(state.g_pp_lesser, state.g_pp_greater)
+        if getattr(ps, "leg", "congruence") == "congruence":
+            # Nothing is added back, and nothing is dropped. The pole channel
+            # here is the POINT-minus-CELL-AVERAGE correction, so what the ring
+            # now convolves is <G~^{<,>}>_k -- the cell average of the
+            # congruence reconstruction, which is what a dw-weighted sum wants
+            # and what the raw grid sample gets wrong by order one for an
+            # under-resolved line (8.2e-01 relative on the h = 20 gamma bed).
+            #
+            # It is an average of PSD matrices, so the leg is PSD however bad
+            # the pole model is. That is the whole difference from the
+            # superseded route, which fed the ring an indefinite remainder and
+            # anti-damped once the residue was off by 20 %.
+            #
+            # What this does NOT do is resolve the pole inside the CONVOLUTION:
+            # the output frequency resolution is still the grid's. Carrying
+            # SR/RS analytically needs a vertex contraction against per-pole
+            # pattern-valued coefficients, which is the remaining work.
+            return
         if ps.sectors == "rr":
             # Deliberately incomplete: SS/SR/RS are not added back, so this
             # DROPS real three-phonon processes. It is a staging setting whose

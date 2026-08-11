@@ -75,6 +75,14 @@ class PoleSectorState:
     quantity ``source_fit_tol`` gates on."""
     source_lesser: list = field(default_factory=list)
     source_greater: list = field(default_factory=list)
+    c_lesser: list = field(default_factory=list)
+    c_greater: list = field(default_factory=list)
+    """``(c_sr, c_rs, c_ss)`` per leg, from
+    :func:`~quatrex.phonon.pole_congruence.background_coefficients`. Empty
+    unless ``pole_sector.leg == "congruence"``. ``c_ss`` duplicates
+    ``source_*`` by construction -- both are ``V^dagger Sigma_tot V`` -- and
+    the other two are what the mixed sectors need in place of the frozen
+    Keldysh remainder."""
     g_pp_lesser: object = None
     g_pp_greater: object = None
     solutions: list[PoleSolution] = field(default_factory=list)

@@ -110,3 +110,97 @@ def test_sample_vanishes_without_poles_shifting_the_leg():
         got = reconstruct(cl, w[i], w[i], gk[i], sig[i])[0]
         assert np.abs(got - want).max() < 1e-9 * np.abs(want).max()
         assert np.abs(dense[i]).max() > 0.0
+
+
+def test_apply_sparse_matches_a_dense_product():
+    """The one primitive that touches the full operator. Duplicate row indices
+    must accumulate, and the dense contact corners must be included -- without
+    them ``G^R Sigma G^A`` is not ``G^<``."""
+    from quatrex.phonon.pole_congruence import apply_sparse
+
+    rng = np.random.default_rng(3)
+    rows = np.array([0, 1, 1, 3, 4, 5, 2, 2])
+    cols = np.array([1, 1, 4, 0, 5, 5, 2, 3])
+    vals = rng.normal(size=(N_W, rows.size)) + 1j * rng.normal(size=(N_W, rows.size))
+    v = rng.normal(size=(N_DOF, N_P)) + 1j * rng.normal(size=(N_DOF, N_P))
+    corner = rng.normal(size=(N_W, 2, 2)) + 1j * rng.normal(size=(N_W, 2, 2))
+
+    dense = np.zeros((N_W, N_DOF, N_DOF), dtype=complex)
+    np.add.at(dense.transpose(1, 2, 0), (rows, cols), vals.T)
+    dense[:, 4:6, 4:6] += corner
+
+    got = apply_sparse(vals, rows, cols, v, N_DOF, corners=((corner, 4),))
+    assert np.abs(np.asarray(got) - dense @ v).max() < 1e-12
+
+    # ... and with a frequency-dependent right-hand side, which is what the
+    # second apply G^R_k (Sigma V) needs.
+    vw = np.stack([v * (1.0 + 0.3 * k) for k in range(N_W)])
+    got = apply_sparse(vals, rows, cols, vw, N_DOF, corners=((corner, 4),))
+    assert np.abs(np.asarray(got) - dense @ vw).max() < 1e-12
+
+
+def test_cell_average_matches_quadrature():
+    """The analytic cell weights against brute-force Gauss-Legendre."""
+    from quatrex.phonon.pole_congruence import sector_cell_average, sector_terms
+
+    cl, w, gk, sig = _bed()
+    co = _coeffs(cl, w, gk, sig)
+    rows, cols = (np.repeat(np.arange(N_DOF), N_DOF),
+                  np.tile(np.arange(N_DOF), N_DOF))
+    h = float(w[1] - w[0])
+    got = np.asarray(sector_cell_average(cl, w, co, rows, cols, h))
+
+    x, wt = np.polynomial.legendre.leggauss(160)
+    ref = np.zeros_like(got)
+    for xi, wi in zip(x, wt):
+        probe = w + 0.5 * h * xi
+        ref += 0.5 * wi * sum(
+            np.asarray(t) for t in sector_terms(cl, w, co, rows, cols, probe))
+    assert np.abs(got - ref).max() < 1e-9 * np.abs(ref).max()
+
+
+def test_cell_averaged_leg_is_psd():
+    """What the ring will consume. An average of PSD matrices is PSD, so the
+    corrected leg cannot anti-damp however wrong the pole model is."""
+    from quatrex.phonon.pole_congruence import sector_cell_average
+
+    cl, w, gk, sig = _bed()
+    co = _coeffs(cl, w, gk, sig)
+    rows, cols = (np.repeat(np.arange(N_DOF), N_DOF),
+                  np.tile(np.arange(N_DOF), N_DOF))
+    h = float(w[1] - w[0])
+    avg = np.asarray(sector_cell_average(cl, w, co, rows, cols, h))
+    z, u, v = np.asarray(cl.z), np.asarray(cl.u), np.asarray(cl.v)
+    for i in range(N_W):
+        b = gk[i] - (u * (1.0 / (w[i] - z))) @ v.conj().T
+        leg = b @ sig[i] @ b.conj().T + avg[i].reshape(N_DOF, N_DOF)
+        herm = -1j * leg
+        herm = 0.5 * (herm + herm.conj().T)
+        ev = np.linalg.eigvalsh(herm)
+        assert ev.min() / abs(ev).max() > -1e-10
+
+
+def test_correction_vanishes_as_the_grid_resolves_the_line():
+    """The pole channel is a DISCRETISATION correction, so it must go to zero
+    on a grid fine enough to hold the line. If it did not, it would be adding
+    physics the ring already has, and the two would double-count."""
+    from quatrex.phonon.pole_congruence import (
+        sector_cell_average, sector_grid_sample,
+    )
+
+    cl, w, gk, sig = _bed()
+    co = _coeffs(cl, w, gk, sig)
+    rows, cols = (np.repeat(np.arange(N_DOF), N_DOF),
+                  np.tile(np.arange(N_DOF), N_DOF))
+    smp = np.asarray(sector_grid_sample(cl, w, co, rows, cols))
+    scale = np.abs(smp).max()
+    prev = None
+    for h in (0.4, 0.1, 0.025):
+        avg = np.asarray(sector_cell_average(cl, w, co, rows, cols, h))
+        err = np.abs(smp - avg).max() / scale
+        if prev is not None:
+            # second order in the cell width: halving h quarters the gap, so
+            # a factor-4 refinement should gain about 16x
+            assert err < prev / 8.0, f"h={h}: {err:.3e} vs {prev:.3e}"
+        prev = err
+    assert prev < 1e-3
