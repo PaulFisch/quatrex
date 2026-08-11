@@ -195,11 +195,39 @@ ranges from 15 % to 663 % and the treatment is worth a factor of 44.
 not well defined, a bordered Newton for one cannot localise, and
 `eps_z ~ 1` is the correct report rather than a failure.
 
-So the low yield on this bed is the right answer. CNT at 300 K is
-anharmonically broadened into a quasi-continuum; it has no population of
-narrow isolated resonances, which is the population the sector is built for.
-`population()` now prints both ratios every iteration so this is visible
-before any conclusion is drawn from a yield.
+So the low yield **on this bed, at this point in the iteration** is the right
+answer. `population()` now prints both ratios every iteration so this is
+visible before any conclusion is drawn from a yield.
+
+**Scope of that measurement, and an open contradiction.** It was taken on
+`pgate` at SCBA iteration 1, where `Sigma_scatt` is essentially zero and the
+broadening is contact-dominated -- it is not the converged linewidth
+distribution, and `pgate` is not the bed the ne ladder was run on. Stated as
+"CNT at 300 K has no narrow modes" it over-reaches, and it collides with
+Sec. 2: if nothing were narrow, refining the grid would converge, and it does
+not.
+
+The ladder is **non-monotone** -- `ne = 161` diverges, 181 and 201 converge,
+271 fails to converge, 361 diverges. Failing at BOTH ends rules out both
+monotone stories: unresolved narrow lines would improve steadily with
+refinement, and crowding the `omega -> 0` acoustic singularity would worsen
+steadily. Neither fits.
+
+Kramers-Kronig truncation is not the discriminator either. `sse_aux_grid_dw_thz
+= 0` on these beds, so the bubble runs on the primary grid, which stops at
+55 THz while the 3-phonon bubble has support to about 110; the solver warns on
+every rung. But the warning does not track the outcome -- the run with the
+WORST truncation (13 % of peak weight at the grid top, `cnt-L3-eta0-mask`)
+converged fastest of all, in 52 iterations. It is a real defect and it is not
+what is firing.
+
+**The mechanism for the ladder is unknown.** The measurement that would settle
+it is the ladder itself, on `cnt33_L4_linear`, pole sector off, with
+`population()` reporting the CONVERGED `gamma` distribution, `h/gamma` and
+`gamma/spacing` at every rung -- measured on that bed at that `ne` rather than
+transferred from another. If narrow modes appear at the failing rungs, the
+premise above is wrong there; if they do not, the ladder pathology is
+something else entirely and the sector cannot be its cure.
 
 Two things this does expose, and neither should be changed silently:
 
