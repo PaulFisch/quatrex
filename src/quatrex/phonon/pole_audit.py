@@ -220,3 +220,101 @@ def sector_sum_residual(
     for k, v in weights.items():
         out[k] = v / (scale or 1.0)
     return out
+
+
+def subcell_positivity(
+    g_full: NDArray,
+    g_pole: NDArray,
+    pole_at: callable,
+    freqs: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    block_sizes: NDArray,
+    centres: NDArray,
+    n_sub: int = 17,
+    sign: float = -1.0,
+    window: int = 2,
+) -> dict[str, float]:
+    r"""Is the reconstructed hybrid function physical BETWEEN grid points?
+
+    The sectors do not act on ``G``. They act on
+
+    .. math:: \tilde G_h(\omega) = P(\omega) + R_k,\qquad
+              R_k = G(\omega_k) - P(\omega_k),
+
+    the analytic pole sum plus a piecewise-constant remainder. That equals
+    ``G`` exactly AT each cell centre and nowhere else: inside a cell ``P``
+    varies while ``R_k`` is frozen.
+
+    ``R_k`` is a DIFFERENCE of positive semidefinite objects and is generically
+    indefinite. At the centre ``P(\omega_k)`` cancels it exactly; a little way
+    off, ``P`` has decayed and the frozen indefinite remainder dominates.
+    Measured on a 2x2 device with a narrow resonance, sweeping across one cell:
+
+    ==================  ====================  ==================
+    offset into cell    ``|P|`` rel. centre   ``lambda_min``
+    ==================  ====================  ==================
+    0.00                1.0000                **+2.219e-02**
+    0.05                0.7191                **-1.000**
+    0.50                0.0250                **-1.000**
+    ==================  ====================  ==================
+
+    while the true ``G`` stays at ``+2.2e-02`` throughout. ``SR``, ``RS`` and
+    ``RR`` all integrate over whole cells, so they all see the unphysical
+    region, and ``B(\tilde G_h, \tilde G_h)`` acquires GAIN even though every
+    stored sample is physical. That is anti-damping, and it is what drives the
+    sector's divergence (``lead balance = 2``).
+
+    This must be evaluated BEFORE any bubble contraction: a failure here is a
+    property of the representation, not of the sectors, and catching it at the
+    source is the difference between a named cause and a blow-up thirty
+    iterations later.
+
+    Parameters
+    ----------
+    g_full, g_pole : NDArray
+        ``(n_omega, nnz)`` the stored Green's function and the pole part
+        evaluated on the SAME grid, so ``R_k = g_full - g_pole``.
+    pole_at : callable
+        ``omega -> (n_omega, nnz)``, the pole part at arbitrary frequency.
+    centres : NDArray
+        Grid indices of the cells to probe -- normally the promoted poles'.
+    n_sub : int
+        Sub-cell samples per cell, spanning the full width.
+
+    Returns
+    -------
+    dict
+        ``worst`` (most negative normalised eigenvalue over all probes),
+        ``worst_centre`` (the cell index where it occurred) and
+        ``at_centres`` (the same measure evaluated only AT the centres, which
+        should be healthy -- if it is not, the failure is upstream).
+
+    """
+    w = np.asarray(_host(freqs), dtype=float)
+    if w.size < 2:
+        return {"worst": 0.0, "worst_centre": -1, "at_centres": 0.0}
+    h = float(w[1] - w[0])
+    idx = np.atleast_1d(np.asarray(_host(centres), dtype=int))
+    if idx.size == 0:
+        return {"worst": 0.0, "worst_centre": -1, "at_centres": 0.0}
+
+    remainder = xp.asarray(g_full) - xp.asarray(g_pole)
+
+    worst, worst_at = 0.0, -1
+    at_centres = 0.0
+    offsets = np.linspace(-0.5, 0.5, int(n_sub))
+    for k in idx:
+        k = int(np.clip(k, 0, w.size - 1))
+        r_k = remainder[k][None, :]
+        probes = xp.asarray(w[k] + offsets * h)
+        recon = pole_at(probes) + r_k                  # (n_sub, nnz)
+        rep = psd_residual(recon, rows, cols, block_sizes,
+                           sign=sign, window=window)
+        if rep["worst"] < worst:
+            worst, worst_at = rep["worst"], k
+        centre_rep = psd_residual(recon[int(n_sub) // 2][None, :], rows, cols,
+                                  block_sizes, sign=sign, window=window)
+        at_centres = min(at_centres, centre_rep["worst"])
+
+    return {"worst": worst, "worst_centre": worst_at, "at_centres": at_centres}
