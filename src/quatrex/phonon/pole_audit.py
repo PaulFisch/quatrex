@@ -129,6 +129,7 @@ def psd_residual(
     block_sizes: NDArray,
     sign: float = -1.0,
     window: int = 2,
+    skip: NDArray | None = None,
 ) -> dict[str, float]:
     r"""Worst normalised eigenvalue of ``sign * i * G`` over the diagonal blocks.
 
@@ -155,6 +156,16 @@ def psd_residual(
         ``(n_omega, nnz)`` ``G^<`` or ``G^>`` on the stored pattern.
     sign : float
         ``-1`` for ``G^<`` (``-i G^< >= 0``), ``+1`` for ``G^>``.
+    skip : NDArray, optional
+        ``(n_omega,)`` boolean; ``True`` drops that bin from BOTH the search
+        and the normalisation. Pass the bubble's own ``conv_mask``. Without it
+        the gate is decided by bins the ring never integrates: on the CNT bed
+        ``G^>`` at ``w = 0`` -- the near-singular acoustic bin the ring zeroes
+        -- carries the largest eigenvalue in the whole window AND the most
+        negative one, so ``worst`` saturates at exactly ``-1.000`` on the
+        POLE-FREE baseline and reports the same ``-1.000`` for every variant
+        of the pole sector. A gate that reads the same with the feature on and
+        off is measuring the feature not at all.
 
     Returns
     -------
@@ -170,6 +181,13 @@ def psd_residual(
 
     if window < 1:
         raise ValueError("psd_residual: window must be >= 1")
+    keep = np.arange(int(values.shape[0]))
+    if skip is not None:
+        m = np.asarray(_host(skip), dtype=bool).ravel()
+        keep = keep[~m[:keep.size]]
+        if keep.size == 0:
+            return {"worst": 0.0, "scale": 0.0, "omega_index": -1}
+        values = values[xp.asarray(keep)]
     evs = []
     for i in range(max(1, sizes.size - window + 1)):
         lo, hi = int(off[i]), int(off[min(i + window, sizes.size)])
@@ -196,7 +214,7 @@ def psd_residual(
         m = float(ev.min()) / scale
         if m < worst:
             worst = m
-            worst_w = int(_host(xp.argmin(ev.min(axis=-1))))
+            worst_w = int(keep[int(_host(xp.argmin(ev.min(axis=-1))))])
     return {"worst": worst, "scale": scale, "omega_index": worst_w}
 
 

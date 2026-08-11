@@ -83,7 +83,8 @@ __all__ = [
 
 
 def pair_convolution(
-    p: NDArray, q: NDArray, omega: NDArray, cell: float | None = None
+    p: NDArray, q: NDArray, omega: NDArray, cell: float | None = None,
+    window: tuple[float, float] | None = None,
 ) -> NDArray:
     r"""Elementary convolution :math:`J(p,q;\omega)` of two simple poles.
 
@@ -94,17 +95,52 @@ def pair_convolution(
     omega : NDArray
         ``(n_omega,)`` real frequencies; prepended as a leading axis.
 
+    window : tuple, optional
+        ``(a, b)``: integrate over ``[a, b]`` instead of the whole axis,
+
+        .. math::
+            J_{[a,b]} = \frac{\log(b-p) - \log(a-p)
+                              - \log(\omega-b-q) + \log(\omega-a-q)}
+                             {2\pi\,(\omega - p - q)} .
+
+        A DIAGNOSTIC, not a production kernel. The residue form integrates the
+        analytic leg over the whole axis while the mixed sectors and the ring
+        only ever see the stored window, so the four sectors do not act on one
+        common function; this is how much that costs. Measured on a CNT-shaped
+        pole pair (``z = 3 - 0.1i``, ``5 - 0.2i``, ``omega = 7``): truncating
+        at ``+-100`` moves a same-half-plane pairing by 3.3e-03 relative, and
+        gives the opposite-half-plane pairing -- which the residue form sets
+        to exactly zero -- a magnitude 3.3e-03 of it. At ``+-60`` both are
+        5.5e-03. So the finite-support inconsistency is a sub-percent effect
+        at a realistic window, not an order-one one, and it is NOT what makes
+        the analytic route diverge. Mutually exclusive with
+        ``cell`` -- the cell average of the log form has no elementary
+        antiderivative.
+
     Returns
     -------
     NDArray
         ``(n_omega,) + broadcast(p, q).shape``.
 
     """
+    if window is not None and cell:
+        raise ValueError(
+            "pair_convolution: window and cell are mutually exclusive; the "
+            "cell average of the finite-window log form is not elementary.")
     p = xp.asarray(p, dtype=xp.complex128)
     q = xp.asarray(q, dtype=xp.complex128)
     w = xp.asarray(omega, dtype=xp.complex128).reshape(
         (-1,) + (1,) * max(p.ndim, q.ndim)
     )
+    if window is not None:
+        a, b = (float(window[0]), float(window[1]))
+        sw = w - q
+        den = sw - p
+        num = (xp.log(b - p) - xp.log(a - p)
+               - xp.log(sw - b) + xp.log(sw - a))
+        ok = den != 0
+        return num / (2.0 * xp.pi * xp.where(ok, den, 1.0)) * ok
+
     both_lower = (xp.imag(p) < 0) & (xp.imag(q) < 0)
     both_upper = (xp.imag(p) > 0) & (xp.imag(q) > 0)
     sign = xp.where(both_lower, -1j, xp.where(both_upper, 1j, 0.0))

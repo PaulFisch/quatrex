@@ -405,6 +405,26 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
     so the decomposition ``B(G,G) = SS + SR + RS + RR`` closes. Removing more
     than is put back is what the sector-sum gate exists to catch, and it is
     the failure this whole construction started from.
+
+    The two halves take DIFFERENT routes into the bubble, and that is the
+    point of the split below.
+
+    ``SS`` -- the pole-pole convolution -- carries its own closed-form causal
+    partner (the two-retarded pairing, whose combined pole ``zeta_p + zeta_q``
+    is again in the lower half plane), so it goes through
+    :meth:`set_pole_self_energy` and never touches the discrete Hilbert
+    transform.
+
+    ``SR + RS`` has NO closed-form causal partner: one leg is the numerical
+    background. It must therefore join the raw bubble output BEFORE
+    ``delta = sigma^> - sigma^<`` is formed, so the existing Kramers-Kronig
+    transform covers it -- which is exactly what :meth:`set_pole_mixed` does,
+    and what the ``rr_ss_sr`` route has always done. Routing it through
+    ``set_pole_self_energy`` instead lands it after ``delta`` is built
+    (``sse_phonon_phonon.py``), and then ``Sigma^R`` is missing the entire
+    dispersive part of the mixed sector while ``Sigma^{<,>}`` has it. That is
+    a fluctuation-dissipation break by construction, and it is what
+    ``lead balance = 2.0000`` measured on job 4398805.
     """
     from quatrex.phonon.pole_bridge import modal_vertex_blocks
     from quatrex.phonon.pole_congruence import (
@@ -412,18 +432,31 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
     )
 
     solver = scba.phonon_solver
+    ps = scba.config.phonon.pole_sector
     rows, cols = data_rows_cols(scba)
     freqs = xp.asarray(solver.local_frequencies, dtype=float)
     shape = scba.data.sigma_lesser.data.shape
     h = float(xp.real(freqs[1] - freqs[0])) if freqs.shape[0] > 1 else 0.0
-    cell = h if getattr(scba.config.phonon.pole_sector, "cell_average",
-                        True) else None
+    cell = h if getattr(ps, "cell_average", True) else None
     g_l = scba.data.g_lesser.data.reshape(freqs.shape[0], -1)
     g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
     reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
     reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
+    # Mask the background leg EXACTLY as the ring masks its own legs
+    # (sse_phonon_phonon: gl_in[conv_mask] = 0), for the same reason as the
+    # rr_ss_sr route above: the omega = 0 bin carries the near-singular
+    # acoustic spectral peak and the ring excludes it, so an unmasked leg
+    # makes the two sectors integrate different data and injects that peak
+    # straight into Sigma. Measured there: Sigma^> non-PSD by 0.15 at
+    # mid-band, strictly LINEAR in the injected mixed term.
+    low = max(1e-6, float(getattr(ssp, "_low_freq_mask", 0.0) or 0.0))
+    leg_mask = xp.abs(freqs) < low
+    if bool(leg_mask.any()):
+        reg_l = reg_l.copy(); reg_l[leg_mask] = 0.0
+        reg_g = reg_g.copy(); reg_g[leg_mask] = 0.0
 
     acc_l = acc_g = acc_r = None
+    mx_l = mx_g = None
     for pf_l, pf_g in zip(state.pf_lesser, state.pf_greater):
         for pf, reg, partner, slot in ((pf_l, reg_l, reg_g, "l"),
                                        (pf_g, reg_g, reg_l, "g")):
@@ -436,21 +469,25 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
             mx = pf_mixed_self_energy(
                 freqs, zeta, p_row, q_col, reg, partner, freqs,
                 ssp.phi_blocks, ssp.block_sizes, rows, cols)
-            # The CAUSAL part comes from the two-retarded pairings of the
-            # pole-pole sector, whose combined pole lands in the lower half
-            # plane. The mixed sectors have no closed-form retarded partner;
-            # the driver's global KK half is what covers them.
+            # The CAUSAL part of the POLE-POLE sector, in closed form.
             rr = pf_self_energy(freqs, zeta, vl, vr, rows, cols,
                                 retarded_only=True, cell=cell)
             if slot == "l":
-                acc_l = ss + mx if acc_l is None else acc_l + ss + mx
+                acc_l = ss if acc_l is None else acc_l + ss
+                mx_l = mx if mx_l is None else mx_l + mx
                 acc_r = -rr if acc_r is None else acc_r - rr
             else:
-                acc_g = ss + mx if acc_g is None else acc_g + ss + mx
+                acc_g = ss if acc_g is None else acc_g + ss
+                mx_g = mx if mx_g is None else mx_g + mx
                 acc_r = rr if acc_r is None else acc_r + rr
 
-    # Inject only the KRAMERS-KRONIG HALF: core/scba.py already adds
-    # 0.5*(sigma^< - sigma^>) globally over the stored total.
+    # Inject only the KRAMERS-KRONIG HALF of the pole-pole Sigma^R:
+    # core/scba.py already adds 0.5*(sigma^< - sigma^>) globally over the
+    # stored total. acc_l/acc_g are SS alone here, which is what acc_r is the
+    # causal partner OF -- the mixed sectors get theirs from the transform.
     kk_half = acc_r - 0.5 * (acc_g - acc_l)
     ssp.set_pole_self_energy(acc_l.reshape(shape), acc_g.reshape(shape),
                              kk_half.reshape(shape))
+    scale = float(getattr(ps, "mixed_scale", 1.0))
+    ssp.set_pole_mixed((scale * mx_l).reshape(shape),
+                       (scale * mx_g).reshape(shape))

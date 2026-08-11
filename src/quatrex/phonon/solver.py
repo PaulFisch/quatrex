@@ -710,9 +710,9 @@ class PhononSolver(SubsystemSolver):
             source_at_poles, source_variation,
         )
         from quatrex.phonon.pole_congruence import (
-            apply_sparse, background_coefficients, coefficients_at_poles,
-            partial_fraction_legs, pf_leg_sample, residue_sum,
-            sector_cell_average, sector_grid_sample,
+            apply_sparse, background_coefficients, coefficient_variation,
+            coefficients_at_poles, partial_fraction_legs, pf_leg_sample,
+            residue_sum, sector_cell_average, sector_grid_sample,
         )
 
         state = self.pole_state
@@ -805,11 +805,18 @@ class PhononSolver(SubsystemSolver):
                         # exact for any G_S, but only if the leg subtracted
                         # here and the leg the sectors restore are literally
                         # the same function.
-                        zeta, p_row, q_col = partial_fraction_legs(
-                            cl, coefficients_at_poles(cl, freqs, co))
+                        frozen = coefficients_at_poles(cl, freqs, co)
+                        zeta, p_row, q_col = partial_fraction_legs(cl, frozen)
                         (state.pf_lesser if g_out == "l"
                          else state.pf_greater).append((zeta, p_row, q_col))
                         state.residue_sum.append(residue_sum(p_row, q_col))
+                        # source_fit_tol gates c_ss; c_rs = G^R_k Sigma V -
+                        # U D_k c_ss carries the whole retarded background and
+                        # can move fast where V^dag Sigma V does not. It is
+                        # frozen by the same approximation, so it needs the
+                        # same measurement.
+                        state.mixed_fit.append(coefficient_variation(
+                            co[1], frozen[1], freqs, cl))
                         smp = pf_leg_sample(zeta, p_row, q_col, freqs,
                                             rows, cols)
                     else:
@@ -846,6 +853,61 @@ class PhononSolver(SubsystemSolver):
             acc_g = g_g if acc_g is None else acc_g + g_g
         state.g_pp_lesser = acc_l.reshape(sse_lesser.data.shape)
         state.g_pp_greater = acc_g.reshape(sse_greater.data.shape)
+        if congruence and comm.rank == 0:
+            # Where each promoted pole sits INSIDE its cell, in cells, worst
+            # over the set. Zero means the line is registered on a grid point;
+            # 0.5 means it is on a cell boundary.
+            #
+            # This is the control parameter of the bubble's registration
+            # error, and nothing measured it before. An exactly cell-averaged
+            # leg still places all of a line's weight at the cell CENTRE, so
+            # the combination frequency Re(z_a + z_b) is displaced by up to a
+            # full cell and the ring splits the peak between two bins.
+            # Measured (test_cell_averaged_legs_do_not_fix_the_bubble_
+            # registration), ring/exact at the combination frequency:
+            #
+            #   offset 0.00   1.004      offset 0.25   1.79
+            #   offset 0.50   0.536
+            #
+            # and it gets WORSE with h/gamma, not better. The congruence
+            # route's accuracy is therefore an accident of registration
+            # unless this number is small.
+            w_host = np.asarray(get_host(freqs), dtype=float)
+            hw = np.asarray(get_host(self.local_frequency_weights), dtype=float)
+            off_worst = 0.0
+            for cl in state.legs:
+                for z in np.asarray(get_host(cl.z)):
+                    x = float(np.real(z))
+                    if x < 0.0:
+                        continue
+                    k = int(np.argmin(np.abs(w_host - x)))
+                    hk = float(hw[k]) if k < hw.size else 0.0
+                    if hk > 0.0:
+                        off_worst = max(off_worst, abs(x - w_host[k]) / hk)
+            print(f"  pole registration: worst sub-cell offset "
+                  f"{off_worst:.3f} cells (0 = on a grid point, 0.5 = on a "
+                  f"cell boundary)", flush=True)
+        if analytic and comm.rank == 0:
+            # Two numbers that decide whether the analytic leg is a legitimate
+            # object at all, and neither was reported before.
+            #
+            # eps_tail is the coefficient of the leg's 1/w tail. The analytic
+            # leg is a GLOBAL function -- the pole-pole sector integrates it
+            # over the whole axis -- so a nonzero tail is not cosmetic: the
+            # true G decays like 1/w^2, and a spurious 1/w once made G_PP 17x
+            # too large at w = 1e2 and cost four orders. It vanishes only for
+            # a bosonically CLOSED set, and only if freezing preserved the
+            # cancellation; a truncated set does not, and this says so.
+            #
+            # eps_c_rs is source_fit_tol's missing half: see
+            # coefficient_variation.
+            tail = max(state.residue_sum) if state.residue_sum else 0.0
+            mixed = max(state.mixed_fit) if state.mixed_fit else 0.0
+            flag = ("" if mixed <= self._pole_cfg.source_fit_tol
+                    else f"  ABOVE source_fit_tol "
+                         f"({self._pole_cfg.source_fit_tol:.2e})")
+            print(f"  pole analytic leg: eps_tail={tail:.3e}  "
+                  f"eps_c_rs={mixed:.3e}{flag}", flush=True)
 
     def _report_subcell(self, out) -> None:
         """Is the reconstruction physical BETWEEN grid points?
@@ -874,32 +936,54 @@ class PhononSolver(SubsystemSolver):
         if state is None or not state.legs:
             return
 
-        if getattr(cfg, "leg", "congruence") == "congruence":
+        if getattr(cfg, "leg", "congruence").startswith("congruence"):
             # The rest of this routine measures the SUPERSEDED reconstruction
             # -- it rebuilds P^{<,>} through pole_keldysh_pf_sparse and asks
             # whether P + R_k is physical. On this route that object is not
             # what anything consumes, so reporting it would be measuring a
             # function the solver no longer uses.
             #
-            # What the ring actually convolves is G^{<,>}_k - g_pp = <G~>_k,
-            # an average of PSD matrices. That is PSD by construction, so this
-            # is a check on the IMPLEMENTATION rather than on the maths: it
-            # catches a sign, an index or a cell width being wrong, which the
-            # offline tests cannot see.
+            # What the ring actually convolves is G^{<,>}_k - g_pp, and on the
+            # cell-average route that is <G~>_k, an average of PSD matrices.
+            # PSD by construction, so this is a check on the IMPLEMENTATION
+            # rather than on the maths: it catches a sign, an index or a cell
+            # width being wrong, which the offline tests cannot see.
+            #
+            # Three things this print gets right that the first version did
+            # not, and each cost a device run to find out:
+            #
+            #   * lesser and greater are reported SEPARATELY. Collapsing them
+            #     to a single min hides which component failed.
+            #   * the bins the ring itself masks are EXCLUDED (skip=). G^>(0)
+            #     is the near-singular acoustic bin; it dominates the global
+            #     normalisation and is indefinite, so an unmasked gate reads
+            #     exactly -1.000 on the POLE-FREE baseline.
+            #   * the same gate on the UNCORRECTED leg is printed beside it as
+            #     the control. If the two agree, the gate is not measuring the
+            #     pole sector, whatever value it shows.
             rows, cols = out[0].rows, out[0].cols
             n_freq = int(self.local_frequencies.shape[0])
-            worst = None
-            for got, pp in ((out[0], state.g_pp_lesser),
-                            (out[1], state.g_pp_greater)):
-                leg = got.data.reshape(n_freq, -1) - pp.reshape(n_freq, -1)
-                rep = psd_residual(leg, rows, cols, self.block_sizes,
-                                   sign=-1.0)
-                worst = (rep["worst"] if worst is None
-                         else min(worst, rep["worst"]))
-            self.psd_report["ring_leg"] = {"worst": worst}
+            low = max(1e-6, float(
+                getattr(self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
+            skip = xp.abs(xp.asarray(self.local_frequencies)) < low
+            rep_all = {}
+            for name, got, pp in (("lesser", out[0], state.g_pp_lesser),
+                                  ("greater", out[1], state.g_pp_greater)):
+                raw = got.data.reshape(n_freq, -1)
+                for tag, leg in ((name, raw - pp.reshape(n_freq, -1)),
+                                 (f"{name}_control", raw)):
+                    rep_all[tag] = psd_residual(
+                        leg, rows, cols, self.block_sizes, sign=-1.0, skip=skip)
+            self.psd_report["ring_leg"] = rep_all
             if comm.rank == 0:
-                print(f"  ring leg positivity (cell-averaged congruence): "
-                      f"worst={worst:+.3e}", flush=True)
+                for name in ("lesser", "greater"):
+                    a, b = rep_all[name], rep_all[f"{name}_control"]
+                    same = "  [== control: gate is blind]" if abs(
+                        a["worst"] - b["worst"]) <= 1e-12 else ""
+                    print(f"  ring leg positivity {name:8s} "
+                          f"worst={a['worst']:+.3e} at w[{a['omega_index']}]"
+                          f"   pole-off control={b['worst']:+.3e}{same}",
+                          flush=True)
             return
         rows, cols = out[0].rows, out[0].cols
         freqs = xp.asarray(self.local_frequencies, dtype=float)

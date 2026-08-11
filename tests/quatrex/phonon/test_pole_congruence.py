@@ -440,3 +440,368 @@ def test_interaction_class_keeps_its_pole_hook():
 
     for name in ("compute", "_inject_pole_sector"):
         assert callable(getattr(PhononPhononInteraction, name, None)), name
+
+
+# --- how the analytic route's two halves reach the bubble -------------------- #
+
+class _Buf:
+    def __init__(self, data, rows=None, cols=None):
+        self.data = data
+        self.rows, self.cols = rows, cols
+
+
+def _analytic_harness(monkeypatch, mixed_scale=1.0, low_freq_mask=0.0):
+    """Drive ``_pole_analytic_sectors`` with stubbed kernels.
+
+    The kernels are covered by their own tests; what is under test here is the
+    ASSEMBLY -- which hook each half goes through, and what the mixed sector is
+    handed. Both are invisible to a kernel test and both cost a device run.
+    """
+    from quatrex.core import interaction as I
+    from quatrex.phonon import pole_congruence as PC
+
+    n_w, nnz = 6, 4
+    freqs = np.linspace(0.0, 5.0, n_w)
+    rows = cols = np.arange(nnz)
+    shape = (n_w, nnz)
+    ones = np.ones(shape, dtype=complex)
+
+    seen = {}
+    monkeypatch.setattr(PC, "pf_self_energy",
+                        lambda *a, retarded_only=False, **k:
+                        (3.0 if retarded_only else 1.0) * ones)
+
+    def _fake_mixed(omega, zeta, p_row, q_col, g_reg, g_partner, *a, **k):
+        seen.setdefault("reg", []).append(np.asarray(g_reg).copy())
+        return 10.0 * ones
+
+    monkeypatch.setattr(PC, "pf_mixed_self_energy", _fake_mixed)
+    monkeypatch.setattr(I, "data_rows_cols", lambda scba: (rows, cols))
+    monkeypatch.setattr(
+        "quatrex.phonon.pole_bridge.modal_vertex_blocks",
+        lambda *a, **k: np.zeros((nnz, 2, 2), dtype=complex))
+
+    class _PS:
+        cell_average, mixed_scale = True, 1.0
+    _PS.mixed_scale = mixed_scale
+
+    class _SSP:
+        phi_blocks, block_sizes = {}, np.array([nnz])
+        _low_freq_mask = low_freq_mask
+
+        def set_pole_self_energy(self, l, g, r):
+            seen["ss"] = (np.asarray(l), np.asarray(g), np.asarray(r))
+
+        def set_pole_mixed(self, l, g):
+            seen["mx"] = (np.asarray(l), np.asarray(g))
+
+    class _Solver:
+        local_frequencies = freqs
+
+    class _Cfg:
+        class phonon:
+            pole_sector = _PS()
+
+    class _Data:
+        sigma_lesser = _Buf(np.zeros(shape, dtype=complex), rows, cols)
+        g_lesser = _Buf(2.0 * ones)
+        g_greater = _Buf(5.0 * ones)
+
+    class _Scba:
+        phonon_solver, config, data = _Solver(), _Cfg(), _Data()
+
+    class _State:
+        g_pp_lesser, g_pp_greater = 1.0 * ones, 1.0 * ones
+        zz = (np.array([1.0 - 0.1j]), np.zeros((nnz, 1), dtype=complex),
+              np.zeros((nnz, 1), dtype=complex))
+        pf_lesser, pf_greater = [zz], [zz]
+
+    I._pole_analytic_sectors(_Scba(), _State(), _SSP())
+    return seen
+
+
+def test_analytic_mixed_sector_goes_through_the_hilbert_hook(monkeypatch):
+    """``SR + RS`` must reach ``set_pole_mixed``, not ``set_pole_self_energy``.
+
+    ``set_pole_self_energy`` lands AFTER ``delta = sigma^> - sigma^<`` is
+    formed, so anything routed there is invisible to the Kramers-Kronig
+    transform and must supply its own causal partner. ``SS`` can (the
+    two-retarded pairing); the mixed sector cannot, because one of its legs is
+    the numerical background. Folding it into the ``SS`` accumulator leaves
+    Sigma^R without the dispersive half of a term Sigma^{<,>} has in full --
+    a fluctuation-dissipation break, measured as ``lead balance = 2.0000``
+    (job 4398805).
+    """
+    seen = _analytic_harness(monkeypatch)
+    assert "mx" in seen, "the mixed sector never reached set_pole_mixed"
+    assert np.allclose(seen["mx"][0], 10.0), "mixed payload not the mixed term"
+    # ... and the SS hook carries SS ALONE: 1.0, not 1.0 + 10.0.
+    assert np.allclose(seen["ss"][0], 1.0), (
+        "set_pole_self_energy carries the mixed term too; its retarded partner "
+        "(the two-retarded pairing) is only the pole-pole one")
+    # kk_half = acc_r - 0.5*(acc_g - acc_l), with acc_r = rr_g - rr_l = 0 here
+    # because both components stub to the same value: the point is that it is
+    # built from the SS accumulators, which now exclude mx.
+    assert np.allclose(seen["ss"][2], 0.0)
+
+
+def test_analytic_mixed_sector_masks_the_background_leg(monkeypatch):
+    """The same low-frequency mask the ring applies to its own legs.
+
+    The omega = 0 bin carries the near-singular acoustic peak and the ring
+    excludes it; an unmasked background leg makes the two sectors integrate
+    different data and injects that peak into Sigma. Measured on the
+    ``rr_ss_sr`` route: Sigma^> non-PSD by 0.15, strictly LINEAR in the
+    injected mixed term.
+    """
+    seen = _analytic_harness(monkeypatch, low_freq_mask=1.5)
+    regs = seen["reg"]
+    assert regs, "the mixed kernel was never called"
+    for r in regs:
+        assert np.abs(r[:2]).max() == 0.0, "background leg not masked below 1.5"
+        assert np.abs(r[2:]).max() > 0.0, "the whole leg was masked"
+
+
+def test_analytic_route_honours_mixed_scale(monkeypatch):
+    """``mixed_scale`` is the bisection knob that separates 'too large' from
+    'wrongly signed'. Ignoring it on this route makes it silently inert."""
+    a = _analytic_harness(monkeypatch, mixed_scale=1.0)["mx"][0]
+    b = _analytic_harness(monkeypatch, mixed_scale=0.0)["mx"][0]
+    assert np.abs(a).max() > 0.0
+    assert np.abs(b).max() == 0.0
+
+
+# --- finite support: how far apart are the four sectors' quadratures? -------- #
+
+def test_finite_window_kernel_matches_quadrature_and_its_residue_limit():
+    """The four sectors do not integrate over the same axis, and this bounds it.
+
+    ``pf_self_energy`` uses the residue kernel, which integrates the analytic
+    leg over ``(-inf, inf)``; the mixed sectors and the ring only ever see the
+    stored window. The finite-window kernel is the same integral over
+    ``[a, b]``, so the gap between them IS the inconsistency.
+    """
+    from scipy.integrate import quad
+
+    from quatrex.phonon.pole_bubble import pair_convolution
+
+    w = np.array([7.0])
+
+    def kern(p, q, window=None):
+        return pair_convolution(np.array([p]), np.array([q]), w,
+                                window=window)[0, 0]
+
+    def numeric(p, q, a, b):
+        f = lambda u: 1.0 / ((u - p) * (w[0] - u - q))
+        re = quad(lambda u: f(u).real, a, b, limit=400)[0]
+        im = quad(lambda u: f(u).imag, a, b, limit=400)[0]
+        return (re + 1j * im) / (2 * np.pi)
+
+    pairs = [(3 - 0.1j, 5 - 0.2j),      # both lower
+             (3 + 0.1j, 5 + 0.2j),      # both upper
+             (3 - 0.1j, -5 + 0.2j)]     # mixed -- residue form gives 0
+    # One common scale: the mixed pairing's residue value is exactly zero, so
+    # a relative tolerance on it would be a tolerance on nothing.
+    scale = abs(kern(*pairs[0]))
+    for p, q in pairs:
+        got, ref = kern(p, q, (-60.0, 60.0)), numeric(p, q, -60.0, 60.0)
+        assert abs(got - ref) <= 1e-10 * scale, (p, q, got, ref)
+        # ... and it must reproduce the residue answer as the window opens
+        assert abs(kern(p, q, (-1e7, 1e7)) - kern(p, q)) < 1e-6 * scale, (p, q)
+
+    # The number that matters: at a realistic omega_max this is sub-percent,
+    # so finite support is NOT what makes the analytic route diverge.
+    same = kern(*pairs[0])
+    for R, tol in ((60.0, 6e-3), (100.0, 4e-3)):
+        assert abs(kern(*pairs[0], window=(-R, R)) - same) / abs(same) < tol
+        assert abs(kern(*pairs[2], window=(-R, R))) / abs(same) < tol
+
+
+def test_window_and_cell_average_are_refused_together():
+    """The cell average of the log form has no elementary antiderivative, so
+    silently ignoring one of the two would emit a kernel that is neither."""
+    from quatrex.phonon.pole_bubble import pair_convolution
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        pair_convolution(np.array([1 - 1j]), np.array([2 - 1j]),
+                         np.array([0.0]), cell=0.5, window=(-10.0, 10.0))
+
+
+def test_analytic_sectors_sum_to_the_bubble_of_the_same_hybrid():
+    """Review Sec. 24, the gate that was missing entirely.
+
+    ``SS + SR + RS + RR`` must reproduce ``B(Ghat, Ghat)`` where
+
+        Ghat(w) = G_S(w) + R_h(w)
+
+    is the hybrid the sector kernels actually assume -- the analytic leg plus
+    the piecewise-constant remainder -- and NOT the physical ``G``. Comparing
+    against ``G`` would fold representation error into the same number as
+    implementation error, and the whole point of the gate is to separate them.
+
+    ``B(Ghat, Ghat) = B(G_S,G_S) + B(G_S,R_h) + B(R_h,G_S) + B(R_h,R_h)`` is
+    an identity of a bilinear form, so any residual here is a defect: a
+    transposed vertex leg, a swapped ``(p, q)``, a dropped conjugation, or the
+    ring giving up more than the sectors put back -- which is the failure this
+    whole construction started from.
+    """
+    import importlib.util
+    import pathlib
+
+    from quatrex.phonon.pole_audit import sector_sum_residual
+    from quatrex.phonon.pole_congruence import (
+        pf_mixed_self_energy, pf_self_energy,
+    )
+
+    _p = pathlib.Path(__file__).with_name("test_pole_mixed_sectors.py")
+    _sp = importlib.util.spec_from_file_location("_pms", _p)
+    m = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(m)
+
+    h = 0.1
+    w_pos = np.arange(0.0, 40.0 + 1e-9, h)
+    w_full = np.concatenate([-w_pos[:0:-1], w_pos])
+    phi, _, _, off = m._bed(0.5)
+    rows, cols = m._pattern()
+    rng = np.random.default_rng(11)
+    nd = m.N_DOF
+
+    # Closed pole set: the residue sum vanishes, so the analytic leg decays
+    # like 1/w^2 and the residue kernel's infinite tail is negligible against
+    # the reference's finite grid (test_finite_window_kernel... bounds it).
+    a = rng.normal(size=(nd, 2)) + 1j * rng.normal(size=(nd, 2))
+    b = rng.normal(size=(nd, 2)) + 1j * rng.normal(size=(nd, 2))
+    zc = np.array([8.0 - 0.5j, 12.0 - 0.5j])
+    zeta = np.concatenate([zc, -np.conj(zc)])
+    p_row, q_col = np.hstack([a, a]), np.hstack([b, -b])
+    assert np.abs(p_row @ q_col.T).max() < 1e-12, "unclosed set"
+
+    mat = rng.normal(size=(nd, nd))
+    mat = mat + mat.T
+
+    def _pair(x):
+        kt = 25.0
+        n_b = 1.0 / np.expm1(np.where(np.abs(x) < 1e-9, 1e-9, x) / kt)
+        aa = 4.0 / ((x - 9.0) ** 2 + 16.0) - 4.0 / ((x + 9.0) ** 2 + 16.0)
+        return (np.einsum("w,ij->wij", 1j * n_b * aa, mat),
+                np.einsum("w,ij->wij", 1j * (n_b + 1.0) * aa, mat))
+
+    reg_full, _ = _pair(w_full)
+    reg_l_v, reg_g_v = (x[:, rows, cols] for x in _pair(w_pos))
+
+    d = 1.0 / (w_full[:, None] - zeta[None, :])
+    gs_full = np.einsum("ip,wp,jp->wij", p_row, d, q_col)
+    hybrid = gs_full + reg_full
+
+    total = m._brute_ring(phi, off, hybrid, hybrid, w_full, rows, cols)
+    rr = m._brute_ring(phi, off, reg_full, reg_full, w_full, rows, cols)
+
+    from quatrex.phonon.pole_bridge import modal_vertex_blocks
+    vl = modal_vertex_blocks(phi, m.SIZES, p_row, conjugate=False)
+    vr = modal_vertex_blocks(phi, m.SIZES, q_col, conjugate=False)
+    ss = np.asarray(pf_self_energy(w_pos, zeta, vl, vr, rows, cols))
+    mx = np.asarray(pf_mixed_self_energy(
+        w_pos, zeta, p_row, q_col, reg_l_v, reg_g_v, w_pos,
+        phi, m.SIZES, rows, cols))
+
+    # Compare where the reference is not dominated by its own grid edges.
+    keep = (w_full > 4.0) & (w_full < 20.0)
+    sel = (w_pos > 4.0) & (w_pos < 20.0)
+    rep = sector_sum_residual(np.asarray(total)[keep],
+                              {"ss": ss[sel], "mixed": mx[sel],
+                               "rr": np.asarray(rr)[keep]})
+    # Every sector must actually carry weight, or the sum passes vacuously.
+    for k in ("weight_ss", "weight_mixed", "weight_rr"):
+        assert rep[k] > 1e-3, f"{k} is numerically absent: {rep[k]:.2e}"
+    assert rep["residual"] < 1e-2, (
+        f"analytic sectors do not reassemble their own hybrid: {rep}")
+
+
+# --- what the cell-averaged leg does NOT fix ------------------------------- #
+
+def _registration_bed(gamma, h, shift, w_max=800.0):
+    """Two Lorentzian lines at ``+-w0``, exactly cell-averaged, run through a
+    midpoint-rule ring, against the exact cell-averaged convolution.
+
+    ``shift`` moves ``w0`` off its cell centre, in cells. Everything else is
+    exact: the legs are analytic cell averages, and so is the reference.
+    """
+    n = int(2 * w_max / h) // 2 * 2 + 1
+    wk = (np.arange(n) - n // 2) * h            # w = 0 IS a cell centre
+    avg = lambda wc, g: 2 * (np.arctan((wc + h / 2) / g)
+                             - np.arctan((wc - h / 2) / g)) / h
+    w0 = 10.0 + shift * h
+    leg = avg(wk - w0, gamma) + avg(wk + w0, gamma)
+    ring = np.convolve(leg, leg)[np.arange(n) + n // 2] * (h / (2 * np.pi))
+    # L_g * L_g = L_2g, so the exact answer is the cell average of the three
+    # lines at -2w0, 0, +2w0 (the middle one doubled by the two cross terms).
+    exact = (avg(wk - 2 * w0, 2 * gamma) + 2 * avg(wk, 2 * gamma)
+             + avg(wk + 2 * w0, 2 * gamma))
+    i = int(np.argmin(np.abs(wk - 2 * w0)))
+    return ring[i] / exact[i], float(np.abs(ring - exact).max()
+                                     / np.abs(exact).max())
+
+
+@pytest.mark.parametrize("h_over_gamma", [20, 200])
+@pytest.mark.parametrize("shift,lo,hi", [(0.00, 0.99, 1.01),
+                                         (0.25, 1.70, 2.00),
+                                         (0.50, 0.50, 0.55)])
+def test_cell_averaged_legs_do_not_fix_the_bubble_registration(
+        h_over_gamma, shift, lo, hi):
+    """An EXACT leg average still gets the combination line in the wrong bin.
+
+    The congruence route makes ``<G~>_k`` exact and stops there. That is not
+    the same as integrating the product: the cell average puts all of a line's
+    weight at its cell CENTRE, so a resonance sitting a quarter cell off has
+    its combination frequency ``Re(z_a + z_b)`` displaced by half a cell, and
+    the ring splits the peak between two bins.
+
+    The control parameter is the pole's SUB-CELL POSITION, not ``h/gamma``.
+    With the pole centred the ring is exact to 0.4 % at ``h = 20 gamma`` and
+    improves as ``h`` grows; a quarter cell off it is 79 % high and gets WORSE
+    with ``h``, asymptoting to a factor 2. Pole placement is set by the
+    physics, so the congruence route's accuracy here is an accident of
+    registration -- which is the reason to resolve the pole inside the
+    convolution rather than only in the leg weight.
+    """
+    gamma = 0.05
+    ratio, _ = _registration_bed(gamma, h_over_gamma * gamma, shift)
+    assert lo < ratio < hi, (
+        f"h/gamma={h_over_gamma} shift={shift}: ratio {ratio:.4f} "
+        f"outside [{lo}, {hi}]")
+
+
+def test_registration_error_is_dominated_by_pole_cell_PAIRS():
+    """... and it is an ``|P|^2`` object, not an ``|P| * N`` one.
+
+    Displacing a line to its cell centre costs the convolution
+    ``O((delta/Gamma_other)^2)`` when the OTHER leg is resolved -- 2 % here,
+    at the worst possible placement -- but an order-one splitting when both
+    legs are displaced, because then the combination line moves a full cell
+    (46 % at the same placement, measured by the test above). Two orders
+    apart, so a correction that replaces the boxcar on just the cell PAIRS
+    with both ends in ``P`` recovers essentially all of it, and there are
+    ``|P|^2`` such pairs rather than ``|P| * N``.
+    """
+    gamma, h, w_max = 0.05, 1.0, 800.0
+    n = int(2 * w_max / h) // 2 * 2 + 1
+    wk = (np.arange(n) - n // 2) * h
+    avg = lambda wc, g: 2 * (np.arctan((wc + h / 2) / g)
+                             - np.arctan((wc - h / 2) / g)) / h
+    ring = lambda a, b: np.convolve(a, b)[np.arange(n) + n // 2] * (h / (2 * np.pi))
+    rel = lambda got, ex: float(np.abs(got - ex).max() / np.abs(ex).max())
+
+    w0 = 10.0 + 0.5 * h                     # worst-case placement, both cases
+    narrow = avg(wk - w0, gamma) + avg(wk + w0, gamma)
+    broad = avg(wk, 3.0)                    # gamma >> h: fully resolved
+
+    one = rel(ring(narrow, broad),
+              avg(wk - w0, gamma + 3.0) + avg(wk + w0, gamma + 3.0))
+    both = rel(ring(narrow, narrow),
+               avg(wk - 2 * w0, 2 * gamma) + 2 * avg(wk, 2 * gamma)
+               + avg(wk + 2 * w0, 2 * gamma))
+    assert one < 0.05, f"one leg in a pole cell: {one:.3e}"
+    assert both > 0.4, f"both legs in pole cells: {both:.3e}"
+    assert both > 20 * one, (
+        f"the two cases must be orders apart, or restricting the correction "
+        f"to pole-cell PAIRS is not justified: {both:.3e} vs {one:.3e}")

@@ -77,6 +77,12 @@ class PoleSectorState:
     source_greater: list = field(default_factory=list)
     c_lesser: list = field(default_factory=list)
     c_greater: list = field(default_factory=list)
+    """``(c_sr, c_rs, c_ss)`` per leg, from
+    :func:`~quatrex.phonon.pole_congruence.background_coefficients`. Empty
+    unless ``pole_sector.leg`` is a congruence route. ``c_ss`` duplicates
+    ``source_*`` by construction -- both are ``V^dagger Sigma_tot V`` -- and
+    the other two are what the mixed sectors need in place of the frozen
+    Keldysh remainder."""
     pf_lesser: list = field(default_factory=list)
     pf_greater: list = field(default_factory=list)
     """``(zeta, p_row, q_col)`` per leg: the congruence flattened to ``2 Np``
@@ -85,12 +91,11 @@ class PoleSectorState:
     residue_sum: list = field(default_factory=list)
     """``max |sum_p p_p q_p^T|`` per leg -- the ``1/w`` tail coefficient of
     the analytic leg, which the bosonic closure must drive to zero."""
-    """``(c_sr, c_rs, c_ss)`` per leg, from
-    :func:`~quatrex.phonon.pole_congruence.background_coefficients`. Empty
-    unless ``pole_sector.leg == "congruence"``. ``c_ss`` duplicates
-    ``source_*`` by construction -- both are ``V^dagger Sigma_tot V`` -- and
-    the other two are what the mixed sectors need in place of the frozen
-    Keldysh remainder."""
+    mixed_fit: list = field(default_factory=list)
+    """Measured variation of ``c_rs`` across its pole window. ``source_fit``
+    covers ``c_ss`` only; the analytic route freezes all three, and this is
+    the one that carries the retarded background and can move fast where
+    ``V^dagger Sigma V`` does not."""
     g_pp_lesser: object = None
     g_pp_greater: object = None
     solutions: list[PoleSolution] = field(default_factory=list)

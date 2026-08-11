@@ -73,6 +73,7 @@ __all__ = [
     "cell_weights",
     "coefficients_at_poles",
     "residue_sum",
+    "coefficient_variation",
     "partial_fraction_legs",
     "pf_leg_sample",
     "pf_self_energy",
@@ -614,6 +615,52 @@ def coefficients_at_poles(
     sr = xp.stack([sr[a, a] for a in range(npp)])
     rs = xp.swapaxes(xp.stack([rs[b, b] for b in range(npp)]), 0, 1)
     return sr, rs, ss
+
+
+def coefficient_variation(
+    c_rs: NDArray, frozen: NDArray, freqs: NDArray, cluster: PoleCluster,
+    window: int = 4,
+) -> float:
+    r"""How far the MIXED coefficient strays from its frozen per-pole value.
+
+    ``source_variation`` gates ``c_ss = V^dagger \Sigma V`` and nothing else,
+    but the analytic route freezes three coefficients, and the mixed one is
+
+    .. math:: c_{rs}(\omega) = G^R(\omega_k)\Sigma(\omega) V
+                              - U D(\omega_k)\, c_{ss}(\omega),
+
+    which carries the full retarded background. It can vary rapidly across a
+    pole window while ``V^dagger \Sigma V`` is perfectly smooth -- a nearby
+    unpromoted resonance, a contact band edge, or sharp self-consistent
+    structure in ``Sigma`` all do it. Freezing an unsmooth coefficient is the
+    same error the source gate exists to refuse, applied to a different object.
+
+    Same convention as :func:`~quatrex.phonon.pole_bridge.source_variation`:
+    the max over the ``window`` cells either side of each pole, normalised
+    GLOBALLY rather than per frequency (a per-omega denominator turns the
+    numerically empty tails into apparent failures).
+
+    Parameters
+    ----------
+    c_rs : NDArray
+        ``(n_omega, n_dof, Np)`` per-cell coefficient.
+    frozen : NDArray
+        ``(n_dof, Np)``, the value :func:`coefficients_at_poles` froze.
+
+    """
+    w = np.asarray(_h(freqs), dtype=float)
+    z = np.asarray(_h(cluster.z))
+    c = np.asarray(_h(c_rs))
+    f = np.asarray(_h(frozen))
+    scale = float(np.abs(c).max())
+    if scale == 0.0:
+        return 0.0
+    worst = 0.0
+    for b in range(int(z.size)):
+        k0 = int(np.argmin(np.abs(w - abs(float(np.real(z[b]))))))
+        lo, hi = max(0, k0 - window), min(w.size, k0 + window + 1)
+        worst = max(worst, float(np.abs(c[lo:hi, :, b] - f[:, b]).max()))
+    return worst / scale
 
 
 def residue_sum(p_row: NDArray, q_col: NDArray) -> float:

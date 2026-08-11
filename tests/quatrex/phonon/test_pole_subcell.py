@@ -226,10 +226,104 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     solver.psd_report = {}
     solver.config.phonon.pole_sector.leg = "congruence"
     solver._report_subcell((_Buf(a), _Buf(a), _Buf(a)))
+    rep = solver.psd_report["ring_leg"]
+    assert "subcell" not in solver.psd_report
+    # Lesser and greater are reported SEPARATELY, each beside the pole-off
+    # control -- collapsing them to one min is what hid the w[0] saturation.
+    for key in ("lesser", "greater", "lesser_control", "greater_control"):
+        assert np.isfinite(rep[key]["worst"]), key
+        assert "omega_index" in rep[key]
+    # g_pp is zero here, so the leg IS the control and the two must agree
+    # exactly -- which is precisely the "gate is blind" case the print flags.
+    for key in ("lesser", "greater"):
+        assert rep[key]["worst"] == rep[f"{key}_control"]["worst"]
+    # ... and the analytic route reports through the same branch, because its
+    # leg is also G - g_pp and not the superseded P + R_k.
+    solver.psd_report = {}
+    solver.config.phonon.pole_sector.leg = "congruence_analytic"
+    solver._report_subcell((_Buf(a), _Buf(a), _Buf(a)))
     assert "ring_leg" in solver.psd_report
     assert "subcell" not in solver.psd_report
-    # g_pp is zero here, so the leg IS G^{<,>} and the metric is finite
-    assert np.isfinite(solver.psd_report["ring_leg"]["worst"])
+
+
+def test_ring_leg_gate_excludes_the_bins_the_ring_masks():
+    """The w = 0 bin decided this gate, and the ring never integrates it.
+
+    On the CNT bed ``-i G^>(0)`` is indefinite AND carries the largest
+    eigenvalue in the window, so it fixes both the numerator and the global
+    normalisation: ``worst`` reads exactly -1.000 on the pole-free baseline
+    and reports the same -1.000 for every pole-sector variant. Excluding it
+    must change the answer, or nothing downstream of the gate means anything.
+    """
+    import types
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_keldysh import PoleCluster
+    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.solver import PhononSolver
+
+    rows, cols = np.meshgrid(np.arange(N), np.arange(N), indexing="ij")
+    rows, cols = rows.ravel(), cols.ravel()
+    freqs = np.linspace(0.0, 20.0, 41)
+    rng = np.random.default_rng(3)
+
+    # A healthy, genuinely PSD -i G^{<,>} everywhere ...
+    b = rng.normal(size=(freqs.size, N, N)) + 1j * rng.normal(
+        size=(freqs.size, N, N))
+    g = 1j * (b @ np.conj(np.swapaxes(b, 1, 2)))
+    # ... except the w = 0 bin, blown up and indefinite, as the acoustic bin
+    # is. -i G must be HERMITIAN for the gate to see it at all, so the bad bin
+    # is i * (Hermitian indefinite), not (Hermitian indefinite).
+    g[0] = 1e6 * 1j * (b[0] + np.conj(b[0].T))
+    vals = g.reshape(freqs.size, -1)
+
+    class _Buf:
+        def __init__(self, data):
+            self.data, self.rows, self.cols = data, rows, cols
+
+    st = PoleSectorState()
+    u = rng.normal(size=(N, 1)) + 1j * rng.normal(size=(N, 1))
+    st.clusters = [PoleCluster(z=np.array([OMEGA - 1j * GAMMA]), u=u, v=u)]
+    st.legs = list(st.clusters)
+    st.g_pp_lesser = np.zeros((freqs.size, rows.size), dtype=complex)
+    st.g_pp_greater = np.zeros((freqs.size, rows.size), dtype=complex)
+
+    solver = object.__new__(PhononSolver)
+    solver.pole_state = st
+    solver.local_frequencies = freqs
+    solver.block_sizes = np.array([N])
+    solver.psd_report = {}
+
+    # The metric, first: the bad bin decides the whole gate, and skipping it
+    # is what makes the remaining -- physical -- bins visible.
+    from quatrex.phonon.pole_audit import psd_residual
+
+    raw = psd_residual(vals, rows, cols, np.array([N]), sign=-1.0)
+    assert raw["omega_index"] == 0
+    assert raw["worst"] < -0.5, (
+        f"the bad bin should decide the gate, got {raw['worst']:.3e}")
+    clean = psd_residual(vals, rows, cols, np.array([N]), sign=-1.0,
+                         skip=(np.abs(freqs) < 1e-6))
+    assert clean["worst"] > -1e-9, (
+        "the rest of the axis is PSD by construction, so with the ring's own "
+        f"mask applied the gate must come back clean; got {clean['worst']:.3e}")
+    # ... and it must also drop the bad bin from the NORMALISATION, or the
+    # scale stays pinned to 1e6 and every real violation reads as zero.
+    assert clean["scale"] < 1e-3 * raw["scale"]
+
+    # Then the solver hook: it passes the ring's mask, so it lands on `clean`.
+    solver.config = types.SimpleNamespace(
+        phonon=types.SimpleNamespace(
+            sse_low_freq_mask_thz=0.0,
+            pole_sector=PoleSectorConfig(enabled=True, psd_check=True,
+                                         leg="congruence")))
+    solver.psd_report = {}
+    solver._report_subcell((_Buf(vals), _Buf(vals), _Buf(vals)))
+    got = solver.psd_report["ring_leg"]["lesser"]
+    assert got["omega_index"] != 0
+    assert got["worst"] == clean["worst"], (
+        "the gate must exclude w = 0 even at sse_low_freq_mask_thz = 0: the "
+        "ring's own mask is max(1e-6, mask), never empty")
 
 
 # --------------------------------------------------------------------------

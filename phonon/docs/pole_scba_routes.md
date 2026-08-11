@@ -1,6 +1,6 @@
 # The three pole-sector routes: formulas as implemented, and what they do
 
-State as of 2026-08-11, commit `2f372dd0`. Selected by
+State as of 2026-08-11. Selected by
 `phonon.pole_sector.leg`. All three are bit-identical to the pole-free
 baseline for an empty pole set, so no baseline result depends on the choice.
 
@@ -161,11 +161,39 @@ recover the ring untouched, or the two would double-count.
 ### What it does not do
 
 The pole is resolved in the leg WEIGHT, not inside the convolution. The output
-frequency resolution is still the grid's.
+frequency resolution is still the grid's, and that is not a small residual
+error -- it is order one, controlled by a number nothing used to measure.
+
+An exact cell average still puts ALL of a line's weight at the cell CENTRE. So
+the combination frequency `Re(z_a + z_b)`, which is where the three-phonon
+structure lands, is displaced by up to a full cell and the ring splits the peak
+between two bins. Measured on the scalar Lorentzian bed, ring against the exact
+cell-averaged convolution at `w = 2 w0`
+(`test_cell_averaged_legs_do_not_fix_the_bubble_registration`):
+
+| pole offset inside its cell | `h = 20 gamma` | `h = 200 gamma` |
+|---|---|---|
+| 0.00 (on a grid point) | 1.0043 | 1.0000 |
+| 0.25 cell | **1.7941** | 1.9754 |
+| 0.50 cell (on a boundary) | **0.5363** | 0.5037 |
+
+The control parameter is the SUB-CELL POSITION, not `h/gamma`, and refining the
+grid does not help -- the quarter-cell case gets worse with `h/gamma`, tending
+to a factor 2. Pole placement is set by the physics, so this route's accuracy
+is an accident of registration. `pole registration: worst sub-cell offset` is
+the runtime number that says which column a given bed is in.
+
+The error is localised. With only ONE leg in a pole cell the displacement costs
+`O((delta/Gamma_other)^2)` -- 2 % at the worst placement against a resolved
+partner -- against 46 % when both are displaced. Two orders apart
+(`test_registration_error_is_dominated_by_pole_cell_PAIRS`), so the whole
+effect lives on cell PAIRS `(k, m-k)` with both ends in the pole set: `|P|^2`
+terms, not `|P| * N`. That is what makes an exact-in-those-cells correction
+affordable, and it is the fallback if the analytic route does not hold up.
 
 ---
 
-## 3. `leg = "congruence_analytic"` -- wired, and wrong on device
+## 3. `leg = "congruence_analytic"` -- three assembly defects fixed, device re-check pending
 
 Same coefficients, then frozen at the poles and flattened so the sectors can
 be convolved in closed form.
@@ -234,8 +262,19 @@ is projected onto `p_row` on the left and `q_col` on the right rather than
 onto `u` and `conj(u)`. `q_col` already carries whatever conjugation each pole
 needs, so both projections are unconjugated.
 
-The retarded partner is the two-retarded pairing of `SS` alone; the mixed
-sectors have no closed form, and the driver's global KK half covers them.
+The two halves take different routes into the bubble, and that is the point.
+
+`SS` carries its own closed-form causal partner -- the two-retarded pairing,
+whose combined pole `zeta_p + zeta_q` is again in the lower half plane -- so it
+goes through `set_pole_self_energy` and never touches the discrete Hilbert
+transform. That IS the causal continuation of `Delta_SS = Sigma^>_SS -
+Sigma^<_SS` (`acc_r = rr_g - rr_l`), not a literal `G^R * G^R`.
+
+`SR + RS` has NO closed form: one leg is the numerical background. It therefore
+goes through `set_pole_mixed`, which adds it to the raw bubble output BEFORE
+`delta = Sigma^> - Sigma^<` is formed, so the existing Kramers-Kronig transform
+covers it -- exactly as the `rr_ss_sr` route has always done. See Sec. 4.2:
+getting this wrong was one of the three reasons the route diverged.
 
 ---
 
@@ -278,7 +317,7 @@ demonstrated; physical significance is NOT. And `rel Sigma` is not converging
 on any route (1.0 -> 0.57 -> 0.43 -> 0.64 -> 0.84 -> 0.96), baseline included,
 so this bed at `mix = 0.05` over 6 iterations gives no converged answer.
 
-### 4.2 `congruence_analytic` (job 4398805) -- DIVERGES
+### 4.2 `congruence_analytic` (job 4398805) -- DIVERGED, and why
 
 | iter | base | congruence | analytic |
 |---|---|---|---|
@@ -287,36 +326,89 @@ so this bed at `mix = 0.05` over 6 iterations gives no converged answer.
 | 3 | 1.44e-05 | 1.45e-05 | **2.0000**, `rel Sigma` 3.13 |
 | 5 | 3.56e-05 | 3.65e-05 | **2.0000**, `rel Sigma` 7.95 |
 
-`P_in` flips sign at iteration 1: +1.578e+04 against `P_out = +1.463e+03`,
-residual 0.83.
+`P_in` flips sign at iteration 1: +1.578e+04 against `P_out` = +1.463e+03.
 
-The kernels are verified in ISOLATION, so the defect is in the assembly:
+The kernels were verified in ISOLATION, and that was the right conclusion --
+the defects were all in the ASSEMBLY (`_pole_analytic_sectors`), and all three
+are now fixed and pinned by tests.
 
-* `pf_self_energy` matches a dense contraction built independently from the
-  vertex, the families and the residue formula -- the one index structure a
-  transposed vertex leg or a swapped `(p,q)` would survive every other test.
-* `pf_mixed_self_energy` matches a brute-force ring on a bed built from the
-  physics, and the residual is the REFERENCE's truncation, not the kernel's:
-  1.0e-01 at `w_max = 24`, 1.4e-03 at 40, 2.3e-04 at 64.
-* `partial_fraction_legs` reproduces `SR + RS + SS` at arbitrary frequencies
-  from the same coefficients, to 1e-9.
+**(a) The mixed sector never reached the Hilbert transform.** It was folded
+into the `SS` accumulator and handed to `set_pole_self_energy`, which joins the
+output AFTER `delta = Sigma^> - Sigma^<` is formed, while the injected retarded
+partner `acc_r` is the two-retarded pairing of the POLE-POLE convolution only.
+So `Sigma^R` was missing the entire dispersive part of `SR + RS` while
+`Sigma^{<,>}` had it in full. That is a fluctuation-dissipation break by
+construction, and `lead balance = 2.0000` is what one looks like.
+(`test_analytic_mixed_sector_goes_through_the_hilbert_hook`.)
 
-### 4.3 An open contradiction, and it is the first thing to resolve
+**(b) The low-frequency leg mask was not applied** to the background leg. The
+`rr_ss_sr` route masks it exactly as the ring masks its own legs, with a
+recorded measurement: without it `Sigma^>` is non-PSD by 0.15 at mid-band and
+the violation is strictly LINEAR in the injected mixed term. The device log
+agrees -- analytic route only, base and cong both read `+0.000e+00 ok`:
 
-The ring-leg positivity gate reads
+    positivity sigma_lesser   worst=-4.202e-01 at w[1]    VIOLATION
+    positivity sigma_greater  worst=-1.000e+00 at w[127]  VIOLATION
 
-    ring leg positivity (cell-averaged congruence): worst = -1.000e+00
+(`test_analytic_mixed_sector_masks_the_background_leg`.)
 
-on the **`congruence`** route -- the one that runs stably -- at every
-iteration.
+**(c) `mixed_scale` was ignored**, so the one knob that separates "too large"
+from "wrongly signed" was inert on this route.
 
-That contradicts the construction. `< G~^{<,>} >_k` is an average of PSD
-matrices and must be PSD, and the gate was added precisely as a check on the
-IMPLEMENTATION rather than the maths. Either the gate is measuring the wrong
-thing (wrong sign, wrong reshape, wrong distribution state, a window too
-narrow for the pattern) or the leg is not what Sec. 2 claims and the route's
-stability has some other cause. Until this is settled, the argument given for
-why `congruence` works is not established -- only that it does work.
+Two things that were suspected and are NOT the cause:
+
+* **Finite support.** `pf_self_energy` integrates the analytic leg over
+  `(-inf, inf)` by residues while the mixed sectors and the ring see only the
+  stored window, so the four sectors do not act on one common function. The
+  finite-window kernel (`pair_convolution(window=...)`, verified against
+  numerical quadrature to 1e-10 and against its own residue limit) puts a
+  number on it: truncating at `+-100` moves a same-half-plane pairing by
+  3.3e-03 relative, and gives the opposite-half-plane pairing -- which the
+  residue form sets to exactly zero -- a magnitude 3.3e-03 of it. Sub-percent
+  at a realistic window, not order one.
+* **Conjugate-pole residue symmetry.** `R_{conj z} = -R_z^dagger` holds
+  structurally: it requires `c_ss^dagger = -c_ss` and `c_sr = -c_rs^dagger`,
+  and both survive the freeze. `source_at_poles` shares
+  `0.5*(P(z_a) + P(conj z_b))` over a pair with a common anchor, and the fit's
+  design matrix is real, so `conj(S[b,a]) = -S[a,b]` exactly;
+  `coefficients_at_poles` fits `c_sr` at `z_a` and `c_rs` at `conj(z_a)` through
+  that same design matrix, so `c_sr(z_a) = -c_rs(conj z_a)^dagger` exactly.
+
+**What remains, and it is structural.** `reg = G(w_k) - G_S(w_k)` is frozen per
+cell while `G_S(w)` varies across it. That is the same additive
+signed-pole-plus-frozen-remainder construction that made `keldysh` diverge
+(Sec. 1), reintroduced. The congruence route avoids it by adding no sectors at
+all and correcting the leg by a cell average instead. Fixing (a)-(c) removes
+three defects; it does not remove this, and the device A/B is what says whether
+it bites.
+
+### 4.3 The `-1.000` ring-leg gate -- RESOLVED, it was the gate
+
+The gate read `-1.000` on the `congruence` route at every iteration, which
+contradicted Sec. 2's construction. The full device log settles it. On the
+**pole-off baseline**, every iteration:
+
+    positivity g_lesser    worst=-1.842e-11 at w[72]  ok
+    positivity g_greater   worst=-1.000e+00 at w[0]   VIOLATION
+
+`-i G^>(0)` is the near-singular acoustic bin. It is indefinite AND carries the
+largest eigenvalue in the whole window, so it fixes both the numerator and the
+global normalisation, and `worst` saturates at exactly `-1.000`. The ring
+itself excludes that bin (`conv_mask`); the gate did not, and it collapsed
+lesser and greater to a single `min`. It therefore reported `-1.000` for the
+baseline and for every pole-sector variant alike.
+
+So Sec. 2 was never contradicted -- it was unmeasured. The gate now takes the
+ring's own mask, reports each component with its `omega_index`, and prints the
+same measure on the UNCORRECTED leg beside it; if the two agree it says
+`[== control: gate is blind]` rather than showing a number that means nothing.
+
+A separate hypothesis -- that zero-filling the sparsity pattern (`M .* X`, a
+Hadamard product with a non-PSD mask) breaks positivity -- remains untested. It
+cannot be what fired here, since the same `-1.000` appears with the pole sector
+off, but it is worth measuring now that `w = 0` no longer masks everything: the
+four objects to compare are the dense congruence, a genuine principal
+submatrix, the zero-filled pattern, and the production tapered pattern.
 
 ### 4.4 The tail sum rule
 
@@ -336,22 +428,69 @@ drives the residue sum below 1e-10 of the open one and steepens the tail from
 
 So the closure of `state.legs` is load-bearing for the analytic route, and
 `residue_sum` is the runtime number that says whether a truncated set still
-satisfies it.
+satisfies it. It is now printed, as `eps_tail`.
 
 ---
 
-## 5. What is not gated
+## 5. What is gated, and what is not
 
-**No sector-sum check runs on the analytic route.** `sector_sum_residual`
-exists and would directly catch the failure mode this construction is most
-exposed to -- the ring giving up more than the sectors put back. It should be
-wired before anything else about Sec. 4.2 is diagnosed by inspection.
+Added since the review:
 
-Also unverified: whether pair-shared `c_ss` and single-pole `c_sr`/`c_rs`
-compose consistently inside `pf_leg_sample`. They are frozen by two different
-rules (Sec. 3.1), and the leg subtracted must equal the leg restored exactly.
+* **Sector sum.** `SS + SR + RS + RR` against a direct high-order quadrature
+  of the SAME hybrid `Ghat = G_S + R_h` -- not against the physical `G`, which
+  would fold representation error into the same number as implementation
+  error. Measured 2.1e-03 on the bed, against 0.16 for a 20 % error in `SS`,
+  0.45 for a dropped mixed sector and 0.91 for a flipped one, with all three
+  sectors carrying real weight (0.80 / 0.45 / 0.59 of the total). Offline,
+  because the device version needs an extra ring pass.
+* **`eps_tail`** -- `max |sum_p p_p q_p^T|`, printed per iteration.
+* **`eps_c_rs`** -- `source_fit_tol`'s missing half. The source gate covers
+  `c_ss = V^dagger Sigma V` only, while the analytic route freezes all three
+  coefficients and `c_rs = G^R_k Sigma V - U D_k c_ss` carries the whole
+  retarded background: it can move fast across a pole window where
+  `V^dagger Sigma V` is perfectly smooth. Printed, and flagged against the
+  same tolerance.
+* **`pole registration`** -- the worst sub-cell pole offset, Sec. 2.
+* **Ring-leg positivity** -- masked, per component, with its control.
 
-## 6. Ledger
+Still open: the zero-filled-pattern positivity question (Sec. 4.3), and a
+device-level sector-sum.
+
+---
+
+## 6. A rejected alternative: the half-amplitude Gram bubble
+
+Factor `-i Sigma_k = L L^dagger`, set `Y(w) = G~^R(w) L`, and the Keldysh
+component is `-i G~ = Y Y^dagger` by construction. Contracting the vertex
+against `Y(u) (x) Y(w-u)` gives
+
+    -i Sigma_{mu nu}(w) = int du/2pi sum_{mn} Z_{mu,mn} conj(Z_{nu,mn})  >= 0
+
+so the bubble is manifestly PSD, and the pole dependence inside `Y` is still
+integrable in closed form. The argument is correct.
+
+It is not affordable. The reduced coefficient
+`H_{mu,mn,rs} = sum_ij Phi_{mu,ij} (C_r)_{im} (C_s)_{jn}` carries an OPEN index
+PAIR `(m, n)` running over the columns of `L`, i.e. over `rank(Sigma_k)`, which
+is `~ n_dof` for an interior device. An `O(N_p^4)` estimate that counts only
+the pole basis omits it. This is precisely the open-index blow-up
+`pole_congruence.py` was designed around -- the reason both flattened families
+are FIXED vectors is so the vertex is projected once per iteration rather than
+carrying a device-sized index.
+
+The affordable route to the same end is Sec. 2's `|P|^2` result: keep the FFT
+ring, and replace the boxcar only on cell pairs `(k, m-k)` with both ends in
+the pole set,
+
+    Sigma_m = Sigma_m^FFT - sum_{k, m-k in P} I_km^box + sum_{k, m-k in P} I_km^exact .
+
+Positivity survives without any of the half-amplitude machinery: every cell
+contributes a PSD integrand -- the boxcar for `k not in P`, the exact integral
+for `k in P` -- so the sum is PSD.
+
+---
+
+## 7. Ledger
 
 Jobs: 4398590 (`pcong2`), 4398779 (`panal`, wasted -- a module-level helper
 inserted into the class body truncated `PhononPhononInteraction` and all three
