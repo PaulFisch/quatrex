@@ -223,6 +223,7 @@ class PhononSolver(SubsystemSolver):
         self._pole = None            # PoleSector, built lazily
         self.pole_state = None       # last PoleSectorState, read by the interaction
         self.psd_report = {}         # last positivity gate result, if enabled
+        self._psd_sigma = None       # Sigma buffers for the gate, if enabled
         # A congruence is PSD exactly, so anything above roundoff on the
         # normalised eigenvalue is structural rather than numerical. The
         # normalisation is global, so this is a single scale-free number.
@@ -573,22 +574,26 @@ class PhononSolver(SubsystemSolver):
             return
         from quatrex.phonon.pole_audit import psd_residual
 
-        g_lesser, g_greater = out[0], out[1]
+        # Sigma is checked as well as G, and it is the ROOT check:
+        # G^< = G^R Sigma^< G^A is a congruence, so a PSD Sigma cannot produce
+        # a non-PSD G. If G^< fails, Sigma^< must have failed first, and
+        # reporting only G would send the search to the wrong place.
         n_freq = int(self.local_frequencies.shape[0])
-        for name, buf, sign in (("g_lesser", g_lesser, -1.0),
-                                ("g_greater", g_greater, +1.0)):
+        targets = [("g_lesser", out[0], -1.0), ("g_greater", out[1], +1.0)]
+        if self._psd_sigma is not None:
+            sl, sg = self._psd_sigma
+            targets = [("sigma_lesser", sl, -1.0),
+                       ("sigma_greater", sg, +1.0)] + targets
+        for name, buf, sign in targets:
             rep = psd_residual(
                 buf.data.reshape(n_freq, -1), buf.rows, buf.cols,
                 self.block_sizes, sign=sign,
             )
             self.psd_report[name] = rep
-            if rep["worst"] < -self._psd_tol and comm.rank == 0:
-                print(
-                    f"  positivity: -i {name} has a normalised eigenvalue "
-                    f"{rep['worst']:.3e} at frequency index "
-                    f"{rep['omega_index']} (tol {self._psd_tol:.1e})",
-                    flush=True,
-                )
+            if comm.rank == 0:
+                flag = "VIOLATION" if rep["worst"] < -self._psd_tol else "ok"
+                print(f"  positivity {name:15s} worst={rep['worst']:+.3e} "
+                      f"at w[{rep['omega_index']}]  {flag}", flush=True)
 
     def _pole_frequency_context(self, local_freqs) -> dict:
         """Global grid, local offset and reducer for the pole continuation.
@@ -806,6 +811,8 @@ class PhononSolver(SubsystemSolver):
         # Must run BEFORE free_data(): the pole solve reads the assembled
         # operator's blocks.
         self._update_pole_sector(sse_lesser, sse_greater)
+        self._psd_sigma = (sse_lesser, sse_greater)
         self._check_positivity(out)
+        self._psd_sigma = None
 
         self.system_matrix.free_data()

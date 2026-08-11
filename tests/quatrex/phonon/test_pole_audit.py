@@ -352,6 +352,7 @@ class _StubSolver:
         self.local_frequencies = np.zeros(n_freq)
         self.psd_report = {}
         self._psd_tol = 1e-10
+        self._psd_sigma = None
         self._out = out
 
 
@@ -387,7 +388,7 @@ def test_positivity_gate_reports_both_buffers_when_enabled():
     cfg = PoleSectorConfig(enabled=True, psd_check=True)
     s = _StubSolver(cfg, out, sizes, ne)
     s._check_positivity(out)
-    assert set(s.psd_report) == {"g_lesser", "g_greater"}
+    assert set(s.psd_report) == {"g_lesser", "g_greater"}   # Sigma off here
     # A congruence passes on BOTH sign conventions.
     for name in ("g_lesser", "g_greater"):
         assert s.psd_report[name]["worst"] > -1e-12
