@@ -182,7 +182,7 @@ class PoleSectorConfig(BaseModel):
     ``"rr_ss"`` and ``"rr"`` DROP physical three-phonon processes and exist only
     to measure the size of what they drop -- neither is a production setting."""
 
-    leg: Literal["congruence", "keldysh"] = "congruence"
+    leg: Literal["congruence", "congruence_analytic", "keldysh"] = "congruence"
     """WHICH Green's function the pole split is applied to.
 
     ``"congruence"`` splits the RETARDED function, ``G~^R = G^R_k + U[D(w) -

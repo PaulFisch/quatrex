@@ -71,9 +71,12 @@ __all__ = [
     "sector_grid_sample",
     "sector_cell_average",
     "cell_weights",
+    "coefficients_at_poles",
+    "residue_sum",
     "partial_fraction_legs",
     "pf_leg_sample",
     "pf_self_energy",
+    "pf_mixed_self_energy",
     "reconstruct",
 ]
 
@@ -478,3 +481,149 @@ def pf_self_energy(
             "kpq,kqp,wpq->wk", xp.take(vl, r[s:e], axis=0),
             xp.take(vr, cc[s:e], axis=0), c)
     return prefactor * out
+
+
+def pf_mixed_self_energy(
+    omega: NDArray,
+    zeta: NDArray,
+    p_row: NDArray,
+    q_col: NDArray,
+    g_reg: NDArray,
+    g_partner: NDArray,
+    freqs: NDArray,
+    phi_blocks: dict,
+    block_sizes: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    prefactor: complex | None = None,
+) -> NDArray:
+    r"""``Sigma_SR + Sigma_RS`` for a partial-fraction leg.
+
+    The same block triple product as
+    :func:`~quatrex.phonon.pole_bridge.mixed_self_energy_blocked`, with one
+    change: the pole leg's row and column modes are no longer independent
+    indices :math:`(\alpha, \delta)` over a single family, but a single index
+    :math:`p` over TWO families, because every residue here is rank one. The
+    double loop over ``(Np, Np)`` therefore collapses to a single loop over
+    ``2 Np``, and the vertex is projected onto ``p_row`` on the left and
+    ``q_col`` on the right rather than onto ``u`` and ``conj(u)``.
+
+    ``q_col`` already carries whatever conjugation each pole needs -- ``conj u``
+    at :math:`\bar z_b`, the ``SR`` bracket at :math:`z_a` -- so both
+    projections are taken unconjugated.
+    """
+    from quatrex.phonon.pole_audit import transpose_index
+    from quatrex.phonon.pole_bridge import (
+        analytic_prefactor, block_offsets, blocks_from_pattern,
+        mixed_vertex_block_dict, pattern_from_blocks,
+    )
+    from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
+
+    if prefactor is None:
+        prefactor = analytic_prefactor()
+    # The convolution runs over the WHOLE axis while the solver holds G only
+    # for omega >= 0; the negative half comes from the PARTNER component,
+    # transposed, not from conjugating this one.
+    g_ext, f_ext = bosonic_extend(
+        g_reg, g_partner, freqs, transpose_index=transpose_index(rows, cols))
+
+    z = np.asarray(_h(zeta))
+    n_p, n_omega = int(z.size), int(omega.shape[0])
+    m_blocks = [
+        blocks_from_pattern(
+            mixed_convolution_batched(omega, complex(z[p]), 1.0 + 0.0j,
+                                      g_ext, f_ext),
+            rows, cols, block_sizes)
+        for p in range(n_p)
+    ]
+
+    off = block_offsets(block_sizes)
+    r = np.asarray(_h(rows), dtype=np.int64)
+    c = np.asarray(_h(cols), dtype=np.int64)
+    out_pairs = {(int(i), int(j)) for i, j in zip(
+        np.searchsorted(off, r, side="right") - 1,
+        np.searchsorted(off, c, side="right") - 1)}
+
+    vd = mixed_vertex_block_dict
+    total = None
+    for legs in ((0, 1), (1, 0)):            # Sigma_SR, then Sigma_RS
+        bl = vd(phi_blocks, block_sizes, p_row, leg=legs[0], conjugate=False)
+        br = vd(phi_blocks, block_sizes, q_col, leg=legs[1], conjugate=False)
+        acc: dict[tuple[int, int], NDArray] = {}
+        for (i_out, j_out) in out_pairs:
+            got = None
+            for p in range(n_p):
+                for (a, b), mab in m_blocks[p].items():
+                    left, right = bl.get((i_out, a)), br.get((j_out, b))
+                    if left is None or right is None:
+                        continue
+                    term = xp.einsum("ik,wkl,jl->wij",
+                                     left[..., p], mab, right[..., p])
+                    got = term if got is None else got + term
+            if got is not None:
+                acc[(i_out, j_out)] = got
+        part = pattern_from_blocks(acc, rows, cols, block_sizes, n_omega,
+                                   dtype=xp.complex128)
+        total = part if total is None else total + part
+    return prefactor * total
+
+
+def coefficients_at_poles(
+    cluster: PoleCluster,
+    freqs: NDArray,
+    coefficients: tuple[NDArray, NDArray, NDArray],
+    order: int = 2,
+    window: int = 4,
+) -> tuple[NDArray, NDArray, NDArray]:
+    r"""Freeze the sector coefficients at their own poles.
+
+    The partial-fraction families are only frequency independent if the
+    coefficients are, so they must be continued off the real axis exactly as
+    the projected source is. ``c_ss`` goes through
+    :func:`~quatrex.phonon.pole_bridge.source_at_poles`, which shares one value
+    between the two residues of a pair -- that is what keeps ``c_a + c_b = 0``
+    and the pole-pole leg decaying like ``1/w^2``.
+
+    ``c_sr`` and ``c_rs`` have no pair structure: each belongs to a SINGLE
+    pole, ``c_sr[a]`` to ``z_a`` and ``c_rs[:, b]`` to ``conj(z_b)``, so each
+    is evaluated at its own. Their asymptotics are governed instead by
+    ``sum_a u_a v_a^H = 0``, the sum rule the bosonically closed pole set
+    satisfies, and :func:`residue_sum` is what measures it.
+    """
+    from quatrex.phonon.pole_bridge import source_at_poles
+    from quatrex.phonon.pole_kernel import delta_local_fit
+
+    c_sr, c_rs, c_ss = coefficients
+    z = np.asarray(_h(cluster.z))
+    npp = int(z.size)
+    ss = source_at_poles(c_ss, freqs, cluster, order=order, window=window)
+
+    def _at(flat, targets, shape):
+        return xp.stack([
+            delta_local_fit(flat, freqs, xp.asarray([t]), order=order,
+                            window=window, anchor=float(np.real(t))
+                            ).reshape(shape)
+            for t in targets])
+
+    n_dof = int(c_sr.shape[-1])
+    sr = _at(c_sr.reshape(c_sr.shape[0], -1), [complex(x) for x in z],
+             (npp, n_dof))
+    rs = _at(xp.swapaxes(c_rs, 1, 2).reshape(c_rs.shape[0], -1),
+             [complex(np.conj(x)) for x in z], (npp, n_dof))
+    # each pole keeps only its own row/column
+    sr = xp.stack([sr[a, a] for a in range(npp)])
+    rs = xp.swapaxes(xp.stack([rs[b, b] for b in range(npp)]), 0, 1)
+    return sr, rs, ss
+
+
+def residue_sum(p_row: NDArray, q_col: NDArray) -> float:
+    r"""``max |sum_p p_p q_p^T|`` -- the coefficient of the leg's ``1/w`` tail.
+
+    The analytic leg is a GLOBAL function, so this is not cosmetic. The true
+    ``G`` decays like ``1/w^2``; a spurious ``1/w`` once made ``G_PP`` 17x too
+    large at ``w = 1e2`` and cost four orders. It vanishes exactly when
+    ``sum_a u_a v_a^H = 0``, which the bosonically closed pole set satisfies
+    because the residue at ``-Omega`` cancels the one at ``+Omega``. A
+    truncated or unclosed set does not, and this is the number that says so.
+    """
+    return float(xp.abs(p_row @ xp.swapaxes(q_col, 0, 1)).max())

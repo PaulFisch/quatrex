@@ -181,6 +181,66 @@ class PhononPhononInteraction(Interaction):
             ),
         )
 
+
+
+def _pole_analytic_sectors(scba, state, ssp) -> None:
+    """SS + SR + RS for the partial-fraction leg, all analytic.
+
+    The leg the solver removed from the ring is
+    ``sum_p p_p q_p^T/(w - zeta_p)``; this restores its three bubble sectors,
+    so the decomposition ``B(G,G) = SS + SR + RS + RR`` closes. Removing more
+    than is put back is what the sector-sum gate exists to catch, and it is
+    the failure this whole construction started from.
+    """
+    from quatrex.phonon.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.pole_congruence import (
+        pf_mixed_self_energy, pf_self_energy,
+    )
+
+    solver = scba.phonon_solver
+    rows, cols = data_rows_cols(scba)
+    freqs = xp.asarray(solver.local_frequencies, dtype=float)
+    shape = scba.data.sigma_lesser.data.shape
+    h = float(xp.real(freqs[1] - freqs[0])) if freqs.shape[0] > 1 else 0.0
+    cell = h if getattr(scba.config.phonon.pole_sector, "cell_average",
+                        True) else None
+    g_l = scba.data.g_lesser.data.reshape(freqs.shape[0], -1)
+    g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
+    reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
+    reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
+
+    acc_l = acc_g = acc_r = None
+    for pf_l, pf_g in zip(state.pf_lesser, state.pf_greater):
+        for pf, reg, partner, slot in ((pf_l, reg_l, reg_g, "l"),
+                                       (pf_g, reg_g, reg_l, "g")):
+            zeta, p_row, q_col = pf
+            vl = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, p_row,
+                                     conjugate=False)
+            vr = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, q_col,
+                                     conjugate=False)
+            ss = pf_self_energy(freqs, zeta, vl, vr, rows, cols, cell=cell)
+            mx = pf_mixed_self_energy(
+                freqs, zeta, p_row, q_col, reg, partner, freqs,
+                ssp.phi_blocks, ssp.block_sizes, rows, cols)
+            # The CAUSAL part comes from the two-retarded pairings of the
+            # pole-pole sector, whose combined pole lands in the lower half
+            # plane. The mixed sectors have no closed-form retarded partner;
+            # the driver's global KK half is what covers them.
+            rr = pf_self_energy(freqs, zeta, vl, vr, rows, cols,
+                                retarded_only=True, cell=cell)
+            if slot == "l":
+                acc_l = ss + mx if acc_l is None else acc_l + ss + mx
+                acc_r = -rr if acc_r is None else acc_r - rr
+            else:
+                acc_g = ss + mx if acc_g is None else acc_g + ss + mx
+                acc_r = rr if acc_r is None else acc_r + rr
+
+    # Inject only the KRAMERS-KRONIG HALF: core/scba.py already adds
+    # 0.5*(sigma^< - sigma^>) globally over the stored total.
+    kk_half = acc_r - 0.5 * (acc_g - acc_l)
+    ssp.set_pole_self_energy(acc_l.reshape(shape), acc_g.reshape(shape),
+                             kk_half.reshape(shape))
+
     def _inject_pole_sector(self, scba: "SCBA") -> None:
         """Hand the solver's pole clusters to the bubble.
 
@@ -209,6 +269,9 @@ class PhononPhononInteraction(Interaction):
         ssp = self.sigma_phonon_phonon
         # (1) The legs: remove the pole sector before the FFT ring sees them.
         ssp.set_pole_channel(state.g_pp_lesser, state.g_pp_greater)
+        if getattr(ps, "leg", "congruence") == "congruence_analytic":
+            _pole_analytic_sectors(scba, state, ssp)
+            return
         if getattr(ps, "leg", "congruence") == "congruence":
             # Nothing is added back, and nothing is dropped. The pole channel
             # here is the POINT-minus-CELL-AVERAGE correction, so what the ring

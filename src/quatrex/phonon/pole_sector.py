@@ -77,6 +77,14 @@ class PoleSectorState:
     source_greater: list = field(default_factory=list)
     c_lesser: list = field(default_factory=list)
     c_greater: list = field(default_factory=list)
+    pf_lesser: list = field(default_factory=list)
+    pf_greater: list = field(default_factory=list)
+    """``(zeta, p_row, q_col)`` per leg: the congruence flattened to ``2 Np``
+    simple poles with rank-1 residues, which is what makes the analytic
+    convolution affordable. Only under ``leg == "congruence_analytic"``."""
+    residue_sum: list = field(default_factory=list)
+    """``max |sum_p p_p q_p^T|`` per leg -- the ``1/w`` tail coefficient of
+    the analytic leg, which the bosonic closure must drive to zero."""
     """``(c_sr, c_rs, c_ss)`` per leg, from
     :func:`~quatrex.phonon.pole_congruence.background_coefficients`. Empty
     unless ``pole_sector.leg == "congruence"``. ``c_ss`` duplicates

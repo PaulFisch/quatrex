@@ -306,3 +306,127 @@ def test_pf_self_energy_matches_a_dense_contraction():
     ref = np.einsum("mce,ndb,cp,bp,eq,dq,wpq->wmn",
                     phi, phi, pr, qc, pr, qc, j)
     assert np.abs(got - ref).max() < 1e-9 * np.abs(ref).max()
+
+
+def test_leg_tail_is_the_residue_sum_and_the_closure_kills_it():
+    """The analytic leg is a GLOBAL function, so its tail is not cosmetic.
+
+    ``sum_p p_p q_p^T`` IS the coefficient of the ``1/w`` tail. The true
+    phonon ``G`` decays like ``1/w^2``, and a spurious ``1/w`` is what once
+    made ``G_PP`` 17x too large at ``w = 1e2`` and cost four orders
+    (``source_at_poles``). It vanishes exactly when ``sum_a u_a v_a^H = 0``,
+    which is the sum rule the BOSONICALLY CLOSED pole set satisfies: the
+    residue at ``-Omega`` cancels the one at ``+Omega``.
+
+    That closure is not optional decoration -- it is what makes the analytic
+    sector's tail legitimate.
+    """
+    from quatrex.phonon.pole_congruence import (
+        background_coefficients, partial_fraction_legs, pf_leg_sample,
+    )
+
+    rng = np.random.default_rng(4)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    n, om, gam = 4, 7.0, 0.05
+    c, d = cx(n, 1), cx(n, 1)
+    big = np.array([1e3, 1e4, 1e5])
+    rows, cols = np.repeat(np.arange(n), n), np.tile(np.arange(n), n)
+    w = np.linspace(1.0, 20.0, 24)
+    a = cx(w.size, n, n)
+    sig = 1j * (a @ np.conj(np.swapaxes(a, 1, 2)))
+    gk = cx(w.size, n, n)
+
+    def tail(z, u, v):
+        cl = PoleCluster(z=z, u=u, v=v, label="t")
+        co = background_coefficients(cl, w, sig @ v, gk @ (sig @ v))
+        zeta, p, q = partial_fraction_legs(cl, tuple(x[0] for x in co))
+        leg = np.asarray(pf_leg_sample(zeta, p, q, big, rows, cols))
+        return np.abs(p @ q.T).max(), np.abs(leg).max(axis=1)
+
+    # open: one pole, nothing to cancel against
+    s_open, l_open = tail(np.array([om - 1j * gam]), c, d)
+    # closed under z -> -conj(z), residues equal and opposite
+    s_cl, l_cl = tail(np.array([om - 1j * gam, -om - 1j * gam]),
+                      np.hstack([c, c]), np.hstack([d, -d]))
+
+    # the residue sum IS the 1/w coefficient, to a few percent at w = 1e5
+    assert abs(l_open[-1] * big[-1] - s_open) < 0.02 * s_open
+    # ... and the closure removes it: the tail steepens from 1/w to 1/w^2
+    assert s_cl < 1e-10 * s_open
+    assert (l_cl[-1] * big[-1] ** 2) / (l_cl[0] * big[0] ** 2) < 1.05
+    # w*|leg| is flat for the open set and falls like 1/w for the closed one
+    assert (l_open[0] * big[0]) / (l_open[-1] * big[-1]) < 1.05
+    assert (l_cl[0] * big[0]) / (l_cl[-1] * big[-1]) > 50.0
+
+
+def test_pf_mixed_sectors_match_the_brute_force_ring():
+    """The new mixed kernel against a direct evaluation of the same ring.
+
+    Reuses the bed of ``test_pole_mixed_sectors``: a physical ``(G^<, G^>)``
+    pair built from the physics rather than from the mirror under test, and a
+    kernel handed only the non-negative half so it must rebuild the negative
+    axis itself. The pole set is closed under ``z -> -conj(z)`` so the flat
+    leg has no spurious ``1/w`` tail to contaminate the comparison.
+    """
+    import importlib.util
+    import pathlib
+
+    from quatrex.phonon.pole_congruence import pf_mixed_self_energy
+
+    # the sibling module is not a package; load it by path
+    _p = pathlib.Path(__file__).with_name("test_pole_mixed_sectors.py")
+    _sp = importlib.util.spec_from_file_location("_pms", _p)
+    m = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(m)
+
+    # The reference must span well past the poles: it truncates the ring
+    # integral at its grid edge while the kernel does the pole part
+    # analytically over the whole axis. Measured on this bed, comparing on
+    # [4, 20]: w_max = 24 gives 1.0e-01, 40 gives 1.4e-03, 64 gives 2.3e-04.
+    # The disagreement is the REFERENCE's, and it converges away.
+    h = 0.1
+    w_pos = np.arange(0.0, 40.0 + 1e-9, h)
+    w_full = np.concatenate([-w_pos[:0:-1], w_pos])
+    phi, _, _, off = m._bed(0.5)
+    rows, cols = m._pattern()
+    rng = np.random.default_rng(17)
+    nd = m.N_DOF
+
+    # closed pole set: residues at -Omega cancel those at +Omega
+    a = rng.normal(size=(nd, 2)) + 1j * rng.normal(size=(nd, 2))
+    b = rng.normal(size=(nd, 2)) + 1j * rng.normal(size=(nd, 2))
+    zc = np.array([8.0 - 0.5j, 12.0 - 0.5j])
+    zeta = np.concatenate([zc, -np.conj(zc)])
+    p_row = np.hstack([a, a])
+    q_col = np.hstack([b, -b])
+    assert np.abs(p_row @ q_col.T).max() < 1e-12
+
+    mat = rng.normal(size=(nd, nd))
+    mat = mat + mat.T
+
+    def _pair(x):
+        kt = 25.0
+        n_b = 1.0 / np.expm1(np.where(np.abs(x) < 1e-9, 1e-9, x) / kt)
+        aa = (4.0 / ((x - 9.0) ** 2 + 16.0) - 4.0 / ((x + 9.0) ** 2 + 16.0))
+        return (np.einsum("w,ij->wij", 1j * n_b * aa, mat),
+                np.einsum("w,ij->wij", 1j * (n_b + 1.0) * aa, mat))
+
+    gl_full, _ = _pair(w_full)
+    gl_pos_v, gg_pos_v = (x[:, rows, cols] for x in _pair(w_pos))
+
+    got = np.asarray(pf_mixed_self_energy(
+        w_pos, zeta, p_row, q_col, gl_pos_v, gg_pos_v, w_pos,
+        phi, m.SIZES, rows, cols))
+
+    d = 1.0 / (w_full[:, None] - zeta[None, :])
+    gs_full = np.einsum("ip,wp,jp->wij", p_row, d, q_col)
+    ref = (m._brute_ring(phi, off, gs_full, gl_full, w_full, rows, cols)
+           + m._brute_ring(phi, off, gl_full, gs_full, w_full, rows, cols))
+
+    keep = (w_full > 4.0) & (w_full < 20.0)
+    sel = (w_pos > 4.0) & (w_pos < 20.0)
+    err = np.abs(got[sel] - ref[keep]).max() / np.abs(ref[keep]).max()
+    assert err < 5e-3, f"pf mixed sectors vs brute-force ring: {err:.3e}"

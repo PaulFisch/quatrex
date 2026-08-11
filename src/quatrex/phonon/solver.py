@@ -710,8 +710,9 @@ class PhononSolver(SubsystemSolver):
             source_at_poles, source_variation,
         )
         from quatrex.phonon.pole_congruence import (
-            apply_sparse, background_coefficients, sector_cell_average,
-            sector_grid_sample,
+            apply_sparse, background_coefficients, coefficients_at_poles,
+            partial_fraction_legs, pf_leg_sample, residue_sum,
+            sector_cell_average, sector_grid_sample,
         )
 
         state = self.pole_state
@@ -740,7 +741,9 @@ class PhononSolver(SubsystemSolver):
         #
         state.legs = self._pole.bubble_clusters()
         acc_l = acc_g = None
-        congruence = getattr(self._pole_cfg, "leg", "congruence") == "congruence"
+        _leg = getattr(self._pole_cfg, "leg", "congruence")
+        analytic = _leg == "congruence_analytic"
+        congruence = _leg.startswith("congruence")
         if congruence:
             if g_retarded is None:
                 raise ValueError(
@@ -795,14 +798,30 @@ class PhononSolver(SubsystemSolver):
                         cl, freqs, sv,
                         apply_sparse(gr, rows, cols, sv, n_dof))
                     c_out.append(co)
-                    # What the ring must give up is the difference between the
-                    # POINT sample it would otherwise use and the CELL AVERAGE
-                    # the bubble's dw-weighted sum actually wants. Subtracting
-                    # it leaves the ring holding <G~^{<,>}>_k, an average of
-                    # PSD matrices, hence PSD whatever the pole model does.
-                    smp = (sector_grid_sample(cl, freqs, co, rows, cols)
-                           - sector_cell_average(cl, freqs, co, rows, cols,
-                                                 cell_widths))
+                    if analytic:
+                        # The sectors are put back as ANALYTIC terms, so what
+                        # the ring gives up is the analytic leg's own sample --
+                        # not a cell-average correction. G_reg = G - G_S is
+                        # exact for any G_S, but only if the leg subtracted
+                        # here and the leg the sectors restore are literally
+                        # the same function.
+                        zeta, p_row, q_col = partial_fraction_legs(
+                            cl, coefficients_at_poles(cl, freqs, co))
+                        (state.pf_lesser if g_out == "l"
+                         else state.pf_greater).append((zeta, p_row, q_col))
+                        state.residue_sum.append(residue_sum(p_row, q_col))
+                        smp = pf_leg_sample(zeta, p_row, q_col, freqs,
+                                            rows, cols)
+                    else:
+                        # What the ring must give up is the difference between
+                        # the POINT sample it would otherwise use and the CELL
+                        # AVERAGE the bubble's dw-weighted sum actually wants.
+                        # Subtracting it leaves the ring holding <G~^{<,>}>_k,
+                        # an average of PSD matrices, hence PSD whatever the
+                        # pole model does.
+                        smp = (sector_grid_sample(cl, freqs, co, rows, cols)
+                               - sector_cell_average(cl, freqs, co, rows,
+                                                     cols, cell_widths))
                     if g_out == "l":
                         acc_l = smp if acc_l is None else acc_l + smp
                     else:
