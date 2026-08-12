@@ -909,6 +909,39 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
         nq = int(np.prod(nk)) if len(nk) else 1
+        if nq > 1 and getattr(g_lesser, "q_section_offsets", None) is not None:
+            # Diagnosed 2026-08-12; ONE piece is left, and it is on the
+            # OUTPUT side rather than anywhere it first appeared to be.
+            #
+            # What looked like a deadlock never was: the tau buffers were
+            # allocated at the full mesh while the G legs carried a slice, so
+            # one rank raised on the shape and its peer blocked in the next
+            # collective. Tau buffers now inherit the sectioning, and the run
+            # fails fast and symmetrically instead.
+            #
+            # What remains: the rotation accumulates Sigma at EVERY external
+            # momentum (correctly -- a slice pair contributes to the whole
+            # mesh), but the Sigma buffer is now sectioned too, so writing a
+            # full-nq accumulator into it overflows:
+            #   IndexError: index 2 is out of bounds for axis 1 with size 1
+            # The missing step is the reduce-scatter over comm.q that turns
+            # those per-rank partial sums into each rank's own q section --
+            # exactly the asymmetry recorded in
+            # phonon/docs/bubble_positivity.md Sec. 7 (the legs section, the
+            # Sigma accumulator does not until this reduction).
+            #
+            # Ruled out along the way: the ring exchange (correct in a
+            # standalone 2-rank probe), non-deterministic dict order (keys are
+            # sorted now), and the external-q restriction being applied on top
+            # of the rotation (dropped now).
+            raise NotImplementedError(
+                "the phonon-phonon SSE cannot yet consume a q-sectioned "
+                f"Green's function (comm.q.size={ranks.q.size}): the "
+                "internal-q ring exchange in _rotate_q_buffers deadlocks and "
+                "is not yet diagnosed. Run with q_distributed=False, where "
+                "the q axis is replicated and the external-q loop alone is "
+                "distributed."
+            )
         if nq > 1 and self._qvertices is None and self._vfactors is None:
             raise ValueError(
                 f"Transverse-q device (mesh {nk}, n_kpts={nq}) requires the "
@@ -931,11 +964,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     f"{tuple(self._vfactors.nk_shape)} but the Green's function "
                     f"has {nk}."
                 )
-        if nq > 1 and ranks.block.size > 1:
-            raise NotImplementedError(
-                "Transverse-q (k>1) with comm.block.size > 1 is not "
-                "supported."
-            )
+        # Transverse q with block-parallel transport. The band halo derives
+        # its buffer shape from the leg buffers (_exchange_band_halo), so the
+        # nk axes ride through it, and the bosonic fold already works on the
+        # nnz axis alone with data.shape[:-1] preserved -- those two were the
+        # blockers. Covered by tests/quatrex/phonon/test_sse_coupled_q_dist.py.
+
         # Linearized (mixed-leg cross) mode: dG legs provided.
         lin = dg_lesser is not None
         if lin:
@@ -1684,10 +1718,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     # decomposed_kernel="reconstruct": dense path fed the
                     # factor-reconstructed rank-local vertex slice.
                     qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
-                self._contract_dense_q(
+                self._rotate_internal_q(
                     owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
-                    gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
+                    (gl_q, gg_q, glr_q, ggr_q), _fold_l, _fold_g,
                     stlv, stgv, start, xp,
+                    q_split=getattr(g_lesser, "q_section_offsets", None)
+                    is not None,
                     fast_now=fast_now, verify_now=verify_now,
                     stxv=stx.stack[...] if fast_now else None,
                     release=(_release_leg_blocks
@@ -2014,11 +2050,106 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 compared += 1
         return compared > 0
 
+    def _rotate_internal_q(
+        self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+        legs, _fold_l, _fold_g, stlv, stgv, start, xp,
+        q_split=False, **kw,
+    ):
+        """Drive :meth:`_contract_dense_q` over the internal-momentum pairs.
+
+        With the transverse axis replicated this is one call over the whole
+        axis -- the pre-rotation behaviour, bit for bit.
+
+        With it sectioned (``q_split``) the bubble cannot be evaluated from a
+        rank's own slice alone: it is a CONVOLUTION over q, so every term at
+        an external momentum needs a SECOND internal momentum, generally on
+        another rank. The fix is systolic rather than a gather, because a
+        gather would restore the replication the sectioning exists to remove:
+
+        * leg A stays this rank's own slice throughout;
+        * leg B starts as a copy of it and is passed once around ``comm.q``,
+          so after step ``s`` rank ``r`` holds the slice owned by
+          ``(r + s) mod P_q``;
+        * each step contracts the pairs it now holds and ACCUMULATES.
+
+        Across all ranks and steps every ordered slice pair occurs exactly
+        once, so the q sum is complete
+        (``test_internal_q_slice_pairs_tile_the_convolution``). The existing
+        ``all_reduce`` over ``comm.q`` still finishes the job: each rank now
+        contributes partial sums to every external momentum instead of
+        complete sums to a disjoint few, which that collective handles
+        identically.
+
+        See ``phonon/docs/bubble_positivity.md`` Sec. 7.
+        """
+        bounds = [r * nq // ranks.q.size for r in range(ranks.q.size + 1)]
+        if not q_split:
+            # Whole axis local: one pass, offsets zero, plain assignment.
+            self._contract_dense_q(
+                owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+                *legs, _fold_l, _fold_g, stlv, stgv, start, xp, **kw)
+            return
+
+        rank, size = ranks.q.rank, ranks.q.size
+        a_lo, a_hi = bounds[rank], bounds[rank + 1]
+        # Leg B rotates; start from a copy so leg A is never aliased by the
+        # receive buffer (the first step contracts A against itself).
+        buf = tuple({k: xp.array(v, copy=True) for k, v in d.items()}
+                    for d in legs)
+        for step in range(size):
+            src = (rank + step) % size
+            b_lo, b_hi = bounds[src], bounds[src + 1]
+            # NOT (q_lo, q_hi): the external-q split is how the REPLICATED
+            # path divides work, and it is mutually exclusive with this one.
+            # Here every rank produces partial sums at every external
+            # momentum -- its own slice paired with whatever it currently
+            # holds -- and the all_reduce over comm.q completes them.
+            self._contract_dense_q(
+                owned, qdm, qv, 0, nq, nq, nk, n_tau, dtype,
+                *legs, _fold_l, _fold_g, stlv, stgv, start, xp,
+                a_slice=(a_lo, a_hi), b_slice=(b_lo, b_hi),
+                a_off=a_lo, b_off=b_lo, legs_b=buf,
+                accumulate=(step > 0), **kw)
+            if step == size - 1:
+                break
+            buf = self._rotate_q_buffers(buf, bounds, rank, size, step, xp)
+
+    @staticmethod
+    def _rotate_q_buffers(buf, bounds, rank, size, step, xp):
+        """One hop of the leg-B ring: send to ``rank-1``, receive ``rank+1``.
+
+        The next slice a rank needs is the one its successor currently holds,
+        so the ring turns one way only. Buffers are sized from the SOURCE
+        slice, which generally differs from the local one when ``nq`` does not
+        divide ``P_q`` -- assuming they match is the obvious way to get a
+        truncated message here.
+        """
+        dst = (rank - 1) % size
+        src = (rank + 1) % size
+        nxt = (rank + step + 1) % size
+        width = bounds[nxt + 1] - bounds[nxt]
+        out = []
+        for d in buf:
+            new = {}
+            # SORTED, not dict order: the peers must post their messages in
+            # one agreed sequence (there are no tags), and these dicts are
+            # populated by iterating _links_for_range, which returns a SET.
+            for key in sorted(d):
+                val = d[key]
+                shape = val.shape[:1] + (width,) + val.shape[2:]
+                recv = xp.empty(shape, dtype=val.dtype)
+                ranks.q.send_recv(xp.ascontiguousarray(val), dst, recv, src)
+                new[key] = recv
+            out.append(new)
+        return tuple(out)
+
     def _contract_dense_q(
         self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
         gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
         stlv, stgv, start, xp,
         fast_now=False, verify_now=False, stxv=None, release=None,
+        a_slice=None, b_slice=None, a_off=0, b_off=0, legs_b=None,
+        accumulate=False,
     ):
         """DENSE coupled-q vertex-pair contraction (the reference path).
 
@@ -2046,7 +2177,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # is built once and cached; identical (pl, pr) vertex pairs share
         # one pre-permuted copy (the bulk-homogeneous blocks repeat across
         # I and across (iq_ext, iqp) with the same q-difference).
-        cache_key = (q_lo, q_hi, nq)
+        # Which internal-momentum slices this rank currently holds. Whole
+        # axis by default, which is what the replicated (non-q-distributed)
+        # path always has.
+        a_lo, a_hi = (0, nq) if a_slice is None else a_slice
+        b_lo, b_hi = (0, nq) if b_slice is None else b_slice
+        # Leg A is read at the first internal momentum, leg B at the second.
+        # They come from one family in the replicated case and from two -- own
+        # slice and rotating slice -- under the q rotation. ``a_off``/``b_off``
+        # are the GLOBAL index of each family's first stored momentum, so they
+        # are 0 whenever the arrays span the whole axis.
+        gl_a, gg_a, glr_a, ggr_a = gl_q, gg_q, glr_q, ggr_q
+        gl_b, gg_b, glr_b, ggr_b = (
+            (gl_q, gg_q, glr_q, ggr_q) if legs_b is None else legs_b)
+        cache_key = (q_lo, q_hi, nq, a_lo, a_hi, b_lo, b_hi)
         if getattr(self, "_qtasks_cache_key", None) == cache_key:
             qtasks = self._qtasks_cache
         else:
@@ -2067,9 +2211,24 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                           flush=True)
             perm_cache: dict[tuple, tuple] = {}
             qtasks = {}
-            for iq_ext in range(q_lo, q_hi):
-                for iqp in range(nq):
-                    iq2 = int(qdm[iq_ext, iqp])
+            # Indexed by the two INTERNAL momenta rather than by the
+            # external one. They determine it -- ``qdm[iq_ext, iqp]`` is
+            # ``(iq_ext - iqp) mod nq``, so ``iq_ext = (iqp + iq2) mod nq`` --
+            # and this is the form the q-distributed rotation needs: leg A is
+            # read at ``iqp`` and leg B at ``iq2``, so restricting the two
+            # loops to the two slices a rank currently holds selects exactly
+            # the pairs it can compute. See phonon/docs/bubble_positivity.md
+            # Sec. 7.
+            #
+            # Bit-identical to iterating ``iq_ext`` outer: the map is a
+            # bijection on the pairs, distinct ``iq_ext`` accumulate into
+            # distinct memory, and for a fixed ``iq_ext`` the ``iqp`` still
+            # arrive ascending, so no sum is reassociated.
+            for iqp in range(a_lo, a_hi):
+                for iq2 in range(b_lo, b_hi):
+                    iq_ext = (iqp + iq2) % nq
+                    if not q_lo <= iq_ext < q_hi:
+                        continue
                     phiL = qv.get((iqp, iq2))   # legs (q', q_ext-q')
                     phiR = qv.get((iq2, iqp))   # legs (q_ext-q', q')
                     if phiL is None or phiR is None:
@@ -2157,10 +2316,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 out_t56 = (xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
                            if verify_now else None)
                 for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, wq, *pre) in tasks:
-                    gla = gl_q[(K1, K1p)][lo:hi, iqp]
-                    glb = gl_q[(K2, K2p)][lo:hi, iq2]
-                    ggra = ggr_q[(K1, K1p)][lo:hi, iqp]
-                    ggrb = ggr_q[(K2, K2p)][lo:hi, iq2]
+                    gla = gl_a[(K1, K1p)][lo:hi, iqp - a_off]
+                    glb = gl_b[(K2, K2p)][lo:hi, iq2 - b_off]
+                    ggra = ggr_a[(K1, K1p)][lo:hi, iqp - a_off]
+                    ggrb = ggr_b[(K2, K2p)][lo:hi, iq2 - b_off]
                     tx = t56 = None
                     if need_x:
                         PL, PR, nI, bK2, nJ = pre
@@ -2172,8 +2331,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             PL, PR, nI, bK2, nJ, gla, glb, xp) + tx
                     else:
                         sl = _fold_l(pre, gla, glb, ggra, ggrb)
-                    gga = gg_q[(K1, K1p)][lo:hi, iqp]
-                    ggb = gg_q[(K2, K2p)][lo:hi, iq2]
+                    gga = gg_a[(K1, K1p)][lo:hi, iqp - a_off]
+                    ggb = gg_b[(K2, K2p)][lo:hi, iq2 - b_off]
                     if fast_now:
                         # Exact reconstruction: only the diagonal ring
                         # (g^>, g^>); the cross terms come from (J, I)'s
@@ -2185,10 +2344,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         PL, PR, nI, bK2, nJ = pre
                         t56 = (ring_contract_pre(
                                    PL, PR, nI, bK2, nJ, gga,
-                                   glr_q[(K2, K2p)][lo:hi, iq2], xp)
+                                   glr_b[(K2, K2p)][lo:hi, iq2 - b_off], xp)
                                + ring_contract_pre(
                                    PL, PR, nI, bK2, nJ,
-                                   glr_q[(K1, K1p)][lo:hi, iqp], ggb, xp))
+                                   glr_a[(K1, K1p)][lo:hi, iqp - a_off], ggb, xp))
                         sg = ring_contract_pre(
                             PL, PR, nI, bK2, nJ, gga, ggb, xp) + t56
                     else:
@@ -2196,8 +2355,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             pre,
                             gga,
                             ggb,
-                            glr_q[(K1, K1p)][lo:hi, iqp],
-                            glr_q[(K2, K2p)][lo:hi, iq2],
+                            glr_a[(K1, K1p)][lo:hi, iqp - a_off],
+                            glr_b[(K2, K2p)][lo:hi, iq2 - b_off],
                         )
                     if wq != 1.0:
                         sl *= wq
@@ -2216,13 +2375,30 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             return res
 
         def _write_q(I, J, out_l, out_g, out_x=None):
+            """Write one slice pair's contribution into the Sigma stack.
+
+            ACCUMULATES when ``accumulate`` is set, which is what the
+            q-distributed rotation needs: a rank visits ``P_q`` slice pairs
+            and each contributes to the same external momenta, so a plain
+            assignment would keep only the last step. Assignment stays the
+            default so the replicated path -- one pass over the whole axis --
+            is untouched.
+            """
             bs_I = int(self.block_sizes[I])
             bs_J = int(self.block_sizes[J])
             blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
-            stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
-            stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+            i, j = I - start, J - start
+            if accumulate:
+                stlv.blocks[i, j] = stlv.blocks[i, j] + out_l.reshape(blk_shape)
+                stgv.blocks[i, j] = stgv.blocks[i, j] + out_g.reshape(blk_shape)
+                if out_x is not None:
+                    stxv.blocks[i, j] = (stxv.blocks[i, j]
+                                         + out_x.reshape(blk_shape))
+                return
+            stlv.blocks[i, j] = out_l.reshape(blk_shape)
+            stgv.blocks[i, j] = out_g.reshape(blk_shape)
             if out_x is not None:
-                stxv.blocks[I - start, J - start] = out_x.reshape(blk_shape)
+                stxv.blocks[i, j] = out_x.reshape(blk_shape)
 
         def _scatter_add_q(out, idx, vals):
             # out (w, nq, bI, bJ); vals (C, w, bI, bJ); idx (C,) with
@@ -2732,14 +2908,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         """
         rank, size = ranks.block.rank, ranks.block.size
         offs = ref.block_section_offsets
-        nloc_tau = int(ref.data.shape[0])  # local tau count (stack state)
+        # Leading axes of a block: (local tau,) in the Gamma-only case, and
+        # (local tau, *nk) once the device is transversely periodic. Read off
+        # the buffer rather than assumed, because hardcoding the Gamma shape
+        # here is what made transverse q and comm.block.size > 1 mutually
+        # exclusive: the halo would post buffers nq times too small.
+        lead = tuple(int(n) for n in ref.data.shape[:-1])
 
         def is_local(link):
             return start <= min(link) < end
 
         def shape(link):
             K, Kp = link
-            return (nloc_tau, int(self.block_sizes[K]), int(self.block_sizes[Kp]))
+            return lead + (int(self.block_sizes[K]),
+                           int(self.block_sizes[Kp]))
 
         neighbours = [
             (nbr, int(offs[nbr]), int(offs[nbr + 1]))
@@ -2828,7 +3010,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         )
         bufs = existing + tuple(
             cls.from_sparray(
-                pattern, self.block_sizes, global_stack_shape=(n_fft,) + nk
+                pattern, self.block_sizes, global_stack_shape=(n_fft,) + nk,
+                # Inherit the source's transverse sectioning. Without this the
+                # tau buffers span the WHOLE mesh while the G legs written
+                # into them carry only this rank's slice, and the assignment
+                # fails on the shape -- asymmetrically, so one rank raises
+                # while its peers block in the next collective and the run
+                # looks like a deadlock rather than an error.
+                q_distributed=getattr(
+                    g_lesser, "q_section_offsets", None) is not None,
             )
             for _ in range(n_needed - len(existing))
         )

@@ -918,3 +918,75 @@ confirmed at 1e-4 to 1.6e-1. What remains open, in order:
    metric used here (worst negative eigenvalue relative to the global
    max, skipping bins below 1e-6 of it) is cheap enough to run per
    iteration behind a flag.
+
+## 7. Distributing the transverse-q axis (2026-08-12)
+
+The q axis used to be replicated on every rank: `allocate_data` built
+`(stack_size, *global_stack_shape[1:], nnz)` and only axis 0 was split, so
+a 25- or 81-point mesh multiplied every buffer everywhere and raising
+`q_comm_size` made per-rank memory WORSE (it shrank the stack section and
+left `nq` whole). `DSDBSparse` now sections it, opt-in via
+`q_distributed=True`, with `local_q_shape`, `local_q_offset`, `q_owner`
+and `local_q_index`.
+
+Two properties keep that contained. The q axis takes no part in the block
+structure or the nnz pattern, so `dtranspose` -- an all-to-all over the
+stack and nnz axes -- carries it through untouched. And every peer of a
+stack all-to-all or a block halo holds the SAME q section, because the
+rank layout gives the stack communicator colour `q_idx * block + block_idx`
+and the block communicator colour `rest`, so both are taken at fixed
+`q_idx`; buffers match with no q-aware padding. The partition is
+`rank * nq // size`, the one the SSE's external-q loop already uses, so the
+owned data slice and the owned loop range coincide.
+
+`nq > 1` with `comm.block.size > 1` also works now. That was refused
+because `_exchange_band_halo` sized its buffers `(local_tau, b_K, b_Kp)`
+with no transverse axis; it takes them from the buffer now. The bosonic
+fold needed nothing -- it works on the nnz axis with `data.shape[:-1]`
+carried through.
+
+### Why the SSE cannot yet consume a sectioned G
+
+The bubble is a CONVOLUTION over q: at external `q_ext` it sums over
+internal `q'` the pairs `(q', q_2)` with `q' + q_2 = q_ext`
+(`_contract_dense_q`, `iq2 = qdm[iq_ext, iqp]`). So owning a slice of `q'`
+is NOT enough to compute even one owned `q_ext` -- every term needs a
+SECOND internal momentum, generally on another rank. This is why the
+current design deliberately replicates: "the q-folded internal q' Green's
+functions are kept whole/local on every rank ... no internal-q gather".
+
+`compute()` therefore refuses a sectioned G rather than running on it. It
+would not crash: `nq` is read from `global_stack_shape` at one site and
+from the local `data.shape` at another, so the q-difference and `q -> -q`
+arithmetic would silently index the wrong momenta and the error would
+surface as physics.
+
+### The rotation that lifts it
+
+Systolic, not a gather -- a gather would restore the replication it exists
+to remove:
+
+* each rank keeps its own internal slice `A_r` fixed as one leg;
+* a second buffer `B` starts as `A_r` and is passed once around `comm.q`,
+  `P_q` steps;
+* at step `s` rank `r` holds `(A_r, B_{(r+s) \bmod P_q})` and contracts
+  every pair `q' in A_r`, `q_2 in B`, accumulating at `q_ext = q' + q_2`;
+* across all `r` and `s` each ordered slice pair occurs exactly once, so
+  the q sum is complete;
+* the accumulated `Sigma` is then reduce-scattered over `comm.q` so each
+  rank keeps its own `q_ext` slice.
+
+What this does and does not buy, and the distinction matters for sizing:
+the LEGS drop to `nq/P_q` plus one rotating slice, and they are the
+dominant term (~16 buffers in the model of `phonon/studies/_memory_model.py`).
+The `Sigma` tau accumulators do NOT -- the `q_ext = q' + q_2` produced by
+one slice pair are spread over the whole mesh, so they stay full-`nq`
+until the reduce-scatter. The saving is therefore large but not `P_q`-fold,
+and a model that reports it as `P_q`-fold will under-size a launch.
+
+Implementation notes for that work: the qtasks cache is keyed
+`(q_lo, q_hi, nq)` and would additionally have to carry which slice pair is
+held; the dense q-folded vertex `qv` is indexed by global `(q1, q2)` and
+needs the same slicing; and the `sse_greater_from_lesser` cross-term
+accumulator and the `q_ext -> -q_ext` gather both cross ranks once `q_ext`
+is sectioned.

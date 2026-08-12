@@ -1910,3 +1910,61 @@ def test_cutoff_taper_nnz_distributed_slice(monkeypatch) -> None:
         np.testing.assert_allclose(w[:n], full[offs[r]:offs[r] + n],
                                    atol=1e-14)
         assert np.all(w[n:] == 0.0), "padding beyond the section must be zero"
+
+
+# --------------------------------------------------------------------------
+# The q-distributed rotation: the internal-momentum decomposition.
+#
+# The bubble is a convolution over q, so an owned external momentum cannot be
+# built from an owned internal one -- every term needs a second internal
+# momentum, generally on another rank. `_contract_dense_q` is therefore
+# indexed by the two INTERNAL momenta, which determine the external one
+# (`qdm[iq_ext, iqp] == (iq_ext - iqp) % nq`, so `iq_ext = (iqp + iq2) % nq`).
+# Restricting the two loops to the slices a rank holds then selects exactly
+# the pairs it can compute. See phonon/docs/bubble_positivity.md Sec. 7.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("nq", [3, 5, 8])
+@pytest.mark.parametrize("n_slices", [1, 2, 3])
+def test_internal_q_slice_pairs_tile_the_convolution(nq, n_slices) -> None:
+    """Every (iqp, iq2) pair occurs in exactly one slice pair.
+
+    This is what makes the rotation complete: each rank keeps its own slice
+    as one leg and passes the other around the ring, so across all ranks and
+    all steps each ordered slice pair is visited once.
+    """
+    qdm = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+    bounds = [r * nq // n_slices for r in range(n_slices + 1)]
+
+    whole = {(iq_ext, iqp, int(qdm[iq_ext, iqp]))
+             for iq_ext in range(nq) for iqp in range(nq)}
+
+    seen: list[tuple] = []
+    for a in range(n_slices):
+        for b in range(n_slices):
+            for iqp in range(bounds[a], bounds[a + 1]):
+                for iq2 in range(bounds[b], bounds[b + 1]):
+                    seen.append(((iqp + iq2) % nq, iqp, iq2))
+
+    assert len(seen) == len(whole), "slice pairs double-count or drop pairs"
+    assert set(seen) == whole
+
+
+@pytest.mark.parametrize("nq", [3, 5])
+def test_internal_q_reindexing_preserves_accumulation_order(nq) -> None:
+    """And the reindexing cannot reassociate a sum.
+
+    Distinct external momenta accumulate into distinct memory, and for a
+    fixed external momentum the internal ones still arrive ascending -- so
+    the whole-axis case is bit-identical to iterating the external momentum
+    outer, which is what the pre-rotation code did.
+    """
+    qdm = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+    for q_lo, q_hi in ((0, nq), (1, nq - 1)):
+        old = [(e, p) for e in range(q_lo, q_hi) for p in range(nq)]
+        new = [((p + t) % nq, p) for p in range(nq) for t in range(nq)
+               if q_lo <= (p + t) % nq < q_hi]
+        assert sorted(old) == sorted(new)
+        for e in range(q_lo, q_hi):
+            assert ([p for x, p in old if x == e]
+                    == [p for x, p in new if x == e])

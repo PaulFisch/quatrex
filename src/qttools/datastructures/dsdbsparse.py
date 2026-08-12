@@ -161,6 +161,7 @@ class DSDBSparse(ABC):
         global_stack_shape: tuple | int,
         index_type: xp.int32 | xp.int64,
         symmetry: str | None = None,
+        q_distributed: bool = False,
     ):
         """Initializes a DSBDSparse matrix."""
 
@@ -225,6 +226,66 @@ class DSDBSparse(ABC):
         self.stack_section_offsets = xp.hstack(
             ([0], np.cumsum(stack_section_sizes))
         ).astype(index_type)
+
+        # --- Things concerning transverse-q distribution --------------
+
+        # ``comm.q`` splits the axis AFTER the stack axis: the flattened
+        # transverse momentum. Without this the axis is replicated on every
+        # rank, so a 25- or 81-point mesh multiplies every buffer everywhere
+        # and raising ``q_comm_size`` made per-rank memory worse rather than
+        # better (it shrank the stack section and left nq whole).
+        #
+        # Two properties make this safe rather than invasive:
+        #
+        # * the q axis is a pure batch axis -- it takes no part in the block
+        #   structure or the nnz pattern -- so ``dtranspose`` (an all-to-all
+        #   over the stack and nnz axes) carries it through untouched;
+        # * every peer of a stack all-to-all or a block halo holds the SAME q
+        #   section, because the rank layout gives the stack communicator
+        #   colour ``q_idx * block_size + block_idx`` and the block
+        #   communicator colour ``rest`` (comm.py), so both are taken at fixed
+        #   ``q_idx``. Buffers therefore match without any q-aware padding.
+        #
+        # The partition is the one the phonon SSE's external-q loop already
+        # uses, ``rank * nq // size``, so the owned data slice and the owned
+        # loop range coincide and need no translation between them.
+        #
+        # OPT-IN (``q_distributed``), because ``q_comm_size > 1`` already had a
+        # meaning: distribute the external-q LOOP while keeping the data whole.
+        # The phonon SSE still relies on that -- its internal q' legs are read
+        # whole from local memory -- so splitting by default would silently
+        # change what an existing q-parallel run computes.
+        self.q_section_offsets = None
+        self.local_q_slice = slice(None)
+        if comm.q.size > 1 and q_distributed:
+            if len(global_stack_shape) != 2:
+                raise ValueError(
+                    "q_comm_size > 1 needs exactly one transverse axis after "
+                    f"the stack axis, got global_stack_shape="
+                    f"{global_stack_shape}. Flatten the momentum mesh first; "
+                    "splitting one of several transverse axes would depend on "
+                    "which, and the flattening order is a convention the "
+                    "vertex already fixes."
+                )
+            nq = int(global_stack_shape[1])
+            if nq < comm.q.size:
+                raise ValueError(
+                    f"Number of MPI ranks in the q communicator {comm.q.size} "
+                    f"exceeds the transverse axis {nq}."
+                )
+            bounds = [r * nq // comm.q.size for r in range(comm.q.size + 1)]
+            self.q_section_offsets = xp.asarray(bounds).astype(index_type)
+            self.local_q_slice = slice(bounds[comm.q.rank],
+                                       bounds[comm.q.rank + 1])
+            local_stack_shape = (
+                local_stack_shape[0],
+                bounds[comm.q.rank + 1] - bounds[comm.q.rank],
+            )
+            self.local_stack_shape = local_stack_shape
+            self.shape = local_stack_shape + (
+                int(sum(block_sizes)),
+                int(sum(block_sizes)),
+            )
 
         # --- Things concerning nnz distribution ---------------------
 
@@ -778,6 +839,49 @@ class DSDBSparse(ABC):
         self._data = None
         free_mempool()
 
+    @property
+    def local_q_shape(self) -> tuple:
+        """Transverse axes actually stored on this rank.
+
+        Equal to ``global_stack_shape[1:]`` unless ``comm.q`` splits them, in
+        which case the single transverse axis is this rank's section.
+        """
+        if self.q_section_offsets is None:
+            return tuple(self.global_stack_shape[1:])
+        return (int(self.q_section_offsets[comm.q.rank + 1])
+                - int(self.q_section_offsets[comm.q.rank]),)
+
+    @property
+    def local_q_offset(self) -> int:
+        """Global index of this rank's first stored transverse point."""
+        if self.q_section_offsets is None:
+            return 0
+        return int(self.q_section_offsets[comm.q.rank])
+
+    def q_owner(self, iq: int) -> int:
+        """Which ``comm.q`` rank stores global transverse index ``iq``."""
+        if self.q_section_offsets is None:
+            return 0
+        offs = self.q_section_offsets
+        return int(xp.searchsorted(offs, int(iq), side="right")) - 1
+
+    def local_q_index(self, iq: int) -> int:
+        """Local position of global transverse index ``iq`` on this rank.
+
+        Raises rather than wrapping: a negative or out-of-range local index
+        would silently read a different momentum, and the q axis is where a
+        wrong index is least likely to show up as an obvious failure.
+        """
+        local = int(iq) - self.local_q_offset
+        n_local = self.local_q_shape[0] if self.local_q_shape else 1
+        if not 0 <= local < n_local:
+            raise IndexError(
+                f"transverse index {iq} is not stored on q rank "
+                f"{comm.q.rank} (it holds "
+                f"[{self.local_q_offset}, {self.local_q_offset + n_local}))."
+            )
+        return local
+
     def allocate_data(self, stack_size: int | None = None) -> None:
         """Allocates the local data.
 
@@ -830,7 +934,7 @@ class DSDBSparse(ABC):
             self._data = xp.empty(
                 (
                     stack_size,
-                    *self.global_stack_shape[1:],
+                    *self.local_q_shape,
                     self.total_nnz_size,
                 ),
                 dtype=self.dtype,

@@ -66,6 +66,7 @@ class DSDBCSR(DSDBSparse):
         local_stack_shape: tuple | int,
         global_stack_shape: tuple,
         symmetry: str | None = None,
+        q_distributed: bool = False,
     ) -> None:
         """Initializes the DBCSR matrix."""
 
@@ -91,6 +92,7 @@ class DSDBCSR(DSDBSparse):
             nnz=len(cols),
             local_stack_shape=local_stack_shape,
             global_stack_shape=global_stack_shape,
+            q_distributed=q_distributed,
             index_type=index_type,
             symmetry=symmetry,
         )
@@ -628,6 +630,7 @@ class DSDBCSR(DSDBSparse):
         symmetry: str | None = None,
         dtype: xp.dtype[xp.generic] = xp.complex128,
         allocate: bool = True,
+        q_distributed: bool = False,
     ) -> "DSDBCSR":
         """Creates a new DSDBCSR matrix from a scipy.sparse array.
 
@@ -686,6 +689,7 @@ class DSDBCSR(DSDBSparse):
             block_sizes=block_sizes,
             local_stack_shape=local_stack_shape,
             global_stack_shape=global_stack_shape,
+            q_distributed=q_distributed,
             symmetry=symmetry,
         )
         if allocate:

@@ -60,6 +60,7 @@ class DSDBCOO(DSDBSparse):
         local_stack_shape: tuple | int,
         global_stack_shape: tuple | int,
         symmetry: str | None = None,
+        q_distributed: bool = False,
     ):
         """Initializes a DSDBCOO matrix."""
 
@@ -84,6 +85,7 @@ class DSDBCOO(DSDBSparse):
             nnz=len(rows),
             local_stack_shape=local_stack_shape,
             global_stack_shape=global_stack_shape,
+            q_distributed=q_distributed,
             index_type=index_type,
             symmetry=symmetry,
         )
@@ -761,6 +763,7 @@ class DSDBCOO(DSDBSparse):
         symmetry: str | None = None,
         dtype: xp.dtype[xp.generic] = xp.complex128,
         allocate: bool = True,
+        q_distributed: bool = False,
     ) -> "DSDBCOO":
         """Constructs a DSDBCOO matrix from a sparse matrix.
 
@@ -842,6 +845,7 @@ class DSDBCOO(DSDBSparse):
             block_sizes=block_sizes,
             local_stack_shape=local_stack_shape,
             global_stack_shape=global_stack_shape,
+            q_distributed=q_distributed,
             symmetry=symmetry,
         )
 

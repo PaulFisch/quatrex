@@ -24,12 +24,27 @@ The model is assembled from the actual allocation sites, not from a fit:
 
 Three facts the formula makes visible, all load-bearing:
 
-* the transverse-q axis is REPLICATED on every rank (nothing distributes
-  `global_stack_shape[1:]`, dsdbsparse.py:829-837), so nq multiplies
-  every term and adding nodes cannot touch it;
-* `q_comm_size > 1` makes per-rank memory WORSE, because
-  P_s = world / (P_b * P_q) (comm.py:1095);
+* the transverse-q axis is replicated on every rank UNLESS the buffers are
+  built with `q_distributed=True` (2026-08-12); without it nothing
+  distributes `global_stack_shape[1:]` and nq multiplies every term, so
+  adding nodes cannot touch it;
+* with the axis replicated, `q_comm_size > 1` makes per-rank memory WORSE,
+  because P_s = world / (P_b * P_q) (comm.py:1095) -- it shrinks the stack
+  section and leaves nq whole;
 * `perm_cache` scales as b^3 * nq^2 and is bounded by nothing.
+
+What `q_distributed` changes, and what it does NOT. The LEGS (the G/Sigma
+buffers, the tau buffers and the band-link dicts -- ~16 of the terms below)
+drop to nq/P_q, plus one rotating slice for the internal-q rotation the SSE
+will need. The Sigma tau ACCUMULATORS do not: the bubble is a convolution
+over q, so the q_ext = q' + q_2 produced by one slice pair are spread over
+the whole mesh and the accumulator stays full-nq until the reduce-scatter
+(see phonon/docs/bubble_positivity.md Sec. 7). Reporting the saving as
+P_q-fold would under-size a launch.
+
+The SSE cannot consume a sectioned G yet -- `compute()` refuses one -- so
+`q_distributed` currently affects sizing only, and `--q-distributed` here
+is a what-if.
 
 Usage
 -----
