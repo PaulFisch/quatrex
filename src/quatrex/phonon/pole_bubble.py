@@ -103,19 +103,47 @@ def pair_convolution(
                               - \log(\omega-b-q) + \log(\omega-a-q)}
                              {2\pi\,(\omega - p - q)} .
 
-        A DIAGNOSTIC, not a production kernel. The residue form integrates the
-        analytic leg over the whole axis while the mixed sectors and the ring
-        only ever see the stored window, so the four sectors do not act on one
-        common function; this is how much that costs. Measured on a CNT-shaped
-        pole pair (``z = 3 - 0.1i``, ``5 - 0.2i``, ``omega = 7``): truncating
-        at ``+-100`` moves a same-half-plane pairing by 3.3e-03 relative, and
-        gives the opposite-half-plane pairing -- which the residue form sets
-        to exactly zero -- a magnitude 3.3e-03 of it. At ``+-60`` both are
-        5.5e-03. So the finite-support inconsistency is a sub-percent effect
-        at a realistic window, not an order-one one, and it is NOT what makes
-        the analytic route diverge. Mutually exclusive with
-        ``cell`` -- the cell average of the log form has no elementary
-        antiderivative.
+        This is the production kernel of the LOCAL route
+        (:mod:`quatrex.phonon.pole_local`), where ``[a, b]`` is one grid cell
+        and the result replaces what the ring's rectangle rule put there.
+        Verified against dense composite Gauss-Legendre on one cell, pole cell
+        against a smooth partner, as relative error of the pair contribution:
+
+        ======== ============ ================ ==========
+        gamma/h  rectangle    cell-avg product  this
+        ======== ============ ================ ==========
+        0.400    5.14e-01     3.29e-01          2.5e-18
+        0.100    1.77e+00     5.29e-01          4.7e-16
+        0.020    9.41e+00     6.06e-01          1.8e-16
+        0.005    3.82e+01     6.21e-01          2.2e-16
+        0.001    1.92e+02     6.26e-01          2.2e-16
+        ======== ============ ================ ==========
+
+        The rectangle rule diverges as ``1/gamma`` and the product of cell
+        averages saturates at an O(1) error (the missing piece is the subcell
+        covariance); this form is exact at every width. Moving the pole from
+        cell centre to edge at ``gamma/h = 0.02`` swings the rectangle error
+        9.41 -> 0.27 -- the registration lottery -- while this stays at 1e-16.
+
+        Note that ALL FOUR half-plane pairings are kept here. The mixed ones
+        vanish only under whole-axis contour closure; on a finite interval
+        they are a genuine part of the integral, and the residue form's zero
+        is what would be wrong.
+
+        As a GLOBAL replacement for the residue form it is instead a
+        diagnostic, measuring the cost of the four sectors not acting on one
+        common function: the residue form integrates the analytic leg over the
+        whole axis while the mixed sectors and the ring only ever see the
+        stored window. On a CNT-shaped pole pair (``z = 3 - 0.1i``,
+        ``5 - 0.2i``, ``omega = 7``), truncating at ``+-100`` moves a
+        same-half-plane pairing by 3.3e-03 relative and gives the
+        opposite-half-plane pairing -- which the residue form sets to exactly
+        zero -- a magnitude 3.3e-03 of it; at ``+-60`` both are 5.5e-03. So
+        that inconsistency is a sub-percent effect at a realistic window, and
+        it is NOT what makes the analytic route diverge.
+
+        Mutually exclusive with ``cell`` -- the cell average of the log form
+        has no elementary antiderivative.
 
     Returns
     -------

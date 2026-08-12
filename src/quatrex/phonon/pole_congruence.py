@@ -76,6 +76,7 @@ __all__ = [
     "fit_residual",
     "remainder_resolution",
     "partial_fraction_legs",
+    "partial_fraction_legs_percell",
     "pf_leg_sample",
     "pf_self_energy",
     "pf_mixed_self_energy",
@@ -446,6 +447,65 @@ def partial_fraction_legs(
     zeta = xp.concatenate([z, zb])
     p_row = xp.concatenate([u, y], axis=1)
     q_col = xp.concatenate([xp.swapaxes(w, 0, 1), xp.conj(u)], axis=1)
+    return zeta, p_row, q_col
+
+
+def partial_fraction_legs_percell(
+    cluster: PoleCluster,
+    coefficients: tuple[NDArray, NDArray, NDArray],
+) -> tuple[NDArray, NDArray, NDArray]:
+    r"""":func:`partial_fraction_legs` keeping the per-cell frequency axis.
+
+    Same algebra, one leading axis. The global route reduces
+    :func:`background_coefficients`' output to the poles and gets ONE flattened
+    leg for the whole axis; the local route
+    (:mod:`quatrex.phonon.pole_local`) needs the leg frozen at each cell it
+    corrects, which is what those coefficients already are before that
+    reduction. Nothing new is computed here -- the frequency axis is simply not
+    thrown away.
+
+    Restrict ``coefficients`` to the pole cells before calling. The families
+    are frequency dependent now, so the cubic vertex must be projected once per
+    cell rather than once per iteration, and that is affordable only because
+    the pole cells are few.
+
+    Parameters
+    ----------
+    cluster : PoleCluster
+    coefficients : tuple
+        ``(c_sr, c_rs, c_ss)`` of shapes ``(M, Np, n_dof)``,
+        ``(M, n_dof, Np)`` and ``(M, Np, Np)``.
+
+    Returns
+    -------
+    zeta : NDArray
+        ``(2 Np,)`` -- cell independent, the poles do not move.
+    p_row, q_col : NDArray
+        ``(M, n_dof, 2 Np)``.
+
+    """
+    c_sr, c_rs, c_ss = (xp.asarray(a, dtype=xp.complex128)
+                        for a in coefficients)
+    if c_ss.ndim != 3:
+        raise ValueError(
+            f"partial_fraction_legs_percell wants a leading cell axis; got "
+            f"c_ss with shape {c_ss.shape}. Use partial_fraction_legs for "
+            "coefficients already reduced to the poles.")
+    z = xp.asarray(cluster.z)
+    u, zb = cluster.u, xp.conj(z)
+    gap = z[:, None] - zb[None, :]                            # (Np, Np)
+    if bool(xp.any(xp.abs(gap) < 1e-300)):
+        raise ValueError(
+            "a pole coincides with a partner's conjugate; the simple-pole "
+            "split is undefined there (defective/exceptional cluster).")
+    scaled = c_ss / gap[None]                                 # (M, Np, Np)
+    w = c_sr + xp.einsum("kab,jb->kaj", scaled, xp.conj(u))
+    y = c_rs - xp.einsum("kab,ja->kjb", scaled, u)
+    zeta = xp.concatenate([z, zb])
+    ub = xp.broadcast_to(u, (c_ss.shape[0],) + u.shape)
+    p_row = xp.concatenate([ub, y], axis=2)
+    q_col = xp.concatenate([xp.swapaxes(w, 1, 2),
+                            xp.broadcast_to(xp.conj(u), ub.shape)], axis=2)
     return zeta, p_row, q_col
 
 

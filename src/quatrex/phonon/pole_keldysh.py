@@ -226,6 +226,76 @@ def pole_keldysh(
     return lmat @ s @ xp.conj(lmat).swapaxes(-2, -1)
 
 
+def hybrid_keldysh_congruence(
+    omega: NDArray,
+    cluster: PoleCluster,
+    r_retarded: NDArray,
+    source: NDArray,
+    cell_index: NDArray,
+) -> NDArray:
+    r"""Reconstruct :math:`G^{\lessgtr}` off-grid by congruence, doc review Eq. (7).
+
+    .. math::
+        \widetilde G^R(\omega) = P^R(\omega) + R^R_k, \qquad
+        \widetilde G^{\lessgtr}(\omega)
+        = \widetilde G^R(\omega)\,\Sigma^{\lessgtr}_k\,\widetilde G^A(\omega)
+
+    The alternative in use elsewhere freezes the KELDYSH remainder,
+    ``R_k = G^<(w_k) - P^<(w_k)``, and reconstructs ``P^<(w) + R_k``. That is
+    exact at the cell centre and unconstrained between centres: ``R_k`` is a
+    difference of PSD objects, hence indefinite, and near a narrow pole
+    ``P^<`` moves by orders of magnitude across one cell while ``R_k`` is
+    frozen. Measured on the bed in ``phonon/studies/_pole_subcell.py``, that
+    reconstruction reaches ``eps_PSD = -5.4e-02`` with a relative error of
+    1079 % at ``2 gamma/h = 0.04``.
+
+    This form has neither failure. Positivity is structural --
+    ``-i G^< = G^R (-i Sigma^<) (G^R)^H`` is a congruence, so it holds for ANY
+    ``G^R``, however inaccurate -- and what is frozen per cell is the SOURCE,
+    which is smooth, rather than the RESPONSE, which carries the pole. On the
+    same bed it stays positive (``+4.0e-07``) with a flat ~14 % error
+    independent of the pole width.
+
+    Both agree exactly at cell centres, where ``P^R(w_k) + R^R_k = G^R(w_k)``.
+
+    Parameters
+    ----------
+    omega : NDArray
+        ``(n_omega,)`` real frequencies, NOT required to lie on the grid.
+    cluster : PoleCluster
+    r_retarded : NDArray
+        ``(n_cells, n_dof, n_dof)`` frozen retarded remainder
+        ``G^R(w_k) - P^R(w_k)`` per cell.
+    source : NDArray
+        ``(n_cells, n_dof, n_dof)`` cell-constant Keldysh source. The PSD
+        object is ``-i Sigma^{<}``, so this carries the usual factor of i;
+        the returned function inherits exactly the semidefiniteness it has.
+    cell_index : NDArray
+        ``(n_omega,)`` index of the cell containing each frequency.
+
+    Returns
+    -------
+    NDArray
+        ``(n_omega, n_dof, n_dof)``.
+
+    """
+    w = xp.asarray(omega, dtype=xp.float64).reshape(-1)
+    idx = xp.asarray(cell_index, dtype=xp.int64).reshape(-1)
+    if idx.shape[0] != w.shape[0]:
+        raise ValueError(
+            f"cell_index has {idx.shape[0]} entries for {w.shape[0]} "
+            "frequencies."
+        )
+    rr = xp.asarray(r_retarded, dtype=xp.complex128)
+    ss = xp.asarray(source, dtype=xp.complex128)
+    if rr.shape[0] != ss.shape[0]:
+        raise ValueError(
+            f"r_retarded has {rr.shape[0]} cells, source has {ss.shape[0]}."
+        )
+    gr = pole_retarded(w, cluster) + rr[idx]
+    return gr @ ss[idx] @ xp.conj(gr).swapaxes(-2, -1)
+
+
 def occupation_matrix(
     omega: NDArray, cluster: PoleCluster, source: NDArray, weights: NDArray | None = None
 ) -> NDArray:

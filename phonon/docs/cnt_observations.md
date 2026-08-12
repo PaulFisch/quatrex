@@ -242,12 +242,59 @@ At `h/gamma = 1.35` a `dw`-weighted sum of point samples already recovers
 has about 2 % to gain; and above `gamma/spacing ~ 0.5` no isolated simple pole
 exists for a bordered Newton to find.
 
-**Scope, and an open contradiction.** That was measured at SCBA iteration 1,
-where `Sigma_scatt` is essentially zero and the broadening is
-contact-dominated — it is not the converged distribution, and `pgate` is not
-the bed the ladder of Sec. 5 was run on. Read as "CNT has no narrow modes" it
-also contradicts Sec. 5: if nothing were narrow, refinement would converge.
-Both cannot be right, and which one gives is the open question.
+**Scope.** That was measured at SCBA iteration 1, where `Sigma_scatt` is
+essentially zero and the broadening is contact-dominated — not the converged
+distribution, and `pgate` is not the bed the ladder of Sec. 5 was run on.
+
+### The contradiction is resolved: nothing is narrow (2026-08-12)
+
+`phonon/scripts/data/resonance_gain_distilled.npz` already carries the
+CONVERGED-iterate linewidth distribution for `cnt33_L4_linear` — the bed the
+Sec. 5 ladder was run on — as `L4_stall__spec_Gamma_tot`, 144 modes at
+`dw = 0.3056 THz`:
+
+| | min | 1 % | 5 % | 25 % | median | max |
+|---|---|---|---|---|---|---|
+| `Gamma_tot / dw` | 1.573 | 1.867 | 2.592 | 4.377 | 6.438 | 150.4 |
+
+**Zero modes of 144 are below one grid spacing**, and only 2 are below two.
+The narrowest mode on the whole device is 1.57 spacings wide, and its
+broadening is 89 % anharmonic. `L2_fp` and `L2_andstall` agree (min 1.98 and
+1.58).
+
+So the median was not hiding a narrow tail: there is no tail. Converged CNT is
+BETTER resolved than the `pgate` iteration-1 snapshot suggested, for the
+obvious reason — at iteration 1 the anharmonic width has not been built yet, so
+`h/gamma = 1.35` there is a lower bound on the converged width, not an estimate
+of it.
+
+That kills the narrow-resonance explanation of Sec. 5 outright rather than
+leaving it open. Refinement does not help because there is nothing to resolve,
+and the non-monotone ladder needs a different mechanism. It also means the pole
+sector, and the local finite-cell route of `pole_scba_divergence.md` Sec. 10,
+have nothing to act on for CNT at 300 K — not "little", nothing.
+
+### The candidate Sec. 5 dismissed too quickly
+
+The grid on every CNT bed runs to 55 THz. The harmonic band top is 46.23 THz,
+so the 3-phonon bubble has support to about 92.5 THz and the grid covers
+**59.5 %** of it. `sse_aux_grid_fmax_thz = 0.0` on these beds, so the dual-grid
+extension that exists for exactly this is switched off, and the solver warns on
+nearly every run.
+
+Sec. 5 rejected this because the worst-truncated run converged fastest — but
+that run is `cnt-L3-eta0-mask`, which differs by masking the scattering below
+2 THz, a change of physics rather than of `fmax`. There has never been a
+controlled `fmax` A/B on CNT. It is the leading candidate by elimination, and
+it is cheap: one rerun of an `ne` rung with `sse_aux_grid_fmax_thz >= 93`.
+
+A second confound worth stating: the attribution of the L8/L10 failure to
+`g_band = 2` is made ACROSS families, and those families also differ in
+`retarded_method` (`fft` against `half`) and in `ne`. The family that converges
+to 32 cells is the one that never computes the Kramers-Kronig integral; the one
+that diverges is the one that computes it on a grid too short to support it.
+That correlation is not evidence against the `g_band` reading, but it has not
+been separated from it either.
 
 ---
 
