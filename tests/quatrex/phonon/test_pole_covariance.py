@@ -411,3 +411,44 @@ def test_spectrum_correction_chunking_is_exact_and_bounds_the_working_set():
     full, tiny = np.asarray(full), np.asarray(tiny)
     assert np.abs(full - tiny).max() <= 1e-13 * max(np.abs(full).max(), 1.0)
     assert np.abs(full).max() > 0.0
+
+
+def test_cells_from_clusters_of_different_size_pair_correctly():
+    """Two clusters, two pole counts -- the first real device call's crash.
+
+    ``modal_vertex_blocks`` required the two families to match, so pairing a
+    cell from a 2-pole cluster with one from a 12-pole cluster raised
+    "families disagree, 4 against 24" on the first device run. The projection
+    is rectangular; nothing about the algebra needs them equal.
+    """
+    from quatrex.phonon.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.pole_covariance import spectrum_correction
+
+    n_dof = 4
+    rng = np.random.default_rng(13)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    r, c = np.meshgrid(np.arange(n_dof), np.arange(n_dof), indexing="ij")
+    rows, cols = r.ravel(), c.ravel()
+    phi = {(0, 0, 0): cx(n_dof, n_dof, n_dof)}
+    sizes = np.array([n_dof])
+    h, freqs = 0.5, np.arange(9) * 0.5
+
+    # 2 flattened modes against 6 -- clusters of different size
+    small = (1.0, np.array([1.0 - 0.01j, -1.0 - 0.01j]),
+             cx(n_dof, 2), cx(n_dof, 2))
+    big_z = np.array([1.5 - 0.02j, 1.6 - 0.02j, 1.4 - 0.03j])
+    big = (1.5, np.concatenate([big_z, np.conj(big_z)]),
+           cx(n_dof, 6), cx(n_dof, 6))
+
+    vb = np.asarray(modal_vertex_blocks(phi, sizes, small[2], conjugate=False,
+                                        v=big[2]))
+    assert vb.shape == (n_dof, 2, 6), vb.shape
+
+    corr, rep = spectrum_correction(freqs, [small, big], phi, sizes,
+                                    rows, cols, h)
+    corr = np.asarray(corr)
+    assert rep["applied"] == 4 and np.isfinite(corr).all()
+    assert np.abs(corr).max() > 0.0

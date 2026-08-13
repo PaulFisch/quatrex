@@ -285,7 +285,9 @@ def spectrum_correction(
 
     r_idx, c_idx = xp.asarray(rows), xp.asarray(cols)
     w0, hh = float(w[0]), float(h)
-    n_p = int(np.asarray(_host(cells[0][1])).size)
+    # cells can come from different clusters, so the family sizes differ;
+    # size the chunk from the largest.
+    n_p = max(int(np.asarray(_host(c[1])).size) for c in cells)
     applied = dropped = 0
     for centre_k, zeta_k, p_k, q_k in cells:
         for centre_l, zeta_l, p_l, q_l in cells:

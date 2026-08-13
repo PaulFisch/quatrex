@@ -155,22 +155,24 @@ def modal_vertex_blocks(
     the positivity statement (``bubble_positivity.md`` Thm 1).
 
     ``v`` supplies a SECOND family for the beta index, giving
-    ``Vbar[mu, alpha, beta] = sum_ab Phi[mu,a,b] u[a,alpha] v[b,beta]``. The
-    subcell covariance correction needs it because its two legs belong to
-    DIFFERENT cells, whose flattened families differ; every other caller
-    convolves a leg with itself and leaves it as ``u``, for which this is
-    bit-identical.
+    ``Vbar[mu, alpha, beta] = sum_ab Phi[mu,a,b] u[a,alpha] v[b,beta]``, and the
+    result is RECTANGULAR when the two families differ in size. The subcell
+    covariance correction needs exactly that: its two legs belong to different
+    cells, and those cells can belong to different CLUSTERS, which carry
+    different pole counts. An earlier version required the two to match and
+    refused the first real device call with "families disagree, 4 against 24" --
+    the guard was loud, which was right, but the assumption behind it was wrong.
+
+    Every other caller convolves a leg with itself and leaves ``v`` as ``None``,
+    for which this is bit-identical.
     """
     sizes = np.asarray(_host(block_sizes), dtype=int)
     off = np.concatenate(([0], np.cumsum(sizes)))
     n_dof, npp = int(off[-1]), int(u.shape[1])
     uu = xp.conj(u) if conjugate else u
     vv = uu if v is None else (xp.conj(v) if conjugate else v)
-    if vv.shape[1] != npp:
-        raise ValueError(
-            f"modal_vertex_blocks: families disagree, {npp} against "
-            f"{vv.shape[1]} modes.")
-    out = xp.zeros((n_dof, npp, npp), dtype=xp.complex128)
+    nqq = int(vv.shape[1])
+    out = xp.zeros((n_dof, npp, nqq), dtype=xp.complex128)
     for (i, k1, k2), blk in phi_blocks.items():
         b = xp.asarray(blk, dtype=xp.complex128)
         u1 = uu[off[k1]:off[k1 + 1]]
