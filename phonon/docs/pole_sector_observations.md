@@ -72,6 +72,49 @@ to avoid.
 
 ---
 
+## 1.4 CNT runs stably WITH the pole sector (job 4443181, 2026-08-13)
+
+The first CNT A/B at the production mixing (0.2), rather than the 0.02-0.1
+every earlier pole run used. 150 iterations budgeted, `ne = 181`; the `cong`
+arm reached 92 before the debug walltime.
+
+| | base | `cong` |
+|---|---|---|
+| `rel Sigma`, it 10 | 8.8647e-01 | 8.6659e-01 |
+| it 50 | 7.2735e-02 | 1.0079e-01 |
+| it 90 | 2.0458e-02 | 1.9782e-02 |
+| min over the run | 1.5746e-02 | 1.7212e-02 |
+| lead balance, it 90 | 5.2074e-04 | 5.6097e-04 |
+| **SIGN INVERSION lines** | 0 | **0** |
+| `P_in`, it 90 | -3.078784e+04 | -3.077554e+04 |
+| worst bubble balance residual | 3.476e-07 | 3.266e-07 |
+
+`cong` tracks base through the whole descent, agrees on `P_in` to 0.04 %, and
+never inverts. Zero sign inversions is the result: that is the failure which
+killed every earlier pole run by iteration 2, and it is gone.
+
+The promotion is also stable now, which it was not:
+
+    it 1: 6 cluster(s), 12/144 promoted   refused: eps_z x128, grid-resolved x4
+    it 2: 5 cluster(s), 11/12 promoted    refused: eps_z x1
+
+12 of 144 under the frequency-unit acceptance against 2 under the old matrix
+residual, and the tracker retains 11 of 12 across the iteration rather than
+re-deciding from scratch.
+
+**What this does NOT show.** Neither arm converges. Both descend to ~1.6e-02
+and then oscillate between 1.6e-02 and 2.4e-02 without tightening -- base
+included, so it is not the sector. `cnt33_L4_linear` converges at 249-311
+iterations under the same recipe, but that is a different bed on tortin;
+`pgate` may simply have a residual floor. A 350-iteration run is queued to
+settle it.
+
+Timing, for budgeting: 10 s per iteration on one GH200 for this bed, so 150
+iterations is roughly 25 minutes and a three-arm 350-iteration comparison does
+not fit in a two-hour job.
+
+---
+
 ## 2. Converged CNT has no narrow modes
 
 From `phonon/scripts/data/resonance_gain_distilled.npz`, converged
