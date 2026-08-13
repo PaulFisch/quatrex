@@ -216,6 +216,65 @@ Fixed; unverified until the next q run, since no local bed has a q axis.
 
 ---
 
+## 1.8 Si HAS narrow, isolated modes -- the first bed that does (job 4450385)
+
+Extraction-only census, `sichk_base`, `ne = 121`, 81 q sampled every 20th,
+`retarded = fft`, iteration 1. Five q-points:
+
+| q | candidates | under-resolved (`q_omega < 1`) | **isolated** (`gamma/sep < 0.5`) | accepted |
+|---|---|---|---|---|
+| 1 | 16 | 13 | **4** | 1 |
+| 2 | 18 | 16 | **6** | 7 |
+| 3 | 18 | 12 | **7** | 6 |
+| 4 | 18 | 10 | **7** | 6 |
+| 5 | 18 | 12 | **6** | -- |
+
+`q_omega` medians run 0.34-0.69 with **minima at 0**, and `gamma/sep` lower
+quartiles run 0.013-0.63. Compare CNT, where the median `gamma/spacing` is 8.40
+with 94 % overlapping and nothing is below one grid spacing.
+
+So Si carries a population that is simultaneously under-resolved and isolated
+-- both criteria at once, which is what a simple-pole representation needs and
+what CNT never had. 6-7 poles per q are accepted, so across 81 q the sector
+would carry several hundred.
+
+Two caveats on the same table. The `gamma/sep` distributions have NEGATIVE
+entries (-0.0119, -0.974, -0.12), i.e. candidates in the UPPER half plane;
+`screen` refuses them ("pole is not in the lower half plane") but they are in
+the population, so the raw quantiles include unphysical roots. And this is an
+iteration-1 census: CNT taught that iteration-1 widths are a LOWER bound,
+because the anharmonic width is not built yet. A converged Si census is the
+number that would settle it.
+
+## 1.9 MoS2 cannot be censused at that size, and Si's fft arm is KK-truncated
+
+**MoS2 OOMs.** `mos2L2conv` at `ne = 401` with 25 q died with
+`OutOfMemoryError: allocating 20,155,392,000 bytes (allocated so far:
+87,535,582,208)`. 87 GB was already resident before the failing 20 GB request,
+so this is the bed's own footprint at that grid, not the sector's -- but it
+means no MoS2 census exists yet, and one will need a coarser grid, fewer q per
+pass, or block distribution.
+
+**Si's `fft` arm truncates the Kramers-Kronig integral.** Same bed, same
+budget, one knob:
+
+| | min `rel Sigma` | sign inversions | KK truncation warning |
+|---|---|---|---|
+| `si_half` | **1.8621e-03** | 0 | 0 |
+| `si_fft` | 2.9761e-02 | 0 | **1** |
+
+    still carries 12.3% of its peak weight at the top of the frequency grid,
+    so the Kramers-Kronig integral for Re Sigma^R is truncated.
+
+`half` never computes that integral, so it cannot fire the warning and is
+unaffected by the truncation -- which makes this pair a much cleaner instance
+of the grid-support hypothesis than the CNT ladder. Same bed, one knob, and the
+arm that converges 16x worse is exactly the arm that computes a truncated KK
+integral. Extending the grid past twice the band top and re-running `si_fft` is
+the direct test, and it is now the most informative single run available.
+
+---
+
 ## 2. Converged CNT has no narrow modes
 
 From `phonon/scripts/data/resonance_gain_distilled.npz`, converged
