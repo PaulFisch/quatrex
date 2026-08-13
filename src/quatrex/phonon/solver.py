@@ -50,6 +50,47 @@ def _btd_subtract(a: DSDBSparse, b: DSDBSparse) -> None:
         a_.blocks[j, i] -= b_.blocks[j, i]
 
 
+def validate_obc_block_sections(num_blocks: int, block_comm_size: int) -> None:
+    """Checks that the boundary ranks own enough blocks for the contact OBC.
+
+    Both contacts build their periodic superblocks from a diagonal block
+    and its immediate off-diagonals, so a boundary rank needs two blocks.
+    Rank 0 survives on one: its ``local_block_sizes`` and the nnz it holds
+    run to the end of the device, so ``blocks[1, 0]`` still reads the right
+    values. The LAST rank does not -- with a single block it addresses
+    ``num_local_blocks - 2 = -1``, a negative local index that no
+    DSDBSparse can serve, and the run dies inside ``_compute_obc`` with an
+    opaque ``IndexError``.
+
+    The electron and Coulomb solvers index their boundary blocks the same
+    way and carry the same requirement; only the phonon path checks it.
+
+    Parameters
+    ----------
+    num_blocks : int
+        Number of blocks in the device.
+    block_comm_size : int
+        Size of the block communicator.
+
+    Raises
+    ------
+    ValueError
+        If the last block rank would own fewer than two blocks. Derived
+        from the section sizes alone, so every rank raises identically.
+
+    """
+    if block_comm_size <= 1:
+        return
+    sections, __ = get_section_sizes(num_blocks, block_comm_size)
+    if int(sections[-1]) < 2:
+        raise ValueError(
+            f"block_comm_size={block_comm_size} sections {num_blocks} "
+            f"blocks as {list(map(int, sections))}, leaving the last rank "
+            f"{int(sections[-1])} block(s); the right contact OBC needs "
+            ">= 2 there. Use a longer device or reduce block_comm_size."
+        )
+
+
 class PhononSolver(SubsystemSolver):
     """Solves the phonon dynamics.
 
@@ -211,6 +252,10 @@ class PhononSolver(SubsystemSolver):
 
         self.obc_blocks = OBCBlocks(num_blocks=self.system_matrix.num_local_blocks)
         self.block_sections = config.phonon.obc.block_sections
+
+        validate_obc_block_sections(
+            self.system_matrix.num_blocks, comm.block.size
+        )
 
         # Pole-subtracted SCBA sector. The pole set is a deterministic function
         # of the mixed self-energy, so it is recomputed every iteration and only
