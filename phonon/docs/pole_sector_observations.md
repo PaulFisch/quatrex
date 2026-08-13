@@ -171,6 +171,51 @@ and no isolated pole exists to give it.
 
 ---
 
+## 1.7 The q-resolved beds, and why the census has not run yet (job 4448828)
+
+Survey of every q-resolved bed in the tree:
+
+| bed | q | cells | `retarded` | `ne` |
+|---|---|---|---|---|
+| MoS2 `mos2L2conv` / `L4conv` | 25 (`[5,5,1]`) | 2 | half | **4001** |
+| MoS2 `mos2soodS4` | 25 | 2 | half | **15001** |
+| Si `sichk_base` / `ext` | 81 (`[1,9,9]`) | 3 | half | **121** |
+| Si `sires1001` / `si4x2` | 81 | 3 / 2 | half | 1001 / 2801 |
+
+Two facts decide what can be asked.
+
+**Every q bed runs `retarded_method = "half"`**, and the sector requires
+`"fft"` -- without the Kramers-Kronig real part the operator is not causal and
+its roots are not resonances. So no q-resolved bed has ever run in a
+configuration the sector can attach to at all. That is a prerequisite, not a
+detail, and it is why the fft-convergence question comes before any pole
+question on these materials.
+
+**The grids are very fine.** MoS2 at `ne = 4001` cannot have unresolved modes
+almost by construction. So "is anything unresolved at the grid these beds use"
+is the wrong question; the answer is trivially no. The question that decides
+whether the method pays is the converse: at a COARSE grid, is there a
+population the sector could carry, so the bed could run coarse instead of at
+4001? Nothing else about this method is worth anything if the answer is no.
+
+**The census did not run.** Every q raised one of two errors, and together they
+locate the fault exactly:
+
+    q (0, k): could not broadcast input array from shape (9,6,6) into shape (6,6)
+    q (1, k): Index 1 is out of bounds for axis 0 with size 1
+
+`_pole_blocks` was handed a bare `(i, j)` while the dynamical matrix carries a
+leading singleton where the Keldysh buffers carry frequency, so on a `(1, 9, 9)`
+stack the slice consumed the singleton and one q index -- leaving a stack where
+a block was wanted -- and every `i > 0` ran off an axis of size 1. The
+transverse axes sit at the END of the stack shape; the index has to be padded on
+the left to whatever leading rank the buffer has. Same off-by-one in the contact
+blocks, which are `(n_freq,) + nk + (b, b)`.
+
+Fixed; unverified until the next q run, since no local bed has a q axis.
+
+---
+
 ## 2. Converged CNT has no narrow modes
 
 From `phonon/scripts/data/resonance_gain_distilled.npz`, converged

@@ -91,6 +91,18 @@ def validate_obc_block_sections(num_blocks: int, block_comm_size: int) -> None:
         )
 
 
+def _q_block(arr, idx):
+    """One q of a contact block, whose transverse axes follow frequency.
+
+    ``arr`` is ``(n_freq,) + nk + (b, b)``. Indexing it with a bare ``idx``
+    would take frequency first, which is the same off-by-one that made the
+    dynamical matrix return a stack where a block was wanted.
+    """
+    if arr is None:
+        return None
+    return arr[(slice(None),) + tuple(idx)]
+
+
 class PhononSolver(SubsystemSolver):
     """Solves the phonon dynamics.
 
@@ -592,7 +604,21 @@ class PhononSolver(SubsystemSolver):
         self._probe_np = 0.5 * self._probe_np + 0.5 * new
 
     def _pole_blocks(self, matrix, index_slice=()):
-        """Dense block-tridiagonal view of a DSDBSparse for one stack element."""
+        """Dense block-tridiagonal view of a DSDBSparse for one stack element.
+
+        ``index_slice`` addresses the TRANSVERSE q axes, which sit at the END
+        of the stack shape. The dynamical matrix carries a leading singleton
+        where the Keldysh buffers carry frequency, so a bare ``(i, j)`` lands on
+        the wrong axes: on a ``(1, 9, 9)`` stack it consumed the singleton and
+        one q index, leaving ``(9, 6, 6)`` where a block was wanted, and every
+        ``i > 0`` raised "Index 1 is out of bounds for axis 0 with size 1".
+        Padding on the LEFT puts the q indices where they belong whatever the
+        buffer's leading rank is.
+        """
+        if index_slice:
+            rank = len(getattr(matrix, "global_stack_shape", ()) or ())
+            pad = max(0, rank - len(index_slice))
+            index_slice = (0,) * pad + tuple(index_slice)
         view = matrix.stack[index_slice] if index_slice else matrix.stack[...]
         n = matrix.num_local_blocks
         out = {}
@@ -822,11 +848,8 @@ class PhononSolver(SubsystemSolver):
                 delta=d_flat[:, iq, :],
                 d_blocks=self._pole_blocks(self.dynamical_matrix,
                                            index_slice=idx),
-                obc_left=(self.obc_blocks.retarded[0][idx]
-                          if self.obc_blocks.retarded[0] is not None else None),
-                obc_right=(self.obc_blocks.retarded[-1][idx]
-                           if self.obc_blocks.retarded[-1] is not None
-                           else None),
+                obc_left=_q_block(self.obc_blocks.retarded[0], idx),
+                obc_right=_q_block(self.obc_blocks.retarded[-1], idx),
                 block_sizes=self.block_sizes,
                 rows=sse_lesser.rows,
                 cols=sse_lesser.cols,
@@ -885,12 +908,8 @@ class PhononSolver(SubsystemSolver):
                     delta=d_flat[:, iq, :],
                     d_blocks=self._pole_blocks(self.dynamical_matrix,
                                                index_slice=idx),
-                    obc_left=(self.obc_blocks.retarded[0][idx]
-                              if self.obc_blocks.retarded[0] is not None
-                              else None),
-                    obc_right=(self.obc_blocks.retarded[-1][idx]
-                               if self.obc_blocks.retarded[-1] is not None
-                               else None),
+                    obc_left=_q_block(self.obc_blocks.retarded[0], idx),
+                    obc_right=_q_block(self.obc_blocks.retarded[-1], idx),
                     block_sizes=self.block_sizes,
                     rows=sse_lesser.rows,
                     cols=sse_lesser.cols,
