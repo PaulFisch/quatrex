@@ -378,6 +378,17 @@ class PoleSectorConfig(BaseModel):
     individual sectors -- only their sum is constrained). Nothing in the solver
     checks this today, and the sector is the first thing that can break it
     structurally."""
+    q_stride: PositiveInt = 1
+    """Solve every ``q_stride``-th transverse q. 1 = all of them.
+
+    Coupled-q costs ``nq`` pole solves -- 25 for a ``[5,5,1]`` mesh, 81 for
+    ``[1,9,9]`` -- and a survey rarely needs all of them. Skipping is safe by
+    construction: an unpromoted q keeps its untouched leg and is bit-identical
+    to pole-off there. Skipped q are REPORTED, because a sampled run that reads
+    like a full one is the trap this knob would otherwise set."""
+    q_max: NonNegativeInt = 0
+    """Hard cap on how many q are solved (0 = no cap), applied after
+    ``q_stride``."""
     extraction_only: bool = False
     """Run the pole SOLVE and print the census, then allocate NO sector.
 

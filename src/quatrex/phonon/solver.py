@@ -267,6 +267,8 @@ class PhononSolver(SubsystemSolver):
         self._pole_cfg = _ps
         self._pole = None            # PoleSector, built lazily
         self.pole_state = None       # last PoleSectorState, read by the interaction
+        self._pole_q = None          # coupled-q: one PoleSector per q
+        self.pole_q_states = []      # coupled-q: (q index, state) per solved q
         self.psd_report = {}         # last positivity gate result, if enabled
         self._psd_sigma = None       # Sigma buffers for the gate, if enabled
         # A congruence is PSD exactly, so anything above roundoff on the
@@ -738,6 +740,10 @@ class PhononSolver(SubsystemSolver):
             self._census_over_q(delta, sse_lesser)
             self.pole_state = None
             return
+        if nq > 1:
+            self._update_pole_sector_q(delta, sse_lesser, sse_greater,
+                                       g_retarded, g_lesser)
+            return
 
         self._pole.set_operator_context(
             delta=delta,
@@ -755,6 +761,110 @@ class PhononSolver(SubsystemSolver):
                                  g_lesser)
         if comm.rank == 0 and self.pole_state is not None:
             print(self.pole_state.report(), flush=True)
+
+    def _q_indices(self, nq: int, shape):
+        """Which q to solve, honouring ``q_stride`` and ``q_max``."""
+        sel = list(range(0, nq, max(1, int(getattr(self._pole_cfg,
+                                                   "q_stride", 1)))))
+        cap = int(getattr(self._pole_cfg, "q_max", 0) or 0)
+        if cap:
+            sel = sel[:cap]
+        return [(iq, tuple(int(i) for i in np.unravel_index(iq, shape)))
+                for iq in sel]
+
+    def _update_pole_sector_q(self, delta, sse_lesser, sse_greater,
+                              g_retarded, g_lesser) -> None:
+        """Coupled-q, Stage 1: one pole problem per q, one leg per q.
+
+        ``leg="congruence"`` adds no analytic sector -- its whole action is to
+        modify the leg the ring convolves, and the ring performs the q fold
+        itself, downstream. So the sector is per-q and UNCOUPLED here, and the
+        vertex fold the guard in ``set_operator_context`` speaks of is needed
+        only where sectors are restored analytically (there
+        ``Sigma_q = sum_q' B[G_q', G_{q-q'}]`` pairs pole sets across q). Those
+        routes stay refused, by that guard, which still sees only a slice.
+
+        One ``PoleSector`` PER q. The tracker, the promoted set and the epoch
+        counter are per-q: a mode at one q has no relation to one at another,
+        so a shared tracker would match them across q and either fuse two
+        unrelated modes or churn membership every iteration -- exactly what the
+        hysteresis exists to prevent.
+        """
+        from quatrex.phonon.pole_sector import PoleSector
+
+        if getattr(self._pole_cfg, "leg", "congruence") != "congruence":
+            raise NotImplementedError(
+                f"pole_sector: leg={self._pole_cfg.leg!r} restores analytic "
+                "sectors beside the ring, and those pair pole sets from "
+                "DIFFERENT q (Sigma_q sums over q' and q-q'). That fold is not "
+                "built. Use leg='congruence' on a q-resolved device, or "
+                "extraction_only=True for a census."
+            )
+
+        freqs = np.asarray(get_host(self.local_frequencies), dtype=float)
+        shape = tuple(int(k) for k in delta.shape[1:-1])
+        nq = int(np.prod(shape))
+        d_flat = delta.reshape(delta.shape[0], nq, delta.shape[-1])
+        todo = self._q_indices(nq, shape)
+
+        if self._pole_q is None:
+            self._pole_q = {}
+        acc_l = xp.zeros_like(sse_lesser.data)
+        acc_g = xp.zeros_like(sse_greater.data)
+        states, promoted = [], 0
+        for iq, idx in todo:
+            sec = self._pole_q.get(iq)
+            if sec is None:
+                sec = PoleSector(self._pole_cfg, freqs,
+                                 **self._pole_frequency_context(freqs))
+                self._pole_q[iq] = sec
+            sec.set_operator_context(
+                delta=d_flat[:, iq, :],
+                d_blocks=self._pole_blocks(self.dynamical_matrix,
+                                           index_slice=idx),
+                obc_left=(self.obc_blocks.retarded[0][idx]
+                          if self.obc_blocks.retarded[0] is not None else None),
+                obc_right=(self.obc_blocks.retarded[-1][idx]
+                           if self.obc_blocks.retarded[-1] is not None
+                           else None),
+                block_sizes=self.block_sizes,
+                rows=sse_lesser.rows,
+                cols=sse_lesser.cols,
+            )
+            st = sec.refresh()
+            states.append((idx, st))
+            if st is None or not st.clusters:
+                continue
+            promoted += st.n_poles
+            # Build this q's leg into this q's slice. The state carries the
+            # per-q correction; only the assembled stack leaves here.
+            self.pole_state = st
+            self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
+                                     g_lesser, q_idx=idx)
+            sel = (slice(None),) + idx
+            acc_l[sel] = st.g_pp_lesser.reshape(acc_l[sel].shape)
+            acc_g[sel] = st.g_pp_greater.reshape(acc_g[sel].shape)
+
+        # One state for the consumers, carrying the STACKED channel. Its
+        # clusters are the union so the interaction's emptiness test is right;
+        # its per-q detail stays in `q_states` for reporting.
+        total = states[0][1] if states and states[0][1] is not None else None
+        if total is None or not any(
+                st is not None and st.clusters for _, st in states):
+            self.pole_state = None
+        else:
+            total = next(st for _, st in states if st is not None
+                         and st.clusters)
+            total.g_pp_lesser, total.g_pp_greater = acc_l, acc_g
+            self.pole_state = total
+        self.pole_q_states = states
+        if comm.rank == 0:
+            n_live = sum(1 for _, st in states
+                         if st is not None and st.clusters)
+            skipped = nq - len(todo)
+            tail = f", {skipped} q skipped (q_stride/q_max)" if skipped else ""
+            print(f"  pole sector: {len(todo)}/{nq} q solved, {n_live} with "
+                  f"poles, {promoted} pole(s) total{tail}", flush=True)
 
     def _census_over_q(self, delta, sse_lesser) -> None:
         """Extraction-only census on a q-resolved device, one q at a time.
@@ -796,7 +906,7 @@ class PhononSolver(SubsystemSolver):
                           f"{exc})", flush=True)
 
     def _build_pole_keldysh(self, sse_lesser, sse_greater,
-                            g_retarded=None, g_lesser=None) -> None:
+                            g_retarded=None, g_lesser=None, q_idx=()) -> None:
         """Project the Keldysh source and reduce ``G_PP`` onto the pattern.
 
         Done here, in the ``"stack"`` state, because this is where the contact
@@ -821,8 +931,22 @@ class PhononSolver(SubsystemSolver):
             return
         freqs = xp.asarray(self.local_frequencies, dtype=float)
         rows, cols = sse_lesser.rows, sse_lesser.cols
-        sl = sse_lesser.data.reshape(freqs.shape[0], -1)
-        sg = sse_greater.data.reshape(freqs.shape[0], -1)
+
+        def _q(a):
+            """This q's slice of a stacked array; identity when nq == 1.
+
+            Every array the sector touches carries the transverse axis in the
+            middle, ``(n_freq,) + nk + (nnz,)``, and the pole problem is
+            independent per q -- so slicing here is the whole of coupled-q for
+            this route. The contact blocks carry it too, and dropping them is
+            not a small error: they are what drives the device.
+            """
+            if not q_idx or a is None:
+                return a
+            return a[(slice(None),) + tuple(q_idx)]
+
+        sl = _q(sse_lesser.data).reshape(freqs.shape[0], -1)
+        sg = _q(sse_greater.data).reshape(freqs.shape[0], -1)
         last = int(np.sum(self.block_sizes[:-1]))
 
         # Closed under z -> -z^*. Bosonic symmetry of the pole set is
@@ -852,18 +976,20 @@ class PhononSolver(SubsystemSolver):
                     "background B^R_k = G^R_k - U D(w_k) V^dagger is what the "
                     "regular leg is made of.")
             n_dof = int(np.sum(self.block_sizes))
-            gr = g_retarded.data.reshape(freqs.shape[0], -1)
-            corners_l = ((self.obc_blocks.lesser[0], 0),
-                         (self.obc_blocks.lesser[-1], last))
-            corners_g = ((self.obc_blocks.greater[0], 0),
-                         (self.obc_blocks.greater[-1], last))
+            gr = _q(g_retarded.data).reshape(freqs.shape[0], -1)
+            corners_l = ((_q(self.obc_blocks.lesser[0]), 0),
+                         (_q(self.obc_blocks.lesser[-1]), last))
+            corners_g = ((_q(self.obc_blocks.greater[0]), 0),
+                         (_q(self.obc_blocks.greater[-1]), last))
             cell_widths = xp.asarray(self.local_frequency_weights, dtype=float)
         for cl in state.legs:
             s_l = project_source_sparse(sl, rows, cols, cl.v)
             s_g = project_source_sparse(sg, rows, cols, cl.v)
             for corner_l, corner_g, off in (
-                (self.obc_blocks.lesser[0], self.obc_blocks.greater[0], 0),
-                (self.obc_blocks.lesser[-1], self.obc_blocks.greater[-1], last),
+                (_q(self.obc_blocks.lesser[0]),
+                 _q(self.obc_blocks.greater[0]), 0),
+                (_q(self.obc_blocks.lesser[-1]),
+                 _q(self.obc_blocks.greater[-1]), last),
             ):
                 if corner_l is not None:
                     s_l = add_contact_source(s_l, corner_l, cl.v, off)
@@ -959,8 +1085,8 @@ class PhononSolver(SubsystemSolver):
                 freqs, cl, source_at_poles(s_g, freqs, cl), rows, cols)
             acc_l = g_l if acc_l is None else acc_l + g_l
             acc_g = g_g if acc_g is None else acc_g + g_g
-        state.g_pp_lesser = acc_l.reshape(sse_lesser.data.shape)
-        state.g_pp_greater = acc_g.reshape(sse_greater.data.shape)
+        state.g_pp_lesser = acc_l.reshape(_q(sse_lesser.data).shape)
+        state.g_pp_greater = acc_g.reshape(_q(sse_greater.data).shape)
         if congruence and comm.rank == 0:
             # Where each promoted pole sits INSIDE its cell, in cells, worst
             # over the set. Zero means the line is registered on a grid point;
@@ -1007,7 +1133,7 @@ class PhononSolver(SubsystemSolver):
             # The RING's leg, G^< - g_pp -- not Sigma, and not the raw G^<:
             # the whole point is what the convolution is fed.
             if g_lesser is not None:
-                gl = (g_lesser.data.reshape(w_host.size, -1)
+                gl = (_q(g_lesser.data).reshape(w_host.size, -1)
                       - acc_l.reshape(w_host.size, -1))
                 low = max(1e-6, float(getattr(
                     self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
@@ -1074,6 +1200,14 @@ class PhononSolver(SubsystemSolver):
             return
         state = self.pole_state
         if state is None or not state.legs:
+            return
+        if out[0].data.ndim > 2:
+            # Coupled-q: every gate below reshapes to (n_freq, nnz) against one
+            # rows/cols pair, and a q axis breaks that silently -- it would
+            # still produce a number. A per-q subcell gate is its own work.
+            if comm.rank == 0:
+                print("  ring leg positivity: skipped (q-resolved; the gate is "
+                      "per-q and not written)", flush=True)
             return
 
         if getattr(cfg, "leg", "congruence") == "congruence":
