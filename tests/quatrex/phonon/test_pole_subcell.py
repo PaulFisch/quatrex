@@ -559,3 +559,103 @@ def test_census_walks_every_q_and_survives_one_failing(capsys):
         assert d.shape == (n_freq, nnz)
     # ... and the slices are distinct, so no q was handed another q's data
     assert len({d.tobytes() for _, d in seen}) == nq - 1
+
+
+def test_bubble_covariance_correction_runs_on_a_production_shaped_state():
+    """Exercise the interaction hook itself, not just the kernels.
+
+    This project has twice paid for a pole path whose kernels all passed and
+    whose ASSEMBLY had never been executed: a helper indented into a class body
+    (three device runs lost to AttributeError) and a dropped parameter
+    (NameError on the first device run). Both were invisible to every kernel
+    test. So the correction gets a call with a production-shaped state before
+    it goes near a node.
+    """
+    import types
+
+    import numpy as np
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.core.interaction import _bubble_covariance_correction
+    from quatrex.phonon.pole_keldysh import PoleCluster
+
+    n_dof, n_w, n_p = 3, 9, 1
+    freqs = np.arange(n_w) * 0.5
+    rows, cols = np.meshgrid(np.arange(n_dof), np.arange(n_dof), indexing="ij")
+    rows, cols = rows.ravel(), cols.ravel()
+    nnz = rows.size
+    rng = np.random.default_rng(11)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    # one promoted pole inside the window, plus its bosonic partner
+    z = np.array([2.0 - 0.02j, -2.0 - 0.02j])[:2 * n_p]
+    u = cx(n_dof, z.size)
+    cl = PoleCluster(z=z, u=u, v=u, label="c0")
+
+    # (c_sr, c_rs, c_ss) with the frequency axis, as background_coefficients
+    co = (cx(n_w, z.size, n_dof), cx(n_w, n_dof, z.size), cx(n_w, z.size, z.size))
+
+    state = types.SimpleNamespace(legs=[cl], c_lesser=[co], c_greater=[co])
+
+    captured = {}
+
+    class _SSP:
+        phi_blocks = {(0, 0, 0): cx(n_dof, n_dof, n_dof)}
+        block_sizes = np.array([n_dof])
+
+        def set_bubble_correction(self, l, g):
+            captured["l"], captured["g"] = np.asarray(l), np.asarray(g)
+
+    ps = PoleSectorConfig(enabled=True, bubble_correction="local_covariance")
+    scba = types.SimpleNamespace(
+        config=types.SimpleNamespace(
+            phonon=types.SimpleNamespace(pole_sector=ps)),
+        phonon_solver=types.SimpleNamespace(local_frequencies=freqs),
+        data=types.SimpleNamespace(
+            sigma_lesser=types.SimpleNamespace(
+                data=np.zeros((n_w, nnz), dtype=complex),
+                rows=rows, cols=cols)),
+    )
+
+    _bubble_covariance_correction(scba, state, _SSP())
+
+    assert "l" in captured, "the correction never reached set_bubble_correction"
+    for tag in ("l", "g"):
+        got = captured[tag]
+        assert got.shape == (n_w, nnz), got.shape
+        assert np.isfinite(got).all(), f"{tag} carries non-finite entries"
+        assert np.abs(got).max() > 0.0, f"{tag} is identically zero"
+
+
+def test_bubble_covariance_correction_is_silent_without_promoted_poles():
+    """No cluster, no correction -- the gate-0 requirement, at the hook."""
+    import types
+
+    import numpy as np
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.core.interaction import _bubble_covariance_correction
+
+    freqs = np.arange(5) * 0.5
+    called = []
+
+    class _SSP:
+        phi_blocks, block_sizes = {}, np.array([2])
+
+        def set_bubble_correction(self, l, g):
+            called.append(True)
+
+    scba = types.SimpleNamespace(
+        config=types.SimpleNamespace(phonon=types.SimpleNamespace(
+            pole_sector=PoleSectorConfig(
+                enabled=True, bubble_correction="local_covariance"))),
+        phonon_solver=types.SimpleNamespace(local_frequencies=freqs),
+        data=types.SimpleNamespace(sigma_lesser=types.SimpleNamespace(
+            data=np.zeros((5, 4), dtype=complex),
+            rows=np.arange(4), cols=np.arange(4))),
+    )
+    _bubble_covariance_correction(
+        scba, types.SimpleNamespace(legs=[], c_lesser=[], c_greater=[]), _SSP())
+    assert not called, "an empty pole set must inject nothing at all"

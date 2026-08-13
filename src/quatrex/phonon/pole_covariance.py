@@ -50,15 +50,24 @@ mean -- which is why no background model is needed for the leading correction.
 with :math:`J` the finite-interval two-pole integral already in
 :func:`~quatrex.phonon.pole_bubble.pair_convolution` under ``window=``.
 
-**Stability.** :math:`s = \Omega - \zeta_p - \zeta_q` has
-:math:`\operatorname{Im} s = \gamma_p + \gamma_q > 0`, so :math:`|s|` is bounded
-below by the combined linewidth and the small-denominator regime feared for the
-logarithmic form is unreachable for physical poles. Measured against 60-digit
-quadrature with the pole at a cell centre and the output AT the combination
-frequency, the log form holds to 2e-16 down to :math:`\gamma/h = 10^{-10}`
-(``test_finite_cell_kernel_is_stable_at_the_combination_frequency``). The
-series fallback of the review's Eq. (15) is therefore not implemented; it would
-be dead code guarding a regime that cannot occur.
+**Stability.** :math:`s = \Omega - \zeta_p - \zeta_q` does vanish, and both
+places it can are ordinary here.
+
+For two poles in the SAME half plane :math:`\operatorname{Im} s =
+\gamma_p + \gamma_q > 0` bounds :math:`|s|` below, and the logarithmic form
+holds to 2e-16 down to :math:`\gamma/h = 10^{-10}`. But a flattened family is
+:math:`[z, \bar z]` by construction, so it always contains MIXED pairings, and
+for those :math:`\zeta_p + \zeta_q = 2\operatorname{Re} z` is real:
+:math:`\operatorname{Im} s = \gamma_p - \gamma_q = 0` and :math:`s` passes
+exactly through zero as :math:`\Omega` sweeps.
+:func:`~quatrex.phonon.pole_bubble.pair_convolution` therefore carries the
+review's series branch after all, switched on :math:`|s|` against
+:math:`\min_u |u - \zeta_p|` -- which for a pole inside its own cell is
+:math:`\gamma_p`, not the distance to the cell endpoints.
+
+The same degeneracy makes :math:`\zeta_p = \bar\zeta_q` the rule rather than
+the exception in :func:`centred_gram`, where the partial fraction is 0/0 and
+the limit is the elementary double-pole integral.
 
 **Cost.** Every residue here is rank one, :math:`R_p = x_p y_p^\dagger`, so
 
@@ -118,14 +127,27 @@ def centred_gram(zeta: NDArray, centre: float, h: float) -> NDArray:
     and :func:`cell_variance` is only a variance because of it.
     """
     z = xp.asarray(zeta, dtype=xp.complex128)
-    d = cell_resolvent_mean(z, centre, h)
+    hh = float(h)
+    d = cell_resolvent_mean(z, centre, hh)
     gap = z[:, None] - xp.conj(z)[None, :]
-    if bool(xp.any(xp.abs(gap) < 1e-300)):
-        raise ValueError(
-            "centred_gram: a pole coincides with a partner's conjugate, so the "
-            "partial fraction is undefined. That needs a pole strictly ON the "
-            "real axis, which the sector refuses upstream.")
-    return (d[:, None] - xp.conj(d)[None, :]) / gap - d[:, None] * xp.conj(d)[None, :]
+    # zeta_p == conj(zeta_q) is the RULE here, not an exception: a flattened
+    # family is [z, conj(z)] by construction, so every pole meets its own
+    # conjugate and the partial fraction is 0/0 for that pair. The limit is the
+    # double-pole integral,
+    #
+    #     (1/h) int_I du/(u - zeta)^2 = (1/h)[1/(c - h/2 - zeta)
+    #                                         - 1/(c + h/2 - zeta)],
+    #
+    # which is elementary. Refusing instead -- as an earlier version did --
+    # rejects every real pole set the sector can produce.
+    lo = 1.0 / (centre - 0.5 * hh - z)
+    hi = 1.0 / (centre + 0.5 * hh - z)
+    double = ((lo - hi) / hh)[:, None] * xp.ones_like(gap)
+    degenerate = xp.abs(gap) < 1e-300
+    safe = xp.where(degenerate, 1.0, gap)
+    uncentred = xp.where(degenerate, double,
+                         (d[:, None] - xp.conj(d)[None, :]) / safe)
+    return uncentred - d[:, None] * xp.conj(d)[None, :]
 
 
 def cell_variance(residues: NDArray, zeta: NDArray, centre: float,

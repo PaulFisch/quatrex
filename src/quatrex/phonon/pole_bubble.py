@@ -162,12 +162,43 @@ def pair_convolution(
     )
     if window is not None:
         a, b = (float(window[0]), float(window[1]))
-        sw = w - q
-        den = sw - p
-        num = (xp.log(b - p) - xp.log(a - p)
-               - xp.log(sw - b) + xp.log(sw - a))
-        ok = den != 0
-        return num / (2.0 * xp.pi * xp.where(ok, den, 1.0)) * ok
+        s_val = w - p - q
+        aa, bb = a - p, b - p
+        # Two forms of the same integral, split on |s| against the distances
+        # from the pole to the cell ENDPOINTS.
+        #
+        # s does vanish. It is NOT bounded below by gamma_p + gamma_q, which
+        # only holds when both poles are in the same half plane: a flattened
+        # family is [z, conj(z)] by construction, and for such a MIXED pairing
+        # p + q = 2 Re z is real, so Im s = gamma_p - gamma_q = 0 and s passes
+        # exactly through zero as Omega sweeps. The log form then divides a
+        # cancelling bracket by it; the previous code returned exactly 0.0
+        # there, which is silently wrong rather than loud.
+        #
+        # Writing Omega - u - q = s - (u - p) puts the bracket in the form
+        # log1p(-s/A) - log1p(-s/B), whose term-by-term expansion is
+        #   J = (1/2pi) sum_n s^n/(n+1) [B^-(n+1) - A^-(n+1)],
+        # convergent for |s| < min(|A|, |B|) and exact at s = 0.
+        # Convergence needs |s| < min_u |u - p| over the WHOLE path, not just
+        # at the endpoints: for a pole INSIDE the cell -- which is the case the
+        # sector exists for -- that minimum is |Im p|, and using the endpoint
+        # distance instead selects the series where it diverges (measured:
+        # +1.27 against a true -98.73).
+        inside = ((xp.real(p) >= a) & (xp.real(p) <= b))
+        reach = xp.where(inside, xp.abs(xp.imag(p)),
+                         xp.minimum(xp.abs(aa), xp.abs(bb)))
+        small = xp.abs(s_val) < 0.25 * reach
+        num = (xp.log(bb) - xp.log(aa)
+               - xp.log(s_val - bb) + xp.log(s_val - aa))
+        den = xp.where(s_val == 0, 1.0, s_val)
+        far = num / (2.0 * xp.pi * den) * (s_val != 0)
+
+        near = xp.zeros_like(far)
+        term_a, term_b = xp.ones_like(aa) / aa, xp.ones_like(bb) / bb
+        for n in range(24):
+            near = near + (s_val ** n / (n + 1.0)) * (term_b - term_a)
+            term_a, term_b = term_a / aa, term_b / bb
+        return xp.where(small, near / (2.0 * xp.pi), far)
 
     both_lower = (xp.imag(p) < 0) & (xp.imag(q) < 0)
     both_upper = (xp.imag(p) > 0) & (xp.imag(q) > 0)

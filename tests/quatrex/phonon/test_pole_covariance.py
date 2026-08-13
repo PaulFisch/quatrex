@@ -177,13 +177,13 @@ def test_the_correction_stays_exact_as_the_line_narrows(gamma):
 def test_finite_cell_kernel_is_stable_at_the_combination_frequency():
     r"""The small-denominator regime, which cannot actually be reached.
 
-    ``s = Omega - zeta_p - zeta_q`` has ``Im s = gamma_p + gamma_q > 0``, so
-    ``|s|`` is bounded below by the combined linewidth however the output
-    frequency is chosen. The logarithmic form is therefore never evaluated at
-    ``s -> 0`` for physical poles, and a series fallback would be dead code
-    guarding a regime that does not occur. Checked here against mpmath at 60
-    digits, output placed exactly AT the combination frequency, which is the
-    closest approach available.
+    For two poles in the SAME half plane ``Im s = gamma_p + gamma_q > 0``
+    bounds ``|s|`` below however the output frequency is chosen, so the
+    logarithmic form is safe -- that is what this case checks, against mpmath
+    at 60 digits with the output placed exactly AT the combination frequency.
+
+    It does NOT generalise, and an earlier version of this docstring claimed it
+    did. See the mixed-pairing test below.
     """
     mp = pytest.importorskip("mpmath")
     from quatrex.phonon.pole_bubble import pair_convolution
@@ -322,3 +322,62 @@ def test_negative_cells_produce_the_difference_channel():
     assert 3 in live, live
     assert rep["out_of_range"] == 2, rep
     assert rep["applied"] == 2
+
+
+def test_the_mixed_pairing_drives_s_through_zero_and_is_still_exact():
+    r"""The case the same-half-plane argument does not cover.
+
+    A flattened family is ``[z, conj(z)]`` by construction, so it ALWAYS
+    contains pairings of a pole with its own conjugate. For those
+    ``zeta_p + zeta_q = 2 Re z`` is real, ``Im s = gamma_p - gamma_q = 0``, and
+    ``s`` passes exactly through zero as ``Omega`` sweeps -- including at
+    ``s = 0`` itself, where the previous code returned 0.0. Not an error: a
+    silently wrong number, in the kernel the whole correction is built on.
+    """
+    mp = pytest.importorskip("mpmath")
+    from quatrex.phonon.pole_bubble import pair_convolution
+
+    mp.mp.dps = 50
+    a, b = -H / 2, H / 2
+    gam = 0.02
+    p, q = -1j * gam, +1j * gam            # z and conj(z), pole in this cell
+    assert abs(np.imag(p + q)) < 1e-15, "the pairing must give a real sum"
+
+    for ds in (1e-1, 1e-2, 1e-4, 1e-8, 0.0):
+        om = float(np.real(p + q)) + ds
+        got = pair_convolution(np.array([p]), np.array([q]),
+                               np.array([om]), window=(a, b))[0, 0]
+        P, Q, W = mp.mpc(p), mp.mpc(q), mp.mpc(om)
+        ref = complex(mp.quad(lambda u: 1 / ((u - P) * (W - u - Q)),
+                              [mp.mpf(a), mp.mpf(0), mp.mpf(b)]) / (2 * mp.pi))
+        assert abs(got - ref) < 1e-10 * abs(ref), f"s={ds}: {got} vs {ref}"
+    # and s = 0 is a finite number, not the zero the old branch returned
+    at_zero = pair_convolution(np.array([p]), np.array([q]),
+                               np.array([float(np.real(p + q))]),
+                               window=(a, b))[0, 0]
+    assert abs(at_zero) > 1.0
+
+
+def test_centred_gram_handles_a_conjugate_pair_in_the_family():
+    """``zeta_p == conj(zeta_q)`` is the rule, not an exceptional input.
+
+    Refusing it -- as an earlier version did -- rejects every real pole set the
+    sector can produce, because the flattened family is built as
+    ``[z, conj(z)]``.
+    """
+    z = np.array([2.0 - 0.02j, -2.0 - 0.02j])
+    zeta = np.concatenate([z, np.conj(z)])
+    gap = zeta[:, None] - np.conj(zeta)[None, :]
+    assert np.abs(gap).min() == 0.0, "the bed must contain the degeneracy"
+
+    got = np.asarray(centred_gram(zeta, 0.0, H))
+    assert np.isfinite(got).all()
+    d = cell_resolvent_mean(zeta, 0.0, H)
+    for p_i in range(zeta.size):
+        for q_i in range(zeta.size):
+            f = lambda u, i=p_i, j=q_i: ((1.0 / (u - zeta[i]) - d[i])
+                                         * np.conj(1.0 / (u - zeta[j]) - d[j]))
+            ref = _quad(f, -H / 2, H / 2, n=20001) / H
+            assert abs(got[p_i, q_i] - ref) < 1e-7 * max(abs(ref), 1.0)
+    ev = np.linalg.eigvalsh(0.5 * (got + np.conj(got.T)))
+    assert ev.min() > -1e-9 * max(abs(ev).max(), 1.0), ev
