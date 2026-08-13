@@ -247,6 +247,7 @@ def pair_covariance(
 def spectrum_correction(
     freqs: NDArray, cells, phi_blocks: dict, block_sizes: NDArray,
     rows: NDArray, cols: NDArray, h: float, prefactor: complex | None = None,
+    chunk_bytes: int = 1 << 28,
 ) -> tuple[NDArray, dict]:
     r"""The total correction to add to the ring's output, on the stored pattern.
 
@@ -284,6 +285,7 @@ def spectrum_correction(
 
     r_idx, c_idx = xp.asarray(rows), xp.asarray(cols)
     w0, hh = float(w[0]), float(h)
+    n_p = int(np.asarray(_host(cells[0][1])).size)
     applied = dropped = 0
     for centre_k, zeta_k, p_k, q_k in cells:
         for centre_l, zeta_l, p_l, q_l in cells:
@@ -302,9 +304,17 @@ def spectrum_correction(
                                      conjugate=False, v=p_l)
             vr = modal_vertex_blocks(phi_blocks, block_sizes, q_l,
                                      conjugate=False, v=q_k)
-            out[m] += prefactor * xp.einsum(
-                "pq,kpq,kqp->k", kern,
-                xp.take(vl, r_idx, axis=0), xp.take(vr, c_idx, axis=0))
+            # CHUNKED over the pattern. vl[rows] is (nnz, P, P): at a
+            # production nnz and P = 2 N_p that is tens of gigabytes per pair,
+            # which is the same materialisation that took the sector kernels
+            # to a 290 GB allocation.
+            step = max(1, int(chunk_bytes // max(1, 32 * n_p * n_p)))
+            for lo in range(0, nnz, step):
+                hi = min(lo + step, nnz)
+                out[m, lo:hi] += prefactor * xp.einsum(
+                    "pq,kpq,kqp->k", kern,
+                    xp.take(vl, r_idx[lo:hi], axis=0),
+                    xp.take(vr, c_idx[lo:hi], axis=0))
             applied += 1
     return out, {"pairs": len(cells) ** 2, "applied": applied,
                  "out_of_range": dropped}

@@ -381,3 +381,33 @@ def test_centred_gram_handles_a_conjugate_pair_in_the_family():
             assert abs(got[p_i, q_i] - ref) < 1e-7 * max(abs(ref), 1.0)
     ev = np.linalg.eigvalsh(0.5 * (got + np.conj(got.T)))
     assert ev.min() > -1e-9 * max(abs(ev).max(), 1.0), ev
+
+
+def test_spectrum_correction_chunking_is_exact_and_bounds_the_working_set():
+    """``vl[rows]`` is ``(nnz, P, P)``; unchunked that is what took the sector
+    kernels to a 290 GB allocation. Chunking must change nothing."""
+    from quatrex.phonon.pole_covariance import spectrum_correction
+
+    n_dof = 4
+    rng = np.random.default_rng(7)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    r, c = np.meshgrid(np.arange(n_dof), np.arange(n_dof), indexing="ij")
+    rows, cols = r.ravel(), c.ravel()
+    phi = {(0, 0, 0): cx(n_dof, n_dof, n_dof)}
+    sizes = np.array([n_dof])
+    h = 0.5
+    freqs = np.arange(9) * h
+    cells = [(1.0, np.array([1.0 - 0.01j, -1.0 - 0.01j]),
+              cx(n_dof, 2), cx(n_dof, 2)),
+             (1.5, np.array([1.5 - 0.02j, -1.5 - 0.02j]),
+              cx(n_dof, 2), cx(n_dof, 2))]
+
+    full, _ = spectrum_correction(freqs, cells, phi, sizes, rows, cols, h)
+    tiny, _ = spectrum_correction(freqs, cells, phi, sizes, rows, cols, h,
+                                  chunk_bytes=1)          # one row at a time
+    full, tiny = np.asarray(full), np.asarray(tiny)
+    assert np.abs(full - tiny).max() <= 1e-13 * max(np.abs(full).max(), 1.0)
+    assert np.abs(full).max() > 0.0
