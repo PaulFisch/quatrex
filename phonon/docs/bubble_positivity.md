@@ -990,3 +990,47 @@ held; the dense q-folded vertex `qv` is indexed by global `(q1, q2)` and
 needs the same slicing; and the `sse_greater_from_lesser` cross-term
 accumulator and the `q_ext -> -q_ext` gather both cross ranks once `q_ext`
 is sectioned.
+
+### The block-count floor the first device run exposed (2026-08-13)
+
+`nq > 1` with `block_comm_size = 2` had never run on a device before the
+halo fix, and the first attempt (daint 4419787, 2-cell MoS2 film, `nblk =
+2`) died at iteration 0 on every odd rank with
+
+```
+IndexError: Negative block indices are not supported.
+```
+
+four frames below the precondition it violated. Both contacts build their
+periodic superblocks from a diagonal block and its immediate
+off-diagonals, so `_compute_obc` reads `blocks[n, n]`, `blocks[m, n]` and
+`blocks[n, m]` with `n = num_local_blocks - 1` and `m = n - 1`. A rank
+holding one block has `m = -1`.
+
+The two contacts are not symmetric here. Rank 0 survives on a single
+block: `local_block_sizes` is sliced as `block_sizes[offset:]` rather than
+`block_sizes[offset:next_offset]`, so it runs to the end of the device,
+and the rank holds the nnz for the trailing rows -- `blocks[1, 0]` was
+checked against a dense reference at `-np 2` and returns the right values.
+The last rank has no such slack, because the block it needs lies behind
+its own offset. So the floor is on the LAST section only, and
+`validate_obc_block_sections` in `src/quatrex/phonon/solver.py` refuses
+exactly that case.
+
+Combined with the band-halo bound already in the SSE, a block-parallel
+configuration must satisfy both
+
+```
+sections[-1] >= 2                       contact OBC
+min(sections) >= g_band + 1             band halo (only checked for g_band > 1)
+```
+
+with `sections = get_section_sizes(n_blocks, block_comm_size)`. For
+`block_comm_size = 2` that is `n_blocks >= 4` outright, and `n_blocks >= 6`
+to keep `g_band = 2`. The 2-cell films that most of the MoS2 campaign
+used cannot be split at all; `mos2f6x1` (6 cells, `sections = [3, 3]`) is
+the shortest bed on disk that can.
+
+The band-halo check does not subsume the OBC one: it is guarded by
+`g_band > 1`, so a run at `g_band = 1` passes it with one block per rank
+and then dies in the OBC. That is precisely what 4419787 did.
