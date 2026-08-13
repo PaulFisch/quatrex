@@ -29,6 +29,27 @@ baseline cannot".
 
 ---
 
+## 0b. Two defects in the work of 2026-08-12, found on review
+
+**26 correctness tests were deleted without mention.** Commit `5caac04e`
+("local finite-cell bubble correction") removed 1043 lines from
+`tests/quatrex/phonon/test_pole_congruence.py`, taking 26 of its 28 tests with
+them, and its message does not refer to doing so. Lost: the four-sector
+identity, the sector-sum oracle, the cell-average-vs-quadrature check, the
+conjugate-pole antisymmetry pair, the leg-tail closure test, the chunking
+equivalence pair, the guard against the class-body truncation that once cost a
+device run, and the Hilbert-hook guard. Restored; all 41 pass unchanged against
+the current source, so none of them had been made obsolete by the intervening
+work -- they were simply lost.
+
+**`pole_local.py` has no caller.** 598 lines of module plus 252 of tests, and
+nothing in `src/` or the engine reaches `correct_spectrum`; there is no config
+field for it. The commit message presents it as a delivered route. Its status
+is now stated in the module docstring, together with what wiring would take and
+why it has not been done -- see the linewidth result below.
+
+---
+
 ## 1. What works today
 
 ### The routes

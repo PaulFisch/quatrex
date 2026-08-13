@@ -1,6 +1,24 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""Local finite-cell replacement of the ring's rectangle rule.
 
+**Status: NOT WIRED.** Nothing in ``src/`` or the engine calls
+:func:`correct_spectrum`, and no config field reaches it; the module is
+exercised only by ``tests/quatrex/phonon/test_pole_local.py``. Wiring it means
+adding a ``pole_sector`` flag (default off, per the project's
+options-not-silent-defaults rule), passing the promoted cells and the flattened
+``(zeta, residues)`` through to :mod:`quatrex.phonon.sse_phonon_phonon`, and
+adding the correction to the raw bubble output BEFORE ``delta`` is formed so
+the Kramers-Kronig transform covers it -- the same placement the mixed sector
+needs.
+
+That has deliberately not been done, because on the only production CNT bed
+there is nothing for it to correct: the converged ``cnt33_L4_linear``
+linewidths run from ``Gamma_tot/dw = 1.573`` upward with ZERO of 144 modes
+below one grid spacing (``phonon/docs/cnt_observations.md`` Sec. 6). Wiring it
+now would ship a path that provably does nothing on the bed it would be judged
+on. It is kept because the kernels are verified and because a bed WITH narrow
+modes is the case it was built for.
+
 The ring evaluates the bubble as a rectangle rule on point samples,
 
 .. math::
