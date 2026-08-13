@@ -786,3 +786,53 @@ def test_extraction_only_reports_a_census_and_allocates_nothing(capsys):
     # ... and the ordinary route on the same bed DOES allocate, or the test
     # above passes for the wrong reason.
     assert _context_run().refresh().n_poles > 0
+
+
+def test_leg_weight_gate_is_exact_where_samples_per_halfwidth_is_a_guess():
+    """The resolution test in the units of the thing it decides.
+
+    ``q_omega = gamma/(p_Gamma h) < 1`` is a hand-chosen constant. The exact
+    statement is how much of the line's weight the grid can misrepresent,
+    worst case over where it falls between nodes, and it inverts in closed
+    form: ``h/gamma < 2 pi / log(1 + 2/eps)``.
+
+    It matters on real data. The CNT population at production mixing has
+    median ``h/gamma = 0.65``, where the grid carries the line to 1.3e-04 --
+    yet ``q_omega`` calls 140 of 144 candidates under-resolved.
+    """
+    freqs = np.linspace(0.0, 55.0, 181)
+    sec = PoleSector(PoleSectorConfig(enabled=True), freqs)
+    h = sec.h
+
+    for eps in (0.01, 0.05, 0.10, 0.20):
+        r_eps = 2 * np.pi / np.log(1 + 2 / eps)
+        assert abs(sec.leg_weight_error(h / r_eps) - eps) < 1e-9 * eps
+        # strictly monotone in h/gamma, so the inversion is a real threshold
+        assert sec.leg_weight_error(h / (r_eps * 0.99)) < eps
+        assert sec.leg_weight_error(h / (r_eps * 1.01)) > eps
+
+    # CNT's median mode: the grid is fine, and the exact gate says so
+    assert sec.leg_weight_error(h / 0.65) < 1e-3
+    # a genuinely unresolved line is flagged hard
+    assert sec.leg_weight_error(h / 20.0) > 1.0
+    assert sec.leg_weight_error(0.0) == float("inf")
+
+
+def test_leg_weight_gate_is_off_by_default_and_refuses_a_resolved_mode_when_on():
+    """Default off keeps the legacy rule; on, it must actually refuse."""
+    freqs = np.linspace(0.0, 55.0, 181)
+    base = PoleSector(PoleSectorConfig(enabled=True), freqs)
+    assert base.cfg.leg_weight_tol == 0.0
+
+    import types
+
+    tight = PoleSector(
+        PoleSectorConfig(enabled=True, leg_weight_tol=0.01), freqs)
+    sol = types.SimpleNamespace(
+        z=complex(10.0, -base.h / 0.65), eps_nep=1e-14, eps_left=1e-14,
+        kappa=1.0, converged=True, iterations=1, dz_est=0.0,
+        r=np.ones(2), l=np.ones(2))
+    why = tight.screen(sol, False, 5.0)
+    assert why is not None and "line-weight" in why, why
+    # the same mode under the legacy rule is NOT refused for resolution
+    assert "grid-resolved" not in (base.screen(sol, False, 5.0) or "")

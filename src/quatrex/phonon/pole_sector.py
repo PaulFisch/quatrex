@@ -403,6 +403,28 @@ class PoleSector:
                 flags[int(new_j)] = True
         return flags
 
+    def leg_weight_error(self, gamma: float) -> float:
+        r"""Worst-case relative error in a line's represented weight.
+
+        .. math::
+            E^{\max}_{\rm leg}(r) = \coth(\pi/r) - 1
+                                   = \frac{2}{e^{2\pi/r} - 1},
+            \qquad r = h/\gamma,
+
+        the maximum of the exact trapezoidal sum
+        :math:`\sinh(2\pi/r)/(\cosh(2\pi/r) - \cos(2\pi x))` over the
+        sub-cell offset ``x``, attained with the line on a node. Small means
+        the grid already carries the line however it happens to fall.
+        """
+        g = float(gamma)
+        if g <= 0.0:
+            return float("inf")
+        r = self.h / g
+        if r <= 0.0:
+            return 0.0
+        arg = 2.0 * np.pi / r
+        return float("inf") if arg > 700.0 else 2.0 / np.expm1(arg)
+
     def screen(self, sol: PoleSolution, was_promoted: bool,
                separation: float = float("inf")) -> str | None:
         """Reason to refuse a pole, or ``None`` to accept it.
@@ -423,10 +445,19 @@ class PoleSector:
         lo, hi = self.window()
         if not (lo <= sol.z.real <= hi):
             return f"outside the pole window [{lo:.3g}, {hi:.3g}]"
-        q = self.resolution_score(gamma)
-        threshold = self.cfg.q_out if was_promoted else self.cfg.q_in
-        if q >= threshold:
-            return f"grid-resolved (q_omega={q:.3g} >= {threshold})"
+        tol = float(getattr(self.cfg, "leg_weight_tol", 0.0) or 0.0)
+        if tol > 0.0:
+            # Exact: how much of the line's weight the grid can misrepresent,
+            # worst case over where it falls between nodes. See leg_weight_tol.
+            err = self.leg_weight_error(gamma)
+            if err <= tol:
+                return (f"grid-resolved (worst line-weight error {err:.3g} "
+                        f"<= {tol:g})")
+        else:
+            q = self.resolution_score(gamma)
+            threshold = self.cfg.q_out if was_promoted else self.cfg.q_in
+            if q >= threshold:
+                return f"grid-resolved (q_omega={q:.3g} >= {threshold})"
         if sol.kappa > self.cfg.condition_reject:
             return f"ill-conditioned (kappa={sol.kappa:.2e})"
         if self.band_edges is not None and self.band_edges.size:

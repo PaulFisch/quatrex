@@ -378,6 +378,30 @@ class PoleSectorConfig(BaseModel):
     individual sectors -- only their sum is constrained). Nothing in the solver
     checks this today, and the sector is the first thing that can break it
     structurally."""
+    leg_weight_tol: NonNegativeFloat = 0.0
+    """Worst-case line-weight error above which a mode counts as unresolved.
+
+    0 keeps the legacy ``q_in``/``samples_per_halfwidth`` rule. Set it and the
+    resolution test becomes exact instead of a hand-chosen constant.
+
+    Summing point samples of a unit-weight Lorentzian over a uniform grid is a
+    theta function, not the nearest-node term:
+
+        W(r, x) = sinh(2 pi / r) / (cosh(2 pi / r) - cos(2 pi x)),
+        r = h/gamma,  x = the offset in cells.
+
+    The worst case is a line sitting ON a node, giving
+
+        E_leg^max(r) = coth(pi / r) - 1 = 2 / (e^{2 pi / r} - 1),
+
+    so a tolerance ``eps`` is met exactly when ``h/gamma < 2 pi/log(1 + 2/eps)``
+    -- 1.185 for 1 %, 1.692 for 5 %, 2.064 for 10 %.
+
+    This matters on real data. The CNT population at production mixing has
+    median ``h/gamma = 0.65``, where the grid carries the line to better than
+    1e-8, yet ``q_omega = gamma/(2h) < 1`` calls 140 of 144 candidates
+    under-resolved -- the old rule flags almost everything and then leans on
+    the root solve to refuse it."""
     bubble_correction: Literal["none", "local_covariance"] = "none"
     """Replace the ring's cell-mean product on ACTIVE cell pairs by the exact
     finite-cell integral.

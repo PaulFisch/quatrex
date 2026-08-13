@@ -115,6 +115,62 @@ not fit in a two-hour job.
 
 ---
 
+## 1.5 The covariance correction on device (jobs 4444772, 4445828)
+
+20 iterations, `ne = 181`, `mix = 0.2` -- short on purpose: this answers
+whether the path executes at device size, not anything about physics.
+
+| arm | `rel Sigma` @20 | lead balance | `lead_current` | wall |
+|---|---|---|---|---|
+| base | 9.4272e-01 | 8.2976e-04 | 41.91546925712334 | 163 s (cold) |
+| gate0 | 9.4272e-01 | 8.2976e-04 | 41.91546925712334 | 76 s |
+| corr | 9.2332e-01 | 8.5696e-04 | 41.872593172402816 | 317 s |
+
+**Gate 0 is exact.** `bubble_correction` ON with an EMPTY pole window
+reproduces base to every printed digit, heat profile included. With nothing to
+correct the correction is nothing, which is the precondition for the third row
+meaning anything.
+
+`corr` runs stably: no sign inversion, lead balance unchanged at 8.6e-04, heat
+profile physical. It moves `lead_current` by **0.10 %** and costs about 4x the
+warm baseline. Active cells vary 1-11 across iterations as the promoted set
+moves.
+
+The first attempt (4444772) raised `modal_vertex_blocks: families disagree, 4
+against 24 modes` -- my own guard, firing loudly rather than returning a
+number, on an assumption that was wrong: paired cells can belong to different
+CLUSTERS with different pole counts, and the mixed vertex projection is
+rectangular.
+
+## 1.6 The resolution gate is mis-calibrated, and the run says so
+
+From the same run's population diagnostic, at production mixing:
+
+    coverage: candidates 144 -> in window 144 -> unresolved 140 -> important 140
+              -> root solved 12 -> representation valid 12 -> active 12
+    population: median h/gamma=0.65, median gamma/spacing=8.40, 94% overlapping
+
+`q_omega = gamma/(2h) < 1` calls **140 of 144** under-resolved. But at
+`h/gamma = 0.65` the exact worst-case line-weight error is **1.3e-04**: the
+grid carries those lines to 0.013 %, however they fall between nodes. The old
+rule flags almost everything and then leans on the root solve to refuse it,
+which is why the refusal histogram is dominated by `eps_z` rather than by
+resolution.
+
+`leg_weight_tol` (default 0 = legacy rule) makes the test exact:
+
+    E_leg^max(r) = coth(pi/r) - 1 = 2/(e^{2 pi/r} - 1),   r = h/gamma
+
+refuse when that is below tolerance. Verified against the closed-form inverse
+`h/gamma < 2 pi/log(1 + 2/eps)`: 1.185 for 1 %, 1.692 for 5 %, 2.064 for 10 %.
+
+The second population number is independent and equally decisive: median
+`gamma/spacing = 8.40` with **94 % overlapping**. An isolated simple pole needs
+below 0.5. So CNT fails both criteria at once -- the grid does not need help,
+and no isolated pole exists to give it.
+
+---
+
 ## 2. Converged CNT has no narrow modes
 
 From `phonon/scripts/data/resonance_gain_distilled.npz`, converged
