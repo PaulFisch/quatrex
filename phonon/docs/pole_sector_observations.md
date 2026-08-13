@@ -233,6 +233,24 @@ Extraction-only census, `sichk_base`, `ne = 121`, 81 q sampled every 20th,
 quartiles run 0.013-0.63. Compare CNT, where the median `gamma/spacing` is 8.40
 with 94 % overlapping and nothing is below one grid spacing.
 
+Through the EXACT gate (`h = 15.0/120 = 0.125 THz`), the linewidths split the
+population sharply:
+
+| `gamma` [THz] | `h/gamma` | `E_leg^max` | where |
+|---|---|---|---|
+| 0.00286 | 43.7 | **1.29e+01** | q2 p25 |
+| 0.00692 | 18.1 | **4.80e+00** | q3 p25 |
+| 0.0252 | 4.96 | **7.84e-01** | q4 p25 |
+| 0.0849 | 1.47 | 2.84e-02 | q3 median |
+| 0.111 | 1.13 | 7.58e-03 | q2 median |
+| 0.166 | 0.75 | 4.76e-04 | q1 median |
+
+The MEDIAN mode is fine -- the grid carries it to better than 1 % -- but the
+lower QUARTILE is misrepresented by 78 % to 1290 %. That is the regime the
+method exists for, and it is the first time any bed has shown it. It also
+explains why a median-based summary would have missed it: on CNT the median WAS
+the whole story because the distribution was narrow, and here it is not.
+
 So Si carries a population that is simultaneously under-resolved and isolated
 -- both criteria at once, which is what a simple-pole representation needs and
 what CNT never had. 6-7 poles per q are accepted, so across 81 q the sector
@@ -255,7 +273,12 @@ so this is the bed's own footprint at that grid, not the sector's -- but it
 means no MoS2 census exists yet, and one will need a coarser grid, fewer q per
 pass, or block distribution.
 
-**Si's `fft` arm truncates the Kramers-Kronig integral.** Same bed, same
+**Si's `fft` arm runs and descends monotonically**, reaching 6.10e-02 at
+iteration 25 with lead balance 3.2e-05, internal spread 4.6e-03 and a uniform
+heat profile [28.933 28.933 28.968 28.926]. It is slower than `half`, not
+unstable. `fft` on MoS2 died the same way its census did.
+
+**But Si's `fft` arm truncates the Kramers-Kronig integral.** Same bed, same
 budget, one knob:
 
 | | min `rel Sigma` | sign inversions | KK truncation warning |
