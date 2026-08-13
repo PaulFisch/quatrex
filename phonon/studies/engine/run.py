@@ -47,6 +47,10 @@ if os.environ.get("QX_ADPERIOD"): cfg.scba.anderson_period = int(os.environ["QX_
 if os.environ.get("QX_MAXIT"):    cfg.scba.max_iterations = int(os.environ["QX_MAXIT"])
 if os.environ.get("QX_MINIT"):    cfg.scba.min_iterations = int(os.environ["QX_MINIT"])
 if os.environ.get("QX_NE"):       cfg.electron.energy_window_num = int(os.environ["QX_NE"])
+# The 3-phonon bubble has support to TWICE the band top, so a grid that
+# stops at the band top truncates the Kramers-Kronig integral for Re Sigma^R
+# and the solver warns. Extending the window is the direct test of that.
+if os.environ.get("QX_WMAX"):     cfg.electron.energy_window_max = float(os.environ["QX_WMAX"])
 if os.environ.get("QX_RETARDED"): cfg.phonon.retarded_method = os.environ["QX_RETARDED"]
 if os.environ.get("QX_FC3"):      cfg.phonon.fc3_path = os.environ["QX_FC3"]
 if os.environ.get("QX_ETAOBC"):   cfg.phonon.eta_obc = float(os.environ["QX_ETAOBC"])
