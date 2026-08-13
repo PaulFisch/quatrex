@@ -178,6 +178,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._pole_channel = None   # (g_pp_lesser, g_pp_greater) on the primary grid
         self._pole_sigma_ss = None  # (sigma_ss_l, sigma_ss_g, sigma_ss_r)
         self._pole_sigma_mixed = None  # (sigma_sr_l, sigma_sr_g)
+        self._bubble_correction = None  # subcell covariance, pre-KK
         self._cm_arrays = None
         # Auxiliary uniform bubble grid (sse_aux_grid_dw_thz): the FFT
         # convolution, the bosonic fold and the Hilbert transform only exist
@@ -1786,6 +1787,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stg.data[1:] += xs[:0:-1]
             sl_conv = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_conv]
             sg_conv = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_conv]
+            if self._bubble_correction is not None:
+                # Before the masks and before delta: see set_bubble_correction.
+                _cl, _cg = self._bubble_correction
+                sl_conv = sl_conv + _cl
+                sg_conv = sg_conv + _cg
             if self._pole_enabled and self._pole_sigma_mixed is not None:
                 # The mixed sectors join the RAW bubble output here, before the
                 # masks and before delta is formed, so the existing
@@ -1880,6 +1886,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._pole_channel = None
             self._pole_sigma_ss = None
             self._pole_sigma_mixed = None
+            self._bubble_correction = None
 
         # Self-consistent SCP cubic-tadpole static self-energy
         if self._scp_tadpole and self._sigma_static is not None:
@@ -3086,6 +3093,25 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         double-counting against the transform that already sees them.
         """
         self._pole_sigma_mixed = (sigma_l, sigma_g)
+
+    def set_bubble_correction(self, corr_l, corr_g) -> None:
+        """Inject the subcell covariance correction for this iteration.
+
+        This is what the cell-averaged ring LEAVES BEHIND, not a replacement
+        for anything it computed: the correction is added to the raw bubble
+        output, nothing is subtracted, and with no active cell it is exactly
+        zero. That is why it needs no matching channel on the legs -- unlike
+        the pole-pole route, where the leg removed and the sector restored have
+        to be the same function.
+
+        Placed with the mixed sectors, BEFORE ``delta`` is formed, so the
+        existing Kramers-Kronig transform supplies its retarded partner. It
+        carries narrow structure at combination frequencies and has no
+        closed-form causal continuation of its own, so routing it after the
+        transform would leave ``Sigma^R`` missing exactly the dispersive part
+        ``Sigma^{<,>}`` had gained.
+        """
+        self._bubble_correction = (corr_l, corr_g)
 
     def set_pole_self_energy(self, sigma_l, sigma_g, sigma_r) -> None:
         """Inject the analytic pole-sector self-energy for this iteration.

@@ -209,6 +209,11 @@ class PhononPhononInteraction(Interaction):
         ssp = self.sigma_phonon_phonon
         # (1) The legs: remove the pole sector before the FFT ring sees them.
         ssp.set_pole_channel(state.g_pp_lesser, state.g_pp_greater)
+        # Independent of `leg`: the ring can be corrected whether or not the
+        # legs also carry a cell-average correction, because this ADDS the
+        # covariance the ring omits rather than replacing anything it computed.
+        if getattr(ps, "bubble_correction", "none") == "local_covariance":
+            _bubble_covariance_correction(scba, state, ssp)
         if getattr(ps, "leg", "congruence") == "congruence_analytic":
             _pole_analytic_sectors(scba, state, ssp)
             return
@@ -491,3 +496,80 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
     scale = float(getattr(ps, "mixed_scale", 1.0))
     ssp.set_pole_mixed((scale * mx_l).reshape(shape),
                        (scale * mx_g).reshape(shape))
+
+
+def _bubble_covariance_correction(scba, state, ssp) -> None:
+    """What the cell-averaged ring leaves behind, added back on active pairs.
+
+    The ring works from cell means; the exact cell-pair integral is that plus
+    the covariance of the two subcell fluctuations. This adds the second term
+    and touches nothing else -- no leg is modified, nothing is subtracted, and
+    an empty active set gives exactly zero. See
+    :mod:`quatrex.phonon.pole_covariance`.
+
+    The active set is built on the EXTENDED axis: each promoted cell enters
+    once at ``+omega_k`` from this Keldysh component and once at ``-omega_k``
+    from its PARTNER, transposed, which is the same fold
+    ``Sigma^<(-w) = Sigma^>(w)^T`` the ring applies to its own legs. Without
+    the negative entries the difference-frequency channel is silently absent.
+    """
+    from quatrex.phonon.pole_congruence import partial_fraction_legs_percell
+    from quatrex.phonon.pole_covariance import cell_variance, spectrum_correction
+
+    ps = scba.config.phonon.pole_sector
+    solver = scba.phonon_solver
+    rows, cols = data_rows_cols(scba)
+    freqs = np.asarray(get_host(solver.local_frequencies), dtype=float)
+    if freqs.size < 2:
+        return
+    h = float(freqs[1] - freqs[0])
+    shape = scba.data.sigma_lesser.data.shape
+    floor = float(getattr(ps, "covariance_sigma_min", 0.0) or 0.0)
+
+    built = {"l": [], "g": []}
+    for cl, co_l, co_g in zip(state.legs, state.c_lesser, state.c_greater):
+        # Only the cells that hold a promoted pole carry subcell structure
+        # worth correcting; the rest are already smooth on the grid.
+        cells = np.unique([int(np.argmin(np.abs(freqs - float(np.real(z)))))
+                           for z in np.asarray(get_host(cl.z))
+                           if float(np.real(z)) >= 0.0])
+        if cells.size == 0:
+            continue
+        for tag, co in (("l", co_l), ("g", co_g)):
+            sub = tuple(np.asarray(get_host(a))[cells] for a in co)
+            zeta, p_row, q_col = partial_fraction_legs_percell(cl, sub)
+            for j, k in enumerate(cells):
+                built[tag].append((float(freqs[k]), np.asarray(get_host(zeta)),
+                                   np.asarray(get_host(p_row))[j],
+                                   np.asarray(get_host(q_col))[j]))
+
+    if not built["l"] and not built["g"]:
+        return
+
+    def _screen(entries):
+        if not entries:
+            return []
+        var = [cell_variance(np.einsum("ip,jp->pij", p, q), z, c, h)
+               for c, z, p, q in entries]
+        top = max(var) if var else 0.0
+        return [e for e, v in zip(entries, var) if v >= floor * top]
+
+    out = {}
+    for tag, partner in (("l", "g"), ("g", "l")):
+        pos = _screen(built[tag])
+        # The negative half is the PARTNER component folded:
+        # G^<(-w) = G^>(w)^T, so a leg sum_p R_p/(u - zeta_p) placed at -w_k
+        # becomes sum_p (-R_p^T)/(u + zeta_p) -- poles at -zeta, residues
+        # negated and TRANSPOSED. For a rank-one residue the transpose is just
+        # the two factors swapped, (p (x) q)^T = q (x) p, so no pattern
+        # permutation is needed and the sign rides on one of them.
+        neg = [(-c, -z, -q, p) for c, z, p, q in _screen(built[partner])]
+        corr, rep = spectrum_correction(freqs, pos + neg, ssp.phi_blocks,
+                                        ssp.block_sizes, rows, cols, h)
+        out[tag] = np.asarray(get_host(corr))
+        if comm.rank == 0 and tag == "l":
+            print(f"  bubble correction: {len(pos)} active cells (+{len(neg)} "
+                  f"mirrored), {rep['applied']} pairs applied, "
+                  f"{rep['out_of_range']} off-grid", flush=True)
+    ssp.set_bubble_correction(xp.asarray(out["l"]).reshape(shape),
+                              xp.asarray(out["g"]).reshape(shape))

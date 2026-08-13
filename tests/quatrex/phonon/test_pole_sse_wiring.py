@@ -239,3 +239,59 @@ def test_mixed_channel_reaches_the_retarded_self_energy():
     assert np.abs(withmx[2] - base[2]).max() > 1e-12, (
         "Sigma^R unchanged: the mixed terms were injected after delta was formed"
     )
+
+
+def test_bubble_correction_reaches_the_retarded_self_energy():
+    """It must be SEEN by the Hilbert transform, like the mixed sectors.
+
+    The covariance carries narrow structure at combination frequencies and has
+    no closed-form causal continuation of its own, so it has to join the raw
+    bubble output before ``delta`` is formed. Injected after, ``Sigma^R`` would
+    be missing exactly the dispersive part ``Sigma^{<,>}`` just gained -- the
+    fluctuation-dissipation break that showed up on the analytic route as
+    ``lead balance = 2.0000``.
+    """
+    phi, bs, freqs, make = _fixture()
+    gl, gg, sl, sg, sr = make()
+    shape = sl.data.shape
+    add = (xp.asarray(np.full(shape, 0.2 - 0.1j)),
+           xp.asarray(np.full(shape, -0.2 + 0.4j)))
+
+    def run_with_correction():
+        gl2, gg2, sl2, sg2, sr2 = make()
+        _fill_legs(gl2, gg2)
+        for buf in (sl2, sg2, sr2):
+            buf.data[:] = 0.0
+        ssp = SigmaPhononPhonon(_make_cfg(True), phonon_frequencies=freqs,
+                                block_sizes=bs, phi_blocks=phi)
+        ssp.set_bubble_correction(*add)
+        ssp.compute(gl2, gg2, out=(sl2, sg2, sr2))
+        return tuple(np.asarray(get_host(b.data)).copy() for b in (sl2, sg2, sr2))
+
+    base = _run(pole_enabled=True)[1]
+    got = run_with_correction()
+    assert np.abs(got[0] - base[0]).max() > 1e-12, "lesser unchanged"
+    assert np.abs(got[2] - base[2]).max() > 1e-12, (
+        "Sigma^R unchanged: the correction was injected after delta was formed")
+
+
+def test_bubble_correction_falls_through_exactly_when_absent():
+    """Nothing injected must be bit-identical, or the default is not free."""
+    _, off = _run(pole_enabled=False)
+    _, on = _run(pole_enabled=True)
+    for a, b in zip(off, on):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_bubble_correction_does_not_survive_the_iteration():
+    """It is built from THIS iterate's poles and must never outlive them."""
+    phi, bs, freqs, make = _fixture()
+    gl, gg, sl, sg, sr = make()
+    _fill_legs(gl, gg)
+    shape = sl.data.shape
+    ssp = SigmaPhononPhonon(_make_cfg(True), phonon_frequencies=freqs,
+                            block_sizes=bs, phi_blocks=phi)
+    ssp.set_bubble_correction(xp.asarray(np.full(shape, 0.1 + 0j)),
+                              xp.asarray(np.full(shape, 0.1 + 0j)))
+    ssp.compute(gl, gg, out=(sl, sg, sr))
+    assert ssp._bubble_correction is None

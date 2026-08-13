@@ -378,6 +378,27 @@ class PoleSectorConfig(BaseModel):
     individual sectors -- only their sum is constrained). Nothing in the solver
     checks this today, and the sector is the first thing that can break it
     structurally."""
+    bubble_correction: Literal["none", "local_covariance"] = "none"
+    """Replace the ring's cell-mean product on ACTIVE cell pairs by the exact
+    finite-cell integral.
+
+    ``"local_covariance"`` adds the subcell covariance
+    ``Delta I = int B[dG_k, dG_l]`` that the FFT ring, working from cell means,
+    leaves out. It is an ADDITION -- nothing is removed from the ring's output
+    and no leg is modified -- so with no active cell it is exactly zero and the
+    run is bit-identical to the baseline. That is the structural difference
+    from the sector routes, where the leg subtracted and the leg restored must
+    be the same function over the same support under the same quadrature.
+
+    Independent of ``leg``: the ring can be corrected whether or not the legs
+    carry a cell-average correction. Off by default."""
+    covariance_sigma_min: NonNegativeFloat = 0.0
+    """Cell activity floor for ``bubble_correction``, relative to the largest
+    ``sigma_k`` on the axis. 0 corrects every cell that carries poles.
+
+    The screening quantity is the cell variance, not a pole-cell / not-a-pole
+    -cell flag: an unresolved line's tail reaches past the cell holding it, so
+    a binary rule both corrects irrelevant cells and misses relevant ones."""
     q_stride: PositiveInt = 1
     """Solve every ``q_stride``-th transverse q. 1 = all of them.
 
