@@ -1034,3 +1034,45 @@ the shortest bed on disk that can.
 The band-halo check does not subsume the OBC one: it is guarded by
 `g_band > 1`, so a run at `g_band = 1` passes it with one block per rank
 and then dies in the OBC. That is precisely what 4419787 did.
+
+### The parity pair: the block split changes no physics (2026-08-13)
+
+`mos2f6x1` (6 cells, `nq = 25`, `ne = 1001`, `g_band = 2`, `eta = 0`,
+3 SCBA iterations, 8 ranks on 2 GH200 nodes), run twice at identical
+settings and differing only in `block_comm_size`:
+
+| | `bcs = 1` (4434361) | `bcs = 2` (4434371) |
+|---|---|---|
+| `lead_current` | 74.67378382 | 74.67378382 |
+| `last_heat[0]` | 136.64106226 | 136.64106226 |
+| `last_heat[-1]` | 12.70650537 | 12.70650537 |
+| it-0 current conservation, abs | 16569.77588 | 16569.77734 |
+| it-1 / it-2 rel Sigma^R residual | 9.5299e3 / 7.2545e3 | 9.5299e3 / 7.2545e3 |
+| lead balance, it 1 / it 2 | 9.6842e-01 / 1.6597e0 | 9.6842e-01 / 1.6597e0 |
+| GPU mempool peak | 14.27 GB | 16.80 GB |
+
+The lead currents agree to every printed digit across the whole
+three-iteration trajectory, not just at iteration 0. The one iteration-0
+number that moves, the absolute current conservation, differs by 8.8e-8
+relative -- reduction order, on a sum of order 1.7e4.
+
+The internal spread is NOT comparable between the two columns (4.83 vs
+1.66) and its disagreement is not a parity failure: the distributed RGF
+leaves the internal interfaces `NaN` by construction, so the NaN-aware
+`nanmax - nanmin` sees only the two leads and the spread collapses onto
+the lead balance. `last_heat` shows this directly -- `[136.64, 368.49,
+319.87, 274.43, 343.36, 7.64, 12.71]` at `bcs = 1` against `[136.64, nan,
+nan, nan, nan, nan, 12.71]` at `bcs = 2`. Only the lead balance is a
+cross-configuration gate.
+
+Both runs diverge (residual ~1e4 by iteration 1, sign inversion at
+iteration 2). That is the known MoS2 behaviour at these settings and this
+pair says nothing about it: 3 iterations at `ne = 1001` is a plumbing
+test, and no conductance claim follows from it.
+
+Memory: the model in `phonon/studies/_memory_model.py` predicted
+19.0-24.2 GB at `p_block = 1` and 24.7-30.2 GB at `p_block = 2`, against
+14.27 and 16.80 GB measured. It over-predicts by 25-45 % here, well
+outside the ~10 % it achieves on the fixtures, and in the safe direction.
+The measured cost of the block split itself is +18 % per rank, which is
+the halo and the duplicated boundary blocks.
