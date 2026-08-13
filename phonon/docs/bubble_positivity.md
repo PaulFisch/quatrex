@@ -1076,3 +1076,44 @@ Memory: the model in `phonon/studies/_memory_model.py` predicted
 outside the ~10 % it achieves on the fixtures, and in the safe direction.
 The measured cost of the block split itself is +18 % per rank, which is
 the halo and the duplicated boundary blocks.
+
+### Si repeats the parity, and exposes what the memory model gets wrong
+
+`sifilm5b` (5 cells, `nq = 81`, `ne = 1001`, `g_band = 1`, `eta = 0`,
+3 iterations, 8 ranks on 2 nodes). Five blocks section as `[3, 2]`, so
+this run sits exactly on the new floor -- the last rank owns the minimum
+two blocks the contact OBC needs.
+
+| | `bcs = 1` (4434636) | `bcs = 2` (4434643) |
+|---|---|---|
+| `lead_current` | 12629.3405080856 | 12629.3405078001 |
+| it-0 / it-1 / it-2 conservation, abs | 1393.27591 / 90.28466 / 410.10090 | 1393.27590 / 90.28467 / 410.10090 |
+| it-1 / it-2 rel Sigma^R residual | 7.3553e1 / 4.2493e1 | 7.3553e1 / 4.2493e1 |
+| lead balance, it 1 / it 2 | 3.3939e-03 / 1.7774e-02 | 3.3939e-03 / 1.7774e-02 |
+| GPU mempool peak | 8.68 GB | 12.96 GB |
+
+The lead currents agree to 2.3e-11 relative. Si also behaves where MoS2
+does not: the residual falls (73.6 -> 42.5) and the lead balance stays at
+1e-2, against MoS2's 1e4 residual and sign inversion at the same
+iteration count.
+
+The memory model is wrong on Si by a factor of three, and the term
+breakdown says why. It predicts 26.9-28.5 GB at `p_block = 1`, of which
+`perm_cache` alone is 20.57 GB (76.5 %); the run peaked at 8.68 GB. The
+remaining modelled terms sum to 6.33 GB, so the true `perm_cache` was
+about 2.4 GB -- an 8.8-fold collapse, squarely inside the 4-16x that
+`sse_perm_cache_share` is documented to buy. The formula
+`32 b^3 (nq^2/P_q) Q` is the ABSOLUTE-key cache; every run in this
+campaign sets `QX_PERMSHARE=auto`, and the model has no term for it.
+
+That is a large error in the safe direction, and it is worth leaving
+alone rather than fitting: one measured collapse factor is one data
+point, and the factor depends on how the vertex keys coincide, which is
+structure-specific. The rule to use when sizing is that a prediction
+dominated by `perm_cache` is an upper bound and nothing more. On MoS2,
+where `perm_cache` is 3.7 % of the total, the model is within 25 %
+(14.27 against 19.0-24.2, and 16.80 against 24.7-30.2).
+
+Measured cost of the block split itself: +18 % per rank on MoS2, +49 % on
+Si. It is not free, and on a device that already fits it buys nothing but
+the ability to go longer.
