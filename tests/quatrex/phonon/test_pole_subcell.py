@@ -717,3 +717,56 @@ def test_the_q_slice_lands_on_the_transverse_axes_not_the_leading_one():
     assert got.shape == (4, b, b), got.shape
     assert np.array_equal(got, arr[:, 3, 5])
     assert _q_block(None, (0, 0)) is None
+
+
+def test_the_q_path_takes_its_clusters_from_the_sector_that_solved_that_q():
+    """The crash on the first real q-resolved pole run.
+
+    ``_build_pole_keldysh`` read its clusters from ``self._pole``. On a
+    q-resolved device the poles live in ``self._pole_q[iq]``; ``self._pole``
+    exists -- it is constructed before the q dispatch -- but was never given an
+    operator context, so it returned an empty closure. ``state.legs`` came back
+    empty, the accumulator stayed ``None``, and the next line raised
+    "'NoneType' object has no attribute 'reshape'".
+
+    Two things are pinned: the sector actually passed is the one consulted, and
+    an empty one is a NO-OP rather than a crash.
+    """
+    import types
+
+    import numpy as np
+
+    from quatrex.phonon.solver import PhononSolver
+
+    asked = []
+
+    class _Sector:
+        def __init__(self, tag, legs):
+            self.tag, self._legs = tag, legs
+
+        def bubble_clusters(self):
+            asked.append(self.tag)
+            return self._legs
+
+    solver = object.__new__(PhononSolver)
+    solver._pole = _Sector("wrong", [])
+    solver.pole_state = types.SimpleNamespace(
+        clusters=[object()], legs=None, source_fit=[], source_lesser=[],
+        source_greater=[], c_lesser=[], c_greater=[], pf_lesser=[],
+        pf_greater=[], residue_sum=[], mixed_fit=[],
+        g_pp_lesser=object(), g_pp_greater=object())
+    solver.local_frequencies = np.linspace(0.0, 4.0, 5)
+    solver.block_sizes = np.array([2])
+    solver._pole_cfg = types.SimpleNamespace(leg="congruence")
+
+    buf = types.SimpleNamespace(data=np.zeros((5, 4), dtype=complex),
+                                rows=np.arange(4), cols=np.arange(4))
+    solver.obc_blocks = types.SimpleNamespace(
+        lesser=[None, None], greater=[None, None])
+    solver.local_frequency_weights = np.full(5, 1.0)
+    # empty legs -> the channel is cleared, and nothing raises
+    solver._build_pole_keldysh(buf, buf, g_retarded=buf,
+                               sector=_Sector("right", []))
+    assert asked == ["right"], f"consulted {asked}, not the sector passed in"
+    assert solver.pole_state.g_pp_lesser is None
+    assert solver.pole_state.g_pp_greater is None

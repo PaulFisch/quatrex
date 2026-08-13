@@ -863,7 +863,9 @@ class PhononSolver(SubsystemSolver):
             # per-q correction; only the assembled stack leaves here.
             self.pole_state = st
             self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
-                                     g_lesser, q_idx=idx)
+                                     g_lesser, q_idx=idx, sector=sec)
+            if st.g_pp_lesser is None:
+                continue
             sel = (slice(None),) + idx
             acc_l[sel] = st.g_pp_lesser.reshape(acc_l[sel].shape)
             acc_g[sel] = st.g_pp_greater.reshape(acc_g[sel].shape)
@@ -925,7 +927,8 @@ class PhononSolver(SubsystemSolver):
                           f"{exc})", flush=True)
 
     def _build_pole_keldysh(self, sse_lesser, sse_greater,
-                            g_retarded=None, g_lesser=None, q_idx=()) -> None:
+                            g_retarded=None, g_lesser=None, q_idx=(),
+                            sector=None) -> None:
         """Project the Keldysh source and reduce ``G_PP`` onto the pattern.
 
         Done here, in the ``"stack"`` state, because this is where the contact
@@ -983,7 +986,13 @@ class PhononSolver(SubsystemSolver):
         # which optimised a staging setting while the production one
         # regressed; the closed set is kept because it is the correct object.
         #
-        state.legs = self._pole.bubble_clusters()
+        # The clusters come from the sector that SOLVED this q. On a
+        # q-resolved device that is self._pole_q[iq], not self._pole -- the
+        # latter exists (it is built before the q dispatch) but was never given
+        # an operator context, so it returns an empty closure. That left
+        # state.legs empty, the accumulator None, and the next line raised
+        # "'NoneType' object has no attribute 'reshape'" on the first q.
+        state.legs = (sector or self._pole).bubble_clusters()
         acc_l = acc_g = None
         _leg = getattr(self._pole_cfg, "leg", "congruence")
         analytic = _leg == "congruence_analytic"
@@ -1104,6 +1113,12 @@ class PhononSolver(SubsystemSolver):
                 freqs, cl, source_at_poles(s_g, freqs, cl), rows, cols)
             acc_l = g_l if acc_l is None else acc_l + g_l
             acc_g = g_g if acc_g is None else acc_g + g_g
+        if acc_l is None or acc_g is None:
+            # No leg carried a pole, so there is nothing to remove from the
+            # ring. Leave the channel unset rather than reshaping None: an
+            # empty sector must be a no-op, not a crash.
+            state.g_pp_lesser = state.g_pp_greater = None
+            return
         state.g_pp_lesser = acc_l.reshape(_q(sse_lesser.data).shape)
         state.g_pp_greater = acc_g.reshape(_q(sse_greater.data).shape)
         if congruence and comm.rank == 0:
