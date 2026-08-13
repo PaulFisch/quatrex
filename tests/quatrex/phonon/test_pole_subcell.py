@@ -659,3 +659,61 @@ def test_bubble_covariance_correction_is_silent_without_promoted_poles():
     _bubble_covariance_correction(
         scba, types.SimpleNamespace(legs=[], c_lesser=[], c_greater=[]), _SSP())
     assert not called, "an empty pole set must inject nothing at all"
+
+
+def test_the_q_slice_lands_on_the_transverse_axes_not_the_leading_one():
+    """The bug that failed every q of the first q-resolved census.
+
+    The transverse axes sit at the END of a buffer's stack shape, and different
+    buffers carry different leading ranks: the dynamical matrix has a singleton
+    where the Keldysh buffers have frequency. Indexing with a bare ``(i, j)``
+    therefore consumed the singleton and ONE q index on a ``(1, 9, 9)`` stack --
+    "could not broadcast (9,6,6) into (6,6)" -- and any ``i > 0`` ran off an
+    axis of size 1.
+
+    The earlier test for the q census stubbed ``_pole_blocks`` out entirely, so
+    it agreed with the assumption rather than checking it. This exercises the
+    padding itself.
+    """
+    import types
+
+    import numpy as np
+
+    from quatrex.phonon.solver import PhononSolver, _q_block
+
+    nk, b = (9, 9), 6
+    taken = {}
+
+    class _Stack:
+        def __init__(self, shape):
+            self.shape = shape
+
+        def __getitem__(self, idx):
+            taken["idx"] = idx
+            # emulate numpy: consuming fewer axes leaves the rest
+            arr = np.zeros(self.shape + (2, b, b))
+            return types.SimpleNamespace(blocks=arr[idx])
+
+    class _Mat:
+        global_stack_shape = (1,) + nk
+        num_local_blocks = 1
+        stack = _Stack((1,) + nk)
+
+    solver = object.__new__(PhononSolver)
+    solver._pole_blocks(_Mat(), index_slice=(3, 5))
+    assert taken["idx"] == (0, 3, 5), (
+        f"q index landed on the wrong axes: {taken['idx']}")
+
+    # ... and a buffer with no leading axis is untouched
+    class _Mat2(_Mat):
+        global_stack_shape = nk
+        stack = _Stack(nk)
+    solver._pole_blocks(_Mat2(), index_slice=(3, 5))
+    assert taken["idx"] == (3, 5), taken["idx"]
+
+    # contact blocks are (n_freq,) + nk + (b, b): frequency kept, q selected
+    arr = np.arange(4 * 9 * 9 * b * b, dtype=float).reshape((4,) + nk + (b, b))
+    got = _q_block(arr, (3, 5))
+    assert got.shape == (4, b, b), got.shape
+    assert np.array_equal(got, arr[:, 3, 5])
+    assert _q_block(None, (0, 0)) is None
