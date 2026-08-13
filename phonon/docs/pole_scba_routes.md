@@ -250,9 +250,15 @@ sides are literally the same function.
 
 -- the same algebra as the pole-pole sector over `2 Np` poles with unit
 coefficients instead of `Np` poles carrying a source matrix, because the
-coefficients now live in the vertex projections. Cost `(2 Np)^4`; `vl[rows]`
-is `(nnz, 2Np, 2Np)`, so the contraction is chunked over the pattern.
-`max_poles` is the control.
+coefficients now live in the vertex projections. Cost `(2 Np)^2` per stored
+entry per frequency -- NOT `(2 Np)^4`, which an earlier version of this line
+claimed while describing the `(2Np)^2` object in the same sentence. The vertex
+is pre-projected onto residue PAIRS, so `vl[rows]` is `(nnz, 2Np, 2Np)` and the
+contraction `kpq,kqp,wpq->wk` sums over `p, q` once. Because every residue is
+rank one, `B(R_p, R_q)` factorises into one projected pair vertex on each side,
+and the pole algebra is quadratic in the flattened residue count -- any quartic
+scaling that shows up is a redundant modal index, not the method. Chunked over
+the pattern; `max_poles` is the control.
 
 `SR + RS` (`pf_mixed_self_energy`): the same block triple product as
 `mixed_self_energy_blocked`, with the pole leg's row and column modes no

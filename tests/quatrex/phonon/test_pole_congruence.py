@@ -1148,3 +1148,63 @@ def test_congruence_stays_psd_off_grid_where_direct_subtraction_fails(gamma):
     assert psd_direct < -1e-6, (
         "the direct split must FAIL here, else the bed is not exercising "
         f"the failure mode: {psd_direct:.3e}")
+
+
+# --- exact represented weight of an unresolved line ------------------------- #
+
+def _w_exact(r, x):
+    """Infinite trapezoidal sum of a unit-weight Lorentzian, review Eq. (1)."""
+    a = 2 * np.pi / r
+    return np.sinh(a) / (np.cosh(a) - np.cos(2 * np.pi * x))
+
+
+@pytest.mark.parametrize("r", [0.5, 1.0, 1.35, 2.0, 3.0, 5.0, 20.0, 100.0])
+@pytest.mark.parametrize("x", [0.0, 0.1, 0.25, 0.5])
+def test_exact_trapezoidal_line_weight(r, x):
+    r"""What the ring's ``dw``-weighted sum actually carries of a narrow line.
+
+    Summing point samples of a unit-weight Lorentzian over a uniform grid is a
+    theta-function, not the nearest-node term:
+
+    .. math::
+        W_\infty(r, x) = \frac{\sinh(2\pi/r)}
+                              {\cosh(2\pi/r) - \cos(2\pi x)},
+        \qquad r = h/\gamma,\ x = \text{offset in cells}.
+
+    An earlier note quoted ``r/(pi(1 + r^2 x^2))`` for this. That is the
+    NEAREST-NODE weight and it is wrong for the total by up to 2.5x -- at
+    ``r = 100, x = 0.5`` it gives 0.0127 against 0.0314. The distinction
+    matters because the whole argument for the sector is how much line weight
+    the grid misplaces, and the two formulas disagree about it.
+    """
+    gamma, w_max = 0.05, 4000.0
+    h = r * gamma
+    n = int(2 * w_max / h) // 2 * 2 + 1
+    wk = (np.arange(n) - n // 2) * h
+    lor = 2 * gamma / ((wk - x * h) ** 2 + gamma ** 2)   # int dw/2pi = 1
+    got = h * lor.sum() / (2 * np.pi)
+    assert abs(got - _w_exact(r, x)) < 5e-4 * max(_w_exact(r, x), 1.0)
+
+
+def test_line_weight_gate_inverts_the_tolerance_exactly():
+    r"""``E_leg^max(r) = coth(pi/r) - 1``, and its inverse is the gate.
+
+    The worst overestimate is at ``x = 0`` and the worst underestimate at
+    ``x = 1/2``; the overestimate is the stricter side, so a worst-case
+    tolerance ``eps`` needs ``h/gamma < 2 pi / log(1 + 2/eps)``. That is an
+    exact statement about represented weight, where ``samples_per_halfwidth``
+    was a constant chosen by hand.
+    """
+    for r in (0.5, 1.0, 2.0, 5.0, 20.0):
+        assert abs(_w_exact(r, 0.0) - 1.0 / np.tanh(np.pi / r)) < 1e-12
+        assert abs(_w_exact(r, 0.5) - np.tanh(np.pi / r)) < 1e-12
+        # the overestimate is the side that binds
+        assert _w_exact(r, 0.0) - 1.0 >= 1.0 - _w_exact(r, 0.5) - 1e-15
+
+    for eps in (0.01, 0.02, 0.05, 0.10, 0.20, 0.50):
+        r_eps = 2 * np.pi / np.log(1 + 2 / eps)
+        assert abs(2 / (np.exp(2 * np.pi / r_eps) - 1) - eps) < 1e-12
+        # just inside the threshold the worst case is within tolerance,
+        # just outside it is not -- so the gate is tight, not conservative
+        assert _w_exact(r_eps * 0.999, 0.0) - 1.0 < eps
+        assert _w_exact(r_eps * 1.001, 0.0) - 1.0 > eps

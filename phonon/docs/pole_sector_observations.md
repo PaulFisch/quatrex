@@ -108,7 +108,37 @@ all nodes, exact total = 1:
 
 The baseline gets a narrow line's total weight wrong by 6x-1000x depending only
 on where it falls between nodes. The cell average is exact at every offset.
-`W_grid = r / (pi (1 + r^2 x^2))` is the closed form and it verifies.
+
+**Correction (2026-08-13).** An earlier version of this section quoted
+`W_grid = r / (pi (1 + r^2 x^2))` as the closed form of that table. That is the
+NEAREST-NODE weight, not the total, and it is wrong for the total by up to 2.5x
+(at `r = 100, x = 0.5` it gives 0.0127 against the measured 0.0314). The exact
+infinite trapezoidal sum, from
+`sum_n 1/((n-x)^2 + a^2) = (pi/a) sinh(2 pi a)/(cosh(2 pi a) - cos(2 pi x))`, is
+
+    W_inf(r, x) = sinh(2 pi / r) / (cosh(2 pi / r) - cos(2 pi x))
+
+and it reproduces every entry of the table to four decimals. Pinned in
+`test_exact_trapezoidal_line_weight`.
+
+The gate that follows from it is exact rather than a rule of thumb. The worst
+overestimate is at `x = 0`,
+
+    E_leg^max(r) = coth(pi / r) - 1 = 2 / (e^{2 pi / r} - 1),
+
+so a worst-case line-weight tolerance `eps` needs `h/gamma < r_eps` with
+
+    r_eps = 2 pi / log(1 + 2/eps).
+
+| tolerance | `h/gamma` threshold |
+|---|---|
+| 1 % | 1.185 |
+| 5 % | 1.692 |
+| 10 % | 2.064 |
+| 20 % | 2.620 |
+
+That replaces `samples_per_halfwidth`, which was an arbitrary constant doing the
+same job badly.
 
 What the cell average does **not** fix is the bubble. Ring against the exact
 cell-averaged convolution at the combination frequency `2 w0`:
