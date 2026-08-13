@@ -767,7 +767,9 @@ class PhononSolver(SubsystemSolver):
         nq = int(np.prod(shape))
         d_flat = delta.reshape(delta.shape[0], nq, delta.shape[-1])
         for iq in range(nq):
-            idx = np.unravel_index(iq, shape)
+            # plain ints: np.unravel_index yields np.int64, which both
+            # prints as 'np.int64(0)' and makes the log ungreppable.
+            idx = tuple(int(i) for i in np.unravel_index(iq, shape))
             try:
                 self._pole.set_operator_context(
                     delta=d_flat[:, iq, :],

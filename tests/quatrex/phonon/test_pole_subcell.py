@@ -505,3 +505,57 @@ def test_when_the_zero_filled_pattern_can_and_cannot_invent_a_violation():
     assert worst_principal > -1e-9, "a principal submatrix of a PSD matrix"
     assert worst_masked < -0.05, (
         f"the zero fill must be able to invent a violation: {worst_masked:.3e}")
+
+
+def test_census_walks_every_q_and_survives_one_failing(capsys):
+    """The q census must visit each q, slice D(q), and not lose the survey.
+
+    Added with the path itself: ``_census_over_q`` is the only way the pole
+    machinery can reach a q-resolved bed at all, so if the loop mis-slices or
+    aborts on the first bad q the measurement it exists for is silently wrong.
+    """
+    import types
+
+    from quatrex.phonon.solver import PhononSolver
+
+    shape, n_freq, nnz = (5, 3), 7, 4          # 15 q-points
+    nq = shape[0] * shape[1]
+    delta = np.arange(n_freq * nq * nnz, dtype=complex).reshape(
+        n_freq, *shape, nnz)
+
+    seen = []
+
+    class _Pole:
+        def set_operator_context(self, *, delta, d_blocks, **kw):
+            # q 7 is unsolvable; the survey must continue past it.
+            if d_blocks == "q(1, 2)":
+                raise RuntimeError("singular M(z)")
+            seen.append((d_blocks, np.asarray(delta).copy()))
+
+        def refresh(self):
+            return None
+
+    solver = object.__new__(PhononSolver)
+    solver._pole = _Pole()
+    solver.dynamical_matrix = None
+    solver.block_sizes = np.array([2, 2])
+    solver.obc_blocks = types.SimpleNamespace(retarded=[None, None])
+    solver._pole_blocks = lambda m, index_slice=(): f"q{tuple(index_slice)}"
+
+    buf = types.SimpleNamespace(rows=np.arange(nnz), cols=np.arange(nnz))
+    solver._census_over_q(delta, buf)
+
+    out = capsys.readouterr().out
+    assert len(seen) == nq - 1, f"visited {len(seen)} of {nq - 1} solvable q"
+    assert "census failed" in out and "singular M(z)" in out, out
+
+    # every q reached with its OWN slice, in row-major order, and the delta
+    # handed over is (n_omega, nnz) -- the shape the guard requires
+    got = [d for d, _ in seen]
+    want = [f"q{tuple(int(j) for j in np.unravel_index(i, shape))}" for i in range(nq)
+            if tuple(int(j) for j in np.unravel_index(i, shape)) != (1, 2)]
+    assert got == want, f"{got[:4]} != {want[:4]}"
+    for i, (_, d) in enumerate(seen):
+        assert d.shape == (n_freq, nnz)
+    # ... and the slices are distinct, so no q was handed another q's data
+    assert len({d.tobytes() for _, d in seen}) == nq - 1
