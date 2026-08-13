@@ -724,6 +724,21 @@ class PhononSolver(SubsystemSolver):
             self.pole_state = None
             return
 
+        # A q-resolved device has one pole problem PER q: M_q(z) = z^2 I -
+        # D(q) - Sigma^R_q(z), and the sets are unrelated. Allocating a sector
+        # from them additionally needs the vertex fold (the bubble at q sums
+        # over q' and q - q'), which is not built -- but the CENSUS needs none
+        # of that, and the census is what says whether coupled-q is worth
+        # building at all. So extraction-only walks the q axis; the allocating
+        # path still refuses it in set_operator_context.
+        nq = 1
+        if delta.ndim > 2:
+            nq = int(np.prod(delta.shape[1:-1]))
+        if nq > 1 and getattr(self._pole_cfg, "extraction_only", False):
+            self._census_over_q(delta, sse_lesser)
+            self.pole_state = None
+            return
+
         self._pole.set_operator_context(
             delta=delta,
             d_blocks=self._pole_blocks(self.dynamical_matrix),
@@ -740,6 +755,43 @@ class PhononSolver(SubsystemSolver):
                                  g_lesser)
         if comm.rank == 0 and self.pole_state is not None:
             print(self.pole_state.report(), flush=True)
+
+    def _census_over_q(self, delta, sse_lesser) -> None:
+        """Extraction-only census on a q-resolved device, one q at a time.
+
+        Each q gets its own ``M_q``, so each gets its own solve. Nothing is
+        allocated and no vertex is touched, which is why this can run where the
+        allocating path cannot.
+        """
+        shape = tuple(int(k) for k in delta.shape[1:-1])
+        nq = int(np.prod(shape))
+        d_flat = delta.reshape(delta.shape[0], nq, delta.shape[-1])
+        for iq in range(nq):
+            idx = np.unravel_index(iq, shape)
+            try:
+                self._pole.set_operator_context(
+                    delta=d_flat[:, iq, :],
+                    d_blocks=self._pole_blocks(self.dynamical_matrix,
+                                               index_slice=idx),
+                    obc_left=(self.obc_blocks.retarded[0][idx]
+                              if self.obc_blocks.retarded[0] is not None
+                              else None),
+                    obc_right=(self.obc_blocks.retarded[-1][idx]
+                               if self.obc_blocks.retarded[-1] is not None
+                               else None),
+                    block_sizes=self.block_sizes,
+                    rows=sse_lesser.rows,
+                    cols=sse_lesser.cols,
+                )
+                if comm.rank == 0:
+                    print(f"  q {idx}:", flush=True)
+                self._pole.refresh()
+            except Exception as exc:                       # noqa: BLE001
+                # One q failing must not lose the other 24: the census is a
+                # survey, and a q that cannot be solved is itself a datum.
+                if comm.rank == 0:
+                    print(f"  q {idx}: census failed ({type(exc).__name__}: "
+                          f"{exc})", flush=True)
 
     def _build_pole_keldysh(self, sse_lesser, sse_greater,
                             g_retarded=None, g_lesser=None) -> None:
