@@ -378,6 +378,22 @@ class PoleSectorConfig(BaseModel):
     individual sectors -- only their sum is constrained). Nothing in the solver
     checks this today, and the sector is the first thing that can break it
     structurally."""
+    extraction_only: bool = False
+    """Run the pole SOLVE and print the census, then allocate NO sector.
+
+    Doc Sec. 27. Root finding and sector allocation fail for unrelated
+    reasons, and a single yield number cannot separate them: a mode missing
+    because Newton did not reach it and one missing because the representation
+    was refused need opposite fixes. With this on, every SCBA iteration solves
+    its candidates, reports location, both acceptance metrics, conditioning
+    and the refusal each would receive, and then hands the ring an EMPTY pole
+    set -- so the run is bit-identical to the pole-free baseline and the census
+    costs only the pole solve.
+
+    That makes it safe to point at any bed, which is the question it exists to
+    answer: does this device HAVE a population of narrow, isolated modes? On
+    CNT at 300 K it does not (``cnt_observations.md`` Sec. 6), and no A/B
+    there can say anything about the method."""
     audit_frequencies: NonNegativeInt = 0
     """Extra frequencies per pole at which to measure the reconstruction error
     against a direct solve. 0 = off."""

@@ -756,3 +756,33 @@ def test_the_grid_already_carries_a_barely_unresolved_line():
         # the cell average is exact at every offset in both regimes
         for x in (0.0, 0.25, 0.5):
             assert abs(total_weight(r, x)[1] - 1.0) < 2 * tail
+
+
+def test_extraction_only_reports_a_census_and_allocates_nothing(capsys):
+    """The mode exists to be pointed at an unknown bed safely.
+
+    Root finding and sector allocation fail for unrelated reasons (doc
+    Sec. 27), so the census has to be obtainable WITHOUT the sector: the ring
+    must see an empty pole set, and the run must therefore stay bit-identical
+    to the pole-free baseline while the numbers come out.
+
+    It is also the check that the mode is reachable at all. ``PoleSector.audit``
+    was written and then had no caller, which is the same defect as a metric
+    with no control -- it cannot be wrong, because it never runs.
+    """
+    sec = _context_run(extraction_only=True)
+    state = sec.refresh()
+
+    assert state.clusters == [], "extraction-only must allocate no cluster"
+    assert state.n_poles == 0
+    assert state.source_lesser == [] and state.g_pp_lesser is None, (
+        "no source may be projected: that is the path this mode avoids")
+
+    out = capsys.readouterr().out
+    assert "pole census:" in out, out
+    for field in ("q_omega", "gamma/sep", "eps_z", "outcome"):
+        assert field in out, f"{field} missing from the census:\n{out}"
+
+    # ... and the ordinary route on the same bed DOES allocate, or the test
+    # above passes for the wrong reason.
+    assert _context_run().refresh().n_poles > 0

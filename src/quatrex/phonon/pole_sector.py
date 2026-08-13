@@ -773,10 +773,64 @@ class PoleSector:
             seeds, vectors = self.harmonic_seeds(), None
             sols = self.solve_poles(m_blocks, dm_blocks, seeds, vectors)
 
+        if getattr(self.cfg, "extraction_only", False):
+            # Census only: report what the solve found and hand back an EMPTY
+            # state, so the ring runs pole-free and the numbers cost nothing
+            # but the solve. Deliberately BEFORE build_clusters -- allocating
+            # and then discarding would still project sources and could still
+            # hit the memory path this mode exists to stay clear of.
+            self._report_census(self.audit(m_blocks, dm_blocks, seeds, vectors))
+            self.state = PoleSectorState(iteration=self.state.iteration + 1)
+            self._prev_delta = xp.array(self._delta, copy=True)
+            return self.state
+
         state = self.build_clusters(sols)
         self._track(state)
         self._prev_delta = xp.array(self._delta, copy=True)
         return state
+
+    @staticmethod
+    def _report_census(rows: list[dict]) -> None:
+        """The extraction-only summary, as a distribution rather than a count.
+
+        A count says how many poles the sector would carry; the distributions
+        say whether the bed HAS anything to carry. ``q_omega`` below one is the
+        grid failing to resolve the line -- the condition the whole method is
+        for -- and ``gamma/separation`` above about a half means neighbouring
+        lines overlap, so no isolated simple pole exists for a bordered Newton
+        to find however good the solver is.
+        """
+        if not rows:
+            print("  pole census: no candidates", flush=True)
+            return
+
+        def _q(vals, ps=(0, 25, 50, 75, 100)):
+            v = np.asarray([x for x in vals if np.isfinite(x)], dtype=float)
+            if v.size == 0:
+                return "n/a"
+            return "  ".join(f"{np.percentile(v, p):.3g}" for p in ps)
+
+        gam = [r["gamma"] for r in rows]
+        overlap = [r["gamma"] / r["separation"] if r["separation"] > 0
+                   else np.inf for r in rows]
+        n_unres = sum(1 for r in rows if r["q_omega"] < 1.0)
+        n_iso = sum(1 for o in overlap if o < 0.5)
+        why: dict[str, int] = {}
+        for r in rows:
+            k = (r["refused"] or "accepted").split("=")[0].split(":")[0].strip()
+            why[k] = why.get(k, 0) + 1
+        print(f"  pole census: {len(rows)} candidates; "
+              f"{n_unres} under-resolved (q_omega < 1), "
+              f"{n_iso} isolated (gamma/sep < 0.5)", flush=True)
+        print(f"    q_omega       min/p25/med/p75/max  {_q([r['q_omega'] for r in rows])}",
+              flush=True)
+        print(f"    gamma/sep     min/p25/med/p75/max  {_q(overlap)}", flush=True)
+        print(f"    eps_z         min/p25/med/p75/max  {_q([r['eps_z'] for r in rows])}",
+              flush=True)
+        print(f"    gamma [THz]   min/p25/med/p75/max  {_q(gam)}", flush=True)
+        print("    outcome: " + ", ".join(f"{k} x{v}" for k, v in
+                                          sorted(why.items(), key=lambda kv: -kv[1])),
+              flush=True)
 
     def _seed(self):
         """Warm-start seeds, or the harmonic estimate when there is no history."""
