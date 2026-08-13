@@ -220,3 +220,73 @@ def pair_covariance(
     else:
         blocks = xp.stack([xp.stack([bilinear(x, y) for y in rl]) for x in rk])
     return xp.einsum("wpq,pqij->wij", k, blocks)
+
+
+def spectrum_correction(
+    freqs: NDArray, cells, phi_blocks: dict, block_sizes: NDArray,
+    rows: NDArray, cols: NDArray, h: float, prefactor: complex | None = None,
+) -> tuple[NDArray, dict]:
+    r"""The total correction to add to the ring's output, on the stored pattern.
+
+    ``cells`` is the ACTIVE set on the EXTENDED frequency axis: one entry per
+    cell that carries enough subcell structure to matter, as
+    ``(centre, zeta, p_row, q_col)`` with rank-one residues
+    :math:`R_p = p_p q_p^{\mathsf T}`.
+
+    Both convolution channels come out of one loop. The ring integrates over
+    the whole axis, so a cell at :math:`-\omega_l` is as much a partner as one
+    at :math:`+\omega_l`; putting the negative cells in ``cells`` with their
+    own (partner-component, transposed) families makes the SUM channel
+    :math:`\omega_k + \omega_l` and the DIFFERENCE channel
+    :math:`\omega_k - \omega_l` the same statement. Treating only the sum would
+    silently drop every :math:`\Omega_a - \Omega_b` process, which is half the
+    convolution.
+
+    Each active PAIR writes to exactly one output bin, ``m`` with
+    :math:`\omega_m = \omega_k + \omega_l`, so the cost is quadratic in the
+    number of active cells and independent of how narrow the lines are. Pairs
+    landing outside the stored output range are counted in the report rather
+    than dropped silently -- they are corrections the run is not applying.
+
+    Returns ``(correction, report)``; ``correction`` is ``(n_omega, nnz)``.
+    """
+    from quatrex.phonon.pole_bridge import analytic_prefactor, modal_vertex_blocks
+
+    if prefactor is None:
+        prefactor = analytic_prefactor()
+    w = np.asarray(_host(freqs), dtype=float)
+    n_w, nnz = int(w.size), int(np.asarray(_host(rows)).size)
+    out = xp.zeros((n_w, nnz), dtype=xp.complex128)
+    if not cells:
+        return out, {"pairs": 0, "applied": 0, "out_of_range": 0}
+
+    r_idx, c_idx = xp.asarray(rows), xp.asarray(cols)
+    w0, hh = float(w[0]), float(h)
+    applied = dropped = 0
+    for centre_k, zeta_k, p_k, q_k in cells:
+        for centre_l, zeta_l, p_l, q_l in cells:
+            om = float(centre_k) + float(centre_l)
+            m = int(round((om - w0) / hh))
+            if m < 0 or m >= n_w:
+                dropped += 1
+                continue
+            kern = covariance_kernel(zeta_k, zeta_l, float(centre_k),
+                                     float(centre_l), hh,
+                                     xp.asarray([w[m]]))[0]
+            # The two legs are different cells, so the vertex is projected onto
+            # a MIXED pair of families -- p_row from k on alpha, p_row from l
+            # on beta, and the mirrored pairing on the right.
+            vl = modal_vertex_blocks(phi_blocks, block_sizes, p_k,
+                                     conjugate=False, v=p_l)
+            vr = modal_vertex_blocks(phi_blocks, block_sizes, q_l,
+                                     conjugate=False, v=q_k)
+            out[m] += prefactor * xp.einsum(
+                "pq,kpq,kqp->k", kern,
+                xp.take(vl, r_idx, axis=0), xp.take(vr, c_idx, axis=0))
+            applied += 1
+    return out, {"pairs": len(cells) ** 2, "applied": applied,
+                 "out_of_range": dropped}
+
+
+def _host(a):
+    return a.get() if hasattr(a, "get") else np.asarray(a)

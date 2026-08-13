@@ -224,3 +224,101 @@ def test_rank_one_residues_factorise_the_vertex_contraction():
     left = np.einsum("mab,a,b->m", phi, x_p, x_q)
     right = np.einsum("ncd,c,d->n", phi, np.conj(y_q), np.conj(y_p))
     assert np.abs(direct - np.outer(left, right)).max() < 1e-10 * np.abs(direct).max()
+
+
+# --- the spectrum-level assembly ------------------------------------------- #
+
+def _pattern(n_dof=3):
+    r, c = np.meshgrid(np.arange(n_dof), np.arange(n_dof), indexing="ij")
+    return r.ravel(), c.ravel()
+
+
+def _phi(n_dof=3, seed=9):
+    rng = np.random.default_rng(seed)
+    b = rng.normal(size=(n_dof, n_dof, n_dof))
+    return {(0, 0, 0): b + np.swapaxes(b, 1, 2)}, np.array([n_dof])
+
+
+def test_spectrum_correction_is_empty_without_active_cells():
+    """Gate 0: no active cell, no correction, bit-exactly."""
+    from quatrex.phonon.pole_covariance import spectrum_correction
+
+    phi, sizes = _phi()
+    rows, cols = _pattern()
+    freqs = np.linspace(0.0, 4.0, 9)
+    corr, rep = spectrum_correction(freqs, [], phi, sizes, rows, cols, 0.5)
+    assert np.abs(np.asarray(corr)).max() == 0.0
+    assert rep == {"pairs": 0, "applied": 0, "out_of_range": 0}
+
+
+def test_spectrum_correction_bins_each_pair_at_the_sum_frequency():
+    """One active pair must land on ``omega_k + omega_l`` and nowhere else,
+    carrying exactly the kernel the verified pair routine gives."""
+    from quatrex.phonon.pole_bridge import analytic_prefactor, modal_vertex_blocks
+    from quatrex.phonon.pole_covariance import (
+        covariance_kernel, spectrum_correction,
+    )
+
+    n_dof = 3
+    phi, sizes = _phi(n_dof)
+    rows, cols = _pattern(n_dof)
+    h = 0.5
+    freqs = np.arange(9) * h                      # 0 .. 4
+    rng = np.random.default_rng(2)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    zk = np.array([1.0 - 0.01j, -1.0 - 0.01j])
+    zl = np.array([1.5 - 0.02j, -1.5 - 0.02j])
+    cells = [(1.0, zk, cx(n_dof, 2), cx(n_dof, 2)),
+             (1.5, zl, cx(n_dof, 2), cx(n_dof, 2))]
+    corr, rep = spectrum_correction(freqs, cells, phi, sizes, rows, cols, h)
+    corr = np.asarray(corr)
+
+    # 4 ordered pairs -> outputs 2.0, 2.5, 2.5, 3.0 == indices 4, 5, 5, 6
+    assert rep["applied"] == 4 and rep["out_of_range"] == 0
+    live = {i for i in range(freqs.size) if np.abs(corr[i]).max() > 0}
+    assert live == {4, 5, 6}, live
+
+    # and index 4 is exactly the (k, k) pair through the mixed vertex
+    ck, zc, pk, qk = cells[0]
+    kern = np.asarray(covariance_kernel(zc, zc, ck, ck, h, np.array([freqs[4]])))[0]
+    vl = np.asarray(modal_vertex_blocks(phi, sizes, pk, conjugate=False, v=pk))
+    vr = np.asarray(modal_vertex_blocks(phi, sizes, qk, conjugate=False, v=qk))
+    want = analytic_prefactor() * np.einsum(
+        "pq,kpq,kqp->k", kern, vl[rows], vr[cols])
+    assert np.abs(corr[4] - want).max() < 1e-12 * np.abs(want).max()
+
+
+def test_negative_cells_produce_the_difference_channel():
+    """A cell at ``-omega_l`` must correct ``omega_k - omega_l``.
+
+    The ring integrates the whole axis, so dropping the negative cells would
+    silently lose every ``Omega_a - Omega_b`` process -- half the convolution,
+    and the half that lands mid-band rather than at the sum frequency.
+    """
+    from quatrex.phonon.pole_covariance import spectrum_correction
+
+    n_dof = 3
+    phi, sizes = _phi(n_dof)
+    rows, cols = _pattern(n_dof)
+    h = 0.5
+    freqs = np.arange(9) * h
+    rng = np.random.default_rng(4)
+
+    def cx(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    z = np.array([2.5 - 0.01j, -2.5 - 0.01j])
+    zn = np.array([-1.0 - 0.01j, 1.0 - 0.01j])
+    cells = [(2.5, z, cx(n_dof, 2), cx(n_dof, 2)),      # +2.5
+             (-1.0, zn, cx(n_dof, 2), cx(n_dof, 2))]    # -1.0
+    corr, rep = spectrum_correction(freqs, cells, phi, sizes, rows, cols, h)
+    corr = np.asarray(corr)
+    live = {i for i in range(freqs.size) if np.abs(corr[i]).max() > 0}
+    # 2.5+2.5 = 5.0 is off the grid (max 4.0) -> counted, not silently dropped;
+    # 2.5-1.0 = 1.5 (index 3) twice, and -2.0 is off the grid below zero.
+    assert 3 in live, live
+    assert rep["out_of_range"] == 2, rep
+    assert rep["applied"] == 2

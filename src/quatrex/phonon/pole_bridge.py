@@ -141,7 +141,8 @@ def pole_keldysh_sparse(
 
 
 def modal_vertex_blocks(
-    phi_blocks: dict, block_sizes: NDArray, u: NDArray, conjugate: bool
+    phi_blocks: dict, block_sizes: NDArray, u: NDArray, conjugate: bool,
+    v: NDArray | None = None,
 ) -> NDArray:
     r"""Project the block-sparse cubic vertex onto the modal basis.
 
@@ -152,16 +153,28 @@ def modal_vertex_blocks(
     ``conjugate`` selects the right-hand factor, whose modal vectors are
     conjugated -- that is what makes the contraction a congruence and carries
     the positivity statement (``bubble_positivity.md`` Thm 1).
+
+    ``v`` supplies a SECOND family for the beta index, giving
+    ``Vbar[mu, alpha, beta] = sum_ab Phi[mu,a,b] u[a,alpha] v[b,beta]``. The
+    subcell covariance correction needs it because its two legs belong to
+    DIFFERENT cells, whose flattened families differ; every other caller
+    convolves a leg with itself and leaves it as ``u``, for which this is
+    bit-identical.
     """
     sizes = np.asarray(_host(block_sizes), dtype=int)
     off = np.concatenate(([0], np.cumsum(sizes)))
     n_dof, npp = int(off[-1]), int(u.shape[1])
     uu = xp.conj(u) if conjugate else u
+    vv = uu if v is None else (xp.conj(v) if conjugate else v)
+    if vv.shape[1] != npp:
+        raise ValueError(
+            f"modal_vertex_blocks: families disagree, {npp} against "
+            f"{vv.shape[1]} modes.")
     out = xp.zeros((n_dof, npp, npp), dtype=xp.complex128)
     for (i, k1, k2), blk in phi_blocks.items():
         b = xp.asarray(blk, dtype=xp.complex128)
         u1 = uu[off[k1]:off[k1 + 1]]
-        u2 = uu[off[k2]:off[k2 + 1]]
+        u2 = vv[off[k2]:off[k2 + 1]]
         out[off[i]:off[i + 1]] += xp.einsum("mab,aA,bB->mAB", b, u1, u2)
     return out
 
