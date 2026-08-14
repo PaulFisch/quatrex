@@ -726,3 +726,49 @@ One more caveat on `base` itself: it is closer to `ref` on the contact row
 disagree about which arm is better by less than the spread between them.
 Neither `base` nor `ref` is converged to better than 1e-03 either, so
 differences at the 0.3 % level are at the edge of what this ladder resolves.
+
+### 10.1 Correction: there is no fine-grid Si baseline to compare against
+
+Sec. 10 treated `ref` (h = 0.125, `ne = 281`) as the answer the coarse arms
+must reproduce, on the strength of one refinement step. That premise does not
+hold. The Si baseline's behaviour under refinement, from runs already on
+scratch (all `retarded = half`):
+
+| run | ne | wmax | it | final rel Sigma |
+|---|---|---|---|---|
+| `sichk_base` | 121 | 15 | 70 | **9.57e-08** |
+| `sichk_ext` | 121 | 20 | 60 | **8.83e-08** |
+| `sires501` | 501 | 20 | 6 | 7.7e-01 |
+| `sires1001` | 1001 | 20 | 6 | 2.1e+01 |
+| `sires2001` | 2001 | 20 | 6 | 5.5e+02 |
+| `sires4001` | 4001 | 20 | 4 | DIVERGED 1.3e+04 |
+| `sires8001` | 8001 | 20 | 4 | DIVERGED 1.7e+05 |
+| `sichk_res` | 15001 | 20 | 4 | 2.4e+06 |
+
+The baseline converges to 1e-08 at `ne = 121` and fails progressively as the
+grid is refined, aborting outright by `ne = 4001`. This is the same pathology
+`pole_sector_state_and_next_steps.md` Sec. 2 records for CNT, and that
+document already draws the right conclusion: the success criterion is not
+"agrees with a fine-grid baseline" -- there is none -- but
+
+> does the sector give an answer on a coarse grid that is STABLE under
+> refinement, where the baseline is not?
+
+**Sec. 10 does not test that.** A single (base, pole, ref) triple at two grid
+spacings cannot distinguish "the sector is biased" from "ref is not the
+truth", and the second is the more likely reading given the table above. The
+-2.1 % is withdrawn as a verdict on the method; it stands only as the
+measured difference between two arms, one of which had not converged.
+
+Caveats on the table: every row is `retarded = half`, while Sec. 10 is `fft`,
+so the divergence is established for a different family -- and the `fft`
+arms at `ne = 141` and `281` both converged (9.3e-04, 1.6e-03), so `fft` is
+demonstrably more robust here. And `sires501/1001/2001` ran 6 iterations, too
+few to separate a transient from an instability; only the 4001/8001/15001
+aborts are unambiguous.
+
+**The experiment that would settle it** is a refinement ladder run WITH the
+sector and with `fft`: `ne = 141, 281, 561, 1121` at fixed `wmax = 35`, base
+and pole at each. The claim is that the pole arm's dw-weighted answer stays
+put while the base arm's drifts and eventually diverges. That is a different
+experiment from Sec. 10 and has never been run.
