@@ -678,3 +678,51 @@ been confirmed that the refused ones are the same modes each iteration. And a
 handful of candidates per iteration are refused as "not in the lower half
 plane": the corrector returning an anti-damped root, harmless because it is
 refused, but it means the Newton is leaving the physical sheet.
+
+---
+
+## 10. The Si ladder: the sector does not reproduce the fine grid (2026-08-14)
+
+`siladder` (4470233) plus `pfix150` (4473420). All arms `wmax = 35` so the
+Kramers-Kronig integral is not truncated, `eta = 0`, `mix = 0.1`, 150
+iterations. `ref` halves the grid spacing and is the answer the coarse arms
+must reproduce.
+
+**`final_heat` is a BIN SUM.** `_phonon_hw_weights` returns `|omega|` with no
+`dw` on a uniform grid ("the constant dw cancels in every conservation
+ratio"), so an arm at `ne = 281` reports roughly twice the arm at `ne = 141`
+for the same physics. Every cross-grid comparison below is multiplied by
+`dw`; comparing the raw numbers would show a factor of two that is pure
+bookkeeping.
+
+| arm | grid | contact row x dw | vs ref | whole profile | vs ref | final rel Sigma |
+|---|---|---|---|---|---|---|
+| `ref` | 0.125 | 2.85491 | -- | 1.96928 | -- | 1.6463e-03 |
+| `base` | 0.25 | 2.82581 | -1.02 % | 1.97492 | +0.29 % | 9.2597e-04 |
+| `pfix150` | 0.25 | 2.79462 | -2.11 % | 1.94695 | -1.13 % | 3.8362e-02 |
+| `pole` (pre-fix) | 0.25 | 2.78831 | -2.33 % | 1.93644 | -1.67 % | ~2.5e-01 |
+
+The sector moves the coarse answer AWAY from the fine one. The plain coarse
+grid sits within 1 % of `ref` on the contact row and 0.3 % on the profile;
+adding the sector roughly doubles the contact-row error and turns +0.29 %
+into -1.13 %. The method's claim -- `pole` lands on `ref` where `base` does
+not -- is not supported on this bed.
+
+**This is not yet a clean measurement.** `pfix150` did not converge: 3.8e-02
+against base's 9.3e-04 and ref's 1.6e-03, and its `rel Sigma` sits in a
+3-5e-02 band rather than decaying, so its heat is the last iterate of a
+moving run. A 2 % difference from an unconverged arm cannot separate a bias
+in the method from a run that has not finished. The comparison should be
+redone once the pole arm reaches the same 1e-03 the other two do.
+
+So the critical path is the REMAINING membership jitter, not a refinement of
+it: `accepted` still moves about 20 poles per iteration.
+`PoleTracker.membership_frozen()` -- dead code, no caller, designed to hold
+membership fixed across an `epoch_iterations` epoch -- is the obvious lever
+and has never been tried.
+
+One more caveat on `base` itself: it is closer to `ref` on the contact row
+(-1.02 %) than on the whole profile (+0.29 %), i.e. the two measures
+disagree about which arm is better by less than the spread between them.
+Neither `base` nor `ref` is converged to better than 1e-03 either, so
+differences at the 0.3 % level are at the edge of what this ladder resolves.
