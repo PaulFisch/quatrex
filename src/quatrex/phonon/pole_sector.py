@@ -45,7 +45,9 @@ from quatrex.phonon.pole_kernel import (
     LocalFitPlan, bosonic_partner, contract_delta, continuation_weights,
     local_fit_weights, sigma_retarded_at_z,
 )
-from quatrex.phonon.pole_nevp import PoleSolution, bordered_newton
+from quatrex.phonon.pole_nevp import (
+    PoleSolution, bordered_newton_batch,
+)
 from quatrex.phonon.pole_probe import (
     BlockLayout, assemble_m_blocks, nnz_to_blocks,
 )
@@ -300,11 +302,13 @@ class PoleSector:
         # smooth rotation a pole undergoes between SCBA iterations and refuses
         # the swap that happens at a crossing.
         self._match_min_overlap = 0.5
-        # Fit anchor for the current pole solve. Pinning it makes M(z) a
-        # genuine analytic function of z for the whole Newton iteration;
-        # deriving the stencil from Re z instead makes M only PIECEWISE
-        # holomorphic, with a measured 17 % jump at each stencil boundary.
-        self._fit_anchor: float | None = None
+        # Fit anchors for the current pole solve, one per candidate. Pinning
+        # them makes M(z) a genuine analytic function of z for the whole Newton
+        # iteration; deriving the stencil from Re z instead makes M only
+        # PIECEWISE holomorphic, with a measured 17 % jump at each stencil
+        # boundary. Set for the duration of solve_poles and restored after.
+        self._fit_anchors: NDArray | None = None
+        self._fit_plan: LocalFitPlan | None = None
 
     # -- window ------------------------------------------------------------ #
 
@@ -510,33 +514,60 @@ class PoleSector:
             return float("inf")
         return max(floor, self.cfg.trust_factor * min(scales))
 
+    def trust_radii(self, seeds) -> NDArray:
+        """``trust_radius`` for a whole seed set at once, ``(P,)``.
+
+        Same formula as :meth:`trust_radius`, written over the seed array so
+        the pole solve does not pay a Python loop per candidate. The two are
+        pinned against each other in the suite.
+        """
+        z = np.asarray([complex(s) for s in seeds])
+        if z.size == 0:
+            return xp.zeros(0)
+        d = np.abs(z[:, None] - z[None, :])
+        np.fill_diagonal(d, np.inf)
+        nearest = d.min(axis=1) if z.size > 1 else np.full(z.size, np.inf)
+        if self.band_edges is not None and self.band_edges.size:
+            edge = np.abs(self.band_edges[None, :] - z.real[:, None]).min(axis=1)
+            nearest = np.minimum(nearest, edge)
+        floor = self.cfg.trust_radius_cells * self.h
+        # No competing scale at all -> unbounded, as the scalar form returns
+        # inf rather than the floor when its `scales` list comes out empty.
+        return xp.asarray(np.where(np.isfinite(nearest),
+                                   np.maximum(floor,
+                                              self.cfg.trust_factor * nearest),
+                                   np.inf))
+
     # -- update ------------------------------------------------------------ #
 
     def solve_poles(
         self, m_blocks, dm_blocks, seeds: list[complex],
         seed_vectors: list[NDArray] | None = None,
     ) -> list[PoleSolution]:
-        """Correct a list of seeds with the bordered Newton iteration."""
-        out = []
-        saved = self._fit_anchor
+        """Correct a whole seed set with the bordered Newton iteration.
+
+        One batched call, not one call per seed. Each candidate keeps its OWN
+        pinned fit anchor -- that is what makes M(z) holomorphic over its solve
+        -- so the anchors travel as a vector alongside the seeds rather than as
+        a single value set and reset around each candidate.
+        """
+        if len(seeds) == 0:
+            return []
+        z0 = xp.asarray([complex(s) for s in seeds], dtype=xp.complex128)
+        r0 = (None if seed_vectors is None
+              else xp.stack([xp.asarray(v).reshape(-1) for v in seed_vectors]))
+        saved = (self._fit_anchors, self._fit_plan)
         try:
-            for k, z0 in enumerate(seeds):
-                r0 = None if seed_vectors is None else seed_vectors[k]
-                # Pin the fit centre and the contact sample to THIS seed for
-                # the whole Newton solve, so the operator Newton differentiates
-                # is the operator it evaluates.
-                self._fit_anchor = float(complex(z0).real)
-                out.append(
-                    bordered_newton(
-                        m_blocks, dm_blocks, z0, r0,
-                        tol=self.cfg.newton_tol,
-                        max_iter=self.cfg.newton_max_iterations,
-                        trust_radius=self.trust_radius(z0, seeds, k),
-                    )
-                )
+            self._set_fit_anchors(xp.real(z0))
+            batch = bordered_newton_batch(
+                m_blocks, dm_blocks, z0, r0,
+                tol=self.cfg.newton_tol,
+                max_iter=self.cfg.newton_max_iterations,
+                trust_radius=self.trust_radii(seeds),
+            )
         finally:
-            self._fit_anchor = saved
-        return out
+            self._fit_anchors, self._fit_plan = saved
+        return batch.to_list()
 
     def audit(self, m_blocks, dm_blocks, seeds: list[complex],
               seed_vectors: list[NDArray] | None = None) -> list[dict]:

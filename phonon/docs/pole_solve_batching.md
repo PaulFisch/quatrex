@@ -204,8 +204,20 @@ the decorator for not reaching `_update_pole_sector_q`; that is wrong.
 dispatch into `_update_pole_sector_q`, and neither early return above it can
 fire on this arm (`_pole_enabled` is true, `delta` is nonzero after iteration
 0, `extraction_only` is off). So the range does cover the work and still
-reports 0.0000 s. Reproduce it locally with a q-resolved bed at
-`QTX_PROFILE_LEVEL=default` before theorising further.
+reports 0.0000 s. Two further facts, both from the `psi2` log: every one of the 41
+`Pole sector` readings in the run is exactly `0.0000s` -- it is never
+nonzero, on either arm -- and there are 41 of them against only 33
+`PhononSolver` exits, so the range is entered more often than the solver
+range closes. `profile_range` prints inline at each exit with no
+aggregation, so these are real per-call measurements, not a broken sum.
+Reproduce locally with a q-resolved bed at `QTX_PROFILE_LEVEL=default`
+before theorising further.
+
+None of this weakens Sec. 0: the 187 s is established by the arm-to-arm
+difference (185/85 s against the base arm's 9.97 s) and by the local
+cProfile of `refresh()`, which measured `solve_poles` directly at 98 % of
+12.9 ms per candidate. 11,664 candidates x 12.9 ms = 150 s, which is the
+observed increment. The broken label is a separate defect.
 
 Fix it before the optimisation, not after -- the profile is how the work above
 is judged, and right now it would send someone to optimise the bubble, which
