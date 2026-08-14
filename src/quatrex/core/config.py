@@ -286,6 +286,26 @@ class PoleSectorConfig(BaseModel):
     and the sector's whole purpose is to replace a grid weight that is wrong
     by factors of 6 to 1000 (see ``pole_sector_state_and_next_steps.md``).
     """
+    audit_every_iteration: bool = True
+    """Offer the full harmonic candidate set EVERY iteration, not only on a
+    tracker rescan.
+
+    The candidate set should be "every mode that could be a pole": the
+    harmonic spectrum in the window, plus any tracked pole that has drifted
+    away from its harmonic origin. Restricting it to the held set between
+    rescans was a cost optimisation from when one pole solve cost 187 s per
+    SCBA iteration; batching brought that to 0.4-0.8 s against the bubble's
+    7.4 s, so the optimisation now buys nothing and costs correctness.
+
+    It cost correctness because the two branches have different YIELDS.
+    Measured on Si (81 q, run ``pdiag``): the harmonic branch offers ~1400
+    candidates and accepts ~630 (43 %), the held branch offers ~620 and
+    accepts ~470 (67 %). Alternating between them alternates the promoted
+    set, which alternates ``Sigma``, which pins ``rel Sigma`` at 2.5e-01 --
+    see ``pole_sector_observations.md`` Sec. 9.
+
+    Set False to restore the rescan-gated seeding.
+    """
     locate_tol_out: PositiveFloat = 0.15
     """Demotion threshold on ``eps_z``: a pole already in the sector is only
     dropped above THIS, not above ``locate_tol``.

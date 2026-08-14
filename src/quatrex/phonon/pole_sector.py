@@ -1135,7 +1135,8 @@ class PoleSector:
                          shift)
         seeds = [complex(x) for x in np.asarray(_host(z + shift))]
         vecs = [s.r for s in prev]
-        if not self.tracker.needs_rescan():
+        if not (getattr(self.cfg, "audit_every_iteration", True)
+                or self.tracker.needs_rescan()):
             return seeds, vecs
         # Audit: offer the harmonic candidates the held set does not already
         # cover. "Already covered" is the same cluster_factor * h that defines

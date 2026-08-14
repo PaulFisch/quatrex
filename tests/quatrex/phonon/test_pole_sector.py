@@ -1005,24 +1005,34 @@ def test_a_rescan_adds_candidates_and_never_replaces_the_held_set():
             for w in (3.0, 5.0, 7.0)]
     sec.state = PoleSectorState(solutions=held, iteration=3)
 
-    # Warm iteration: exactly the held set, with its predicted vectors.
-    sec.tracker.rescan_reasons = []
+    reach = sec.cfg.cluster_factor * sec.h
     sec.tracker.clusters = [object()]          # non-empty: not a cold start
     sec.tracker.iteration = 3                  # not on the rescan_iterations beat
-    assert not sec.tracker.needs_rescan()
-    warm, warm_vecs = sec._seed()
-    assert len(warm) == len(held), "a warm iteration seeds the held set"
-    assert warm_vecs is not None and len(warm_vecs) == len(held)
 
-    # Audit due: the held seeds must ALL still be there, plus extras.
-    sec.tracker.rescan_reasons = ["cluster count 3 -> 2"]
-    assert sec.tracker.needs_rescan()
-    audit, audit_vecs = sec._seed()
+    def _seeds(rescan_armed):
+        sec.tracker.rescan_reasons = ["cluster count 3 -> 2"] if rescan_armed else []
+        return sec._seed()
 
-    assert len(audit) >= len(warm), (
-        "a rescan shrank the candidate set; that is the period-two oscillator")
-    reach = sec.cfg.cluster_factor * sec.h
-    for w in warm:
-        assert min(abs(w - a) for a in audit) <= reach, (
-            f"held seed {w} was dropped by the audit")
-    assert len(audit_vecs) == len(audit), "every seed needs its vector slot"
+    # The held poles must survive BOTH branches. That is the invariant; which
+    # branch runs is a cost decision, and it must not change the answer.
+    for armed in (False, True):
+        got, vecs = _seeds(armed)
+        assert len(vecs) == len(got), "every seed needs its vector slot"
+        for h_ in held:
+            assert min(abs(h_.z - g) for g in got) <= reach, (
+                f"held pole {h_.z} dropped with rescan_armed={armed}; that is "
+                "the period-two oscillator")
+
+    # Default is to audit every iteration: the solve is batched and cheap now,
+    # so the candidate set is never narrowed to the held set alone.
+    assert sec.cfg.audit_every_iteration
+    assert len(_seeds(False)[0]) > len(held), (
+        "the harmonic candidates must be offered even when no rescan is armed")
+
+    # With the audit gated back to rescans only, the warm branch is the held
+    # set exactly -- and the rescan branch still may not shrink it.
+    sec.cfg = sec.cfg.model_copy(update={"audit_every_iteration": False})
+    warm, _ = _seeds(False)
+    assert len(warm) == len(held), "gated: a warm iteration seeds the held set"
+    assert len(_seeds(True)[0]) >= len(warm), (
+        "gated: a rescan shrank the candidate set")
