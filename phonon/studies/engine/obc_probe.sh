@@ -30,18 +30,27 @@ export QX_CONFIG=$REPO/cluster/si4x2/quatrex_config.toml
 export QX_RETARDED=fft QX_WMAX=35.0 QX_MIX=0.1 QX_BBCHECK=1
 export QX_NE=${QX_NE:-8001} QX_MAXIT=${QX_MAXIT:-3}
 
+# srun runs THIS SCRIPT on every rank, so a shared `tee` target would have
+# four writers opening the same path with O_TRUNC and the log would be
+# shredded. Per-rank files, and only rank 0 narrates.
+R=${SLURM_PROCID:-0}
+say () { [ "$R" = "0" ] && echo "$@"; }
+
 arm () {   # name, extra env
-    echo "==================== $1 ===================="
+    say "==================== $1 ===================="
     env $2 QX_NPZ=$OUT/run_$1.npz \
-        python $REPO/phonon/studies/engine/run.py 2>&1 | tee $OUT/log_$1.txt \
-        | grep -E "rel Sigma|SAVED|Traceback|Error" | tail -4
-    echo "---- $1: OBC recursion warnings ----"
-    echo -n "  count: "; grep -c "High error" $OUT/log_$1.txt || true
-    grep -A2 "High error" $OUT/log_$1.txt | grep -oE "Relative recursion error: [0-9.e+-]+" \
-        | sort -u | tail -3
+        python $REPO/phonon/studies/engine/run.py 2>&1 | tee $OUT/log_$1.r$R.txt \
+        | { [ "$R" = "0" ] && grep -E "rel Sigma|SAVED|Traceback|Error" | tail -4 \
+            || cat > /dev/null; }
+    # Every rank counts its OWN warnings: the recursion error is reported per
+    # rank and per contact, and "which rank" is part of the answer.
+    n=$(grep -c "High error" $OUT/log_$1.r$R.txt || true)
+    worst=$(grep -oE "Relative recursion error: [0-9.e+-]+" $OUT/log_$1.r$R.txt \
+            | grep -oE "[0-9.e+-]+$" | sort -g | tail -1)
+    echo "  OBC[$1] rank $R: $n warning(s), worst relative recursion error ${worst:-none}"
 }
 
 arm spec "QX_OBC_ALG=spectral QX_NEVP=beyn"
 arm full "QX_OBC_ALG=spectral QX_NEVP=full"
 arm sr   "QX_OBC_ALG=sancho-rubio"
-echo "==================== obc probe done ===================="
+say "==================== obc probe done ===================="
