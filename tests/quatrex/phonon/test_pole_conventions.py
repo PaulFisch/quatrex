@@ -208,3 +208,46 @@ def test_finite_support_refuses_a_non_positive_width():
     sec = _sector()
     assert np.isinf(sec.leg_weight_error_finite(0.0, 10.0))
     assert np.isinf(sec.leg_weight_error_finite(-1.0, 10.0))
+
+
+# --- the census must not be written by every rank --------------------------- #
+
+def test_the_census_prints_on_one_rank_only(monkeypatch, capsys):
+    """Four ranks writing the same report to one stdout interleave mid-word.
+
+    Job 4479538 came back with rows like ``gamma [THz]    gamma [THz]
+    min/p25/...`` because every rank computes the same poles -- by construction,
+    that is the invariant -- and every rank printed them. ``_census_over_q``
+    already guards the ``q (...)`` header it emits, so the log carried 14
+    headers against 179 bodies.
+    """
+    import quatrex.phonon.pole_sector as ps
+
+    rows = [{"z": 3 - 0.01j, "gamma": 0.01, "separation": 1.0, "chi": 0.01,
+             "q_omega": 0.04, "leg_weight_error": 12.0, "E_finite": 0.9,
+             "gamma_sens_anh": 0.009, "passive": True, "eps_z": 1e-12,
+             "eps_nep": 1e-12, "eps_left": 1e-12, "kappa": 1.0,
+             "iterations": 3, "trust_radius": 1.0, "refused": None}]
+
+    monkeypatch.setattr(ps, "_report_rank", lambda: 0)
+    ps.PoleSector._report_census(rows)
+    assert "pole census" in capsys.readouterr().out
+
+    for rank in (1, 2, 3):
+        monkeypatch.setattr(ps, "_report_rank", lambda r=rank: r)
+        ps.PoleSector._report_census(rows)
+        assert capsys.readouterr().out == "", f"rank {rank} wrote to stdout"
+
+
+def test_an_empty_census_is_also_silent_off_rank_zero(monkeypatch, capsys):
+    """The no-candidates line is a print too, and was outside the guard in the
+    first version of this fix."""
+    import quatrex.phonon.pole_sector as ps
+
+    monkeypatch.setattr(ps, "_report_rank", lambda: 2)
+    ps.PoleSector._report_census([])
+    assert capsys.readouterr().out == ""
+
+    monkeypatch.setattr(ps, "_report_rank", lambda: 0)
+    ps.PoleSector._report_census([])
+    assert "no candidates" in capsys.readouterr().out

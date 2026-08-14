@@ -55,6 +55,22 @@ from quatrex.phonon.pole_tracker import (
 __all__ = ["PoleSectorState", "PoleSector", "PoleQBatch", "refresh_many"]
 
 
+def _report_rank() -> int:
+    """Rank for the purpose of PRINTING, or 0 when there is no communicator.
+
+    This module is otherwise free of any communicator: the continuation is a
+    pure function of the gathered ``Delta`` and every rank computes the same
+    poles. The census is the one thing here that writes to stdout, so it is
+    the one thing that needs to know. Imported lazily and defaulting to 0, so
+    a serial caller or a test never pays for MPI.
+    """
+    try:
+        from qttools.comm import comm
+        return int(comm.rank)
+    except Exception:                                       # noqa: BLE001
+        return 0
+
+
 @dataclass
 class PoleSectorState:
     """What one update produced, and why.
@@ -1165,6 +1181,14 @@ class PoleSector:
     def _report_census(rows: list[dict]) -> None:
         """The extraction-only summary, as a distribution rather than a count.
 
+        Rank 0 only. Every rank assembles the same operator and solves the same
+        poles by construction, so without the guard all of them write the same
+        report to one stdout and the lines interleave mid-word -- the census of
+        job 4479538 came back with rows like ``gamma [THz]    gamma [THz]
+        min/p25/...`` and was unparseable. ``_census_over_q`` already guards the
+        ``q (...)`` header it prints, which is what made the mismatch visible:
+        14 headers against 179 bodies.
+
         A count says how many poles the sector would carry; the distributions
         say whether the bed HAS anything to carry. ``q_omega`` below one is the
         grid failing to resolve the line -- the condition the whole method is
@@ -1172,6 +1196,8 @@ class PoleSector:
         lines overlap, so no isolated simple pole exists for a bordered Newton
         to find however good the solver is.
         """
+        if _report_rank() != 0:
+            return
         if not rows:
             print("  pole census: no candidates", flush=True)
             return
