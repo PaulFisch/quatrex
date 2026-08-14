@@ -653,9 +653,23 @@ separately because it isolates the defect from the physics:
 
 So the leg is Phi-derivable and conserving; what oscillated was which poles
 were in the sector, and it showed up directly in the total power at 1.8 %.
-The pole arm's conservation residual is nonetheless 1000x looser than base's,
-which is unexplained and probably the cell-average correction's own
-quadrature error.
+The pole arm's conservation residual is nonetheless 1000x looser than
+base's, and that is still unexplained. The obvious story -- that the
+diagnostic pairs `Sigma` built from cell-averaged legs with the
+point-sampled `data.g_*`, so the residual measures the correction's size --
+is REFUTED by the run: pairing each iteration's pole count against its
+residual gives
+
+    ~640 poles   resid  7.4  6.9  8.2  4.1  5.8  6.1  8.3  6.6   (x1e-7)
+    ~470 poles   resid  8.1  8.8 10.6  9.8  9.1  9.2  9.4 13.1   (x1e-7)
+
+More poles gives BETTER conservation, where that story predicts worse. So
+the channel is not leaking -- carrying more of the spectrum in the sector
+makes `Sigma` and `G` pair more consistently. (Confounded: the two phases
+are different points in a limit cycle, so the pole count is not the only
+thing that differs between them. Worth redoing on `pfix150`, where the set
+is stable and the count can be varied deliberately through the pole
+window.)
 
 Two things seen but not chased. About 25 % of candidates are refused on
 `eps_z` even with a stable set, which is expected -- the harmonic spectrum
