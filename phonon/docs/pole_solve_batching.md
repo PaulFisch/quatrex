@@ -4,6 +4,14 @@
 bubble's 7 s, and essentially none of it is arithmetic. This is the plan to fix
 it. Companion to `pole_sector_observations.md`.
 
+> **Do the convergence fix first.** The same Si run that produced these
+> timings does not converge: the promoted pole set limit-cycles with period
+> two (620 <-> 460 poles) while `rel Sigma` sits at O(1). See
+> `pole_sector_observations.md` Sec. 8. A 20x faster pole solve is worth
+> nothing until that is settled, and the fix changes how many poles are
+> promoted per iteration, which is the quantity every number below scales
+> with.
+
 ---
 
 ## 0. The measurement this rests on
@@ -184,11 +192,21 @@ two changes and leaves nothing to compare against.
 
     PhononSolver: Pole sector : 0.0000s
 
-The most expensive block in the run is invisible to the profiler. The
-`@profiler.profile(label="PhononSolver: Pole sector")` decorator sits on
-`_update_pole_sector`, which now dispatches into `_update_pole_sector_q`; the
-label is not capturing the q loop. Anyone tuning this would be misled into
-optimising the bubble, which is already fine.
+The most expensive block in the run is invisible to the profiler. On the pole
+arm `PhononSolver` reports 81.9 s with `OBC` 8.96 s, `Assemble` 0.004 s and
+`Selected Solve` 0.011 s under it -- about 73 s unaccounted, which is the pole
+solve, and the label that should hold it reads zero.
+
+**The cause is not yet identified.** An earlier draft of this section blamed
+the decorator for not reaching `_update_pole_sector_q`; that is wrong.
+`@profiler.profile(label="PhononSolver: Pole sector")` sits on
+`_update_pole_sector`, which wraps the whole body including the `nq > 1`
+dispatch into `_update_pole_sector_q`, and neither early return above it can
+fire on this arm (`_pole_enabled` is true, `delta` is nonzero after iteration
+0, `extraction_only` is off). So the range does cover the work and still
+reports 0.0000 s. Reproduce it locally with a q-resolved bed at
+`QTX_PROFILE_LEVEL=default` before theorising further.
 
 Fix it before the optimisation, not after -- the profile is how the work above
-is judged.
+is judged, and right now it would send someone to optimise the bubble, which
+is already fine.
