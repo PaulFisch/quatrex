@@ -788,8 +788,27 @@ class PhononSolver(SubsystemSolver):
             self.pole_state = self._pole.refresh()
         with profiler.profile_range("PhononSolver: Pole legs", "default",
                                     comm):
-            self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
-                                     g_lesser)
+            if getattr(self._pole_cfg, "leg", "congruence") == "congruence":
+                # Same batched path as the q-resolved route, with one q, so
+                # both are the same code and every single-q test covers it.
+                self._pole_layout = getattr(self._pole, "_layout", None)
+                state = self.pole_state
+                if self._pole_layout is not None and state is not None \
+                        and state.clusters:
+                    leg_l, leg_g = self._build_pole_legs(
+                        sse_lesser, sse_greater, g_retarded, [state],
+                        [self._pole], np.array([0], dtype=int))
+                    if leg_l is not None:
+                        state.g_pp_lesser = leg_l[0].reshape(
+                            sse_lesser.data.shape)
+                        state.g_pp_greater = leg_g[0].reshape(
+                            sse_greater.data.shape)
+                    self._report_pole_registration(
+                        [state], g_lesser, state.g_pp_lesser,
+                        np.array([0], dtype=int))
+            else:
+                self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
+                                         g_lesser)
         if comm.rank == 0 and self.pole_state is not None:
             print(self.pole_state.report(), flush=True)
 
@@ -881,23 +900,32 @@ class PhononSolver(SubsystemSolver):
             for lo in range(0, len(sectors), chunk):
                 solved.extend(refresh_many(sectors[lo:lo + chunk]))
 
-        for (iq, idx), sec, st in zip(todo, sectors, solved):
+        for (iq, idx), st in zip(todo, solved):
             states.append((idx, st))
-            if st is None or not st.clusters:
-                continue
-            promoted += st.n_poles
-            # Build this q's leg into this q's slice. The state carries the
-            # per-q correction; only the assembled stack leaves here.
-            self.pole_state = st
-            with profiler.profile_range("PhononSolver: Pole legs", "debug",
-                                        comm):
-                self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
-                                         g_lesser, q_idx=idx, sector=sec)
-            if st.g_pp_lesser is None:
-                continue
-            sel = (slice(None),) + idx
-            acc_l[sel] = st.g_pp_lesser.reshape(acc_l[sel].shape)
-            acc_g[sel] = st.g_pp_greater.reshape(acc_g[sel].shape)
+            if st is not None and st.clusters:
+                promoted += st.n_poles
+
+        # One leg build for EVERY q and cluster. The q are independent and the
+        # clusters within a q are independent, so this is one batched pass, not
+        # a Python loop of n_q x n_clusters. See PhononSolver._build_pole_legs.
+        self._pole_layout = layout
+        with profiler.profile_range("PhononSolver: Pole legs", "default", comm):
+            leg_l, leg_g = self._build_pole_legs(
+                sse_lesser, sse_greater, g_retarded, solved, sectors,
+                np.array([iq for iq, _ in todo], dtype=int))
+        if leg_l is not None:
+            for k, (iq, idx) in enumerate(todo):
+                st = solved[k]
+                if st is None or not st.clusters:
+                    continue
+                sel = (slice(None),) + idx
+                st.g_pp_lesser = leg_l[k].reshape(acc_l[sel].shape)
+                st.g_pp_greater = leg_g[k].reshape(acc_g[sel].shape)
+                acc_l[sel] = st.g_pp_lesser
+                acc_g[sel] = st.g_pp_greater
+        self._report_pole_registration(solved, g_lesser, acc_l,
+                                       np.array([iq for iq, _ in todo],
+                                                dtype=int))
 
         # One state for the consumers, carrying the STACKED channel. Its
         # clusters are the union so the interaction's emptiness test is right;
@@ -954,6 +982,225 @@ class PhononSolver(SubsystemSolver):
                 if comm.rank == 0:
                     print(f"  q {idx}: census failed ({type(exc).__name__}: "
                           f"{exc})", flush=True)
+
+    @staticmethod
+    def _q_stack(buf, iq, tail: int):
+        """``(Q, n_freq, *tail)`` view of a stacked buffer for the chosen q.
+
+        Every array the sector touches carries the transverse axis in the
+        middle, ``(n_freq,) + nk + tail``. This is the batched form of the
+        per-q slice the leg builder used to take one q at a time.
+        """
+        if buf is None:
+            return None
+        a = xp.asarray(buf)
+        n_freq = int(a.shape[0])
+        flat = a.reshape((n_freq, -1) + a.shape[a.ndim - tail:])
+        return xp.moveaxis(flat[:, iq], 0, 1)
+
+    def _build_pole_legs(self, sse_lesser, sse_greater, g_retarded,
+                         states, sectors, iq) -> tuple:
+        """The congruence leg for EVERY q and cluster in one pass.
+
+        The per-cluster routines in :mod:`~quatrex.phonon.pole_congruence` say
+        what the leg is, one cluster at a time, and are what this is verified
+        against. Driving production through them cost a Python loop of
+        ``n_q * n_clusters`` iterations over routines that themselves looped
+        over pole columns and pole pairs -- 6.85 million calls and 33 s per
+        SCBA iteration on Si, against a bubble of 7.4 s. See
+        :mod:`~quatrex.phonon.pole_legs`.
+
+        Only the ``congruence`` route comes through here. ``congruence_analytic``
+        and the superseded ``keldysh`` route flatten each cluster into its own
+        partial fractions, which is per-cluster by construction and is not a
+        production setting; they keep the reference path.
+        """
+        from quatrex.phonon.pole_legs import (
+            ClusterBatch, ClusterViews, CoefficientViews,
+            congruence_legs, source_fit,
+        )
+
+        n_dof = int(np.sum(self.block_sizes))
+        per_q = []
+        for st, sec in zip(states, sectors):
+            legs = sec.bubble_clusters() if st is not None and st.clusters else []
+            if st is not None:
+                st.legs = legs
+            per_q.append(legs)
+        if not any(per_q):
+            return None, None
+
+        # The batch trades memory for launches: on Si it peaks around 1.5 GB
+        # against a 44 MB self-energy, because every intermediate carries the
+        # q, cluster, frequency and pole axes at once. That is the right trade
+        # on a GPU and the wrong one if it does not fit, so the q axis is cut
+        # to a budget. One chunk whenever it fits -- and it is REPORTED when it
+        # does not, because a silently chunked run looks like an unchunked one.
+        chunk = int(getattr(self._pole_cfg, "q_batch", 0) or 0)
+        if not chunk:
+            n_p = max((int(c.z.shape[0]) for legs in per_q for c in legs),
+                      default=1)
+            n_m = max((len(legs) for legs in per_q), default=1)
+            per_q_bytes = 16 * 34 * int(self.local_frequencies.shape[0]) * \
+                max(n_dof, 1) * n_p * n_m
+            chunk = max(1, self._POLE_LEG_BUDGET // max(per_q_bytes, 1))
+        if chunk < len(states):
+            if comm.rank == 0:
+                print(f"  pole sector: leg build split into "
+                      f"{-(-len(states) // chunk)} chunks of {chunk} q "
+                      f"(memory budget)", flush=True)
+            out_l, out_g = [], []
+            for lo in range(0, len(states), chunk):
+                hi = min(lo + chunk, len(states))
+                part = self._build_pole_legs_chunk(
+                    sse_lesser, sse_greater, g_retarded, states[lo:hi],
+                    per_q[lo:hi], iq[lo:hi], n_dof)
+                if part[0] is None:
+                    w = int(self.local_frequencies.shape[0])
+                    nnz = int(self._pole_layout.nnz)
+                    part = (xp.zeros((hi - lo, w, nnz), dtype=xp.complex128),
+                            xp.zeros((hi - lo, w, nnz), dtype=xp.complex128))
+                out_l.append(part[0])
+                out_g.append(part[1])
+            return xp.concatenate(out_l), xp.concatenate(out_g)
+        return self._build_pole_legs_chunk(sse_lesser, sse_greater, g_retarded,
+                                           states, per_q, iq, n_dof)
+
+    # Peak working set the leg build may allocate before it cuts the q axis.
+    _POLE_LEG_BUDGET = 4 << 30
+
+    def _build_pole_legs_chunk(self, sse_lesser, sse_greater, g_retarded,
+                               states, per_q, iq, n_dof) -> tuple:
+        """One memory-sized slice of :meth:`_build_pole_legs`."""
+        from quatrex.phonon.pole_legs import (
+            ClusterBatch, ClusterViews, CoefficientViews,
+            congruence_legs, source_fit,
+        )
+
+        if not any(per_q):
+            return None, None
+        batch = ClusterBatch.from_clusters(per_q, n_dof)
+        omega = xp.asarray(self.local_frequencies, dtype=float)
+        widths = xp.asarray(self.local_frequency_weights, dtype=float)
+        gr = self._q_stack(g_retarded.data, iq, 1)
+        last_block = len(self.block_sizes) - 1
+
+        out = {}
+        for tag, buf, lo, hi in (
+            ("l", sse_lesser, self.obc_blocks.lesser[0], self.obc_blocks.lesser[-1]),
+            ("g", sse_greater, self.obc_blocks.greater[0], self.obc_blocks.greater[-1]),
+        ):
+            corners = ((self._q_stack(lo, iq, 2), 0),
+                       (self._q_stack(hi, iq, 2), last_block))
+            out[tag] = congruence_legs(
+                batch, self._pole_layout, self._q_stack(buf.data, iq, 1), gr,
+                corners, omega, widths)
+
+        # source_fit_tol as a real gate: carrying a source analytically
+        # presumes it is smooth across its own pole window, and this is the
+        # measured statement of that. Reported, never silently applied -- an
+        # asymptotic error estimate cannot see a source with structure of its
+        # own.
+        fit_l = source_fit(batch, out["l"][1], omega)
+        fit_g = source_fit(batch, out["g"][1], omega)
+        fit = xp.maximum(fit_l, fit_g)
+        fit_host = np.asarray(get_host(fit))
+
+        # Per-q bookkeeping, as VIEWS. Slicing the padded results per cluster
+        # is a Python call and a device slice each, which is exactly the cost
+        # this path removes -- and the consumers are diagnostics that usually
+        # never run. ClusterViews defers it to whoever actually indexes.
+        sizes = [[int(cl.z.shape[0]) for cl in legs] for legs in per_q]
+        for k, (st, legs) in enumerate(zip(states, per_q)):
+            if st is None or not legs:
+                continue
+            st.source_lesser = ClusterViews(out["l"][1][k], sizes[k])
+            st.source_greater = ClusterViews(out["g"][1][k], sizes[k])
+            st.c_lesser = CoefficientViews([c[k] for c in out["l"][2]],
+                                           sizes[k])
+            st.c_greater = CoefficientViews([c[k] for c in out["g"][2]],
+                                            sizes[k])
+            st.source_fit = list(fit_host[k, :len(legs)])
+
+        # source_fit_tol is REPORTED, never applied -- an asymptotic error
+        # estimate cannot see a source with structure of its own. The offenders
+        # are found without a walk over the clusters; normally there are none.
+        if comm.rank == 0:
+            over = np.argwhere(fit_host > self._pole_cfg.source_fit_tol)
+            for k, m in over:
+                if k < len(per_q) and m < len(per_q[k]):
+                    print(f"  pole sector: cluster {per_q[k][m].label} source "
+                          f"varies by {fit_host[k, m]:.2e} across its window "
+                          f"(tol {self._pole_cfg.source_fit_tol:.2e}); the "
+                          "analytic source model is not justified there",
+                          flush=True)
+        return out["l"][0].sum(axis=1), out["g"][0].sum(axis=1)
+
+    def _report_pole_registration(self, states, g_lesser, leg, iq) -> None:
+        """Where the promoted poles sit INSIDE their cells, over the whole set.
+
+        This is the control parameter of the bubble's registration error, and
+        nothing measured it before. An exactly cell-averaged leg still places
+        all of a line's weight at the cell CENTRE, so the combination frequency
+        Re(z_a + z_b) is displaced by up to a full cell and the ring splits the
+        peak between two bins. Measured
+        (test_cell_averaged_legs_do_not_fix_the_bubble_registration),
+        ring/exact at the combination frequency:
+
+            offset 0.00   1.004      offset 0.25   1.79
+            offset 0.50   0.536
+
+        and it gets WORSE with h/gamma, not better. The congruence route's
+        accuracy is therefore an accident of registration unless this is small.
+
+        Reported once for the whole q axis rather than once per q: it is a
+        property of the promoted SET.
+        """
+        if comm.rank != 0 or leg is None:
+            return
+        from quatrex.phonon.pole_audit import pole_pair_weight
+
+        w_host = np.asarray(get_host(self.local_frequencies), dtype=float)
+        hw = np.asarray(get_host(self.local_frequency_weights), dtype=float)
+        z = np.concatenate(
+            [np.asarray(get_host(cl.z)).ravel()
+             for st in states if st is not None
+             for cl in (st.legs or [])] or [np.zeros(0, dtype=complex)])
+        z = z[np.real(z) >= 0.0]
+        if z.size == 0:
+            return
+        k = np.argmin(np.abs(w_host[None, :] - np.real(z)[:, None]), axis=1)
+        pole_cells = np.zeros(w_host.size, dtype=bool)
+        pole_cells[k] = True
+        good = hw[k] > 0.0
+        off_worst = float(np.max(np.abs(np.real(z)[good] - w_host[k[good]])
+                                 / hw[k[good]])) if good.any() else 0.0
+
+        # ... and how much of the ring's weight the offset can actually move.
+        # The registration error is order one ONLY on cell pairs (k, m-k) with
+        # both ends in a pole cell -- one displaced leg against a resolved
+        # partner costs O((delta/Gamma)^2) instead -- so the error in Sigma is
+        # bounded by this fraction times ~0.8. A scalar-norm proxy for the
+        # vertex contraction, hence an upper bound: a small value is
+        # conclusive, a large one is a reason to measure properly.
+        # The RING's leg, G^< - g_pp -- not Sigma, and not the raw G^<: the
+        # whole point is what the convolution is fed.
+        if g_lesser is not None:
+            gl = (self._q_stack(g_lesser.data, iq, 1)
+                  - xp.asarray(leg).reshape(iq.size, w_host.size, -1))
+            norms = np.linalg.norm(np.asarray(get_host(gl)), axis=2).max(axis=0)
+            low = max(1e-6, float(getattr(
+                self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
+            pw = pole_pair_weight(norms, pole_cells, freqs=w_host,
+                                  skip=np.abs(w_host) < low)
+        else:
+            pw = {"mean": float("nan"), "worst": float("nan"),
+                  "omega": float("nan")}
+        print(f"  pole registration: worst sub-cell offset {off_worst:.3f} "
+              f"cells (0 = on a grid point, 0.5 = on a cell boundary); "
+              f"pole-cell PAIRS carry {100 * pw['mean']:.3g}% of the ring's "
+              f"weight, up to {100 * pw['worst']:.3g}% at "
+              f"w={pw['omega']:.2f}", flush=True)
 
     def _build_pole_keldysh(self, sse_lesser, sse_greater,
                             g_retarded=None, g_lesser=None, q_idx=(),

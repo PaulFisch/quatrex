@@ -355,6 +355,18 @@ class LocalFitPlan:
             cols.append(fall * s ** (m - deriv) * ds_dz ** deriv)
         return xp.stack(cols, axis=1)
 
+    def compact_weights(self, z: NDArray, *, deriv: int = 0):
+        """``(row, idx, positive)`` -- the weights WITHOUT the zero padding.
+
+        :meth:`weights` scatters each probe's ``2*window`` coefficients into a
+        full ``(P, K)`` row, which is what :func:`contract_delta` wants but is
+        mostly zeros: for a few hundred thousand probes -- one per pole PAIR
+        per cluster per q -- that array is the whole cost. A caller that
+        gathers its own samples wants the compact form.
+        """
+        row = (self.powers(z, deriv)[:, None, :] @ self.pinv)[:, 0, :]
+        return row, self.idx, self._pos
+
     def weights(self, z: NDArray, *, deriv: int = 0) -> tuple[NDArray, NDArray]:
         """``(w_pos, w_mir)``, each ``(P, K)``, as :func:`contract_delta` wants."""
         row = (self.powers(z, deriv)[:, None, :] @ self.pinv)[:, 0, :]  # (P, wid)

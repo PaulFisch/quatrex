@@ -658,29 +658,35 @@ def source_at_poles(
         ``(Np, Np)``.
 
     """
-    from quatrex.phonon.pole_kernel import delta_local_fit
+    from quatrex.phonon.pole_kernel import LocalFitPlan
 
-    z = np.asarray(_host(cluster.z))
-    npp = int(z.size)
+    z = xp.asarray(cluster.z, dtype=xp.complex128)
+    npp = int(z.shape[0])
     src = xp.asarray(source, dtype=xp.complex128)
-    if src.ndim == 3:
-        flat = src.reshape(src.shape[0], -1)
-    else:
-        flat = src
+    flat = src.reshape(src.shape[0], -1)
 
-    rows = []
-    for a in range(npp):
-        col = []
-        for b in range(npp):
-            za, zbb = complex(z[a]), complex(np.conj(z[b]))
-            anchor = 0.5 * (za.real + zbb.real)
-            vals = delta_local_fit(
-                flat, freqs, xp.asarray([za, zbb]),
-                order=order, window=window, anchor=anchor,
-            ).reshape(2, npp, npp)
-            col.append(0.5 * (vals[0, a, b] + vals[1, a, b]))
-        rows.append(xp.stack(col))
-    return xp.stack(rows)
+    # One fit per PAIR, two probes each. The loop this replaces ran the fit
+    # over the whole (Np, Np) source for every pair and then kept a single
+    # entry of the result -- Np^2 least-squares solves whose Np^2 - 1 other
+    # outputs were discarded, so Np^4 of the work was waste. The stencil
+    # depends only on the pair's centre, so all 2 Np^2 probes go through one
+    # batched pseudo-inverse (LocalFitPlan) and only the entry each pair
+    # actually needs is contracted.
+    a_idx = xp.repeat(xp.arange(npp), npp)
+    b_idx = xp.tile(xp.arange(npp), npp)
+    za, zbb = z[a_idx], xp.conj(z[b_idx])
+    anchor = 0.5 * (xp.real(za) + xp.real(zbb))
+
+    plan = LocalFitPlan(freqs, xp.concatenate([anchor, anchor]),
+                        order=order, window=window)
+    w_pos, w_mir = plan.weights(xp.concatenate([za, zbb]))
+
+    # Column of the flattened source that pair (a, b) reads.
+    col = a_idx * npp + b_idx
+    sel = xp.take(flat, xp.concatenate([col, col]), axis=1).T     # (2Np^2, K)
+    vals = xp.sum(w_pos * sel + w_mir * xp.conj(sel), axis=1)
+    n = npp * npp
+    return (0.5 * (vals[:n] + vals[n:])).reshape(npp, npp)
 
 
 def source_variation(
@@ -706,26 +712,34 @@ def source_variation(
     turns the numerically empty tails of the window into apparent failures,
     which is the recorded trap that once made a ballistic control "fail".
     """
-    w = np.asarray(_host(freqs), dtype=float)
-    z = np.asarray(_host(cluster.z))
-    src = np.asarray(_host(source))
-    pair = np.asarray(_host(source_at_poles(source, freqs, cluster)))
+    w = xp.asarray(freqs, dtype=xp.float64)
+    z = xp.asarray(cluster.z, dtype=xp.complex128)
+    src = xp.asarray(source, dtype=xp.complex128)
+    pair = source_at_poles(source, freqs, cluster)
 
-    scale = float(np.abs(src).max())
+    scale = float(xp.abs(src).max())
     if scale == 0.0:
         return 0.0
-    worst = 0.0
-    npp = int(z.size)
-    centre = 0.5 * (z.real[:, None] + np.conj(z).real[None, :])
-    for a in range(npp):
-        for b in range(npp):
-            k0 = int(np.argmin(np.abs(w - abs(centre[a, b]))))
-            lo, hi = max(0, k0 - window), min(w.size, k0 + window + 1)
-            local = src[lo:hi, a, b]
-            if abs(centre[a, b]) < 0.0 or centre[a, b] < 0.0:
-                local = np.conj(local)
-            worst = max(worst, float(np.abs(local - pair[a, b]).max()))
-    return worst / scale
+
+    # Vectorised over pole pairs. The loop this replaces pulled the whole
+    # (n_omega, Np, Np) source back to the host and walked Np^2 windows there,
+    # which on a device is a synchronisation per cluster per Keldysh component.
+    centre = 0.5 * (xp.real(z)[:, None] + xp.real(z)[None, :])    # (Np, Np)
+    flat_c = xp.abs(centre).reshape(-1)                           # (Np^2,)
+    k0 = xp.argmin(xp.abs(w[None, :] - flat_c[:, None]), axis=1)
+    span = xp.arange(-window, window + 1)
+    # Clamping rather than shortening the window at the grid edges only
+    # REPEATS a sample that is already inside it, and the reduction below is a
+    # maximum, so the answer is the one the variable-length slice gave.
+    idx = xp.clip(k0[:, None] + span[None, :], 0, int(w.shape[0]) - 1)
+
+    local = xp.take(src.reshape(src.shape[0], -1), idx, axis=0)   # (Np^2, win, Np^2)
+    ab = xp.arange(int(flat_c.shape[0]))
+    local = local[ab[:, None], xp.arange(int(idx.shape[1]))[None, :], ab[:, None]]
+    # A pair whose centre is negative is served by the mirrored branch.
+    neg = (centre.reshape(-1) < 0.0)[:, None]
+    local = xp.where(neg, xp.conj(local), local)
+    return float(xp.abs(local - pair.reshape(-1)[:, None]).max()) / scale
 
 
 def pole_keldysh_pf_sparse(

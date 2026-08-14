@@ -356,6 +356,7 @@ class BlockLayout:
             raise ValueError("BlockLayout: the band does not cover the diagonal.")
         self.diag = xp.asarray(diag)
         self.corner = {i: sl for (i, j), sl, _, _ in self.slices if i == j}
+        self._build_band()
 
     def gather(self, values: NDArray) -> NDArray:
         """Lay ``(..., nnz)`` values out in band order, zero where absent."""
@@ -396,6 +397,140 @@ class BlockLayout:
         """The same views, keyed like :func:`nnz_to_blocks`' output."""
         return {ij: flat[..., sl].reshape(flat.shape[:-1] + (bi, bj))
                 for ij, sl, bi, bj in self.slices}
+
+    # -- band-tensor form -------------------------------------------------- #
+    #
+    # ``blocks()`` hands back a LIST, one entry per block, so every consumer
+    # walks it in Python and the call count grows with the device length. The
+    # band form carries the same data as a single dense tensor
+    # ``(..., n_blocks, 3, bmax, bmax)`` -- block row, band offset ``j - i + 1``,
+    # and the two intra-block indices -- padded to the largest block and zero
+    # filled outside the band and outside a short block. Every operation the
+    # legs need on a block-tridiagonal operator is then ONE einsum or matmul
+    # over that tensor, with no loop over blocks at all.
+
+    def _build_band(self) -> None:
+        sizes = self.block_sizes
+        nb = int(len(sizes))
+        bmax = int(sizes.max())
+        off = np.concatenate(([0], np.cumsum(sizes)))
+        n_dof = int(off[-1])
+        self.n_blocks, self.bmax, self.n_dof = nb, bmax, n_dof
+
+        # Global row of local row r of block i; n_dof marks padding, which
+        # gathers a zero from a caller-appended sentinel row.
+        row_index = np.full((nb, bmax), n_dof, dtype=np.int64)
+        for i in range(nb):
+            row_index[i, :sizes[i]] = np.arange(off[i], off[i + 1])
+        self.row_index = xp.asarray(row_index)
+
+        # Which nnz column feeds band slot (i, o, r, s); self.nnz marks empty.
+        band = np.full((nb, 3, bmax, bmax), self.nnz, dtype=np.int64)
+        # Sentinel = the band size: an nnz entry OUTSIDE the band unbands to
+        # zero, matching nnz_to_blocks, which materialises |I-J| <= band only.
+        band_of_nnz = np.full(self.nnz, nb * 3 * bmax * bmax, dtype=np.int64)
+        flat_src = np.asarray(_host(self.source))
+        for (i, j), sl, bi, bj in self.slices:
+            o = j - i + 1
+            blk = flat_src[sl].reshape(bi, bj)
+            band[i, o, :bi, :bj] = blk
+            keep = blk < self.nnz
+            band_of_nnz[blk[keep]] = np.ravel_multi_index(
+                (np.full(int(keep.sum()), i), np.full(int(keep.sum()), o),
+                 *np.nonzero(keep)), (nb, 3, bmax, bmax))
+        self.band_source = xp.asarray(band)
+        self.band_of_nnz = xp.asarray(band_of_nnz)
+        self.band_size = nb * 3 * bmax * bmax
+
+        # Block row j = i + o - 1 reached from (i, o); nb marks off the end.
+        shift = np.add.outer(np.arange(nb), np.arange(3) - 1)
+        self.shift_index = xp.asarray(np.where((shift < 0) | (shift >= nb),
+                                               nb, shift))
+
+        # Slot holding the TRANSPOSED entry: (i, o, r, s) -> (i+o-1, 2-o, s, r).
+        # Out-of-band slots map to a sentinel, which :meth:`band_transpose`
+        # serves a zero from.
+        ii, oo, rr, ss = np.meshgrid(np.arange(nb), np.arange(3),
+                                     np.arange(bmax), np.arange(bmax),
+                                     indexing="ij")
+        jj = ii + oo - 1
+        ok = (jj >= 0) & (jj < nb)
+        tflat = np.full((nb, 3, bmax, bmax), nb * 3 * bmax * bmax,
+                        dtype=np.int64)
+        tflat[ok] = np.ravel_multi_index(
+            (jj[ok], 2 - oo[ok], ss[ok], rr[ok]), (nb, 3, bmax, bmax))
+        self.band_transpose_index = xp.asarray(tflat.reshape(-1))
+
+    def band_transpose(self, band: NDArray) -> NDArray:
+        r"""The band tensor of :math:`A^{T}` (no conjugation).
+
+        Slot ``(i, o, r, s)`` holds ``A`` at global ``(row(i,r), col(i,o,s))``,
+        and its transpose lives at ``(i+o-1, 2-o, s, r)``. One gather.
+        """
+        flat = band.reshape(band.shape[:-4] + (self.band_size,))
+        pad = xp.zeros(flat.shape[:-1] + (1,), dtype=flat.dtype)
+        full = xp.concatenate([flat, pad], axis=-1)
+        return full[..., self.band_transpose_index].reshape(band.shape)
+
+    def band(self, values: NDArray) -> NDArray:
+        """``(..., nnz)`` values as the band tensor ``(..., nb, 3, bmax, bmax)``."""
+        pad = xp.zeros(values.shape[:-1] + (1,), dtype=values.dtype)
+        full = xp.concatenate([values, pad], axis=-1)
+        return full[..., self.band_source.reshape(-1)].reshape(
+            values.shape[:-1] + (self.n_blocks, 3, self.bmax, self.bmax))
+
+    def unband(self, band: NDArray) -> NDArray:
+        """Inverse of :meth:`band` onto the stored pattern, ``(..., nnz)``."""
+        flat = band.reshape(band.shape[:-4] + (self.band_size,))
+        pad = xp.zeros(flat.shape[:-1] + (1,), dtype=flat.dtype)
+        return xp.concatenate([flat, pad], axis=-1)[..., self.band_of_nnz]
+
+    def to_blocks(self, dense: NDArray) -> NDArray:
+        """``(..., n_dof, m)`` laid out per block row, ``(..., nb, bmax, m)``.
+
+        Rows that do not exist in a short block gather a zero from a sentinel
+        row appended here, so the padding never carries weight.
+        """
+        pad = xp.zeros(dense.shape[:-2] + (1, dense.shape[-1]),
+                       dtype=dense.dtype)
+        full = xp.concatenate([dense, pad], axis=-2)
+        return xp.take(full, self.row_index, axis=full.ndim - 2)
+
+    def from_blocks(self, blocked: NDArray) -> NDArray:
+        """Inverse of :meth:`to_blocks`, ``(..., nb, bmax, m) -> (..., n_dof, m)``."""
+        flat = blocked.reshape(blocked.shape[:-3]
+                               + (self.n_blocks * self.bmax,) + blocked.shape[-1:])
+        out = xp.zeros(blocked.shape[:-3] + (self.n_dof + 1,) + blocked.shape[-1:],
+                       dtype=blocked.dtype)
+        out[..., self.row_index.reshape(-1), :] = flat
+        return out[..., :self.n_dof, :]
+
+    def band_neighbours(self, blocked: NDArray) -> NDArray:
+        """``(..., nb, bmax, m) -> (..., nb, 3, bmax, m)``: block ``i + o - 1``.
+
+        The partner of :meth:`band`: together they turn a block-tridiagonal
+        apply into one matmul whose contracted axis is ``(o, s)``.
+        """
+        pad = xp.zeros(blocked.shape[:-3] + (1,) + blocked.shape[-2:],
+                       dtype=blocked.dtype)
+        full = xp.concatenate([blocked, pad], axis=-3)
+        return xp.take(full, self.shift_index, axis=full.ndim - 3)
+
+    def apply_band(self, band: NDArray, x: NDArray) -> NDArray:
+        """``A @ x`` for a band-tensor ``A`` and dense ``x``, in ONE matmul.
+
+        ``band`` is ``(..., nb, 3, bmax, bmax)`` and ``x`` is
+        ``(..., n_dof, m)``; the two batch shapes broadcast. The band offset
+        and the contracted intra-block index are folded into a single axis of
+        length ``3 * bmax``, so the whole block-tridiagonal apply is one
+        batched GEMM rather than a Python walk over the blocks.
+        """
+        nb, bm = self.n_blocks, self.bmax
+        a = xp.swapaxes(band, -3, -2).reshape(
+            band.shape[:-4] + (nb, bm, 3 * bm))
+        v = self.band_neighbours(self.to_blocks(x))
+        v = v.reshape(v.shape[:-4] + (nb, 3 * bm, v.shape[-1]))
+        return self.from_blocks(a @ v)
 
     def flatten_blocks(self, blocks: dict[tuple[int, int], NDArray]) -> NDArray:
         """Inverse of :meth:`block_dict` for a dense block dict (e.g. ``D``)."""
