@@ -910,7 +910,7 @@ cause. Three arms differing ONLY in the boundary solver:
 |---|---|---|---|---|---|
 | `spec` (4476664) | spectral | beyn | rank 2, both contacts | 6.507e-01 | 1.0 -> 2.07e+03 -> 3.30e+03 |
 | `full` (4478364) | spectral | **full** | rank 2, both contacts | 6.507e-01 | 1.0 -> 2.07e+03 (identical to `spec`) |
-| `sr` (4478344) | **sancho-rubio** | -- | **ranks 0, 1, 3**, both contacts | -- | **nan** (from the first residual, and stays) |
+| `sr` (4478344) | **sancho-rubio** | -- | **ranks 0, 1, 3**, both contacts | -- | **nan** on all 3 iterations, `final_heat` nan |
 
 **All three fail.** The reading:
 
@@ -928,7 +928,20 @@ cause. Three arms differing ONLY in the boundary solver:
   the first residual.
 
 So the recursion error is a symptom of the fine grid, not its cause, and no
-available OBC algorithm removes it. `QX_OBC_ALG` / `QX_NEVP` are wired
+available OBC algorithm removes it.
+
+**One caveat on the `sr` row, not yet closed.** Calling sancho-rubio "worse
+at a fine grid" presumes it WORKS at a coarse one on this bed, and that has
+never been shown: every converged Si run in this investigation used the
+spectral OBC, and `siladder` used `sichk_base` (3 cells x 1), not `si4x2`. So
+`si4x2` at `ne = 141` has no run at all, under either solver. A pair of
+controls at that spacing -- `srcoarse` (4478525, sancho-rubio) and its
+spectral counterpart -- is what makes the `sr` row interpretable; without
+both, a NaN at `ne = 141` could equally be the bed.
+
+The section's CONCLUSION does not depend on it. `spec` and `full` agree
+bit-for-bit, both warn, and both diverge, which settles the OBC question on
+its own; the controls only decide how sancho-rubio should be described. `QX_OBC_ALG` / `QX_NEVP` are wired
 (`phonon.obc.algorithm`, `phonon.obc.nevp_solver`) and remain useful knobs,
 but they do not change this answer.
 
