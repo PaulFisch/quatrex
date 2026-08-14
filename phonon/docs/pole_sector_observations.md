@@ -772,3 +772,61 @@ sector and with `fft`: `ne = 141, 281, 561, 1121` at fixed `wmax = 35`, base
 and pole at each. The claim is that the pole arm's dw-weighted answer stays
 put while the base arm's drifts and eventually diverges. That is a different
 experiment from Sec. 10 and has never been run.
+
+---
+
+## 11. Two defects found while probing the fine grid (2026-08-14)
+
+### 11.1 Every multi-rank pole run was dead on arrival
+
+`PhononSolver._pole_frequency_context` called
+
+    sizes = comm.stack.all_gather(np.array([local_freqs.size]))
+
+but `all_gather` is IN-PLACE: `all_gather(sendbuf, recvbuf) -> None`. Every
+rank raised `TypeError: missing 1 required positional argument: 'recvbuf'`,
+which took the heat and current with it -- the first 4-rank run of the session
+(`si8kprobe`, `ne = 8001`) completed with `lead_current=None` and printed no
+residual at all.
+
+Nothing caught it because the body is guarded by `if comm.stack.size <= 1:
+return {}` and the suite runs on one rank, while
+`test_mpi_split_matches_the_serial_answer` -- whose docstring says "the real
+plumbing: comm.stack all_gather of the grid" -- builds the split by hand with
+raw `mpi.Allreduce` and never calls the production function. A test that says
+it covers the plumbing and covers the maths instead is worse than no test,
+because it is counted.
+
+The counts also differ per rank whenever the grid does not divide evenly, so a
+single `all_gather` could not have worked in any case. Fixed by gathering the
+counts first, padding to the max and trimming. The new test drives the real
+function on a deliberately uneven split (65 points over 4 ranks).
+
+### 11.2 The spectral OBC does not satisfy its own recursion at fine h
+
+At `ne = 8001` on `si4x2`:
+
+    High error at rank 1 for left of OBCSolver Spectral:
+    Relative recursion error: 6.507e-01
+    Absolute recursion error: 5.320e+00
+
+The surface Green's function misses its own defining recursion by 65 %. This
+is a candidate cause for the fine-grid instability that Sec. 10.1 reads as a
+property of the physics: at `h = 0.0044 THz` far more grid points land near
+band edges, where a contour-based NEVP has to resolve roots crowding the
+contour.
+
+`phonon.obc.algorithm` accepts `spectral` (default) and `sancho-rubio`, and
+`nevp_solver` accepts `beyn` (default) and `full`. `pole_sector.sheet =
+"outgoing"` would pin the spectral solver, but the default is `"physical"`, so
+the choice is free for the runs done here. `QX_OBC_ALG` / `QX_NEVP` expose it;
+`phonon/studies/engine/obc_probe.sh` runs the three-arm separation.
+
+### 11.3 Operational: do not sync while a repo-script job is running
+
+`daint.py sync` is `git pull` on shared scratch, and bash reads a script
+incrementally by byte offset, so pulling while a job executes a script FROM
+THE REPO TREE can corrupt that job mid-flight. The launcher snapshots
+`job.sh` into the run dir, but `launch -- bash <repo path>` points at the live
+file. Earlier arm scripts lived in gitignored run dirs, which is why this had
+not bitten before.
