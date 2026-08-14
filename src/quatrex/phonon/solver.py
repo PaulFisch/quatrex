@@ -945,8 +945,39 @@ class PhononSolver(SubsystemSolver):
                          if st is not None and st.clusters)
             skipped = nq - len(todo)
             tail = f", {skipped} q skipped (q_stride/q_max)" if skipped else ""
+            # A count alone cannot say WHY the set moved. "Refused" and "never
+            # found" need opposite fixes, and the hysteresis in
+            # PoleSector.screen can only act on a candidate the tracker
+            # matched -- so report seeded, matched and the refusal histogram
+            # summed over q, not just the promoted total.
+            seeded = sum(st.n_seeded for _, st in states if st is not None)
+            matched = sum(st.n_matched for _, st in states if st is not None)
+            why: dict[str, int] = {}
+            for _, st in states:
+                if st is None:
+                    continue
+                for _z, reason in st.rejected:
+                    key = reason.split("=")[0].split("(")[0].strip()
+                    why[key] = why.get(key, 0) + 1
+            hist = "  ".join(f"{k} x{v}" for k, v in
+                             sorted(why.items(), key=lambda kv: -kv[1]))
+            eno = [v for _, st in states if st is not None
+                   for v in st.eps_z_refused if np.isfinite(v)]
+            eok = [v for _, st in states if st is not None
+                   for v in st.eps_z_accepted if np.isfinite(v)]
+            def _pct(v):
+                if not v:
+                    return "n/a"
+                q = np.percentile(np.asarray(v, dtype=float), (50, 90, 100))
+                return "  ".join(f"{x:.3g}" for x in q)
             print(f"  pole sector: {len(todo)}/{nq} q solved, {n_live} with "
                   f"poles, {promoted} pole(s) total{tail}", flush=True)
+            print(f"    seeded {seeded}, matched-as-promoted {matched}, "
+                  f"accepted {promoted}, refused {seeded - promoted}"
+                  + (f"  [{hist}]" if hist else ""), flush=True)
+            print(f"    eps_z (med/p90/max) accepted {_pct(eok)} | "
+                  f"refused {_pct(eno)}   tol {self._pole_cfg.locate_tol:g}"
+                  f" in / {self._pole_cfg.locate_tol_out:g} out", flush=True)
 
     def _census_over_q(self, delta, sse_lesser) -> None:
         """Extraction-only census on a q-resolved device, one q at a time.

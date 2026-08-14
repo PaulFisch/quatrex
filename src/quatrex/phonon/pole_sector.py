@@ -112,6 +112,23 @@ class PoleSectorState:
     solutions: list[PoleSolution] = field(default_factory=list)
     rejected: list[tuple[complex, str]] = field(default_factory=list)
     coherence: list[float] = field(default_factory=list)
+    n_seeded: int = 0
+    """Candidates the corrector was handed this iteration."""
+    eps_z_accepted: list = field(default_factory=list)
+    eps_z_refused: list = field(default_factory=list)
+    """``eps_z`` for each candidate, split by the decision.
+
+    Whether the refused ones sit just over ``locate_tol`` or orders above it
+    is the difference between a threshold that is merely too tight and poles
+    the corrector genuinely failed to locate. Widening the hysteresis gap
+    helps only in the first case."""
+    n_matched: int = 0
+    """Of those, how many the tracker recognised as ALREADY in the sector.
+
+    The hysteresis in :meth:`PoleSector.screen` can only act on these. A pole
+    that leaves because it was never matched left for a different reason than
+    one refused on its own merits, and the two need opposite fixes -- so the
+    count is reported rather than inferred from the promoted total."""
     iteration: int = 0
     _h_for_report: float = 0.0
     """Grid spacing, carried only so ``population()`` can report h/gamma."""
@@ -639,8 +656,11 @@ class PoleSector:
         accepted, rejected = [], []
         promoted = self._match_previous(solutions)
         seps = self.separations(solutions)
+        eps_ok, eps_no = [], []
         for k, sol in enumerate(solutions):
             why = self.screen(sol, promoted[k], seps[k])
+            (eps_no if why else eps_ok).append(
+                float(self.locate_error(sol, seps[k])))
             (rejected if why else accepted).append(
                 (sol.z, why) if why else sol
             )
@@ -671,6 +691,8 @@ class PoleSector:
         self.state = PoleSectorState(
             clusters=clusters, solutions=accepted, rejected=rejected,
             coherence=coherence, iteration=self.state.iteration + 1,
+            n_seeded=len(solutions), n_matched=int(sum(promoted)),
+            eps_z_accepted=eps_ok, eps_z_refused=eps_no,
             _h_for_report=self.h,
         )
         self._promoted = [(complex(s.z), s.r) for s in accepted]
