@@ -963,3 +963,66 @@ def test_leg_weight_gate_has_hysteresis():
     sol = _Sol(complex(9.0, -gamma))
     assert sec.screen(sol, was_promoted=False) is not None, "refused when new"
     assert sec.screen(sol, was_promoted=True) is None, "kept once promoted"
+
+
+def test_a_rescan_adds_candidates_and_never_replaces_the_held_set():
+    r"""The period-two oscillator, as a gate.
+
+    ``_track`` calls ``tracker.update`` on a warm iteration and
+    ``tracker.adopt`` on a rescan; ``update`` arms a rescan whenever the
+    cluster count or a cluster size changes, and ``adopt`` disarms it. Since
+    membership moving is what changes those counts, a warm iteration always
+    arms the next rescan. While a rescan REPLACED the held set with the
+    harmonic spectrum, the sector therefore alternated between everything the
+    spectrum offers and whatever survived screening it -- period two, locked,
+    for as long as the run went on.
+
+    Measured on Si (81 q, h = 0.25, run ``siladder``): 650 <-> 485 poles over
+    150 iterations, with ``rel Sigma`` pinned at 2.5e-01 where the pole-free
+    arm converged to 9.3e-04. No threshold and no physics is involved -- it is
+    control flow -- which is why the ``locate_tol_out`` hysteresis could not
+    touch it.
+
+    So a rescan must be additive.
+    """
+    import numpy as np
+
+    from quatrex.phonon.pole_sector import PoleSectorState
+
+    sec = _context_run(nf=201, omega_min_thz=0.5, omega_max_thz=15.0)
+
+    class _Sol:
+        converged = True
+        eps_nep = 0.0
+        kappa = 1.0
+        dz_est = 0.0 + 0.0j
+        def __init__(self, z, r):
+            self.z, self.r = z, r
+            self.l = r
+
+    n_dof = int(np.sum(sec._block_sizes))
+    held = [_Sol(complex(w, -0.02), np.ones(n_dof, dtype=complex))
+            for w in (3.0, 5.0, 7.0)]
+    sec.state = PoleSectorState(solutions=held, iteration=3)
+
+    # Warm iteration: exactly the held set, with its predicted vectors.
+    sec.tracker.rescan_reasons = []
+    sec.tracker.clusters = [object()]          # non-empty: not a cold start
+    sec.tracker.iteration = 3                  # not on the rescan_iterations beat
+    assert not sec.tracker.needs_rescan()
+    warm, warm_vecs = sec._seed()
+    assert len(warm) == len(held), "a warm iteration seeds the held set"
+    assert warm_vecs is not None and len(warm_vecs) == len(held)
+
+    # Audit due: the held seeds must ALL still be there, plus extras.
+    sec.tracker.rescan_reasons = ["cluster count 3 -> 2"]
+    assert sec.tracker.needs_rescan()
+    audit, audit_vecs = sec._seed()
+
+    assert len(audit) >= len(warm), (
+        "a rescan shrank the candidate set; that is the period-two oscillator")
+    reach = sec.cfg.cluster_factor * sec.h
+    for w in warm:
+        assert min(abs(w - a) for a in audit) <= reach, (
+            f"held seed {w} was dropped by the audit")
+    assert len(audit_vecs) == len(audit), "every seed needs its vector slot"

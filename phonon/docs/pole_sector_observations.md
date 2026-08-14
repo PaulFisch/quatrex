@@ -560,3 +560,66 @@ not been run and is what would separate them.
 
 Still open: a long normal-partition arm to carry `psih` to the base arm's
 9.2597e-04 and compare `lead_current` against 400.611.
+
+---
+
+## 9. Why the poles leave: a control-flow oscillator (pdiag, 4473047)
+
+`siladder`'s pole arm limit-cycles 641 <-> 470 and floors at `rel Sigma`
+2.5e-01 where the pole-free arm on the same grid reaches 9.2597e-04. The
+cause is neither the acceptance threshold nor the physics. It is the
+interaction of two methods in `PoleSector`/`PoleTracker`:
+
+* `_seed` used `harmonic_seeds()` -- discarding the held set -- whenever
+  `tracker.needs_rescan()`;
+* `_track` calls `tracker.update` on a warm iteration and `tracker.adopt` on
+  a rescan. `update` ARMS a rescan whenever the cluster count or any cluster
+  size changes; `adopt` DISARMS it.
+
+Membership moving is what changes those counts, and membership moves every
+iteration, so every warm iteration armed the next rescan, and every rescan
+threw away the held poles and re-seeded from the full harmonic spectrum,
+which re-found them. The sector therefore alternated between everything the
+spectrum offers and whatever survived screening it. Period two, locked, for
+as long as the run lasted.
+
+Instrumented (`n_seeded` / `n_matched` / refusal histogram over q):
+
+    it  seeded  matched  accepted  refused   seeding
+     1    1456        0       626      830   harmonic
+     2     626      514       421      205   warm
+     3    1422      338       555      867   harmonic
+     4     572      540       448      124   warm
+     5    1356      421       579      777   harmonic
+     6     678      586       482      196   warm
+     7    1456      459       626      830   harmonic
+     8     626      613       489      137   warm
+     9    1379      480       648      731   harmonic
+
+`seeded` alternates ~1400 <-> ~620, and iteration 7 revisits iteration 1
+exactly (1456 seeded, 626 accepted): a genuine cycle, not drift.
+
+**The threshold is not the sensitive knob.** `eps_z` is sharply bimodal --
+accepted median 1e-14 to 1e-9, refused median 0.6 to 1.2, against a
+tolerance of 0.05. The refused poles miss by one to two orders of magnitude,
+not by a hair, so no widening of the `locate_tol`/`locate_tol_out` gap would
+retain them. The `locate_tol_out` hysteresis added in Sec. 8 was aimed at the
+wrong mechanism: the oscillation is decided in the SEEDING, before any pole
+reaches `screen`.
+
+**Why the residual floors.** Under `leg = "congruence"` the pole channel is
+the point-minus-cell-average correction, so the ring convolves the cell
+average of the reconstruction. An alternating pole set therefore makes
+`Sigma` alternate by a finite amount, and `rel Sigma = ||Sigma_new -
+Sigma_old|| / ||Sigma||` cannot fall below that jump. The 2.5e-01 floor is
+the discontinuity, not slow convergence.
+
+**Fix.** A rescan now ADDS the harmonic candidates the held set does not
+already cover (within `cluster_factor * h`) instead of replacing it, so a
+rescan can only ever grow the candidate set. Regression test
+`test_a_rescan_adds_candidates_and_never_replaces_the_held_set`.
+
+**Also found: `PoleTracker.membership_frozen()` has no caller.** It is the
+mechanism for holding sector membership fixed across an `epoch_iterations`
+epoch -- exactly the remedy for a discrete set entering a fixed-point map --
+and it is dead code.

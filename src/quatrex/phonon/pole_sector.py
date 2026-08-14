@@ -1094,9 +1094,34 @@ class PoleSector:
               flush=True)
 
     def _seed(self):
-        """Warm-start seeds, or the harmonic estimate when there is no history."""
+        """Warm-start seeds, PLUS the harmonic estimate when an audit is due.
+
+        A rescan ADDS candidates; it must never replace the held set. Replacing
+        it makes the sector a period-two oscillator, and the mechanism is pure
+        control flow -- no physics, no threshold, in it:
+
+        * ``_track`` calls ``tracker.update`` on a warm iteration and
+          ``tracker.adopt`` on a rescan. ``update`` arms a rescan whenever the
+          cluster COUNT or any cluster SIZE changes; ``adopt`` disarms it.
+        * membership moving is what changes those counts, and membership moves
+          every iteration, so a warm iteration always arms the next rescan.
+        * the rescan then discarded the held poles and re-seeded from the
+          harmonic spectrum, which re-found them all.
+
+        So the sector alternated between everything the harmonic spectrum
+        offers and whatever survived screening it, locked at period two. On Si
+        (81 q, ``h = 0.25``) that was 650 <-> 485 poles for 150 iterations,
+        and because the ring convolves the cell average of the reconstruction,
+        an alternating pole set makes ``Sigma`` alternate too -- pinning
+        ``rel Sigma`` at 2.5e-01 where the pole-free arm reaches 9.3e-04. The
+        floor was the discontinuity, not slow convergence.
+
+        The acceptance hysteresis in :meth:`screen` cannot reach this: the
+        oscillation is in which seeds the corrector is handed, decided before
+        any pole is screened.
+        """
         prev = self.state.solutions
-        if not prev or self.tracker.needs_rescan():
+        if not prev:
             return self.harmonic_seeds(), None
         z = xp.asarray([complex(s.z) for s in prev], dtype=xp.complex128)
         r = xp.stack([xp.asarray(s.r).reshape(-1) for s in prev])
@@ -1109,7 +1134,24 @@ class PoleSector:
         shift = xp.where(mag > cap, shift * (cap / xp.where(mag > 0, mag, 1.0)),
                          shift)
         seeds = [complex(x) for x in np.asarray(_host(z + shift))]
-        return seeds, [s.r for s in prev]
+        vecs = [s.r for s in prev]
+        if not self.tracker.needs_rescan():
+            return seeds, vecs
+        # Audit: offer the harmonic candidates the held set does not already
+        # cover. "Already covered" is the same cluster_factor * h that defines
+        # "the same mode" everywhere else, so a re-found pole is not duplicated
+        # into its own neighbour and then split by the clusterer.
+        reach = self.cfg.cluster_factor * self.h
+        extra = [w for w in self.harmonic_seeds()
+                 if min(abs(w - t) for t in seeds) > reach]
+        if not extra:
+            return seeds, vecs
+        # The same unit vector the unbatched solve would have drawn, so an
+        # added candidate starts exactly where a cold solve would start it.
+        rng = xp.random.default_rng(0)
+        n_dof = int(np.sum(self._block_sizes))
+        default = rng.standard_normal(n_dof) + 1j * rng.standard_normal(n_dof)
+        return seeds + extra, vecs + [default] * len(extra)
 
     def _predicted_shifts(self, z, l, r):
         r"""``delta z_alpha = l^H Delta Sigma_s^R(z_alpha) r`` for every pole.
