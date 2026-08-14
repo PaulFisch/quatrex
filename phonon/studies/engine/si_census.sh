@@ -49,8 +49,18 @@ run () {
     grep -c "pole census" "$OUT/log_$1.txt" || true
 }
 
-run cold 3   "$CENSUS"
-run base 150 "QX_POLE=0 QX_SAVE_SIGMA=$OUT/sig_base.npz"
-run warm 3   "$CENSUS QX_SIGMA_INIT=$OUT/sig_base.npz"
+# Which stages to run. `base` is the only expensive one and its Sigma snapshot
+# is reusable, so a census that has to be repeated (a reporting defect, a new
+# column) re-runs "cold warm" against the sig_base.npz already on disk.
+STAGES=${QX_CENSUS_STAGES:-"cold base warm"}
+
+for stage in $STAGES; do
+    case $stage in
+        cold) run cold 3   "$CENSUS" ;;
+        base) run base 150 "QX_POLE=0 QX_SAVE_SIGMA=$OUT/sig_base.npz" ;;
+        warm) run warm 3   "$CENSUS QX_SIGMA_INIT=$OUT/sig_base.npz" ;;
+        *)    echo "unknown stage: $stage" ; exit 1 ;;
+    esac
+done
 
 echo "==================== census done ===================="
