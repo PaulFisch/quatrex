@@ -60,7 +60,9 @@ class PoleSolution:
     Attributes
     ----------
     z : complex
-        Pole location (THz).
+        Pole location (THz), ``z = omega_pole - i * gamma_hwhm`` under the
+        ``e^{-i omega t}`` convention this package uses throughout. See
+        :attr:`gamma_hwhm` and :attr:`is_passive`.
     r : NDArray
         Right null vector, ``(n_dof,)``, unit norm.
     l : NDArray
@@ -105,6 +107,44 @@ class PoleSolution:
     iterations: int
     eps_left: float = float("nan")
     dz_est: complex = 0.0 + 0.0j
+
+    @property
+    def omega_pole(self) -> float:
+        """Resonance frequency ``Re z`` (THz)."""
+        return float(self.z.real)
+
+    @property
+    def gamma_hwhm(self) -> float:
+        r"""HALF width at half maximum, ``-Im z`` (THz).
+
+        Named because the tree carries both conventions in prose and the
+        factor of two between them lands in every resolution gate: the exact
+        line-weight error is a function of ``h/gamma`` with ``gamma`` the HALF
+        width (:meth:`~quatrex.phonon.pole_sector.PoleSector.leg_weight_error`),
+        and using the full width there would misjudge a line by the same factor
+        of two in the argument of a function that varies exponentially.
+
+        Positive for a passive resonance. A negative value means the root came
+        back on the wrong half plane and is a continuation failure, not a mode.
+        """
+        return -float(self.z.imag)
+
+    @property
+    def Gamma_fwhm(self) -> float:
+        """FULL width at half maximum, ``-2 Im z`` (THz). Twice
+        :attr:`gamma_hwhm`, and never what the gates take."""
+        return -2.0 * float(self.z.imag)
+
+    @property
+    def is_passive(self) -> bool:
+        r"""Whether the pole sits in the lower half plane.
+
+        The time convention is :math:`e^{-i\omega t}`, so a mode that decays
+        carries :math:`z = \Omega - i\gamma` with :math:`\gamma > 0`. Under the
+        opposite convention every sign here flips and the retarded function
+        would be built from the wrong half plane.
+        """
+        return self.z.imag < 0.0
 
     def residue(self) -> NDArray:
         """Residue matrix ``R = r l^H`` (doc Eq. 50)."""

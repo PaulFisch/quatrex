@@ -13,12 +13,11 @@ One update does:
 
 1. rebuild ``Delta`` from the mixed self-energy buffers (never cached -- it must
    not drift out of step with the ``Sigma^R`` the Dyson operator was built from);
-2. seed from the previous iterate through the first-order predictor, or from a
-   contour scan when tracking has been lost;
+2. seed from the previous iterate through the first-order predictor, or from the
+   harmonic/golden-rule estimate when tracking has been lost;
 3. correct each pole with bordered Newton and accept on the scaled residual;
-4. apply the promotion criteria -- resolution, isolation, conditioning, band-edge
-   distance and vertex-weighted importance -- with hysteresis, and only at an
-   epoch boundary;
+4. apply the promotion criteria -- resolution, conditioning and the location
+   error -- with hysteresis, and only at an epoch boundary;
 5. group the survivors into coherent clusters and project the Keldysh source
    onto each.
 
@@ -43,16 +42,14 @@ from quatrex.phonon.pole_keldysh import (
 )
 from quatrex.phonon.pole_kernel import (
     LocalFitPlan, bosonic_partner, contract_delta, continuation_weights,
-    local_fit_weights, sigma_retarded_at_z,
+    local_fit_weights,
 )
 from quatrex.phonon.pole_nevp import (
     PoleSolution, _lift, _matvec, _vdot, bordered_newton_batch,
 )
-from quatrex.phonon.pole_probe import (
-    BlockLayout, assemble_m_blocks, nnz_to_blocks,
-)
+from quatrex.phonon.pole_probe import BlockLayout, nnz_to_blocks
 from quatrex.phonon.pole_tracker import (
-    PoleTracker, cluster_poles, match_cost, match_poles, predict_shift,
+    PoleTracker, cluster_poles, match_poles,
 )
 
 __all__ = ["PoleSectorState", "PoleSector", "PoleQBatch", "refresh_many"]
@@ -269,6 +266,13 @@ class PoleSector:
         point, not a simple pole, and forcing one into a single-pole fit is the
         documented failure mode.
 
+        NEVER SUPPLIED IN PRODUCTION. Both solver call sites construct the
+        sector without it, so the ``edge_factor`` gate and the band-edge term of
+        :meth:`trust_radius` are inert on every real run; only tests pass it.
+        Supplying it means deriving the lead band edges from the contact
+        dispersion, and doing so would change which poles are promoted -- so it
+        is a deliberate measurement, not a wiring oversight to fix in passing.
+
     """
 
     def __init__(self, config, freqs: NDArray, band_edges: NDArray | None = None,
@@ -338,9 +342,17 @@ class PoleSector:
         ``omega_min_thz = 0`` resolves to ``max(4*dw, mask + 2*dw)``: below that
         the quasiparticle picture does not apply, and the continuation has no cut
         where the self-energy has been masked to zero.
+
+        The top comes from the GLOBAL axis, not this rank's slice. Every rank
+        assembles the same operator and is supposed to solve the same poles
+        (see ``PhononSolver._pole_frequency_context``); taking the default from
+        ``self.freqs[-1]`` gave each rank a different search window, so on a
+        distributed run the ranks screened against different bounds and could
+        promote different sets. Serial runs are unaffected -- ``global_freqs``
+        IS ``freqs`` there.
         """
         lo = self.cfg.omega_min_thz or max(4.0 * self.h, low_freq_mask + 2.0 * self.h)
-        hi = self.cfg.omega_max_thz or float(_host(self.freqs)[-1])
+        hi = self.cfg.omega_max_thz or float(_host(self.global_freqs)[-1])
         return float(lo), float(hi)
 
     # -- criteria ---------------------------------------------------------- #
@@ -453,6 +465,64 @@ class PoleSector:
             return 0.0
         arg = 2.0 * np.pi / r
         return float("inf") if arg > 700.0 else 2.0 / np.expm1(arg)
+
+    def leg_weight_error_finite(self, gamma: float, centre: float) -> float:
+        r"""Relative error in a line's represented weight over the FINITE grid.
+
+        .. math::
+            E_{\rm finite} =
+              \frac{|W^{[a,b]}_{\rm point} - W^{[a,b]}_{\rm exact}|}
+                   {W^{[a,b]}_{\rm exact} + \epsilon},
+
+        with :math:`W_{\rm point} = \frac{h}{2\pi}\sum_{\omega_n\in[a,b]}
+        L_\gamma(\omega_n)` and :math:`W_{\rm exact} = \int_a^b
+        \frac{d\omega}{2\pi} L_\gamma(\omega)`, for the unit-weight Lorentzian
+        :math:`L_\gamma(\omega) = 2\gamma/((\omega-\Omega)^2+\gamma^2)`.
+
+        :meth:`leg_weight_error` is the infinite-grid statement and knows
+        nothing about where the line sits. It is the right question for a mode
+        in the middle of the band and the wrong one near a support boundary,
+        where a Lorentzian tail runs off the end of the grid: there the
+        trapezoidal sum can be accurate about a weight that is itself only a
+        fraction of the line. This measures the quantity the ring actually
+        integrates, over the support it actually has.
+
+        The two agree in the regime that matters. Where the line is
+        under-resolved and sits well inside the support, the sum departs from
+        the integral by the pole's own discretisation error and this returns
+        :math:`|W_\infty(r,x) - 1|`, whose worst case over the sub-cell offset
+        ``x`` is :meth:`leg_weight_error`; with the line on a node the two
+        agree to better than a percent.
+
+        They do NOT agree once the grid resolves the line. Truncation cancels
+        in the ratio -- numerator and denominator run over the same ``[a,b]``
+        -- so what is left is the Euler-Maclaurin endpoint term,
+        :math:`O(h^2 f'(b) - h^2 f'(a))`, which does not vanish with the pole.
+        On a 20 THz grid at ``h = 0.125`` a line of half width 0.4 reads
+        3.4e-07 here against 3.7e-09 from the infinite formula: both say
+        "resolved", by different mechanisms. Read this gate as a statement
+        about a line the grid cannot carry, not as a refinement of one it can.
+
+        ``centre`` is the resonance frequency :math:`\Omega = \Re z`; ``gamma``
+        is the HALF width (see
+        :attr:`~quatrex.phonon.pole_nevp.PoleSolution.gamma_hwhm`).
+        """
+        g = float(gamma)
+        if g <= 0.0:
+            return float("inf")
+        w = np.asarray(_host(self.global_freqs), dtype=float)
+        if w.size < 2:
+            return float("inf")
+        c = float(centre)
+        # The support is the union of the cells, so it runs half a spacing
+        # past the outermost NODES -- the same convention the ring integrates
+        # under, where every sample owns a cell of width h.
+        a, b = w[0] - 0.5 * self.h, w[-1] + 0.5 * self.h
+        point = (self.h / np.pi) * float(np.sum(g / ((w - c) ** 2 + g * g)))
+        exact = (np.arctan((b - c) / g) - np.arctan((a - c) / g)) / np.pi
+        if exact <= 0.0:
+            return float("inf")
+        return float(abs(point - exact) / exact)
 
     def screen(self, sol: PoleSolution, was_promoted: bool,
                separation: float = float("inf"),
@@ -645,15 +715,6 @@ class PoleSector:
                 "refused": self.screen(sol, promoted[k], seps[k]),
             })
         return rows
-
-    def predict(self, dsigma_at: dict[int, NDArray]) -> list[complex]:
-        """Warm-start seeds from the previous iterate (doc Eq. 43)."""
-        seeds = []
-        for k, sol in enumerate(self.state.solutions):
-            ds = dsigma_at.get(k)
-            shift = 0.0 if ds is None else predict_shift(sol.l, sol.r, ds)
-            seeds.append(sol.z + shift)
-        return seeds
 
     def build_clusters(
         self,
@@ -1009,11 +1070,17 @@ class PoleSector:
     def refresh(self) -> PoleSectorState:
         """One SCBA iteration's worth of pole tracking.
 
-        Predictor -> corrector -> subspace match -> contour fallback, in that
+        Predictor -> corrector -> subspace match -> harmonic re-seed, in that
         order. The seed comes from the first-order response of the previous
         poles to the change in the scattering self-energy (doc Eq. 43), which
-        costs one projection; the harmonic/golden-rule estimate is used only on
-        the first iteration or after tracking has been lost.
+        costs one projection; the harmonic/golden-rule estimate is used on the
+        first iteration, when a rescan offers new candidates, and as the
+        fallback when no pole survived the corrector.
+
+        There is no contour fallback. :func:`~quatrex.phonon.pole_nevp.
+        beyn_contour` exists and is tested, but nothing in ``src/`` calls it and
+        ``contour_quad_points`` reaches no code; the fallback that actually runs
+        is the harmonic re-seed in :func:`refresh_many`.
 
         Sector membership is held fixed within an adaptation epoch: an
         approximate implementation is not invariant under repartitioning, so a
@@ -1052,23 +1119,47 @@ class PoleSector:
         return state
 
     def _census_rows(self, sols: list[PoleSolution], seeds) -> list[dict]:
-        """:meth:`audit`'s report for an ALREADY solved candidate set."""
+        """:meth:`audit`'s report for an ALREADY solved candidate set.
+
+        Carries the four quantities the pole/QNM audit (Sec. 38) asks for
+        beyond what the gates themselves need: ``chi`` for the simple-versus-
+        cluster decision, ``E_finite`` for the support boundary, the anharmonic
+        sensitivity for what SETS the width, and ``passive`` so a root that came
+        back on the wrong half plane is counted as a continuation failure rather
+        than folded into the refusal histogram as one more rejected mode.
+        """
         seps = self.separations(sols)
         promoted = self._match_previous(sols)
-        return [{
-            "z": complex(sol.z),
-            "gamma": float(-np.imag(complex(sol.z))),
-            "separation": float(seps[k]),
-            "q_omega": self.resolution_score(
-                max(-float(np.imag(complex(sol.z))), 0.0)),
-            "eps_z": self.locate_error(sol, seps[k]),
-            "eps_nep": float(sol.eps_nep),
-            "eps_left": float(sol.eps_left),
-            "kappa": float(sol.kappa),
-            "iterations": int(sol.iterations),
-            "trust_radius": self.trust_radius(seeds[k], seeds, k),
-            "refused": self.screen(sol, promoted[k], seps[k]),
-        } for k, sol in enumerate(sols)]
+        try:
+            sens = self.sensitivities(sols)
+        except (AttributeError, ValueError):
+            # No operator context (the manually driven route): the location
+            # census is still worth having without it.
+            sens = [complex("nan")] * len(sols)
+        rows = []
+        for k, sol in enumerate(sols):
+            gamma = float(-np.imag(complex(sol.z)))
+            sep = float(seps[k])
+            rows.append({
+                "z": complex(sol.z),
+                "gamma": gamma,
+                "separation": sep,
+                "chi": gamma / sep if sep > 0 else float("inf"),
+                "q_omega": self.resolution_score(max(gamma, 0.0)),
+                "leg_weight_error": self.leg_weight_error(gamma),
+                "E_finite": self.leg_weight_error_finite(
+                    gamma, float(np.real(complex(sol.z)))),
+                "gamma_sens_anh": -sens[k].imag,
+                "passive": bool(np.imag(complex(sol.z)) < 0.0),
+                "eps_z": self.locate_error(sol, sep),
+                "eps_nep": float(sol.eps_nep),
+                "eps_left": float(sol.eps_left),
+                "kappa": float(sol.kappa),
+                "iterations": int(sol.iterations),
+                "trust_radius": self.trust_radius(seeds[k], seeds, k),
+                "refused": self.screen(sol, promoted[k], sep),
+            })
+        return rows
 
     @staticmethod
     def _report_census(rows: list[dict]) -> None:
@@ -1100,15 +1191,25 @@ class PoleSector:
         for r in rows:
             k = (r["refused"] or "accepted").split("=")[0].split(":")[0].strip()
             why[k] = why.get(k, 0) + 1
+        n_bad = sum(1 for r in rows if not r["passive"])
+        tail = (f"; {n_bad} CONTINUATION FAILURES (upper half plane)"
+                if n_bad else "")
         print(f"  pole census: {len(rows)} candidates; "
               f"{n_unres} under-resolved (q_omega < 1), "
-              f"{n_iso} isolated (gamma/sep < 0.5)", flush=True)
+              f"{n_iso} isolated (gamma/sep < 0.5){tail}", flush=True)
         print(f"    q_omega       min/p25/med/p75/max  {_q([r['q_omega'] for r in rows])}",
               flush=True)
         print(f"    gamma/sep     min/p25/med/p75/max  {_q(overlap)}", flush=True)
         print(f"    eps_z         min/p25/med/p75/max  {_q([r['eps_z'] for r in rows])}",
               flush=True)
         print(f"    gamma [THz]   min/p25/med/p75/max  {_q(gam)}", flush=True)
+        print(f"    E_leg^max     min/p25/med/p75/max  "
+              f"{_q([r['leg_weight_error'] for r in rows])}", flush=True)
+        print(f"    E_finite      min/p25/med/p75/max  "
+              f"{_q([r['E_finite'] for r in rows])}", flush=True)
+        print(f"    gamma_sens/gamma  min/p25/med/p75/max  "
+              f"{_q([r['gamma_sens_anh'] / r['gamma'] for r in rows if r['gamma'] > 0])}",
+              flush=True)
         print("    outcome: " + ", ".join(f"{k} x{v}" for k, v in
                                           sorted(why.items(), key=lambda kv: -kv[1])),
               flush=True)
@@ -1204,6 +1305,48 @@ class PoleSector:
             self._delta = saved
         blocks = self._layout.blocks(flat)
         return _vdot(l, _matvec(blocks, r))
+
+    def sensitivities(self, sols: list[PoleSolution]) -> list[complex]:
+        r"""``dz/dlambda`` for the anharmonic channel -- audit Eq. (10).
+
+        Scaling one self-energy component by :math:`\lambda_j` gives
+        :math:`M(z,\lambda_j) = M(z,0) - \lambda_j \Sigma_j^R(z)`, and implicit
+        differentiation of :math:`l^\dagger M r = 0` gives
+
+        .. math::
+            \frac{dz_\alpha}{d\lambda_j}
+              = \frac{l_\alpha^\dagger \Sigma_j^R(z_\alpha) r_\alpha}
+                     {l_\alpha^\dagger M'(z_\alpha) r_\alpha},
+
+        whose denominator is 1 under the normalisation
+        :func:`~quatrex.phonon.pole_nevp.bordered_newton_batch` already applies.
+        The imaginary part, :math:`\gamma^{\rm sens}_{\alpha,j} = -\Im\,
+        dz_\alpha/d\lambda_j`, is how much of the pole's half width that channel
+        accounts for.
+
+        Only ``j = anharmonic`` is available. The two contact channels need
+        :math:`\Sigma_c(z)`, and the operator holds the contacts at a real
+        anchor with no ``z`` dependence at all (see
+        :meth:`set_operator_context`), so their derivative is identically zero
+        by construction rather than small -- reporting it would be reporting the
+        approximation, not the physics.
+
+        These are diagnostics. They are exact first derivatives of the pole
+        location, but the channels are not independent and the widths they
+        return do not have to sum to :math:`\gamma`.
+
+        Reuses the contraction :meth:`_predicted_shifts` uses, against the full
+        ``Delta`` rather than its change: block-tridiagonal, one batched pass
+        over the whole pole set, no dense ``(n_dof, n_dof)`` per pole.
+        """
+        if not sols:
+            return []
+        z = xp.asarray([complex(s.z) for s in sols], dtype=xp.complex128)
+        r = xp.stack([xp.asarray(s.r).reshape(-1) for s in sols])
+        l = xp.stack([xp.asarray(s.l).reshape(-1) for s in sols])
+        flat = self._continue_flat(z, 0)
+        val = _vdot(l, _matvec(self._layout.blocks(flat), r))
+        return [complex(x) for x in np.asarray(_host(val)).reshape(-1)]
 
     def _track(self, state: PoleSectorState) -> None:
         """Match this iteration's clusters to the previous ones by subspace.
