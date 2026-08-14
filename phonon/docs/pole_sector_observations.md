@@ -623,3 +623,44 @@ rescan can only ever grow the candidate set. Regression test
 mechanism for holding sector membership fixed across an `epoch_iterations`
 epoch -- exactly the remedy for a discrete set entering a fixed-point map --
 and it is dead code.
+
+### 9.1 The fix on device (pfix, 4473281)
+
+30 iterations, same bed and grid as `siladder`'s pole arm. Accepted poles:
+
+    pfix      626 508 548 547 560 574 573 579 586 593 608 595 600 596 607
+              595 611 604 611 596 611 612 612 612 600 610 597 589 592
+    siladder  626 421 555 448 579 463 592 487 606 482 626 489 648 485 652
+              488 649 487 663 511 647 482 649 474 649 474 ...
+
+The period-two cycle is gone. `seeded` decays 1456 -> 951 -> 848 -> 805 ->
+791 and then locks at ~775 instead of alternating ~1400 <-> ~620, and
+`matched-as-promoted` rises to ~600 of ~600 accepted: the sector now carries
+its poles across iterations rather than rediscovering them.
+
+The residual over the last ten iterations is monotone -- 7.09 6.96 6.67 6.31
+5.83 5.39 4.85 -- where `siladder` alternates 2.3 <-> 4.9 at the same point.
+Smooth descent is the signature wanted, but `siladder` sits at LOWER absolute
+values here, so 30 iterations does not yet say the fix converges further;
+`pfix150` (4473420) runs the full 150 against base's 9.2597e-04.
+
+Conservation, from `siladder` with `QX_BBCHECK=1`, is worth recording
+separately because it isolates the defect from the physics:
+
+    base   P_in = P_out to 10 digits,  resid 8.6e-10
+    pole   P_in = P_out to  6 digits,  resid 7e-07 to 1.3e-06
+           and P_in itself ALTERNATES: -2.4328e+05 <-> -2.4766e+05
+
+So the leg is Phi-derivable and conserving; what oscillated was which poles
+were in the sector, and it showed up directly in the total power at 1.8 %.
+The pole arm's conservation residual is nonetheless 1000x looser than base's,
+which is unexplained and probably the cell-average correction's own
+quadrature error.
+
+Two things seen but not chased. About 25 % of candidates are refused on
+`eps_z` even with a stable set, which is expected -- the harmonic spectrum
+offers every mode, not only the ones that are resonances -- but it has not
+been confirmed that the refused ones are the same modes each iteration. And a
+handful of candidates per iteration are refused as "not in the lower half
+plane": the corrector returning an anti-damped root, harmless because it is
+refused, but it means the Newton is leaving the physical sheet.
