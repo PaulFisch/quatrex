@@ -930,18 +930,41 @@ cause. Three arms differing ONLY in the boundary solver:
 So the recursion error is a symptom of the fine grid, not its cause, and no
 available OBC algorithm removes it.
 
-**One caveat on the `sr` row, not yet closed.** Calling sancho-rubio "worse
-at a fine grid" presumes it WORKS at a coarse one on this bed, and that has
-never been shown: every converged Si run in this investigation used the
-spectral OBC, and `siladder` used `sichk_base` (3 cells x 1), not `si4x2`. So
-`si4x2` at `ne = 141` has no run at all, under either solver. A pair of
-controls at that spacing -- `srcoarse` (4478525, sancho-rubio) and its
-spectral counterpart -- is what makes the `sr` row interpretable; without
-both, a NaN at `ne = 141` could equally be the bed.
+### 12.2.1 The coarse-grid controls
 
-The section's CONCLUSION does not depend on it. `spec` and `full` agree
-bit-for-bit, both warn, and both diverge, which settles the OBC question on
-its own; the controls only decide how sancho-rubio should be described. `QX_OBC_ALG` / `QX_NEVP` are wired
+Calling sancho-rubio "worse at a fine grid" presumed it WORKS at a coarse one
+on this bed, which had never been shown -- every converged Si run in this
+investigation used the spectral OBC, and `siladder` ran `sichk_base`
+(3 cells x 1), not `si4x2`. So `si4x2` at `ne = 141` had no run at all under
+either solver, and a NaN there could equally have been the bed. Both controls,
+5 iterations, everything else identical:
+
+| | `ne = 141` | `ne = 8001` |
+|---|---|---|
+| **spectral** | `speccoarse` (4478559): **0 warnings**, `rel Sigma` 1.0 -> 0.887 -> 0.960 -> 0.895 -> 0.933, lead balance 1.2e-03, heat 12.17 | `spec`/`full`: 6 warnings on rank 2, 1.0 -> 2.07e+03 -> 3.30e+03 |
+| **sancho-rubio** | `srcoarse` (4478525): 4 warnings on ranks 0,1, **nan** x5, `final_heat` nan | `sr` (4478344): 6 warnings on ranks 0,1,3, **nan** x3 |
+
+Three things follow.
+
+**The bed is sound.** `si4x2` runs cleanly under the spectral OBC at
+`ne = 141` -- no recursion warning, O(1) residuals, physical heat. So the
+`ne = 8001` divergence in Sec. 12.1 is a property of the GRID, not an artefact
+of the 2x2 blocking, and does not need repeating on `sichk_base`.
+
+**Sancho-rubio is not a fine-grid finding.** It returns NaN on this bed at
+BOTH spacings, so it fails unconditionally here and contributes nothing to the
+grid argument. The earlier phrasing -- that it was "strictly worse" at the
+fine grid -- read a grid effect into a solver that does not function on this
+bed at all. Withdrawn.
+
+**The spectral failure IS grid-driven.** It is clean at `ne = 141` and warns
+only at `ne = 8001`, which is what makes it a symptom of the spacing rather
+than a standing defect.
+
+The section's conclusion never depended on the sancho-rubio row: `spec` and
+`full` agree bit-for-bit on every iteration (1.0000e+00, 2.0665e+03,
+3.2963e+03, with identical lead balance and internal spread), both warn on
+rank 2, and both diverge. `QX_OBC_ALG` / `QX_NEVP` are wired
 (`phonon.obc.algorithm`, `phonon.obc.nevp_solver`) and remain useful knobs,
 but they do not change this answer.
 
