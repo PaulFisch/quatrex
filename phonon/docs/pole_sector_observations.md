@@ -830,3 +830,39 @@ THE REPO TREE can corrupt that job mid-flight. The launcher snapshots
 `job.sh` into the run dir, but `launch -- bash <repo path>` points at the live
 file. Earlier arm scripts lived in gitignored run dirs, which is why this had
 not bitten before.
+
+### 11.4 ne = 8001 does not fit: memory, not time, is the constraint
+
+`obcprobe` (4476350), `si4x2`, `ne = 8001`, 81 q, `wmax = 35`, `fft`, one node
+/ 4 ranks. Both the `spec` and `full` arms died on every rank:
+
+    cupy.cuda.memory.OutOfMemoryError: Out of memory allocating 2,986,730,496
+    bytes (allocated so far: 99,555,274,240 bytes)
+
+About 100 GB already held per rank, and the failing allocation is 2.99 GB =
+exactly twice the local `(2001, 81, 576)` complex block -- the FFT zero-padding
+for the Kramers-Kronig transform. **Zero iterations completed in any arm**, so
+the OBC question is unanswered at this size.
+
+Sizing an `ne = 8001` run by WALLTIME (the earlier estimate was ~179 s per
+iteration on 4 ranks, so ~7.5 h for 150) answers the wrong question. Memory
+binds first. Two ways to fit it: 8 ranks over 2 nodes (~50 GB/rank), or a
+coarser rung. `ne = 4001` on one node is the cheaper first test and is still
+28x finer than the `siladder` grid.
+
+Two diagnostics also failed on this run, both caught as non-fatal:
+
+    slab_absorption failed: operands could not be broadcast together with
+      shapes (8001, 81, 144) (8001, 81, 576)
+    G-diagonal gather failed: The mask is too small for the sendbuf: 2001 < 8001
+
+The first is Sigma and G carrying DIFFERENT nnz patterns in
+`_phonon_slab_absorption` (144 = 12^2, 576 = 24^2 -- `si4x2` has 12 dof per
+cell and 24 per block). The second is an `all_gather_v` mask sized from the
+local frequency count while the send buffer carries the global one, which is
+the same family as Sec. 11.1.
+
+**Neither is confirmed.** Both fired on a run that OOMed with zero completed
+iterations, so the arrays they inspect may simply be in a half-built state.
+They are recorded here to be re-checked on a run that finishes, not fixed
+blind.
