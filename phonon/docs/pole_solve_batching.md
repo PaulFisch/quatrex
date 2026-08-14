@@ -188,37 +188,50 @@ two changes and leaves nothing to compare against.
 
 ---
 
-## 5. A defect to fix while in here
+## 5. A defect to fix while in here -- IDENTIFIED AND FIXED
 
     PhononSolver: Pole sector : 0.0000s
 
-The most expensive block in the run is invisible to the profiler. On the pole
+The most expensive block in the run was invisible to the profiler. On the pole
 arm `PhononSolver` reports 81.9 s with `OBC` 8.96 s, `Assemble` 0.004 s and
 `Selected Solve` 0.011 s under it -- about 73 s unaccounted, which is the pole
-solve, and the label that should hold it reads zero.
+solve, and the label that should have held it read zero.
 
-**The cause is not yet identified.** An earlier draft of this section blamed
-the decorator for not reaching `_update_pole_sector_q`; that is wrong.
-`@profiler.profile(label="PhononSolver: Pole sector")` sits on
-`_update_pole_sector`, which wraps the whole body including the `nq > 1`
-dispatch into `_update_pole_sector_q`, and neither early return above it can
-fire on this arm (`_pole_enabled` is true, `delta` is nonzero after iteration
-0, `extraction_only` is off). So the range does cover the work and still
-reports 0.0000 s. Two further facts, both from the `psi2` log: every one of the 41
-`Pole sector` readings in the run is exactly `0.0000s` -- it is never
-nonzero, on either arm -- and there are 41 of them against only 33
-`PhononSolver` exits, so the range is entered more often than the solver
-range closes. `profile_range` prints inline at each exit with no
-aggregation, so these are real per-call measurements, not a broken sum.
-Reproduce locally with a q-resolved bed at `QTX_PROFILE_LEVEL=default`
-before theorising further.
+**The cause: the decorator was on the wrong method.** At `f6bd76f7`, the
+commit the `psi2` log was produced from, `solver.py:630` reads
+
+    @profiler.profile(label="PhononSolver: Pole sector", level="default", comm=comm)
+    def _check_positivity(self, out: tuple) -> None:
+
+and `_update_pole_sector` (l. 712) carries no decorator at all.
+`_check_positivity` returns on its first statement unless
+`pole_sector.psd_check` is set, and it is off by default. So the range was
+timing an immediate return, which is why every one of the 41 readings is
+*exactly* `0.0000s` and never nonzero on either arm -- a range that genuinely
+covered the q loop would at least fluctuate.
+
+Two earlier readings of this were wrong and are recorded so the next person
+does not repeat them. The first blamed the decorator for not reaching
+`_update_pole_sector_q`; it never reached `_update_pole_sector` either. The
+second concluded the cause was unidentified because `@profiler.profile` does
+sit on `_update_pole_sector` -- true of the tree only AFTER the fix below,
+which had already been committed (`e4e8e05e`) when that paragraph was written.
+Checking `f6bd76f7` rather than the working tree settles it.
+
+The fix is to move the label onto `_update_pole_sector`, and to give
+`_check_positivity` its own (`PhononSolver: Positivity`), so the gate is
+measured where it is rather than borrowing the sector's name. Two sub-ranges,
+`PhononSolver: Pole solve` and `PhononSolver: Pole legs`, split the sector into
+the corrector and the leg construction, so the 187 s is attributed rather than
+assumed.
+
+The 41-against-33 count -- more `Pole sector` readings than `PhononSolver`
+exits -- is NOT explained by this and remains open. It does not affect the
+attribution: `profile_range` prints inline at each exit with no aggregation, so
+a spurious extra reading of an immediate return adds zero either way.
 
 None of this weakens Sec. 0: the 187 s is established by the arm-to-arm
-difference (185/85 s against the base arm's 9.97 s) and by the local
-cProfile of `refresh()`, which measured `solve_poles` directly at 98 % of
-12.9 ms per candidate. 11,664 candidates x 12.9 ms = 150 s, which is the
-observed increment. The broken label is a separate defect.
-
-Fix it before the optimisation, not after -- the profile is how the work above
-is judged, and right now it would send someone to optimise the bubble, which
-is already fine.
+difference (185/85 s against the base arm's 9.97 s) and by the local cProfile
+of `refresh()`, which measured `solve_poles` directly at 98 % of 12.9 ms per
+candidate. 11,664 candidates x 12.9 ms = 150 s, which is the observed
+increment.

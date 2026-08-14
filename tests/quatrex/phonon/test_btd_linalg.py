@@ -126,15 +126,32 @@ def test_matvec_accepts_blocks_carrying_a_singleton_stack_axis():
     assert np.abs(got[0] - dense @ x).max() < 1e-12
 
 
-def test_bordered_newton_matvec_refuses_a_real_stack_axis():
-    """A non-singleton stack must raise, not be reshaped into the row index."""
+def test_bordered_newton_matvec_carries_the_candidate_axis():
+    """The stack axis is the CANDIDATE axis and must survive the matvec.
+
+    This used to raise: the bordered Newton corrected one pole at a time, so a
+    non-singleton stack could only be a mistake, and folding it into the row
+    index would have returned a plausible-looking vector of the wrong length.
+    The solve is batched now -- the stack IS the seed set -- so the same input
+    must produce one matrix-vector product per candidate, each against that
+    candidate's own operator.
+    """
     from quatrex.phonon.pole_nevp import _matvec
 
-    b, nb = 2, 2
+    b, nb, npole = 2, 2, 4
     rng = np.random.default_rng(1)
-    a_ii = [rng.standard_normal((4, b, b)) + 0j for _ in range(nb)]
-    a_ij = [rng.standard_normal((4, b, b)) + 0j for _ in range(nb - 1)]
-    a_ji = [rng.standard_normal((4, b, b)) + 0j for _ in range(nb - 1)]
-    v = rng.standard_normal(nb * b) + 0j
-    with pytest.raises(ValueError, match="non-singleton stack axis"):
-        _matvec((a_ii, a_ij, a_ji), v)
+    a_ii = [rng.standard_normal((npole, b, b)) + 0j for _ in range(nb)]
+    a_ij = [rng.standard_normal((npole, b, b)) + 0j for _ in range(nb - 1)]
+    a_ji = [rng.standard_normal((npole, b, b)) + 0j for _ in range(nb - 1)]
+    v = rng.standard_normal((npole, nb * b)) + 0j
+
+    got = _h(_matvec((a_ii, a_ij, a_ji), v))
+    assert got.shape == (npole, nb * b)
+    for k in range(npole):
+        dense = np.zeros((nb * b, nb * b), dtype=complex)
+        for i in range(nb):
+            dense[i * b:(i + 1) * b, i * b:(i + 1) * b] = _h(a_ii[i])[k]
+        for i in range(nb - 1):
+            dense[i * b:(i + 1) * b, (i + 1) * b:(i + 2) * b] = _h(a_ij[i])[k]
+            dense[(i + 1) * b:(i + 2) * b, i * b:(i + 1) * b] = _h(a_ji[i])[k]
+        assert np.abs(got[k] - dense @ _h(v)[k]).max() < 1e-12

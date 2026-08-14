@@ -469,6 +469,20 @@ class PoleSectorConfig(BaseModel):
     q_max: NonNegativeInt = 0
     """Hard cap on how many q are solved (0 = no cap), applied after
     ``q_stride``."""
+    q_batch: NonNegativeInt = 0
+    """How many q share one bordered-Newton solve. 0 = all of them.
+
+    The pole problems at different q are independent, so solving them together
+    changes nothing about the answer -- it changes how much work each kernel
+    launch does. That matters because the per-q operator is tiny (three 6x6
+    blocks on Si) and the solve was launch-bound, not arithmetic-bound:
+    ``phonon/docs/pole_solve_batching.md``.
+
+    This is therefore a MEMORY knob, not a numerics one. A batch holds the
+    self-energy of its q gathered into the block layout, plus its bosonic
+    mirror, so peak use grows linearly with the batch and results must be
+    independent of it (which is a test). Lower it if the pole solve runs out of
+    device memory on a large device; there is no accuracy reason to."""
     extraction_only: bool = False
     """Run the pole SOLVE and print the census, then allocate NO sector.
 

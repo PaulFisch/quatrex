@@ -46,7 +46,7 @@ from quatrex.phonon.pole_kernel import (
     local_fit_weights, sigma_retarded_at_z,
 )
 from quatrex.phonon.pole_nevp import (
-    PoleSolution, bordered_newton_batch,
+    PoleSolution, _lift, _matvec, _vdot, bordered_newton_batch,
 )
 from quatrex.phonon.pole_probe import (
     BlockLayout, assemble_m_blocks, nnz_to_blocks,
@@ -55,7 +55,7 @@ from quatrex.phonon.pole_tracker import (
     PoleTracker, cluster_poles, match_cost, match_poles, predict_shift,
 )
 
-__all__ = ["PoleSectorState", "PoleSector"]
+__all__ = ["PoleSectorState", "PoleSector", "PoleQBatch", "refresh_many"]
 
 
 @dataclass
@@ -309,6 +309,9 @@ class PoleSector:
         # boundary. Set for the duration of solve_poles and restored after.
         self._fit_anchors: NDArray | None = None
         self._fit_plan: LocalFitPlan | None = None
+        self._delta_raw: NDArray | None = None
+        self._delta_mirror: NDArray | None = None
+        self._delta_layouts = None
 
     # -- window ------------------------------------------------------------ #
 
@@ -543,6 +546,7 @@ class PoleSector:
     def solve_poles(
         self, m_blocks, dm_blocks, seeds: list[complex],
         seed_vectors: list[NDArray] | None = None,
+        *, batched: bool = False,
     ) -> list[PoleSolution]:
         """Correct a whole seed set with the bordered Newton iteration.
 
@@ -550,9 +554,19 @@ class PoleSector:
         pinned fit anchor -- that is what makes M(z) holomorphic over its solve
         -- so the anchors travel as a vector alongside the seeds rather than as
         a single value set and reset around each candidate.
+
+        ``batched`` says whether the operator callables already take a VECTOR
+        of probe points, as :meth:`operator` produces. It defaults to False, so
+        a caller holding a scalar ``z -> blocks`` closure -- the toy beds, and
+        anything outside this class -- still works: such an operator is lifted
+        by evaluating it once per probe point, which is arithmetically the
+        per-candidate solve this method replaced, and is the reference the
+        batched path is verified against.
         """
         if len(seeds) == 0:
             return []
+        if not batched:
+            m_blocks, dm_blocks = _lift(m_blocks), _lift(dm_blocks)
         z0 = xp.asarray([complex(s) for s in seeds], dtype=xp.complex128)
         r0 = (None if seed_vectors is None
               else xp.stack([xp.asarray(v).reshape(-1) for v in seed_vectors]))
@@ -570,7 +584,8 @@ class PoleSector:
         return batch.to_list()
 
     def audit(self, m_blocks, dm_blocks, seeds: list[complex],
-              seed_vectors: list[NDArray] | None = None) -> list[dict]:
+              seed_vectors: list[NDArray] | None = None,
+              *, batched: bool = False) -> list[dict]:
         """Solve the candidates and report, WITHOUT allocating a sector.
 
         Doc Sec. 27. Root finding and sector allocation fail for unrelated
@@ -582,7 +597,8 @@ class PoleSector:
         Returns one row per candidate with the location, both acceptance
         metrics, the conditioning, and the refusal reason it would receive.
         """
-        sols = self.solve_poles(m_blocks, dm_blocks, seeds, seed_vectors)
+        sols = self.solve_poles(m_blocks, dm_blocks, seeds, seed_vectors,
+                                batched=batched)
         seps = self.separations(sols)
         promoted = self._match_previous(sols)
         rows = []
@@ -663,7 +679,8 @@ class PoleSector:
     # -- operator context --------------------------------------------------- #
 
     def set_operator_context(
-        self, *, delta, d_blocks, obc_left, obc_right, block_sizes, rows, cols
+        self, *, delta, d_blocks, obc_left, obc_right, block_sizes, rows, cols,
+        layout: BlockLayout | None = None,
     ) -> None:
         r"""Store everything :math:`M(z)` needs for this SCBA iteration.
 
@@ -706,15 +723,18 @@ class PoleSector:
         self._block_sizes = np.asarray(_host(block_sizes), dtype=int)
         self._rows, self._cols = rows, cols
         self._n_dof = int(np.sum(self._block_sizes))
-        self._set_layout()
+        self._set_layout(layout)
 
-    def _set_layout(self) -> None:
-        """Build the z-independent half of the operator (see above)."""
-        self._layout = BlockLayout(self._rows, self._cols, self._block_sizes,
-                                   band=1)
-        self._delta_mirror = bosonic_partner(self._delta)
-        self._delta_lay = self._layout.gather(self._delta)
-        self._mirror_lay = self._layout.gather(self._delta_mirror)
+    def _set_layout(self, layout: BlockLayout | None = None) -> None:
+        """Build the Delta-independent half of the operator (see above).
+
+        ``layout`` lets a caller with many q share one: the map from the stored
+        sparsity pattern to blocks depends on ``(rows, cols, block_sizes)``
+        alone, which every q has in common, so building it per q is the same
+        scan repeated ``nq`` times.
+        """
+        self._layout = layout if layout is not None else BlockLayout(
+            self._rows, self._cols, self._block_sizes, band=1)
         d_lay = self._layout.flatten_blocks(self._d_blocks)
         # Drop leading singletons: the dynamical matrix carries a singleton
         # where the Keldysh buffers carry frequency, and the operator's own
@@ -722,6 +742,38 @@ class PoleSector:
         self._d_lay = d_lay.reshape(-1, self._layout.total)
         if self._d_lay.shape[0] == 1:
             self._d_lay = self._d_lay[0]
+
+    # ``Delta`` is held behind a property so that everything DERIVED from it --
+    # the bosonic mirror and the two block-layout gathers -- cannot survive a
+    # change to it. They are pure functions of Delta and rebuilding them per
+    # Newton step is the waste this refactor removes, but a stale copy is the
+    # exact failure this module refuses to risk: Delta is rebuilt from the
+    # mixed buffers every iteration precisely so it cannot drift out of step
+    # with the Sigma^R the Dyson operator was built from. Assigning _delta
+    # anywhere -- set_operator_context, the predictor's temporary swap, a test
+    # perturbing it in place -- invalidates the cache.
+    @property
+    def _delta(self) -> NDArray:
+        return self._delta_raw
+
+    @_delta.setter
+    def _delta(self, value) -> None:
+        self._delta_raw = xp.asarray(value)
+        self._delta_mirror = None
+        self._delta_layouts = None
+
+    def _mirror(self) -> NDArray:
+        """The bosonic partner of Delta; needs no operator context."""
+        if self._delta_mirror is None:
+            self._delta_mirror = bosonic_partner(self._delta_raw)
+        return self._delta_mirror
+
+    def _delta_derived(self):
+        """``(delta_lay, mirror_lay)``, Delta gathered into the block layout."""
+        if self._delta_layouts is None:
+            self._delta_layouts = (self._layout.gather(self._delta_raw),
+                                   self._layout.gather(self._mirror()))
+        return self._delta_layouts
 
     # -- the anchor-pinned fit ---------------------------------------------- #
 
@@ -780,8 +832,7 @@ class PoleSector:
         """
         zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
         w_pos, w_mir = self._weights(zz, order)
-        val = contract_delta(self._delta, w_pos, w_mir,
-                             mirror=getattr(self, "_delta_mirror", None))
+        val = contract_delta(self._delta, w_pos, w_mir, mirror=self._mirror())
         return self._reduce(val)
 
     def _continue_flat(self, zz: NDArray, order: int) -> NDArray:
@@ -792,7 +843,8 @@ class PoleSector:
         disappears: the result IS the block buffer.
         """
         w_pos, w_mir = self._weights(zz, order)
-        return self._reduce(w_pos @ self._delta_lay + w_mir @ self._mirror_lay)
+        delta_lay, mirror_lay = self._delta_derived()
+        return self._reduce(w_pos @ delta_lay + w_mir @ mirror_lay)
 
     def _sigma_blocks_at(self, z, order: int):
         """Scattering self-energy blocks at complex ``z``."""
@@ -921,26 +973,29 @@ class PoleSector:
         approximate implementation is not invariant under repartitioning, so a
         mode that changes sector every iteration changes the fixed-point map
         itself.
+
+        The one-q case of :func:`refresh_many`, so that the single-q path and
+        the q-batched path are the same code and every test of this method also
+        tests that one.
         """
-        m_blocks, dm_blocks = self.operator()
+        return refresh_many([self])[0]
 
-        seeds, vectors = self._seed()
-        sols = self.solve_poles(m_blocks, dm_blocks, seeds, vectors)
+    # -- the three phases refresh_many drives ------------------------------- #
 
-        # A failed correction is a tracking failure, not a reason to carry a
-        # pole: re-seed from the harmonic spectrum and try once more.
-        if self.state.solutions and not any(s.converged for s in sols):
-            self.tracker.rescan_reasons.append("no pole survived the corrector")
-            seeds, vectors = self.harmonic_seeds(), None
-            sols = self.solve_poles(m_blocks, dm_blocks, seeds, vectors)
+    def _begin_refresh(self):
+        """Seeds and predicted eigenvectors for this iteration."""
+        return self._seed()
 
+    def _end_refresh(self, sols: list[PoleSolution], seeds, vectors,
+                     m_blocks, dm_blocks) -> PoleSectorState:
+        """Screen, cluster and track what the corrector returned."""
         if getattr(self.cfg, "extraction_only", False):
             # Census only: report what the solve found and hand back an EMPTY
             # state, so the ring runs pole-free and the numbers cost nothing
             # but the solve. Deliberately BEFORE build_clusters -- allocating
             # and then discarding would still project sources and could still
             # hit the memory path this mode exists to stay clear of.
-            self._report_census(self.audit(m_blocks, dm_blocks, seeds, vectors))
+            self._report_census(self._census_rows(sols, seeds))
             self.state = PoleSectorState(iteration=self.state.iteration + 1)
             self._prev_delta = xp.array(self._delta, copy=True)
             return self.state
@@ -949,6 +1004,25 @@ class PoleSector:
         self._track(state)
         self._prev_delta = xp.array(self._delta, copy=True)
         return state
+
+    def _census_rows(self, sols: list[PoleSolution], seeds) -> list[dict]:
+        """:meth:`audit`'s report for an ALREADY solved candidate set."""
+        seps = self.separations(sols)
+        promoted = self._match_previous(sols)
+        return [{
+            "z": complex(sol.z),
+            "gamma": float(-np.imag(complex(sol.z))),
+            "separation": float(seps[k]),
+            "q_omega": self.resolution_score(
+                max(-float(np.imag(complex(sol.z))), 0.0)),
+            "eps_z": self.locate_error(sol, seps[k]),
+            "eps_nep": float(sol.eps_nep),
+            "eps_left": float(sol.eps_left),
+            "kappa": float(sol.kappa),
+            "iterations": int(sol.iterations),
+            "trust_radius": self.trust_radius(seeds[k], seeds, k),
+            "refused": self.screen(sol, promoted[k], seps[k]),
+        } for k, sol in enumerate(sols)]
 
     @staticmethod
     def _report_census(rows: list[dict]) -> None:
@@ -998,21 +1072,30 @@ class PoleSector:
         prev = self.state.solutions
         if not prev or self.tracker.needs_rescan():
             return self.harmonic_seeds(), None
-        dsigma = self._delta_sigma_at([s.z for s in prev])
-        seeds = []
-        for k, sol in enumerate(prev):
-            shift = 0.0 if dsigma is None else predict_shift(sol.l, sol.r, dsigma[k])
-            if abs(shift) > self.cfg.trust_radius_cells * self.h:
-                shift *= self.cfg.trust_radius_cells * self.h / abs(shift)
-            seeds.append(sol.z + shift)
+        z = xp.asarray([complex(s.z) for s in prev], dtype=xp.complex128)
+        r = xp.stack([xp.asarray(s.r).reshape(-1) for s in prev])
+        l = xp.stack([xp.asarray(s.l).reshape(-1) for s in prev])
+        shift = self._predicted_shifts(z, l, r)
+        if shift is None:
+            shift = xp.zeros_like(z)
+        cap = self.cfg.trust_radius_cells * self.h
+        mag = xp.abs(shift)
+        shift = xp.where(mag > cap, shift * (cap / xp.where(mag > 0, mag, 1.0)),
+                         shift)
+        seeds = [complex(x) for x in np.asarray(_host(z + shift))]
         return seeds, [s.r for s in prev]
 
-    def _delta_sigma_at(self, z_list):
-        r"""``Delta Sigma_s^R(z)`` between consecutive iterates, as dense blocks.
+    def _predicted_shifts(self, z, l, r):
+        r"""``delta z_alpha = l^H Delta Sigma_s^R(z_alpha) r`` for every pole.
 
         The predictor needs the CHANGE in the self-energy, which is linear in
         the change in ``Delta`` -- so it is the same continuation applied to the
         difference, and costs one extra contraction rather than a re-solve.
+
+        Contracted for the whole previous pole set at once, and applied through
+        the block-tridiagonal operator rather than a dense ``(n_dof, n_dof)``
+        per pole: ``Delta Sigma`` has the band the stored pattern has, so the
+        dense form was materialising zeros.
         """
         prev = getattr(self, "_prev_delta", None)
         if prev is None or prev.shape != self._delta.shape:
@@ -1020,31 +1103,18 @@ class PoleSector:
         diff = self._delta - prev
         if float(xp.abs(diff).max()) == 0.0:
             return None
-        out = []
-        for z in z_list:
-            blocks = self._sigma_blocks_at_from(diff, complex(z), 0)
-            n = len(self._block_sizes)
-            off = np.concatenate(([0], np.cumsum(self._block_sizes)))
-            dense = xp.zeros((int(off[-1]),) * 2, dtype=xp.complex128)
-            for (i, j), b in blocks.items():
-                dense[off[i]:off[i + 1], off[j]:off[j + 1]] = b[0]
-            out.append(dense)
-        return out
-
-    def _sigma_blocks_at_from(self, delta, z: complex, order: int):
-        """:meth:`_sigma_blocks_at` against an explicit ``Delta``.
-
-        Routed through the same distributed contraction, so the predictor sees
-        the whole frequency axis too. Continuing a rank-local slice here would
-        make the predicted shift depend on the rank decomposition.
-        """
-        saved, self._delta = self._delta, delta
+        saved = self._delta
         try:
-            val = self.continue_sigma(xp.asarray([z]), order=order)
+            # The setter invalidates the derived gathers, so the contraction
+            # below really is against the difference and not against a cached
+            # Delta -- see the property.
+            self._delta = diff
+            flat = self._continue_flat(
+                xp.asarray(z, dtype=xp.complex128).reshape(-1), 0)
         finally:
             self._delta = saved
-        return nnz_to_blocks(val, self._rows, self._cols, self._block_sizes,
-                             band=1)
+        blocks = self._layout.blocks(flat)
+        return _vdot(l, _matvec(blocks, r))
 
     def _track(self, state: PoleSectorState) -> None:
         """Match this iteration's clusters to the previous ones by subspace.
@@ -1074,3 +1144,252 @@ class PoleSector:
         here rather than being left to the caller to remember.
         """
         return [bosonic_closure(c) for c in self.state.clusters]
+
+
+class PoleQBatch:
+    r"""One :math:`M(z)` assembly shared by several independent q.
+
+    A q-resolved device has one pole problem PER q -- ``M_q(z) = z^2 I - D(q) -
+    Sigma^R_q(z)`` -- and the sets are unrelated, so the driver keeps a
+    :class:`PoleSector` per q with its own tracker, promoted set and epoch
+    counter. What the q have in common is the SHAPE of the work: the same
+    block layout, the same frequency grid, the same number of Newton steps. So
+    the solve is shared even though nothing else is.
+
+    Batching within a q already removed the per-candidate Python loop. What is
+    left after that is a loop over q, and on a device like Si -- 81 q, three
+    6x6 blocks -- the per-q work is far too small to occupy a GPU: the whole
+    operator assembly is two GEMMs on matrices of a few hundred entries. This
+    class stacks the q, so the candidate axis the bordered Newton sees is
+    ``nq * n_probe`` and every kernel launch does ``nq`` times more work.
+
+    The candidate axis is FLATTENED rather than kept as ``(nq, P)``, so
+    :func:`~quatrex.phonon.pole_nevp.bordered_newton_batch` and
+    :mod:`~quatrex.phonon.btd_linalg` need no notion of q at all -- they see one
+    batch of independent operators, which is what they already handle.
+
+    Parameters
+    ----------
+    sectors : list[PoleSector]
+        The per-q sectors, each with its operator context already set. They
+        must share a frequency grid and a block layout; that is checked.
+    n_probe : int
+        Candidates per q. Shorter seed sets are padded by the caller.
+
+    """
+
+    def __init__(self, sectors: list["PoleSector"], n_probe: int):
+        if not sectors:
+            raise ValueError("PoleQBatch needs at least one sector.")
+        first = sectors[0]
+        for sec in sectors[1:]:
+            if sec._layout is not first._layout:
+                raise ValueError(
+                    "the q sectors do not share a block layout; pass the same "
+                    "BlockLayout to every set_operator_context.")
+        self.sectors = list(sectors)
+        self.nq = len(sectors)
+        self.n_probe = int(n_probe)
+        self.layout = first._layout
+        self.cfg = first.cfg
+        self.freqs = first.freqs
+        self.global_freqs = first.global_freqs
+        self._freq_offset = first._freq_offset
+        self._reduce = first._reduce
+        self._n_local = int(first._delta.shape[0])
+
+        lay = self.layout
+        self._delta_lay = xp.stack([s._delta_derived()[0] for s in sectors])
+        self._mirror_lay = xp.stack([s._delta_derived()[1] for s in sectors])
+        self._d_lay = xp.stack([
+            xp.broadcast_to(s._d_lay.reshape(-1, lay.total)[0], (lay.total,))
+            for s in sectors])
+        self._obc = tuple(
+            None if sectors[0]._obc[side] is None
+            else xp.stack([xp.asarray(s._obc[side]) for s in sectors])
+            for side in (0, 1))
+        self._plan: LocalFitPlan | None = None
+
+    # -- the pinned fit ----------------------------------------------------- #
+
+    def set_anchors(self, anchors: NDArray) -> None:
+        """Pin one fit stencil per (q, candidate); ``anchors`` is ``(nq, P)``."""
+        self._anchors = xp.asarray(anchors, dtype=xp.float64).reshape(-1)
+        self._plan = LocalFitPlan(
+            self.global_freqs, self._anchors,
+            order=self.cfg.delta_fit_order,
+            window=self.cfg.delta_fit_window_cells,
+        )
+
+    def _weights(self, zf: NDArray, order: int) -> tuple[NDArray, NDArray]:
+        """``(w_pos, w_mir)`` shaped ``(nq, P, n_local)`` for the batched GEMM."""
+        w_pos, w_mir = continuation_weights(zf, self.global_freqs, order=order)
+        f_pos, f_mir = self._plan.weights(zf, deriv=order)
+        lo = self._freq_offset
+        hi = lo + self._n_local
+        shape = (self.nq, self.n_probe, hi - lo)
+        return ((w_pos[:, lo:hi] + f_pos[:, lo:hi]).reshape(shape),
+                (w_mir[:, lo:hi] + f_mir[:, lo:hi]).reshape(shape))
+
+    def _continue_flat(self, zf: NDArray, order: int) -> NDArray:
+        """``Sigma_s^{R,II}`` for every (q, candidate), ``(nq * P, total)``."""
+        w_pos, w_mir = self._weights(zf, order)
+        sig = (xp.matmul(w_pos, self._delta_lay)
+               + xp.matmul(w_mir, self._mirror_lay))
+        return self._reduce(sig).reshape(self.nq * self.n_probe,
+                                         self.layout.total)
+
+    def _obc_at(self):
+        """Contact blocks at each candidate's anchor, ``(nq * P, b, b)``."""
+        out = []
+        for o in self._obc:
+            if o is None or o.ndim < 4:
+                # (nq, b, b) already, or absent: broadcast over the candidates.
+                out.append(None if o is None
+                           else xp.repeat(o, self.n_probe, axis=0))
+                continue
+            n_freq = int(o.shape[1])
+            ref = self._anchors.reshape(self.nq, self.n_probe)
+            k = xp.argmin(xp.abs(self.freqs[None, None, :] - ref[..., None]),
+                          axis=-1)
+            flat = (xp.arange(self.nq)[:, None] * n_freq + k).reshape(-1)
+            out.append(o.reshape((self.nq * n_freq,) + o.shape[2:])[flat])
+        return out[0], out[1]
+
+    def operator(self):
+        """``(m_blocks, dm_blocks)`` over the flattened ``(nq * P,)`` axis."""
+        lay = self.layout
+        last = len(self.sectors[0]._block_sizes) - 1
+        d_lay = xp.repeat(self._d_lay, self.n_probe, axis=0)
+
+        def m_blocks(z):
+            zf = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+            flat = xp.zeros((zf.shape[0], lay.total), dtype=xp.complex128)
+            flat[..., lay.diag] = (zf * zf)[:, None]
+            flat = flat - d_lay - self._continue_flat(zf, 0)
+            obc_l, obc_r = self._obc_at()
+            for obc, i in ((obc_l, 0), (obc_r, last)):
+                if obc is not None:
+                    flat[..., lay.corner[i]] -= obc.reshape(obc.shape[0], -1)
+            return lay.blocks(flat)
+
+        def dm_blocks(z):
+            zf = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+            flat = xp.zeros((zf.shape[0], lay.total), dtype=xp.complex128)
+            flat[..., lay.diag] = 2.0 * zf[:, None]
+            return lay.blocks(flat - self._continue_flat(zf, 1))
+
+        return m_blocks, dm_blocks
+
+
+def _pad_seeds(seeded, n_probe: int):
+    """Pad every q's seed list to ``n_probe``, and say which slots are real.
+
+    Candidate counts differ per q: ``harmonic_seeds`` keeps only the modes
+    inside the pole window, and the predictor carries only the poles that
+    survived last iteration. The batch needs a rectangle.
+
+    Padding REPEATS a real seed rather than inventing one. A made-up ``z``
+    could sit on a pole of the operator, and the batched ``inv`` behind the BTD
+    factorisation raises for the whole batch if any single matrix is singular
+    -- so one meaningless slot would take out every q. A duplicate is
+    guaranteed to be as well conditioned as the seed it copies.
+    """
+    seeds, vectors, valid = [], [], []
+    for sd, vec in seeded:
+        n = len(sd)
+        pad = n_probe - n
+        seeds.append(list(sd) + [sd[-1]] * pad)
+        vectors.append(None if vec is None else list(vec) + [vec[-1]] * pad)
+        valid.append(n)
+    return seeds, vectors, valid
+
+
+def refresh_many(sectors: list["PoleSector"]) -> list[PoleSectorState]:
+    """One SCBA iteration's worth of pole tracking for several q at once.
+
+    Seeding, screening, clustering and tracking stay per q -- a mode at one q
+    has no relation to one at another, and a shared tracker would either fuse
+    two unrelated modes or churn membership every iteration. Only the SOLVE is
+    shared, because that is the part whose cost is launch latency rather than
+    arithmetic. See :class:`PoleQBatch`.
+    """
+    if not sectors:
+        return []
+    seeded = [sec._begin_refresh() for sec in sectors]
+    live = [k for k, (sd, _) in enumerate(seeded) if len(sd)]
+    states: list[PoleSectorState | None] = [None] * len(sectors)
+    for k in range(len(sectors)):
+        if k not in live:
+            # Nothing in the window at this q: no solve, but the iteration
+            # still has to advance so the epoch and the tracker stay in step.
+            states[k] = sectors[k]._end_refresh([], [], None, None, None)
+    if not live:
+        return states
+
+    sols = _solve_batched([sectors[k] for k in live],
+                          [seeded[k] for k in live])
+
+    # A failed correction is a tracking failure, not a reason to carry a pole:
+    # re-seed from the harmonic spectrum and try once more. Only the q that
+    # lost everything are re-solved, and they are re-solved together.
+    again = [i for i, k in enumerate(live)
+             if sectors[k].state.solutions and not any(s.converged
+                                                       for s in sols[i])]
+    if again:
+        for i in again:
+            sectors[live[i]].tracker.rescan_reasons.append(
+                "no pole survived the corrector")
+        reseed = [(sectors[live[i]].harmonic_seeds(), None) for i in again]
+        keep = [i for i, r in zip(again, reseed) if len(r[0])]
+        if keep:
+            redo = _solve_batched([sectors[live[i]] for i in keep],
+                                  [reseed[again.index(i)] for i in keep])
+            for slot, out in zip(keep, redo):
+                sols[slot] = out
+                seeded[live[slot]] = reseed[again.index(slot)]
+
+    for i, k in enumerate(live):
+        sd, vec = seeded[k]
+        states[k] = sectors[k]._end_refresh(sols[i], sd, vec, None, None)
+    return states
+
+
+def _solve_batched(sectors, seeded) -> list[list[PoleSolution]]:
+    """The shared corrector: one bordered Newton for every (q, candidate)."""
+    n_probe = max(len(sd) for sd, _ in seeded)
+    seeds, vectors, valid = _pad_seeds(seeded, n_probe)
+    n_dof = int(np.sum(sectors[0]._block_sizes))
+
+    # Trust radii come from the UNPADDED seed lists: a duplicated seed sits at
+    # zero distance from its original, and the nearest-competing-seed rule
+    # would then collapse the real candidate's search region to the floor.
+    radii = xp.stack([
+        xp.concatenate([xp.asarray(sec.trust_radii(sd[:n])),
+                        xp.full(n_probe - n, xp.inf)])
+        for sec, sd, n in zip(sectors, seeds, valid)])
+
+    z0 = xp.asarray([[complex(x) for x in sd] for sd in seeds],
+                    dtype=xp.complex128)
+    r0 = None
+    if any(v is not None for v in vectors):
+        # Where a q has no predicted vector, use the same random unit vector
+        # the unbatched solve would have drawn for it.
+        rng = xp.random.default_rng(0)
+        default = rng.standard_normal(n_dof) + 1j * rng.standard_normal(n_dof)
+        r0 = xp.stack([
+            xp.stack([xp.asarray(v).reshape(-1) for v in vec])
+            if vec is not None else xp.broadcast_to(default, (n_probe, n_dof))
+            for vec in vectors]).reshape(-1, n_dof)
+
+    batch = PoleQBatch(sectors, n_probe)
+    batch.set_anchors(xp.real(z0))
+    m_blocks, dm_blocks = batch.operator()
+    cfg = sectors[0].cfg
+    out = bordered_newton_batch(
+        m_blocks, dm_blocks, z0.reshape(-1), r0,
+        tol=cfg.newton_tol, max_iter=cfg.newton_max_iterations,
+        trust_radius=radii.reshape(-1),
+    ).to_list()
+    return [out[q * n_probe:q * n_probe + n]
+            for q, n in enumerate(valid)]

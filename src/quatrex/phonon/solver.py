@@ -783,9 +783,11 @@ class PhononSolver(SubsystemSolver):
             rows=sse_lesser.rows,
             cols=sse_lesser.cols,
         )
-        with profiler.profile_range("PhononSolver: Pole solve", "debug", comm):
+        with profiler.profile_range("PhononSolver: Pole solve", "default",
+                                    comm):
             self.pole_state = self._pole.refresh()
-        with profiler.profile_range("PhononSolver: Pole legs", "debug", comm):
+        with profiler.profile_range("PhononSolver: Pole legs", "default",
+                                    comm):
             self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
                                      g_lesser)
         if comm.rank == 0 and self.pole_state is not None:
@@ -819,7 +821,8 @@ class PhononSolver(SubsystemSolver):
         unrelated modes or churn membership every iteration -- exactly what the
         hysteresis exists to prevent.
         """
-        from quatrex.phonon.pole_sector import PoleSector
+        from quatrex.phonon.pole_probe import BlockLayout
+        from quatrex.phonon.pole_sector import PoleSector, refresh_many
 
         if getattr(self._pole_cfg, "leg", "congruence") != "congruence":
             raise NotImplementedError(
@@ -841,6 +844,14 @@ class PhononSolver(SubsystemSolver):
         acc_l = xp.zeros_like(sse_lesser.data)
         acc_g = xp.zeros_like(sse_greater.data)
         states, promoted = [], 0
+
+        # ONE block layout for every q. The map from the stored sparsity
+        # pattern to dense blocks depends on (rows, cols, block_sizes) alone,
+        # which no q changes, so building it per q repeats the same scan nq
+        # times -- and it is what lets the sectors share a batched solve.
+        layout = BlockLayout(sse_lesser.rows, sse_lesser.cols,
+                             self.block_sizes, band=1)
+        sectors = []
         for iq, idx in todo:
             sec = self._pole_q.get(iq)
             if sec is None:
@@ -856,10 +867,21 @@ class PhononSolver(SubsystemSolver):
                 block_sizes=self.block_sizes,
                 rows=sse_lesser.rows,
                 cols=sse_lesser.cols,
+                layout=layout,
             )
-            with profiler.profile_range("PhononSolver: Pole solve", "debug",
-                                        comm):
-                st = sec.refresh()
+            sectors.append(sec)
+
+        # The q are independent, so their correctors are one batch. q_batch
+        # caps how many share a solve, for memory only -- the answer does not
+        # depend on it.
+        chunk = int(getattr(self._pole_cfg, "q_batch", 0) or 0) or len(sectors)
+        solved = []
+        with profiler.profile_range("PhononSolver: Pole solve", "default",
+                                    comm):
+            for lo in range(0, len(sectors), chunk):
+                solved.extend(refresh_many(sectors[lo:lo + chunk]))
+
+        for (iq, idx), sec, st in zip(todo, sectors, solved):
             states.append((idx, st))
             if st is None or not st.clusters:
                 continue

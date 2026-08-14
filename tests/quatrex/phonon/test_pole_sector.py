@@ -534,13 +534,33 @@ def test_operator_reduces_a_frequency_resolved_contact_block():
     )
     m_blocks, _ = sec.operator()
     a_ii, a_ij, a_ji = m_blocks(9.0 - 0.05j)
+    # The operator is batched, so a block carries exactly ONE leading axis and
+    # it is the CANDIDATE axis. The regression this guards against is that axis
+    # being the frequency axis instead -- which is what carrying the contact
+    # unreduced produces, and it is indistinguishable from a legitimate batch
+    # by rank alone.
     for b in (*a_ii, *a_ij, *a_ji):
-        assert b.ndim == 2, f"M(z) block carries a stack axis: {b.shape}"
+        assert b.ndim == 3, f"M(z) block lost its candidate axis: {b.shape}"
+        assert b.shape[0] == 1, (
+            f"M(z) block carries {b.shape[0]} matrices for one probe point "
+            f"(the frequency grid has {freqs.size})")
+
+    # Several probes at once: still one matrix per probe, never per frequency.
+    z_many = np.array([9.0 - 0.05j, 4.0 - 0.02j, 14.0 - 0.10j])
+    for b in (x for part in m_blocks(z_many) for x in part):
+        assert b.shape[0] == z_many.size, b.shape
 
     # And it really is the nearest grid point that was used.
     k = int(np.argmin(np.abs(freqs - 9.0)))
     other = m_blocks(freqs[k] - 0.05j)
     assert np.abs(_h(a_ii[0]) - _h(other[0][0])).max() < 1e-9
+
+    # Each probe is served by its OWN nearest grid point, not by a single
+    # sample shared across the batch.
+    solo = [m_blocks(np.array([z]))[0][0][0] for z in z_many]
+    many = m_blocks(z_many)[0][0]
+    for k, one in enumerate(solo):
+        assert np.abs(_h(many[k]) - _h(one)).max() < 1e-12
 
 
 def test_hysteresis_survives_across_iterations():

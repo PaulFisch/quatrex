@@ -105,6 +105,7 @@ if os.environ.get("QX_POLE_SHEET"): cfg.phonon.pole_sector.sheet = os.environ["Q
 if os.environ.get("QX_POLE_PGAMMA"): cfg.phonon.pole_sector.samples_per_halfwidth = float(os.environ["QX_POLE_PGAMMA"])
 if os.environ.get("QX_POLE_QSTRIDE"): cfg.phonon.pole_sector.q_stride = int(os.environ["QX_POLE_QSTRIDE"])
 if os.environ.get("QX_POLE_QMAX"): cfg.phonon.pole_sector.q_max = int(os.environ["QX_POLE_QMAX"])
+if os.environ.get("QX_POLE_QBATCH"): cfg.phonon.pole_sector.q_batch = int(os.environ["QX_POLE_QBATCH"])
 if os.environ.get("QX_POLE_LEGWTOL"): cfg.phonon.pole_sector.leg_weight_tol = float(os.environ["QX_POLE_LEGWTOL"])
 if os.environ.get("QX_POLE_LEGWTOLOUT"): cfg.phonon.pole_sector.leg_weight_tol_out = float(os.environ["QX_POLE_LEGWTOLOUT"])
 if os.environ.get("QX_POLE_BUBCORR"): cfg.phonon.pole_sector.bubble_correction = os.environ["QX_POLE_BUBCORR"]
