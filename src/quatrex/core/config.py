@@ -286,6 +286,27 @@ class PoleSectorConfig(BaseModel):
     and the sector's whole purpose is to replace a grid weight that is wrong
     by factors of 6 to 1000 (see ``pole_sector_state_and_next_steps.md``).
     """
+    freeze_membership: bool = False
+    """Hold sector MEMBERSHIP fixed except on ``epoch_iterations`` boundaries.
+
+    The promoted set is a discrete object inside a fixed-point iteration, so
+    every pole that enters or leaves moves ``Sigma`` by a finite amount and
+    puts a floor under ``rel Sigma`` that no amount of iterating removes.
+    Measured on Si after the seeding fix (``pfix150``): membership still
+    jitters about 20 poles per iteration and ``rel Sigma`` sits in a 3-5e-02
+    band, against the pole-free arm's 9.3e-04 on the same grid, with
+    excursions damping back to that floor rather than through it.
+
+    When frozen, a pole already in the sector is re-solved (its POSITION
+    tracks ``Sigma``, which is what makes the leg correct) but is neither
+    demoted on a quality gate nor joined by a new one. The hard gates still
+    evict it: a root that leaves the lower half plane or the pole window has
+    stopped being a pole and cannot be carried in spite of that.
+
+    ``PoleTracker.membership_frozen`` has existed since the tracker was
+    written and had no caller; this is what calls it. Off by default so the
+    change is measured rather than assumed.
+    """
     audit_every_iteration: bool = True
     """Offer the full harmonic candidate set EVERY iteration, not only on a
     tracker rescan.

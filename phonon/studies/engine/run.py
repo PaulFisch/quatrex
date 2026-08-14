@@ -128,6 +128,8 @@ if os.environ.get("QX_POLE_TRUST"): cfg.phonon.pole_sector.trust_radius_cells = 
 if os.environ.get("QX_POLE_ACCEPT"): cfg.phonon.pole_sector.accept = os.environ["QX_POLE_ACCEPT"]
 if os.environ.get("QX_POLE_LOCTOL"): cfg.phonon.pole_sector.locate_tol = float(os.environ["QX_POLE_LOCTOL"])
 if os.environ.get("QX_POLE_LOCTOLOUT"): cfg.phonon.pole_sector.locate_tol_out = float(os.environ["QX_POLE_LOCTOLOUT"])
+if os.environ.get("QX_POLE_FREEZE"): cfg.phonon.pole_sector.freeze_membership = os.environ["QX_POLE_FREEZE"] not in ("0", "false", "False")
+if os.environ.get("QX_POLE_EPOCH"): cfg.phonon.pole_sector.epoch_iterations = int(os.environ["QX_POLE_EPOCH"])
 # Physical trust radius as a fraction of min(nearest seed, nearest band edge).
 # Set tiny to reproduce the old grid-tied radius, which floors it at
 # trust_radius_cells * h.

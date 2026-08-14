@@ -455,12 +455,27 @@ class PoleSector:
         return float("inf") if arg > 700.0 else 2.0 / np.expm1(arg)
 
     def screen(self, sol: PoleSolution, was_promoted: bool,
-               separation: float = float("inf")) -> str | None:
+               separation: float = float("inf"),
+               *, hard_only: bool = False) -> str | None:
         """Reason to refuse a pole, or ``None`` to accept it.
 
         Hysteresis is applied here: a mode already in the sector is only demoted
         once it is comfortably resolved, so membership cannot oscillate.
+
+        ``hard_only`` keeps just the gates a pole cannot be carried in spite
+        of -- it is not in the lower half plane, or it has left the window --
+        and drops the quality gates. Used while membership is frozen for an
+        epoch, where the question is not "is this pole worth carrying" (that
+        was settled at the epoch boundary) but "is it still a pole at all".
         """
+        gamma_ = -sol.z.imag
+        if gamma_ <= 0.0:
+            return "pole is not in the lower half plane"
+        lo_, hi_ = self.window()
+        if not (lo_ <= sol.z.real <= hi_):
+            return f"outside the pole window [{lo_:.3g}, {hi_:.3g}]"
+        if hard_only:
+            return None
         if getattr(self.cfg, "accept", "locate") == "locate":
             eps_z = self.locate_error(sol, separation)
             # Hysteresis, same rule as q_in/q_out below: strict to enter,
@@ -476,12 +491,7 @@ class PoleSector:
                         f"={tol_z:g} (eps_nep={sol.eps_nep:.2e})")
         elif not sol.converged:
             return f"eps_nep={sol.eps_nep:.2e} above tolerance"
-        gamma = -sol.z.imag
-        if gamma <= 0.0:
-            return "pole is not in the lower half plane"
-        lo, hi = self.window()
-        if not (lo <= sol.z.real <= hi):
-            return f"outside the pole window [{lo:.3g}, {hi:.3g}]"
+        gamma = gamma_          # both hard gates ran above, before hard_only
         tol = float(getattr(self.cfg, "leg_weight_tol", 0.0) or 0.0)
         if tol > 0.0:
             # Exact: how much of the line's weight the grid can misrepresent,
@@ -657,8 +667,18 @@ class PoleSector:
         promoted = self._match_previous(solutions)
         seps = self.separations(solutions)
         eps_ok, eps_no = [], []
+        # Membership frozen: the epoch decided who is in, and re-deciding
+        # every iteration is what puts a floor under rel Sigma. Positions
+        # still track Sigma; only the SET is held.
+        frozen = (bool(getattr(self.cfg, "freeze_membership", False))
+                  and bool(self._promoted)
+                  and self.tracker.membership_frozen())
         for k, sol in enumerate(solutions):
-            why = self.screen(sol, promoted[k], seps[k])
+            if frozen:
+                why = (self.screen(sol, True, seps[k], hard_only=True)
+                       if promoted[k] else "not in the frozen epoch set")
+            else:
+                why = self.screen(sol, promoted[k], seps[k])
             (eps_no if why else eps_ok).append(
                 float(self.locate_error(sol, seps[k])))
             (rejected if why else accepted).append(

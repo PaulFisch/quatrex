@@ -1036,3 +1036,65 @@ def test_a_rescan_adds_candidates_and_never_replaces_the_held_set():
     assert len(warm) == len(held), "gated: a warm iteration seeds the held set"
     assert len(_seeds(True)[0]) >= len(warm), (
         "gated: a rescan shrank the candidate set")
+
+
+def test_frozen_membership_holds_the_set_but_still_evicts_a_dead_pole():
+    """What ``freeze_membership`` must and must not do.
+
+    The promoted set is discrete and sits inside a fixed-point iteration, so
+    each pole entering or leaving moves Sigma by a finite amount and floors
+    ``rel Sigma``. Measured on Si after the seeding fix (``pfix150``):
+    membership jitters ~20 poles per iteration and ``rel Sigma`` holds a
+    3-5e-02 band against the pole-free arm's 9.3e-04, with excursions damping
+    back to that floor rather than through it.
+
+    Freezing must hold the SET without holding the physics: a member is
+    re-solved and kept even if a quality gate would now refuse it, a
+    non-member is not admitted, and a root that has stopped being a pole --
+    left the lower half plane, left the window -- is evicted anyway.
+    """
+    import numpy as np
+
+    from quatrex.phonon.pole_sector import PoleSectorState
+
+    sec = _context_run(nf=201, omega_min_thz=0.5, omega_max_thz=15.0)
+    sec.cfg = sec.cfg.model_copy(update={"freeze_membership": True})
+    n_dof = int(np.sum(sec._block_sizes))
+    vec = np.ones(n_dof, dtype=complex)
+
+    class _Sol:
+        converged = True
+        eps_nep = 0.0
+        kappa = 1.0
+        def __init__(self, z, dz=0.0 + 0.0j):
+            self.z, self.dz_est = z, dz
+            self.r = self.l = vec
+
+    member = _Sol(complex(5.0, -0.02))
+    sec._promoted = [(member.z, vec)]
+    sec.state = PoleSectorState(solutions=[member], iteration=3)
+    sec.tracker.iteration = 3                    # 3 % 5 != 0 -> frozen
+    assert sec.tracker.membership_frozen()
+
+    # A member whose eps_z now far exceeds even locate_tol_out is KEPT.
+    bad = _Sol(complex(5.0, -0.02), complex(50.0, 0.0))
+    assert sec.locate_error(bad, float("inf")) > sec.cfg.locate_tol_out
+    state = sec.build_clusters([bad])
+    assert len(state.solutions) == 1, "a frozen member must not be demoted"
+
+    # A newcomer is NOT admitted, however well located.
+    sec.state = PoleSectorState(solutions=[member], iteration=3)
+    sec.tracker.iteration = 3
+    newcomer = _Sol(complex(9.0, -0.02))
+    state = sec.build_clusters([bad, newcomer])
+    kept = [complex(s.z) for s in state.solutions]
+    assert newcomer.z not in kept, "freezing must not admit a new pole"
+
+    # But a member that has stopped being a pole is evicted regardless.
+    for dead, why in ((_Sol(complex(5.0, +0.02)), "lower half plane"),
+                      (_Sol(complex(99.0, -0.02)), "window")):
+        sec.state = PoleSectorState(solutions=[member], iteration=3)
+        sec.tracker.iteration = 3
+        sec._promoted = [(dead.z, vec)]
+        state = sec.build_clusters([dead])
+        assert not state.solutions, f"frozen set kept a pole past the {why} gate"
