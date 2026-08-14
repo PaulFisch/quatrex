@@ -120,3 +120,60 @@ def test_mpi_split_matches_the_serial_answer():
                    freq_offset=lo, reduce=_reduce)
     got = _h(part.continue_sigma(z, order=0))
     assert np.abs(got - ref).max() < 1e-12 * max(np.abs(ref).max(), 1.0)
+
+
+@pytest.mark.mpi
+def test_the_production_frequency_context_matches_the_hand_split():
+    r"""Exercise ``PhononSolver._pole_frequency_context`` itself.
+
+    ``test_mpi_split_matches_the_serial_answer`` builds the split by hand with
+    raw ``mpi.Allreduce``, so it verifies the MATHS of the split and nothing
+    about the function that performs it in production. That function called
+
+        sizes = comm.stack.all_gather(np.array([local_freqs.size]))
+
+    but ``all_gather`` is IN-PLACE, ``all_gather(sendbuf, recvbuf) -> None``.
+    Every multi-rank pole run therefore died with "missing 1 required
+    positional argument: 'recvbuf'" on every rank, and no test noticed,
+    because the body is guarded by ``if comm.stack.size <= 1: return {}`` and
+    the whole suite runs on one rank.
+
+    This calls the real thing. It also uses an UNEVEN split -- 65 points over
+    4 ranks -- because equal counts are the case a naive all_gather happens to
+    survive.
+    """
+    from mpi4py.MPI import COMM_WORLD as mpi
+
+    from qttools.comm import comm
+    from quatrex.phonon.solver import PhononSolver
+
+    if mpi.size < 2:
+        pytest.skip("needs >= 2 MPI ranks")
+
+    # block_comm_size 1 => the whole world is one stack communicator, which is
+    # the layout every phonon run has used (bcs=1, qcs=1).
+    comm.configure(block_comm_size=1, block_comm_config={},
+                   stack_comm_config={}, override=True)
+
+    n_freq = 65                              # deliberately not divisible
+    freqs = np.linspace(0.0, 20.0, n_freq)
+    sizes = [n_freq // mpi.size] * mpi.size
+    for i in range(n_freq % mpi.size):
+        sizes[i] += 1
+    off = int(np.sum(sizes[:mpi.rank]))
+    local = freqs[off:off + sizes[mpi.rank]]
+
+    ctx = PhononSolver._pole_frequency_context(None, local)
+
+    assert ctx, "the context must be non-empty on a split axis"
+    assert ctx["freq_offset"] == off
+    got = np.asarray(ctx["global_freqs"], dtype=float)
+    assert got.shape == freqs.shape, (
+        f"gathered {got.shape} against {freqs.shape}; padding was not trimmed")
+    assert np.abs(got - freqs).max() < 1e-12, "the gathered grid is wrong"
+
+    # And the reducer must be a genuine sum over ranks.
+    one = np.ones(3, dtype=complex) * (mpi.rank + 1)
+    red = np.asarray(_h(ctx["reduce"](one)), dtype=complex)
+    expect = sum(r + 1 for r in range(mpi.size))
+    assert np.abs(red - expect).max() < 1e-12

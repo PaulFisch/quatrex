@@ -693,12 +693,28 @@ class PhononSolver(SubsystemSolver):
         if comm.stack.size <= 1:
             return {}
 
-        sizes = comm.stack.all_gather(
-            np.array([local_freqs.size], dtype=np.int64))
+        # comm.stack.all_gather is IN-PLACE -- all_gather(sendbuf, recvbuf)
+        # returning None -- and every rank must send the same count, which the
+        # frequency split does not guarantee. So gather the counts first, then
+        # pad to the max and trim on the way out. Calling it as if it returned
+        # a value raised "missing 1 required positional argument: 'recvbuf'"
+        # on every rank, which made every multi-rank pole run dead on arrival.
+        n_ranks = comm.stack.size
+        sizes = np.empty(n_ranks, dtype=np.int64)
+        comm.stack.all_gather(np.array([local_freqs.size], dtype=np.int64),
+                              sizes)
         sizes = np.asarray(get_host(sizes), dtype=np.int64).ravel()
         offset = int(sizes[:comm.stack.rank].sum())
-        gathered = comm.stack.all_gather(np.ascontiguousarray(local_freqs))
-        global_freqs = np.asarray(get_host(gathered), dtype=float).ravel()
+
+        n_max = int(sizes.max())
+        send = np.zeros(n_max, dtype=float)
+        send[:local_freqs.size] = np.asarray(
+            get_host(local_freqs), dtype=float).ravel()
+        recv = np.empty(n_max * n_ranks, dtype=float)
+        comm.stack.all_gather(send, recv)
+        recv = np.asarray(get_host(recv), dtype=float).reshape(n_ranks, n_max)
+        global_freqs = np.concatenate(
+            [recv[r, :int(sizes[r])] for r in range(n_ranks)])
 
         def _reduce(arr):
             send = xp.ascontiguousarray(arr)
