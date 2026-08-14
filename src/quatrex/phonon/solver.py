@@ -627,7 +627,7 @@ class PhononSolver(SubsystemSolver):
                 out[(i, j)] = view.blocks[i, j]
         return out
 
-    @profiler.profile(label="PhononSolver: Pole sector", level="default", comm=comm)
+    @profiler.profile(label="PhononSolver: Positivity", level="default", comm=comm)
     def _check_positivity(self, out: tuple) -> None:
         """Positivity gate on the RECONSTRUCTED TOTAL ``G^{<,>}``.
 
@@ -709,6 +709,7 @@ class PhononSolver(SubsystemSolver):
         return {"global_freqs": global_freqs, "freq_offset": offset,
                 "reduce": _reduce}
 
+    @profiler.profile(label="PhononSolver: Pole sector", level="default", comm=comm)
     def _update_pole_sector(self, sse_lesser, sse_greater,
                             g_retarded=None, g_lesser=None) -> None:
         """Refresh the pole set from the current (mixed) self-energy.
@@ -782,9 +783,11 @@ class PhononSolver(SubsystemSolver):
             rows=sse_lesser.rows,
             cols=sse_lesser.cols,
         )
-        self.pole_state = self._pole.refresh()
-        self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
-                                 g_lesser)
+        with profiler.profile_range("PhononSolver: Pole solve", "debug", comm):
+            self.pole_state = self._pole.refresh()
+        with profiler.profile_range("PhononSolver: Pole legs", "debug", comm):
+            self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
+                                     g_lesser)
         if comm.rank == 0 and self.pole_state is not None:
             print(self.pole_state.report(), flush=True)
 
@@ -854,7 +857,9 @@ class PhononSolver(SubsystemSolver):
                 rows=sse_lesser.rows,
                 cols=sse_lesser.cols,
             )
-            st = sec.refresh()
+            with profiler.profile_range("PhononSolver: Pole solve", "debug",
+                                        comm):
+                st = sec.refresh()
             states.append((idx, st))
             if st is None or not st.clusters:
                 continue
@@ -862,8 +867,10 @@ class PhononSolver(SubsystemSolver):
             # Build this q's leg into this q's slice. The state carries the
             # per-q correction; only the assembled stack leaves here.
             self.pole_state = st
-            self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
-                                     g_lesser, q_idx=idx, sector=sec)
+            with profiler.profile_range("PhononSolver: Pole legs", "debug",
+                                        comm):
+                self._build_pole_keldysh(sse_lesser, sse_greater, g_retarded,
+                                         g_lesser, q_idx=idx, sector=sec)
             if st.g_pp_lesser is None:
                 continue
             sel = (slice(None),) + idx

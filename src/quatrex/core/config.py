@@ -286,6 +286,26 @@ class PoleSectorConfig(BaseModel):
     and the sector's whole purpose is to replace a grid weight that is wrong
     by factors of 6 to 1000 (see ``pole_sector_state_and_next_steps.md``).
     """
+    locate_tol_out: PositiveFloat = 0.15
+    """Demotion threshold on ``eps_z``: a pole already in the sector is only
+    dropped above THIS, not above ``locate_tol``.
+
+    The gap is hysteresis, and it exists for the same reason the ``q_in`` /
+    ``q_out`` gap does. Without it the acceptance test is a hard threshold
+    sitting inside a fixed-point iteration, and it closes a feedback loop:
+    the pole enters the sector, its leg changes Sigma, ``eps_z`` rises past
+    the threshold, the pole is demoted, Sigma changes back, and the pole is
+    re-promoted. Measured on Si (81 q, ``leg="congruence"``, run ``psi2``):
+    the promoted set limit-cycled with period two between ~620 and ~460
+    poles for 34 iterations while the residual sat at O(1), where the same
+    bed without the sector converged monotonically to 9.3e-04.
+
+    ``q_out``/``q_in`` did have their gap, but that gate runs BEHIND this one
+    and never sees a pole this one has already refused.
+
+    Must exceed ``locate_tol``; raising it only ever RETAINS a pole that
+    would otherwise be dropped, never admits one that ``locate_tol`` refused.
+    """
     newton_max_iterations: PositiveInt = 8
     """Bordered-Newton steps per pole per SCBA iteration."""
     trust_radius_cells: PositiveFloat = 0.25
@@ -402,6 +422,21 @@ class PoleSectorConfig(BaseModel):
     1e-8, yet ``q_omega = gamma/(2h) < 1`` calls 140 of 144 candidates
     under-resolved -- the old rule flags almost everything and then leans on
     the root solve to refuse it."""
+
+    leg_weight_tol_out: NonNegativeFloat = 0.0
+    """Demotion threshold for ``leg_weight_tol``; 0 means "use
+    ``leg_weight_tol / 3``".
+
+    Same hysteresis as ``locate_tol`` / ``locate_tol_out``, with the
+    inequality the other way round: this gate REFUSES a pole the grid already
+    resolves (``err <= tol``), so leniency for a pole already in the sector
+    means a SMALLER threshold, not a larger one. Must be below
+    ``leg_weight_tol``.
+
+    This matters because setting ``leg_weight_tol`` replaces the
+    ``q_in``/``q_out`` branch outright -- it does not run in addition to it --
+    so without this the sector would have no hysteresis at all.
+    """
     bubble_correction: Literal["none", "local_covariance"] = "none"
     """Replace the ring's cell-mean product on ACTIVE cell pairs by the exact
     finite-cell integral.
@@ -464,6 +499,21 @@ class PoleSectorConfig(BaseModel):
                 f"pole_sector: q_out ({self.q_out}) must exceed q_in "
                 f"({self.q_in}); the gap IS the hysteresis that stops a mode "
                 "changing sector every iteration."
+            )
+        if self.locate_tol_out <= self.locate_tol:
+            raise ValueError(
+                f"pole_sector: locate_tol_out ({self.locate_tol_out}) must "
+                f"exceed locate_tol ({self.locate_tol}); the gap IS the "
+                "hysteresis that stops a mode changing sector every "
+                "iteration."
+            )
+        if (self.leg_weight_tol > 0.0 and self.leg_weight_tol_out > 0.0
+                and self.leg_weight_tol_out >= self.leg_weight_tol):
+            raise ValueError(
+                f"pole_sector: leg_weight_tol_out "
+                f"({self.leg_weight_tol_out}) must be BELOW leg_weight_tol "
+                f"({self.leg_weight_tol}); this gate refuses a pole the grid "
+                "already resolves, so hysteresis lowers the threshold."
             )
         if self.condition_reject <= self.condition_max:
             raise ValueError(

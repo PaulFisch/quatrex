@@ -836,3 +836,110 @@ def test_leg_weight_gate_is_off_by_default_and_refuses_a_resolved_mode_when_on()
     assert why is not None and "line-weight" in why, why
     # the same mode under the legacy rule is NOT refused for resolution
     assert "grid-resolved" not in (base.screen(sol, False, 5.0) or "")
+
+
+def test_eps_z_gate_has_hysteresis():
+    r"""The ``eps_z`` acceptance gate must be lenient once a pole is promoted.
+
+    ``q_in``/``q_out`` had their gap from the start, but ``accept="locate"``
+    put ``eps_z <= locate_tol`` in FRONT of that gate as a single hard
+    threshold, and a hard threshold inside a fixed-point iteration closes a
+    feedback loop: the pole enters, its leg changes Sigma, ``eps_z`` drifts
+    past the threshold, the pole is demoted, Sigma changes back, the pole is
+    re-promoted.
+
+    Measured on Si (81 q, ``leg="congruence"``, ``h = 0.25``, run ``psi2``,
+    2026-08-14): the promoted set limit-cycled with period two between ~620
+    and ~460 poles for 34 SCBA iterations while the residual sat at O(1),
+    where the same bed with the sector off converged monotonically to
+    9.3e-04. The wall time alternated with it, 185 s against 85 s.
+
+    The older hysteresis test above cannot see this: it sets ``dz_est = 0`` so
+    that ``eps_z`` is identically zero and this gate never fires.
+    """
+    import numpy as np
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_sector import PoleSector
+
+    freqs = np.linspace(0.0, 20.0, 41)               # h = 0.5
+    cfg = PoleSectorConfig(enabled=True, omega_min_thz=1.0,
+                           omega_max_thz=19.0)
+    sec = PoleSector(cfg, freqs)
+
+    assert cfg.locate_tol_out > cfg.locate_tol, "the gap IS the hysteresis"
+
+    # gamma well under-resolved, so the q_in/q_out gate behind this one
+    # cannot be what refuses the pole; eps_z is the only gate in play.
+    gamma = 0.1 * sec.h
+
+    class _Sol:
+        converged = True
+        eps_nep = 0.0
+        kappa = 1.0
+        def __init__(self, z, dz):
+            self.z = z
+            self.dz_est = dz
+
+    # eps_z placed BETWEEN locate_tol and locate_tol_out: refused on first
+    # sight, retained once promoted. scale = min(gamma, sep, h) = gamma.
+    eps_mid = 0.5 * (cfg.locate_tol + cfg.locate_tol_out)
+    sol = _Sol(complex(9.0, -gamma), complex(eps_mid * gamma, 0.0))
+    assert abs(sec.locate_error(sol, float("inf")) - eps_mid) < 1e-12
+
+    assert sec.screen(sol, was_promoted=False) is not None, "refused when new"
+    assert sec.screen(sol, was_promoted=True) is None, "kept once promoted"
+
+    # Above BOTH thresholds it is refused either way -- hysteresis widens the
+    # band, it does not remove the gate.
+    far = _Sol(complex(9.0, -gamma),
+               complex(2.0 * cfg.locate_tol_out * gamma, 0.0))
+    assert sec.screen(far, was_promoted=True) is not None
+    assert sec.screen(far, was_promoted=False) is not None
+
+    # Below both, accepted either way.
+    tight = _Sol(complex(9.0, -gamma),
+                 complex(0.1 * cfg.locate_tol * gamma, 0.0))
+    assert sec.screen(tight, was_promoted=False) is None
+    assert sec.screen(tight, was_promoted=True) is None
+
+
+def test_leg_weight_gate_has_hysteresis():
+    """``leg_weight_tol`` REPLACES the q_in/q_out branch, so it needs its own.
+
+    Setting ``leg_weight_tol`` takes the ``else`` branch away, and with it the
+    only hysteresis the resolution gate had. The inequality runs the other
+    way here than for ``eps_z``: this gate refuses a pole the grid already
+    resolves (``err <= tol``), so leniency for a promoted pole is a SMALLER
+    threshold.
+    """
+    import numpy as np
+
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_sector import PoleSector
+
+    freqs = np.linspace(0.0, 20.0, 41)
+    cfg = PoleSectorConfig(enabled=True, omega_min_thz=1.0,
+                           omega_max_thz=19.0, leg_weight_tol=1e-3)
+    sec = PoleSector(cfg, freqs)
+
+    class _Sol:
+        converged = True
+        eps_nep = 0.0
+        kappa = 1.0
+        dz_est = 0.0 + 0.0j
+        def __init__(self, z): self.z = z
+
+    # Find a gamma whose line-weight error sits between tol/3 and tol: the
+    # grid resolves it well enough to refuse a newcomer, not well enough to
+    # evict a member.
+    lo, hi = cfg.leg_weight_tol / 3.0, cfg.leg_weight_tol
+    target = 0.5 * (lo + hi)
+    g = np.geomspace(1e-3 * sec.h, 10.0 * sec.h, 4001)
+    err = np.array([sec.leg_weight_error(float(x)) for x in g])
+    gamma = float(g[int(np.argmin(np.abs(err - target)))])
+    assert lo < sec.leg_weight_error(gamma) < hi, "no gamma lands in the band"
+
+    sol = _Sol(complex(9.0, -gamma))
+    assert sec.screen(sol, was_promoted=False) is not None, "refused when new"
+    assert sec.screen(sol, was_promoted=True) is None, "kept once promoted"

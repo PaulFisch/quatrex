@@ -44,6 +44,7 @@ from quatrex.phonon.pole_kernel import (
 )
 
 __all__ = [
+    "BlockLayout",
     "delta_from_sigma",
     "probe_sigma_retarded",
     "nnz_to_blocks",
@@ -275,3 +276,136 @@ class ProbePlan:
             return {o: xp.zeros((0,) + delta.shape[1:], dtype=delta.dtype)
                     for o in self.orders}
         return probe_sigma_retarded(delta, freqs, self.z, orders=self.orders, **kw)
+
+
+class BlockLayout:
+    r"""Precomputed map from the stored sparsity pattern to BTD block views.
+
+    :func:`nnz_to_blocks` answers the same question, but it re-derives the
+    answer on every call: two ``np.searchsorted`` passes over ``nnz``, then a
+    ``np.where((br == i) & (bc == j))`` scan and a fresh allocation per block
+    pair. Inside the bordered Newton that runs once per candidate per step --
+    117 times for nine candidates on the local bed -- for an answer that
+    depends only on ``(rows, cols, block_sizes)``, which are fixed for a whole
+    SCBA iteration.
+
+    So the scan is done once and stored as a single gather. The band blocks are
+    laid out end to end in a flat buffer of length ``total``; ``source`` says,
+    for each slot of that buffer, which ``nnz`` column feeds it, with a
+    sentinel for slots the pattern leaves empty. Applying the layout to
+    ``Delta`` is then one fancy-index gather, and the BTD block list is a set
+    of **zero-copy reshaped views** of the flat buffer -- a ``(*stack, total)``
+    array with unit last stride reshapes to ``(*stack, b_i, b_j)`` without a
+    copy, so materialising the blocks costs no kernel at all.
+
+    Attributes
+    ----------
+    block_sizes : np.ndarray
+        The partition, as given.
+    total : int
+        Length of the flat band buffer, ``sum_{|I-J| <= band} b_I b_J``.
+    source : NDArray
+        ``(total,)`` index into a value array PADDED with one trailing zero
+        column; ``nnz`` marks an empty slot.
+    diag : NDArray
+        ``(n_dof,)`` flat positions of the operator's diagonal entries, in
+        increasing global-index order.
+    slices : list[tuple[tuple[int, int], slice, int, int]]
+        ``((I, J), slice, b_I, b_J)`` in buffer order.
+
+    """
+
+    def __init__(self, rows, cols, block_sizes, *, band: int = 1):
+        sizes = np.asarray(_host(block_sizes), dtype=int)
+        off = np.concatenate(([0], np.cumsum(sizes)))
+        r = np.asarray(_host(rows), dtype=int)
+        c = np.asarray(_host(cols), dtype=int)
+        nnz = int(r.size)
+        br = np.searchsorted(off, r, side="right") - 1
+        bc = np.searchsorted(off, c, side="right") - 1
+
+        self.block_sizes = sizes
+        self.nnz = nnz
+        self._band = int(band)
+        # Sentinel = nnz: the caller appends one zero column, so an empty slot
+        # gathers a zero. This reproduces nnz_to_blocks' zero-filled block.
+        source = np.full(0, nnz, dtype=np.int64)
+        pieces, self.slices, pos = [], [], 0
+        for i in range(len(sizes)):
+            for j in range(max(0, i - band), min(len(sizes), i + band + 1)):
+                bi, bj = int(sizes[i]), int(sizes[j])
+                blk = np.full(bi * bj, nnz, dtype=np.int64)
+                sel = np.where((br == i) & (bc == j))[0]
+                if sel.size:
+                    # Last wins on a duplicated (row, col), exactly as the
+                    # fancy-index assignment in nnz_to_blocks does.
+                    blk[(r[sel] - off[i]) * bj + (c[sel] - off[j])] = sel
+                pieces.append(blk)
+                self.slices.append(((i, j), slice(pos, pos + bi * bj), bi, bj))
+                pos += bi * bj
+        source = np.concatenate(pieces) if pieces else source
+        self.total = int(pos)
+        self.source = xp.asarray(source)
+
+        # Flat positions of the global diagonal, for the z^2 I term.
+        diag = np.full(int(off[-1]), -1, dtype=np.int64)
+        for (i, j), sl, bi, bj in self.slices:
+            if i == j:
+                diag[off[i]:off[i + 1]] = sl.start + np.arange(bi) * bj + np.arange(bi)
+        if (diag < 0).any():
+            raise ValueError("BlockLayout: the band does not cover the diagonal.")
+        self.diag = xp.asarray(diag)
+        self.corner = {i: sl for (i, j), sl, _, _ in self.slices if i == j}
+
+    def gather(self, values: NDArray) -> NDArray:
+        """Lay ``(..., nnz)`` values out in band order, zero where absent."""
+        if int(values.shape[-1]) != self.nnz:
+            raise ValueError(
+                f"values carry {int(values.shape[-1])} nnz, the layout was "
+                f"built for {self.nnz}."
+            )
+        pad = xp.zeros(values.shape[:-1] + (1,), dtype=values.dtype)
+        return xp.concatenate([values, pad], axis=-1)[..., self.source]
+
+    def blocks(self, flat: NDArray):
+        """``(a_ii, a_ij, a_ji)`` views of a ``(*stack, total)`` buffer.
+
+        No copy and no kernel: each block is a reshaped slice.
+        """
+        if int(flat.shape[-1]) != self.total:
+            raise ValueError(
+                f"buffer has {int(flat.shape[-1])} entries, the layout needs "
+                f"{self.total}."
+            )
+        stack = flat.shape[:-1]
+        a_ii, a_ij, a_ji = {}, {}, {}
+        for (i, j), sl, bi, bj in self.slices:
+            view = flat[..., sl].reshape(stack + (bi, bj))
+            if i == j:
+                a_ii[i] = view
+            elif j == i + 1:
+                a_ij[i] = view
+            elif j == i - 1:
+                a_ji[j] = view
+        n = len(self.block_sizes)
+        return ([a_ii[i] for i in range(n)],
+                [a_ij[i] for i in range(n - 1)],
+                [a_ji[i] for i in range(n - 1)])
+
+    def block_dict(self, flat: NDArray) -> dict[tuple[int, int], NDArray]:
+        """The same views, keyed like :func:`nnz_to_blocks`' output."""
+        return {ij: flat[..., sl].reshape(flat.shape[:-1] + (bi, bj))
+                for ij, sl, bi, bj in self.slices}
+
+    def flatten_blocks(self, blocks: dict[tuple[int, int], NDArray]) -> NDArray:
+        """Inverse of :meth:`block_dict` for a dense block dict (e.g. ``D``)."""
+        stack = xp.broadcast_shapes(
+            *(xp.asarray(b).shape[:-2] for b in blocks.values()))
+        out = xp.zeros(stack + (self.total,), dtype=xp.complex128)
+        for ij, sl, bi, bj in self.slices:
+            b = blocks.get(ij)
+            if b is not None:
+                b = xp.asarray(b)
+                out[..., sl] = xp.broadcast_to(
+                    b, stack + b.shape[-2:]).reshape(stack + (bi * bj,))
+        return out

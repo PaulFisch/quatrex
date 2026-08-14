@@ -65,6 +65,8 @@ __all__ = [
     "contract_delta",
     "sigma_retarded_at_z",
     "delta_local_fit",
+    "local_fit_weights",
+    "LocalFitPlan",
     "lorentz_retarded",
     "lorentz_pair_retarded",
 ]
@@ -221,7 +223,8 @@ def bosonic_partner(a: NDArray, transverse_shape: tuple = ()) -> NDArray:
 
 
 def contract_delta(
-    a: NDArray, w_pos: NDArray, w_mir: NDArray, *, transverse_shape: tuple = ()
+    a: NDArray, w_pos: NDArray, w_mir: NDArray, *, transverse_shape: tuple = (),
+    mirror: NDArray | None = None,
 ) -> NDArray:
     """Apply continuation weights to ``Delta`` along the leading frequency axis.
 
@@ -236,6 +239,12 @@ def contract_delta(
         Weights from :func:`continuation_weights`, shape ``(P, K)``.
     transverse_shape : tuple, optional
         Transverse-momentum axis sizes, passed to :func:`bosonic_partner`.
+    mirror : NDArray, optional
+        A precomputed :func:`bosonic_partner` of ``a``. It does NOT depend on
+        ``z``, so a caller that contracts the same ``Delta`` at many probe
+        points -- the bordered Newton does it about 6 times per candidate --
+        should build it once and pass it here rather than have it rebuilt on
+        every call.
 
     Returns
     -------
@@ -251,9 +260,111 @@ def contract_delta(
         )
     tail = a.shape[1:]
     flat = a.reshape(n_freq, -1)
-    mirror = bosonic_partner(a, transverse_shape).reshape(n_freq, -1)
+    if mirror is None:
+        mirror = bosonic_partner(a, transverse_shape)
+    mirror = mirror.reshape(n_freq, -1)
     out = w_pos @ flat + w_mir @ mirror
     return out.reshape((w_pos.shape[0],) + tail)
+
+
+class LocalFitPlan:
+    r"""The anchor-dependent half of :func:`local_fit_weights`, computed once.
+
+    ``Delta_an(z)`` is a least-squares polynomial in ``(omega - w_c)/h`` over a
+    fixed stencil, evaluated at ``z``. The stencil, the fit centre ``w_c``, the
+    branch, and ``pinv(vander)`` depend only on the ANCHOR -- and the anchor is
+    pinned per candidate for the whole bordered-Newton solve, precisely so that
+    ``M(z)`` is a genuine analytic function of ``z``
+    (:class:`~quatrex.phonon.pole_sector.PoleSector`, doc Sec. 2.4). Only
+    ``s = (z - w_c)/h`` moves between Newton steps.
+
+    Splitting it that way turns the per-step pseudo-inverse -- 117 SVDs for
+    nine candidates on the local bed -- into one batched ``pinv`` per SCBA
+    iteration, and leaves a per-step cost of two elementwise expressions and a
+    scatter.
+
+    Parameters
+    ----------
+    energies : NDArray
+        Uniform ascending grid (THz), ``(K,)``.
+    anchors : NDArray
+        ``(P,)`` real fit anchors, one per probe. A negative anchor selects the
+        mirror branch, where the model is a function of ``-z``.
+    order : int, optional
+        Polynomial degree. Default 2.
+    window : int, optional
+        Cells on each side of the anchor. Default 4.
+
+    """
+
+    def __init__(self, energies: NDArray, anchors: NDArray, *,
+                 order: int = 2, window: int = 4):
+        if 2 * window < order + 1:
+            raise ValueError(
+                f"window={window} gives {2 * window} samples, too few for a "
+                f"degree-{order} fit."
+            )
+        self.h = cell_width(energies)
+        e = xp.asarray(energies, dtype=xp.float64)
+        self.n_freq = n_freq = int(e.shape[0])
+        self.order = int(order)
+
+        a = np.asarray(_host(anchors), dtype=float).reshape(-1)
+        self.n_probe = int(a.size)
+        self.positive = a >= 0.0
+        w_c = np.where(self.positive, a, -a)
+
+        # Same stencil arithmetic as the scalar path; the width collapses to
+        # the whole grid only when the grid is shorter than the window.
+        wid = min(2 * window, n_freq)
+        centre = np.clip(np.round(w_c / self.h), 0, n_freq - 1)
+        lo = np.clip(centre - window, 0, n_freq - wid).astype(int)
+        self.lo, self.width = lo, wid
+        idx = lo[:, None] + np.arange(wid)[None, :]              # (P, wid)
+        self.idx = xp.asarray(idx)
+
+        t = (np.asarray(_host(e))[idx] - w_c[:, None]) / self.h  # (P, wid)
+        vander = np.stack([t ** m for m in range(order + 1)], axis=2)
+        self.pinv = xp.linalg.pinv(
+            xp.asarray(vander, dtype=xp.complex128))             # (P, ord+1, wid)
+        self.w_c = xp.asarray(w_c)
+        self._sign = xp.asarray(np.where(self.positive, 1.0, -1.0))
+        self._pos = xp.asarray(self.positive)
+
+    def powers(self, z: NDArray, deriv: int = 0) -> NDArray:
+        """``(P, order+1)`` monomials of the fit variable at ``z``."""
+        zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+        if int(zz.shape[0]) != self.n_probe:
+            raise ValueError(
+                f"plan holds {self.n_probe} anchors, got {int(zz.shape[0])} "
+                "probe points."
+            )
+        # On the mirror branch the model is a function of -z, so the chain
+        # rule flips the sign of ds/dz.
+        s = (self._sign * xp.real(zz) - self.w_c
+             + 1j * self._sign * xp.imag(zz)) / self.h
+        ds_dz = self._sign / self.h
+        cols = []
+        for m in range(self.order + 1):
+            if m < deriv:
+                cols.append(xp.zeros_like(s))
+                continue
+            fall = 1.0
+            for j in range(deriv):
+                fall *= m - j
+            cols.append(fall * s ** (m - deriv) * ds_dz ** deriv)
+        return xp.stack(cols, axis=1)
+
+    def weights(self, z: NDArray, *, deriv: int = 0) -> tuple[NDArray, NDArray]:
+        """``(w_pos, w_mir)``, each ``(P, K)``, as :func:`contract_delta` wants."""
+        row = (self.powers(z, deriv)[:, None, :] @ self.pinv)[:, 0, :]  # (P, wid)
+        w_pos = xp.zeros((self.n_probe, self.n_freq), dtype=xp.complex128)
+        w_mir = xp.zeros((self.n_probe, self.n_freq), dtype=xp.complex128)
+        rows = xp.arange(self.n_probe)[:, None]
+        zero = xp.zeros_like(row)
+        w_pos[rows, self.idx] = xp.where(self._pos[:, None], row, zero)
+        w_mir[rows, self.idx] = xp.where(self._pos[:, None], zero, row)
+        return w_pos, w_mir
 
 
 def local_fit_weights(
@@ -263,7 +374,7 @@ def local_fit_weights(
     order: int = 2,
     window: int = 4,
     deriv: int = 0,
-    anchor: float | None = None,
+    anchor: float | NDArray | None = None,
 ) -> tuple[NDArray, NDArray]:
     r"""``(P, K)`` weights of :math:`\Delta_{\rm an}(z)`, as a linear map on Delta.
 
@@ -282,6 +393,16 @@ def local_fit_weights(
     ``z + omega_k`` argument -- so a rank never needs a frequency another rank
     owns.
 
+    The fit centre and stencil are chosen from ``anchor`` when given, so that
+    Delta_an is a genuine analytic function of z. Deriving them from Re z
+    instead makes M(z) only PIECEWISE holomorphic: the stencil index is
+    round(Re z / h), so it switches discretely and the value jumps. Measured on
+    a random Delta at h = 0.25: a 3.08e-01 step at the boundary against
+    ~3.4e-03 within a stencil and a typical scale of 1.79, i.e. a 17 %
+    discontinuity. Newton's trust radius is trust_radius_cells * h, so steps
+    routinely cross one. ``anchor`` may be a scalar (shared) or ``(P,)`` (one
+    per probe, which is what a batched pole solve needs).
+
     Returns
     -------
     tuple[NDArray, NDArray]
@@ -289,59 +410,14 @@ def local_fit_weights(
         :func:`continuation_weights`' output in :func:`contract_delta`.
 
     """
-    h = cell_width(energies)
-    e = xp.asarray(energies, dtype=xp.float64)
-    n_freq = int(e.shape[0])
-    if 2 * window < order + 1:
-        raise ValueError(
-            f"window={window} gives {2 * window} samples, too few for a "
-            f"degree-{order} fit."
-        )
     zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
-    n_probe = int(zz.shape[0])
-    w_pos = xp.zeros((n_probe, n_freq), dtype=xp.complex128)
-    w_mir = xp.zeros((n_probe, n_freq), dtype=xp.complex128)
-
-    for p in range(n_probe):
-        zp = complex(zz[p])
-        # The fit centre and stencil are chosen from ``anchor`` when given, so
-        # that Delta_an is a genuine analytic function of z. Deriving them from
-        # Re z instead makes M(z) only PIECEWISE holomorphic: the stencil index
-        # is round(Re z / h), so it switches discretely and the value jumps.
-        # Measured on a random Delta at h = 0.25: a 3.08e-01 step at the
-        # boundary against ~3.4e-03 within a stencil and a typical scale of
-        # 1.79, i.e. a 17 % discontinuity. Newton's trust radius is
-        # trust_radius_cells * h, so steps routinely cross one.
-        ref = zp.real if anchor is None else float(anchor)
-        positive = ref >= 0.0
-        w_c = ref if positive else -ref
-        centre = int(np.clip(round(w_c / h), 0, n_freq - 1))
-        lo = int(np.clip(centre - window, 0, max(0, n_freq - 2 * window)))
-        hi = min(n_freq, lo + 2 * window)
-        lo = max(0, hi - 2 * window)
-        idx = xp.arange(lo, hi)
-        t = (e[idx] - w_c) / h
-        vander = xp.stack([t**m for m in range(order + 1)], axis=1)
-        pinv = xp.linalg.pinv(vander.astype(xp.complex128))     # (order+1, 2*window)
-
-        if positive:
-            s, ds_dz = (zp.real - w_c + 1j * zp.imag) / h, 1.0 / h
-        else:
-            s, ds_dz = (-zp.real - w_c - 1j * zp.imag) / h, -1.0 / h
-        pw = []
-        for m in range(order + 1):
-            if m < deriv:
-                pw.append(0.0 * s)
-                continue
-            fall = 1.0
-            for j in range(deriv):
-                fall *= m - j
-            pw.append(fall * s ** (m - deriv) * ds_dz**deriv)
-        powers = xp.asarray(pw, dtype=xp.complex128)            # (order+1,)
-        row = powers @ pinv                                     # (2*window,)
-        target = w_pos if positive else w_mir
-        target[p, lo:hi] = row
-    return w_pos, w_mir
+    if anchor is None:
+        anchors = xp.real(zz)
+    else:
+        anchors = xp.broadcast_to(
+            xp.asarray(anchor, dtype=xp.float64).reshape(-1), zz.shape)
+    plan = LocalFitPlan(energies, anchors, order=order, window=window)
+    return plan.weights(zz, deriv=deriv)
 
 
 def delta_local_fit(

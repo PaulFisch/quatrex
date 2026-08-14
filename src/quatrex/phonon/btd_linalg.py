@@ -34,8 +34,16 @@ from qttools.kernels import linalg
 __all__ = ["BTDFactorization", "btd_matvec", "btd_norm2"]
 
 
+_OFFSET_CACHE: dict[tuple[int, ...], np.ndarray] = {}
+
+
 def _offsets(block_sizes) -> np.ndarray:
-    return np.concatenate(([0], np.cumsum(np.asarray(block_sizes, dtype=int))))
+    key = tuple(int(b) for b in block_sizes)
+    off = _OFFSET_CACHE.get(key)
+    if off is None:
+        off = np.concatenate(([0], np.cumsum(np.asarray(key, dtype=int))))
+        _OFFSET_CACHE[key] = off
+    return off
 
 
 def btd_matvec(
@@ -122,14 +130,24 @@ def btd_norm2(
 
     n_dof = int(sum(int(b.shape[-1]) for b in a_ii))
     stack = a_ii[0].shape[:-2]
+    # The adjoint blocks do not depend on the iterate, so they are built ONCE
+    # rather than rebuilt inside the power loop -- that was n_power copies of
+    # the whole operator per call, and this function is called twice per pole.
+    h_ii, h_ij, h_ji = ([dag(m) for m in a_ii], [dag(m) for m in a_ji],
+                        [dag(m) for m in a_ij])
     rng = xp.random.default_rng(seed)
-    v = (rng.standard_normal(stack + (n_dof, 1))).astype(a_ii[0].dtype)
+    # ONE start vector, broadcast over the batch. Drawing a different vector
+    # per batch element would make ||M||, and through it eps_nep and kappa,
+    # depend on how the candidates happen to be grouped into a batch -- a
+    # pole's conditioning is a property of its operator, not of its neighbours
+    # in the solve. Identical to the unstacked draw when stack == ().
+    v = (rng.standard_normal((n_dof, 1))).astype(a_ii[0].dtype)
     v /= xp.linalg.norm(v, axis=-2, keepdims=True)
+    v = xp.broadcast_to(v, stack + (n_dof, 1))
     lam = xp.zeros(stack)
     for _ in range(n_power):
         w = btd_matvec(a_ii, a_ij, a_ji, v)
-        u = btd_matvec([dag(m) for m in a_ii], [dag(m) for m in a_ji],
-                       [dag(m) for m in a_ij], w)
+        u = btd_matvec(h_ii, h_ij, h_ji, w)
         nrm = xp.linalg.norm(u, axis=-2, keepdims=True)
         lam = nrm[..., 0, 0]
         v = u / xp.where(nrm > 0, nrm, 1.0)

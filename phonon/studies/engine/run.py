@@ -15,7 +15,7 @@ Env overrides (optional, on top of the TOML):
   QX_POLE=1 (pole-subtracted SCBA sector) with QX_POLE_NP QX_POLE_SECTORS
   QX_POLE_WMIN QX_POLE_WMAX QX_POLE_SHEET QX_POLE_PGAMMA QX_POLE_AUDIT
   QX_POLE_PSD QX_POLE_LEG QX_POLE_NEWTIT QX_POLE_TRUST
-  QX_POLE_ACCEPT QX_POLE_LOCTOL QX_POLE_TRUSTF.
+  QX_POLE_ACCEPT QX_POLE_LOCTOL QX_POLE_LOCTOLOUT QX_POLE_TRUSTF.
 
 Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
 (qttools default "cupy" with silent NumPy fallback); set it explicitly for
@@ -106,6 +106,7 @@ if os.environ.get("QX_POLE_PGAMMA"): cfg.phonon.pole_sector.samples_per_halfwidt
 if os.environ.get("QX_POLE_QSTRIDE"): cfg.phonon.pole_sector.q_stride = int(os.environ["QX_POLE_QSTRIDE"])
 if os.environ.get("QX_POLE_QMAX"): cfg.phonon.pole_sector.q_max = int(os.environ["QX_POLE_QMAX"])
 if os.environ.get("QX_POLE_LEGWTOL"): cfg.phonon.pole_sector.leg_weight_tol = float(os.environ["QX_POLE_LEGWTOL"])
+if os.environ.get("QX_POLE_LEGWTOLOUT"): cfg.phonon.pole_sector.leg_weight_tol_out = float(os.environ["QX_POLE_LEGWTOLOUT"])
 if os.environ.get("QX_POLE_BUBCORR"): cfg.phonon.pole_sector.bubble_correction = os.environ["QX_POLE_BUBCORR"]
 if os.environ.get("QX_POLE_SIGMIN"): cfg.phonon.pole_sector.covariance_sigma_min = float(os.environ["QX_POLE_SIGMIN"])
 if os.environ.get("QX_POLE_EXTRACT"): cfg.phonon.pole_sector.extraction_only = bool(int(os.environ["QX_POLE_EXTRACT"]))
@@ -125,6 +126,7 @@ if os.environ.get("QX_POLE_TRUST"): cfg.phonon.pole_sector.trust_radius_cells = 
 # old runs reproduce. newton_tol is untouched by either.
 if os.environ.get("QX_POLE_ACCEPT"): cfg.phonon.pole_sector.accept = os.environ["QX_POLE_ACCEPT"]
 if os.environ.get("QX_POLE_LOCTOL"): cfg.phonon.pole_sector.locate_tol = float(os.environ["QX_POLE_LOCTOL"])
+if os.environ.get("QX_POLE_LOCTOLOUT"): cfg.phonon.pole_sector.locate_tol_out = float(os.environ["QX_POLE_LOCTOLOUT"])
 # Physical trust radius as a fraction of min(nearest seed, nearest band edge).
 # Set tiny to reproduce the old grid-tied radius, which floors it at
 # trust_radius_cells * h.

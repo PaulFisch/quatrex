@@ -41,9 +41,14 @@ from quatrex.phonon.pole_keldysh import (
     occupation_matrix,
     project_source,
 )
-from quatrex.phonon.pole_kernel import sigma_retarded_at_z
+from quatrex.phonon.pole_kernel import (
+    LocalFitPlan, bosonic_partner, contract_delta, continuation_weights,
+    local_fit_weights, sigma_retarded_at_z,
+)
 from quatrex.phonon.pole_nevp import PoleSolution, bordered_newton
-from quatrex.phonon.pole_probe import assemble_m_blocks, nnz_to_blocks
+from quatrex.phonon.pole_probe import (
+    BlockLayout, assemble_m_blocks, nnz_to_blocks,
+)
 from quatrex.phonon.pole_tracker import (
     PoleTracker, cluster_poles, match_cost, match_poles, predict_shift,
 )
@@ -434,9 +439,17 @@ class PoleSector:
         """
         if getattr(self.cfg, "accept", "locate") == "locate":
             eps_z = self.locate_error(sol, separation)
-            if not np.isfinite(eps_z) or eps_z > self.cfg.locate_tol:
-                return (f"eps_z={eps_z:.2e} above locate_tol "
-                        f"(eps_nep={sol.eps_nep:.2e})")
+            # Hysteresis, same rule as q_in/q_out below: strict to enter,
+            # lenient to stay. A single threshold here closes a feedback loop
+            # through Sigma and the promoted set limit-cycles with period two
+            # (measured on Si: 620 <-> 460 poles, residual stuck at O(1)).
+            tol_z = (float(getattr(self.cfg, "locate_tol_out",
+                                   self.cfg.locate_tol))
+                     if was_promoted else self.cfg.locate_tol)
+            if not np.isfinite(eps_z) or eps_z > tol_z:
+                return (f"eps_z={eps_z:.2e} above "
+                        f"{'locate_tol_out' if was_promoted else 'locate_tol'}"
+                        f"={tol_z:g} (eps_nep={sol.eps_nep:.2e})")
         elif not sol.converged:
             return f"eps_nep={sol.eps_nep:.2e} above tolerance"
         gamma = -sol.z.imag
@@ -449,6 +462,12 @@ class PoleSector:
         if tol > 0.0:
             # Exact: how much of the line's weight the grid can misrepresent,
             # worst case over where it falls between nodes. See leg_weight_tol.
+            # Hysteresis runs the other way here than for eps_z: this gate
+            # refuses a pole the grid ALREADY resolves, so staying in the
+            # sector means a smaller threshold, not a larger one.
+            if was_promoted:
+                out = float(getattr(self.cfg, "leg_weight_tol_out", 0.0) or 0.0)
+                tol = out if out > 0.0 else tol / 3.0
             err = self.leg_weight_error(gamma)
             if err <= tol:
                 return (f"grid-resolved (worst line-weight error {err:.3g} "
@@ -624,6 +643,13 @@ class PoleSector:
         sheet -- which is where the currently supported pole classes live, in a
         contact gap or weakly coupled -- the contact contribution is flat over a
         window narrower than its own scale.
+
+        Everything that does NOT depend on ``z`` is built here, once. The
+        bordered Newton evaluates the operator about six times per candidate
+        and used to rebuild all of it every time: the bosonic mirror of
+        ``Delta`` (identical on every call, ``a`` being ``Delta``), the scatter
+        from the stored sparsity pattern into dense blocks, and the dense
+        ``D``. See :class:`~quatrex.phonon.pole_probe.BlockLayout`.
         """
         d = xp.asarray(delta)
         if d.ndim > 2:
@@ -648,6 +674,66 @@ class PoleSector:
         )
         self._block_sizes = np.asarray(_host(block_sizes), dtype=int)
         self._rows, self._cols = rows, cols
+        self._n_dof = int(np.sum(self._block_sizes))
+        self._set_layout()
+
+    def _set_layout(self) -> None:
+        """Build the z-independent half of the operator (see above)."""
+        self._layout = BlockLayout(self._rows, self._cols, self._block_sizes,
+                                   band=1)
+        self._delta_mirror = bosonic_partner(self._delta)
+        self._delta_lay = self._layout.gather(self._delta)
+        self._mirror_lay = self._layout.gather(self._delta_mirror)
+        d_lay = self._layout.flatten_blocks(self._d_blocks)
+        # Drop leading singletons: the dynamical matrix carries a singleton
+        # where the Keldysh buffers carry frequency, and the operator's own
+        # batch axis is the probe axis.
+        self._d_lay = d_lay.reshape(-1, self._layout.total)
+        if self._d_lay.shape[0] == 1:
+            self._d_lay = self._d_lay[0]
+
+    # -- the anchor-pinned fit ---------------------------------------------- #
+
+    def _set_fit_anchors(self, anchors) -> None:
+        """Pin the local-fit stencil for a whole batched Newton solve.
+
+        One anchor per candidate. Pinning makes ``M(z)`` a genuine analytic
+        function of ``z`` for that candidate's whole solve; deriving the
+        stencil from ``Re z`` instead makes ``M`` only PIECEWISE holomorphic,
+        with a measured 17 % jump at each stencil boundary. The stencil and its
+        pseudo-inverse depend on nothing else, so they are built once here
+        rather than at every Newton step.
+        """
+        if anchors is None:
+            self._fit_anchors = self._fit_plan = None
+            return
+        self._fit_anchors = xp.asarray(anchors, dtype=xp.float64).reshape(-1)
+        self._fit_plan = LocalFitPlan(
+            self.global_freqs, self._fit_anchors,
+            order=self.cfg.delta_fit_order,
+            window=self.cfg.delta_fit_window_cells,
+        )
+
+    def _weights(self, zz: NDArray, order: int) -> tuple[NDArray, NDArray]:
+        """``(w_pos, w_mir)`` on this rank's frequency columns, ``(P, n_local)``."""
+        w_pos, w_mir = continuation_weights(zz, self.global_freqs, order=order)
+        plan = getattr(self, "_fit_plan", None)
+        if plan is None:
+            f_pos, f_mir = local_fit_weights(
+                self.global_freqs, zz, order=self.cfg.delta_fit_order,
+                window=self.cfg.delta_fit_window_cells, deriv=order,
+            )
+        else:
+            if plan.n_probe != int(zz.shape[0]):
+                raise ValueError(
+                    f"the fit anchors are pinned for {plan.n_probe} candidates "
+                    f"but the operator was asked for {int(zz.shape[0])} probe "
+                    "points; the anchor must accompany its candidate."
+                )
+            f_pos, f_mir = plan.weights(zz, deriv=order)
+        lo = self._freq_offset
+        hi = lo + int(self._delta.shape[0])
+        return w_pos[:, lo:hi] + f_pos[:, lo:hi], w_mir[:, lo:hi] + f_mir[:, lo:hi]
 
     def continue_sigma(self, z: NDArray, order: int = 0) -> NDArray:
         r"""``Sigma_s^{R,II}(z)`` (or its ``order``-th derivative) on the pattern.
@@ -661,69 +747,82 @@ class PoleSector:
         needed, and in the serial case the reduction is the identity, so this
         is bit-identical to the undistributed path.
         """
-        from quatrex.phonon.pole_kernel import (
-            contract_delta, continuation_weights, local_fit_weights,
-        )
-
         zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
-        w_pos, w_mir = continuation_weights(zz, self.global_freqs, order=order)
-        f_pos, f_mir = local_fit_weights(
-            self.global_freqs, zz, order=self.cfg.delta_fit_order,
-            window=self.cfg.delta_fit_window_cells, deriv=order,
-            anchor=self._fit_anchor,
-        )
-        lo = self._freq_offset
-        hi = lo + int(self._delta.shape[0])
-        val = contract_delta(self._delta,
-                             w_pos[:, lo:hi] + f_pos[:, lo:hi],
-                             w_mir[:, lo:hi] + f_mir[:, lo:hi])
+        w_pos, w_mir = self._weights(zz, order)
+        val = contract_delta(self._delta, w_pos, w_mir,
+                             mirror=getattr(self, "_delta_mirror", None))
         return self._reduce(val)
 
-    def _sigma_blocks_at(self, z: complex, order: int):
+    def _continue_flat(self, zz: NDArray, order: int) -> NDArray:
+        """``Sigma_s^{R,II}`` already laid out in band-block order, ``(P, total)``.
+
+        Same contraction as :meth:`continue_sigma`, against ``Delta`` gathered
+        once into the block layout, so the per-step scatter into dense blocks
+        disappears: the result IS the block buffer.
+        """
+        w_pos, w_mir = self._weights(zz, order)
+        return self._reduce(w_pos @ self._delta_lay + w_mir @ self._mirror_lay)
+
+    def _sigma_blocks_at(self, z, order: int):
         """Scattering self-energy blocks at complex ``z``."""
-        val = self.continue_sigma(xp.asarray([z]), order=order)
+        val = self.continue_sigma(xp.asarray(z).reshape(-1), order=order)
         return nnz_to_blocks(val, self._rows, self._cols, self._block_sizes,
                              band=1)
 
-    def _obc_at(self, z: complex):
-        """Contact blocks sampled at the grid frequency nearest ``Re z``.
+    def _obc_at(self, zz: NDArray):
+        """Contact blocks sampled at the grid frequency nearest each anchor.
 
-        A leading frequency axis is reduced here and nowhere else, so
-        ``assemble_m_blocks`` always sees one matrix per block.
+        A leading frequency axis is reduced here and nowhere else, so the
+        assembled operator always sees one matrix per block per candidate.
         """
+        anchors = getattr(self, "_fit_anchors", None)
+        # Pinned to the same anchor as the fit: sampling the contact at the
+        # point nearest Re z would reintroduce a jump into M(z).
+        ref = xp.real(zz) if anchors is None else anchors
         out = []
         for o in self._obc:
             if o is None or o.ndim < 3:
                 out.append(o)
                 continue
-            # Pinned to the same anchor as the fit: sampling the contact at
-            # the point nearest Re z would reintroduce a jump into M(z).
-            ref = z.real if self._fit_anchor is None else self._fit_anchor
-            k = int(np.argmin(np.abs(np.asarray(_host(self.freqs)) - ref)))
+            k = xp.argmin(xp.abs(self.freqs[None, :] - ref[:, None]), axis=1)
             out.append(o[k])
         return out[0], out[1]
 
     def operator(self):
-        """``(m_blocks, dm_blocks)`` closures over the stored context."""
+        """``(m_blocks, dm_blocks)`` closures over the stored context.
+
+        Both take a VECTOR of probe points and return block-tridiagonal blocks
+        with a leading candidate axis. The blocks are reshaped views of one
+        flat buffer, so the whole assembly is two GEMMs and a handful of
+        elementwise kernels regardless of how many candidates or blocks there
+        are.
+        """
+        lay = self._layout
+        last = len(self._block_sizes) - 1
+
+        def _flat(zz):
+            return xp.zeros((int(zz.shape[0]), lay.total), dtype=xp.complex128)
 
         def m_blocks(z):
-            sig = {k: v[0] for k, v in self._sigma_blocks_at(z, 0).items()}
-            obc_l, obc_r = self._obc_at(z)
-            return assemble_m_blocks(
-                z, self._d_blocks, sig, obc_left=obc_l, obc_right=obc_r,
-                block_sizes=self._block_sizes,
-            )
+            zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+            # Assembled in the same order as the scalar path built it,
+            # z^2 I - D - Sigma_s - Sigma_c, so the arithmetic matches.
+            flat = _flat(zz)
+            flat[..., lay.diag] = (zz * zz)[:, None]
+            flat = flat - self._d_lay - self._continue_flat(zz, 0)
+            obc_l, obc_r = self._obc_at(zz)
+            for obc, i in ((obc_l, 0), (obc_r, last)):
+                if obc is not None:
+                    sl = lay.corner[i]
+                    flat[..., sl] -= xp.asarray(obc).reshape(
+                        xp.asarray(obc).shape[:-2] + (-1,))
+            return lay.blocks(flat)
 
         def dm_blocks(z):
-            sig = {k: v[0] for k, v in self._sigma_blocks_at(z, 1).items()}
-            n = len(self._block_sizes)
-            a_ii = [
-                2.0 * z * xp.eye(int(self._block_sizes[i]), dtype=xp.complex128)
-                - sig[(i, i)] for i in range(n)
-            ]
-            a_ij = [-sig[(i, i + 1)] for i in range(n - 1)]
-            a_ji = [-sig[(i + 1, i)] for i in range(n - 1)]
-            return a_ii, a_ij, a_ji
+            zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
+            flat = _flat(zz)
+            flat[..., lay.diag] = 2.0 * zz[:, None]
+            return lay.blocks(flat - self._continue_flat(zz, 1))
 
         return m_blocks, dm_blocks
 

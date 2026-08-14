@@ -463,3 +463,59 @@ is attributed to `g_band = 2` across families that also differ in
 (`[1,9,9]`, 81 q). **No run in the recorded history has used `q_comm_size > 1`**
 — 94 of 94 are `qcs = 1` — so the q axis has only ever been carried in the
 stack. See `pole_sector_coupled_q.md`.
+
+---
+
+## 8. The promoted set limit-cycles (Si, 2026-08-14)
+
+Run `psi2` (daint 4464697), Si `sichk_base`, 81 q, `h = 0.25`, `wmax = 35`,
+`retarded=fft`, `mix = 0.1`, `leg="congruence"`. Two arms on the same grid.
+
+    base   150 it   rel Sigma -> 9.2597e-04, monotone, lead_current 400.611
+    pole    34 it   rel Sigma oscillating at O(1), no downward trend
+
+The pole arm's per-iteration pole count:
+
+    624 431 576 433 569 436 556 442 578 462 608 466 618 463 630 479
+    641 470 628 479 651 479 622 454 634 463 621 450 619 447 624 446 625
+
+A period-2 limit cycle: ~620 poles on odd iterations, ~460 on even, ~170
+poles (27 % of the set) entering and leaving every iteration for 34
+iterations with no sign of settling. The wall time alternates with it
+(185 s against 85 s per iteration) and so does the residual.
+
+**Cause.** `accept="locate"` (the default since the `eps_z` work) tests
+`eps_z <= locate_tol` as the FIRST gate in `PoleSector.screen`, and it was a
+single hard threshold — `was_promoted` was not consulted. A hard threshold
+inside a fixed-point iteration closes a feedback loop: the pole enters the
+sector, its leg changes Sigma, `eps_z` drifts past the threshold, the pole is
+demoted, Sigma changes back, the pole is re-promoted.
+
+The `q_in`/`q_out` gap was built for exactly this and its config validator
+says so ("the gap IS the hysteresis that stops a mode changing sector every
+iteration"). It did not help: that gate runs *behind* the `eps_z` one and
+never sees a pole `eps_z` has already refused. `leg_weight_tol` has the same
+hole and is worse, because setting it *replaces* the `q_in`/`q_out` branch
+rather than adding to it, leaving no hysteresis anywhere.
+
+The existing hysteresis test could not catch it: it sets `dz_est = 0`, so
+`eps_z` is identically zero and the gate never fires.
+
+**Fix.** `locate_tol_out` (default 0.15 against `locate_tol` 0.05) and
+`leg_weight_tol_out` (default `leg_weight_tol / 3`), both validated to lie on
+the correct side, both wired into `screen` under `was_promoted`. Note the
+inequality runs the other way for the two: `eps_z` refuses a *badly located*
+pole so leniency raises the threshold, while `leg_weight` refuses a
+*well-resolved* one so leniency lowers it. Regression tests
+`test_eps_z_gate_has_hysteresis` and `test_leg_weight_gate_has_hysteresis`.
+
+Hysteresis can only ever retain a pole that would otherwise be dropped; it
+cannot admit one that `locate_tol` refused. So this does not loosen
+acceptance, and a run that never re-screens a promoted pole is unchanged.
+
+**Not yet verified on device.** The claim that this is *the* driver rests on
+the mechanism plus the period-2 signature; it is confirmed when a rerun of
+the `pole` arm shows the pole count settling. That rerun is the next step,
+and it should come before any of the batching work in
+`pole_solve_batching.md` — a 20x faster pole solve is worth nothing while the
+SCBA does not converge.
