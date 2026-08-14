@@ -519,3 +519,44 @@ the `pole` arm shows the pole count settling. That rerun is the next step,
 and it should come before any of the batching work in
 `pole_solve_batching.md` — a 20x faster pole solve is worth nothing while the
 SCBA does not converge.
+
+### 8.1 Result (psih, 4466692, 2026-08-14)
+
+Same bed and grid as `psi2`'s pole arm, 21 iterations before the 30-minute
+debug wall. Promoted-pole count:
+
+    309 310 301 301 305 300 306 301 299 296 359
+    347 349 349 356 346 344 343 337 344 347
+
+**The period-2 limit cycle is gone.** No alternation anywhere in 21
+iterations, the band is 296-359 against `psi2`'s 431-651 sawtooth, and two
+consecutive iterations (349, 349) return an identically-sized set.
+
+Residual against the base arm at the same iteration:
+
+    base  1.0000 0.9984 0.9695 0.7871 0.9418 0.7604 0.6317 0.8432 0.7594
+          0.6715 0.5353 0.4297 0.3997 0.3825 0.3715 0.3688 0.3599 0.3404
+          0.3098 0.2714 0.2352 0.1982
+    psih  1.0000 0.9990 0.9744 0.9117 0.9100 0.6930 0.8004 0.6562 0.5334
+          0.5105 0.4904 0.5104 0.5132 0.4709 0.3930 0.3035 0.2587 0.2291
+          0.2012 0.2481 0.2927 0.3054
+
+`psih` tracks the base arm: same order, same wobbly descent, ahead of base
+between iterations 9 and 19 (0.533 against 0.759; 0.201 against 0.310) and
+behind over the last three. Both arms wobble -- base rises 0.787 -> 0.942 at
+iteration 5 and 0.632 -> 0.843 at iteration 8 -- so `psih`'s rise over its
+last three is inside the envelope the baseline itself shows, not a turn.
+Lead balance stays at 3e-04 throughout, against `psi2`'s 1e-02.
+
+**Confounded, and this must not be forgotten.** `psih` runs `e4e8e05e`,
+which carries BOTH the hysteresis fix and the in-flight batching refactor
+(`BlockLayout`, `bordered_newton_batch`, vectorised `m_blocks`/`dm_blocks`/
+`continue_sigma`). `psi2` ran `f6bd76f7`, which has neither. The refactor is
+not numerically neutral: it changes the count at iteration 1, from 624 to
+309, where hysteresis provably cannot act because `was_promoted` is False
+for every candidate. So this run does not attribute the fix to either
+change. The `P = 1` bit-identity gate of `pole_solve_batching.md` Sec. 3 has
+not been run and is what would separate them.
+
+Still open: a long normal-partition arm to carry `psih` to the base arm's
+9.2597e-04 and compare `lead_current` against 400.611.
