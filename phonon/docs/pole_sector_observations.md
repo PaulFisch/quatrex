@@ -866,3 +866,77 @@ the same family as Sec. 11.1.
 iterations, so the arrays they inspect may simply be in a half-built state.
 They are recorded here to be re-checked on a run that finishes, not fixed
 blind.
+
+---
+
+## 12. The fine-grid breakdown is not an OBC artefact (2026-08-14)
+
+Sec. 10.1 concluded that Si has no fine-grid limit, from `retarded = half`
+runs at `wmax = 20` -- below twice the ~15 THz band top, so with a truncated
+Kramers-Kronig integral, and with no KK correction computed at all. Both
+objections are fair, so the test was redone with every one of them removed:
+
+| | Sec. 10.1 (`sires`) | this test |
+|---|---|---|
+| bed | `sichk_base`, 3 cells x 1 | **`si4x2`, 2 cells per slab** |
+| `retarded` | half | **fft** |
+| `wmax` | 20 (band top ~15) | **35** |
+| `sse_g_band` | 3 (default) | 3 (default, confirmed unset) |
+| `eta` | 0 | 0 |
+
+`si4x2` is 4 atoms x 2 transport cells = the SAME 8-atom device as `si4x1`'s
+2 x 4, blocked 2x2 rather than 4x1.
+
+### 12.1 It still diverges
+
+`obc8k2n` (4476664), `ne = 8001`, 8 ranks, pole sector off:
+
+    rel Sigma:  1.0000e+00 -> 2.0665e+03 -> 3.2963e+03
+
+Three iterations is short and early SCBA transients are large, but `siladder`
+base at `ne = 141` stays at O(1) through the same iterations, and this grows.
+**The corrected setup does not rescue the fine grid.** Sec. 10.1's conclusion
+survives its own methodological objection.
+
+### 12.2 And it is not the boundary conditions
+
+The spectral OBC reports a 65 % relative error on its own surface-Green's-
+function recursion at this spacing, localised to rank 2 of 8 -- with 8001
+points over `wmax = 35`, `omega ~ 8.8-13.1 THz`, INSIDE the phonon band where
+the lead's NEVP roots crowd the unit circle. That made the OBC a candidate
+cause. Three arms differing ONLY in the boundary solver:
+
+| arm | algorithm | NEVP | warnings | worst rel. recursion | residual |
+|---|---|---|---|---|---|
+| `spec` (4476664) | spectral | beyn | rank 2, both contacts | 6.507e-01 | 1.0 -> 2.07e+03 -> 3.30e+03 |
+| `full` (4478364) | spectral | **full** | rank 2, both contacts | 6.507e-01 | 1.0, running |
+| `sr` (4478344) | **sancho-rubio** | -- | **ranks 0, 1, 3**, both contacts | -- | **nan** |
+
+**All three fail.** The reading:
+
+* `full` shares the spectral CONSTRUCTION with `spec` but replaces Beyn's
+  contour with a dense linearised eigensolve -- no contour to tune -- and
+  reproduces `spec` exactly, same rank, same 6.507e-01. So the contour is not
+  the cause.
+* `sancho-rubio` shares none of that construction, is iterative, and is
+  strictly WORSE: it fails on three ranks instead of one and returns `nan` on
+  the first residual.
+
+So the recursion error is a symptom of the fine grid, not its cause, and no
+available OBC algorithm removes it. `QX_OBC_ALG` / `QX_NEVP` are wired
+(`phonon.obc.algorithm`, `phonon.obc.nevp_solver`) and remain useful knobs,
+but they do not change this answer.
+
+### 12.3 Cost, for anyone tempted to run a converged fine grid
+
+`ne = 8001`, 81 q, `si4x2`:
+
+* **4 ranks: OOM** at ~100 GB/rank, zero iterations. The failing allocation is
+  twice the local `(2001, 81, 576)` block -- the KK transform's FFT padding.
+* **8 ranks: fits**, at 643-683 s per iteration, of which the ring contraction
+  is 556-596 s and the OBC 84 s.
+
+150 iterations is therefore ~27 h, about **55 node-hours on 2 nodes**. Memory
+binds before walltime, and sizing such a run from a per-iteration timing
+alone gets the wrong answer. The fine grid is a DIAGNOSTIC on this bed, not a
+reference that can be converged to.
