@@ -235,3 +235,54 @@ difference (185/85 s against the base arm's 9.97 s) and by the local cProfile
 of `refresh()`, which measured `solve_poles` directly at 98 % of 12.9 ms per
 candidate. 11,664 candidates x 12.9 ms = 150 s, which is the observed
 increment.
+
+---
+
+## 6. Result, measured on device (job 4468380, 2026-08-14)
+
+Si `sichk_base`, 81 q, `ne = 141`, the same arm as `cluster/pgate/sipole2.sh`,
+four SCBA iterations at `QTX_PROFILE_LEVEL=default`. Seconds per iteration,
+iterations 1-3 (iteration 0 has no scattering yet and returns early):
+
+| | `Pole sector` | of which `Pole solve` | rest (legs) | `PhononSolver` |
+|---|---|---|---|---|
+| q batched (81 per solve) | 34.3 / 21.2 / 35.7 | **0.77 / 0.77 / 0.41** | 33.6 / 20.4 / 35.3 | 43.4 / 30.2 / 44.7 |
+| `q_batch = 1` (per-q solve) | 40.2 / 27.9 / 43.0 | **7.51 / 7.71 / 7.48** | 32.7 / 20.2 / 35.5 | 49.2 / 36.8 / 51.9 |
+| sector off | 0.0 | -- | -- | 8.97 / 8.98 / 8.97 |
+
+The bubble (`PhPh SSE: 3 ring contraction`) is 7.3-7.6 s throughout and is
+unmoved, as it must be.
+
+**The corrector is done.** Sec. 0 attributed about 177 s of the 187 s increment
+to the pole solve. It is now **0.4-0.8 s**, against the bubble's 7.4 s: a
+factor of roughly 250, of which about 24 comes from batching the candidates
+within a q (Secs. 2.1-2.4, the `q_batch = 1` row) and a further 12 from
+batching across q (Sec. 2.5). Wall clock per arm is not the number to read --
+the first arm in a job also pays the one-time fc3 load and CUDA context setup,
+which is why the faster arm has the longer wall time (261 s against 184 s) --
+the profiled ranges are.
+
+**The bottleneck moved rather than vanished.** `Pole sector` is still 21-36 s,
+and now essentially all of it is `_build_pole_keldysh`: the leg construction,
+which Sec. 0 never separated from the solve because the label was broken. It
+scales with the promoted count at about **55 ms per pole** (624 poles -> 33.6 s,
+437 -> 20.4 s, 580 -> 35.3 s) and is the same in both rows, as it must be,
+being untouched. So `PhononSolver` is 30-45 s against the base arm's 9.0 s, and
+the sector remains the dominant cost of the run.
+
+That is the same defect one level out: `_build_pole_keldysh` loops over q in
+Python and, inside each q, over clusters, calling `project_source_sparse`,
+`add_contact_source`, `source_variation` and the congruence routines on one
+small cluster at a time. The clusters are independent, the operations are the
+same shape for all of them, and the arithmetic per call is tiny -- which is the
+description Sec. 0 gives of the solve. It should be batched the same way, and
+`Pole legs` (currently at `debug` level, one range per q) is the number to
+judge it by.
+
+**Open.** `q_batch` is not bit-invariant across a whole SCBA trajectory on GPU:
+the promoted count reads 624 against 622 at the first iteration and 437 against
+437 at the second. Batched and unbatched GEMMs differ in the last ulps and this
+run is nowhere near converged (`rel Sigma` is O(25) at iteration 3), so these
+four iterations cannot separate solver roundoff from ordinary trajectory
+amplification. A converged A/B would settle it; nothing here depends on it,
+since the batch size is a memory knob.

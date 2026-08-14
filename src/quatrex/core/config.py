@@ -480,9 +480,18 @@ class PoleSectorConfig(BaseModel):
 
     This is therefore a MEMORY knob, not a numerics one. A batch holds the
     self-energy of its q gathered into the block layout, plus its bosonic
-    mirror, so peak use grows linearly with the batch and results must be
-    independent of it (which is a test). Lower it if the pole solve runs out of
-    device memory on a large device; there is no accuracy reason to."""
+    mirror, so peak use grows linearly with the batch. Lower it if the pole
+    solve runs out of device memory on a large device; there is no accuracy
+    reason to.
+
+    ONE solve is independent of it to well below a linewidth, which is a test.
+    A whole SCBA trajectory is not bit-independent of it, for the same reason
+    no two floating-point summation orders are: batched and unbatched GEMMs
+    differ in the last ulps, and an unconverged fixed-point iteration amplifies
+    that like any other perturbation. Measured on Si (job 4468380, 81 q, 4
+    iterations, ``rel Sigma`` still O(25)): 624 against 622 promoted poles at
+    the first iteration and 437 against 437 at the second. Do not use it to
+    reproduce a run bit-for-bit; do use it to fit one in memory."""
     extraction_only: bool = False
     """Run the pole SOLVE and print the census, then allocate NO sector.
 
