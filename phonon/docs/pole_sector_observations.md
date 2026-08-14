@@ -909,15 +909,20 @@ cause. Three arms differing ONLY in the boundary solver:
 | arm | algorithm | NEVP | warnings | worst rel. recursion | residual |
 |---|---|---|---|---|---|
 | `spec` (4476664) | spectral | beyn | rank 2, both contacts | 6.507e-01 | 1.0 -> 2.07e+03 -> 3.30e+03 |
-| `full` (4478364) | spectral | **full** | rank 2, both contacts | 6.507e-01 | 1.0, running |
-| `sr` (4478344) | **sancho-rubio** | -- | **ranks 0, 1, 3**, both contacts | -- | **nan** |
+| `full` (4478364) | spectral | **full** | rank 2, both contacts | 6.507e-01 | 1.0 -> 2.07e+03 (identical to `spec`) |
+| `sr` (4478344) | **sancho-rubio** | -- | **ranks 0, 1, 3**, both contacts | -- | **nan** (from the first residual, and stays) |
 
 **All three fail.** The reading:
 
 * `full` shares the spectral CONSTRUCTION with `spec` but replaces Beyn's
   contour with a dense linearised eigensolve -- no contour to tune -- and
-  reproduces `spec` exactly, same rank, same 6.507e-01. So the contour is not
-  the cause.
+  reproduces it EXACTLY: same rank, same 6.507e-01, and the same residual to
+  every printed digit (2.0665e+03 at iteration 2, lead balance 2.8270e-04,
+  internal spread 7.0728e-02 in both). Beyn and the dense eigensolve agree
+  bit-for-bit, so the contour is well converged and is finding the same roots.
+  The recursion error is therefore NOT a root-finding accuracy problem: the
+  spectral REPRESENTATION of the surface Green's function cannot satisfy its
+  own recursion in that in-band window however its modes are computed.
 * `sancho-rubio` shares none of that construction, is iterative, and is
   strictly WORSE: it fails on three ranks instead of one and returns `nan` on
   the first residual.
