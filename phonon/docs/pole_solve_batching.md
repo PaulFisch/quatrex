@@ -286,3 +286,77 @@ run is nowhere near converged (`rel Sigma` is O(25) at iteration 3), so these
 four iterations cannot separate solver roundoff from ordinary trajectory
 amplification. A converged A/B would settle it; nothing here depends on it,
 since the batch size is a memory knob.
+
+---
+
+## 7. The legs, batched too (job 4469760, 2026-08-14)
+
+Sec. 6 left the corrector at 0.6 s and the leg build at 21-36 s, and named it
+the same defect one level out. It was. Same bed, same arm, four iterations,
+seconds per iteration 1-3:
+
+| | `Pole solve` | `Pole legs` | `Pole sector` | `PhononSolver` |
+|---|---|---|---|---|
+| before anything (Sec. 0) | ~177 | ~33* | 185 / 85 | 185 / 85 |
+| solve batched (Sec. 6) | 0.77 / 0.77 / 0.41 | 33.6 / 20.4 / 35.3* | 34.3 / 21.2 / 35.7 | 43.4 / 30.2 / 44.7 |
+| legs batched | **0.73 / 0.68 / 0.50** | **3.00 / 0.41 / 0.60** | **3.81 / 1.16 / 1.17** | **13.0 / 10.4 / 10.3** |
+| `q_batch = 1` | 7.60 / 7.84 / 7.83 | 1.26 / 1.05 / 1.09 | 8.95 / 8.97 / 9.00 | 18.1 / 18.1 / 18.0 |
+| sector off | -- | -- | 0.0 | 9.29 / 8.96 / 8.95 |
+
+\* by difference; the label did not exist until Sec. 5 was fixed.
+
+The bubble is 7.4-7.7 s throughout and unmoved. The first leg build of a run
+costs 3.0 s against 0.4-0.6 s afterwards -- allocation, not work.
+
+**The sector is no longer the bottleneck.** `PhononSolver` is 10.3 s against
+the pole-free arm's 8.95 s, so the whole pole sector now costs about **1.2 s on
+top of a 9 s solve, against 176 s before** -- and 16 % of the bubble it sits
+beside rather than 25 times it.
+
+The `q_batch = 1` row separates the two levels of batching. Within a q the leg
+is batched either way, which is why its legs are 1.1 s rather than 33 s;
+sharing the q on top is worth a further ~2x there and ~15x on the corrector,
+where the per-q operator is far too small to occupy a GPU.
+
+### What made the legs 60x
+
+`V^dagger Sigma_tot V` was computed twice -- once as the projected source and
+once as `background_coefficients`' `c_ss`, which the config docstring already
+observed are the same object. `c_sr` is *defined* as `-conj(c_rs^T)`, so the
+`SR` sector is the conjugate transpose of `RS` on the pattern (1.4e-16), which
+halves the sector work. `source_at_poles` ran two least-squares solves per pole
+PAIR and discarded `Np^2 - 1` of each result. And `BlockLayout` now carries the
+band as a `(n_blocks, 3, b, b)` TENSOR instead of a list of blocks, so applying
+a block-tridiagonal operator is one GEMM over the `(offset, column)` axis and
+nothing walks the blocks.
+
+### Bounded, not merely smaller
+
+The number of contractions the leg ISSUES is now identical under 16x the q, 4x
+the clusters, 8x the poles, 4x the frequencies and 4x the blocks -- asserted,
+not measured once (`test_pole_legs.py`). What remains is bookkeeping: about 11
+Python calls per q to read that q's cluster set and attach lazy views to its
+state, doing no arithmetic and issuing no array operation. That is inherent to
+one `PoleSector` per q, which is physics -- pole identity is per q.
+
+The corrector still carries roughly 1,500 host-side calls per q in the
+screening, clustering and matching layer, which works pole by pole. That is
+~0.5 s of the 0.5-0.7 s `Pole solve` and is the remaining candidate.
+
+### The trajectory moves, and this run cannot say why
+
+The promoted counts are 624 / 420 / 555 here against 624 / 437 / 580 in Sec. 6.
+Iteration 1 agrees exactly -- it is the only iteration whose input is identical
+-- and the divergence begins where the legs first feed back.
+
+That is expected but not proven from four iterations. `rel Sigma` is O(1) to
+O(30), Paul's Sec. 8 records that the promoted set limit-cycles, and in that
+regime any change of summation order selects a branch. The control is in the
+table: `q_batch` is provably the same arithmetic modulo chunk boundaries, and
+changing it alone moves the count 420 -> 424 and 555 -> 559, the same character
+and order as the change between commits. The leg itself is gated at 1e-15
+against the per-cluster path on six bed shapes including ragged clusters,
+ragged pole counts and non-uniform blocks.
+
+A converged A/B is what would settle it, and that is a normal-partition job,
+not a debug slot.

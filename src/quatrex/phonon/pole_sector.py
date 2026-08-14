@@ -941,24 +941,28 @@ class PoleSector:
         cols = np.asarray(_host(self._cols), dtype=int)
 
         lo, hi = self.window()
-        seeds: list[complex] = []
-        for k, l in enumerate(lam.real):
-            if l <= 0.0:
-                continue
-            om = float(np.sqrt(l))
-            if not (lo <= om <= hi):
-                continue
-            # Delta at Omega, linearly interpolated from the grid.
-            idx = int(np.clip(np.searchsorted(w, om), 1, w.size - 1))
-            f = (om - w[idx - 1]) / (w[idx] - w[idx - 1])
-            vals = (1.0 - f) * delta[idx - 1] + f * delta[idx]
-            mat = np.zeros((n_dof, n_dof), dtype=complex)
-            mat[rows, cols] = vals
-            v = vec[:, k]
-            gamma = -float(np.imag(np.vdot(v, mat @ v))) / (4.0 * om)
-            gamma = max(gamma, 1e-12)
-            seeds.append(complex(om, -gamma))
-        return seeds
+        # Over the whole spectrum at once. The loop this replaces built a dense
+        # (n_dof, n_dof) Delta per MODE -- n_dof of them per q, so n_dof * n_q
+        # per SCBA iteration -- to take one quadratic form from each.
+        keep = np.nonzero((lam.real > 0.0)
+                          & (np.sqrt(np.maximum(lam.real, 0.0)) >= lo)
+                          & (np.sqrt(np.maximum(lam.real, 0.0)) <= hi))[0]
+        if keep.size == 0:
+            return []
+        om = np.sqrt(lam.real[keep])                                # (K,)
+
+        # Delta at Omega, linearly interpolated from the grid.
+        idx = np.clip(np.searchsorted(w, om), 1, w.size - 1)
+        f = (om - w[idx - 1]) / (w[idx] - w[idx - 1])
+        vals = ((1.0 - f)[:, None] * delta[idx - 1]
+                + f[:, None] * delta[idx])                          # (K, nnz)
+
+        # v^H Delta v on the stored pattern, without densifying: the quadratic
+        # form is a weighted sum over the nonzeros.
+        v = vec[:, keep]                                            # (n_dof, K)
+        quad = np.sum(np.conj(v[rows, :]).T * vals * v[cols, :].T, axis=1)
+        gamma = np.maximum(-np.imag(quad) / (4.0 * om), 1e-12)
+        return [complex(o, -g) for o, g in zip(om, gamma)]
 
     def refresh(self) -> PoleSectorState:
         """One SCBA iteration's worth of pole tracking.

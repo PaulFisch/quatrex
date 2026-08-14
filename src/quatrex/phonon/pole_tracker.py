@@ -102,26 +102,29 @@ def cluster_poles(
     """
     zz = np.asarray(_host(z)).reshape(-1)
     n = zz.size
+    if n == 0:
+        return []
     gam = -zz.imag
-    parent = list(range(n))
 
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
+    # Adjacency, then its transitive closure by repeated squaring. The union-
+    # find this replaces walked every PAIR in Python -- O(Np^2) calls per q,
+    # and there is one q per transverse momentum. Squaring reaches the closure
+    # in ceil(log2(n)) boolean matmuls, so the call count grows with the
+    # LOGARITHM of the pole count rather than its square.
+    adj = (np.abs(zz[:, None] - zz[None, :])
+           <= factor * (gam[:, None] + gam[None, :]))
+    adj |= np.eye(n, dtype=bool)
+    reach = adj
+    for _ in range(int(np.ceil(np.log2(n))) if n > 1 else 0):
+        nxt = reach @ reach
+        if np.array_equal(nxt, reach):
+            break
+        reach = nxt
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            if abs(zz[i] - zz[j]) <= factor * (gam[i] + gam[j]):
-                a, b = find(i), find(j)
-                if a != b:
-                    parent[a] = b
-
-    groups: dict[int, list[int]] = {}
-    for i in range(n):
-        groups.setdefault(find(i), []).append(i)
-    return sorted((sorted(g) for g in groups.values()), key=lambda g: g[0])
+    # A component is named by its lowest member, which also orders the groups.
+    label = np.argmax(reach, axis=1)
+    order = np.unique(label)
+    return [np.nonzero(label == r)[0].tolist() for r in order]
 
 
 def _host(a):
