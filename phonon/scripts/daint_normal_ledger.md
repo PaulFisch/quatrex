@@ -256,3 +256,6 @@ node-hours on 2026-08-15 at the same time, so this line leaves 203 nh for the
 least-squares ladder rebuild.
 | 2026-08-15 | 4490541 | lsbuild8 | 1 | 01:00:00 | 1.00 | 198.00 | normal |
 | 2026-08-15 | 4490547 | lsM2 | 2 | 01:00:00 | 2.00 | 200.00 | normal |
+| 2026-08-15 | 4490605 | lsM2a | 2 | 02:00:00 | 4.00 | 204.00 | normal |
+| 2026-08-15 | 4490793 | lsM2b | 2 | 03:00:00 | 6.00 | 210.00 | normal |
+| 2026-08-15 | 4490794 | lsM2n | 2 | 02:00:00 | 4.00 | 214.00 | normal |

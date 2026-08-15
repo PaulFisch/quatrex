@@ -233,10 +233,28 @@ box-mask discovery by five days. It is not: this run has `fill = 1.000`, the
 mask is inactive, and it orbits anyway. The cross-gap vertex itself is what makes
 the fixed point hard, and the 2026-08-03 observation stands on its own.
 
-So the ARDR ladder converged partly *because* its vertex was the weaker,
-block-diagonal one. Getting a defensible number needs a solver that does not rely
-on the map being a contraction -- `mixing_method="newton"`
-(`src/quatrex/core/newton.py`) is the one in the tree for exactly this.
+**REVISED the same evening: the orbit is the mixer, not the vertex.** The same
+bed at anderson depth **8** (job 4490605, warm from `sigma_best`) descends to
+`6.58e-03` by iteration 37 and has **no positivity violation at any of its 38
+iterations** -- `sigma_lesser`, `sigma_greater` and `g_lesser` all sit at
+`+0.000e+00` throughout, with only `g_greater`'s constant `-1.374e-14` at bin 0,
+the same sub-tolerance harmonic artefact the ARDR runs carried at `-8.755e-11`.
+
+So the depth-2 result is one data point about one mixer setting, not a verdict on
+the vertex, and the positivity violations went away with the orbit rather than
+being a property of the cross-gap coupling. What survives is narrow: the LS
+vertex needs more Anderson history than the ARDR one, which is what a map with
+four times the scattering channels should need.
+
+**Newton is not available on this path.** `newton.py::_newton_step` raises
+`NotImplementedError: mixing_method='newton' (exact JVP) requires the numpy
+backend`, and daint jobs run `QTX_ARRAY_MODULE=cupy` (job 4490794: warmup runs,
+then it throws on the first Newton step). Two further traps in its defaults:
+`newton_switch_tol = 1e-2` means Newton engages only once the residual reaches
+1 % of its first value, so on an orbiting run it never engages and the job is
+silently damped Picard; and `newton_max_krylov = 30` costs up to 30 JVPs per
+step, each about one map application. None of that matters here because Anderson
+works, but it rules Newton out as the fallback for the longer rungs.
 
 ## What a fourth point would cost
 
