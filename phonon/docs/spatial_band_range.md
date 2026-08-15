@@ -180,3 +180,47 @@ Two traps in building this, recorded because both produce plausible output:
   both endpoints double counts, and the reference then stops decaying at 5e-6
   -- which looks like a Green function reaching a floor and is arithmetic. The
   test now asserts its own reference is converged, 1024 against 4096 nodes.
+
+## On real device cells (2026-08-15)
+
+The same reconstruction against the stored dynamical matrices, at 1.05x the
+band top so the quadrature reference is regular.
+
+| bed | DOF | decaying modes | abs(lambda) range | rel. err n=1 / 3 / 8 |
+|---|---|---|---|---|
+| CNT (3,3), Gamma | 36 | 36 | 7.6e-05 .. 0.145 | 1.8e-15 / 5.5e-14 / 2.5e-10 |
+| Si film, transverse Gamma | 6 | 6 | 9.2e-03 .. 0.319 | 9.2e-16 / 1.3e-14 / 1.2e-12 |
+
+The growth with `n` is the REFERENCE, not the reconstruction: the CNT
+quadrature self-converges to 6.5e-10 at n=8 and only 1.2e-06 at n=12 (4096
+against 16384 nodes), because `|G(12)|` is 6.8e-13 and the integral is chasing
+its own floor. Checked rather than assumed.
+
+### The rank and the fit anchor are one choice, not two
+
+Truncating the mode set looked free and is not. Modes with `|lambda| = 1e-3`
+contribute `1e-9` by three cells, yet dropping them costs `1e-4` -- because the
+fit was anchored at `n = 1, 2` where they are still present in the data, so
+their weight is pushed onto the survivors. Moving the anchor past their range
+recovers it. On CNT at rank 22 of 36:
+
+| fit anchor | rel. err at n = 5 | at n = 8 |
+|---|---|---|
+| n = 1, 2 | 1.2e-02 | 1.1e-02 |
+| n = 3, 4 | 6.0e-05 | 3.0e-05 |
+| n = 5, 6 | 2.1e-07 | 1.4e-07 |
+
+It cuts the other way too. A fit anchored far out cannot determine the
+coefficient of a mode that has already decayed there -- at `n = 7` a mode with
+`|lambda| = 1e-3` contributes `1e-21`, so the design carries no information
+about it and SHORT-range blocks degrade even at full rank.
+
+So the anchor is not a stability knob. It selects the window of distances the
+representation is valid on, and the rank follows from it: keep the modes alive
+at the anchor, drop the rest, and use the result only at or beyond it. The pole
+sector reached the same conclusion for its own local model, where `_fit_anchor`
+had to be pinned per candidate.
+
+Practical consequence for Phase 8: the band-truncated blocks that need
+replacing are the DISTANT ones, so the anchor belongs at the band edge, and the
+rank needed there is 22 of 36 on CNT rather than all of them.

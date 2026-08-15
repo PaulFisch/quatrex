@@ -547,3 +547,102 @@ def test_the_modal_form_is_smaller_than_the_blocks_it_replaces():
         blocks = n_dist * b * b
         assert modal < blocks / 3, (
             f"{modal} numbers vs {blocks} for {n_dist} distances")
+
+
+# --- the rank and the fit anchor are coupled ------------------------------- #
+
+def _synthetic_modes(seed=3):
+    r"""Three modes with a deliberately huge spread in ``|lambda|``.
+
+    ``G(n)`` is BUILT from them, so the exact answer is known without a
+    quadrature and the test measures only the fitting, which is what is at
+    issue here.
+    """
+    rng = np.random.default_rng(seed)
+    lam = np.array([0.62, 0.31, 1e-3])            # two long-range, one dead
+    V = rng.normal(size=(4, 3)) + 1j * rng.normal(size=(4, 3))
+    C = rng.normal(size=(3, 4)) + 1j * rng.normal(size=(3, 4))
+    def g(n):
+        return V @ np.diag(lam ** n) @ C
+    return lam, V, C, g
+
+
+def _fit(lam, V, g, anchors):
+    design = np.vstack([V @ np.diag(lam ** n) for n in anchors])
+    rhs = np.vstack([g(n) for n in anchors])
+    return np.linalg.lstsq(design, rhs, rcond=None)[0]
+
+
+def test_the_anchor_selects_the_distance_window_not_the_accuracy():
+    r"""The rule underneath both halves of this, and it cuts both ways.
+
+    A fit anchored at ``n_0`` can only determine the coefficient of a mode that
+    is still ALIVE at ``n_0``. Anchor close in and every mode is constrained,
+    so the representation is exact everywhere -- at the cost of an
+    ill-conditioned design when the spread in ``|lambda|`` is large. Anchor far
+    out and the fast modes have decayed below the fit's reach, so their
+    coefficients are unconstrained and SHORT range degrades, even at full rank.
+
+    So the anchor is not a numerical detail to be tuned for stability: it
+    chooses the window of distances the representation is valid on.
+    """
+    lam, V, C, g = _synthetic_modes()
+
+    near = _fit(lam, V, g, (1, 2))
+    for n in (1, 5, 12):
+        rec = V @ np.diag(lam ** n) @ near
+        assert np.linalg.norm(rec - g(n)) < 1e-9 * np.linalg.norm(g(n))
+
+    # Anchored past the fast mode's range, its coefficient is undetermined:
+    # lambda^7 = 1e-21 there, so the design carries no information about it.
+    far = V @ np.diag(lam ** 1) @ _fit(lam, V, g, (7, 8))
+    assert np.linalg.norm(far - g(1)) > 1e-6 * np.linalg.norm(g(1))
+
+    # ... while the distances at and beyond the anchor are still exact.
+    for n in (7, 9, 14):
+        rec = V @ np.diag(lam ** n) @ _fit(lam, V, g, (7, 8))
+        assert np.linalg.norm(rec - g(n)) < 1e-8 * np.linalg.norm(g(n))
+
+
+def test_a_truncated_set_must_be_fitted_where_the_dropped_modes_are_dead():
+    r"""The design rule, and it is not obvious.
+
+    Dropping a mode with :math:`|\lambda| = 10^{-3}` looks free -- it
+    contributes :math:`10^{-9}` by ``n = 3``. But fitting the survivors at
+    ``n = 1, 2``, where the dropped mode is still present in the data, pushes
+    its weight onto them and corrupts the coefficients at every distance.
+    Anchoring the fit past its range instead recovers the accuracy.
+
+    Measured on the real CNT cell at rank 22 of 36, the same effect is
+    1.2e-02 fitted at ``n = 1, 2`` against 2.1e-07 fitted at ``n = 5, 6``
+    (``phonon/docs/spatial_band_range.md``).
+
+    The pole sector learned the same lesson as ``_fit_anchor``: where a local
+    model is anchored is part of the model.
+    """
+    lam, V, C, g = _synthetic_modes()
+    keep = np.abs(lam) > 1e-2                     # drop the dead mode
+    assert keep.sum() == 2
+
+    near = _fit(lam[keep], V[:, keep], g, (1, 2))
+    far = _fit(lam[keep], V[:, keep], g, (5, 6))
+
+    def err(C_fit, n):
+        rec = V[:, keep] @ np.diag(lam[keep] ** n) @ C_fit
+        return np.linalg.norm(rec - g(n)) / np.linalg.norm(g(n))
+
+    # anchored close in, the truncation contaminates every distance
+    assert err(near, 6) > 1e-6
+    # anchored past the dropped mode's range, it is accurate where it is used
+    assert err(far, 6) < 1e-9
+    assert err(far, 10) < 1e-9
+    assert err(far, 6) < 1e-3 * err(near, 6)
+
+
+def test_the_dropped_mode_really_is_negligible_at_the_far_anchor():
+    """Guards the premise: if the dead mode still mattered at n=5 the rule
+    above would be describing something else."""
+    lam, V, C, g = _synthetic_modes()
+    dead = np.abs(lam) < 1e-2
+    contrib = V[:, dead] @ np.diag(lam[dead] ** 5) @ C[dead]
+    assert np.linalg.norm(contrib) < 1e-12 * np.linalg.norm(g(5))
