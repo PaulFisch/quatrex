@@ -125,7 +125,7 @@ NORMAL_LEDGER = Path(__file__).resolve().parent / "daint_normal_ledger.md"
 # target. Same date: the ledger now charges EVERY partition, debug included --
 # debug jobs are billed by CSCS like any other, so leaving them out understated
 # the true figure.
-NORMAL_NH_CAP = 300.0
+NORMAL_NH_CAP = 400.0
 NORMAL_MAX_NODES = 2         # per job, unless Paul authorises more
 
 

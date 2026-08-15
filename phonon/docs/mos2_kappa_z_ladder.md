@@ -92,6 +92,10 @@ So the recipe is `build_inputs.py --system mos2film --nslabs N --nk 5` against
 `cluster/mos2_film_reap`, then a re-block to 2 blocks. That is now recorded;
 before this it existed nowhere.
 
+Both reaps were copied to daint on 2026-08-15 (md5-verified) so they are no
+longer single-copy: `cluster/mos2_film_reap` (ARDR, 8.6 MB) and
+`cluster/mos2_film_reap_ls` (least squares, 11.5 MB).
+
 ### The ladder's vertex has no coupling across the van der Waals gap
 
 The reap that reproduces the ladder is the **ARDR** fit, and ARDR is a
@@ -110,6 +114,18 @@ stored `fc3_blocks.hdf5` of every rung:
 across the gap is nonzero (harmonic interlayer transport works), so in this
 model heat crosses the van der Waals gap **purely harmonically**, and every
 anharmonic scattering event happens inside a layer.
+
+The least-squares refit of the same 40-structure data does not do this. Summing
+`|Phi|` over each reference atom's whole neighbourhood and splitting by layer:
+
+| reap | cross-layer weight | Mo | each of the four S |
+|---|---|---|---|
+| `mos2_film_reap` (ardr) | **0.000000 %** | 0 | 0 |
+| `mos2_film_reap_ls` (least squares) | **1.185434 %** | 0 | **2.272335 %** |
+
+The cross-gap coupling sits entirely on the four gap-facing sulfurs and none of
+it on the molybdenums, which is where the geometry says it should be. The ARDR
+zero is a regression artefact, not a physical statement.
 
 That is a first-order caveat on `kappa_bulk = 2.193 W/m/K`. It is a real number
 for the model that was run, and the linearity test stands, but it is not a

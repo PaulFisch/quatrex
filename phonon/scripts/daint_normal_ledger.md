@@ -244,3 +244,13 @@ ledger charges at SUBMISSION by design. -->
 | 2026-08-15 | 4490501 | mos2psd40 | 1 | 00:20:00 | 0.33 | 275.43 | debug |
 | 2026-08-15 | 4490504 | mos2psd10lm | 1 | 00:20:00 | 0.33 | 275.76 | debug |
 | 2026-08-15 | 4490505 | mos2psd40b | 1 | 00:20:00 | 0.33 | 276.09 | debug |
+
+Running total from here: **197.00 nh**
+
+CSCS-reported actual consumption on 2026-08-15 (`daint.py status`: "lp16
+node-hours this month (this user): 197.22"), replacing the accumulated commit
+figure of 276.09. The gap is the usual one -- rows charge nodes x submitted
+walltime, and the ARDR kappa_z ladder alone committed 48 nh for the L6 pair
+against about 18 nh actually consumed. Paul raised the hard cap from 300 to 400
+node-hours on 2026-08-15 at the same time, so this line leaves 203 nh for the
+least-squares ladder rebuild.
