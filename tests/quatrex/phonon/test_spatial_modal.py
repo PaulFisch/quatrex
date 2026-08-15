@@ -387,3 +387,163 @@ def test_a_census_linewidth_implies_a_band_far_longer_than_any_in_use():
             np.sqrt(K_S) * np.cos(np.arcsin(omega / (2 * np.sqrt(K_S))))
             / gamma_thz, rel=5e-3)
         assert xi > 10.0, "the range collapsed below a plausible band"
+
+
+# --- Phase 7: distant blocks are generated, not stored --------------------- #
+
+D00_2 = np.array([[2.6, -0.4], [-0.4, 2.2]])
+D01_2 = np.array([[-0.9, -0.25], [-0.2, -0.8]])       # full rank on purpose
+
+
+def _blocks2(omega):
+    """A 2-DOF cell whose inter-cell coupling is INVERTIBLE.
+
+    A rank-deficient ``D_01`` makes the pencil degenerate -- roots collapse to
+    0 and infinity and the mode count is wrong -- so the coupling is chosen
+    full rank and the test asserts it.
+    """
+    return (omega * omega * np.eye(2) - D00_2, -D01_2, -D01_2.conj().T)
+
+
+def _band_top_2(n_k=2001):
+    k = np.linspace(0.0, np.pi, n_k)
+    top = 0.0
+    for x in k:
+        dk = D00_2 + D01_2 * np.exp(1j * x) + D01_2.conj().T * np.exp(-1j * x)
+        top = max(top, np.sqrt(np.linalg.eigvalsh(
+            0.5 * (dk + dk.conj().T)).max()))
+    return top
+
+
+BAND_TOP_2 = _band_top_2()
+
+
+def _green_blocks(omega, n_max, n_k=2048):
+    r"""Exact ``G(n)`` by Brillouin-zone quadrature, for ``n`` up to ``n_max``.
+
+    Periodic trapezoid: the integrand is analytic and periodic in ``k``, so
+    this converges exponentially. Using ``linspace`` with both endpoints
+    instead double counts and lands on a noise floor -- the first version of
+    this bed did exactly that and reported a Green function that stopped
+    decaying at 5e-6, which reads as physics and is not.
+
+    Evaluated above the band, where ``A(k)`` is invertible for every ``k``, so
+    no broadening is needed and eta stays zero.
+    """
+    a_ii, a_ij, a_ji = _blocks2(omega)
+    k = 2.0 * np.pi * np.arange(n_k) / n_k
+    ph = np.exp(1j * k)[:, None, None]
+    a_k = a_ii[None] + a_ij[None] * ph + a_ji[None] * np.conj(ph)
+    inv = np.linalg.inv(a_k)                                  # (n_k, 2, 2)
+    return {n: (inv * np.exp(1j * k * n)[:, None, None]).sum(0) / n_k
+            for n in range(n_max + 1)}
+
+
+def _modal_fit(omega):
+    """``V``, ``lambda`` and ``C`` of ``G(n) = V diag(lambda^n) C``."""
+    from quatrex.phonon.spatial_modes import bloch_modes
+
+    modes = bloch_modes(*_blocks2(omega))
+    keep = np.abs(modes.lam) < 1.0 - 1e-12
+    V, lm = modes.vecs[:, keep], modes.lam[keep]
+    g = _green_blocks(omega, 2)
+    design = np.vstack([V @ np.diag(lm ** n) for n in (1, 2)])
+    rhs = np.vstack([g[1], g[2]])
+    C = np.linalg.lstsq(design, rhs, rcond=None)[0]
+    return V, lm, C
+
+
+def test_the_bed_has_an_invertible_coupling_and_two_decaying_modes():
+    from quatrex.phonon.spatial_modes import bloch_modes
+
+    assert np.linalg.cond(D01_2) < 10.0
+    modes = bloch_modes(*_blocks2(1.05 * BAND_TOP_2))
+    mod = np.sort(np.abs(modes.lam))
+    assert mod.size == 4                       # 2 DOF -> 4 finite roots
+    assert np.sum(mod < 1.0) == 2 and np.sum(mod > 1.0) == 2
+    assert mod[0] > 1e-6, "a root collapsed to zero: the coupling is singular"
+
+
+def test_two_modes_reproduce_every_distant_block(  ):
+    r"""Proposal Eq. (158), :math:`G_{S,ij} = U_i C V_j^\dagger`, exactly.
+
+    The coefficients are fitted from ``n = 1`` and ``n = 2`` ONLY, and then
+    every block out to ``n = 12`` is predicted. Agreement at roundoff is the
+    Phase 7 claim: distant blocks are generated from a rank-``r`` object rather
+    than stored, with ``r`` the number of decaying modes.
+    """
+    omega = 1.05 * BAND_TOP_2
+    V, lm, C = _modal_fit(omega)
+    exact = _green_blocks(omega, 12)
+
+    for n in range(1, 13):
+        rec = V @ np.diag(lm ** n) @ C
+        rel = np.linalg.norm(rec - exact[n]) / np.linalg.norm(exact[n])
+        assert rel < 1e-12, f"n={n}: rel err {rel:.3e}"
+
+    # and it is a genuine extrapolation, not a fit sitting on flat data: over
+    # the nine distances that were never fitted the blocks fall by more than
+    # two orders. The slowest mode sets the scale, lambda^9 = 0.511^9 ~ 4e-3.
+    fall = np.linalg.norm(exact[12]) / np.linalg.norm(exact[3])
+    assert fall < 1e-2, f"blocks only fell by {1 / fall:.0f}x"
+    assert fall == pytest.approx(np.max(np.abs(lm)) ** 9, rel=0.5)
+
+
+def test_the_quadrature_reference_is_converged():
+    """Guards the trap the first version fell into: a reference that stopped
+    decaying because it had hit its own noise floor."""
+    omega = 1.05 * BAND_TOP_2
+    coarse = _green_blocks(omega, 8, n_k=1024)
+    fine = _green_blocks(omega, 8, n_k=4096)
+    for n in (4, 6, 8):
+        rel = np.linalg.norm(coarse[n] - fine[n]) / np.linalg.norm(fine[n])
+        assert rel < 1e-12, f"n={n}: quadrature not converged, {rel:.3e}"
+
+
+def test_dropping_a_mode_breaks_the_reconstruction():
+    """The rank is not a tuning parameter: it is the number of decaying modes,
+    and one fewer does not reproduce the blocks at any coefficient."""
+    omega = 1.05 * BAND_TOP_2
+    V, lm, C = _modal_fit(omega)
+    exact = _green_blocks(omega, 8)
+
+    order = np.argsort(-np.abs(lm))            # drop the fastest-decaying one
+    V1, lm1 = V[:, order[:1]], lm[order[:1]]
+    design = np.vstack([V1 @ np.diag(lm1 ** n) for n in (1, 2)])
+    rhs = np.vstack([exact[1], exact[2]])
+    C1 = np.linalg.lstsq(design, rhs, rcond=None)[0]
+
+    worst = max(np.linalg.norm(V1 @ np.diag(lm1 ** n) @ C1 - exact[n])
+                / np.linalg.norm(exact[n]) for n in (1, 2, 3))
+    assert worst > 1e-3, "rank 1 fitted this bed, so it is not testing the rank"
+
+
+def test_a_range_of_blocks_sums_in_closed_form():
+    r"""Eq. (160) at the matrix level -- the point of the whole construction.
+
+    :math:`\sum_{n_0}^{N-1} G(n) = V\,\mathrm{diag}\!\left(\lambda^{n_0}
+    \frac{1-\lambda^{N-n_0}}{1-\lambda}\right) C`, so a long-range sum costs
+    ``r`` geometric series and never materialises the blocks it runs over.
+    """
+    omega = 1.05 * BAND_TOP_2
+    V, lm, C = _modal_fit(omega)
+
+    for n0, n_end in ((1, 9), (3, 25), (2, 200)):
+        closed = V @ np.diag(
+            lm ** n0 * (1.0 - lm ** (n_end - n0)) / (1.0 - lm)) @ C
+        direct = sum(V @ np.diag(lm ** n) @ C for n in range(n0, n_end))
+        assert np.linalg.norm(closed - direct) < 1e-12 * np.linalg.norm(direct)
+
+
+def test_the_modal_form_is_smaller_than_the_blocks_it_replaces():
+    """Storage, stated rather than implied: ``r`` mode vectors and ``r``
+    coefficient rows against one dense block per distance."""
+    omega = 1.05 * BAND_TOP_2
+    V, lm, C = _modal_fit(omega)
+    b, r = V.shape[0], lm.size
+
+    modal = V.size + lm.size + C.size          # 2*2 + 2 + 2*2 = 10
+    for n_dist in (8, 32, 128):
+        blocks = n_dist * b * b
+        assert modal < blocks / 3, (
+            f"{modal} numbers vs {blocks} for {n_dist} distances")

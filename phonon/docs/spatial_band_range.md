@@ -144,3 +144,39 @@ conclusion, from a third of the data read under the wrong convention.
 The tell was in the output and was missed on the first pass: that dispersion had
 NO acoustic branch reaching zero at Gamma, which no phonon dispersion of a
 translationally invariant crystal can lack.
+
+---
+
+## Phase 7: the distant blocks are generated, not stored (2026-08-15)
+
+The acceptance test the proposal asks for -- "initially use it only to
+reconstruct distant blocks; do not alter the SCBA kernel; validate against
+exact distant G_ij" -- on a 2-DOF cell with an invertible inter-cell coupling.
+
+Fitting `G(n) = V diag(lambda^n) C` from `n = 1` and `n = 2` ONLY, and then
+predicting every block out to `n = 12`:
+
+| n | 1 | 2 | 4 | 8 | 12 |
+|---|---|---|---|---|---|
+| rel. error | 1e-15 | 5e-15 | 2e-14 | 4e-14 | 6e-14 |
+
+Roundoff over nine distances that were never fitted, across which the blocks
+fall by more than two orders. That is Eq. (158) exactly: two mode vectors and
+two coefficient rows -- ten numbers -- reproduce what would otherwise be one
+dense block per distance.
+
+The rank is not a tuning parameter. Dropping to one mode fails at 1e-3 on the
+very blocks it was fitted to, so `r` is the number of decaying modes and not a
+knob. And a range of blocks sums in closed form (Eq. 160 at the matrix level),
+so a long-range sum costs `r` geometric series and never materialises what it
+runs over -- checked to n = 200.
+
+Two traps in building this, recorded because both produce plausible output:
+
+* A rank-deficient inter-cell coupling makes the pencil degenerate. The first
+  bed used a `D_01` with one nonzero entry; its roots collapsed to 0 and 173
+  and the mode count was wrong.
+* The quadrature reference must be a PERIODIC trapezoid. Using `linspace` with
+  both endpoints double counts, and the reference then stops decaying at 5e-6
+  -- which looks like a Green function reaching a floor and is arithmetic. The
+  test now asserts its own reference is converged, 1024 against 4096 nodes.
