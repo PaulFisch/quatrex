@@ -56,7 +56,7 @@ and its reach grows with the leg band.
 
 | # | truncation | where | status |
 |---|---|---|---|
-| 1 | `Phi` to `p = 1` | `fc3_loader.py:5-9`; drops longer triplets, warns above a dropped-Frobenius threshold | approximate; **never measured on a real bed** |
+| 1 | `Phi` to `p = 1` | `fc3_loader.py:5-9` | **exact** on every bed here -- the FC3 cutoff is shorter than the transport cell, so nothing beyond the shell exists to drop (see below) |
 | 2 | legs to `\|K-K'\| <= b` | `sse_g_band` | **exact** for the retained output once `b >= 3` |
 | 3 | output to `\|I-J\| <= 1` | `sse_phonon_phonon.py:474`, `for J in range(max(0, I-1), min(n, I+2))` | approximate; discards `2 <= \|I-J\| <= 2p+b` |
 
@@ -135,8 +135,9 @@ modal/regular **Schur complement**, a different construction: it keeps the
 tridiagonal part in the BTD solver and couples a small non-local sector to it,
 rather than compressing distant `G`.
 
-Truncation 1 is untouched by either and is the only one whose size is still
-unknown.
+Truncation 1 turns out to cost nothing on these beds: the FC3 cutoff is
+shorter than the transport-cell length, so the nearest-neighbour shell holds
+every triplet the force constants contain.
 
 ## Caveats on the numbers
 
@@ -146,34 +147,47 @@ or not. The support law (*) and the flatness argument are structural and do not
 depend on the bed; the percentage does. Evaluating the same split on the stored
 FC3 blocks is offline and is what would turn it into a production number.
 
-## Truncation 1 is unmeasurable from the shipped inputs (2026-08-15)
+## Truncation 1 is exact on every bed in the tree (2026-08-15)
 
-`fc3_loader` computes the dropped Frobenius fraction at LOAD time and warns
-above a threshold, which looks like instrumentation for exactly this question.
-It is not, and cannot be. Across every stored `fc3_blocks.hdf5` in the tree --
-45 beds spanning CNT, Si and MoS2 -- the maximum block-index offset is 1 and
-the dropped fraction is **0.000 %** without exception. The nearest-neighbour
-projection is applied by the input builder, before the file is written, so by
-the time the loader sees a vertex there is nothing left beyond the shell to
-drop.
+Measured, then corrected once. Across every stored `fc3_blocks.hdf5` -- 45 beds
+spanning CNT, Si and MoS2 -- the maximum block-index offset is 1 and the
+dropped fraction at load is **0.000 %** without exception.
 
-The guard therefore never fires, and the size of truncation 1 is recorded
-nowhere. That is the honest state: of the three spatial approximations, the one
-whose magnitude is unknown is also the one the code appears to be watching.
+The first reading of that was that the builder discards distant triplets before
+writing, leaving the loader's warning unable to fire. That is wrong.
+`build_device_fc3_blocks` takes `vertex_cutoff=None` by default -- "imposes no
+extra truncation; the result contains every triplet the supercell FC3 can
+resolve" -- and `build_inputs.py:153` passes no cutoff. **The builder does not
+truncate.** The stored files contain no triplet beyond the nearest-neighbour
+shell because the force constants contain none.
 
-Measuring it means re-running the builder's projection with `nn_only=False`
-from the raw force constants and comparing block norms. Those exist locally for
-MoS2 (`cluster/mos2_reap/fc3.hdf5`) and are not in the cluster tree for Si or
-CNT, so it is a builder-side task rather than a pass over production inputs.
+Why they contain none is a two-line argument. Three atoms with all pairwise
+distances within the FC3 cutoff `r_c` span at most `r_c` along transport, so
+they occupy at most `ceil(r_c / L) + 1` consecutive cells of length `L`. For
+`r_c < L` that is two, i.e.
 
-One thing can be said without that work. For a film with cross-plane transport
-the couplings of interest sit between ADJACENT slabs, which is `|I-J| = 1` and
-inside the retained shell -- so the nearest-neighbour projection is unlikely to
-be what removes them. The MoS2 cross-slab couplings are about 0.5 % of the
-vertex weight, and what removes them is the ESTIMATOR: ARDR prunes them to
-exact zero, which is why the production MoS2 vertex is the least-squares fit
-instead (`document/src/results/75_mos2.tex`). A different failure, at a
-different stage, that is easy to file under this one.
+    r_c < L  =>  max block offset 1  =>  the nearest-neighbour shell is EXACT.
+
+MoS2: `r_c = 4.0 Ang` against a primitive `c = 12.294 Ang`
+(`cluster/mos2_*_reap/hiphive_meta.json`, cutoffs `[6.0, 4.0]`). Four is
+comfortably under twelve, so no triplet can reach a second-neighbour cell and
+there is nothing for the projection to drop.
+
+Two honest limits on that. The fitting supercell is `[4, 4, 3]` for the film,
+and `build_device_fc3_blocks` resolves only `|delta| <= N_super_z // 2 = 1`, so
+the supercell independently bounds the offset at 1 -- the two explanations
+cannot be separated from the stored data, though the cutoff argument alone is
+sufficient and does not depend on the supercell. And the force-constant
+metadata for CNT, SiNW and SrTiO3 is not in this repository
+(`phonon/configs/*/fc3_hiphive_*` are absent), so `r_c` and `L` have not been
+compared for those beds; the stored offset of 1 is consistent with the same
+conclusion but is not by itself proof of it, since the supercell bound would
+also produce it.
+
+So of the three spatial approximations, truncation 1 is exact on MoS2 by a
+cutoff argument, and exact-or-supercell-limited elsewhere pending those inputs.
+It is not the unmeasured hazard the first version of this section made it out
+to be.
 
 ## Error trail
 
@@ -190,5 +204,13 @@ Recorded because the document exists on account of it.
    long-range modal machinery does not repair it either. The conclusion in (2)
    was right; the reason given for it was not.
 
-Each step was a claim about which blocks matter, argued in prose. The algebra
-is four lines and settles all of it, which is why it is written down here.
+4. Reported that truncation 1's size is unrecorded and its guard structurally
+   dead, on the strength of every stored file showing 0.000 % dropped. The
+   builder does not truncate -- `vertex_cutoff` defaults to `None` -- so the
+   zero means the force constants have no triplet beyond the shell, and the
+   guard reads zero because zero is the right answer.
+
+Each step was a claim about which blocks matter, argued from a number without
+its mechanism. The algebra is four lines and settles the first three; the
+fourth needed one line of the builder's signature. Both are written down here
+so the next reader does not re-derive them from percentages.
