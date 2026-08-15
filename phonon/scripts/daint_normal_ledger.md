@@ -254,3 +254,5 @@ walltime, and the ARDR kappa_z ladder alone committed 48 nh for the L6 pair
 against about 18 nh actually consumed. Paul raised the hard cap from 300 to 400
 node-hours on 2026-08-15 at the same time, so this line leaves 203 nh for the
 least-squares ladder rebuild.
+| 2026-08-15 | 4490541 | lsbuild8 | 1 | 01:00:00 | 1.00 | 198.00 | normal |
+| 2026-08-15 | 4490547 | lsM2 | 2 | 01:00:00 | 2.00 | 200.00 | normal |

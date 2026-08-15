@@ -200,6 +200,44 @@ The eight-block source itself carries 50 vertex blocks over its 8 slabs (8
 diagonal + 42 off-diagonal at offsets `(+-1, 0)`, `(0, +-1)`, `(+-1, +-1)`) where
 ARDR would have 8. That 6.25x is the cost the correct vertex carries.
 
+## lsM2: the correct vertex does not converge under fixed-point iteration
+
+Job 4490547, 2 nodes, `eta = 0`, `ne = 6001`, anderson depth 2, `QX_MIX=0.1`,
+`QX_POLE_PSD=1`. TIMEOUT at 1:00:13 after 19 iterations. Three things it was run
+to measure:
+
+**Cost multiplier: 4.0x.** 3.16 min/iteration against the ARDR L2 rung's 47 s,
+matching the 8-vs-2 vertex block count.
+
+**It orbits.** The residual never improves on its first value:
+
+| it | 1 | 4 | 7 | 8 | 10 | 15 | 17 |
+|---|---|---|---|---|---|---|---|
+| residual | 0.110 | 0.234 | 0.176 | **0.568** | 0.120 | 0.114 | 0.221 |
+
+`sigma_best` holds `res = 1.1005e-01` from iteration 1, the best of the run.
+That is a limit cycle, not slow convergence.
+
+**Positivity fails in two distinct modes.** From iteration 4:
+
+* persistent and mild at `w[734] = 2.936 THz`, growing -6.2e-05 -> -1.6e-03 and
+  then sitting there;
+* intermittent and severe at `w[1] = 0.004 THz` -- iterations 7, 17, 18, reaching
+  **-2.38e-02** with `g_lesser` at -7.1e-03 -- and each one coincides with a
+  residual spike.
+
+**A hypothesis of mine, falsified.** `mos2-ardr-no-cross-gap-fc3` recorded on
+2026-08-03 that "without cross-gap fc3 the film SCBA descends; with it, it
+orbits". I proposed that this was confounded by H6, since it predates the
+box-mask discovery by five days. It is not: this run has `fill = 1.000`, the
+mask is inactive, and it orbits anyway. The cross-gap vertex itself is what makes
+the fixed point hard, and the 2026-08-03 observation stands on its own.
+
+So the ARDR ladder converged partly *because* its vertex was the weaker,
+block-diagonal one. Getting a defensible number needs a solver that does not rely
+on the map being a contraction -- `mixing_method="newton"`
+(`src/quatrex/core/newton.py`) is the one in the tree for exactly this.
+
 ## What a fourth point would cost
 
 The ladder as it stands cost about 12.2 node-hours: `cvM2b` 2 nodes for 7:52,

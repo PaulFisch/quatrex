@@ -72,9 +72,12 @@ def main(argv=None) -> int:
             head += f"  {t:>16}"
         print(head)
         for r in rows:
-            line = (f"{r['iter']:>3}  "
-                    f"{(r['res'] if r['res'] is not None else float('nan')):>10.3e} "
-                    f"{(r['bal'] if r['bal'] is not None else float('nan')):>9.3e}")
+            # A missing residual means the iteration was cut off before it
+            # printed one (a walltime kill), NOT a NaN result. Rendering it as
+            # nan reads as a numeric blow-up that did not happen.
+            res = f"{r['res']:>10.3e}" if r["res"] is not None else f"{'--':>10}"
+            bal = f"{r['bal']:>9.3e}" if r["bal"] is not None else f"{'--':>9}"
+            line = f"{r['iter']:>3}  {res} {bal}"
             for t in TARGETS:
                 if t not in r["psd"]:
                     line += f"  {'-':>16}"
