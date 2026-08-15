@@ -66,6 +66,82 @@ that are themselves 80-92 % contact -- and it is why the third point mattered.
 so `kappa_z,eff` from any single thickness (0.178, 0.325, 0.459 W/m/K) is mostly
 interface and is not a material number. Only the slope is bulk.
 
+## The 8-layer point: blocked, and the reason is not the budget
+
+Asked to run it, I traced what it needs before launching. Two things came out,
+and the second is the important one.
+
+### The build recipe is recoverable -- and it was nearly lost
+
+The 8-layer device inputs do not exist and must be built. The reap they have to
+be built from is **not on either cluster**: `cluster/mos2_film_reap` is absent
+from daint entirely and from tortin's scratch, and neither surviving MoS2 film
+reap on tortin (`mos2_film_reap_scp`, `mos2_film_reap_o4`) reproduces the
+ladder's dynamical matrix. It survives only in the laptop's `cluster/` tree.
+
+Identified by measurement rather than by name. Rebuilding `H_00`/`H_01` at
+`nk = 5` from each candidate and comparing against the stored
+`dynamical_matrix.mat` over all 75 real-space blocks:
+
+| reap | fit | worst `|dD|` vs the ladder |
+|---|---|---|
+| `cluster/mos2_film_reap` | **ardr** | **0.0000e+00** (bit-exact, 75/75) |
+| `cluster/mos2_film_reap_ls` | least-squares | 1.04e+00 (rel 9.1e-03) |
+
+So the recipe is `build_inputs.py --system mos2film --nslabs N --nk 5` against
+`cluster/mos2_film_reap`, then a re-block to 2 blocks. That is now recorded;
+before this it existed nowhere.
+
+### The ladder's vertex has no coupling across the van der Waals gap
+
+The reap that reproduces the ladder is the **ARDR** fit, and ARDR is a
+sparsifying regression that pruned MoS2's cross-gap third-order parameters to
+exact zero even though the 3.528 A S-S distance is inside the 4.0 A cutoff.
+That pruning propagates all the way into the device inputs. Measured on the
+stored `fc3_blocks.hdf5` of every rung:
+
+| rung | vertex blocks | off-diagonal | cross-layer `|Phi|` weight inside a block |
+|---|---|---|---|
+| `mos2f2dense` (cvM2) | 2 | 0 | -- (one layer per block) |
+| `mos2f4dense` (cvM4) | 2 | 0 | **0.000000 %** |
+| `mos2f6x3` (cvM6) | 2 | 0 | **0.000000 %** |
+
+100.000000 % of the three-phonon weight is intra-layer, at every rung. `fc2`
+across the gap is nonzero (harmonic interlayer transport works), so in this
+model heat crosses the van der Waals gap **purely harmonically**, and every
+anharmonic scattering event happens inside a layer.
+
+That is a first-order caveat on `kappa_bulk = 2.193 W/m/K`. It is a real number
+for the model that was run, and the linearity test stands, but it is not a
+measurement of MoS2 cross-plane *anharmonic* transport, because the gap-crossing
+anharmonic channel is identically absent rather than small.
+
+An 8-layer point built the same way inherits this exactly. It would buy a second
+test of linearity for a model missing that channel.
+
+### What to run instead, and what it costs
+
+The least-squares reap keeps the cross-gap couplings (`cross_frob` 21.9 -> 18.8
+across a 56 -> 80 structure extension; ARDR's is exactly 0, with CV force error
+23-35 % worse) and is the fit the thesis calls production. Rebuilding the ladder
+on `mos2_film_reap_ls` is what produces a defensible cross-plane number.
+
+Neither option fits the current budget:
+
+| option | builds | SCBA | node-hours |
+|---|---|---|---|
+| 8th-layer point on the ARDR ladder | 1 | cold + warm at ~16 nodes | ~25-40 |
+| rebuild the ladder on least squares | 3-4 | 3-4 cold + warm pairs | ~60-100 |
+
+The daint ledger stands at 276.09/300, so **23.91 nh remain** and neither fits.
+The ledger charges nodes x walltime AT SUBMISSION, and `daint.py status` reports
+CSCS's actual consumption at **197.22 nh** -- an over-charge of 78.87 nh, which
+is structural and expected. The documented remedy is a
+`Running total from here: **N nh**` line, applied twice before (2026-08-08 at
+103.00, 2026-08-10 at 126.0), both times by Paul. Applying it again would free
+that 78.87 nh. That is a call for Paul, not something to do silently, so nothing
+has been launched.
+
 ## What a fourth point would cost
 
 The ladder as it stands cost about 12.2 node-hours: `cvM2b` 2 nodes for 7:52,
