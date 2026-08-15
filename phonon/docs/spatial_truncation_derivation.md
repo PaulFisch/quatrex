@@ -86,7 +86,49 @@ Reporting a whole-array error therefore overstates the leg band's cost;
 reporting only the retained band hides the output pin's. Both mistakes were
 made here, in that order.
 
-### What the output pin costs
+### What the output pin costs -- and the seven-cell figure was too small
+
+An earlier version of this section reported 10.8 % from a seven-cell device.
+That is finite-size limited and should not be quoted. The tridiagonal band is
+`3N-2` of `N^2` entries, so the share of `Sigma` outside it grows with the
+device until `Sigma`'s decay with distance takes over:
+
+| device [cells] | 7 | 10 | 14 |
+|---|---|---|---|
+| discarded, range 2.1 cells | 10.5 % | 29.3 % | 30.3 % |
+| discarded, range 20 cells | 13.2 % | 34.2 % | 35.7 % |
+
+**About 30 % on a device long enough to have settled**, not 11 %. A short bed
+is not a conservative proxy for a long one; it is a different answer, and the
+long devices are where the band ladder brackets.
+
+Range dependence is real but secondary: five points between ranges of 2 and 20
+cells, against thirty points from the device length. So the pin is not
+principally a long-range effect.
+
+### The lever is the blocking
+
+`supp(Sigma) = {|I-J| <= 2p + b}` is in CELLS. Group `m` cells into one block
+and it becomes `ceil((2p+b)/m)` in BLOCKS, so a wide enough block makes the
+tridiagonal restriction the RGF needs discard nothing. On a 12-cell device:
+
+| cells per block | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| discarded | 32.1 % | 5.4 % | 2.5 % | 0.30 % |
+
+Two cells per block already removes six sevenths of it. This is the mechanism
+behind an observation already in the tree -- the same Si device diverging at
+`4x1` blocks and converging at `2x2` -- and the tool exists
+(`phonon/studies/engine/reblock_device.py`).
+
+It is also the answer to "could an analytic treatment of the non-decaying modes
+improve the output truncation". Partly, and not mainly: the discarded weight
+moves five points with the range and thirty with the blocking. The modal route
+addresses the smaller term.
+
+### The original seven-cell breakdown
+
+
 
 With `p = 1` and an untruncated `G`, the weight of `Sigma` by output distance:
 

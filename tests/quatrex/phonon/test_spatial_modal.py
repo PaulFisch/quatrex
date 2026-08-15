@@ -1034,3 +1034,83 @@ def test_the_discarded_output_weight_does_not_track_the_green_range():
     assert min(fracs) > 0.05
     # ... and flat: it moves by under a fifth while the range triples
     assert max(fracs) / min(fracs) < 1.2, f"{fracs}"
+
+
+# --- the output pin is a BLOCKING statement --------------------------------- #
+
+def _long_bed(n_cell, top=0.90, nw=14, seed=5):
+    """Gapped chain of ``n_cell`` cells and its exact ring, no leg mask."""
+    w = np.linspace(0.0, top * W0, nw)
+    idx = np.abs(np.subtract.outer(np.arange(n_cell), np.arange(n_cell)))
+    legs = np.stack([_gap_green(om, n_cell)[idx] for om in w])
+
+    rng = np.random.default_rng(seed)
+    phi = np.zeros((n_cell,) * 3)
+    for i in range(n_cell):
+        for a in (i - 1, i, i + 1):
+            for b in (i - 1, i, i + 1):
+                if 0 <= a < n_cell and 0 <= b < n_cell:
+                    phi[i, a, b] = rng.normal()
+    phi = (phi + phi.transpose(0, 2, 1)) / 2.0
+
+    h = w[1] - w[0]
+    out = np.zeros((nw, n_cell, n_cell), dtype=complex)
+    for iw, om in enumerate(w):
+        j = np.rint((om - w - w[0]) / h).astype(int)
+        ok = (j >= 0) & (j < nw)
+        conv = np.einsum("kcb,ked->cbed", legs[ok], legs[j[ok]],
+                         optimize=True) * h
+        out[iw] = np.einsum("ace,Jdb,cbed->aJ", phi, phi, conv, optimize=True)
+    return out
+
+
+def _discarded(sigma, cells_per_block):
+    n = sigma.shape[-1]
+    blk = np.arange(n) // cells_per_block
+    far = np.abs(np.subtract.outer(blk, blk)) > 1
+    return float(np.abs(sigma[:, far]).sum() / np.abs(sigma).sum())
+
+
+def test_the_output_pin_costs_far_more_on_a_long_device():
+    """A seven-cell device understates it by a factor three.
+
+    The tridiagonal band is ``3N-2`` of ``N^2`` entries, so the share of
+    ``Sigma`` outside it grows with the device until the decay of ``Sigma``
+    with distance takes over. Measured 10.5 % at seven cells and about 30 % by
+    ten, which is where it settles -- so a short bed is not a conservative
+    proxy for a long one, it is a different answer.
+    """
+    short = _discarded(_long_bed(7), 1)
+    long_ = _discarded(_long_bed(12), 1)
+    assert short < 0.15
+    assert long_ > 0.25
+    assert long_ > 2.0 * short
+
+
+@pytest.mark.parametrize("cells_per_block,ceiling", [(1, 1.0), (2, 0.10),
+                                                     (3, 0.05), (4, 0.01)])
+def test_wider_blocks_make_the_tridiagonal_pin_accurate(cells_per_block,
+                                                        ceiling):
+    r"""The lever on the output pin is the BLOCKING, not the modes.
+
+    ``supp(Sigma) = {|I-J| <= 2p + b}`` in CELLS. Group ``m`` cells into a
+    block and that becomes ``ceil((2p+b)/m)`` in BLOCKS, so once a block is
+    wide enough the tridiagonal restriction the RGF needs stops discarding
+    anything. Measured on a 12-cell device:
+
+    ======  ==========
+    m       discarded
+    ======  ==========
+    1       32.1 %
+    2        5.4 %
+    3        2.5 %
+    4        0.30 %
+    ======  ==========
+
+    This is the mechanism behind an observation already in the tree -- the same
+    Si device diverging at 4x1 blocks and converging at 2x2. It is also why the
+    long-range modal machinery is the wrong lever here: the discarded weight
+    depends only weakly on the Green-function range (about five points between
+    ranges of 2 and 20 cells) and strongly on how the device is blocked.
+    """
+    assert _discarded(_long_bed(12), cells_per_block) < ceiling
