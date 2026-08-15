@@ -225,6 +225,48 @@ superseded by ~30 %; and a stored note read "MoS2 bulk FCP has exactly zero fc3
 across the vdW gap", which describes the REJECTED ARDR fit -- production uses
 least squares, which keeps those couplings.
 
+### A sixth, from the next day: the wrong surface again
+
+I reported that `sse_vertex_scale`, `sse_ramp_iterations` and
+`low_freq_mixing_thz` are "all plumbed, all zero in every one of 33 MoS2
+configs -- the knob written specifically for the IR marginal mode has never been
+switched on there". Wrong, and wrong because I audited
+`cluster/*/quatrex_config.toml`. The engine takes **environment overrides** that
+never touch the config file (`studies/engine/run.py`: `QX_VSCALE`, `QX_RAMP`,
+`QX_SSE_LOWMASK`, ...), and each log prints a `RUN env` line for exactly this
+reason. Reading it instead:
+
+| knob | env | status |
+|---|---|---|
+| `sse_low_freq_mask_thz` | `QX_SSE_LOWMASK` | **used five times** on MoS2 -- 0.3 THz once, 1.5 THz four times |
+| `low_freq_mixing_thz` | none (config only) | 0.0 in all 33 MoS2 configs; genuinely never used |
+| `sse_ramp_iterations` | `QX_RAMP` | 0 in all 57 configs, absent from all 48 recorded `RUN env` lines |
+| `sse_vertex_scale` | `QX_VSCALE` | 1.0 everywhere, absent from every `RUN env` -- and 1.0 is the value CLAUDE.md mandates, so this one is correct, not unused |
+
+Two knobs, not one: a **mask** that zeroes the SSE below a frequency and a
+**mixing factor** that damps the update there. I conflated them.
+
+**And the five runs say something.** All were at `interaction_cutoff = 10.0`,
+the H6 bad rung, and all diverged:
+
+| run | job | mask | last residual / lead balance |
+|---|---|---|---|
+| `mos2f3-lm03` | 4327700 | 0.3 THz | 1.0000 / 2.000 |
+| `mos2f3-lm15` | 4327664 | 1.5 THz | 1.0000 / 1.850 |
+| `mos2f3-u2001-lm15` | 4327702 | 1.5 THz | 0.9334 / 0.507 |
+| `mos2f3-u2001-lm15b` | 4330508 | 1.5 THz | 0.9999 / 2.000 |
+| `mos2f3-abl-lm15` | 4327703 | 1.5 THz | aborted, 9.1e+04 at iteration 361 |
+
+Masking the infrared does not repair what the box mask breaks. That is
+consistent with Sec. 6.10's reading of H6 -- the criterion is mask PSD-ness, not
+which frequencies carry weight -- and it lowers the prior that the MoS2
+instability is an IR-mode effect. The IR *mixing* knob remains untried, but it
+is now a weaker candidate than it looked.
+
+Caveat on the negatives: only 48 logs carry a `RUN env` line, so "absent
+everywhere" means absent from those 48 plus all 57 stored configs, not from
+every run ever launched.
+
 **The shape.** Every one was a number read without its mechanism: an error
 percentage without asking which blocks it lived in, a zero without asking what
 produced it, a convergence difference without checking whether it had already
