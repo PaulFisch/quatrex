@@ -94,18 +94,22 @@ def main() -> int:
                     help="HWHM in THz; the Si census median is 0.16")
     ap.add_argument("--band", type=int, nargs="+", default=[1, 2, 3],
                     help="sse_g_band values to compare against")
+    ap.add_argument("--axis", default="x", choices=["x", "y", "z"],
+                    help="transport direction, matching the config")
     ap.add_argument("--vmin", type=float, default=1e-3,
                     help="ignore near-flat branches below this cells*THz")
     args = ap.parse_args()
 
-    offsets, axis_values = load_offsets(args.mat)
+    ta = 'xyz'.index(args.axis)
+    offsets, axis_values = load_offsets(args.mat, ta)
     if not offsets:
         print(f"no [nx, ny, nz] blocks in {args.mat}")
         return 1
-    n_y, n_z = len(axis_values[1]), len(axis_values[2])
+    tr = [a for a in range(3) if a != ta]
+    n_y, n_z = len(axis_values[tr[0]]), len(axis_values[tr[1]])
     q_mesh = [(2 * np.pi * i / n_y, 2 * np.pi * j / n_z)
               for i in range(n_y) for j in range(n_z)]
-    layers = {(i, j): transport_layers(offsets, qy, qz)
+    layers = {(i, j): transport_layers(offsets, qy, qz, ta)
               for (i, j), (qy, qz) in zip(
                   [(i, j) for i in range(n_y) for j in range(n_z)], q_mesh)}
 
