@@ -103,25 +103,38 @@ commensurate q. The code does not apply it.
 
 ## What this does and does not say about production
 
-**Does not** say production is wrong. The production Si film uses
-`reaps/si_big_hiphive` (5x5x5 supercell, verified on the cluster) with an odd
-`nk = 9`, and the CNT beds are transversely finite (`nk = 1`, Gamma only), where
-the question does not arise at all.
+**Nothing is wrong on the production film, and this is now measured rather than
+bounded.** `phonon/studies/_qfold_image_check.py` rebuilds `D_B(q_perp)` with the
+vertex fold's cell sum and compares it against phonopy's, over the production
+transverse mesh:
 
-**Does** say the size of the effect on the film is unmeasured. Counting pairs on
-the film geometry -- rebuilt from the reap's `phono3py.yaml` (fcc primitive,
-a = 2.734 A, 2 atoms, 5x5x5, transport x); `get_smallest_vectors` needs the
-geometry only, not the force constants -- 22.8% of pairs are
-transversely degenerate and 4.0% are unambiguous-but-placed-elsewhere. Those are
-*pair counts*, an upper bound on what can differ, not an error -- the weight
-those pairs actually carry is set by the hiphive FC3 cutoff, which is well
-inside the 5x5x5 box. Quoting 22.8% as an error would be exactly the
-fill-fraction mistake catalogued in `bubble_positivity.md` §6.10.
+| bed | supercell | nk | worst rel `|dD_B|` | worst `|dw|` |
+| --- | --- | --- | --- | --- |
+| `si_big_hiphive` (production Si film) | 5x5x5 | 9 | **8.8e-16** | 2.0e-08 THz |
+| `si_big_hiphive` | 5x5x5 | 8 | 6.3e-16 | 2.0e-08 THz |
+| `si_primitive_work` (this comparison's bed) | 2x2x2 | 9 | 4.6e-01 | 6.1 THz |
+| `si_primitive_work` | 2x2x2 | 4 | 4.6e-01 | 4.5 THz |
 
-The measurement that would settle it is the FC-weighted one, i.e. the S4 column
-computed on `si_big_hiphive` rather than on this 2x2x2 bed: `rel |dD_B|` between
-the code's cell fold and phonopy's shortest-vector fold, at the nine production
-`q = k/9`. It needs `fc2.hdf5` from the cluster reap and no compute.
+On the production bed the two folds are the same object to machine precision at
+every one of the 81 transverse q. The 22.8 % of atom pairs that *could* differ
+carry no FC2 weight: the hiphive cutoff keeps the force constants well inside the
+5x5x5 box, so nothing ambiguous is ever summed. Quoting that 22.8 % as an error
+would have been the fill-fraction mistake of `bubble_positivity.md` Sec. 6.10 --
+a fraction of the wrong set. The CNT beds are transversely finite (`nk = 1`,
+Gamma only), where the question does not arise at all.
+
+The effect is real but needs a box small enough that every neighbour lands on a
+tie shell, which 2x2x2 is and no transport bed is.
+
+One convention detail the same measurement exposes. Convention B is
+`exp(+2 pi i q . R)`; the vertex legs carry `exp(-2 pi i q . R)`
+(`build_gathering_matrix`, `se_q._qfold_device_blocks`). On the 5x5x5 bed the
+wrong sign is worth 88 % of `||D_B||` while the right one is 8.8e-16, so the
+sign is not cosmetic. It is a leg-orientation convention -- the contracted legs
+carry outgoing momenta -- and at q commensurate with the FC supercell the two
+signs coincide, which is why the checks above cannot see it. Whether the
+orientation is globally consistent inside the bubble is a different question
+that neither script tests.
 
 ## Regression
 

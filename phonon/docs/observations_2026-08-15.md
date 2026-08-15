@@ -292,13 +292,16 @@ phono3py RTA (~110 W/m/K on our own FC3) has still never been run, and the
 Si-film over-scatter against Guo (45 % against 10 %) still has no explanation.
 It can no longer be blamed on the vertex.
 
-**New, and unmeasured.** H and the vertex do not use the same periodic image.
-H comes from phonopy's shortest vectors, tie-averaged; the vertex fold uses one
-wrapped cell index, no basis offset, no average. Same gauge, different image, and
-they part company at q not commensurate with the FC supercell -- 25-46 % of
-`||D_B||` on the 2x2x2 Si bed. Whether it matters on the production film
-(5x5x5, `nk = 9`) is an FC-weighted question that has not been asked; the pair
-counts alone (22.8 %) are an upper bound, not an error.
+**Checked, and null.** H and the vertex could have disagreed on which periodic
+image to sum -- H uses phonopy's shortest vectors, tie-averaged; the vertex fold
+uses one wrapped cell index, no basis offset, no average. On a 2x2x2 box they do
+disagree, by 46 % of `||D_B||` and 6.1 THz. On the production film
+(`si_big_hiphive`, 5x5x5, `nk = 9`) they agree to **8.8e-16 at every one of the
+81 transverse q**: the 22.8 % of atom pairs that could differ carry no FC2
+weight, because the hiphive cutoff never reaches them.
+`phonon/studies/_qfold_image_check.py` measures it on any bed. The pair count
+was an upper bound and stayed one -- quoting it as an error would have been the
+fill-fraction mistake of `bubble_positivity.md` Sec. 6.10 all over again.
 
 **Cheap and unmeasured.** The output pin's ~30 % is a 1-DOF chain with a random
 vertex; the same split on the real `Phi` blocks would turn it into a production

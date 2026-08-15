@@ -209,11 +209,15 @@ def basis_gauge(scaled_positions, qs):
 def cell_dynamical_matrix(ph3, prim_indices, cell_frac, ref_sc_atoms, q):
     """D(q) in the code's convention: lattice-translation phases only.
 
-    This is the convention the device stack builds its Hamiltonian in
-    (``studies/engine/build_inputs.py``: ``h00 + h01 exp(2 pi i k)`` along
-    transport, ``exp(-2 pi i q . R_perp)`` transverse). Eigenvalues are
-    convention-independent only when the Fourier transform is *exact* at ``q``;
-    comparing them with phonopy's is therefore a direct test of whether the
+    Convention B is ``exp(+2 pi i q . R)`` (``phonon_inputs/convention.py``),
+    which is what the device Hamiltonian is built in. The *vertex* legs carry
+    the conjugate phase (``build_gathering_matrix``,
+    ``se_q._qfold_device_blocks``: ``exp(-2 pi i q . R)``) because they are
+    contracted legs; that is a leg-orientation convention, and whether it is
+    globally consistent inside the bubble is not something this script tests.
+    At q commensurate with the FC supercell the two signs coincide anyway.
+
+    Comparing these eigenvalues with phonopy's is a direct test of whether the
     single-image cell sum represents the supercell FC2 at that ``q``.
     """
     from phonon.phonon_inputs.constants import CONVERSION_THZ2
@@ -221,7 +225,7 @@ def cell_dynamical_matrix(ph3, prim_indices, cell_frac, ref_sc_atoms, q):
     fc2 = np.asarray(ph3.fc2)
     masses = np.asarray(ph3.primitive.masses, dtype=float)
     nat = len(masses)
-    ph = np.exp(-2j * np.pi * (cell_frac @ np.asarray(q, float)))
+    ph = np.exp(2j * np.pi * (cell_frac @ np.asarray(q, float)))
     d = np.zeros((3 * nat, 3 * nat), dtype=complex)
     for i in range(nat):
         s_i = ref_sc_atoms[i]
