@@ -146,6 +146,35 @@ or not. The support law (*) and the flatness argument are structural and do not
 depend on the bed; the percentage does. Evaluating the same split on the stored
 FC3 blocks is offline and is what would turn it into a production number.
 
+## Truncation 1 is unmeasurable from the shipped inputs (2026-08-15)
+
+`fc3_loader` computes the dropped Frobenius fraction at LOAD time and warns
+above a threshold, which looks like instrumentation for exactly this question.
+It is not, and cannot be. Across every stored `fc3_blocks.hdf5` in the tree --
+45 beds spanning CNT, Si and MoS2 -- the maximum block-index offset is 1 and
+the dropped fraction is **0.000 %** without exception. The nearest-neighbour
+projection is applied by the input builder, before the file is written, so by
+the time the loader sees a vertex there is nothing left beyond the shell to
+drop.
+
+The guard therefore never fires, and the size of truncation 1 is recorded
+nowhere. That is the honest state: of the three spatial approximations, the one
+whose magnitude is unknown is also the one the code appears to be watching.
+
+Measuring it means re-running the builder's projection with `nn_only=False`
+from the raw force constants and comparing block norms. Those exist locally for
+MoS2 (`cluster/mos2_reap/fc3.hdf5`) and are not in the cluster tree for Si or
+CNT, so it is a builder-side task rather than a pass over production inputs.
+
+One thing can be said without that work. For a film with cross-plane transport
+the couplings of interest sit between ADJACENT slabs, which is `|I-J| = 1` and
+inside the retained shell -- so the nearest-neighbour projection is unlikely to
+be what removes them. The MoS2 cross-slab couplings are about 0.5 % of the
+vertex weight, and what removes them is the ESTIMATOR: ARDR prunes them to
+exact zero, which is why the production MoS2 vertex is the least-squares fit
+instead (`document/src/results/75_mos2.tex`). A different failure, at a
+different stage, that is easy to file under this one.
+
 ## Error trail
 
 Recorded because the document exists on account of it.
