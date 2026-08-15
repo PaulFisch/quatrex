@@ -276,11 +276,29 @@ triangular taper turns a converging run into a divergence at 1.76e6 while
 restoring positivity perfectly. That is circumstantial and is the only
 H4-flavoured evidence in the tree.
 
-**Open, and worth more than either thread here.** Bulk-Si kappa from the code's
-own SCBA in the diffusive limit against phono3py RTA (~110 W/m/K on our own
-FC3) has never been run. It settles the absolute prefactor that blocks the Si
-film result, where the divide-by-four was retracted and the native prefactor
-over-scatters against Guo by 45 % against 10 %.
+**Half-closed, later the same day.** The absolute prefactor question splits in
+two, and the vertex half is now settled exactly. `vertex_normalisation.md`:
+the code's mass-weighted FC3 is phono3py's times exactly `CONVERSION_FC3_THZ`,
+worst deviation 1.1e-13 over every triplet and band on the checked-in Si
+primitive reap, and its Fourier fold is phono3py's to 0.0e+00 at commensurate q
+once the documented A -> B gauge is applied. F28 had put native within ~15 % with
+`div4` and `x4` excluded by an order of magnitude; the element comparison says
+the vertex is not close to phono3py's, it IS phono3py's.
+
+What that leaves open is everything downstream of the vertex -- the bubble
+prefactor, the Keldysh assembly, the grid -- which only an end-to-end number
+tests. Bulk-Si kappa from the code's own SCBA in the diffusive limit against
+phono3py RTA (~110 W/m/K on our own FC3) has still never been run, and the
+Si-film over-scatter against Guo (45 % against 10 %) still has no explanation.
+It can no longer be blamed on the vertex.
+
+**New, and unmeasured.** H and the vertex do not use the same periodic image.
+H comes from phonopy's shortest vectors, tie-averaged; the vertex fold uses one
+wrapped cell index, no basis offset, no average. Same gauge, different image, and
+they part company at q not commensurate with the FC supercell -- 25-46 % of
+`||D_B||` on the 2x2x2 Si bed. Whether it matters on the production film
+(5x5x5, `nk = 9`) is an FC-weighted question that has not been asked; the pair
+counts alone (22.8 %) are an upper bound, not an error.
 
 **Cheap and unmeasured.** The output pin's ~30 % is a 1-DOF chain with a random
 vertex; the same split on the real `Phi` blocks would turn it into a production

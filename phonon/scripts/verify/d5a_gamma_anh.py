@@ -10,8 +10,18 @@ the PHYSICAL anharmonic linewidth Gamma_anh(omega) directly from the golden-rule
 sub-grid at every FEASIBLE uniform grid (=> iteration-infeasible, the honest
 verdict), or resolvable at a finer grid (=> eta=0 works there)?
 
-Reuses the Si-validated golden-rule machinery in bte_linewidths._bte_machinery
-(vertex 3% vs phono3py on Si). d5a fc3 Fourier-interpolates to ANY q (real-space
+.. warning::
+   BROKEN. This script's core, ``bte_linewidths._bte_machinery``, was never
+   committed -- there is no blob for ``phonon/studies/bte_linewidths.py``
+   anywhere in history -- so the import below fails and nothing here runs.
+   The docstring used to advertise that machinery as "Si-validated (vertex 3%
+   vs phono3py on Si)"; the code behind that number is absent, so the claim is
+   withdrawn. The vertex itself has since been checked directly and is not
+   3% off but exact: ``phonon/studies/_vertex_element_check.py`` puts the
+   code's mass-weighted FC3 at phono3py's times exactly ``CONVERSION_FC3_THZ``
+   (1.1e-13 worst case over every triplet and band).
+
+d5a fc3 Fourier-interpolates to ANY q (real-space
 FC3 + smallest-vector multiplicity), so we sample a fine q-mesh along the wire
 axis even though the supercell is only [1,1,4]. On-shell Gamma_lambda(omega_lambda)
 is binned by frequency; Si-H character via eigenvector projection onto the 12 H.
@@ -28,7 +38,8 @@ for _p in (str(ROOT), str(ROOT / "phonon")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from phonon.studies.bte_linewidths import _bte_machinery   # validated vertex
+# Never committed -- see the warning in the module docstring.
+from phonon.studies.bte_linewidths import _bte_machinery  # noqa: F401
 
 T_KELVIN = 300.0
 D5A_DIR = ROOT / "phonon/configs/sinw/fc3_hiphive_sinw100_d5a_sc4_vasp"

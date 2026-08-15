@@ -4,8 +4,12 @@ import argparse
 import importlib
 import sys
 
+# "sse_verify" and "bte_linewidths" were registered here but never committed
+# (no blob for either path anywhere in history), so both verbs raised
+# ModuleNotFoundError on dispatch. Removed 2026-08-15 rather than left
+# advertising modules that do not exist.
 INVESTIGATIONS = ("conservation", "linewidths", "ballistic",
-                  "convergence", "transport", "sse_verify", "bte_linewidths")
+                  "convergence", "transport")
 
 
 def main() -> int:
