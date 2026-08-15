@@ -143,6 +143,19 @@ def main(argv=None) -> int:
     R = np.array([r["R_m2KGW"] for r in rows]) * 1e-9
     if len(rows) < 2:
         return 0
+    if len(set(np.round(t, 15))) < 2:
+        # Two runs at the SAME thickness are an A/B at fixed length, not a
+        # ladder: R(t) = R_c + t/kappa has no slope to fit and polyfit will
+        # happily return a number anyway.
+        print("\n  same-thickness runs -- this is a fixed-length A/B, not a "
+              "ladder; no R(t) fit. Ratio of resistances:")
+        ref = rows[0]
+        for r in rows[1:]:
+            d = (r["R_m2KGW"] - ref["R_m2KGW"]) / ref["R_m2KGW"]
+            print(f"    {r['name']} / {ref['name']}: "
+                  f"{r['R_m2KGW']:.4f} vs {ref['R_m2KGW']:.4f} m2K/GW "
+                  f"({d:+.2%})")
+        return 0
     slope, intercept = np.polyfit(t, R, 1)
     kappa, r_c = 1.0 / slope, intercept
     print(f"\nfit over {len(rows)} points: R(t) = R_c + t/kappa_bulk")

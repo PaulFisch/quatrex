@@ -256,6 +256,44 @@ silently damped Picard; and `newton_max_krylov = 30` costs up to 30 JVPs per
 step, each about one map application. None of that matters here because Anderson
 works, but it rules Newton out as the fallback for the longer rungs.
 
+## The fixed-length A/B: the least-squares fit lowers cross-plane resistance by 11 %
+
+`lsM2f` (job 4491085) is `lsM2b`'s state finished off at a loose tolerance so it
+writes a current -- `lsM2b` itself ran 57 correct iterations and hit the wall
+before the output stage, which produced no transport number at all.
+
+| run | vertex | t | J_raw | residual | lead balance | R |
+|---|---|---|---|---|---|---|
+| `cvM2b` | ARDR, 2 blocks all diagonal | 2.4588 nm | 590.3940 | 5.11e-06 | 1.52e-04 | **13.8161** m2K/GW |
+| `lsM2f` | least squares, 8 blocks | 2.4588 nm | 662.2560 | 4.81e-04 | 1.04e-03 | **12.3169** m2K/GW |
+
+Same geometry, same 2-block partition, same `ne = 6001` on the same 24 THz
+window, same 5x5 transverse mesh, same 305/295 K, `eta = 0` both, box mask
+inactive on both. One variable: which force-constant fit the device was built
+from.
+
+**R falls by 10.85 %.**
+
+Two things this is NOT.
+
+It is not "the cross-gap fc3 channel is worth 11 %". The two reaps differ in
+`fc2` as well as `fc3` -- `||H01(G)||` is 1.9 against 3.0 THz^2, and the
+rigid-layer modes move from 1.39/1.42 to 1.10/1.58 THz. Isolating the
+third-order channel alone would need a third build, LS `fc2` with the `fc3`
+pruned the ARDR way. What the 11 % measures is the whole difference between the
+two fits, and the fit that produces it is the one that matches the measured
+rigid-layer frequencies.
+
+It is not a converged-to-converged comparison. `lsM2f` stops at a Sigma residual
+of 4.81e-04 where `cvM2b` reached 5.11e-06. The bound that matters is the
+conservation one: lead balance 1.04e-03 against 1.52e-04, so the LS current
+carries about 0.1 % of imbalance-bounded uncertainty against the ARDR side's
+0.015 %. Both are far below the 11 % effect.
+
+`_kappa_z_ladder.py` now refuses to fit `R(t)` across runs at the same
+thickness -- polyfit returned `kappa_bulk = 0.3764 W/m/K` from these two points
+before the guard, which is a fit to a vertical line and means nothing.
+
 ## What a fourth point would cost
 
 The ladder as it stands cost about 12.2 node-hours: `cvM2b` 2 nodes for 7:52,
