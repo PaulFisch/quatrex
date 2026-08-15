@@ -126,6 +126,47 @@ improve the output truncation". Partly, and not mainly: the discarded weight
 moves five points with the range and thirty with the blocking. The modal route
 addresses the smaller term.
 
+### On the production beds
+
+Block structure read from the stored inputs:
+
+| bed | blocks | DOF/block | cells/block |
+|---|---|---|---|
+| `sichk_base` | 3 | 6 | 1 |
+| `si4x1` | 4 | 6 | 1 |
+| `si4x2` | **2** | 12 | **2** |
+| `cnt_cal`, `l4gpu` | 4 | 36 | 1 |
+| `sifilm_nk9r` | 3 | 6 | 1 |
+
+Si's primitive cell is 6 DOF and CNT (3,3)'s is 36, so every production bed
+except `si4x2` runs at one primitive cell per block.
+
+`si4x1` and `si4x2` are the same 24-DOF device blocked two ways, and the tree
+already records that the first diverges and the second converges. The pin
+explains the pair without appealing to a magnitude: **`si4x2` has two blocks, so
+the largest possible `|I-J|` is 1 and the tridiagonal restriction discards
+nothing at all.** There is no mask. Since the mask is a Schur product with an
+indefinite band-ones matrix -- the documented source of non-causal gain -- what
+matters is not that its weight is small but that it is exactly absent. `si4x1`
+at four blocks does have one.
+
+That is combinatorics, not a property of this bed: any two-block device is free
+of the output pin, and so is any device whose blocks are wide enough that
+`2p + b` collapses to 1 in block units.
+
+### Against the CNT ladder
+
+Discarded weight at one cell per block, over the ladder's lengths: L4 about
+2 %, L7 about 11 %, L16 about 35 %. The reported CNT series stops at seven
+cells and brackets from sixteen, which is where this crosses from a few percent
+to a third.
+
+A correspondence and not a proof -- the bed is a 1-DOF chain with a random
+vertex, so the percentages are not the device's. What transfers is the shape:
+the pin's cost grows steeply with block count over exactly that range, while
+the quantity usually blamed for the bracket, the Green-function range, moves it
+five points over a factor ten.
+
 ### The original seven-cell breakdown
 
 

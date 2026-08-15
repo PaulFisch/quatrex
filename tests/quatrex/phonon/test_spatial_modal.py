@@ -1114,3 +1114,44 @@ def test_wider_blocks_make_the_tridiagonal_pin_accurate(cells_per_block,
     ranges of 2 and 20 cells) and strongly on how the device is blocked.
     """
     assert _discarded(_long_bed(12), cells_per_block) < ceiling
+
+
+def test_a_two_block_device_has_no_output_pin_error_at_all():
+    r"""Combinatorial, not numerical: with two blocks the largest possible
+    ``|I-J|`` is 1, so a tridiagonal restriction discards nothing on ANY bed.
+
+    That is the whole difference between the two blockings of one 24-DOF Si
+    device recorded in the tree, `si4x1` (4 blocks of 6 DOF) and `si4x2`
+    (2 blocks of 12 DOF): the second has no mask to apply. Since the mask is a
+    Schur product with an indefinite band-ones matrix -- the documented source
+    of non-causal gain -- what matters is not that its weight is small but that
+    it is exactly absent.
+    """
+    sig = _long_bed(4)
+    assert _discarded(sig, 2) == 0.0          # 2 blocks: nothing to discard
+    assert _discarded(sig, 1) > 0.0           # 4 blocks: a mask exists
+
+    # and it is the block COUNT that does it, not the bed
+    for n_cell, m in ((6, 3), (8, 4), (12, 6)):
+        assert _discarded(_long_bed(n_cell), m) == 0.0
+
+
+def test_the_pin_grows_over_the_lengths_where_the_cnt_ladder_stops_being_read():
+    r"""The discarded weight at one cell per block, over the ladder's lengths.
+
+    L4 about 2 %, L7 about 11 %, L16 about 35 %. The reported CNT series stops
+    at seven cells and brackets from sixteen
+    (``document/src/results/64_gband.tex``), which is where this crosses from a
+    few percent to a third.
+
+    Correspondence, not proof: the bed is a 1-DOF chain with a random vertex,
+    so the percentages are not the device's. What transfers is that the pin's
+    cost grows steeply with block count over exactly that range, while the
+    quantity usually blamed -- the Green-function range -- moves it by five
+    points over a factor ten.
+    """
+    fracs = {n: _discarded(_long_bed(n), 1) for n in (4, 7, 16)}
+    assert fracs[4] < 0.05
+    assert 0.08 < fracs[7] < 0.20
+    assert fracs[16] > 0.30
+    assert fracs[16] > 10.0 * fracs[4]
