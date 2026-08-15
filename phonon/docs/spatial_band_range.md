@@ -265,3 +265,46 @@ that the completion is exact and the mechanism is the one measured on the real
 cells above. Wiring it into `SigmaPhononPhonon` behind a flag, against the
 `set_pole_channel` / `set_cm_channel` seams, is the next step and the first one
 that would move a production number.
+
+## Why reweighting the mask cannot substitute for a modal sector
+
+The cheap alternative to building a modal representation is to keep the boxcar
+and re-weight it. Two independent bounds close that route.
+
+**At the output.** The output band is pinned at `|I-J| <= 1` whatever `g_band`
+is, so the output mask is the tridiagonal Toeplitz `[w_1, 1, w_1]` with symbol
+`1 + 2 w_1 cos(theta)`, non-negative only for `w_1 <= 1/2`. A weighting
+faithful to a Green function of range `xi` has `w_1 = exp(-1/xi)`, so PSD-ness
+demands
+
+    xi <= 1 / ln 2 = 1.4427 cells,
+
+and every range measured above is far past it -- 3.05 to 28.8 on Si, 1.5 to
+25.5 on CNT. This also derives the existing empirical result rather than
+restating it: Bartlett has `w_1 = b/(b+1) <= 1/2` only at `b = 1`, which is
+exactly where `test_taper_is_psd_only_at_band_one` finds it, and band-1
+Bartlett sits precisely on the boundary.
+
+**On the legs.** The untruncated geometric weight is the Poisson kernel and is
+strictly positive, so a geometric taper looks like the natural PSD choice.
+Truncated it is not -- cutting a slowly decaying tail leaves a discontinuity,
+and a truncated positive-definite sequence need not stay positive definite. At
+`lambda = 0.91` and band 4 the leg symbol reaches -1.11. The first band at
+which it turns positive:
+
+| lambda | xi [cells] | first PSD band | band / xi |
+|---|---|---|---|
+| 0.30 | 0.83 | 1 | 1.20 |
+| 0.50 | 1.44 | 2 | 1.39 |
+| 0.68 | 2.59 | 4 | 1.54 |
+| 0.80 | 4.48 | 10 | 2.23 |
+| 0.91 | 10.60 | 32 | 3.02 |
+
+The band must exceed the range by a factor that itself grows with the range --
+the regime in which no truncation was needed in the first place.
+
+So the mask has to go rather than be reshaped, which is what makes the modal
+completion the answer and not a nicety. It also explains, from the symbol
+rather than from a measurement, why `bubble_positivity.md` Sec. 6.10b found
+that the PSD taper fixed positivity exactly and the run still diverged: the
+taper repaired the legs while the output mask stayed indefinite.

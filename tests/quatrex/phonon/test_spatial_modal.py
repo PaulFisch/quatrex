@@ -811,3 +811,107 @@ def test_the_banded_error_grows_with_the_range_of_the_green_function():
         ranges.append(-1.0 / np.log(abs(_gap_root(top))))
     assert ranges[0] < ranges[1] < ranges[2], ranges
     assert errs[0] < errs[1] < errs[2], f"error did not grow with range: {errs}"
+
+
+# --- no reweighting of the mask can do this job ----------------------------- #
+
+def test_the_output_mask_is_psd_only_below_a_range_of_one_and_a_half_cells():
+    r"""Closes the cheap alternative to a modal sector, with a proof.
+
+    The obvious way to avoid building a modal representation is to keep the
+    boxcar and re-weight it -- a taper. But the OUTPUT band is pinned at
+    ``|I-J| <= 1`` whatever ``g_band`` is, so the output mask is the
+    tridiagonal Toeplitz ``[w_1, 1, w_1]`` with symbol
+    :math:`1 + 2 w_1\cos\theta`, non-negative only for :math:`w_1 \le 1/2`.
+
+    Any weighting faithful to a Green function of range :math:`\xi` has
+    :math:`w_1 = e^{-1/\xi}`, so PSD-ness demands
+
+        xi <= 1 / ln 2 = 1.4427 cells,
+
+    and every range measured on a real bed is far above that -- 3.05 to 28.8
+    on Si, 1.5 to 25.5 on CNT (``phonon/docs/spatial_band_range.md``). So no
+    choice of weights is simultaneously PSD at the output and faithful to the
+    range the device actually has. The mask has to go, not be reshaped.
+
+    This also derives the existing empirical result rather than restating it:
+    Bartlett has ``w_1 = b/(b+1)``, which is ``<= 1/2`` only at ``b = 1``,
+    which is exactly where ``test_taper_is_psd_only_at_band_one`` finds it.
+    """
+    def output_symbol_min(w1):
+        theta = np.linspace(0.0, 2 * np.pi, 2001)
+        return float(np.min(1.0 + 2.0 * w1 * np.cos(theta)))
+
+    # the bound itself
+    assert output_symbol_min(0.5) == pytest.approx(0.0, abs=1e-5)
+    assert output_symbol_min(0.49) > 0.0
+    assert output_symbol_min(0.51) < 0.0
+
+    xi_max = 1.0 / np.log(2.0)
+    assert xi_max == pytest.approx(1.4427, rel=1e-4)
+    assert np.exp(-1.0 / xi_max) == pytest.approx(0.5)
+
+    # Bartlett is PSD at the output only at band 1, and marginally
+    for band in (1, 2, 3):
+        w1 = 1.0 - 1.0 / (band + 1.0)
+        assert (output_symbol_min(w1) >= -1e-9) == (band == 1)
+
+    # every range measured on a real device is above the bound
+    for xi in (3.05, 6.05, 28.8, 1.5, 2.62, 10.7):
+        assert xi > xi_max
+        assert output_symbol_min(np.exp(-1.0 / xi)) < 0.0
+
+
+def test_a_truncated_geometric_mask_is_psd_only_once_the_band_exceeds_the_range():
+    r"""The other half of the impossibility, and it was not what I expected.
+
+    The untruncated geometric weight is the Poisson kernel
+    :math:`(1-\lambda^2)/(1-2\lambda\cos\theta+\lambda^2) > 0`, so a geometric
+    taper looks like the obvious PSD replacement for the boxcar. TRUNCATED it
+    is not: cutting a slowly decaying tail leaves a discontinuity, and a
+    truncated positive-definite sequence need not stay positive definite. At
+    :math:`\lambda = 0.91` and band 4 the leg symbol reaches -1.11.
+
+    Measured, the first band at which it turns positive:
+
+    ======  =========  ==============  ==========
+    lambda  xi [cells] first PSD band  band / xi
+    ======  =========  ==============  ==========
+    0.30    0.83       1               1.20
+    0.50    1.44       2               1.39
+    0.68    2.59       4               1.54
+    0.80    4.48       10              2.23
+    0.91    10.60      32              3.02
+    ======  =========  ==============  ==========
+
+    So the band has to exceed the range, by a factor that itself grows with the
+    range -- which is precisely the regime in which no truncation was needed.
+    Together with the output bound above, reweighting cannot substitute for a
+    modal sector on any bed whose range exceeds about one and a half cells.
+    """
+    theta = np.linspace(0.0, 2.0 * np.pi, 4001)
+
+    def sym_min(lam, band):
+        d = np.arange(-band, band + 1)
+        return float(np.min(np.real(
+            np.exp(1j * np.outer(theta, d)) @ (lam ** np.abs(d)))))
+
+    # the failure at a short band and a long range
+    assert sym_min(0.91, 4) < -1.0
+
+    # the measured turn-on, and that it needs more than the range itself
+    for lam, first in ((0.3, 1), (0.5, 2), (0.68, 4), (0.8, 10), (0.91, 32)):
+        xi = -1.0 / np.log(lam)
+        assert sym_min(lam, first) > 0.0
+        if first > 1:
+            assert sym_min(lam, first - 1) <= 0.0
+        assert first >= xi, f"lam={lam}: band {first} below the range {xi:.2f}"
+
+    # the untruncated limit IS the Poisson kernel and is strictly positive
+    for lam in (0.3, 0.68, 0.91):
+        exact = (1 - lam ** 2) / (1 - 2 * lam * np.cos(theta) + lam ** 2)
+        assert exact.min() > 0.0
+        wide = int(np.ceil(30.0 / abs(np.log(lam))))
+        d = np.arange(-wide, wide + 1)
+        got = np.real(np.exp(1j * np.outer(theta, d)) @ (lam ** np.abs(d)))
+        assert np.allclose(got, exact, rtol=1e-8)
