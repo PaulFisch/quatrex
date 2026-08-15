@@ -797,6 +797,86 @@ or a damped-warm-started Anderson, which is what makes the refined Si
 grids descend), and then an R-ladder to find whether a PSD radius exists
 that is mild enough to be accurate.
 
+### 6.10c MEASURED: the mask breaks positivity of G before Sigma exists
+
+Everything above infers the mask-PSD story from convergence outcomes. The
+positivity gate settles it directly. `phonon/solver.py::_check_positivity` has
+been in the tree behind `pole_sector.psd_check` (env `QX_POLE_PSD=1`) and had
+never been switched on -- it appears in no recorded `RUN env` and no log has
+ever printed a `positivity ...` line. Three runs (2026-08-15, daint debug,
+0.33 nh each) switch it on for a single-variable cutoff A/B on the `mos2f3nu`
+geometry: 3 transport cells (36.9 A), `ne = 262`, 4 ranks, `eta = 0`, inputs
+read from `mos2f3nu` and nothing written back to it.
+
+| job | name | `interaction_cutoff` | extra |
+|---|---|---|---|
+| 4490500 | `mos2psd10` | 10 A | -- |
+| 4490505 | `mos2psd40b` | 40 A | 40 iterations |
+| 4490504 | `mos2psd10lm` | 10 A | `QX_SSE_LOWMASK=1.5` |
+
+The gate reports the worst NORMALISED eigenvalue, so `-1` is the floor.
+
+**The bare Green function already fails.** At iteration 0 the self-energy is
+identically zero and the two runs differ in nothing but the cutoff:
+
+| | `g_lesser` at it 0 | `g_greater` at it 0 |
+|---|---|---|
+| 10 A | **-2.167e-01** at w[1] = 0.113 THz | -2.225e-01 at w[0] |
+| 40 A | -3.451e-16 at w[29] | -8.755e-11 at w[0] |
+
+`interaction_cutoff` is not a vertex knob. `core/scba.py` feeds it to
+`compute_sparsity_pattern`, so it masks the stored pattern of **every** matrix,
+`G` included. A box-masked `G` is not PSD, and the measurement above is that
+statement with no self-energy in it at all.
+
+**Sigma then inherits it through the congruence.** From the first non-trivial
+iteration:
+
+| iteration | 10 A: `sigma_lesser` | 40 A: `sigma_lesser` |
+|---|---|---|
+| 0 | +0.000e+00 (Sigma = 0) | +0.000e+00 |
+| 1 | **-9.923e-01** at w[1] | **+0.000e+00** |
+| 2-11 | -9.90e-01 ... -9.93e-01, always at w[1] | +0.000e+00 |
+
+At 40 A, `sigma_lesser` and `sigma_greater` are `+0.000e+00` at **all 40**
+iterations, and the residual falls monotonically from iteration 13 to 3.91e-02
+at iteration 39 (still above the 1e-3 tolerance -- converging, not converged).
+At 10 A the violation is essentially maximal and pinned to the second grid
+point for every iteration.
+
+So the chain is measured end to end: the box mask truncates `G`, a truncated
+`G` is not PSD, `Sigma = Phi G G Phi` is a congruence of it and inherits the
+failure, and the SCBA diverges. Sec. 6.10's "the criterion is mask PSD-ness"
+was the right reading; this is the mechanism under it.
+
+### 6.10d Why the infrared mask never helped: it relocates the violation
+
+Sec. 6.10c puts the 10 A violation at 0.113 THz, and the five historical
+`QX_SSE_LOWMASK` runs used thresholds of 0.3 and 1.5 THz, which cover it -- yet
+all five diverged. Job 4490504 is that experiment with the gate on:
+
+| iteration | `sigma_lesser` worst | at |
+|---|---|---|
+| 1 | -9.244e-01 | w[48] = 1.778 THz |
+| 2 | -4.115e-01 | w[48] |
+| 4 | -2.212e-01 | w[48] |
+| 7 | -1.636e-01 | w[37] = 1.558 THz |
+| 11 | -1.219e-01 | w[37] |
+
+The violation does not go away. It **moves to just above the mask edge** --
+1.56-1.78 THz against a 1.5 THz mask -- shrinks about eightfold, and decays
+slowly. The residual falls to 3.355e-01 by iteration 7 and then turns and rises
+again (0.374, 0.419, 0.467, 0.515), with the lead balance climbing throughout.
+`g_lesser` and `g_greater` sit frozen at their iteration-0 values
+(-2.167e-01 at w[1], -2.225e-01 at w[0]) because the masked `Sigma` no longer
+touches the infrared, so `G` stays bare there.
+
+Masking the infrared treats the location of the symptom, not the truncation
+that causes it. That reconciles the five failed runs with Sec. 6.10c and closes
+the question of whether the infrared knob was simply never tried hard enough.
+
+Reproduce with `python -m phonon.studies._psd_trace_report <slurm log>`.
+
 ### 6.11 Why only MoS2: the mask is PSD for every clean system
 
 The same box mask, evaluated at the production default 10 A on each
