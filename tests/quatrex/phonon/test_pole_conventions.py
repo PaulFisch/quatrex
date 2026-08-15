@@ -251,3 +251,59 @@ def test_an_empty_census_is_also_silent_off_rank_zero(monkeypatch, capsys):
     monkeypatch.setattr(ps, "_report_rank", lambda: 0)
     ps.PoleSector._report_census([])
     assert "no candidates" in capsys.readouterr().out
+
+
+# --- the shipped resolution gate is the exact one --------------------------- #
+
+def test_the_exact_line_weight_gate_is_the_default():
+    """It defaulted to 0 -- the legacy ratio -- until 2026-08-15.
+
+    On the frozen Si census the two rules disagreed about the physics
+    conclusion: the ratio reported the narrow population as surviving
+    self-consistency (under-resolved 95.5 % -> 95.1 %) while the exact rule
+    reported the median line going from unrepresentable to carried at 3 %.
+    A default that can invert a physics answer is not a threshold preference.
+    """
+    from quatrex.core.config import PoleSectorConfig
+
+    cfg = PoleSectorConfig()
+    assert cfg.leg_weight_tol > 0.0, "the legacy ratio gate is shipping again"
+    assert cfg.leg_weight_tol == pytest.approx(0.05)
+    # 0 stays reachable, so pre-2026-08-15 runs still reproduce.
+    assert PoleSectorConfig(leg_weight_tol=0.0).leg_weight_tol == 0.0
+
+
+def test_the_default_tolerance_splits_the_population_where_the_census_did():
+    r"""0.05 promotes the tail and leaves the median mode on the grid.
+
+    Pinned against the converged Si census numbers (Sec. 13): a median line at
+    ``E_leg^max = 0.0314`` must be refused as grid-carried, and the typical
+    worst line at 3.56 must be promoted. A default that failed either would be
+    carrying a different population than the measurement described.
+    """
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_sector import PoleSector
+
+    tol = PoleSectorConfig().leg_weight_tol
+    h = 0.25                                    # the census grid, wmax 35 / 140
+    sec = PoleSector(PoleSectorConfig(), np.arange(0.0, 35.0 + h, h))
+    assert sec.h == pytest.approx(h)
+
+    # Invert E_leg^max to the gamma each census figure corresponds to.
+    def gamma_of(err):
+        return h / (2.0 * np.pi / np.log1p(2.0 / err))
+
+    assert sec.leg_weight_error(gamma_of(0.0314)) <= tol      # median: refused
+    assert sec.leg_weight_error(gamma_of(3.56)) > tol         # tail: promoted
+
+
+def test_hysteresis_still_derives_from_the_new_default():
+    """``leg_weight_tol_out = 0`` means tol/3, and the out-tolerance must be
+    SMALLER: this gate refuses a pole the grid already resolves, so staying in
+    the sector is the easier condition, not the harder one."""
+    from quatrex.core.config import PoleSectorConfig
+
+    cfg = PoleSectorConfig()
+    assert cfg.leg_weight_tol_out == 0.0
+    effective_out = cfg.leg_weight_tol / 3.0
+    assert effective_out < cfg.leg_weight_tol

@@ -119,7 +119,14 @@ def test_screening_rejects_a_grid_resolved_mode():
     kept = sec.build_clusters(sols).n_poles
     assert kept > 0
 
-    sec_strict, sols_strict, *_ = _run(samples_per_halfwidth=1e-6)
+    # The bar that is ACTIVE. Since 2026-08-15 the shipped gate is the exact
+    # line-weight test, and `screen` treats the two as alternatives rather than
+    # a stack -- with leg_weight_tol > 0 the q_omega branch is never reached, so
+    # samples_per_halfwidth (which this test used to raise) no longer demotes
+    # anything. The exact tolerance is a RELATIVE weight error and is unbounded
+    # above -- this bed's lines sit at E_leg^max ~ 8.6 -- so "accept any
+    # representation error, never promote" is a large tolerance, not 1.
+    sec_strict, sols_strict, *_ = _run(leg_weight_tol=1e12)
     state = sec_strict.build_clusters(sols_strict)
     assert state.n_poles == 0, "an absurd resolution bar promoted modes anyway"
     # Exactly the poles that were kept before must now be refused for being
@@ -592,11 +599,17 @@ def test_hysteresis_survives_across_iterations():
         dz_est = 0.0 + 0.0j     # perfectly located, so eps_z cannot refuse it
         def __init__(self, z): self.z = z
 
-    # gamma chosen so q_omega sits BETWEEN q_in and q_out: such a pole is
-    # refused on first sight but retained once promoted. That gap is the
-    # hysteresis, and it is what stops membership oscillating.
-    q_mid = 0.5 * (sec.cfg.q_in + sec.cfg.q_out)
-    gamma = q_mid * sec.cfg.samples_per_halfwidth * h
+    # gamma chosen to sit in the ACTIVE gate's hysteresis gap. The shipped gate
+    # is the exact line-weight test, whose out-tolerance is tol/3, so a line
+    # with tol/3 < E_leg^max <= tol is refused on first sight and retained once
+    # promoted. (Before 2026-08-15 the active gap was q_in..q_out; raising
+    # samples_per_halfwidth no longer demotes anything, because `screen` takes
+    # the two gates as alternatives and never reaches the ratio branch.)
+    tol = sec.cfg.leg_weight_tol
+    assert tol > 0.0, "this test needs the exact gate to be the active one"
+    e_mid = 0.6 * tol                       # between tol/3 and tol
+    gamma = h / (2.0 * np.pi / np.log1p(2.0 / e_mid))
+    assert sec.cfg.leg_weight_tol / 3.0 < sec.leg_weight_error(gamma) <= tol
     sol = _Sol(complex(9.0, -gamma))
 
     assert sec.screen(sol, was_promoted=False) is not None, "refused when new"
@@ -838,10 +851,18 @@ def test_leg_weight_gate_is_exact_where_samples_per_halfwidth_is_a_guess():
     assert sec.leg_weight_error(0.0) == float("inf")
 
 
-def test_leg_weight_gate_is_off_by_default_and_refuses_a_resolved_mode_when_on():
-    """Default off keeps the legacy rule; on, it must actually refuse."""
+def test_leg_weight_gate_ships_on_and_the_legacy_rule_stays_reachable():
+    """Since 2026-08-15 the exact gate is the default; 0 restores the legacy
+    ratio so earlier runs reproduce.
+
+    The two disagreed about a physics conclusion on the frozen Si census, not
+    merely about a threshold, which is why the default moved
+    (``pole_sector_observations.md`` Sec. 13.1).
+    """
     freqs = np.linspace(0.0, 55.0, 181)
-    base = PoleSector(PoleSectorConfig(enabled=True), freqs)
+    assert PoleSector(PoleSectorConfig(enabled=True), freqs).cfg.leg_weight_tol > 0.0
+    base = PoleSector(
+        PoleSectorConfig(enabled=True, leg_weight_tol=0.0), freqs)
     assert base.cfg.leg_weight_tol == 0.0
 
     import types

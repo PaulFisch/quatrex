@@ -230,12 +230,27 @@ class PoleSectorConfig(BaseModel):
 
     samples_per_halfwidth: PositiveFloat = 2.0
     """``p_Gamma``: samples per half-width below which a mode counts as
-    under-resolved and is promoted."""
+    under-resolved and is promoted.
+
+    NOT CONSULTED under the shipped default. ``screen`` treats the exact
+    line-weight gate and this ratio as ALTERNATIVES, not as a stack, and
+    since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
+    branch is only reached when ``leg_weight_tol`` is set back to 0."""
     q_in: PositiveFloat = 1.0
-    """Promote when the resolution score falls below this."""
+    """Promote when the resolution score falls below this.
+
+    NOT CONSULTED under the shipped default. ``screen`` treats the exact
+    line-weight gate and this ratio as ALTERNATIVES, not as a stack, and
+    since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
+    branch is only reached when ``leg_weight_tol`` is set back to 0."""
     q_out: PositiveFloat = 2.0
     """Demote only above this. The gap to ``q_in`` is hysteresis: a mode that
-    changes sector every iteration makes the fixed-point map discontinuous."""
+    changes sector every iteration makes the fixed-point map discontinuous.
+
+    NOT CONSULTED under the shipped default. ``screen`` treats the exact
+    line-weight gate and this ratio as ALTERNATIVES, not as a stack, and
+    since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
+    branch is only reached when ``leg_weight_tol`` is set back to 0."""
 
     isolation_min: PositiveFloat = 2.0
     """``eta_iso``: below this a group of poles is carried as one COHERENT
@@ -471,11 +486,13 @@ class PoleSectorConfig(BaseModel):
     individual sectors -- only their sum is constrained). Nothing in the solver
     checks this today, and the sector is the first thing that can break it
     structurally."""
-    leg_weight_tol: NonNegativeFloat = 0.0
+    leg_weight_tol: NonNegativeFloat = 0.05
     """Worst-case line-weight error above which a mode counts as unresolved.
 
-    0 keeps the legacy ``q_in``/``samples_per_halfwidth`` rule. Set it and the
-    resolution test becomes exact instead of a hand-chosen constant.
+    0 restores the legacy ``q_in``/``samples_per_halfwidth`` rule, kept so
+    pre-2026-08-15 runs reproduce. The default is now the EXACT test, because
+    on the frozen Si census the two rules disagreed about the physics
+    conclusion and not merely about a threshold -- see the calibration below.
 
     Summing point samples of a unit-weight Lorentzian over a uniform grid is a
     theta function, not the nearest-node term:
@@ -494,7 +511,32 @@ class PoleSectorConfig(BaseModel):
     median ``h/gamma = 0.65``, where the grid carries the line to better than
     1e-8, yet ``q_omega = gamma/(2h) < 1`` calls 140 of 144 candidates
     under-resolved -- the old rule flags almost everything and then leans on
-    the root solve to refuse it."""
+    the root solve to refuse it.
+
+    **Why 0.05.** Measured on the converged Si census (81 q, 1456 candidates,
+    ``pole_sector_observations.md`` Sec. 13), the tolerance decides how much of
+    the population the sector is asked to carry:
+
+    ======  ======================  ==================================
+    eps     h/gamma called adequate q whose MEDIAN line is promoted
+    ======  ======================  ==================================
+    0.01    1.185                   76/81
+    0.05    1.692                   32/81
+    0.10    2.064                   18/81
+    ======  ======================  ==================================
+
+    The census found the bulk of that population carried by the grid to 3 %
+    once the SCBA converges, and a tail of roughly one to four modes per q that
+    is not. 0.01 promotes the bulk, which is the thing the census says is
+    unnecessary; 0.10 keeps only the extreme tail. 0.05 promotes the tail and
+    the worst quartile (80/81 q have a p75 line above it) and leaves the median
+    mode on the grid, which is the population split the measurement actually
+    found.
+
+    Promoting more is not the safe direction: the sector's own bubble balance
+    runs about 1000x looser than the pole-free baseline, so carrying a mode the
+    grid already integrates correctly trades a known small error for an
+    unexplained larger one."""
 
     leg_weight_tol_out: NonNegativeFloat = 0.0
     """Demotion threshold for ``leg_weight_tol``; 0 means "use
