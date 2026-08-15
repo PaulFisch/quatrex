@@ -158,6 +158,48 @@ is structural and expected. The documented remedy is a
 that 78.87 nh. That is a call for Paul, not something to do silently, so nothing
 has been launched.
 
+## The least-squares rebuild: inputs, and the gates they passed
+
+Built 2026-08-15. One source device at one cell per block, then re-blocked --
+`reblock_device.py` merges the q-fold rather than recomputing it, so the
+expensive object is produced once:
+
+    build_inputs.py --system mos2film --nslabs 8 --nk 5 \
+        --fc3-subdir ../cluster/mos2_film_reap_ls --out cluster/mos2f8_ls_x1
+    reblock_device.py --src cluster/mos2f8_ls_x1 --cells N --per-block N/2 \
+        --out cluster/lsM{N}
+
+The build had to run on the laptop: daint's venv has no `phonopy` (the job died
+in seconds) and tortin had no node idle enough to claim under the sharing
+policy. Peak 5.5 GB against 51 GB free, 8 of 16 cores, threads pinned; the fold
+took about ninety seconds.
+
+Harmonic gates on the source: IDFT round-trip `1.71e-15`, acoustic modes at
+Gamma exactly zero, `||H00(G)|| = 454.5 THz^2` against the ARDR build's `454.4`
+-- the same crystal. `||H01(G)||` is 1.9 against 3.0, which is the interlayer
+coupling the two fits disagree about and the same disagreement the rigid-layer
+modes show.
+
+Re-block gates, on every rung: slab translational equivalence OK, FC2 re-block
+exact, fc3 merge exact (the dense operator is unchanged by the re-partition).
+Worth noting because `reblock_device.py`'s docstring justifies replication with
+"the fit prunes the vdW-gap fc3 to exact zero" -- true for ARDR, not for LS, so
+the assertion was doing real work here and it passed.
+
+| rung | cells | dof/block | span | cutoff | fill | qfold | vertex blocks | cross-layer inside a block |
+|---|---|---|---|---|---|---|---|---|
+| `lsM2` | 2 | 18 | 21.57 A | 30 A | 1.000 | 0.44 GB | **8** (2 diag + 6 off) | n/a, 1 cell/block |
+| `lsM4` | 4 | 36 | 46.16 A | 48 A | 1.000 | 3.48 GB | **8** (2 diag + 6 off) | **0.520591 %** |
+| `lsM6` | 6 | 54 | 70.75 A | 72 A | 1.000 | 11.73 GB | **8** (2 diag + 6 off) | **0.692919 %** |
+
+Against the ARDR ladder's 2 blocks, all diagonal, 0.000000 % cross-layer. The
+channel that was identically absent is now present, and the box mask is inactive
+on all three.
+
+The eight-block source itself carries 50 vertex blocks over its 8 slabs (8
+diagonal + 42 off-diagonal at offsets `(+-1, 0)`, `(0, +-1)`, `(+-1, +-1)`) where
+ARDR would have 8. That 6.25x is the cost the correct vertex carries.
+
 ## What a fourth point would cost
 
 The ladder as it stands cost about 12.2 node-hours: `cvM2b` 2 nodes for 7:52,
