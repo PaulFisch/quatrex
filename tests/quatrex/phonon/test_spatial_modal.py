@@ -210,3 +210,126 @@ def test_the_modal_form_beats_a_hard_band_at_equal_storage():
     dropped = np.abs(exact - boxcar)[n > band]
     assert dropped.min() == pytest.approx(1.0, abs=1e-12)
     assert dropped.size == n.size - band - 1
+
+
+# --- complex bands of the dressed operator, proposal Eqs. (143)-(144) ------- #
+
+def _blocks(omega, sigma=0.0):
+    """System-matrix blocks of the chain: ``a_ii = w^2 - h00 - Sigma``."""
+    return (np.array([[omega * omega - 2.0 * K_S - sigma]], dtype=complex),
+            np.array([[K_S + 0j]]), np.array([[K_S + 0j]]))
+
+
+@pytest.mark.parametrize("frac", [0.4, 0.9, 1.4, 2.2])
+def test_the_nevp_reproduces_the_closed_form_roots(frac):
+    """The fixed point of reusing the OBC's solver: handed the chain's own
+    blocks it must return the quadratic's roots.
+
+    This is what pins the block convention. ``a_ji/lambda + a_ii + a_ij lambda``
+    is the OBC's ordering; passing dynamical-matrix blocks instead of
+    system-matrix blocks solves a different pencil and returns wrong bands with
+    no error raised.
+    """
+    from quatrex.phonon.spatial_modes import bloch_modes
+
+    omega = frac * BAND_TOP
+    got = np.asarray(bloch_modes(*_blocks(omega)).lam)
+    want = np.asarray(bloch_roots(omega))
+
+    # Compared as a SET. A conjugate pair has equal real parts, so any sort
+    # tie-breaks on the imaginary part by last-digit noise and can hand back
+    # the two roots in either order -- which says nothing about the solver.
+    assert got.size == want.size
+    for w in want:
+        assert np.min(np.abs(got - w)) < 1e-10, f"{w} missing from {got}"
+    for g in got:
+        assert np.min(np.abs(want - g)) < 1e-10, f"{g} is spurious"
+
+
+def test_an_undressed_in_band_mode_has_no_range_at_all():
+    r"""``|lambda| = 1`` gives ``xi = inf``, and the required band is unbounded.
+
+    Reported as ``inf`` rather than as a large number: the honest answer for an
+    undressed operator is that no mask is long enough, and the reply is a modal
+    representation rather than a wider one.
+    """
+    from quatrex.phonon.spatial_modes import band_range_cells, bloch_modes
+
+    modes = bloch_modes(*_blocks(0.5 * BAND_TOP))
+    assert modes.propagating.all()
+    assert np.isinf(modes.xi).all()
+    assert np.isinf(band_range_cells(*_blocks(0.5 * BAND_TOP)))
+
+
+@pytest.mark.parametrize("gamma_s", [0.05, 0.5, 5.0])
+def test_dressing_gives_a_propagating_mode_a_finite_mean_free_path(gamma_s):
+    r"""The substitution the spatial leg turns on, Eq. (144).
+
+    :math:`\Sigma^R = -i\Gamma` splits the reciprocal pair, and the decaying
+    partner acquires :math:`\xi = -1/\ln|\lambda|`. That is a mean free path in
+    cells and it is what a spatial truncation has to be compared against --
+    the quantity that decides whether ``sse_g_band`` is a convention or a
+    controlled approximation.
+    """
+    from quatrex.phonon.spatial_modes import band_range_cells, bloch_modes
+
+    blocks = _blocks(0.5 * BAND_TOP, sigma=-1j * gamma_s)
+    modes = bloch_modes(*blocks)
+
+    assert not modes.propagating.any(), "damping left a mode on the unit circle"
+    assert modes.decaying.sum() == 1
+    xi = band_range_cells(*blocks)
+    assert np.isfinite(xi) and xi > 0.0
+
+    # reciprocity survives the dressing: one decays, one grows, product 1
+    assert np.prod(modes.lam) == pytest.approx(1.0, abs=1e-10)
+
+
+def test_the_mean_free_path_scales_as_one_over_the_damping():
+    r"""Weak damping gives a long range, and the two are inversely proportional.
+
+    The relation that makes the number actionable: reading a range of hundreds
+    of cells off a device says a band of a few cannot be right, whatever the
+    convergence table appears to show.
+    """
+    from quatrex.phonon.spatial_modes import band_range_cells
+
+    xis = [band_range_cells(*_blocks(0.5 * BAND_TOP, sigma=-1j * g))
+           for g in (0.05, 0.5, 5.0)]
+    assert xis[0] > xis[1] > xis[2]
+    for a, b in zip(xis, xis[1:]):
+        assert a / b == pytest.approx(10.0, rel=0.05)
+
+
+def test_a_short_band_discards_weight_the_range_predicts():
+    r"""Ties the diagnostic to the thing it is meant to warn about.
+
+    A truncation at ``b`` blocks drops ``exp(-b/xi)`` of a mode whose range is
+    ``xi``. At ``xi = 55`` cells a band of 3 keeps 95 % of the amplitude it
+    should have removed -- which is a truncation in name only.
+    """
+    from quatrex.phonon.spatial_modes import band_range_cells
+
+    xi = band_range_cells(*_blocks(0.5 * BAND_TOP, sigma=-0.5j))
+    assert xi == pytest.approx(55.4, rel=0.02)
+    assert np.exp(-3.0 / xi) > 0.94, "a band of 3 barely touches this mode"
+    assert np.exp(-3.0 * xi / xi) == pytest.approx(np.exp(-3.0))
+
+
+def test_non_square_blocks_are_refused():
+    from quatrex.phonon.spatial_modes import bloch_modes
+
+    with pytest.raises(ValueError, match="square"):
+        bloch_modes(np.zeros((2, 3)), np.zeros((2, 3)), np.zeros((2, 3)))
+
+
+def test_decay_lengths_label_each_character_distinctly():
+    """A growing partner gets ``nan``, not a negative length -- otherwise a
+    ``min`` over the array silently returns it as the binding range."""
+    from quatrex.phonon.spatial_modes import decay_lengths
+
+    xi = decay_lengths(np.array([0.5, 1.0, 2.0, 0.0], dtype=complex))
+    assert xi[0] == pytest.approx(-1.0 / np.log(0.5))
+    assert np.isinf(xi[1])
+    assert np.isnan(xi[2])
+    assert xi[3] == 0.0
