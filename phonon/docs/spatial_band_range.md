@@ -1,5 +1,15 @@
 # How far a damped mode travels, and how long the band is
 
+> **Status (2026-08-15).** The measurements below stand. The inference drawn
+> from them -- that the ring's `sse_g_band` truncates modes that carry heat --
+> does NOT, and is withdrawn. `g_band = 3` is exact for the retained output
+> band; the live spatial truncation is the hard-coded pin of `Sigma` to
+> `|I-J| <= 1`, which costs about 11 % and is insensitive to the range measured
+> here. The index algebra is in `spatial_truncation_derivation.md`; read that
+> first. Sections below are kept because the ranges, the reconstruction and the
+> mask-PSD bound are correct and general, not because they motivate a change to
+> the kernel.
+
 The spatial half of the method proposal asks for a modal representation of
 long-range propagation. Before building one it is worth measuring the thing it
 would fix: the distance a mode actually reaches, against the number of blocks
@@ -84,6 +94,11 @@ interesting part. The TYPICAL CNT mode has a range near 2.6 cells and a band of
 3 is roughly adequate for it. The LONG-LIVED modes -- the narrow ones, which are
 also the ones that carry heat furthest -- reach 6 to 25 cells, and no band
 between 1 and 3 touches them.
+
+**Withdrawn as an explanation of the bracket** (2026-08-15): the ring's leg
+band is exact at the shipped default, so it cannot be what the ladder's arms
+differ by. The range numbers above stand; the reading below does not, and is
+kept only so the withdrawal is legible.
 
 That lines up with the ladder's own numbers more closely than it was set up to.
 The two arms of the bracket are a band-3 boxcar and a band-1 taper. At the
@@ -252,7 +267,11 @@ Green-function ranges 2.0 to 4.6 cells across the grid:
 | 3 | 7.14e-02 | 6.8e-17 | 1.1e+15 |
 
 The boxcar gets the self-energy wrong by 32 % at band 1 and still 7 % at
-band 3. The completion is exact to roundoff at every band, and it beats
+band 3 -- **over all `Sigma` blocks**. On the `|I-J| <= 1` band production
+actually outputs, band 3 is exact to 0.000e+00 and the 7 % lives entirely in
+blocks that are discarded anyway. The whole-array figure is the right measure
+of a hard band in general and the wrong measure of this kernel; see
+`spatial_truncation_derivation.md`. The completion is exact to roundoff at every band, and it beats
 WIDENING the boxcar by a block -- which costs a whole extra block per cell pair
 where the completion costs one root and one anchor block.
 

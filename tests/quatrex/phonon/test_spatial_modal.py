@@ -754,11 +754,17 @@ def test_the_gapped_bed_is_below_its_band_and_long_ranged_enough():
 def test_the_modal_completion_restores_what_the_band_removed(band):
     r"""The Phase 8 claim, on a dense vertex.
 
-    Three rings differing only in the spatial legs: the exact ones, the boxcar
-    the kernel applies today, and the boxcar completed by the modal form beyond
-    the band. The completed ring must land on the exact one, and the banded one
-    must not -- otherwise the truncation was harmless here and the bed proves
-    nothing.
+    Three rings differing only in the spatial legs: the exact ones, a boxcar,
+    and the boxcar completed by the modal form beyond the band. The completed
+    ring must land on the exact one, and the banded one must not -- otherwise
+    the truncation was harmless here and the bed proves nothing.
+
+    Measures the general mechanism of a hard band, over ALL ``Sigma`` blocks.
+    It is NOT a statement about the shipped kernel: production retains only
+    ``|I-J| <= 1``, where ``sse_g_band = 3`` is exact, and most of the error
+    counted here lives in blocks that are discarded regardless. See
+    ``test_band_three_is_exact_on_the_output_band_and_lossy_off_it`` and
+    ``phonon/docs/spatial_truncation_derivation.md``.
     """
     exact, banded, completed = _legs(W_GRID, band)
     phi = _phi_nn()
@@ -782,7 +788,11 @@ def test_the_modal_completion_restores_what_the_band_removed(band):
 def test_the_completion_beats_a_wider_band():
     """Widening the boxcar by one block is the obvious alternative and costs a
     whole extra block per cell pair; the completion costs one root and one
-    anchor block."""
+    anchor block.
+
+    General mechanism, not a property of the shipped kernel -- see the note on
+    the previous test.
+    """
     phi = _phi_nn()
     exact, _, completed = _legs(W_GRID, 1)
     _, wider, _ = _legs(W_GRID, 2)
@@ -798,8 +808,14 @@ def test_the_completion_beats_a_wider_band():
 
 
 def test_the_banded_error_grows_with_the_range_of_the_green_function():
-    """The mechanism behind the band ladder failing on long devices: a
-    longer-ranged G makes the same truncation worse."""
+    """A longer-ranged G makes the same truncation worse.
+
+    True of a hard band in general. It is not the mechanism behind the CNT band
+    ladder, which was the reading originally attached to it: the ring's leg band
+    is exact at the shipped default, and the output pin that IS live turns out
+    to be insensitive to the range (see
+    ``test_the_discarded_output_weight_does_not_track_the_green_range``).
+    """
     phi = _phi_nn()
     errs, ranges = [], []
     for top in (0.30 * W0, 0.65 * W0, 0.90 * W0):
@@ -915,3 +931,106 @@ def test_a_truncated_geometric_mask_is_psd_only_once_the_band_exceeds_the_range(
         d = np.arange(-wide, wide + 1)
         got = np.real(np.exp(1j * np.outer(theta, d)) @ (lam ** np.abs(d)))
         assert np.allclose(got, exact, rtol=1e-8)
+
+
+# --- what the ring's spatial truncations actually are ----------------------- #
+#
+# Three tests pinning the derivation in
+# ``phonon/docs/spatial_truncation_derivation.md``. They exist because reasoning
+# in prose about "which blocks matter" produced two opposite wrong answers in a
+# row; the index algebra is short and the numbers settle it.
+
+VERTEX_REACH = 1                 # _phi_nn couples each cell to its neighbours
+
+
+def _out_distance():
+    i, j = np.meshgrid(np.arange(N_CELL), np.arange(N_CELL), indexing="ij")
+    return np.abs(i - j)
+
+
+@pytest.mark.parametrize("band", [0, 1, 2, 3])
+def test_the_sigma_support_law_is_two_p_plus_band(band):
+    r"""``supp(Sigma) = {|I-J| <= 2p + b}``, with ``p`` the vertex reach.
+
+    One line of index algebra: ``K1, K2`` lie within ``p`` of ``I`` and
+    ``K1', K2'`` within ``p`` of ``J``, while the legs contribute only for
+    ``|K - K'| <= b``; chaining the three gives
+    ``|I-J| <= p + b + p``.
+
+    The consequence that matters is that ``Sigma`` is NOT tridiagonal. Its
+    reach grows with the leg band, so pinning the output at ``|I-J| <= 1`` is a
+    truncation in its own right and not a property of the vertex.
+    """
+    _, banded, _ = _legs(W_GRID, band)
+    s = _ring(_phi_nn(), banded, banded, W_GRID)
+    d = _out_distance()
+
+    reach = max(dd for dd in range(N_CELL)
+                if np.abs(s[:, d == dd]).max() > 1e-13 * np.abs(s).max())
+    assert reach == 2 * VERTEX_REACH + band
+
+
+def test_band_three_is_exact_on_the_output_band_and_lossy_off_it():
+    r"""The claim I got wrong in both directions, frozen.
+
+    ``sse_g_band`` truncates the LEGS. Given the output pin at ``|I-J| <= 1``
+    the reachable leg distance is ``2p + 1 = 3``, so ``b = 3`` loses nothing
+    THERE -- which is what the config docstring means by "the first
+    off-diagonal Sigma blocks become exact and causal", and why the field is
+    capped at 3.
+
+    It is not a statement that the ring is exact. Off the retained band the
+    same ``b = 3`` result is visibly wrong, because those blocks were never
+    computed to begin with. Reporting a whole-array error therefore overstates
+    the leg band's cost, and reporting only the retained band hides the output
+    pin's.
+    """
+    exact, _, _ = _legs(W_GRID, N_CELL)
+    phi = _phi_nn()
+    s_exact = _ring(phi, exact, exact, W_GRID)
+    d = _out_distance()
+    keep, drop = d <= 1, d > 1
+
+    errs = {}
+    for band in (1, 2, 3):
+        _, banded, _ = _legs(W_GRID, band)
+        diff = np.abs(_ring(phi, banded, banded, W_GRID) - s_exact)
+        errs[band] = (diff[:, keep].max() / np.abs(s_exact[:, keep]).max(),
+                      diff[:, drop].max() / np.abs(s_exact[:, drop]).max())
+
+    assert errs[1][0] > 1e-2, "band 1 must be lossy on the retained band"
+    assert errs[2][0] > 1e-2, "band 2 must be lossy on the retained band"
+    assert errs[3][0] < 1e-13, f"band 3 not exact on |I-J|<=1: {errs[3][0]:.2e}"
+    # ... and off it, band 3 is not exact at all
+    assert errs[3][1] > 1e-2
+
+
+def test_the_discarded_output_weight_does_not_track_the_green_range():
+    r"""The output pin costs about a tenth of ``Sigma``, whatever the range.
+
+    Measured 10.5 % at a Green-function range of 2.1 cells and 11.4 % at 7.2 --
+    flat, where a long-range effect would grow. Index algebra again: for
+    ``|I-J| = 2`` one may take ``K = I+1`` and ``K' = J-1 = I+1``, so
+    ``|K - K'| = 0``. The near tail of ``Sigma`` is fed by the DIAGONAL of
+    ``G`` through the vertex's reach, and long-range ``G`` only ever appears in
+    blocks the pin has already discarded.
+
+    That is why a low-rank representation of distant ``G`` does not repair this
+    truncation, and why the fix has to be a non-tridiagonal ``Sigma``.
+    """
+    phi = _phi_nn()
+    d = _out_distance()
+    fracs, ranges = [], []
+    for top in (0.20, 0.65, 0.96):
+        w = np.linspace(0.0, top * W0, 20)
+        exact, _, _ = _legs(w, N_CELL)
+        s = _ring(phi, exact, exact, w)
+        fracs.append(float(np.abs(s[:, d > 1]).sum() / np.abs(s).sum()))
+        ranges.append(-1.0 / np.log(abs(_gap_root(top * W0))))
+
+    assert ranges[0] < ranges[1] < ranges[2]
+    assert ranges[2] / ranges[0] > 3.0, "the range barely moved; not a test"
+    # the discarded share is real ...
+    assert min(fracs) > 0.05
+    # ... and flat: it moves by under a fifth while the range triples
+    assert max(fracs) / min(fracs) < 1.2, f"{fracs}"

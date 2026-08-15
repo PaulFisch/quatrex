@@ -407,3 +407,27 @@ existing TOML still validates.
 
 **Run the suite with `QTX_ARRAY_MODULE=numpy`.** Under the default cupy backend on this
 laptop 190 of 399 pole tests fail in the helpers, not in production code.
+
+---
+
+## 8. Outcome of the Sec. 6 spatial recommendation (2026-08-15)
+
+Sec. 6 above recommended the proposal's spatial leg on the strength of the
+long-CNT factor-2.2 bracket. That recommendation was mis-aimed and is recorded
+here rather than quietly dropped.
+
+What was built and stands: `src/quatrex/phonon/spatial_modes.py` (device complex
+bands, decay lengths, `band_range_cells`), the range measurements on Si and CNT,
+`xi = v_g/gamma`, and the Phase 7 reconstruction `G(n) = V diag(lambda^n) C`
+exact to roundoff on real cells. All diagnostic; none wired into a solver path.
+
+What does not follow: that the ring truncates long-range `G`. It does not. With
+a nearest-neighbour vertex the reachable leg distance is `2p + 1 = 3` and
+`sse_g_band` already defaults to 3, capped at 3. The bracket is not explained by
+the ring's band.
+
+The live spatial approximation is the hard-coded pin of `Sigma` to
+`|I-J| <= 1`, worth about 11 % and insensitive to the range of `G`. It is
+repaired by a non-tridiagonal `Sigma` -- the proposal's Sec. 32 Schur complement
+-- and not by the low-rank `G` of Secs. 33-34. Derivation and numbers:
+`spatial_truncation_derivation.md`.
