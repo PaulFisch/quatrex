@@ -340,6 +340,27 @@ with gain fraction exactly 0.00000 at 30 A and 3.7e+07 at 10 A, and the cutoff
 ladder shows the criterion is mask PSD-ness rather than retained weight -- the
 21 A rung has **98.6 % fill and still diverges**, 22 A is dense and converges.
 
+**MEASURED the next day.** The mechanism is no longer an inference from
+convergence outcomes. `bubble_positivity.md` Secs. 6.10c/6.10d, from three daint
+debug runs that switch on the positivity gate for the first time (it had been in
+the tree behind `pole_sector.psd_check` / `QX_POLE_PSD` and had never once been
+enabled):
+
+* at **iteration 0**, with Sigma identically zero and the cutoff the only thing
+  that differs, `-i G^<` is already non-PSD at 10 A (**-2.167e-01** at
+  0.113 THz) and clean at 40 A (-3.5e-16). `interaction_cutoff` is not a vertex
+  knob -- `core/scba.py` feeds it to `compute_sparsity_pattern`, so it masks the
+  stored pattern of every matrix including `G`. **The mask breaks `G` before the
+  self-energy exists.**
+* Sigma inherits it through the congruence: **-9.92e-01** at the same 0.113 THz
+  from iteration 1 at 10 A, against **+0.000e+00 at all 40 iterations** at 40 A,
+  where the residual falls monotonically to 3.9e-02.
+* and `QX_SSE_LOWMASK=1.5` does not remove the violation, it **moves it to
+  1.56-1.78 THz, just above the mask edge**, shrinks it eightfold and lets the
+  residual turn around at iteration 7. That is why the five low-mask runs above
+  all diverged: masking the infrared treats where the symptom shows, not the
+  truncation that causes it.
+
 Why I got it wrong: Sec. 6.7 of that document ends "what remains is H4", and
 Secs. 6.8-6.10 -- which supersede it -- were written a day later without
 revising that sentence. I read 6.7, stopped, and propagated its conclusion. The
