@@ -552,6 +552,15 @@ seed by the eta = 0 near-singular acoustic resolvent -- which is
 consistent with the CNT L4 carrying the largest injected negativity of
 any system measured here and still converging.
 
+> **SUPERSEDED by Secs. 6.8-6.10 (2026-08-09).** This paragraph is the
+> state of the enquiry on 2026-08-08 and was never revised. H4 is NOT
+> what remained: **H6**, the `interaction_cutoff` box mask on the storage
+> pattern, is confirmed causal by the single-variable A/B of Sec. 6.9,
+> and MoS2 converges at eta = 0 once the cutoff exceeds the device
+> (`mos2L2conv` 29 iterations, `mos2L4conv` 30). Read on before quoting
+> this. Flagged 2026-08-15 after it was propagated into a session
+> summary as the current verdict.
+
 Grid caveat: 121 points is far below the resolution the grid audit says
 is needed for converged transport numbers. It is adequate for *this*
 comparison, because both legs use the same grid and the divergence is

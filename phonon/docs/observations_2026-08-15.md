@@ -243,10 +243,38 @@ is a fraction OF, and before proposing a run, grep the docs for the experiment.
 leg is built as far as diagnostics and will not proceed, because the ring does
 not ask the question it answers.
 
-**Open, and unaffected by any of this.** The MoS2 film has no eta = 0 fixed
-point in any tested corner. `bubble_positivity.md` has eliminated H1, H2 and H3
-and the dual grid; what remains is H4, amplification of an O(1e-16) seed by the
-eta = 0 near-singular acoustic resolvent.
+**CORRECTED 2026-08-15, after this document was first written.** The paragraph
+here originally read "the MoS2 film has no eta = 0 fixed point in any tested
+corner ... what remains is H4". **Both halves are wrong**, and my own memory
+file had the right answer while I wrote the negation of it.
+
+MoS2 HAS converged eta = 0 fixed points:
+
+| run | job | device | `interaction_cutoff` | outcome |
+|---|---|---|---|---|
+| `mos2L2conv` | 4384190 | 2 cells, nf 4001 | 30 A | **converged, 29 iterations**, residual 9.34e-04, lead balance 1.52e-04 |
+| `mos2L4conv` | 4384165 | 4 cells, nf 4001 | 48 A | **converged, 30 iterations**, residual 9.04e-04, lead balance 2.63e-04 |
+| `mos2L6n4scba` | 4384160 | 6 cells | 75 A | OOM at 97.8 GB/GPU, 0 iterations -- memory-blocked, NOT divergent |
+
+The cause is **H6**, the `interaction_cutoff` box mask on the storage pattern --
+a second Hadamard mask at the orbital level, distinct from the block-band H2.
+`bubble_positivity.md` Sec. 6.8-6.10 establishes it: a single-variable A/B
+(jobs 4383378/4383393) where only the cutoff moves gives monotone convergence
+with gain fraction exactly 0.00000 at 30 A and 3.7e+07 at 10 A, and the cutoff
+ladder shows the criterion is mask PSD-ness rather than retained weight -- the
+21 A rung has **98.6 % fill and still diverges**, 22 A is dense and converges.
+
+Why I got it wrong: Sec. 6.7 of that document ends "what remains is H4", and
+Secs. 6.8-6.10 -- which supersede it -- were written a day later without
+revising that sentence. I read 6.7, stopped, and propagated its conclusion. The
+thesis chapter had already been corrected (`75_mos2.tex` opens its
+corresponding subsection with "That reading is wrong").
+
+So H4 is not the standing hypothesis. What it could still own is one datum,
+Sec. 6.10b: at a COMPLETE 30 A support, merely reweighting it with the
+triangular taper turns a converging run into a divergence at 1.76e6 while
+restoring positivity perfectly. That is circumstantial and is the only
+H4-flavoured evidence in the tree.
 
 **Open, and worth more than either thread here.** Bulk-Si kappa from the code's
 own SCBA in the diffusive limit against phono3py RTA (~110 W/m/K on our own
