@@ -267,6 +267,40 @@ Caveat on the negatives: only 48 logs carry a `RUN env` line, so "absent
 everywhere" means absent from those 48 plus all 57 stored configs, not from
 every run ever launched.
 
+### The other two survey claims, checked
+
+Having got one wrong I checked the rest of what I relayed.
+
+**"No MoS2 Jacobian has ever been computed; the probe has only ever been
+pointed at CNT."** Stands. `cluster/jp-l4-stall/run.log` is the one existing
+run, and it is CNT-33 L4: `n = 3753216` per key over `ne = 181` is `144 x 144`
+dense, which is that bed's block size, and the whole `l4-*` / `newton-L4`
+family runs `out/anderson_test/cnt33_L4_linear`. Its numbers are worth carrying:
+**four eigenvalues, all unstable** -- `|lambda| = 5.07, ..., 4.15` -- at a
+fixed-point defect of 6.0e-02, and **every one of them supported in omega bins
+1-5**, the infrared end of the grid. So on CNT the instability *is* an IR-mode
+effect. Whether MoS2 behaves the same is the untested part, and the five
+low-mask runs above argue it may not.
+
+**"Nothing in `src/quatrex` checks PSD of Sigma at any point."** Wrong.
+`phonon/solver.py::_check_positivity` checks `sigma_lesser`, `sigma_greater`,
+`g_lesser` and `g_greater` through `pole_audit.psd_residual`, reports the worst
+eigenvalue and the omega index where it occurs, and its docstring says it closes
+`bubble_positivity.md`'s open item "a production positivity gate behind a flag".
+It is off by default (`pole_sector.psd_check`, env `QX_POLE_PSD`).
+
+The corrected finding is sharper than the wrong one: the gate exists, is wired,
+and **`QX_POLE_PSD` appears in no recorded `RUN env` and no log has ever printed
+a `positivity ...` line**. The iteration-resolved positivity trace costs one
+environment variable, not new code.
+
+**The shape, again.** Three claims relayed, one wrong outright, one wrong in
+detail, one right. All three failed the same way the five before them did: the
+set I searched was not the set the question lives in -- config files instead of
+the effective environment, `grep` for a concept instead of the function that
+implements it. The `RUN env` line each log prints exists precisely because the
+config file is not the record of what ran.
+
 **The shape.** Every one was a number read without its mechanism: an error
 percentage without asking which blocks it lived in, a zero without asking what
 produced it, a convergence difference without checking whether it had already
