@@ -646,3 +646,168 @@ def test_the_dropped_mode_really_is_negligible_at_the_far_anchor():
     dead = np.abs(lam) < 1e-2
     contrib = V[:, dead] @ np.diag(lam[dead] ** 5) @ C[dead]
     assert np.linalg.norm(contrib) < 1e-12 * np.linalg.norm(g(5))
+
+
+# --- Phase 8: what the band discards, the ring notices ---------------------- #
+#
+# The ring is a convolution, so Sigma(Omega) needs G at omega AND at
+# Omega - omega: the frequency grid has to start at zero. A gapped chain is
+# what lets that coexist with an exact reference -- with an on-site pinning the
+# band is [w0, sqrt(w0^2 + 4 k_s)], so a grid below w0 never touches it and the
+# Brillouin-zone integrand stays regular at eta = 0. The ungapped chain used
+# above cannot do this: its acoustic branch reaches zero, so any grid starting
+# at zero runs through the band.
+
+N_CELL = 7                       # 1 DOF per cell, so a block IS a cell
+W0, KS_G = 1.0, 4.0              # gap and coupling; band = [1.0, 4.123]
+W_TOP = 0.9 * W0                 # the whole grid sits below the band
+
+
+def _gap_root(omega):
+    """Decaying Bloch factor of the gapped chain (real, in (0, 1))."""
+    a, b, c = KS_G, omega * omega - (W0 ** 2 + 2 * KS_G), KS_G
+    disc = np.lib.scimath.sqrt(b * b - 4 * a * c)
+    lam = np.array([(-b + disc) / (2 * a), (-b - disc) / (2 * a)])
+    return complex(lam[np.argmin(np.abs(lam))])
+
+
+def _gap_green(omega, n_max, n_k=4096):
+    """``G(n)`` by periodic-trapezoid quadrature -- independent of the roots.
+
+    This is a Brillouin-zone integral of ``1/A(k)``; ``_gap_root`` is a root of
+    ``A``. That the two agree is what earlier tests establish, and it is what
+    lets the ring be driven by one and completed by the other without the
+    argument becoming circular.
+    """
+    k = 2.0 * np.pi * np.arange(n_k) / n_k
+    denom = omega ** 2 - (W0 ** 2 + 2 * KS_G) + 2.0 * KS_G * np.cos(k)
+    return np.array([np.sum(np.exp(1j * k * n) / denom) / n_k
+                     for n in range(n_max + 1)])
+
+
+def _legs(omegas, band):
+    """``(exact, banded, completed)`` spatial legs, each ``(n_w, N, N)``."""
+    idx = np.abs(np.subtract.outer(np.arange(N_CELL), np.arange(N_CELL)))
+    exact = np.zeros((omegas.size, N_CELL, N_CELL), dtype=complex)
+    completed = np.zeros_like(exact)
+    for iw, omega in enumerate(omegas):
+        g = _gap_green(omega, N_CELL)
+        lam = _gap_root(omega)
+        exact[iw] = g[idx]
+        # continued from the last block INSIDE the band, so the completion
+        # only ever supplies what the boxcar removed
+        completed[iw] = np.where(idx <= band, g[idx],
+                                 g[band] * lam ** (idx - band))
+    banded = np.where(idx <= band, exact, 0.0)
+    return exact, banded, completed
+
+
+def _ring(phi, a_leg, b_leg, w):
+    r""":math:`\Phi_{ace} A_{cb} B_{ed} \Phi_{Jdb}`, convolved over ``w``.
+
+    The contraction the production ring performs, written out directly so the
+    legs can be swapped without touching anything else.
+    """
+    h = w[1] - w[0]
+    out = np.zeros((w.size, N_CELL, N_CELL), dtype=complex)
+    for iw, om in enumerate(w):
+        j = np.rint((om - w - w[0]) / h).astype(int)
+        ok = (j >= 0) & (j < w.size)
+        conv = np.einsum("kcb,ked->cbed", a_leg[ok], b_leg[j[ok]]) * h
+        out[iw] = np.einsum("ace,Jdb,cbed->aJ", phi, phi, conv)
+    return out / (2.0 * np.pi)
+
+
+def _phi_nn(seed=5):
+    """A cubic vertex coupling each cell to its neighbours, index-symmetric."""
+    rng = np.random.default_rng(seed)
+    phi = np.zeros((N_CELL, N_CELL, N_CELL))
+    for i in range(N_CELL):
+        for a in (i - 1, i, i + 1):
+            for b in (i - 1, i, i + 1):
+                if 0 <= a < N_CELL and 0 <= b < N_CELL:
+                    phi[i, a, b] = rng.normal()
+    return (phi + phi.transpose(0, 2, 1)) / 2.0
+
+
+W_GRID = np.linspace(0.0, W_TOP, 24)
+
+
+def test_the_gapped_bed_is_below_its_band_and_long_ranged_enough():
+    """Both premises, because either one failing makes the rest vacuous."""
+    band_lo = W0
+    assert W_GRID.max() < band_lo
+    lam = np.array([abs(_gap_root(w)) for w in W_GRID])
+    assert np.all(lam < 1.0), "a grid point landed inside the band"
+    # ranges of a few cells, so a band of 1-2 on a 7-cell device truncates
+    xi = -1.0 / np.log(lam)
+    assert xi.min() > 1.5 and xi.max() > 3.0, f"too short-ranged: {xi}"
+
+    # and the modal form matches the quadrature, which is what makes the
+    # completion below an independent computation rather than a restatement
+    g = _gap_green(W_GRID[-1], 5)
+    lm = _gap_root(W_GRID[-1])
+    assert g[4] == pytest.approx(g[0] * lm ** 4, rel=1e-10)
+
+
+@pytest.mark.parametrize("band", [1, 2])
+def test_the_modal_completion_restores_what_the_band_removed(band):
+    r"""The Phase 8 claim, on a dense vertex.
+
+    Three rings differing only in the spatial legs: the exact ones, the boxcar
+    the kernel applies today, and the boxcar completed by the modal form beyond
+    the band. The completed ring must land on the exact one, and the banded one
+    must not -- otherwise the truncation was harmless here and the bed proves
+    nothing.
+    """
+    exact, banded, completed = _legs(W_GRID, band)
+    phi = _phi_nn()
+
+    s_exact = _ring(phi, exact, exact, W_GRID)
+    s_band = _ring(phi, banded, banded, W_GRID)
+    s_modal = _ring(phi, completed, completed, W_GRID)
+
+    scale = np.abs(s_exact).max()
+    assert scale > 0.0
+    err_band = np.abs(s_band - s_exact).max() / scale
+    err_modal = np.abs(s_modal - s_exact).max() / scale
+
+    assert err_band > 1e-3, (
+        f"the band changed the ring by only {err_band:.1e}; this bed does not "
+        "test a truncation")
+    assert err_modal < 1e-10, f"completion left {err_modal:.1e}"
+    assert err_modal < 1e-6 * err_band
+
+
+def test_the_completion_beats_a_wider_band():
+    """Widening the boxcar by one block is the obvious alternative and costs a
+    whole extra block per cell pair; the completion costs one root and one
+    anchor block."""
+    phi = _phi_nn()
+    exact, _, completed = _legs(W_GRID, 1)
+    _, wider, _ = _legs(W_GRID, 2)
+
+    s_exact = _ring(phi, exact, exact, W_GRID)
+    scale = np.abs(s_exact).max()
+    err_wider = np.abs(_ring(phi, wider, wider, W_GRID) - s_exact).max() / scale
+    err_modal = np.abs(
+        _ring(phi, completed, completed, W_GRID) - s_exact).max() / scale
+
+    assert err_wider > 1e-4
+    assert err_modal < 1e-6 * err_wider
+
+
+def test_the_banded_error_grows_with_the_range_of_the_green_function():
+    """The mechanism behind the band ladder failing on long devices: a
+    longer-ranged G makes the same truncation worse."""
+    phi = _phi_nn()
+    errs, ranges = [], []
+    for top in (0.30 * W0, 0.65 * W0, 0.90 * W0):
+        w = np.linspace(0.0, top, 20)
+        exact, banded, _ = _legs(w, 1)
+        s_exact = _ring(phi, exact, exact, w)
+        errs.append(np.abs(_ring(phi, banded, banded, w) - s_exact).max()
+                    / np.abs(s_exact).max())
+        ranges.append(-1.0 / np.log(abs(_gap_root(top))))
+    assert ranges[0] < ranges[1] < ranges[2], ranges
+    assert errs[0] < errs[1] < errs[2], f"error did not grow with range: {errs}"

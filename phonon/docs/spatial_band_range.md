@@ -224,3 +224,44 @@ had to be pinned per candidate.
 Practical consequence for Phase 8: the band-truncated blocks that need
 replacing are the DISTANT ones, so the anchor belongs at the band edge, and the
 rank needed there is 22 of 36 on CNT rather than all of them.
+
+---
+
+## Phase 8: the ring sees what the band removes (2026-08-15)
+
+The proposal's Phase 8 is "use factorized G_S inside the FC3 ring", with the
+dense-vertex version required correct first. This is that version, at the
+kernel level: three rings differing ONLY in the spatial legs, on a 7-cell
+chain with a dense nearest-neighbour cubic vertex.
+
+The frequency grid forces the bed. A ring is a convolution, so `Sigma(Omega)`
+needs `G` at `omega` and at `Omega - omega` and the grid has to start at zero;
+an exact `eta = 0` reference needs the grid to avoid the band. A GAPPED chain
+satisfies both -- an on-site pinning puts the band at
+`[w0, sqrt(w0^2 + 4 k_s)]` and the grid sits below `w0`, where the
+Brillouin-zone integrand never vanishes. The ungapped chain used earlier
+cannot: its acoustic branch reaches zero, so any grid starting at zero runs
+through the band.
+
+Green-function ranges 2.0 to 4.6 cells across the grid:
+
+| `g_band` | boxcar error | modal completion | ratio |
+|---|---|---|---|
+| 1 | 3.18e-01 | 1.8e-16 | 1.8e+15 |
+| 2 | 1.40e-01 | 1.1e-16 | 1.3e+15 |
+| 3 | 7.14e-02 | 6.8e-17 | 1.1e+15 |
+
+The boxcar gets the self-energy wrong by 32 % at band 1 and still 7 % at
+band 3. The completion is exact to roundoff at every band, and it beats
+WIDENING the boxcar by a block -- which costs a whole extra block per cell pair
+where the completion costs one root and one anchor block.
+
+The error also grows with the range of `G`, which is the mechanism behind a
+band ladder that converges on short devices and brackets on long ones.
+
+Not a production claim. This is a 1-DOF synthetic chain with a random dense
+vertex, so 32 % is a property of this bed and not of CNT; what transfers is
+that the completion is exact and the mechanism is the one measured on the real
+cells above. Wiring it into `SigmaPhononPhonon` behind a flag, against the
+`set_pole_channel` / `set_cm_channel` seams, is the next step and the first one
+that would move a production number.
