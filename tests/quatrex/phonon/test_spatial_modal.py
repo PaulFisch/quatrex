@@ -1120,12 +1120,14 @@ def test_a_two_block_device_has_no_output_pin_error_at_all():
     r"""Combinatorial, not numerical: with two blocks the largest possible
     ``|I-J|`` is 1, so a tridiagonal restriction discards nothing on ANY bed.
 
-    That is the whole difference between the two blockings of one 24-DOF Si
-    device recorded in the tree, `si4x1` (4 blocks of 6 DOF) and `si4x2`
-    (2 blocks of 12 DOF): the second has no mask to apply. Since the mask is a
-    Schur product with an indefinite band-ones matrix -- the documented source
-    of non-causal gain -- what matters is not that its weight is small but that
-    it is exactly absent.
+    It is a real difference between the two blockings of one 24-DOF Si device
+    in the tree -- `si4x1` (4 blocks of 6 DOF) discards, `si4x2` (2 blocks of
+    12 DOF) does not -- but it does NOT explain why the first diverges and the
+    second converges. `bubble_positivity.md` Sec. 6.7 ran that experiment
+    directly on the MoS2 film: at two blocks, with no mask applied at all, the
+    run diverges at the same iteration as the maximally truncated one and
+    carries more gain rather than less. The pin is an accuracy defect, not a
+    stability one.
     """
     sig = _long_bed(4)
     assert _discarded(sig, 2) == 0.0          # 2 blocks: nothing to discard
@@ -1144,11 +1146,11 @@ def test_the_pin_grows_over_the_lengths_where_the_cnt_ladder_stops_being_read():
     (``document/src/results/64_gband.tex``), which is where this crosses from a
     few percent to a third.
 
-    Correspondence, not proof: the bed is a 1-DOF chain with a random vertex,
-    so the percentages are not the device's. What transfers is that the pin's
-    cost grows steeply with block count over exactly that range, while the
-    quantity usually blamed -- the Green-function range -- moves it by five
-    points over a factor ten.
+    Correspondence, not proof, and explicitly not a claim about the bracket's
+    cause: removing the pin entirely does not stop a divergence
+    (`bubble_positivity.md` Sec. 6.7). What this measures is how much of
+    ``Sigma`` goes unrepresented, which is an accuracy statement. The bed is a
+    1-DOF chain with a random vertex, so the percentages are not the device's.
     """
     fracs = {n: _discarded(_long_bed(n), 1) for n in (4, 7, 16)}
     assert fracs[4] < 0.05

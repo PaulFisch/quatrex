@@ -142,17 +142,38 @@ Si's primitive cell is 6 DOF and CNT (3,3)'s is 36, so every production bed
 except `si4x2` runs at one primitive cell per block.
 
 `si4x1` and `si4x2` are the same 24-DOF device blocked two ways, and the tree
-already records that the first diverges and the second converges. The pin
-explains the pair without appealing to a magnitude: **`si4x2` has two blocks, so
-the largest possible `|I-J|` is 1 and the tridiagonal restriction discards
-nothing at all.** There is no mask. Since the mask is a Schur product with an
-indefinite band-ones matrix -- the documented source of non-causal gain -- what
-matters is not that its weight is small but that it is exactly absent. `si4x1`
-at four blocks does have one.
+records that the first diverges and the second converges. It is tempting to
+read that as the pin: `si4x2` has two blocks, so the largest possible `|I-J|`
+is 1 and the tridiagonal restriction discards nothing at all, while `si4x1` at
+four blocks does discard.
 
-That is combinatorics, not a property of this bed: any two-block device is free
-of the output pin, and so is any device whose blocks are wide enough that
-`2p + b` collapses to 1 in block units.
+**That reading is wrong, and it was already tested.** `bubble_positivity.md`
+Sec. 6.7 ran the decisive experiment on the MoS2 film -- the same device at six
+blocks (maximal truncation, 71 % discarded) and at two blocks (no mask applied
+at all):
+
+| run | blocks | truncation | balance | gain frac | outcome |
+|---|---|---|---|---|---|
+| `mos2f6x1` | 6 | maximal | 2.000 | 0.41 % | diverged, it 28 |
+| `mos2f6x3` | 2 | **none** | 1.051 | **13.2 %** | diverged, it 28 |
+
+Both abort at the same iteration, the untruncated run carries MORE gain rather
+than less, and the `Sigma^R` residual sequences agree to five significant
+figures for eight iterations. Removing the pin entirely leaves the divergence
+untouched. Sec. 6.7's verdict is that the band mask is "real, provable,
+measurable -- and not the cause".
+
+The same document reaches the same conclusion for the Si pair directly
+(Sec. 8): both blockings have a complete leg mask, identical ballistic
+transport and bit-identical iteration-0 currents, so "whatever drives the Si
+instability is carried by the block partition itself, not by the truncation the
+partition implies". The candidate channels it lists -- the count of independent
+off-diagonal `Sigma` blocks assembled, the RGF off-diagonal post-pass, the OBC
+NEVP conditioning of a 6-DOF against a 12-DOF lead cell -- are untested.
+
+So the pin is an ACCURACY defect and not a stability one. The ~30 % it discards
+on a long device is a real error in `Sigma`; it is not what makes a run
+diverge, and re-blocking is worth doing for the former reason only.
 
 ### Against the CNT ladder
 
