@@ -307,3 +307,146 @@ def test_hysteresis_still_derives_from_the_new_default():
     assert cfg.leg_weight_tol_out == 0.0
     effective_out = cfg.leg_weight_tol / 3.0
     assert effective_out < cfg.leg_weight_tol
+
+
+# --- lead band edges: the branch-point gate ---------------------------------- #
+
+def test_lead_band_edges_match_the_monatomic_chain_closed_form():
+    r"""``omega(k)^2 = 4 k_s sin^2(k/2)``, so the band is ``[0, 2 sqrt(k_s)]``.
+
+    The one lead whose dispersion is elementary, used so the sampler is pinned
+    against algebra rather than against itself.
+    """
+    from quatrex.phonon.pole_sector import lead_band_edges
+
+    for k_s in (1.0, 4.0, 17.5):
+        edges = lead_band_edges(np.array([[2.0 * k_s]]),
+                                np.array([[-k_s]]), np.array([[-k_s]]))
+        assert edges == pytest.approx([0.0, 2.0 * np.sqrt(k_s)], abs=1e-9)
+
+
+def test_lead_band_edges_finds_both_branches_of_a_diatomic_chain():
+    r"""Two masses give an acoustic and an optical branch with a gap between
+    them, so a correct sampler returns FOUR edges, not two.
+
+    Taking only the global min and max would report ``[0, omega_max]`` and
+    silently lose the gap -- and the gap edges are exactly the branch points a
+    pole must not be fitted through.
+    """
+    from quatrex.phonon.pole_sector import lead_band_edges
+
+    k_s, m1, m2 = 1.0, 1.0, 3.0
+    d00 = np.array([[2 * k_s / m1, -k_s / np.sqrt(m1 * m2)],
+                    [-k_s / np.sqrt(m1 * m2), 2 * k_s / m2]])
+    d01 = np.array([[0.0, -k_s / np.sqrt(m1 * m2)], [0.0, 0.0]])
+    edges = lead_band_edges(d00, d01, d01.T.conj())
+
+    assert edges.size == 4, f"expected two branches, got edges {edges}"
+    acoustic_top, optical_bottom = edges[1], edges[2]
+    assert acoustic_top < optical_bottom, "no gap: the branches were merged"
+    # Closed form: the zone-boundary pair is sqrt(2k/m2), sqrt(2k/m1).
+    assert acoustic_top == pytest.approx(np.sqrt(2 * k_s / m2), rel=1e-6)
+    assert optical_bottom == pytest.approx(np.sqrt(2 * k_s / m1), rel=1e-6)
+
+
+def test_lead_band_edges_refuses_a_stack_instead_of_a_block():
+    """A leading frequency axis reaching this would silently make a 'band edge'
+    per frequency. Refuse rather than average."""
+    from quatrex.phonon.pole_sector import lead_band_edges
+
+    d = np.zeros((7, 2, 2))
+    with pytest.raises(ValueError, match="one square block"):
+        lead_band_edges(d, d, d)
+
+
+def test_the_band_edge_gate_is_off_by_default_and_bites_when_supplied():
+    """It was inert in production for the whole campaign: neither solver call
+    site passed ``band_edges``, so ``edge_factor`` never fired and the
+    proposal's "do not force band-edge continua into isolated poles" was
+    unenforced. Default stays off because switching it on changes which poles
+    are promoted."""
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.pole_sector import PoleSector
+
+    assert PoleSectorConfig().band_edges == "none"
+
+    freqs = np.arange(0.0, 20.0, 0.25)
+    gamma = 0.05
+    sol = _sol(complex(9.0, -gamma))
+    sol.dz_est = 0.0 + 0.0j
+
+    blind = PoleSector(PoleSectorConfig(enabled=True), freqs)
+    # An edge one half-width away: inside edge_factor * gamma of the pole.
+    seeing = PoleSector(PoleSectorConfig(enabled=True), freqs,
+                        band_edges=np.array([9.0 + gamma]))
+
+    assert "band edge" not in (blind.screen(sol, False, 5.0) or "")
+    why = seeing.screen(sol, False, 5.0)
+    assert why is not None and "band edge" in why, why
+
+
+def test_the_solver_derivation_is_cached_off_switchable_and_squeezes():
+    """``PhononSolver._band_edges_for`` without standing up a solver.
+
+    The default is ``"none"``, so nothing in the suite would otherwise execute
+    this path -- which is exactly how it stayed inert through the campaign in
+    the first place. Bound to a stand-in carrying only the attributes it uses.
+    """
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.solver import PhononSolver
+
+    k_s = 4.0
+    d00 = np.array([[2.0 * k_s]])
+    d01 = np.array([[-k_s]])
+
+    class _Stub:
+        block_sections = 1
+        dynamical_matrix = object()
+
+        def __init__(self, mode, leading=()):
+            self._pole_cfg = PoleSectorConfig(enabled=True, band_edges=mode)
+            self.calls = 0
+            self._leading = leading
+
+        def _pole_blocks(self, matrix, index_slice=()):
+            self.calls += 1
+            def _b(a):
+                return a.reshape(self._leading + a.shape)
+            return {(0, 0): _b(d00), (0, 1): _b(d01),
+                    (1, 0): _b(d01.T), (1, 1): _b(d00)}
+
+    off = _Stub("none")
+    assert PhononSolver._band_edges_for(off) is None
+    assert off.calls == 0, "the off switch must not do the work"
+
+    on = _Stub("lead")
+    edges = PhononSolver._band_edges_for(on)
+    assert edges == pytest.approx([0.0, 2.0 * np.sqrt(k_s)], abs=1e-9)
+
+    # Cached per q: D does not move during the SCBA.
+    PhononSolver._band_edges_for(on)
+    PhononSolver._band_edges_for(on)
+    assert on.calls == 1, f"recomputed {on.calls} times; should be cached"
+    # ... and a different q is a different entry.
+    PhononSolver._band_edges_for(on, index_slice=(3, 1))
+    assert on.calls == 2
+
+    # A leading singleton stack must be squeezed, not refused.
+    stacked = _Stub("lead", leading=(1,))
+    assert PhononSolver._band_edges_for(stacked) == pytest.approx(
+        [0.0, 2.0 * np.sqrt(k_s)], abs=1e-9)
+
+
+def test_a_single_block_device_has_no_periodic_layer_to_homogenise():
+    from quatrex.core.config import PoleSectorConfig
+    from quatrex.phonon.solver import PhononSolver
+
+    class _Stub:
+        block_sections = 1
+        dynamical_matrix = object()
+        _pole_cfg = PoleSectorConfig(enabled=True, band_edges="lead")
+
+        def _pole_blocks(self, matrix, index_slice=()):
+            return {(0, 0): np.array([[1.0]])}
+
+    assert PhononSolver._band_edges_for(_Stub()) is None

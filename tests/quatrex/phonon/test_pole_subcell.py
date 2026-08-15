@@ -535,8 +535,11 @@ def test_census_walks_every_q_and_survives_one_failing(capsys):
         def refresh(self):
             return None
 
+    from quatrex.core.config import PoleSectorConfig
+
     solver = object.__new__(PhononSolver)
     solver._pole = _Pole()
+    solver._pole_cfg = PoleSectorConfig()      # band_edges="none" -> no derivation
     solver.dynamical_matrix = None
     solver.block_sizes = np.array([2, 2])
     solver.obc_blocks = types.SimpleNamespace(retarded=[None, None])

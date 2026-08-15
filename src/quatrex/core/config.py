@@ -274,6 +274,24 @@ class PoleSectorConfig(BaseModel):
     condition_reject: PositiveFloat = 1e5
     """Above this, refuse to promote at all -- near a defective point the
     simple-pole expansion itself fails."""
+    band_edges: Literal["none", "lead"] = "none"
+    """Where ``edge_factor`` gets the branch points it refuses poles near.
+
+    ``"none"`` supplies nothing, which is what every run before 2026-08-15 did
+    -- so the ``edge_factor`` gate and the band-edge term of the trust radius
+    were INERT in production, and the method proposal's "do not force band-edge
+    continua into isolated poles" was unenforced. ``"lead"`` derives them from
+    the periodic lead dispersion (:func:`~quatrex.phonon.pole_sector.
+    lead_band_edges`), homogenised from the dynamical matrix by the same
+    ``get_periodic_superblocks`` the OBC uses, so they are the branch points of
+    the contact self-energy the operator actually carries.
+
+    Default ``"none"`` because switching it on CHANGES WHICH POLES ARE
+    PROMOTED, and that is a measurement rather than a tidy-up. A band edge is a
+    branch point, not a simple pole; the frozen Si census returned 36 of 1456
+    roots in the upper half plane, which is the artefact class this refuses.
+
+    Per q on a transverse-q device: ``D`` depends on q, so the edges do too."""
     edge_factor: PositiveFloat = 5.0
     """Refuse promotion within this many half-widths of a contact band edge.
     Band edges are branch points, not simple poles; forcing one into a

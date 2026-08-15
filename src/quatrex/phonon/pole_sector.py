@@ -52,7 +52,8 @@ from quatrex.phonon.pole_tracker import (
     PoleTracker, cluster_poles, match_poles,
 )
 
-__all__ = ["PoleSectorState", "PoleSector", "PoleQBatch", "refresh_many"]
+__all__ = ["PoleSectorState", "PoleSector", "PoleQBatch",
+           "lead_band_edges", "refresh_many"]
 
 
 def _report_rank() -> int:
@@ -69,6 +70,53 @@ def _report_rank() -> int:
         return int(comm.rank)
     except Exception:                                       # noqa: BLE001
         return 0
+
+
+def lead_band_edges(d_00, d_01, d_10, n_k: int = 257) -> NDArray:
+    r"""Band extrema of the periodic lead, in THz.
+
+    The lead dispersion of a nearest-layer chain is the eigenproblem
+
+    .. math:: D(k) = D_{00} + D_{01}e^{ik} + D_{10}e^{-ik},
+              \qquad \lambda_n(k) = \omega_n(k)^2,
+
+    and its extrema are the band edges -- the van Hove points where the number
+    of propagating channels changes, and where :math:`\Sigma_c^R(\omega)` has a
+    branch point rather than a pole.
+
+    Why the sector needs them: a branch point is not a simple pole, and forcing
+    a continuum edge into a single-pole fit is a documented failure mode (the
+    method proposal's Sec. 49, "do not force band-edge continua into isolated
+    poles"). The frozen Si census returned 36 of 1456 roots in the UPPER half
+    plane, which is the artefact class this anticipates.
+
+    Sampled rather than solved. Eigenvalues are sorted at every ``k``, so the
+    "branches" are the sorted ones; they are continuous, and their extrema over
+    the sampled interval are the band extrema plus, at worst, a zone-boundary
+    value that is already an edge. Erring toward extra edges is the safe
+    direction for a gate that REFUSES, so a sampled answer is preferred to a
+    root solve that could miss one.
+
+    Only ``[0, pi]`` is sampled: ``D(-k) = D(k)^*`` for real blocks, so the
+    spectrum is symmetric and the other half repeats these values.
+    """
+    d0 = np.asarray(_host(d_00))
+    d1 = np.asarray(_host(d_01))
+    d2 = np.asarray(_host(d_10))
+    if d0.ndim != 2 or d0.shape[0] != d0.shape[1]:
+        raise ValueError(
+            f"lead_band_edges: d_00 must be one square block, got {d0.shape}")
+
+    k = np.linspace(0.0, np.pi, int(n_k))
+    ph = np.exp(1j * k)[:, None, None]
+    dk = d0[None] + d1[None] * ph + d2[None] * np.conj(ph)
+    # D(k) is Hermitian for a physical lead; symmetrise so eigvalsh is exact
+    # rather than nearly so, and a broken input surfaces as a large residual
+    # instead of a silently complex frequency.
+    lam = np.linalg.eigvalsh(0.5 * (dk + np.conj(np.swapaxes(dk, -2, -1))))
+    w = np.sqrt(np.maximum(lam.real, 0.0))              # (n_k, b), THz
+    edges = np.concatenate([w.min(axis=0), w.max(axis=0)])
+    return np.unique(edges[np.isfinite(edges)])
 
 
 @dataclass
@@ -799,7 +847,7 @@ class PoleSector:
 
     def set_operator_context(
         self, *, delta, d_blocks, obc_left, obc_right, block_sizes, rows, cols,
-        layout: BlockLayout | None = None,
+        layout: BlockLayout | None = None, band_edges=None,
     ) -> None:
         r"""Store everything :math:`M(z)` needs for this SCBA iteration.
 
@@ -839,6 +887,12 @@ class PoleSector:
         self._obc = tuple(
             None if o is None else xp.asarray(o) for o in (obc_left, obc_right)
         )
+        if band_edges is not None:
+            # Per q: D depends on the transverse momentum, so the lead branch
+            # points do too. Supplied here rather than at construction because
+            # the census walks every q through ONE sector object.
+            self.band_edges = np.asarray(_host(band_edges), dtype=float)
+
         self._block_sizes = np.asarray(_host(block_sizes), dtype=int)
         self._rows, self._cols = rows, cols
         self._n_dof = int(np.sum(self._block_sizes))

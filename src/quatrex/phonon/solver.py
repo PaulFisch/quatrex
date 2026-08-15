@@ -603,6 +603,53 @@ class PhononSolver(SubsystemSolver):
         new[..., dof] = nloc
         self._probe_np = 0.5 * self._probe_np + 0.5 * new
 
+    def _band_edges_for(self, index_slice=()):
+        """Lead band edges (THz) for one q, or ``None`` when the gate is off.
+
+        Homogenised from the DYNAMICAL matrix by the same
+        ``get_periodic_superblocks`` the OBC applies to the system matrix, so
+        the edges are the branch points of the contact the operator carries.
+        Taking them from the system matrix instead would mean removing the
+        ``z^2 I`` the phonon Dyson operator adds, at a frequency that would
+        then have to be chosen.
+
+        Frequency independent and cached per q: ``D`` does not move during the
+        SCBA, so this runs once per q per run.
+        """
+        from quatrex.phonon.pole_sector import lead_band_edges
+
+        if getattr(self._pole_cfg, "band_edges", "none") != "lead":
+            return None
+        key = tuple(int(i) for i in index_slice)
+        cache = getattr(self, "_band_edge_cache", None)
+        if cache is None:
+            cache = self._band_edge_cache = {}
+        if key in cache:
+            return cache[key]
+
+        blocks = self._pole_blocks(self.dynamical_matrix,
+                                   index_slice=index_slice)
+        if (1, 0) not in blocks:
+            # A single-block device has no periodic layer to homogenise.
+            cache[key] = None
+            return None
+        d_10, d_00, d_01 = get_periodic_superblocks(
+            a_ii=blocks[(0, 0)], a_ji=blocks[(1, 0)], a_ij=blocks[(0, 1)],
+            block_sections=self.block_sections,
+        )
+
+        def _one(b):
+            a = xp.asarray(b)
+            return a.reshape(a.shape[-2:])      # drop any leading singletons
+
+        edges = lead_band_edges(_one(d_00), _one(d_01), _one(d_10))
+        if comm.rank == 0 and not cache:
+            print(f"  pole sector: {edges.size} lead band edges "
+                  f"[{edges.min():.3f}, {edges.max():.3f}] THz feed edge_factor="
+                  f"{self._pole_cfg.edge_factor:g}", flush=True)
+        cache[key] = edges
+        return edges
+
     def _pole_blocks(self, matrix, index_slice=()):
         """Dense block-tridiagonal view of a DSDBSparse for one stack element.
 
@@ -789,6 +836,7 @@ class PhononSolver(SubsystemSolver):
             return
 
         self._pole.set_operator_context(
+            band_edges=self._band_edges_for(),
             delta=delta,
             d_blocks=self._pole_blocks(self.dynamical_matrix),
             obc_left=(self.obc_blocks.retarded[0]
@@ -894,6 +942,7 @@ class PhononSolver(SubsystemSolver):
                                  **self._pole_frequency_context(freqs))
                 self._pole_q[iq] = sec
             sec.set_operator_context(
+                band_edges=self._band_edges_for(idx),
                 delta=d_flat[:, iq, :],
                 d_blocks=self._pole_blocks(self.dynamical_matrix,
                                            index_slice=idx),
@@ -1011,6 +1060,7 @@ class PhononSolver(SubsystemSolver):
             idx = tuple(int(i) for i in np.unravel_index(iq, shape))
             try:
                 self._pole.set_operator_context(
+                    band_edges=self._band_edges_for(idx),
                     delta=d_flat[:, iq, :],
                     d_blocks=self._pole_blocks(self.dynamical_matrix,
                                                index_slice=idx),
@@ -1023,6 +1073,12 @@ class PhononSolver(SubsystemSolver):
                 if comm.rank == 0:
                     print(f"  q {idx}:", flush=True)
                 self._pole.refresh()
+            except (AttributeError, NameError, ImportError):
+                # Never "this q is hard" -- these are programming errors, and
+                # absorbing them into the per-q report turns a broken build
+                # into a survey that quietly visits nothing. Measured: a
+                # missing local import made every q read as "census failed".
+                raise
             except Exception as exc:                       # noqa: BLE001
                 # One q failing must not lose the other 24: the census is a
                 # survey, and a q that cannot be solved is itself a datum.
