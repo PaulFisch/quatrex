@@ -333,3 +333,57 @@ def test_decay_lengths_label_each_character_distinctly():
     assert np.isinf(xi[1])
     assert np.isnan(xi[2])
     assert xi[3] == 0.0
+
+
+@pytest.mark.parametrize("frac", [0.3, 0.5, 0.8])
+@pytest.mark.parametrize("gamma_s", [0.05, 0.5])
+def test_the_range_is_the_group_velocity_over_the_linewidth(frac, gamma_s):
+    r"""``xi = v_g / gamma``, and it ties the spatial half to the frequency one.
+
+    The pole census already measures ``gamma`` per mode on every bed it has
+    run. This says the required spatial band follows from it directly, given
+    the group velocity, so a frequency-domain measurement already taken can be
+    converted into "how many blocks does the self-energy need" without a new
+    calculation.
+
+    ``gamma`` here is the HWHM in THz that :math:`\Sigma^R = -i\Gamma`
+    implies, :math:`\gamma = \Gamma/2\omega`, since the self-energy enters the
+    phonon Dyson operator in :math:`\omega^2`. Exact to 1e-4 in weak damping;
+    the identification of a range with a lifetime is itself a weak-damping
+    statement, so the agreement loosens to about a percent once a mode decays
+    within a few cells.
+    """
+    from quatrex.phonon.spatial_modes import band_range_cells
+
+    omega = frac * BAND_TOP
+    k = 2.0 * np.arcsin(omega / (2.0 * np.sqrt(K_S)))
+    v_g = np.sqrt(K_S) * np.cos(k / 2.0)          # dw/dk, cells * THz
+    gamma = gamma_s / (2.0 * omega)               # HWHM in THz
+
+    xi = band_range_cells(*_blocks(omega, sigma=-1j * gamma_s))
+    assert xi == pytest.approx(v_g / gamma, rel=2e-3)
+
+
+def test_a_census_linewidth_implies_a_band_far_longer_than_any_in_use():
+    r"""What that bridge says about a bed already measured.
+
+    The converged Si census reports a median half width near 0.16 THz
+    (``pole_sector_observations.md`` Sec. 13). At an acoustic group velocity of
+    a few cell-THz that is a range of tens of cells, against an
+    ``sse_g_band`` of 1 to 3 blocks in every production run.
+
+    Written as a calculation rather than a claim about Si specifically -- the
+    device group velocity is not measured here -- but the order is the point,
+    and it is the same order as the factor 2.2 the long-CNT bracket sits at.
+    """
+    from quatrex.phonon.spatial_modes import band_range_cells
+
+    gamma_thz = 0.16
+    for v_g in (1.0, 3.0, 6.0):                   # cells * THz
+        omega = 0.5 * BAND_TOP
+        xi = band_range_cells(
+            *_blocks(omega, sigma=-1j * 2.0 * omega * gamma_thz))
+        assert xi == pytest.approx(
+            np.sqrt(K_S) * np.cos(np.arcsin(omega / (2 * np.sqrt(K_S))))
+            / gamma_thz, rel=5e-3)
+        assert xi > 10.0, "the range collapsed below a plausible band"
