@@ -26,7 +26,7 @@ from pathlib import Path
 
 ITER = re.compile(r"^Iteration (\d+)")
 PSD = re.compile(
-    r"positivity\s+(\S+)\s+worst=([-+0-9.eE]+)\s+at w\[(\d+)\]\s+(\S+)"
+    r"positivity\s+(\S+)\s+worst=([-+0-9.eE]+)\s+at w\[(-?\d+)\]\s+(\S+)"
 )
 RES = re.compile(
     r"rel Sigma\^R residual ([-+0-9.eE]+); lead balance ([-+0-9.eE]+)"
@@ -81,7 +81,10 @@ def main(argv=None) -> int:
                     continue
                 worst, wi, flag = r["psd"][t]
                 mark = "!" if flag == "VIOLATION" else " "
-                line += f"  {worst:>+11.3e}@{wi:<3}{mark}"
+                # w[-1] is the gate's sentinel for "no negative eigenvalue
+                # anywhere on the local grid", not a frequency index.
+                where = "--" if wi < 0 else str(wi)
+                line += f"  {worst:>+11.3e}@{where:<3}{mark}"
             print(line)
         first = next((r for r in rows
                       if any(v[2] == "VIOLATION" for v in r["psd"].values())),
