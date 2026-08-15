@@ -279,6 +279,27 @@ read by nothing. The actual fallback is a harmonic re-seed and re-solve
 
 ## 6. Ordering
 
+**Answered, 2026-08-15.** The census ran (jobs 4479538 / 4489601) and its result
+is `pole_sector_observations.md` Sec. 13. In short: the bulk of the Si
+population broadens away under self-consistency -- the median line goes from
+unrepresentable to carried at 3 %, and the number of q with a median line the
+grid cannot carry falls 46/81 to 0/81 -- but 66 of 81 q still hold at least one
+line the grid cannot represent, and the survivors are OVERLAPPING rather than
+isolated (median `gamma/sep` 0.751 -> 1.52).
+
+That is the third branch of Sec. 51, not the first or the second. It also
+settles the ordering below: the outgoing sheet (Sec. 3.1) and the cluster
+representation matter for a tail; the multi-cell wiring (Sec. 2) does not,
+because the cells it would correct are no longer the ones carrying the physics.
+
+The census also showed that the shipped gate would have given the OPPOSITE
+answer -- accepted 584 -> 504 and under-resolved 95.5 % -> 95.1 %, i.e. "the
+population survived" -- because `leg_weight_tol` defaults to 0 and acceptance is
+still decided by the crude `q_omega` ratio. That is Sec. 2's first entry, and it
+is no longer a tidiness item.
+
+
+
 The backlog's own decision tree (Sec. 51) turns on one measurement: does the narrow,
 isolated Si population survive anharmonic self-consistency? If it does not, Secs. 43-46
 are wasted. `pole_sector_observations.md` Sec. 1.8 reaches the same conclusion from the

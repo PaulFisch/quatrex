@@ -981,3 +981,147 @@ but they do not change this answer.
 binds before walltime, and sizing such a run from a per-iteration timing
 alone gets the wrong answer. The fine grid is a DIAGNOSTIC on this bed, not a
 reference that can be converged to.
+
+---
+
+## 13. The frozen Si census: the bulk broadens away, a tail does not (2026-08-15)
+
+Jobs 4479538 and 4489601, `sichk_base`, `ne = 141`, `wmax = 35` with
+`retarded = fft`, `g_band` default, eta = 0, 4 ranks. The gating measurement of
+the 2026-08-14 pole/QNM audit (its Sec. 38, decision tree Sec. 51), and the
+number Sec. 1.8 above said would settle it.
+
+Three stages, one bed, one grid: `cold` censuses at iteration 1; `base` runs
+150 iterations pole-off and saves its Sigma (converged to `9.2597e-04`, the
+same value the `siladder` base arm reached, so the run reproduces); `warm`
+censuses the frozen converged state. 81 q, 18 candidates each, 1456 in total.
+
+`extraction_only` reports the candidates and hands the ring an EMPTY pole set,
+so every stage is bit-identical to the pole-free baseline. That is now verified
+ON DEVICE and not only in the unit tests: `cold` and `base` agree to every
+printed digit at the same iteration, residual `9.6952e-01` and lead balance
+`1.2363e-05`. It is what makes the stages comparable.
+
+### 13.1 What the shipped gate says, and why it is wrong here
+
+| | cold (iteration 1) | warm (converged) |
+|---|---|---|
+| candidates | 1456 | 1456 |
+| under-resolved (`q_omega < 1`) | 1390 (95.5 %) | 1384 (95.1 %) |
+| isolated (`gamma/sep < 0.5`) | 638 (43.8 %) | 374 (25.7 %) |
+| **accepted** | 584 (40.1 %) | 504 (34.6 %) |
+| median per-q `gamma` [THz] | 0.0361 | 0.161 |
+
+Read the accepted count alone and the answer is "the population survived":
+95.5 % under-resolved becomes 95.1 %, and the accepted set falls only to 0.86
+of itself. That reading is an artefact of the gate. `leg_weight_tol` defaults
+to 0, so acceptance is still decided by `q_omega = gamma/(2h)` against `q_in`,
+and Sec. 1.6 measured what that costs. Here it costs the conclusion.
+
+### 13.2 What the exact line-weight gate says
+
+`E_leg^max = coth(pi h / gamma) - 1` is the worst-case error in the weight the
+grid carries for a line, over where it falls between nodes.
+
+| per-q median `E_leg^max` | cold | warm |
+|---|---|---|
+| carried better than 1 % | 0/81 q | 5/81 q |
+| carried better than 5 % | 3/81 q | 49/81 q |
+| carried better than 10 % | 4/81 q | 63/81 q |
+| **worse than 100 %** | **46/81 q** | **0/81 q** |
+| median of the per-q median | 1.22 | 0.0314 |
+
+The median line goes from unrepresentable to carried at 3 %, a factor 39, while
+the shipped gate barely moved. Anharmonic self-consistency broadens the poles by
+4.5x and the grid then carries them.
+
+### 13.3 The tail, which the medians hide
+
+Sec. 1.8's own lesson was that a median-based summary would have missed its
+finding. Applying it here reverses part of the verdict:
+
+| per-q distribution of `E_leg^max` | cold | warm |
+|---|---|---|
+| q whose WORST QUARTILE is unrepresentable (`p75 > 1`) | 81/81 | 1/81 |
+| q with ANY unrepresentable line (`max > 1`) | 81/81 | **66/81** |
+| median of the per-q `max` | 60.9 | **3.56** |
+| q whose worst line is carried to 10 % | 0/81 | 0/81 |
+
+So the bulk broadens away and a tail does not. At convergence three quarters of
+the lines in a q are carried to about 12 % or better, but 66 of 81 q still hold
+at least one line the grid cannot represent, the typical worst line sitting at
+356 % error. One q, `(4, 4)`, in full:
+
+    cold  gamma  min/p25/med/p75/max  -0.2  0.00238  0.00867  0.0382  0.141
+          E_leg^max                   0.0593  0.675  6.45  9.62  521
+    warm  gamma  min/p25/med/p75/max  -0.161  0.0627  0.107  0.144  0.166
+          E_leg^max                   0.0313  0.0487  0.137  0.399  1.56
+
+The median width grows 12x, the median line goes from 645 % error to 14 %, and
+the single worst line lands at 156 % -- marginal rather than catastrophic, and
+not zero.
+
+### 13.4 The survivors are less isolated than the population that broadened
+
+Isolated candidates fall 638 -> 374, and the median per-q `gamma/sep` rises
+0.751 -> 1.52. The typical converged mode overlaps its neighbour. On q `(4, 4)`
+the isolated count goes 12/18 -> 4/18.
+
+That matters for which representation the audit's Sec. 51 points at. A narrow
+tail that is also OVERLAPPING is its third branch -- a cluster or
+invariant-subspace representation -- not the simple-pole one the sector
+currently builds.
+
+**A limit of this measurement, stated because it decides the next step.** The
+census prints MARGINAL percentiles per q, not joint distributions. It shows that
+narrow lines survive and that isolation falls, but it cannot say whether the
+surviving narrow lines ARE the isolated ones. The method needs narrow AND
+isolated AND important simultaneously, and that conjunction is exactly what
+marginals cannot report. Settling it needs per-pole rows, not percentiles.
+
+### 13.5 Continuation failures persist
+
+Roots returning in the UPPER half plane, counted for the first time by the
+column added on 2026-08-15: 68 of 1456 cold (4.7 %), 36 of 1456 warm (2.5 %).
+Every q had between one and three cold. `screen` refuses them on the hard gate
+so they never reach the sector, but they are not noise at this rate, and the
+audit's Sec. 3 asks for exactly this: a lower-half-plane root is meaningful only
+if the contact self-energy is on the correct outgoing continuation, and this
+operator holds the contacts at a real anchor (see `pole_qnm_audit_map.md`
+Sec. 3.1).
+
+### 13.6 A reporting defect found by this run
+
+The first attempt (4479538) came back unparseable. Every rank assembles the
+same operator and solves the same poles -- the invariant the distributed path
+rests on -- and `PoleSector._report_census` had no rank guard, so all four wrote
+the same report into one stdout and the lines interleaved mid-word:
+
+    gamma [THz]    gamma [THz]   min/p25/med/p75/max  0.000414 ...
+    po  pole census: 18 candidates; 18 under-resolved ...
+
+The tell was in the log: `_census_over_q` DOES guard the `q (...)` header it
+prints, so the stage carried 14 headers against 179 bodies. The corruption also
+took neighbouring output with it -- the cold stage kept only one of its three
+`rel Sigma` lines. Guarded on rank 0 and re-run as 4489601 against the same
+saved Sigma; the corrected logs carry 81 distinct q with headers and bodies
+matched one to one.
+
+### 13.7 Verdict
+
+Si does not need the pole method for its bulk. It may still need something for
+a tail of roughly one to four modes per q, and that tail is overlapping rather
+than isolated.
+
+Against the audit's Sec. 51 this is neither the clean "poles broaden away, stop"
+nor the clean "narrow and isolated survives, proceed". It is the third branch.
+Before any of Secs. 43-46 is worth building, the open question is the one
+Sec. 13.4 names: are the surviving narrow lines the isolated ones? A per-pole
+census answers it at the cost of one more short run.
+
+Two things follow immediately and cheaply. `leg_weight_tol` should stop
+defaulting to 0, because on this bed the shipped gate and the exact gate
+disagree about the physics conclusion, not merely about a threshold. And
+`pole_local`'s radius-R support stays unwired: its measured factor-27 gain is
+real, but the bed that would have justified it is not the bed this census
+found.
