@@ -888,9 +888,22 @@ class SCBA(TransportSolver):
                     # because reading 2.0 as a large imbalance costs days.
                     _sign = ("  [SIGN INVERSION: emitting into both leads]"
                              if balance > 1.5 else "")
+                    # The lead current itself, on the same line: `balance`
+                    # and `spread` are both normalised by it, so without it
+                    # a run killed by the wall reports how self-consistent
+                    # it was but not WHAT it computed. That cost two 24 nh
+                    # MoS2 rungs (lsM4c/lsM4w, 2026-08-16), whose currents
+                    # existed at every iteration and were never printed.
+                    # Appended at the END of the line on purpose: several
+                    # log parsers anchor on "residual ...; lead balance ..."
+                    # (e.g. phonon/studies/_psd_trace_report.py), so a new
+                    # field may only go where it cannot split that pair.
+                    _lead_J = 0.5 * (abs(float(heat[0]))
+                                     + abs(float(heat[-1])))
                     print(f"Phonon: rel Sigma^R residual {rel_sigma:.4e}; "
                           f"lead balance {balance:.4e}; "
-                          f"internal spread {spread:.4e}{_sign}", flush=True)
+                          f"internal spread {spread:.4e}; "
+                          f"lead current {_lead_J:.6e}{_sign}", flush=True)
                 # NOTE: G survives the back-transpose only when
                 # bubble_balance_check keeps it; on discarded G the traces
                 # would evaluate to a spurious machine-perfect 0 == 0.
