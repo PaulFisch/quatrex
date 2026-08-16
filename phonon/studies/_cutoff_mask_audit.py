@@ -24,8 +24,17 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+# Offline analysis -- it must never need a GPU, and it must give the same
+# numbers on every machine. quatrex picks its array module at qttools import
+# time from this variable, so it has to be set before the first
+# quatrex/qttools import (all of which happen lazily inside the functions
+# below). Under the default cupy backend the mask audit dies inside
+# compute_sparsity_pattern, an xp routine handed a host grid.
+os.environ.setdefault("QTX_ARRAY_MODULE", "numpy")
 
 import numpy as np
 
