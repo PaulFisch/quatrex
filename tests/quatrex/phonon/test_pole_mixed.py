@@ -79,13 +79,6 @@ def test_moment_route_beats_the_cell_route_when_the_pole_is_narrow():
     assert _err("moments", g, order=5, window=10) < 0.5 * _err("cells", g)
 
 
-def test_rational_route_is_refused_not_silently_downgraded():
-    """An unimplemented method must raise, not return another method's answer."""
-    w, r = _bed()
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        mixed_convolution(PROBES, 10.0 - 0.01j, 1.0 + 0j, r, w, method="rational")
-
-
 def test_unknown_method_raises():
     w, r = _bed()
     with pytest.raises(ValueError, match="method must be"):

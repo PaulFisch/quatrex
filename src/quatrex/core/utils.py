@@ -23,10 +23,8 @@ def compute_sparsity_pattern(
     transport_direction : str, optional
         The transport direction, by default 'x'.
     strategy : str, optional
-        The strategy to use, by default "box", where only the distance
-        along the transport direction is considered. The other option is
-        "sphere", where the usual Euclidean distance between points
-        matters.
+        The strategy to use. Only "box" is supported: the distance along
+        the transport direction.
     start_idx : int, optional
         The start index for which to compute the sparsity pattern, by
         default 0.
@@ -42,13 +40,7 @@ def compute_sparsity_pattern(
         The sparsity pattern.
 
     """
-    if strategy == "sphere":
-
-        def distance(x, y):
-            """Euclidean distance."""
-            return xp.linalg.norm(x[..., xp.newaxis, :] - y[xp.newaxis, ...], axis=-1)
-
-    elif strategy == "box":
+    if strategy == "box":
 
         idx = {"x": 0, "y": 1, "z": 2}[transport_direction]
 

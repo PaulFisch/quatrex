@@ -11,18 +11,11 @@ with :math:`d_\alpha = l_\alpha^\dagger M'(z_\alpha) r_\alpha`. Normalising
 :math:`l_\alpha^\dagger M' r_\alpha = 1` makes :math:`d_\alpha = 1` and the residue
 simply :math:`r_\alpha l_\alpha^\dagger`.
 
-Two routines:
-
-* :func:`beyn_contour` -- initialisation and periodic audit. Contour moments
-  :math:`A_k = \frac{1}{2\pi i}\oint z^k M(z)^{-1} V\,dz` give the enclosed pole
-  set and its subspace. This is a *new* implementation rather than a reuse of
-  :class:`qttools.nevp.beyn.Beyn`: that class solves a **polynomial** pencil in
-  the Bloch factor :math:`\lambda` through ``operator_inverse``, and cannot take
-  a general matrix function of :math:`z`.
-* :func:`bordered_newton` -- the corrector. The bordered system of the design
-  note is solved by eliminating the border analytically, so each step costs two
-  BTD solves against one factorisation rather than an :math:`(N+1)`-dimensional
-  solve.
+:func:`bordered_newton` is the corrector. The bordered system is solved by
+eliminating the border analytically, so each step costs two BTD solves against
+one factorisation rather than an :math:`(N+1)`-dimensional solve. Seeds come
+from the harmonic re-seed in :func:`~quatrex.phonon.pole_sector.refresh_many`;
+there is no contour initialiser.
 
 The operator is supplied as callables returning block-tridiagonal blocks, so the
 same code serves the toy beds and the distributed production assembly, and the
@@ -44,9 +37,7 @@ __all__ = [
     "PoleSolutions",
     "bordered_newton",
     "bordered_newton_batch",
-    "beyn_contour",
     "residue",
-    "ellipse_contour",
 ]
 
 Blocks = tuple[list[NDArray], list[NDArray], list[NDArray]]
@@ -154,11 +145,6 @@ class PoleSolution:
 def residue(r: NDArray, l: NDArray) -> NDArray:
     r"""Residue :math:`R_\alpha = r_\alpha l_\alpha^\dagger` of a normalised pair."""
     return xp.outer(r, xp.conj(l))
-
-
-def _flat_solve(fac: BTDFactorization, v: NDArray) -> NDArray:
-    """Solve for a single vector, hiding the (n, nrhs) convention."""
-    return fac.solve(v.reshape(-1, 1))[..., 0]
 
 
 def _adjoint_blocks(blocks: Blocks) -> Blocks:
@@ -497,117 +483,3 @@ def bordered_newton(
     return batch.to_list()[0]
 
 
-def ellipse_contour(
-    centre: complex, semi_re: float, semi_im: float, n_quad: int = 32
-) -> tuple[NDArray, NDArray]:
-    r"""Quadrature nodes and weights of an elliptical contour.
-
-    The contour must enclose the sought poles and avoid the real axis, on which
-    the continuation of :math:`\Sigma_s^R` has its branch cut. A trapezoidal rule
-    on a smooth closed curve is spectrally accurate.
-
-    Parameters
-    ----------
-    centre : complex
-        Ellipse centre; normally ``Omega - 1j*gamma_mid`` in the lower half plane.
-    semi_re, semi_im : float
-        Semi-axes along the real and imaginary directions (THz).
-    n_quad : int, optional
-        Number of nodes. Default 32.
-
-    Returns
-    -------
-    nodes : NDArray
-        ``(n_quad,)`` complex quadrature points.
-    weights : NDArray
-        ``(n_quad,)`` values of ``z'(t) dt / (2 pi i)``.
-
-    """
-    t = xp.arange(n_quad) * (2.0 * np.pi / n_quad)
-    nodes = centre + semi_re * xp.cos(t) + 1j * semi_im * xp.sin(t)
-    dz = -semi_re * xp.sin(t) + 1j * semi_im * xp.cos(t)
-    weights = dz * (2.0 * np.pi / n_quad) / (2.0 * np.pi * 1j)
-    return nodes, weights
-
-
-def beyn_contour(
-    m_blocks: BlockFn,
-    nodes: NDArray,
-    weights: NDArray,
-    *,
-    n_probe: int = 8,
-    rank_tol: float = 1e-8,
-    seed: int = 42,
-) -> tuple[NDArray, NDArray]:
-    r"""Beyn's contour method for the poles enclosed by a contour.
-
-    Forms the moments :math:`A_k = \frac{1}{2\pi i}\oint z^k M(z)^{-1} V\,dz`
-    for :math:`k = 0, 1` with a random probing matrix :math:`V`, and reads the
-    enclosed poles off the reduced pencil. Used for initialisation, for periodic
-    audit, and as the recovery path when the predictor/corrector loses a pole.
-
-    Parameters
-    ----------
-    m_blocks : callable
-        ``z -> (a_ii, a_ij, a_ji)`` of ``M(z)``.
-    nodes, weights : NDArray
-        From :func:`ellipse_contour`.
-    n_probe : int, optional
-        Columns of the probing matrix; must exceed the number of enclosed
-        poles. Default 8.
-    rank_tol : float, optional
-        Relative singular-value threshold for the numerical rank. Default 1e-8.
-    seed : int, optional
-        Probing-matrix seed. Fixed so the SCBA map stays a deterministic
-        function of the self-energy.
-
-    Returns
-    -------
-    z : NDArray
-        ``(m,)`` enclosed poles.
-    r : NDArray
-        ``(n_dof, m)`` right vectors, unit norm.
-
-    """
-    blocks0 = m_blocks(complex(nodes[0]))
-    n_dof = int(sum(int(b.shape[-1]) for b in blocks0[0]))
-
-    rng = xp.random.default_rng(seed)
-    v = rng.standard_normal((n_dof, n_probe)) + 1j * rng.standard_normal(
-        (n_dof, n_probe)
-    )
-
-    a0 = xp.zeros((n_dof, n_probe), dtype=xp.complex128)
-    a1 = xp.zeros((n_dof, n_probe), dtype=xp.complex128)
-    y_scale = 0.0
-    for zk, wk in zip(nodes, weights):
-        fac = BTDFactorization.factorize(*m_blocks(complex(zk)))
-        y = fac.solve(v)
-        y_scale = max(y_scale, float(xp.linalg.norm(y)))
-        a0 += wk * y
-        a1 += wk * complex(zk) * y
-
-    u, s, vh = xp.linalg.svd(a0, full_matrices=False)
-    # An ABSOLUTE floor is essential: with no pole enclosed, A_0 is zero up to
-    # quadrature error, and a purely relative test against s[0] would promote
-    # that noise to a full set of spurious poles.
-    floor = rank_tol * max(float(s[0]), y_scale)
-    m = int(xp.sum(s > floor)) if float(s[0]) > 0 else 0
-    if m == 0:
-        return xp.zeros(0, dtype=xp.complex128), xp.zeros((n_dof, 0), dtype=xp.complex128)
-    if m == n_probe:
-        # The probing matrix saturated: there may be more poles than columns.
-        import warnings
-
-        warnings.warn(
-            f"beyn_contour: numerical rank saturated the probing matrix "
-            f"({m} == n_probe); poles may be missing. Increase n_probe.",
-            stacklevel=2,
-        )
-
-    u, s, vh = u[:, :m], s[:m], vh[:m]
-    b = u.conj().T @ a1 @ vh.conj().T / s
-    lam, w = xp.linalg.eig(b)
-    r = u @ w
-    r = r / xp.linalg.norm(r, axis=0, keepdims=True)
-    return lam, r

@@ -42,40 +42,14 @@ from scipy.optimize import linear_sum_assignment
 from qttools import NDArray, xp
 
 __all__ = [
-    "predict_shift",
     "cluster_poles",
     "subspace_basis",
     "principal_angles",
-    "subspace_distance",
     "match_cost",
     "match_poles",
     "TrackedCluster",
     "PoleTracker",
 ]
-
-
-def predict_shift(l: NDArray, r: NDArray, dsigma: NDArray) -> complex:
-    r"""First-order pole shift under a self-energy update, doc Eq. (43).
-
-    .. math:: \delta z_\alpha = l_\alpha^\dagger\,\Delta\Sigma_s^R(z_\alpha)\,r_\alpha
-
-    Valid with the normalisation ``l^H M'(z) r = 1``, which makes the
-    denominator ``d_alpha`` unity.
-
-    Parameters
-    ----------
-    l, r : NDArray
-        ``(n_dof,)`` left and right vectors of the pole.
-    dsigma : NDArray
-        ``(n_dof, n_dof)`` change in the retarded scattering self-energy,
-        evaluated at the pole.
-
-    Returns
-    -------
-    complex
-
-    """
-    return complex(xp.vdot(l, dsigma @ r))
 
 
 def cluster_poles(
@@ -157,14 +131,6 @@ def principal_angles(q1: NDArray, q2: NDArray) -> NDArray:
     """
     s = xp.linalg.svd(xp.conj(q1).T @ q2, compute_uv=False)
     return xp.arccos(xp.clip(xp.real(s), -1.0, 1.0))
-
-
-def subspace_distance(vectors_a: NDArray, vectors_b: NDArray) -> float:
-    """Largest principal angle between the spans of two vector sets (rad)."""
-    qa, qb = subspace_basis(vectors_a), subspace_basis(vectors_b)
-    if qa.shape[1] != qb.shape[1]:
-        return float(np.pi / 2)
-    return float(xp.max(principal_angles(qa, qb)))
 
 
 def match_cost(

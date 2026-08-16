@@ -113,7 +113,6 @@ if os.environ.get("QX_POLE_LEGWTOLOUT"): cfg.phonon.pole_sector.leg_weight_tol_o
 if os.environ.get("QX_POLE_BUBCORR"): cfg.phonon.pole_sector.bubble_correction = os.environ["QX_POLE_BUBCORR"]
 if os.environ.get("QX_POLE_SIGMIN"): cfg.phonon.pole_sector.covariance_sigma_min = float(os.environ["QX_POLE_SIGMIN"])
 if os.environ.get("QX_POLE_EXTRACT"): cfg.phonon.pole_sector.extraction_only = bool(int(os.environ["QX_POLE_EXTRACT"]))
-if os.environ.get("QX_POLE_AUDIT"): cfg.phonon.pole_sector.audit_frequencies = int(os.environ["QX_POLE_AUDIT"])
 if os.environ.get("QX_POLE_PSD"): cfg.phonon.pole_sector.psd_check = bool(int(os.environ["QX_POLE_PSD"]))
 if os.environ.get("QX_POLE_MIXSCALE"): cfg.phonon.pole_sector.mixed_scale = float(os.environ["QX_POLE_MIXSCALE"])
 if os.environ.get("QX_POLE_LEG"): cfg.phonon.pole_sector.leg = os.environ["QX_POLE_LEG"]

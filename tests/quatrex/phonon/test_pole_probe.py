@@ -17,11 +17,8 @@ from qttools.datastructures import DSDBCOO
 
 from quatrex.phonon.pole_kernel import sigma_retarded_at_z
 from quatrex.phonon.pole_probe import (
-    ProbePlan,
-    assemble_m_blocks,
     delta_from_sigma,
     nnz_to_blocks,
-    probe_sigma_retarded,
 )
 
 TINY = 1e-30
@@ -80,38 +77,6 @@ def test_delta_sign_matches_the_stored_convention():
 # The batched contraction.
 # --------------------------------------------------------------------------- #
 
-def test_batched_probe_matches_single_evaluations():
-    rng = np.random.default_rng(1)
-    freqs = np.linspace(0.0, 20.0, 201)
-    delta = -1j * (0.02 * freqs * np.exp(-((freqs / 9.0) ** 2)))[:, None] * np.ones(4)
-    z = np.array([7.0 - 0.01j, 11.0 - 0.05j, 13.0 - 0.2j])
-
-    got = probe_sigma_retarded(delta, freqs, z, orders=(0, 1))
-    for order in (0, 1):
-        ref = _h(sigma_retarded_at_z(delta, freqs, z, sheet="II", order=order))
-        assert np.abs(_h(got[order]) - ref).max() / np.abs(ref).max() < 1e-12
-
-
-def test_probe_plan_batches_and_labels():
-    freqs = np.linspace(0.0, 20.0, 101)
-    delta = -1j * (0.02 * freqs)[:, None] * np.ones(3)
-    plan = ProbePlan(orders=(0, 1))
-    i0 = plan.add(7.0 - 0.01j, tag="cluster-a")
-    i1 = plan.add(11.0 - 0.05j, tag="cluster-b")
-    assert (i0, i1, len(plan)) == (0, 1, 2)
-    out = plan.evaluate(delta, freqs)
-    assert set(out) == {0, 1}
-    assert _h(out[0]).shape == (2, 3)
-    assert plan.tags == ["cluster-a", "cluster-b"]
-
-
-def test_empty_probe_plan_is_a_no_op():
-    freqs = np.linspace(0.0, 20.0, 51)
-    delta = np.zeros((51, 3), dtype=complex)
-    out = ProbePlan(orders=(0,)).evaluate(delta, freqs)
-    assert _h(out[0]).shape == (0, 3)
-
-
 # --------------------------------------------------------------------------- #
 # The scatter into blocks, against a real DSDBCOO pattern.
 # --------------------------------------------------------------------------- #
@@ -160,44 +125,3 @@ def test_nnz_to_blocks_survives_the_distribution_transpose():
 # Assembling the operator.
 # --------------------------------------------------------------------------- #
 
-def test_assemble_m_blocks_matches_a_dense_operator():
-    block_sizes = np.array([3, 3, 2])
-    n = int(block_sizes.sum())
-    off = np.concatenate(([0], np.cumsum(block_sizes)))
-    rng = np.random.default_rng(4)
-    dense_d = rng.normal(size=(n, n))
-    dense_d = dense_d + dense_d.T
-    d_blocks = {
-        (i, j): dense_d[off[i]:off[i + 1], off[j]:off[j + 1]] + 0j
-        for i in range(3) for j in range(max(0, i - 1), min(3, i + 2))
-    }
-    obc_l = rng.normal(size=(3, 3)) + 1j * rng.normal(size=(3, 3))
-    obc_r = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
-
-    z = 7.0 - 0.05j
-    a_ii, a_ij, a_ji = assemble_m_blocks(
-        z, d_blocks, obc_left=obc_l, obc_right=obc_r, block_sizes=block_sizes
-    )
-
-    # Build the reference from the block-tridiagonal blocks only: the operator
-    # has no corner, and a full dense D would carry one.
-    ref = z * z * np.eye(n) + 0j
-    for (i, j), b in d_blocks.items():
-        ref[off[i]:off[i + 1], off[j]:off[j + 1]] -= b
-    ref[off[0]:off[1], off[0]:off[1]] -= obc_l
-    ref[off[2]:off[3], off[2]:off[3]] -= obc_r
-
-    from quatrex.phonon.btd_linalg import BTDFactorization
-    got = _h(BTDFactorization.factorize(a_ii, a_ij, a_ji).to_dense())
-    assert np.abs(got - ref).max() < 1e-12
-
-
-def test_assemble_m_blocks_subtracts_the_scattering_self_energy():
-    block_sizes = np.array([2, 2])
-    d_blocks = {(0, 0): np.eye(2) + 0j, (1, 1): np.eye(2) + 0j,
-                (0, 1): np.zeros((2, 2)) + 0j, (1, 0): np.zeros((2, 2)) + 0j}
-    sig = {k: 0.5 * np.ones_like(v) for k, v in d_blocks.items()}
-    z = 3.0 - 0.1j
-    bare = assemble_m_blocks(z, d_blocks, block_sizes=block_sizes)[0][0]
-    with_s = assemble_m_blocks(z, d_blocks, sig, block_sizes=block_sizes)[0][0]
-    assert np.allclose(_h(bare) - _h(with_s), 0.5 * np.ones((2, 2)))

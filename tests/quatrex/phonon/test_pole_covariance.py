@@ -19,7 +19,6 @@ from quatrex.phonon.pole_covariance import (
     cell_variance,
     centred_gram,
     covariance_kernel,
-    pair_covariance,
 )
 
 H = 0.5
@@ -101,77 +100,6 @@ def test_variance_is_the_norm_the_bound_uses():
 
     ref = _quad(f, -H / 2, H / 2) / H
     assert abs(got - ref) < 1e-8 * ref, f"{got:.6e} vs {ref:.6e}"
-
-
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_the_covariance_identity_holds_to_roundoff(seed):
-    r"""The whole method in one assertion.
-
-        exact = ring box term + Delta I
-
-    If the cross terms did not cancel, or the kernel's box subtraction were
-    wrong, this is where it shows -- and it shows as a finite discrepancy, not
-    a small one, because the mean x mean term is the dominant piece.
-    """
-    ck, cl, zk, zl, rk, rl = _bed(seed)
-    gk, mk = _leg(zk, rk, ck)
-    gl, ml = _leg(zl, rl, cl)
-    omega = np.array([ck + cl])                    # the matched cell pair
-
-    def integrand(u):
-        return np.einsum("wij,wjl->wil", gk(u), gl(omega[0] - u))
-
-    exact = _quad(integrand, ck - H / 2, ck + H / 2) / (2 * np.pi)
-    box = (H / (2 * np.pi)) * (mk @ ml)
-    delta = np.asarray(pair_covariance(rk, rl, zk, zl, ck, cl, H, omega))[0]
-
-    err = np.abs(exact - (box + delta)).max() / np.abs(exact).max()
-    assert err < 1e-9, (
-        f"identity broken: {err:.3e}\n exact {exact}\n box+delta {box + delta}")
-    # ... and the correction must not be negligible, or the test is vacuous
-    assert np.abs(delta).max() > 1e-3 * np.abs(box).max()
-
-
-def test_the_ring_alone_is_wrong_by_the_amount_the_correction_supplies():
-    """The box term is what the FFT ring computes; measure its error directly."""
-    ck, cl, zk, zl, rk, rl = _bed(0, gamma=0.002)
-    gk, mk = _leg(zk, rk, ck)
-    gl, ml = _leg(zl, rl, cl)
-    omega = np.array([ck + cl])
-
-    exact = _quad(lambda u: np.einsum("wij,wjl->wil", gk(u), gl(omega[0] - u)),
-                  ck - H / 2, ck + H / 2) / (2 * np.pi)
-    box = (H / (2 * np.pi)) * (mk @ ml)
-    delta = np.asarray(pair_covariance(rk, rl, zk, zl, ck, cl, H, omega))[0]
-
-    ring_err = np.abs(exact - box).max() / np.abs(exact).max()
-    corr_err = np.abs(exact - box - delta).max() / np.abs(exact).max()
-    assert ring_err > 0.05, f"bed does not exercise the error: {ring_err:.3e}"
-    assert corr_err < 1e-9
-    assert corr_err < 1e-6 * ring_err
-
-
-@pytest.mark.parametrize("gamma", [1e-1, 1e-2, 1e-3, 1e-4])
-def test_the_correction_stays_exact_as_the_line_narrows(gamma):
-    """The requirement a sharp-resonance method has to meet.
-
-    The rectangle rule diverges as ``1/gamma``; this must not. A method whose
-    own error grows with the thing it exists to treat is no method.
-    """
-    ck, cl, zk, zl, rk, rl = _bed(3, gamma=gamma)
-    gk, _ = _leg(zk, rk, ck)
-    gl, _ = _leg(zl, rl, cl)
-    omega = np.array([ck + cl])
-    n = 200001 if gamma < 1e-3 else 20001
-    exact = _quad(lambda u: np.einsum("wij,wjl->wil", gk(u), gl(omega[0] - u)),
-                  ck - H / 2, ck + H / 2, n=n) / (2 * np.pi)
-    d_k = cell_resolvent_mean(zk, ck, H)
-    d_l = cell_resolvent_mean(zl, cl, H)
-    box = (H / (2 * np.pi)) * (np.einsum("p,pij->ij", d_k, rk)
-                               @ np.einsum("q,qij->ij", d_l, rl))
-    delta = np.asarray(pair_covariance(rk, rl, zk, zl, ck, cl, H, omega))[0]
-    err = np.abs(exact - box - delta).max() / np.abs(exact).max()
-    assert err < 1e-6, f"gamma={gamma}: {err:.3e}"
 
 
 def test_finite_cell_kernel_is_stable_at_the_combination_frequency():

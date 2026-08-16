@@ -91,7 +91,6 @@ __all__ = [
     "centred_gram",
     "cell_variance",
     "covariance_kernel",
-    "pair_covariance",
 ]
 
 
@@ -219,29 +218,6 @@ def covariance_kernel(
     d_l = cell_resolvent_mean(zl, centre_l, h)
     box = (float(h) / (2.0 * xp.pi)) * d_k[:, None] * d_l[None, :]
     return j - box[None, :, :]
-
-
-def pair_covariance(
-    res_k: NDArray, res_l: NDArray, zeta_k: NDArray, zeta_l: NDArray,
-    centre_k: float, centre_l: float, h: float, omega: NDArray,
-    bilinear=None,
-) -> NDArray:
-    r"""``Delta I_kl(Omega) = sum_pq K_pq B(R_kp, R_lq)``, densely.
-
-    The reference form, for the bed and the tests: it contracts dense residues
-    through ``bilinear`` (the plain matrix product by default). A device path
-    keeps the residues rank one and contracts the projected pair vertices
-    instead -- see the module docstring -- but both evaluate the same sum, so
-    this is the oracle that path is checked against.
-    """
-    k = covariance_kernel(zeta_k, zeta_l, centre_k, centre_l, h, omega)
-    rk = xp.asarray(res_k, dtype=xp.complex128)
-    rl = xp.asarray(res_l, dtype=xp.complex128)
-    if bilinear is None:
-        blocks = xp.einsum("pij,qjl->pqil", rk, rl)
-    else:
-        blocks = xp.stack([xp.stack([bilinear(x, y) for y in rl]) for x in rk])
-    return xp.einsum("wpq,pqij->wij", k, blocks)
 
 
 def spectrum_correction(

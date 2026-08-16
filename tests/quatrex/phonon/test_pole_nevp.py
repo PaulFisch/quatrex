@@ -20,9 +20,7 @@ import numpy as np
 import pytest
 
 from quatrex.phonon.pole_nevp import (
-    beyn_contour,
     bordered_newton,
-    ellipse_contour,
     residue,
 )
 
@@ -146,34 +144,6 @@ def test_residue_matches_the_closed_form():
     assert np.abs(got - ref).max() / np.abs(ref).max() < 1e-8
 
 
-def test_residue_matches_a_contour_integral():
-    """Independent check of the residue: (1/2 pi i) * contour integral of G^R."""
-    d = _dynamical(seed=3)
-    m_blocks, dm_blocks = _operator(*d)
-    z_ex, _, _ = _exact_poles(_dense(*d))
-
-    k = 1
-    sol = bordered_newton(
-        m_blocks, dm_blocks, complex(z_ex[k].real, -0.05), max_iter=30
-    )
-    assert sol.converged and abs(sol.z - z_ex[k]) < 1e-8 * abs(z_ex[k])
-    # The contour must enclose this pole and no other.
-    gap = np.min(np.abs(np.delete(z_ex, k) - sol.z))
-    rad = 0.3 * gap
-    nodes, weights = ellipse_contour(sol.z, rad, rad, n_quad=256)
-
-    from quatrex.phonon.btd_linalg import BTDFactorization
-
-    n = _dense(*d).shape[0]
-    acc = np.zeros((n, n), dtype=complex)
-    for zk, wk in zip(_h(nodes), _h(weights)):
-        fac = BTDFactorization.factorize(*m_blocks(complex(zk)))
-        acc += wk * _h(fac.solve(np.eye(n, dtype=complex)))
-
-    got = _h(sol.residue())
-    assert np.abs(acc - got).max() / np.abs(got).max() < 1e-8
-
-
 def test_eps_nep_flags_a_wrong_pole():
     """The residual must reject a point that is not a pole -- the accept gate."""
     d = _dynamical(seed=4)
@@ -200,51 +170,6 @@ def test_trust_radius_caps_the_step():
         m_blocks, dm_blocks, far, max_iter=1, trust_radius=0.01
     )
     assert abs(capped.z - far) <= 0.01 + 1e-12
-
-
-def test_beyn_contour_finds_the_enclosed_poles():
-    d = _dynamical(sizes=(3, 3), seed=6)
-    m_blocks, _ = _operator(*d)
-    z_ex, _, _ = _exact_poles(_dense(*d))
-
-    lo, hi = sorted(z_ex.real)[1], sorted(z_ex.real)[2]
-    centre = complex(0.5 * (lo + hi), -0.5 * G_DAMP)
-    semi_re = 0.5 * (hi - lo) + 0.05
-    nodes, weights = ellipse_contour(centre, semi_re, 0.25, n_quad=128)
-
-    z, r = beyn_contour(m_blocks, nodes, weights, n_probe=6)
-    z = np.sort_complex(_h(z))
-    want = np.sort_complex(
-        np.array([p for p in z_ex if lo - 1e-9 <= p.real <= hi + 1e-9])
-    )
-    assert len(z) == len(want), f"found {len(z)} poles, expected {len(want)}"
-    assert np.abs(z - want).max() < 1e-7, f"{z} vs {want}"
-    assert _h(r).shape[0] == _dense(*d).shape[0]
-
-
-def test_beyn_contour_returns_nothing_when_empty():
-    d = _dynamical(sizes=(3, 3), seed=7)
-    m_blocks, _ = _operator(*d)
-    z_ex, _, _ = _exact_poles(_dense(*d))
-    # A contour far above every pole.
-    nodes, weights = ellipse_contour(
-        complex(max(z_ex.real) + 20.0, -0.15), 0.5, 0.1, n_quad=64
-    )
-    z, r = beyn_contour(m_blocks, nodes, weights, n_probe=4)
-    assert len(_h(z)) == 0
-
-
-def test_beyn_warns_when_the_probe_saturates():
-    d = _dynamical(sizes=(3, 3), seed=8)
-    m_blocks, _ = _operator(*d)
-    z_ex, _, _ = _exact_poles(_dense(*d))
-    # A contour around every pole, with far too few probing columns.
-    lo, hi = min(z_ex.real), max(z_ex.real)
-    nodes, weights = ellipse_contour(
-        complex(0.5 * (lo + hi), -0.5 * G_DAMP), 0.5 * (hi - lo) + 1.0, 0.25, 128
-    )
-    with pytest.warns(UserWarning, match="saturated"):
-        beyn_contour(m_blocks, nodes, weights, n_probe=2)
 
 
 def test_dense_spectrum_needs_the_contour_not_a_crude_guess():

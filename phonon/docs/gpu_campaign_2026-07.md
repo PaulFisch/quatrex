@@ -219,9 +219,10 @@ Results (tileiras 13.3.36, cuda-tile 1.5.0):
 Pre-registered verdict: **<1.1x = negative result, park.** The
 tile-quantization headroom (28 vs 13.5 TF/s at b=36) remains real in
 principle, but today's compiler cannot approach it. Re-evaluate on
-future tileiras releases: `_cutile_ring.py smoke && check --quick`
-(laptop) then the bench job — the harness is ready and the assessment
-criteria (≥1.3x at b=36, ≥0.9x at 63/135) stand. This is, to our
+future tileiras releases; the assessment criteria (≥1.3x at b=36,
+≥0.9x at 63/135) stand. The harness itself (`_cutile_ring.py`,
+`_fused_ring.cu/.cubin`, `_ring_variants_bench.py`) was removed with the
+parked result on 2026-08-16 and is recoverable from git history. This is, to our
 knowledge, the first FP64/complex cuTile-on-Hopper datapoint.
 
 ## Budget

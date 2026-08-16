@@ -13,10 +13,8 @@ from quatrex.phonon.pole_tracker import (
     PoleTracker,
     cluster_poles,
     match_poles,
-    predict_shift,
     principal_angles,
     subspace_basis,
-    subspace_distance,
 )
 
 G_DAMP = 0.25
@@ -51,77 +49,9 @@ def _crossing_d(s, gap=0.05, coupling=0.02, centre=64.0):
 # Predictor (doc Eq. 43).
 # --------------------------------------------------------------------------- #
 
-def test_predictor_is_first_order_accurate():
-    """delta z = l^H dSigma r, exact to first order in the update.
-
-    On this bed a constant retarded perturbation ``dSigma = eps W`` is
-    equivalent to ``D -> D - eps W``, so the true pole shift is available in
-    closed form and the predictor error must fall quadratically in ``eps``.
-    """
-    rng = np.random.default_rng(0)
-    a = rng.normal(size=(4, 4))
-    d = a + a.T + np.diag([60.0, 90.0, 140.0, 200.0])
-    w = rng.normal(size=(4, 4))
-    w = w + w.T
-
-    z0, v0 = _poles_of(d)
-    k = 1
-    r = v0[:, k]
-    l = r / (2.0 * z0[k].real)          # normalised so l^H M' r = 1
-
-    errs = []
-    for eps in (1e-3, 1e-4, 1e-5):
-        # dSigma^R = +eps W  =>  M = z^2 - D - dSigma  =>  D_eff = D + eps W.
-        z1, _ = _poles_of(d + eps * w)
-        exact = z1[k] - z0[k]
-        pred = predict_shift(l, r, eps * w)
-        errs.append(abs(pred - exact) / abs(exact))
-    # Second order: a 10x smaller step must cut the relative error ~10x.
-    assert errs[0] > errs[1] > errs[2]
-    assert errs[1] < 0.2 * errs[0], f"not first-order accurate: {errs}"
-    assert errs[-1] < 1e-3, f"predictor is inaccurate even at eps=1e-5: {errs[-1]:.3e}"
-
-
 # --------------------------------------------------------------------------- #
 # Experiment C: the crossing.
 # --------------------------------------------------------------------------- #
-
-def test_subspace_survives_a_crossing_that_defeats_label_sorting():
-    # The physical regime: the avoided-crossing gap is far SMALLER than how far
-    # the poles move in one SCBA iteration, so the sweep steps across the
-    # crossing rather than resolving it. The offset keeps s = 0 off the grid --
-    # landing exactly on the crossing would sample the symmetric combination and
-    # halve the apparent rotation.
-    steps = np.linspace(-0.6, 0.6, 121) + 0.005
-    gap = 1e-5
-    prev_vecs = prev_pair = None
-    worst_individual, worst_subspace = 0.0, 0.0
-
-    for s in steps:
-        z, vec = _poles_of(_crossing_d(s, gap=gap))
-        order = np.argsort(z.real)[:2]          # the two crossing modes
-        pair = vec[:, order]
-        if prev_vecs is not None:
-            # (a) label/frequency sorting: how far each labelled vector moved.
-            for c in range(2):
-                ov = abs(np.vdot(prev_pair[:, c], pair[:, c]))
-                worst_individual = max(worst_individual, 1.0 - ov)
-            # (b) the cluster's invariant subspace.
-            worst_subspace = max(worst_subspace, subspace_distance(prev_pair, pair))
-        prev_vecs, prev_pair = vec, pair
-
-    # Label tracking loses the mode outright; the invariant subspace does not
-    # move at all. Measured: 0.998 against 3.7e-08 rad.
-    assert worst_individual > 0.9, (
-        f"the bed does not actually rotate the eigenvectors ({worst_individual:.3f}); "
-        "nothing is being demonstrated"
-    )
-    assert worst_subspace < 1e-5, (
-        f"subspace turned {worst_subspace:.3e} rad while the individual vectors "
-        f"turned by {worst_individual:.3f} -- subspace tracking gained nothing"
-    )
-    assert worst_individual > 1e4 * worst_subspace
-
 
 def test_frequency_sorting_swaps_character_through_the_crossing():
     """The concrete failure: the mode labelled 'lowest' is a different mode after."""

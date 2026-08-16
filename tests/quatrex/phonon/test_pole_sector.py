@@ -667,33 +667,12 @@ def test_coverage_chain_separates_the_reasons_a_candidate_is_lost():
     assert chain["candidates"] == 7
     assert chain["in window"] == 6
     assert chain["unresolved"] == 4
-    assert chain["important"] == 4          # not implemented: nothing is lost
     assert chain["root solved"] == 3
     assert chain["representation valid"] == 1
     assert chain["active"] == 0
     # every refusal is attributed to exactly one stage
     assert chain["candidates"] - chain["active"] == len(st.rejected)
     assert "coverage:" in st.report()
-
-
-def test_the_important_stage_is_not_implemented_and_says_so():
-    """``weight_min`` is in the config and nothing reads it.
-
-    So no candidate is ever refused for carrying too little spectral or
-    vertex-weighted weight, and the review's ``important`` stage is a gap
-    rather than a pass. It is listed with its input count so the gap is
-    visible; if this ever starts filtering, this test is the reminder to give
-    it its own stage semantics.
-    """
-    import inspect
-
-    from quatrex.phonon import pole_sector as ps
-
-    # Look for USE, not mention: coverage_chain's own docstring names it.
-    src = inspect.getsource(ps)
-    assert "cfg.weight_min" not in src and "config.weight_min" not in src, (
-        "weight_min is now read; give the 'important' stage real semantics "
-        "and update coverage_chain")
 
 
 def test_audit_reports_candidates_without_allocating_a_sector():

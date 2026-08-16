@@ -304,7 +304,7 @@ def leg_partial_fractions(
             # dropping it: the dropped piece is the smooth part of the source,
             # so the answer would look reasonable and be wrong.
             raise NotImplementedError(
-                f"source_order={n_moments - 1} needs the degree-"
+                f"a source of order {n_moments - 1} needs the degree-"
                 f"{n_moments - 2} polynomial remainder of the partial-fraction "
                 "split, which is not implemented. Orders 0 and 1 are exact "
                 "here (the quotient is empty)."

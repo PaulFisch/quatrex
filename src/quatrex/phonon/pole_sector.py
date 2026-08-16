@@ -207,16 +207,10 @@ class PoleSectorState:
         was refused. Those have completely different fixes, and the chain
         separates them.
 
-        The ``important`` stage is NOT implemented: ``weight_min`` exists in
-        the config and nothing reads it, so no candidate is ever refused for
-        carrying too little spectral or vertex-weighted weight. It is listed
-        with its input count so the gap is visible rather than silently
-        absent.
         """
         stages = [("in window", ("outside the pole window",
                                  "pole is not in the lower half plane")),
                   ("unresolved", ("grid-resolved",)),
-                  ("important", ()),                   # not implemented
                   ("root solved", ("eps_z", "eps_nep")),
                   ("representation valid", ("ill-conditioned",
                                             "half-widths of a band edge")),
@@ -1147,10 +1141,8 @@ class PoleSector:
         first iteration, when a rescan offers new candidates, and as the
         fallback when no pole survived the corrector.
 
-        There is no contour fallback. :func:`~quatrex.phonon.pole_nevp.
-        beyn_contour` exists and is tested, but nothing in ``src/`` calls it and
-        ``contour_quad_points`` reaches no code; the fallback that actually runs
-        is the harmonic re-seed in :func:`refresh_many`.
+        There is no contour fallback; the fallback that actually runs is the
+        harmonic re-seed in :func:`refresh_many`.
 
         Sector membership is held fixed within an adaptation epoch: an
         approximate implementation is not invariant under repartitioning, so a

@@ -958,10 +958,10 @@ def test_state_report_carries_the_promotion_yield():
                                v=np.ones((2, 1), dtype=complex))]
     st.coherence = [1.0]
     st.rejected = ([(3.0 - 0.2j, "eps_nep=5.7e-03 above tolerance")] * 4
-                   + [(4.0 - 0.2j, "weight below weight_min")])
+                   + [(4.0 - 0.2j, "ill-conditioned")])
     head = st.report().splitlines()[0]
     assert "1/6 pole(s) promoted" in head, head
-    assert "eps_nep x4" in head and "weight below weight_min x1" in head, head
+    assert "eps_nep x4" in head and "ill-conditioned x1" in head, head
 
 
 # --- memory: the sector must be able to carry more than a handful of poles -- #
@@ -1064,7 +1064,7 @@ def test_an_additive_remainder_may_be_indefinite_while_the_total_is_fine():
 # --------------------------------------------------------------------------- #
 
 from quatrex.phonon.pole_keldysh import (          # noqa: E402
-    hybrid_keldysh_congruence, pole_keldysh, pole_retarded,
+    pole_keldysh, pole_retarded,
 )
 
 
@@ -1101,53 +1101,6 @@ def _herm_eigs(mats):
     """Eigenvalues of the Hermitian part of ``-i M``."""
     h = -1j * np.asarray(mats)
     return np.linalg.eigvalsh(0.5 * (h + np.conj(h).swapaxes(-2, -1)))
-
-
-def test_congruence_matches_the_direct_split_at_cell_centres():
-    """Both reconstructions are exact where the remainder is defined."""
-    cl, g_ret, g_les, sigma = _psd_bed(gamma=0.01)
-    centres = np.array([3.75, 4.0, 4.25])
-    r_ret = g_ret(centres) - pole_retarded(centres, cl)
-    src = np.repeat(sigma[None], centres.size, axis=0)
-    got = hybrid_keldysh_congruence(centres, cl, r_ret, src,
-                                    np.arange(centres.size))
-    exact = g_les(centres)
-    err = np.abs(got - exact).max() / np.abs(exact).max()
-    assert err < 1e-10, f"congruence must be exact at centres: {err:.3e}"
-
-
-@pytest.mark.parametrize("gamma", [0.1, 0.02, 0.005])
-def test_congruence_stays_psd_off_grid_where_direct_subtraction_fails(gamma):
-    """The point of the construction: positivity is structural off-grid.
-
-    ``-i G^< = G^R (-i Sigma^<) (G^R)^H`` holds for any ``G^R``, so the
-    reconstruction cannot go indefinite however coarse the cell. Freezing the
-    Keldysh remainder instead has no such guarantee, and must be shown failing
-    here or the test proves nothing.
-    """
-    h = 0.25
-    cl, g_ret, g_les, sigma = _psd_bed(gamma=gamma)
-    centres = np.array([4.0])
-    x = np.polynomial.legendre.leggauss(24)[0] * 0.5
-    w = centres[0] + h * x
-    idx = np.zeros(w.size, dtype=int)
-
-    r_ret = g_ret(centres) - pole_retarded(centres, cl)
-    src = np.repeat(sigma[None], 1, axis=0)
-    cong = hybrid_keldysh_congruence(w, cl, r_ret, src, idx)
-
-    r_les = g_les(centres) - pole_keldysh(centres, cl,
-                                          np.conj(cl.v).T @ sigma @ cl.v)
-    direct = pole_keldysh(w, cl, np.conj(cl.v).T @ sigma @ cl.v) + r_les[0]
-
-    # One global scale for both, per pole_audit.psd_residual's convention.
-    scale = float(max(_herm_eigs(cong).max(), _herm_eigs(direct).max()))
-    psd_cong = _herm_eigs(cong).min() / scale
-    psd_direct = _herm_eigs(direct).min() / scale
-    assert psd_cong > -1e-12, f"congruence lost positivity: {psd_cong:.3e}"
-    assert psd_direct < -1e-6, (
-        "the direct split must FAIL here, else the bed is not exercising "
-        f"the failure mode: {psd_direct:.3e}")
 
 
 # --- exact represented weight of an unresolved line ------------------------- #

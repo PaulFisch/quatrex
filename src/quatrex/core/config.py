@@ -252,25 +252,8 @@ class PoleSectorConfig(BaseModel):
     since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
     branch is only reached when ``leg_weight_tol`` is set back to 0."""
 
-    isolation_min: PositiveFloat = 2.0
-    """``eta_iso``: below this a group of poles is carried as one COHERENT
-    cluster with its full projected-source matrix. Independent scalar
-    occupations discard the modal coherences, which is wrong by ~30% for
-    overlapping resonances (measured) and fine once separated.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
     cluster_factor: PositiveFloat = 3.0
     """Single-linkage clustering radius, in units of the summed half-widths."""
-    condition_max: PositiveFloat = 1e3
-    """Above this pole conditioning, force the mode into a cluster: individual
-    eigenvectors are no longer a good numerical object even where the invariant
-    subspace still is.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
     condition_reject: PositiveFloat = 1e5
     """Above this, refuse to promote at all -- near a defective point the
     simple-pole expansion itself fails."""
@@ -296,10 +279,6 @@ class PoleSectorConfig(BaseModel):
     """Refuse promotion within this many half-widths of a contact band edge.
     Band edges are branch points, not simple poles; forcing one into a
     single-pole fit is the failure mode of Sec. 41."""
-    weight_min: NonNegativeFloat = 1e-4
-    """Drop a mode only when BOTH its spectral weight and its vertex-weighted
-    importance fall below this. An unresolved-but-relevant mode is promoted,
-    never ignored."""
 
     newton_tol: PositiveFloat = 1e-10
     """Acceptance threshold on the scaled nonlinear-eigenvalue residual."""
@@ -407,24 +386,11 @@ class PoleSectorConfig(BaseModel):
     ``trust_radius_cells * h``. Below one half the step cannot reach the
     midpoint between two seeds, which is what stops a Newton solve from
     walking onto its neighbour's pole."""
-    taylor_order: Literal[1, 2] = 2
-    """Order of the local model of Sigma^R(z) built from the probe derivatives.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
     delta_fit_order: NonNegativeInt = 2
     """Degree of the local polynomial continuation of Sigma^> - Sigma^<, which
     is the second-sheet term."""
     delta_fit_window_cells: PositiveInt = 4
     """Half-width of that fit window, in grid cells."""
-    contour_quad_points: PositiveInt = 32
-    """Quadrature nodes on the Beyn contour used for initialisation, audit and
-    recovery.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
     rescan_iterations: PositiveInt = 10
     """Force a full harmonic rescan every N SCBA iterations even when tracking looks
     healthy."""
@@ -437,28 +403,6 @@ class PoleSectorConfig(BaseModel):
     approximate implementation is not invariant under repartitioning, so a mode
     that jumps sector every iteration changes the fixed-point map itself."""
 
-    keldysh_split: Literal["pp", "pp_pb_bp"] = "pp"
-    """How the Keldysh function is split. ``"pp"``: ``G_S = G_PP``,
-    ``G_R = G_direct - G_PP``. Both halves are then computable, they sum to the
-    untouched G identically, and the pole-background interference is retained
-    (carried on the grid, where it is smooth: it has one narrow denominator, not
-    two). ``"pp_pb_bp"`` additionally moves the mixed terms into the analytic
-    sector; those coefficients are device-sized in one index, so it is not a
-    cheap option.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
-    source_model: Literal["frozen", "poly"] = "poly"
-    """Representation of the projected source across a pole window. ``"frozen"``
-    is the smooth-source approximation; ``"poly"`` fits a local polynomial,
-    whose integrals against the pole denominators are still closed form.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
-    source_order: NonNegativeInt = 2
-    """Degree of that polynomial."""
     source_fit_tol: PositiveFloat = 0.1
     """Relative fit residual above which the cluster is DEMOTED rather than
     approximated. A source that is not smooth across its own pole window has no
@@ -483,22 +427,7 @@ class PoleSectorConfig(BaseModel):
     operates where this matters.
 
     ``False`` restores point sampling, for reproducing earlier results."""
-    ss_kernel: Literal["residue", "lorentz"] = "residue"
-    """Pole-pole convolution kernel. ``"residue"`` is exact for the full
-    coherent cluster. ``"lorentz"`` uses the Lorentzian composition identity,
-    which is a fast path valid only for a diagonal source.
 
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
-
-    linear_solver: Literal["btd", "dense"] = "btd"
-    """Linear solver behind the pole solve. ``"dense"`` is for tests and very
-    small systems.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
     psd_check: bool = False
     """Per-iteration positivity gate on the reconstructed total (never on
     individual sectors -- only their sum is constrained). Nothing in the solver
@@ -641,13 +570,6 @@ class PoleSectorConfig(BaseModel):
     answer: does this device HAVE a population of narrow, isolated modes? On
     CNT at 300 K it does not (``cnt_observations.md`` Sec. 6), and no A/B
     there can say anything about the method."""
-    audit_frequencies: NonNegativeInt = 0
-    """Extra frequencies per pole at which to measure the reconstruction error
-    against a direct solve. 0 = off.
-
-    INERT: nothing reads this field (checked 2026-08-14 against the
-    whole of ``src/``); the behaviour it describes is not implemented.
-    Kept so existing TOML files still validate."""
 
     @model_validator(mode="after")
     def check_pole_sector_consistency(self) -> Self:
@@ -674,11 +596,6 @@ class PoleSectorConfig(BaseModel):
                 f"({self.leg_weight_tol_out}) must be BELOW leg_weight_tol "
                 f"({self.leg_weight_tol}); this gate refuses a pole the grid "
                 "already resolves, so hysteresis lowers the threshold."
-            )
-        if self.condition_reject <= self.condition_max:
-            raise ValueError(
-                f"pole_sector: condition_reject ({self.condition_reject:g}) must "
-                f"exceed condition_max ({self.condition_max:g})."
             )
         if 2 * self.delta_fit_window_cells < self.delta_fit_order + 1:
             raise ValueError(
@@ -1862,9 +1779,6 @@ class PhononConfig(BaseModel):
     phonon_energy: NonNegativeFloat | None = None
     deformation_potential: NonNegativeFloat | None = None
     temperature: PositiveFloat = 300.0  # K
-
-    band_edge_tracking: Literal["dos-peaks", "eigenvalues"] | None = None
-    filtering_iteration_limit: PositiveInt = 1
 
     left_temperature: PositiveFloat | None = None
     """Temperature of the left phonon reservoir. Defaults to `temperature`."""

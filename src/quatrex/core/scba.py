@@ -38,7 +38,7 @@ from quatrex.electron import (
     SigmaPhoton,
 )
 from quatrex.grid import get_electron_energies
-from quatrex.phonon import PhononSolver, PiPhonon
+from quatrex.phonon import PhononSolver
 from quatrex.photon import PhotonSolver, PiPhoton
 
 profiler = Profiler()

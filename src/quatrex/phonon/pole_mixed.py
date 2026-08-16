@@ -1,5 +1,5 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-r"""Mixed pole-background convolution: four routes, so they can be measured.
+r"""Mixed pole-background convolution: three routes, so they can be measured.
 
 The mixed sectors :math:`\Sigma_{SR} + \Sigma_{RS}` need
 
@@ -15,7 +15,7 @@ one narrow pole against a smooth background known on the grid. Substituting
 with :math:`\operatorname{Im} z = \gamma > 0`, i.e. off the real axis.
 
 Unlike the pole-pole channel there is no free exact answer here, because ``R``
-is only known on the grid. Four routes, with different costs and failure modes:
+is only known on the grid. Three routes, with different costs and failure modes:
 
 ``"grid"``
     The discrete convolution, i.e. what the existing linearised bubble does.
@@ -29,13 +29,7 @@ is only known on the grid. Four routes, with different costs and failure modes:
     Local polynomial model of ``R`` over a window around the pole, integrated
     against the pole analytically; the rest of the axis by the cell kernel.
     Exact in the pole, order ``p`` in ``R``.
-``"rational"``
-    Local rational model of ``R``, turning the whole integral into a residue
-    sum. Cheapest asymptotically. **Not implemented** -- see
-    :func:`_rational_resolvent` for what is missing and why the measured
-    comparison does not motivate finishing it.
-
-The comparison driver is ``phonon/studies/_pole_mixed_compare.py``.
+Production uses ``"cells"``.
 """
 from __future__ import annotations
 
@@ -46,7 +40,7 @@ from qttools import NDArray, xp
 __all__ = ["mixed_convolution", "cell_resolvent_weights",
            "mixed_convolution_batched", "bosonic_extend", "METHODS"]
 
-METHODS = ("grid", "cells", "moments", "rational")
+METHODS = ("grid", "cells", "moments")
 
 
 def _host(a):
@@ -101,41 +95,6 @@ def _moment_resolvent(
     return far + acc / (2.0 * np.pi)
 
 
-def _rational_resolvent(
-    z: complex, r_vals: np.ndarray, w: np.ndarray, n_fit: int, window: int
-) -> complex:
-    """Local rational model of ``R``, as a residue sum. NOT IMPLEMENTED.
-
-    Raises rather than falling back, because a silent fallback would report the
-    cell-kernel result under the rational label -- which is exactly what an
-    earlier version of this function did, and it looked like a validated
-    method in the comparison table.
-
-    Two things are missing, and the first is a correctness lesson worth keeping:
-
-    * The causality guard was written as "reject a fitted pole in the same half
-      plane as ``z``". That rejects EVERY fit: ``R`` is real, so its fitted
-      poles come in conjugate pairs and one is always in the upper half plane.
-      A upper-half-plane pole is in fact harmless -- closing the contour
-      downward it simply does not contribute -- so the guard should test the
-      fit's spuriousness (residue size, distance from the sampled window), not
-      its half plane.
-    * The residue sum over the fitted denominator poles was never written.
-
-    It is not obviously worth completing: the measured comparison
-    (``phonon/studies``) shows the moment route is already flat in ``gamma`` at
-    ~1e-03 and exact in the pole, so the only thing a rational model could add
-    is a lower asymptotic cost per pole -- against a real risk of a spurious
-    pole corrupting the causal structure.
-    """
-    raise NotImplementedError(
-        "the rational mixed-convolution route is not implemented: its causality "
-        "guard rejects every fit (a real background has conjugate poles) and "
-        "the denominator residue sum is missing. Use method='moments', which "
-        "is measured flat in gamma and exact in the pole."
-    )
-
-
 def mixed_convolution(
     omega: NDArray,
     pole: complex,
@@ -146,7 +105,6 @@ def mixed_convolution(
     method: str = "cells",
     order: int = 3,
     window: int = 6,
-    n_fit: int = 2,
 ) -> NDArray:
     r"""``C(omega) = int dw'/2pi [coeff/(w'-pole)] R(omega-w')``.
 
@@ -162,8 +120,8 @@ def mixed_convolution(
         ``R`` sampled on ``freqs``.
     freqs : NDArray
         Uniform grid on which ``R`` is known.
-    method : {"grid", "cells", "moments", "rational"}
-    order, window, n_fit : int
+    method : {"grid", "cells", "moments"}
+    order, window : int
         Model parameters for the local routes.
 
     Returns
@@ -197,10 +155,8 @@ def mixed_convolution(
         z = o - p
         if method == "cells":
             out[i] = c * _cell_resolvent(z, r, w)
-        elif method == "moments":
-            out[i] = c * _moment_resolvent(z, r, w, order, window)
         else:
-            out[i] = c * _rational_resolvent(z, r, w, n_fit, window)
+            out[i] = c * _moment_resolvent(z, r, w, order, window)
     return out
 
 
