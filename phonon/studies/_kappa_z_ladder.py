@@ -58,6 +58,7 @@ NE = re.compile(r"\bne=(\d+)\b")
 # it; the run is then quotable only if it converged.
 ITER_CURRENT = re.compile(r"lead current ([-+0-9.eE]+)")
 ITER_RESIDUAL = re.compile(r"rel Sigma\^R residual ([-+0-9.eE]+)")
+ITER_BALANCE = re.compile(r"lead balance ([-+0-9.eE]+)")
 TAIL = 5  # iterations whose spread becomes the quoted uncertainty
 
 
@@ -114,8 +115,21 @@ def read_run(run_dir: Path) -> dict:
     # consistency check, not the error bar.
     iter_j = [float(x) for x in ITER_CURRENT.findall(text)]
     iter_res = [float(x) for x in ITER_RESIDUAL.findall(text)]
+    iter_bal = [float(x) for x in ITER_BALANCE.findall(text)]
     tail = iter_j[-TAIL:]
     j_halfrange = (max(tail) - min(tail)) / 2.0 if len(tail) > 1 else None
+    j_rel_iter = (j_halfrange / abs(float(cur[-1]))
+                  if j_halfrange is not None else None)
+
+    # Lead balance |J_L - J_R| / Jbar is how far the two ends of the SAME
+    # iterate disagree, so it bounds J no matter how still the iteration has
+    # gone -- a run can sit at a fixed point that does not conserve energy.
+    # Take it as a FLOOR under the iteration-to-iteration spread rather than
+    # an alternative to it: converged runs (which log no per-iteration
+    # current at all before 716107fa) would otherwise enter the fit as exact.
+    balance = iter_bal[-1] if iter_bal else None
+    j_rel = max(x for x in (j_rel_iter, balance) if x is not None) \
+        if (j_rel_iter is not None or balance is not None) else None
 
     return {
         "name": run_dir.name,
@@ -125,8 +139,9 @@ def read_run(run_dir: Path) -> dict:
         "converged": conv is not None,
         "n_iter_logged": len(iter_j),
         "j_halfrange": j_halfrange,
-        "j_rel_halfrange": (j_halfrange / abs(float(cur[-1]))
-                            if j_halfrange is not None else None),
+        "j_rel_iter": j_rel_iter,
+        "lead_balance": balance,
+        "j_rel_halfrange": j_rel,
         "last_residual": iter_res[-1] if iter_res else None,
         "ne": n_freq, "df": df, "n_q": n_q, "dT": d_t,
         "area_ang2": area_ang2,
@@ -185,12 +200,17 @@ def main(argv=None) -> int:
             print(f"  refusing to fit {r['name']}: did not converge "
                   f"(pass --allow-unconverged to fit it with a bar)")
         return 1
-    if unconv and any(r["j_rel_halfrange"] is None for r in unconv):
+    # The lead-balance floor is available on every run, but it says nothing
+    # about how far the ITERATION still has to travel -- that is exactly what
+    # an unconverged run needs bounded, and only the per-iteration currents
+    # bound it. So the refusal keys on j_rel_iter, not on the floored bar.
+    if unconv and any(r["j_rel_iter"] is None for r in unconv):
         for r in unconv:
-            if r["j_rel_halfrange"] is None:
+            if r["j_rel_iter"] is None:
                 print(f"  refusing to fit {r['name']}: unconverged AND its "
                       f"log predates the per-iteration lead-current print, "
-                      f"so there is nothing to put a bar on")
+                      f"so its lead balance is the only bar available and "
+                      f"that does not bound the drift")
         return 1
 
     consts = {(r["ne"], round(r["df"], 9), r["n_q"], r["dT"],
@@ -244,9 +264,14 @@ def main(argv=None) -> int:
             lo, hi = np.percentile(ks, [16, 84])
             rlo, rhi = np.percentile(rcs, [16, 84])
             spreads = ", ".join(
-                "{} {:.2%}".format(r["name"], r["j_rel_halfrange"] or 0.0)
+                "{} {:.2%}({})".format(
+                    r["name"], r["j_rel_halfrange"] or 0.0,
+                    "iterate" if (r["j_rel_iter"] is not None
+                                  and r["j_rel_iter"] >= (r["lead_balance"] or 0))
+                    else "balance")
                 for r in rows)
-            print(f"  bar from the per-run current spread ({spreads}):")
+            print(f"  bar on each J, the larger of its iterate spread and its "
+                  f"lead balance ({spreads}):")
             print(f"    kappa_bulk in [{lo:.4f}, {hi:.4f}] W/m/K (68%), "
                   f"{len(ks)}/{len(draws)} draws physical")
             print(f"    R_c        in [{rlo:.4f}, {rhi:.4f}] m2K/GW")
