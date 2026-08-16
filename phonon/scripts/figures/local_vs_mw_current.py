@@ -1,17 +1,7 @@
 """Local (bond) vs Meir-Wingreen heat current: the continuity identity figure.
 
-Two panels (cnt33 L3): measured per-interface heat current (points; indices
-0/-1 are the lead Meir-Wingreen currents, interior are Hardy bond currents)
-vs the energy-continuity reconstruction J_0 + cumsum(P_abs) from the
-per-slab scattering absorption (line). Left: eta=1e-12 conserving fixed
-point -- the reconstruction reproduces the interior profile exactly (the
-interior dip is the energy carried by the three-phonon interaction channel,
-which the harmonic bond current does not see). Right: eta=0.7 -- the extra
-mismatch is the finite-eta ghost-reservoir absorption (the ordering
-commutator), slab-resolved.
-
-Data: phonon/studies/out/local_mw/{L3_eta0,L3_eta07}/run.npz (launch recipe
-in phonon/scripts/verify/local_vs_mw_current.py).
+Data:
+  Data: phonon/studies/out/local_mw/{L3_eta0,L3_eta07}/run.npz (launch recipe
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/local_vs_mw_current.py
 """

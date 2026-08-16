@@ -189,13 +189,8 @@ def test_pole_is_stable_under_grid_refinement():
 
 
 def test_pole_subtraction_flattens_the_retarded_green_function():
-    """Removing R/(w - z) must leave a background that is orders of magnitude flatter.
-
-    This is the acceptance test of doc Phase 1 stated in a way that can actually
-    fail: eps_G is zero by construction (the background is DEFINED by
-    subtraction), so what has to be measured is whether the remainder is
-    genuinely smoother than what it was carved out of.
-    """
+    """Removing R/(w - z) must leave a background that is orders of magnitude
+    flatter."""
     sol, freqs, d, delta = _find_pole(401, 4)
     assert sol.converged
     omega0, gamma = sol.z.real, -sol.z.imag
@@ -245,15 +240,7 @@ def test_residue_reproduces_the_peak_height():
 
 
 def test_registration_lottery_moves_the_grid_answer_but_not_the_pole():
-    """The motivating asymmetry, stated as a test.
-
-    Sliding the grid under a fixed resonance (the micro-rung trick: change the
-    point count slightly at fixed extent) swings what the grid REPORTS by orders
-    of magnitude -- this is the registration lottery of ``phonon/docs/grid_audit.md``,
-    where a converged coarse run reports its own spacing as the physics. The
-    pole solve reads the same self-energy samples and returns the same pole
-    every time, because it needs Sigma^R to be sampled, not resolved.
-    """
+    """The motivating asymmetry, stated as a test."""
     sampled, poles, hs = [], [], []
     for nf in (401, 403, 405, 407, 409):
         sol, freqs, d, delta = _find_pole(nf, 4)

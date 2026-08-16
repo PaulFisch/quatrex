@@ -1,26 +1,8 @@
 """V3 + V4 gates for the CM-channel subtraction
 (phonon/docs/ir_residue_derivation.md Sec. 6).
 
-Bed: the _ir_conserve_gate diatomic chain (6-DOF device, spectral NEVP
-OBC, eta = 0, random no-ASR S3 vertex -- the generic truncation leak).
-
-V4 (the disease test, end-to-end): a full eta=0 SCBA loop
-  Sigma -> G (dense Keldysh with lead + anharmonic Sigma)
-        -> bubble(legs [- S]) -> linear mix
-across a dw ladder. Derived prediction: the bare loop degrades with
-refinement (the leaked CM channel grows ~1/dw); the subtracted loop
-converges at every dw. The Jacobian contraction factor at the fixed
-point is estimated from the asymptotic residual ratio r:
-lambda ~ 1 - (1 - r)/alpha.
-
-V3 (equilibrium identities at the subtracted fixed point, T_L = T_R):
-  - detailed balance  Sigma^>(w) = e^{beta h w} Sigma^<(w)
-  - equal-time <ww> = pref * dw/2pi * sum_w iG^< : bare grows with
-    refinement (the CM channel's divergent equal-time weight), the
-    CM-subtracted <ww> converges.
-
-Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=1 \
-        python phonon/studies/_ir_v34_gates.py
+(phonon/docs/ir_residue_derivation.md Sec. 6).
+Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=1         python phonon/studies/_ir_v34_gates.py
 """
 from __future__ import annotations
 

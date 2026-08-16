@@ -1,36 +1,6 @@
 """Dispersion audit of a built device: is omega(q) linear around omega=0?
 
-Paul's question (a) of the MoS2 conservation audit: non-linear
-dispersion near omega = 0 changes the near-DC phase space AND the
-opening exponent of the lead broadening Gamma(omega) ~ omega^p. The
-whole infrared treatment (and the CM-channel derivation,
 phonon/docs/ir_residue_derivation.md) assumes p = 1, which holds only
-for a LINEAR acoustic branch. A quadratic (flexural/membrane) branch
-gives p = 1/2 and breaks that assumption.
-
-Builds H(q_perp, q_z) from a production ``dynamical_matrix.mat`` in the
-exact production conventions:
-  transverse   H_t(q_perp) = sum_c D[c, t] exp(+2i pi c . q_perp)
-               (phonon/studies/engine/build_inputs.py:386 `fold`,
-                src/quatrex/device/inputs.py:424 `_assemble_kpoint`)
-  transport    H(q_perp, q_z) = H_0 + H_+1 e^{+2i pi q_z}
-                                    + H_-1 e^{-2i pi q_z}
-               (build_inputs.py:124, the CNT dispersion self-check)
-Frequencies are SIGNED, sign(w2)*sqrt(|w2|) via
-phonon.postproc.spectral.frequencies_from_dynamical, so soft/imaginary
-modes are reported, not clipped (make_grid._modes_from_dyn clips and
-must not be used here).
-
-Reports, per system:
-  1. hermiticity / D(-q) = D(q)* / reality gates on the input blocks
-  2. Gamma-point spectrum (3 acoustic zeros expected)
-  3. log-log exponent alpha in omega ~ q^alpha for the lowest branches,
-     in-plane and along transport
-  4. imaginary-mode census on the ACTUALLY SAMPLED transverse mesh
-     (and on a fine mesh, separating "unstable model" from "unsampled
-     instability")
-  5. the sound velocities and the implied lead-opening exponent
-
 Run:  QTX_ARRAY_MODULE=numpy python phonon/studies/_mos2_dispersion_audit.py
 """
 from __future__ import annotations

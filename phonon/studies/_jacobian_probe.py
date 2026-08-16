@@ -1,26 +1,7 @@
 """Power-iteration probe of the SCBA fixed-point Jacobian J = dF/dSigma.
 
-Estimates the dominant eigenvalue(s) of the linearized SCBA map around a
-reference self-energy Sigma* (a QX_SAVE_SIGMA snapshot), using ONE map
-application per power step:
-
-    J delta ~ [F(Sigma* + eps*delta) - F(Sigma*)] / eps
-
-with F evaluated through the production engine (QX_MAXIT=1, QX_MINIT=1,
-QX_MIX=1.0 so the mixed iterate IS the raw map output, warm-started via
-QX_SIGMA_INIT; single-rank). Reports per step the Rayleigh quotient
-lambda = <delta, J delta>/<delta, delta> and the norm ratio |J delta|/|delta|,
-plus the omega-support of the converged eigenvector. Deflation against
-converged eigenvectors gives the next-dominant eigenvalues.
-
-Answers the theory's regime question (30_scba_eta0, sub:rootfinders):
-rho(J) < 1  => contraction-based schemes can work (mixing/Anderson/RRE);
-rho(J) >= 1 => genuinely unstable fixed point (RPM/JFNK territory).
-
 Usage:
-    python phonon/studies/_jacobian_probe.py \
-        --config <quatrex_config.toml> --sigma <sigma_snapshot.npz> \
-        [--steps 15] [--eps-rel 1e-6] [--top 2] [--workdir DIR]
+    python phonon/studies/_jacobian_probe.py         --config <quatrex_config.toml> --sigma <sigma_snapshot.npz>         [--steps 15] [--eps-rel 1e-6] [--top 2] [--workdir DIR]
 """
 from __future__ import annotations
 

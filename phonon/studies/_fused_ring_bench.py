@@ -1,31 +1,6 @@
 """C++/CUDA fused ring-contraction kernel vs the cuBLAS-batched path.
 
-The SSE three-phonon ring S = (PL @ Ga) @ (Gb @ PR) runs in production
-as three strided-batched ZGEMMs (sse_phonon_phonon._contract_tau_q_batched
--> bubble.ring_contract_pre); at b=18 that path sits at the cuBLAS
-tile-quantization ceiling (~5.5-6.8 TF/s FP64 on GH200: 32-wide FP64
-tiles waste (32/18)^2 of the padded flops per GEMM dim, and the T/U
-intermediates round-trip HBM). This study fuses the whole sandwich into
-ONE real CUDA C++ kernel (_fused_ring.cu, nvcc -arch=sm_90): one
-threadblock per (task, tau), the b*b-long middle contraction streamed
-one k1'-panel at a time through shared memory, S accumulated in
-registers -- T/U never touch global memory. Python here is ONLY the
-loader/bench driver (cupy RawModule on the nvcc-built .cubin); there is
-no python-side kernel.
-
-Effective TF/s uses the complex flop model
-    flops = 3 GEMMs * b^4 complex MACs * 8 real flops = 24 * C * W * b^4
-(GEMM1 (b^2,b)@(b,b), GEMM2 (b,b)@(b,b^2), GEMM3 (b,b^2)@(b^2,b): b^4
-complex MACs each), identical for both paths, so the numbers compare
-directly with the cuBLAS figures.
-
 Usage:
-  python _fused_ring_bench.py build [--arch sm_90] [--no-fast-math]
-  python _fused_ring_bench.py check [--quick]     # parity vs cuBLAS
-  python _fused_ring_bench.py bench [--json f]    # TF/s sweep
-
-Laptop (sm_86): functional dev + correctness only (FP64 is 1:64 there).
-GH200 numbers via phonon/scripts/daint.py, job _fused_ring_job.sh.
 """
 from __future__ import annotations
 

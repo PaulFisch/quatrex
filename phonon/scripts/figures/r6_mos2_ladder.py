@@ -1,18 +1,5 @@
 """Results 6: the MoS2 cross-plane thickness ladder against experiment.
 
-R(t) = R_c + t/kappa_bulk separates the contact resistance from the bulk
-conductivity, which no single thickness can do -- R_c is 80-92% of the total
-resistance across this ladder, so a kappa_z read off one film is mostly
-interface.
-
-Three series: the harmonic bound (thickness-independent R), the sparsifying
-(ARD) vertex ladder at three thicknesses, and the least-squares vertex at two.
-The two-point fits use the SAME pair of thicknesses, so the gap between them
-is the force-constant fit alone.
-
-Every number comes from phonon.studies._kappa_z_ladder.read_run(), the same
-function the text report uses, so the figure cannot drift from the table.
-
 Run:  python phonon/scripts/figures/r6_mos2_ladder.py
 """
 

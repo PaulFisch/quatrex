@@ -1,6 +1,15 @@
 # daint NORMAL-partition job ledger
 
-Hard cap 200 node-hours committed (nodes x walltime at submission; raised from 100 by Paul 2026-08-05). Paul authorises any excess BEFORE launch.
+Hard cap 200 node-hours committed (nodes x walltime at submission; raised from 100 by Paul 2026-08-05, to 300 on 2026-08-10 and to 400 on 2026-08-15). Paul authorises any excess BEFORE launch.
+
+**Reading the totals.** The `nh` column charges *submitted* walltime x nodes,
+which is the only figure known before a run starts, so it overcounts every job
+killed early. The `total nh` column is therefore NOT a running sum of the `nh`
+column: it is reset three times (2026-08-08, 2026-08-10, 2026-08-15) to the
+actual consumption CSCS reports. Summing the `nh` column over all rows gives
+545.83; the last reset put actual consumption at 197.00. Quote the reset
+figures, not the column sum -- an earlier draft of the report quoted the
+post-reset running total as "committed at submission" and was wrong by 1.8x.
 
 | date | job | name | nodes | walltime | nh | total nh |
 |---|---|---|---|---|---|---|

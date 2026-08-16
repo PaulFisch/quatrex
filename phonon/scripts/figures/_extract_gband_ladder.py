@@ -1,13 +1,9 @@
 """Distil the long-chain CNT g_band ladder into a committed dataset.
 
-Sources (uncommitted GPU-campaign run dirs, pulled from daint):
+Data:
   cluster/l{16,24,32}f-{g3,g1t}/run.npz      ne=161 pairs (2x4 GH200)
   cluster/l16f-{g3,g1t}-361/run.npz          ne=361 grid check at L16
-
-Writes phonon/scripts/data/gband_ladder.npz with one row per run:
-  (L, band [3 or 1=taper], ne, converged, I_integral, n_iter,
-   internal_spread) -- lead currents converted to the integral
-  convention (sum x dw on uniform grids).
+  Writes phonon/scripts/data/gband_ladder.npz with one row per run:
 
 Run:  python phonon/scripts/figures/_extract_gband_ladder.py
 """

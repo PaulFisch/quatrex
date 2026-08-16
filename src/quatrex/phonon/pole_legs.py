@@ -2,45 +2,15 @@
 r"""The congruence leg, for every q and every cluster in one pass.
 
 :mod:`~quatrex.phonon.pole_congruence` states the physics one cluster at a
-time, which is how it should be read and how it is tested. Driving production
-that way is a different matter: a q-resolved device has one pole problem per q
-and several clusters in each, so the leg construction ran a Python loop of
-``n_q * n_clusters`` iterations over routines that themselves looped over pole
-columns and over pole pairs. Measured on Si (81 q, ~600 promoted poles): **6.85
-million Python calls and 33 s per SCBA iteration**, against a bubble of 7.4 s
-and a pole solve, once batched, of 0.6 s.
+time, which is how it is read and tested. Production cannot be driven that way:
+looping over q and clusters in Python cost 6.85 million calls and 33 s per SCBA
+iteration on Si (81 q, ~600 poles), against a 7.4 s bubble.
 
-The arithmetic is the same arithmetic. What this module changes is that the
-number of Python calls no longer depends on the number of q, clusters, poles,
-frequencies or nonzeros -- only on the device blocking, which enters through
-:class:`~quatrex.phonon.pole_probe.BlockLayout`'s band tensor and costs no loop
-at all. Every step below is one gather, one matmul or one elementwise
-expression over the whole (q, cluster) stack.
-
-Three structural facts make that possible.
-
-``V^dagger Sigma_tot V`` is already computed
-    ``background_coefficients`` returns it as ``c_ss``, and the driver
-    separately built the same object as the projected source. It is formed
-    once here.
-
-``Sigma^{SR} = -(Sigma^{RS})^{T*}``
-    ``c_sr`` is defined as ``-conj(c_rs^T)``, so the ``SR`` sector is the
-    conjugate transpose of the ``RS`` one on the pattern. Verified to 1.4e-16
-    relative. That halves the sector work and, more usefully, avoids indexing
-    the coefficients by COLUMN, which is the one contraction whose intermediate
-    would carry an extra factor of three.
-
-The band is a tensor, not a list
-    A block-tridiagonal operator is ``(n_blocks, 3, b, b)`` -- block row, band
-    offset, and the two intra-block indices -- so applying it is one batched
-    GEMM whose contracted axis is ``(offset, column)``. Nothing walks the
-    blocks.
-
-Clusters are padded to a common pole count with ZERO ``u`` and ``v`` columns,
-so a padded column contributes nothing to any contraction whatever its ``z``;
-the padded ``z`` only has to keep ``1/(w - z)`` and ``z_a - conj(z_b)`` finite,
-which sitting in the lower half plane guarantees.
+The arithmetic is unchanged. What changes is that the number of Python calls no
+longer depends on the number of q, clusters, poles, frequencies or nonzeros --
+only on the device blocking, through
+:class:`~quatrex.phonon.pole_probe.BlockLayout`. Every step is one gather, one
+matmul or one elementwise expression over the whole (q, cluster) stack.
 """
 from __future__ import annotations
 

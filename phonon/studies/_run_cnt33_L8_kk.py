@@ -1,37 +1,9 @@
 """Longer CNT (3,3) L8 at eta = 0, g_band = 2: does a SUPPORT-COMPLETE
-Kramers-Kronig integral + contact-dressing stabilise the run that
-diverged before?
+Kramers-Kronig integral + contact-dressing stabilise the run that diverged
+before?
 
-CNT (3,3) L8 with g_band = 2 DIVERGED at iteration 63 on the old code
 (cnt33_L8_linear/run_gband2.npz: converged=False, diverged=True). That run
-used fmax = 55 THz, but omega_max = 43.73 THz so 2*omega_max = 87.5 THz > 55:
-the 3-phonon bubble's two-phonon weight on (55, 87.5] was TRUNCATED, and with
-it the Kramers-Kronig integral for Re Sigma^R -- exactly the truncation that
-drove the d5a eta = 0 runs unstable and that the support-complete KK
-(nu_kk rung) removed. Here the dual grid supplies that support cheaply: the
-primary (Dyson) grid stops at 55, the auxiliary bubble grid reaches
-aux_fmax = 88 >= 2*omega_max, so Re Sigma^R is reconstructed from the full
-convolution support at no extra Dyson solves.
-
-Two levers, 2x2:
-  KK support : truncated (aux off, fmax = 55) vs complete (aux_fmax = 88).
-  contacts   : bare harmonic reservoirs (obc_scattering_contacts = False)
-               vs dressed with the device boundary Sigma^R (= True, the
-               GW-style self-consistent contact).
-
-Rungs (all eta = 0, g_band = 2, uniform primary nf = 361 on [0, 55] so the
-grid resolution is not a confound):
-  trunc_bare : fmax 55, aux off,      obc_scattering = False  (reproduces
-               the original divergence on current code -- the control).
-  kk_bare    : aux_fmax 88,           obc_scattering = False.
-  kk_dressed : aux_fmax 88,           obc_scattering = True.
-
-(trunc + dressed is omitted: dressing cannot cure a truncated Re Sigma^R.)
-
-Run (background, cluster):
-    cd <repo>
-    nohup python phonon/studies/_run_cnt33_L8_kk.py > \
-        phonon/studies/out/cnt33_L8_kk/kk.log 2>&1 &
+    nohup python phonon/studies/_run_cnt33_L8_kk.py >         phonon/studies/out/cnt33_L8_kk/kk.log 2>&1 &
 """
 from __future__ import annotations
 

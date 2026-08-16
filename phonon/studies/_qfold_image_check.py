@@ -1,28 +1,7 @@
-"""Does the vertex fold and the device Hamiltonian pick the same periodic image?
-
-H is built from phonopy's dynamical matrix, whose Fourier sum uses the shortest
-vectors ``R + tau_kappa - tau_i`` averaged over ties
-(``phonon_inputs/convention.py::get_btd_blocks_folded``, then gauge-transformed
-A -> B). The three-phonon vertex is folded with one wrapped cell index per atom,
-no basis offset and no tie average (``solver/se_q.py::_qfold_device_blocks``,
-``separable.build_gathering_matrix``). Same convention, possibly different image.
-
-This script asks the question at the level of the FC2, where it is
-eigenvector-free and exact: rebuild ``D_B(q_perp)`` with the vertex fold's cell
-sum and compare it against phonopy's, over the production transverse mesh.
-
-The answer is FC-weighted, which is the point -- counting how many atom pairs
-have a degenerate image is an upper bound, not an error, because the pairs that
-are ambiguous are the far ones and the FC cutoff may put no weight there.
+"""Does the vertex fold and the device Hamiltonian pick the same periodic
+image?
 
 Usage::
-
-    python -m phonon.studies._qfold_image_check --reap DIR --nk 9 [--tdir x]
-
-``DIR`` needs ``fc2.hdf5`` and ``phono3py.yaml``. For the production Si film
-that is ``reaps/si_big_hiphive`` on the cluster (5x5x5, nk=9); the checked-in
-``reaps/si_primitive_work`` (2x2x2) is the contrasting case where the box is
-small enough that every neighbour lands on a tie shell.
 """
 
 from __future__ import annotations

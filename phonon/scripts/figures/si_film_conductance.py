@@ -1,23 +1,7 @@
 """Silicon thin-film ballistic kappa(L)=G*L figure (fig:res_sifilm, panel b).
 
-Regenerates document/fig/transport_sweeps/si_film_conductance_b from the
-SURVIVING record. The raw sweep JSONs of the original dense-solver runs
-(phonon/scripts/out/si_film/si_film_ballistic{,_lconv}.json) were purged;
-the surviving numerical record is the F23 entry of
-phonon/docs/lab_notebook_archive.md (Part B, "Si thin-film cross-plane
-kappa"), which archives three mesh-converged (nk=8, 121 frequencies,
-eta_factor=0.1, 300 K, bulk-Si 2x2x2 FD force constants) ballistic points:
-
-  G_ball = 1034 MW m^-2 K^-1  @ 4 layers ~ 1.55 nm  ("matched-mesh result")
-  G_ball =  952 MW m^-2 K^-1  @ 5 uc     = 2.70 nm  ("5uc ballistic G_ball=952")
-  G_ball =  928 MW m^-2 K^-1  @ 8 layers = 3.09 nm  (nk=4/8/12/16 -> 970/928/
-                                                     921/920; nk=8 value)
-
-Thickness conventions as recorded in document/src/results/40_film_hetero.tex
-(1 uc = 5.4018 A; primitive layers ~0.39 nm: 4 layers ~ 1.55 nm, 8 layers
-= 3.09 nm). kappa(L) = G*L in W m^-1 K^-1; a thin linear guide through the
-first point makes the sub-linear growth visible, and G itself (declining)
-is shown on a second axis.
+Data:
+  phonon/docs/lab_notebook_archive.md (Part B, "Si thin-film cross-plane
 
 Run:  python phonon/scripts/figures/si_film_conductance.py
 Figure -> document/fig/transport_sweeps/si_film_conductance_b.{pdf,png}

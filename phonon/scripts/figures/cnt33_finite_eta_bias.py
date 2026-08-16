@@ -1,20 +1,7 @@
 """cnt33 finite-eta bias demonstration (results/80_approx, fig:res_cnt_T).
 
-Regenerates cnt33_temperature_{g,ratio} from the ARCHIVED dense-reference
-sweeps (phonon/docs/lab_notebook_archive.md, F30 -- the raw npz were purged in
-the studies reorganisation; the notebook tables are the surviving record of
-the converged runs) and overlays the conserving eta=0 production sweep
-(phonon/scripts/out/prod/cnt33_eta0/summary.json).
-
-The point of the figure: at ANY temperature the finite-eta ratio sits well
-above the conserving eta=0 result, and the finite-eta answer itself moves
-0.709 -> 0.810 at 300 K/one cell between eta_w = 0.050 and 0.206 THz -- the
-broadening bias is larger than any other numerical systematic and does not
-vanish with convergence quality.
-
-  dense T-sweep  (L=1, d_omega 0.10, eta_w 0.050 THz, tight tol)  F30
-  dense ladder   (L=1/2/3, eta_w 0.206 THz, anderson, tight tol)  F30
-  eta=0 sweep    (L=2 slabs, eta=1e-12, retarded=fft, production) summary.json
+Data:
+  sweeps (phonon/docs/lab_notebook_archive.md, F30 -- the raw npz were purged in
 
 Run:  python phonon/scripts/figures/cnt33_finite_eta_bias.py
 """

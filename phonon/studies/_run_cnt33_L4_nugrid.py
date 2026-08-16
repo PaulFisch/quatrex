@@ -1,33 +1,7 @@
 """CNT (3,3) L4 uniform-vs-non-uniform grid A/B -- a cheap, known-to-converge
 cross-check of the dual-grid SSE (companion to _run_d5a_nugrid.py).
 
-CNT (3,3) L4 converges at eta = 0 (the production baseline reached a genuine
-fixed point, best lead balance ~4e-7), so this is a VALIDATION, not a
-stability probe: uniform and non-uniform must land on the same conductance
-and spectra. The A/B is designed to isolate the grid alone:
-
-  uni : uniform primary = auxiliary grid, nfreq = 361 on [0, 55] THz
-        (dw = 0.1528 THz; well-resolved reference).
-  nu  : NON-UNIFORM primary grid, ~150 points from the peaks of the
-        converged run's device DOS (make_grid --npz, the a-posteriori
-        refinement mode -- CNT is dispersive, so the grid follows the real
-        spectral structure, not just zone-centre modes), feeding the
-        IDENTICAL auxiliary bubble grid (aux_dw = 0.1528, aux_fmax = 55).
-
-Because the auxiliary grid is byte-identical to uni's grid, the 3-phonon
-bubble, its fold and the Kramers-Kronig transform are computed the same in
-both runs; the ONLY difference is that nu solves the Dyson equation (and
-stores G/Sigma) on ~150 non-uniform points instead of 361 uniform ones. If
-the conductance and spectra agree, the dual-grid machinery is validated on a
-converging device at ~2.4x fewer Dyson solves.
-
-eta = 0 throughout (NO artificial broadening -- see CLAUDE.md). sse_g_band = 2
-(required for L >= 3; L4 = 4 transport cells).
-
-Run (background, cluster):
-    cd <repo>
-    nohup python phonon/studies/_run_cnt33_L4_nugrid.py > \
-        phonon/studies/out/cnt33_L4_nugrid/nugrid.log 2>&1 &
+    nohup python phonon/studies/_run_cnt33_L4_nugrid.py >         phonon/studies/out/cnt33_L4_nugrid/nugrid.log 2>&1 &
 """
 from __future__ import annotations
 

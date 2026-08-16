@@ -1,19 +1,7 @@
 """Static-correction magnitude study figure (results/50_static_scp).
 
-One merged 2x2 figure (static_se_study) replacing the old
-static_se_study + static_se_tadpole_breakdown pair, from the regenerated
-snapshots (phonon/scripts/out/snapshots/study_*.npz, produced by
-phonon/scripts/verify/_static_se_sweep.sh; the original snapshots were purged).
-
-Top row (per structure): static-correction magnitudes vs T --
-  ||Sigma_T|| isolated (tadpole-only run) vs the COUPLED tadpole
-  ||Sigma_static(loop+tadpole) - Sigma_static(loop)|| (the two differ by the
-  loop's stiffening of the modes the tadpole pulls on -- the old figure/text
-  contradiction), ||Sigma_loop||, max|Re Sigma_B|, and the omega^2_low validity
-  scale. Red circles mark imaginary-mode / non-converged tadpole-only points.
-Bottom row: heat-flow conservation vs T per correction mode (x = unconverged).
-
-All derived numbers are printed for the text-verification pass.
+Data:
+  snapshots (phonon/scripts/out/snapshots/study_*.npz, produced by
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/static_se_figs.py
 """

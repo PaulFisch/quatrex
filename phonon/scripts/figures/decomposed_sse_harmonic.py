@@ -1,27 +1,8 @@
-"""Anharmonic vs harmonic transport with the decomposed vertex (fig:res_decomp_harmonic).
+"""Anharmonic vs harmonic transport with the decomposed vertex
+(fig:res_decomp_harmonic).
 
-  decomp_harmonic  left:  effective transmission T_eff(w) = I(w)/[n_L(w)-n_R(w)],
-                          harmonic (vertex zeroed) against the three-phonon SCBA
-                          at several ranks;
-                   right: spectral heat current j(w) = h f I(w), same legs;
-                   inset/annotation: the integrated ratio G_anh/G_ball.
-
-THE PHYSICALITY GATE. T_anh(w) <= T_ball(w) must hold: scattering cannot create
-transmission. At eta = 0.4 THz on this film it did NOT -- G_anh/G_ball came out at
-1.055, with a uniform +6-7% excess present all the way down to 0-2 THz (NOT, as I
-first wrote, a band-edge effect; the 178x ratio at 15 THz is two near-zero numbers
-and carries 0.08% of the weight). The cause is the eta regulator itself: it damps
-G^R with no matching fluctuation, which violates fluctuation-dissipation and, under
-a thermal bias, injects a spurious energy current (config.py::buttiker_probe). At
-eta -> 0 that source vanishes. This figure is therefore the gate on the eta=0 runs:
-the ratio must come back below 1. If it does not, something else is wrong.
-
-Everything below OMEGA_IR is masked: -Im G^R at omega=0 is ~1e6x the next bin
-(the unresolved acoustic pole) and its tail contaminates the first few bins.
-
-Data: phonon/scripts/data/decomposed_sse_spectra.npz (harmonic leg = `ball`,
-      produced with QX_BALLISTIC=1, which zeroes the vertex in place and keeps
-      the leads/OBC/Meir-Wingreen machinery identical).
+Data:
+  Data: phonon/scripts/data/decomposed_sse_spectra.npz (harmonic leg = `ball`,
 
 Run:  python phonon/scripts/figures/decomposed_sse_harmonic.py
 """

@@ -1,52 +1,13 @@
-"""Energy-conservation audit of the decomposed three-phonon SSE (decomp_conservation).
+"""Energy-conservation audit of the decomposed three-phonon SSE
+(decomp_conservation).
 
-The bubble is Phi-derivable, so P_in = P_out is an IDENTITY of the exact vertex --
-it holds at ANY G, not just at self-consistency. It holds precisely when the cubic
-vertex is totally symmetric (S3). On the transversely-periodic Si film (sifilm, L3,
-nk=9, eta=1e-12) the bubble misses it by ~2e-6, which the ratio |P|/J ~ 6.6e3
-amplifies into a 1-3% violation of the terminal heat balance. This figure asks
-whether the low-rank INDSCAL vertex is to blame. It is not.
-
-  left   : the vertex's S3 defect vs rank, for the two q-fold phase conventions.
-           The PRODUCTION fold puts the transverse Bloch phase on RAW supercell
-           cell indices (0..4) instead of minimum-image ones (-2..2) --
-           phonon/phonon_inputs/separable.py:102 (cell_frac[s] = R_int), consumed
-           at phonon/solver/se_q.py:41-42 and fc3_factor_device.py:122. The FC3
-           supercell is 5x5x5, so exp(-2i.pi.5q) = 1 only when 5 | nk. At the
-           production mesh nk=9 that alias breaks S3 by ~0.65 -- ALREADY IN THE
-           EXACT DENSE VERTEX (dashed line), independent of rank. Re-folded with
-           minimum-image cells the exact vertex is S3-clean to 3e-16, and what
-           remains is INDSCAL's own defect, which falls with rank as the
-           lam_r d_r (x) u_r (x) u_r ansatz predicts.
-  middle : the measured imbalance. Circles: the bubble residual at ITERATION 0,
-           where G is the ballistic G and therefore IDENTICAL for every leg (all
-           legs log the same lead balance 2.16e-15) -- so only the vertex differs.
-           The exact dense vertex gives the SAME residual as R=64 (1.961e-6),
-           which refutes truncation as the leading cause. Squares: the same defect
-           at the fixed point, amplified by |P|/J into the reported heat-balance
-           violation. Open squares = the run never converged (hit the 450-iteration
-           cap), because the gate demands a balance the bubble cannot reach.
-  right  : where the energy is lost. The per-frequency imbalance d(w) = P_out(w) -
-           P_in(w) (normalised by J, so it sums to the middle panel's squares) sits
-           on the optical/zone-boundary band, NOT in the infrared -- even though the
-           IR is where the bubble throughput |P_out(w)| (grey) actually lives. The
-           eta -> 0 infrared singularity is therefore not the culprit either.
-
-Data: phonon/scripts/data/decomp_conservation.npz -- extracted read-only from the
-      cluster campaign cluster/eta0-L3/{ball,dense,r8,r16,r32,r64} (stdout.log +
-      run.npz) and from a symmetry probe over the shipped vertices
-      (cluster/prod/geom/sifilm_L3_nk9/qfold_vertices.npz, decomposed_vertices_r*.npz)
-      and the cached real-space INDSCAL factors (phonon/reaps/si_big_hiphive/
-      fc3_factors_indscal_r*.npz). The S2/S3 defects are relative Frobenius norms
-          S2: Phi^{q1,q2}_{I,K,K'}[a,b,c] - Phi^{q2,q1}_{I,K',K}[a,c,b]
-          S3: Phi^{q1,q2}_{I,K,K'}[a,b,c] - Phi^{q3,q2}_{K,I,K'}[b,a,c], q3=-(q1+q2)
-      over all 15 device blocks and 61 sampled (q1,q2) pairs (9 pairs for the
-      re-folded dense controls, which cost a full fold each). S2 swaps the two
-      CONTRACTED legs -- the one permutation INDSCAL enforces by construction and
-      the one the conservation proof cannot use. S3 moves the EXTERNAL leg.
-      The probe re-folds the vertex from the raw FC3 and reproduces the shipped
-      qfold_vertices.npz to 0.0 (bit-identical), which is what pins "the solver
-      really did consume raw cell indices".
+Data:
+  Data: phonon/scripts/data/decomp_conservation.npz -- extracted read-only from the
+  cluster campaign cluster/eta0-L3/{ball,dense,r8,r16,r32,r64} (stdout.log +
+  run.npz) and from a symmetry probe over the shipped vertices
+  (cluster/prod/geom/sifilm_L3_nk9/qfold_vertices.npz, decomposed_vertices_r*.npz)
+  fc3_factors_indscal_r*.npz). The S2/S3 defects are relative Frobenius norms
+  qfold_vertices.npz to 0.0 (bit-identical), which is what pins "the solver
 
 Run:  python phonon/scripts/figures/decomposed_sse_conservation.py
 """

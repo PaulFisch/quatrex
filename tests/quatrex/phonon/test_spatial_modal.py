@@ -59,13 +59,7 @@ def decaying_root(omega: float) -> complex:
 # --- character ------------------------------------------------------------- #
 
 def test_the_roots_come_in_reciprocal_pairs():
-    r""":math:`\lambda_1 \lambda_2 = 1` for every frequency.
-
-    A property of the pencil, not of the frequency: the constant and leading
-    coefficients are both ``h_01``. It is what makes "the decaying one" and
-    "the growing one" a partition rather than a choice, and it holds inside the
-    band where both sit on the unit circle.
-    """
+    r""":math:`\lambda_1 \lambda_2 = 1` for every frequency."""
     for omega in (0.3, 2.0, BAND_TOP, 1.4 * BAND_TOP, 3.0 * BAND_TOP):
         assert np.prod(bloch_roots(omega)) == pytest.approx(1.0, abs=1e-12)
 
@@ -106,15 +100,7 @@ def test_a_hard_band_discards_nothing_of_an_evanescent_mode(band):
 
 @pytest.mark.parametrize("band", [2, 4, 8, 16, 64, 1024])
 def test_a_hard_band_discards_an_unbounded_amount_of_a_propagating_mode(band):
-    r"""The failure, exactly.
-
-    In band :math:`|\lambda| = 1`, so every retained cell contributes the same
-    magnitude and the discarded tail :math:`\sum_{n>b} 1` DIVERGES however
-    large ``b`` is made. There is no band width at which a propagating mode is
-    captured, which is why the thesis' long-CNT boxcar arm is an upper bracket
-    contaminated by gain rather than a converged number -- and why the answer
-    has to be a modal sector, not a longer mask.
-    """
+    r"""The failure, exactly."""
     lam = abs(decaying_root(0.6 * BAND_TOP))
     assert lam == pytest.approx(1.0, abs=1e-12)
     retained = np.sum(np.abs(lam ** np.arange(band + 1)))
@@ -161,17 +147,7 @@ def test_the_closed_form_degenerates_and_the_stated_limit_repairs_it():
 
 @pytest.mark.parametrize("frac", [1.1, 1.6, 2.5])
 def test_the_bulk_green_function_is_rank_one_in_the_bloch_factor(frac):
-    r""":math:`G(n) = G(0)\,\lambda^{|n|}` for the infinite chain.
-
-    This is the proposal's Eq. (158), ``G_{S,ij} = U_i C V_j^H``, at one degree
-    of freedom: the whole distance dependence is a power of one Bloch factor,
-    so distant blocks are generated rather than stored.
-
-    The reference is a Brillouin-zone quadrature of
-    ``G(n) = (1/2pi) int dk e^{ikn} / (omega^2 - 2k_s + 2 k_s cos k)``,
-    evaluated OUTSIDE the band where the integrand is regular -- so no
-    broadening is needed anywhere and eta stays exactly zero.
-    """
+    r""":math:`G(n) = G(0)\,\lambda^{|n|}` for the infinite chain."""
     omega = frac * BAND_TOP
     lam = decaying_root(omega)
     assert abs(lam) < 1.0
@@ -189,13 +165,7 @@ def test_the_bulk_green_function_is_rank_one_in_the_bloch_factor(frac):
 
 
 def test_the_modal_form_beats_a_hard_band_at_equal_storage():
-    r"""Same memory, different answer -- the reason to prefer a modal sector.
-
-    A boxcar of range ``b`` stores ``b+1`` numbers per row and reproduces the
-    first ``b+1`` entries exactly and everything beyond as zero. The rank-one
-    modal form stores TWO (``G(0)`` and ``lambda``) and reproduces every entry.
-    Measured on the propagating case, where the discarded tail never decays.
-    """
+    r"""Same memory, different answer -- the reason to prefer a modal sector."""
     omega = 0.45 * BAND_TOP
     lam = decaying_root(omega)
     n = np.arange(0, 400)
@@ -223,13 +193,7 @@ def _blocks(omega, sigma=0.0):
 @pytest.mark.parametrize("frac", [0.4, 0.9, 1.4, 2.2])
 def test_the_nevp_reproduces_the_closed_form_roots(frac):
     """The fixed point of reusing the OBC's solver: handed the chain's own
-    blocks it must return the quadratic's roots.
-
-    This is what pins the block convention. ``a_ji/lambda + a_ii + a_ij lambda``
-    is the OBC's ordering; passing dynamical-matrix blocks instead of
-    system-matrix blocks solves a different pencil and returns wrong bands with
-    no error raised.
-    """
+    blocks it must return the quadratic's roots."""
     from quatrex.phonon.spatial_modes import bloch_modes
 
     omega = frac * BAND_TOP
@@ -263,14 +227,7 @@ def test_an_undressed_in_band_mode_has_no_range_at_all():
 
 @pytest.mark.parametrize("gamma_s", [0.05, 0.5, 5.0])
 def test_dressing_gives_a_propagating_mode_a_finite_mean_free_path(gamma_s):
-    r"""The substitution the spatial leg turns on, Eq. (144).
-
-    :math:`\Sigma^R = -i\Gamma` splits the reciprocal pair, and the decaying
-    partner acquires :math:`\xi = -1/\ln|\lambda|`. That is a mean free path in
-    cells and it is what a spatial truncation has to be compared against --
-    the quantity that decides whether ``sse_g_band`` is a convention or a
-    controlled approximation.
-    """
+    r"""The substitution the spatial leg turns on, Eq. (144)."""
     from quatrex.phonon.spatial_modes import band_range_cells, bloch_modes
 
     blocks = _blocks(0.5 * BAND_TOP, sigma=-1j * gamma_s)
@@ -338,21 +295,8 @@ def test_decay_lengths_label_each_character_distinctly():
 @pytest.mark.parametrize("frac", [0.3, 0.5, 0.8])
 @pytest.mark.parametrize("gamma_s", [0.05, 0.5])
 def test_the_range_is_the_group_velocity_over_the_linewidth(frac, gamma_s):
-    r"""``xi = v_g / gamma``, and it ties the spatial half to the frequency one.
-
-    The pole census already measures ``gamma`` per mode on every bed it has
-    run. This says the required spatial band follows from it directly, given
-    the group velocity, so a frequency-domain measurement already taken can be
-    converted into "how many blocks does the self-energy need" without a new
-    calculation.
-
-    ``gamma`` here is the HWHM in THz that :math:`\Sigma^R = -i\Gamma`
-    implies, :math:`\gamma = \Gamma/2\omega`, since the self-energy enters the
-    phonon Dyson operator in :math:`\omega^2`. Exact to 1e-4 in weak damping;
-    the identification of a range with a lifetime is itself a weak-damping
-    statement, so the agreement loosens to about a percent once a mode decays
-    within a few cells.
-    """
+    r"""``xi = v_g / gamma``, and it ties the spatial half to the frequency
+    one."""
     from quatrex.phonon.spatial_modes import band_range_cells
 
     omega = frac * BAND_TOP
@@ -365,17 +309,7 @@ def test_the_range_is_the_group_velocity_over_the_linewidth(frac, gamma_s):
 
 
 def test_a_census_linewidth_implies_a_band_far_longer_than_any_in_use():
-    r"""What that bridge says about a bed already measured.
-
-    The converged Si census reports a median half width near 0.16 THz
-    (``pole_sector_observations.md`` Sec. 13). At an acoustic group velocity of
-    a few cell-THz that is a range of tens of cells, against an
-    ``sse_g_band`` of 1 to 3 blocks in every production run.
-
-    Written as a calculation rather than a claim about Si specifically -- the
-    device group velocity is not measured here -- but the order is the point,
-    and it is the same order as the factor 2.2 the long-CNT bracket sits at.
-    """
+    r"""What that bridge says about a bed already measured."""
     from quatrex.phonon.spatial_modes import band_range_cells
 
     gamma_thz = 0.16
@@ -419,17 +353,7 @@ BAND_TOP_2 = _band_top_2()
 
 
 def _green_blocks(omega, n_max, n_k=2048):
-    r"""Exact ``G(n)`` by Brillouin-zone quadrature, for ``n`` up to ``n_max``.
-
-    Periodic trapezoid: the integrand is analytic and periodic in ``k``, so
-    this converges exponentially. Using ``linspace`` with both endpoints
-    instead double counts and lands on a noise floor -- the first version of
-    this bed did exactly that and reported a Green function that stopped
-    decaying at 5e-6, which reads as physics and is not.
-
-    Evaluated above the band, where ``A(k)`` is invertible for every ``k``, so
-    no broadening is needed and eta stays zero.
-    """
+    r"""Exact ``G(n)`` by Brillouin-zone quadrature, for ``n`` up to ``n_max``."""
     a_ii, a_ij, a_ji = _blocks2(omega)
     k = 2.0 * np.pi * np.arange(n_k) / n_k
     ph = np.exp(1j * k)[:, None, None]
@@ -465,13 +389,7 @@ def test_the_bed_has_an_invertible_coupling_and_two_decaying_modes():
 
 
 def test_two_modes_reproduce_every_distant_block(  ):
-    r"""Proposal Eq. (158), :math:`G_{S,ij} = U_i C V_j^\dagger`, exactly.
-
-    The coefficients are fitted from ``n = 1`` and ``n = 2`` ONLY, and then
-    every block out to ``n = 12`` is predicted. Agreement at roundoff is the
-    Phase 7 claim: distant blocks are generated from a rank-``r`` object rather
-    than stored, with ``r`` the number of decaying modes.
-    """
+    r"""Proposal Eq. (158), :math:`G_{S,ij} = U_i C V_j^\dagger`, exactly."""
     omega = 1.05 * BAND_TOP_2
     V, lm, C = _modal_fit(omega)
     exact = _green_blocks(omega, 12)
@@ -574,18 +492,7 @@ def _fit(lam, V, g, anchors):
 
 
 def test_the_anchor_selects_the_distance_window_not_the_accuracy():
-    r"""The rule underneath both halves of this, and it cuts both ways.
-
-    A fit anchored at ``n_0`` can only determine the coefficient of a mode that
-    is still ALIVE at ``n_0``. Anchor close in and every mode is constrained,
-    so the representation is exact everywhere -- at the cost of an
-    ill-conditioned design when the spread in ``|lambda|`` is large. Anchor far
-    out and the fast modes have decayed below the fit's reach, so their
-    coefficients are unconstrained and SHORT range degrades, even at full rank.
-
-    So the anchor is not a numerical detail to be tuned for stability: it
-    chooses the window of distances the representation is valid on.
-    """
+    r"""The rule underneath both halves of this, and it cuts both ways."""
     lam, V, C, g = _synthetic_modes()
 
     near = _fit(lam, V, g, (1, 2))
@@ -605,21 +512,7 @@ def test_the_anchor_selects_the_distance_window_not_the_accuracy():
 
 
 def test_a_truncated_set_must_be_fitted_where_the_dropped_modes_are_dead():
-    r"""The design rule, and it is not obvious.
-
-    Dropping a mode with :math:`|\lambda| = 10^{-3}` looks free -- it
-    contributes :math:`10^{-9}` by ``n = 3``. But fitting the survivors at
-    ``n = 1, 2``, where the dropped mode is still present in the data, pushes
-    its weight onto them and corrupts the coefficients at every distance.
-    Anchoring the fit past its range instead recovers the accuracy.
-
-    Measured on the real CNT cell at rank 22 of 36, the same effect is
-    1.2e-02 fitted at ``n = 1, 2`` against 2.1e-07 fitted at ``n = 5, 6``
-    (``phonon/docs/spatial_band_range.md``).
-
-    The pole sector learned the same lesson as ``_fit_anchor``: where a local
-    model is anchored is part of the model.
-    """
+    r"""The design rule, and it is not obvious."""
     lam, V, C, g = _synthetic_modes()
     keep = np.abs(lam) > 1e-2                     # drop the dead mode
     assert keep.sum() == 2
@@ -672,13 +565,7 @@ def _gap_root(omega):
 
 
 def _gap_green(omega, n_max, n_k=4096):
-    """``G(n)`` by periodic-trapezoid quadrature -- independent of the roots.
-
-    This is a Brillouin-zone integral of ``1/A(k)``; ``_gap_root`` is a root of
-    ``A``. That the two agree is what earlier tests establish, and it is what
-    lets the ring be driven by one and completed by the other without the
-    argument becoming circular.
-    """
+    """``G(n)`` by periodic-trapezoid quadrature -- independent of the roots."""
     k = 2.0 * np.pi * np.arange(n_k) / n_k
     denom = omega ** 2 - (W0 ** 2 + 2 * KS_G) + 2.0 * KS_G * np.cos(k)
     return np.array([np.sum(np.exp(1j * k * n) / denom) / n_k
@@ -752,20 +639,7 @@ def test_the_gapped_bed_is_below_its_band_and_long_ranged_enough():
 
 @pytest.mark.parametrize("band", [1, 2])
 def test_the_modal_completion_restores_what_the_band_removed(band):
-    r"""The Phase 8 claim, on a dense vertex.
-
-    Three rings differing only in the spatial legs: the exact ones, a boxcar,
-    and the boxcar completed by the modal form beyond the band. The completed
-    ring must land on the exact one, and the banded one must not -- otherwise
-    the truncation was harmless here and the bed proves nothing.
-
-    Measures the general mechanism of a hard band, over ALL ``Sigma`` blocks.
-    It is NOT a statement about the shipped kernel: production retains only
-    ``|I-J| <= 1``, where ``sse_g_band = 3`` is exact, and most of the error
-    counted here lives in blocks that are discarded regardless. See
-    ``test_band_three_is_exact_on_the_output_band_and_lossy_off_it`` and
-    ``phonon/docs/spatial_truncation_derivation.md``.
-    """
+    r"""The Phase 8 claim, on a dense vertex."""
     exact, banded, completed = _legs(W_GRID, band)
     phi = _phi_nn()
 
@@ -788,11 +662,7 @@ def test_the_modal_completion_restores_what_the_band_removed(band):
 def test_the_completion_beats_a_wider_band():
     """Widening the boxcar by one block is the obvious alternative and costs a
     whole extra block per cell pair; the completion costs one root and one
-    anchor block.
-
-    General mechanism, not a property of the shipped kernel -- see the note on
-    the previous test.
-    """
+    anchor block."""
     phi = _phi_nn()
     exact, _, completed = _legs(W_GRID, 1)
     _, wider, _ = _legs(W_GRID, 2)
@@ -808,14 +678,7 @@ def test_the_completion_beats_a_wider_band():
 
 
 def test_the_banded_error_grows_with_the_range_of_the_green_function():
-    """A longer-ranged G makes the same truncation worse.
-
-    True of a hard band in general. It is not the mechanism behind the CNT band
-    ladder, which was the reading originally attached to it: the ring's leg band
-    is exact at the shipped default, and the output pin that IS live turns out
-    to be insensitive to the range (see
-    ``test_the_discarded_output_weight_does_not_track_the_green_range``).
-    """
+    """A longer-ranged G makes the same truncation worse."""
     phi = _phi_nn()
     errs, ranges = [], []
     for top in (0.30 * W0, 0.65 * W0, 0.90 * W0):
@@ -832,28 +695,7 @@ def test_the_banded_error_grows_with_the_range_of_the_green_function():
 # --- no reweighting of the mask can do this job ----------------------------- #
 
 def test_the_output_mask_is_psd_only_below_a_range_of_one_and_a_half_cells():
-    r"""Closes the cheap alternative to a modal sector, with a proof.
-
-    The obvious way to avoid building a modal representation is to keep the
-    boxcar and re-weight it -- a taper. But the OUTPUT band is pinned at
-    ``|I-J| <= 1`` whatever ``g_band`` is, so the output mask is the
-    tridiagonal Toeplitz ``[w_1, 1, w_1]`` with symbol
-    :math:`1 + 2 w_1\cos\theta`, non-negative only for :math:`w_1 \le 1/2`.
-
-    Any weighting faithful to a Green function of range :math:`\xi` has
-    :math:`w_1 = e^{-1/\xi}`, so PSD-ness demands
-
-        xi <= 1 / ln 2 = 1.4427 cells,
-
-    and every range measured on a real bed is far above that -- 3.05 to 28.8
-    on Si, 1.5 to 25.5 on CNT (``phonon/docs/spatial_band_range.md``). So no
-    choice of weights is simultaneously PSD at the output and faithful to the
-    range the device actually has. The mask has to go, not be reshaped.
-
-    This also derives the existing empirical result rather than restating it:
-    Bartlett has ``w_1 = b/(b+1)``, which is ``<= 1/2`` only at ``b = 1``,
-    which is exactly where ``test_taper_is_psd_only_at_band_one`` finds it.
-    """
+    r"""Closes the cheap alternative to a modal sector, with a proof."""
     def output_symbol_min(w1):
         theta = np.linspace(0.0, 2 * np.pi, 2001)
         return float(np.min(1.0 + 2.0 * w1 * np.cos(theta)))
@@ -879,32 +721,7 @@ def test_the_output_mask_is_psd_only_below_a_range_of_one_and_a_half_cells():
 
 
 def test_a_truncated_geometric_mask_is_psd_only_once_the_band_exceeds_the_range():
-    r"""The other half of the impossibility, and it was not what I expected.
-
-    The untruncated geometric weight is the Poisson kernel
-    :math:`(1-\lambda^2)/(1-2\lambda\cos\theta+\lambda^2) > 0`, so a geometric
-    taper looks like the obvious PSD replacement for the boxcar. TRUNCATED it
-    is not: cutting a slowly decaying tail leaves a discontinuity, and a
-    truncated positive-definite sequence need not stay positive definite. At
-    :math:`\lambda = 0.91` and band 4 the leg symbol reaches -1.11.
-
-    Measured, the first band at which it turns positive:
-
-    ======  =========  ==============  ==========
-    lambda  xi [cells] first PSD band  band / xi
-    ======  =========  ==============  ==========
-    0.30    0.83       1               1.20
-    0.50    1.44       2               1.39
-    0.68    2.59       4               1.54
-    0.80    4.48       10              2.23
-    0.91    10.60      32              3.02
-    ======  =========  ==============  ==========
-
-    So the band has to exceed the range, by a factor that itself grows with the
-    range -- which is precisely the regime in which no truncation was needed.
-    Together with the output bound above, reweighting cannot substitute for a
-    modal sector on any bed whose range exceeds about one and a half cells.
-    """
+    r"""The other half of the impossibility, and it was not what I expected."""
     theta = np.linspace(0.0, 2.0 * np.pi, 4001)
 
     def sym_min(lam, band):
@@ -950,17 +767,7 @@ def _out_distance():
 
 @pytest.mark.parametrize("band", [0, 1, 2, 3])
 def test_the_sigma_support_law_is_two_p_plus_band(band):
-    r"""``supp(Sigma) = {|I-J| <= 2p + b}``, with ``p`` the vertex reach.
-
-    One line of index algebra: ``K1, K2`` lie within ``p`` of ``I`` and
-    ``K1', K2'`` within ``p`` of ``J``, while the legs contribute only for
-    ``|K - K'| <= b``; chaining the three gives
-    ``|I-J| <= p + b + p``.
-
-    The consequence that matters is that ``Sigma`` is NOT tridiagonal. Its
-    reach grows with the leg band, so pinning the output at ``|I-J| <= 1`` is a
-    truncation in its own right and not a property of the vertex.
-    """
+    r"""``supp(Sigma) = {|I-J| <= 2p + b}``, with ``p`` the vertex reach."""
     _, banded, _ = _legs(W_GRID, band)
     s = _ring(_phi_nn(), banded, banded, W_GRID)
     d = _out_distance()
@@ -971,20 +778,7 @@ def test_the_sigma_support_law_is_two_p_plus_band(band):
 
 
 def test_band_three_is_exact_on_the_output_band_and_lossy_off_it():
-    r"""The claim I got wrong in both directions, frozen.
-
-    ``sse_g_band`` truncates the LEGS. Given the output pin at ``|I-J| <= 1``
-    the reachable leg distance is ``2p + 1 = 3``, so ``b = 3`` loses nothing
-    THERE -- which is what the config docstring means by "the first
-    off-diagonal Sigma blocks become exact and causal", and why the field is
-    capped at 3.
-
-    It is not a statement that the ring is exact. Off the retained band the
-    same ``b = 3`` result is visibly wrong, because those blocks were never
-    computed to begin with. Reporting a whole-array error therefore overstates
-    the leg band's cost, and reporting only the retained band hides the output
-    pin's.
-    """
+    r"""The claim I got wrong in both directions, frozen."""
     exact, _, _ = _legs(W_GRID, N_CELL)
     phi = _phi_nn()
     s_exact = _ring(phi, exact, exact, W_GRID)
@@ -1006,18 +800,7 @@ def test_band_three_is_exact_on_the_output_band_and_lossy_off_it():
 
 
 def test_the_discarded_output_weight_does_not_track_the_green_range():
-    r"""The output pin costs about a tenth of ``Sigma``, whatever the range.
-
-    Measured 10.5 % at a Green-function range of 2.1 cells and 11.4 % at 7.2 --
-    flat, where a long-range effect would grow. Index algebra again: for
-    ``|I-J| = 2`` one may take ``K = I+1`` and ``K' = J-1 = I+1``, so
-    ``|K - K'| = 0``. The near tail of ``Sigma`` is fed by the DIAGONAL of
-    ``G`` through the vertex's reach, and long-range ``G`` only ever appears in
-    blocks the pin has already discarded.
-
-    That is why a low-rank representation of distant ``G`` does not repair this
-    truncation, and why the fix has to be a non-tridiagonal ``Sigma``.
-    """
+    r"""The output pin costs about a tenth of ``Sigma``, whatever the range."""
     phi = _phi_nn()
     d = _out_distance()
     fracs, ranges = [], []
@@ -1072,14 +855,7 @@ def _discarded(sigma, cells_per_block):
 
 
 def test_the_output_pin_costs_far_more_on_a_long_device():
-    """A seven-cell device understates it by a factor three.
-
-    The tridiagonal band is ``3N-2`` of ``N^2`` entries, so the share of
-    ``Sigma`` outside it grows with the device until the decay of ``Sigma``
-    with distance takes over. Measured 10.5 % at seven cells and about 30 % by
-    ten, which is where it settles -- so a short bed is not a conservative
-    proxy for a long one, it is a different answer.
-    """
+    """A seven-cell device understates it by a factor three."""
     short = _discarded(_long_bed(7), 1)
     long_ = _discarded(_long_bed(12), 1)
     assert short < 0.15
@@ -1091,44 +867,14 @@ def test_the_output_pin_costs_far_more_on_a_long_device():
                                                      (3, 0.05), (4, 0.01)])
 def test_wider_blocks_make_the_tridiagonal_pin_accurate(cells_per_block,
                                                         ceiling):
-    r"""The lever on the output pin is the BLOCKING, not the modes.
-
-    ``supp(Sigma) = {|I-J| <= 2p + b}`` in CELLS. Group ``m`` cells into a
-    block and that becomes ``ceil((2p+b)/m)`` in BLOCKS, so once a block is
-    wide enough the tridiagonal restriction the RGF needs stops discarding
-    anything. Measured on a 12-cell device:
-
-    ======  ==========
-    m       discarded
-    ======  ==========
-    1       32.1 %
-    2        5.4 %
-    3        2.5 %
-    4        0.30 %
-    ======  ==========
-
-    This is the mechanism behind an observation already in the tree -- the same
-    Si device diverging at 4x1 blocks and converging at 2x2. It is also why the
-    long-range modal machinery is the wrong lever here: the discarded weight
-    depends only weakly on the Green-function range (about five points between
-    ranges of 2 and 20 cells) and strongly on how the device is blocked.
-    """
+    r"""The lever on the output pin is the BLOCKING, not the modes."""
     assert _discarded(_long_bed(12), cells_per_block) < ceiling
 
 
 def test_a_two_block_device_has_no_output_pin_error_at_all():
     r"""Combinatorial, not numerical: with two blocks the largest possible
-    ``|I-J|`` is 1, so a tridiagonal restriction discards nothing on ANY bed.
-
-    It is a real difference between the two blockings of one 24-DOF Si device
-    in the tree -- `si4x1` (4 blocks of 6 DOF) discards, `si4x2` (2 blocks of
-    12 DOF) does not -- but it does NOT explain why the first diverges and the
-    second converges. `bubble_positivity.md` Sec. 6.7 ran that experiment
-    directly on the MoS2 film: at two blocks, with no mask applied at all, the
-    run diverges at the same iteration as the maximally truncated one and
-    carries more gain rather than less. The pin is an accuracy defect, not a
-    stability one.
-    """
+    ``|I-J|`` is 1, so a tridiagonal restriction discards nothing on ANY
+    bed."""
     sig = _long_bed(4)
     assert _discarded(sig, 2) == 0.0          # 2 blocks: nothing to discard
     assert _discarded(sig, 1) > 0.0           # 4 blocks: a mask exists
@@ -1139,19 +885,7 @@ def test_a_two_block_device_has_no_output_pin_error_at_all():
 
 
 def test_the_pin_grows_over_the_lengths_where_the_cnt_ladder_stops_being_read():
-    r"""The discarded weight at one cell per block, over the ladder's lengths.
-
-    L4 about 2 %, L7 about 11 %, L16 about 35 %. The reported CNT series stops
-    at seven cells and brackets from sixteen
-    (``document/src/results/64_gband.tex``), which is where this crosses from a
-    few percent to a third.
-
-    Correspondence, not proof, and explicitly not a claim about the bracket's
-    cause: removing the pin entirely does not stop a divergence
-    (`bubble_positivity.md` Sec. 6.7). What this measures is how much of
-    ``Sigma`` goes unrepresented, which is an accuracy statement. The bed is a
-    1-DOF chain with a random vertex, so the percentages are not the device's.
-    """
+    r"""The discarded weight at one cell per block, over the ladder's lengths."""
     fracs = {n: _discarded(_long_bed(n), 1) for n in (4, 7, 16)}
     assert fracs[4] < 0.05
     assert 0.08 < fracs[7] < 0.20

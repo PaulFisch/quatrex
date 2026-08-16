@@ -187,13 +187,7 @@ def test_batched_legs_equal_the_per_cluster_path(sizes, nk, poles, contacts):
 
 
 def test_each_q_gets_its_own_self_energy_and_its_own_contacts():
-    """A padded batch is exactly where one q's data can leak into another's.
-
-    Perturbing ONE q's self-energy, and separately one q's contact block, must
-    move that q's leg and no other. Equality of the whole stack cannot see a
-    transposed q index if every q happens to be built from the same random
-    draw, so the perturbation is the test.
-    """
+    """A padded batch is exactly where one q's data can leak into another's."""
     kw = dict(sizes=(3, 3, 3), nk=(2, 2), poles=((2, 1), (3,), (1, 2, 1), (2,)))
     base = _bed(**kw)
     got0 = base[0]._build_pole_legs(*base[1:4], base[5], base[6],
@@ -274,13 +268,7 @@ _DISPATCHERS = ("congruence_legs", "source_fit", "apply_band", "band",
 
 
 def test_dispatched_work_does_not_grow_with_the_problem():
-    """The invariant the batching exists for, in the unit that costs.
-
-    Every axis the leg used to loop over -- q, clusters, poles, frequencies --
-    is varied by a large factor, and the number of times a contraction is
-    ISSUED must not move at all. Not smaller: identical. A loop that has only
-    been shortened is a loop that comes back on the next device.
-    """
+    """The invariant the batching exists for, in the unit that costs."""
     _, small = _profile(sizes=(3, 3, 3), nk=(2,), poles=((1,), (1,)))
     base = {k: small.get(k, 0) for k in _DISPATCHERS}
     assert sum(base.values()) > 0, "the probe names no longer match the code"
@@ -306,14 +294,7 @@ def test_dispatched_work_does_not_grow_with_the_problem():
 
 
 def test_only_per_q_bookkeeping_scales_and_only_barely():
-    """What is left, and why it is left.
-
-    The driver keeps one PoleSector per q -- identity is per q, which is
-    physics, not an implementation choice -- so reading each q's cluster set
-    and attaching lazy views to its state is inherently once per q. Those calls
-    do no arithmetic and issue no array operation. The bound is here so that
-    real work cannot creep back in under cover of bookkeeping.
-    """
+    """What is left, and why it is left."""
     small, _ = _profile(sizes=(3, 3, 3), nk=(2,), poles=((1,), (1,)))
     big, _ = _profile(sizes=(3, 3, 3), nk=(4, 4), poles=tuple(((1,),) * 16))
     per_q = (big - small) / 14
@@ -323,15 +304,7 @@ def test_only_per_q_bookkeeping_scales_and_only_barely():
 
 
 def test_registration_report_measures_the_sub_cell_offset():
-    """Where the poles sit inside their cells, over the whole promoted set.
-
-    This is the control parameter of the bubble's registration error: an
-    exactly cell-averaged leg still places a line's whole weight at the cell
-    CENTRE, so the combination frequency is displaced by up to a full cell.
-    The report used to be recomputed per q from a Python walk over the poles;
-    it is one reduction over the whole set now, and it has to give the same
-    number.
-    """
+    """Where the poles sit inside their cells, over the whole promoted set."""
     import re
 
     solver, sse_l, sse_g, g_r, g_l, states, sectors, n_q = _bed(

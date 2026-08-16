@@ -1,18 +1,5 @@
-"""Mode-resolved three-phonon physics for bulk Si from the phono3py RTA result.
-
-Reads kappa-m191919.hdf5 (FD FC3, 19^3 q-mesh, 300 K) and shows the three
-observables the nanowire argument rests on:
-  (a) mode lifetimes tau(omega) with the tau ~ omega^-2 envelope
-      [tau = 1/(4*pi*gamma), gamma the phono3py HWHM linewidth in THz];
-  (b) kappa-accumulation vs phonon mean free path, with the 50%-accumulation
-      MFP, the kappa fraction below 10 nm, and the ~1 nm wire-core band
-      (near-zero garbage MFPs from v_g~0 modes are dropped from the
-      percentile computation, x clipped to [1e0, 1e5] nm);
-  (c) the mode-kappa spectrum split acoustic (band index < 3) vs optical,
-      with the acoustic share of kappa.
-
-Reads ONLY on-disk data:
-  phonon/reaps/si_primitive_work/kappa-m191919.hdf5
+"""Mode-resolved three-phonon physics for bulk Si from the phono3py RTA
+result.
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/phph_physics_si.py
 Figure -> document/fig/transport_sweeps/phph_physics_si.{pdf,png}

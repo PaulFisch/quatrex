@@ -1,20 +1,5 @@
 """Unified d5a eta=0 marginal-fixed-point figure (results/60_eta0).
 
-Replaces the ten orphaned sinw_d5a_eta0_* diagnostics with one three-panel
-figure, built ONLY from the saved conv1e10 runs:
-
-  (a) convergence + conservation of the floor-stabilised JFNK family
-      (trust-grow bold; warm/t005/ptc01 thin): rel Sigma^R residual floors at
-      ~0.016-0.032 (marginal, NOT 1e-10), lead balance ~2.5e-3-1.7e-2, bubble
-      balance pinned at machine precision.
-  (b) the OBSERVABLE is method-invariant despite the floor: per-iteration lead
-      heat current G(it) of the four runs + the independent repro run collapse
-      to 2.613-2.640 (1%); the coarser irsub variant reaches 2.70 -> the
-      marginal floor limits the absolute G to a ~5% envelope around ~2.65.
-  (c) the broadening floor is a removable crutch: annealing Gamma_floor
-      2 -> 0 cells over 80 iterations, G moves <5% after warm-up and the
-      fixed point survives at Gamma_floor = 0.
-
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/sinw_d5a_eta0_panel.py
 Figure -> document/fig/transport_sweeps/sinw_d5a_eta0_panel.{pdf,png}
 """

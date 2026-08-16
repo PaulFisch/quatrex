@@ -1350,27 +1350,15 @@ class PhononSolver(SubsystemSolver):
         sg = _q(sse_greater.data).reshape(freqs.shape[0], -1)
         last = int(np.sum(self.block_sizes[:-1]))
 
-        # Closed under z -> -z^*. Bosonic symmetry of the pole set is
-        # physics, not a tuning knob: every resonance at +Omega has a partner
-        # at -Omega, and the NEP only finds the positive members because the
-        # search window is positive.
+        # The pole set must be closed under z -> -z^*: every resonance at
+        # +Omega has a partner at -Omega, and the NEP finds only the positive
+        # members because the search window is positive. Leaving it unclosed
+        # flatters the rr_ss staging setting and costs the complete method
+        # four orders.
         #
-        # Measured both ways on the pgate bed (pre-mixing balance residual):
-        #
-        #   closed      rr_ss 1.8e-04   rr_ss_sr 2.6e-05
-        #   unclosed    rr_ss 5.4e-08   rr_ss_sr 1.5e-01
-        #
-        # Unclosed flatters rr_ss and costs the COMPLETE method four orders.
-        # An earlier revision deferred the closure on the rr_ss number alone,
-        # which optimised a staging setting while the production one
-        # regressed; the closed set is kept because it is the correct object.
-        #
-        # The clusters come from the sector that SOLVED this q. On a
-        # q-resolved device that is self._pole_q[iq], not self._pole -- the
-        # latter exists (it is built before the q dispatch) but was never given
-        # an operator context, so it returns an empty closure. That left
-        # state.legs empty, the accumulator None, and the next line raised
-        # "'NoneType' object has no attribute 'reshape'" on the first q.
+        # The clusters come from the sector that SOLVED this q, i.e.
+        # self._pole_q[iq]. self._pole exists (built before the q dispatch)
+        # but has no operator context and returns an empty closure.
         state.legs = (sector or self._pole).bubble_clusters()
         acc_l = acc_g = None
         _leg = getattr(self._pole_cfg, "leg", "congruence")
@@ -1501,24 +1489,15 @@ class PhononSolver(SubsystemSolver):
         state.g_pp_lesser = acc_l.reshape(_q(sse_lesser.data).shape)
         state.g_pp_greater = acc_g.reshape(_q(sse_greater.data).shape)
         if congruence and comm.rank == 0:
-            # Where each promoted pole sits INSIDE its cell, in cells, worst
-            # over the set. Zero means the line is registered on a grid point;
-            # 0.5 means it is on a cell boundary.
-            #
-            # This is the control parameter of the bubble's registration
-            # error, and nothing measured it before. An exactly cell-averaged
-            # leg still places all of a line's weight at the cell CENTRE, so
-            # the combination frequency Re(z_a + z_b) is displaced by up to a
-            # full cell and the ring splits the peak between two bins.
-            # Measured (test_cell_averaged_legs_do_not_fix_the_bubble_
-            # registration), ring/exact at the combination frequency:
-            #
-            #   offset 0.00   1.004      offset 0.25   1.79
-            #   offset 0.50   0.536
-            #
-            # and it gets WORSE with h/gamma, not better. The congruence
-            # route's accuracy is therefore an accident of registration
-            # unless this number is small.
+            # Where each promoted pole sits inside its cell, in cells, worst
+            # over the set: 0 is registered on a grid point, 0.5 on a cell
+            # boundary. This is the control parameter of the bubble's
+            # registration error. A cell-averaged leg still places a line's
+            # weight at the cell CENTRE, so the combination frequency is
+            # displaced by up to a full cell and the ring splits the peak
+            # between two bins -- and it worsens with h/gamma. The congruence
+            # route's accuracy is an accident of registration unless this is
+            # small.
             from quatrex.phonon.pole_audit import pole_pair_weight
 
             w_host = np.asarray(get_host(freqs), dtype=float)
@@ -1563,21 +1542,15 @@ class PhononSolver(SubsystemSolver):
                   f"{100 * pw['worst']:.3g}% at w={pw['omega']:.2f}",
                   flush=True)
         if analytic and comm.rank == 0:
-            # Two numbers that decide whether the analytic leg is a legitimate
-            # object at all, and neither was reported before.
-            #
             # eps_tail is the coefficient of the leg's 1/w tail. The analytic
-            # leg is a GLOBAL function -- the pole-pole sector integrates it
-            # over the whole axis -- so a nonzero tail is not cosmetic: the
-            # true G decays like 1/w^2, and a spurious 1/w once made G_PP 17x
-            # too large at w = 1e2 and cost four orders. It vanishes only for
-            # a bosonically CLOSED set, and only if freezing preserved the
-            # cancellation; a truncated set does not, and this says so.
+            # leg is global -- the pole-pole sector integrates it over the
+            # whole axis -- and the true G decays like 1/w^2, so a spurious
+            # 1/w is not cosmetic. It vanishes only for a bosonically closed
+            # set whose freezing preserved the cancellation.
             #
-            # eps_fit is the local model's residual against its own
-            # samples; eps_reg is whether the grid integrates the regular
-            # remainder. They are separate errors and a single number cannot
-            # stand for both.
+            # eps_fit is the local model's residual against its own samples;
+            # eps_reg is whether the grid integrates the regular remainder.
+            # Separate errors; one number cannot stand for both.
             tail = max(state.residue_sum) if state.residue_sum else 0.0
             fits = [a for a, _ in state.mixed_fit] or [0.0]
             regs = [b for _, b in state.mixed_fit] or [0.0]
@@ -1624,40 +1597,21 @@ class PhononSolver(SubsystemSolver):
             return
 
         if getattr(cfg, "leg", "congruence") == "congruence":
-            # The rest of this routine measures the SUPERSEDED reconstruction
-            # -- it rebuilds P^{<,>} through pole_keldysh_pf_sparse and asks
-            # whether P + R_k is physical. On this route that object is not
-            # what anything consumes, so reporting it would be measuring a
-            # function the solver no longer uses.
+            # The ring convolves G^{<,>}_k - g_pp, which on the cell-average
+            # route is an average of PSD matrices: PSD by construction, so
+            # this gate checks the implementation (a sign, an index, a cell
+            # width), not the maths. Three things it must do: report lesser
+            # and greater separately, since a single min hides which failed;
+            # EXCLUDE the bins the ring masks (unmasked, the near-singular
+            # G^>(0) acoustic bin makes the gate read exactly -1.000 on the
+            # pole-free baseline); and print the same gate on the uncorrected
+            # leg as a control, since agreement means it is not measuring the
+            # pole sector at all.
             #
-            # What the ring actually convolves is G^{<,>}_k - g_pp, and on the
-            # cell-average route that is <G~>_k, an average of PSD matrices.
-            # PSD by construction, so this is a check on the IMPLEMENTATION
-            # rather than on the maths: it catches a sign, an index or a cell
-            # width being wrong, which the offline tests cannot see.
-            #
-            # Three things this print gets right that the first version did
-            # not, and each cost a device run to find out:
-            #
-            #   * lesser and greater are reported SEPARATELY. Collapsing them
-            #     to a single min hides which component failed.
-            #   * the bins the ring itself masks are EXCLUDED (skip=). G^>(0)
-            #     is the near-singular acoustic bin; it dominates the global
-            #     normalisation and is indefinite, so an unmasked gate reads
-            #     exactly -1.000 on the POLE-FREE baseline.
-            #   * the same gate on the UNCORRECTED leg is printed beside it as
-            #     the control. If the two agree, the gate is not measuring the
-            #     pole sector, whatever value it shows.
-            #
-            # This branch is deliberately NOT taken on congruence_analytic.
-            # There the leg is G - G_S, an additive remainder, and a remainder
-            # is a DIFFERENCE of PSD objects: it may be indefinite with
-            # nothing wrong. Only the total -i Sigma^{<,>} is constrained
-            # (bubble_positivity.md Thm 1-2, and the same reason the gate is
-            # never applied per sector). Reading -4.09e-01 there as the cause
-            # of that route's divergence was a category error; the gates that
-            # DO bind on it are the sector sum, the total positivity, the
-            # Keldysh identity and conservation.
+            # Deliberately NOT taken on congruence_analytic: there the leg is
+            # the remainder G - G_S, a difference of PSD objects, which may be
+            # indefinite with nothing wrong. Only the total -i Sigma^{<,>} is
+            # constrained.
             rows, cols = out[0].rows, out[0].cols
             n_freq = int(self.local_frequencies.shape[0])
             low = max(1e-6, float(

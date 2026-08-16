@@ -179,7 +179,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # the bubble LEGS and re-added analytically, so the frequency grid no
         # longer has to resolve the sharpest linewidth in the problem. The
         # split G = G_S + G_R is exact: this changes the representation, not
-        # the diagram. See phonon/docs/pole_subtracted_modal_scba.md.
+        # the diagram. See phonon/docs/pole_scba_implemented.md.
         _ps = getattr(config.phonon, "pole_sector", None)
         self._pole_cfg = _ps
         self._pole_enabled = bool(_ps is not None and _ps.enabled)
@@ -418,25 +418,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     "block_comm_size."
                 )
 
-        # PSD taper of the band mask (sse_g_band_taper = "bartlett"): the
-        # boxcar mask above is indefinite, so the masked kernel loses
-        # PSD-ness; Bartlett weights w_d = 1 - d/(g_band+1) make the LEG
-        # mask PSD (Fejer kernel) at any band, and applying the SAME taper
-        # to the inner G legs and the Sigma output blocks is the
-        # Phi-derivable pair (Phi[M o G] chain rule) -- energy
-        # conservation retained.
+        # PSD taper of the band mask. Bartlett weights w_d = 1 -
+        # d/(g_band+1) make the LEG mask PSD at any band, and the same taper
+        # on legs and Sigma output is the Phi-derivable pair, so energy
+        # conservation is retained.
         #
-        # CAVEAT (measured 2026-08-08, phonon/docs/bubble_positivity.md
-        # Thm 3): the OUTPUT band is pinned at |I-J| <= 1 (see the pair
-        # index below) regardless of g_band, so the effective output mask
-        # is w[|I-J|] restricted to the tridiagonal, whose Toeplitz symbol
-        # 1 + 2*w_1*cos(theta) is non-negative only for w_1 <= 1/2, i.e.
-        # only for g_band = 1 (w_1 = 1/2). At g_band >= 2 (w_1 = 2/3, 3/4)
-        # the taper does NOT restore output positivity -- it is not a
-        # PSD repair "at any band". Decoupling the output weights from the
-        # leg weights would fix positivity but break the Phi-derivable
-        # pairing above, so the combination is warned about, not silently
-        # changed. Test: test_taper_is_psd_only_at_band_one.
+        # It restores OUTPUT positivity only at g_band = 1. The output band is
+        # pinned at |I-J| <= 1 regardless of g_band, and that tridiagonal
+        # symbol 1 + 2*w_1*cos(theta) needs w_1 <= 1/2. Decoupling the output
+        # weights from the leg weights would fix positivity and break the
+        # Phi-derivable pairing, so the combination is warned about rather
+        # than silently changed. Test: test_taper_is_psd_only_at_band_one.
         # Implementation: the ring is linear in each factor, so the two
         # G-leg weights and the output weight collapse to ONE scalar per
         # quad, w(K1,K1') * w(K2,K2') * w(I,J), folded into the left
@@ -1188,23 +1180,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     np.asarray(get_host(conv_freqs)).real)
             gtl.data[:] = self._fft_pad(gl_in, n_fft)
             gtg.data[:] = self._fft_pad(gg_in, n_fft)
-            # Build the reversed (absorption) legs: DFT index-reversal
-            # rev(X)[l] = X[(-l) mod n_fft] of the FFT'd G. The exact bosonic
-            # continuation carries the ji-TRANSPOSE (and -q for coupled-q):
-            #     G^<_ij(q, -w) = G^>_ji(-q, w).
-            # NOTE: the no-transpose shortcut is exact only for the EQUILIBRIUM
-            # (complex-symmetric) part of G; skipping the transpose breaks the
-            # Phi-derivable energy balance of the bubble off equilibrium
-            # (see SCBA._phonon_bubble_energy_balance).
-            # The q-negation (middle axes) and the FFT + tau reversal (axis 0)
-            # are state-independent and done here in the nnz state; the
-            # ji-transpose (nnz/last axis) is applied AFTER the nnz->stack
-            # dtranspose below, where the FULL nnz pattern is local on every
-            # rank. The transpose commutes with the FFT/reversal (axis 0) and
-            # the q-negation (middle axes), so this is exactly the serial fold
-            # at any rank count. The q-negation also commutes with the axis-0
-            # FFT, so the already-FFT'd decay legs are reused without a second
-            # FFT of the reversed source.
+            # Reversed (absorption) legs: rev(X)[l] = X[(-l) mod n_fft] of the
+            # FFT'd G. The bosonic continuation carries the ji-TRANSPOSE (and
+            # -q for coupled-q): G^<_ij(q, -w) = G^>_ji(-q, w). The
+            # no-transpose shortcut is exact only for the equilibrium
+            # (complex-symmetric) part of G and breaks the Phi-derivable energy
+            # balance off equilibrium.
+            #
+            # Ordering: q-negation and FFT + tau reversal are state-independent
+            # and done here in the nnz state; the ji-transpose is applied after
+            # the nnz->stack dtranspose, where the full nnz pattern is local on
+            # every rank. All three commute, so this is exactly the serial fold
+            # at any rank count, and the already-FFT'd decay legs are reused.
             Xl, Xg = gtl.data, gtg.data
             if nq > 1 and q_split:
                 # Sectioned: q -> -q lands on another rank's slice, so the

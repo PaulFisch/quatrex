@@ -1,24 +1,8 @@
 #!/usr/bin/env python
 """Aggregate the per-q pole census across a run, and compare two stages.
 
-Hypothesis: the narrow, isolated Si population reported at iteration 1
-(``pole_sector_observations.md`` Sec. 1.8) is an artefact of an undeveloped
-anharmonic self-energy, and shrinks or disappears once the SCBA converges. The
-falsifier is the ``accepted`` count: if it survives self-consistency, the pole
-method has a bed; if it collapses, it does not.
-
-``accepted`` is the number that matters. ``under-resolved`` and ``isolated``
-are printed separately per q and their INTERSECTION is not, but a candidate is
-only accepted when it has passed every gate at once, so the accepted count is
-the intersection the decision actually turns on.
-
-Percentile rows are summarised across q as the distribution of per-q medians.
-That is a summary of summaries, not a pooled distribution, and is labelled as
-such -- the raw per-pole values are not in the log.
-
 Run:
-    python phonon/studies/_si_census_report.py cluster/sicensus/log_cold.txt \
-        cluster/sicensus/log_warm.txt
+    python phonon/studies/_si_census_report.py cluster/sicensus/log_cold.txt         cluster/sicensus/log_warm.txt
 """
 from __future__ import annotations
 

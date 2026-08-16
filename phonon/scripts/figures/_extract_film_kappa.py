@@ -1,22 +1,9 @@
 """Distil the film ballistic/SCBA ladders into a committed kappa table.
 
-For each run dir: lead heat from the npz (last_heat, q-summed integral
-convention), transverse cell area from structure.xyz, temperature bias
-and mesh from the config, slab height from the lattice transport
-component. Conversion (the units bridge of phonon/studies/summarize):
-
-    G [W/m^2/K] = h * 1e24 * J * (dw if uniform grid else 1)
-                  / (A_c * dT * N_q)
-    kappa_z(t) = G * t,  R = 1/G  [m^2 K / W]
-
-Writes phonon/scripts/data/film_kappa.csv with one row per run:
-system, tag, kind, n_slabs, t_nm, J, uniform, dw_thz, A_c_m2, dT, N_q,
-G_W_m2K, converged, n_iter.
-
-Sources: cluster/mos2f{3nu,6b,10b,16b} (ballistic, nu grid),
-cluster/sifilm{3,5,8}{b,s} (ballistic + SCBA legs, uniform 121 grid).
-Missing dirs are skipped with a warning (SCBA legs appear as they
-land).
+Data:
+  Writes phonon/scripts/data/film_kappa.csv with one row per run:
+  Sources: cluster/mos2f{3nu,6b,10b,16b} (ballistic, nu grid),
+  cluster/sifilm{3,5,8}{b,s} (ballistic + SCBA legs, uniform 121 grid).
 
 Run:  python phonon/scripts/figures/_extract_film_kappa.py
 """

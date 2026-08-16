@@ -1,19 +1,6 @@
 """(b) Converge cnt33 L_n eta=0 to a GENUINE 1e-10 Sigma^R fixed point.
 
-Pure linear + gentle low-omega mixing. The mixing (1-a)*Sigma_prev + a*Sigma_new
-equals Sigma_prev at the fixed point for ANY a -> damping only the IR bins is
-PROVABLY fixed-point-preserving (changes the path, not the solution). The IR
-marginal mode is a period-2 limit cycle (lambda ~ -1, residual 0.04<->0.54), so
-its iteration eigenvalue under low-omega mixing is |1 + a_low*(lambda-1)| =
-|1 - 2*a_low|, MINIMIZED near a_low ~ 0.4-0.5 (NOT the very-gentle 0.02, which
-gives 0.96 -> glacial). retarded=fft (causal eta=0 partner, REQUIRED),
-band_limit, exact conserving fold (bcs=1). QX_DIAG_OMEGA localizes the residual
-per-omega. Reaching 1e-10 with the first bin no longer dominating, bubble
-balance ~1e-16 and lead balance ~1e-3 CERTIFIES the marginal mode is tamed.
-
 Usage:
-  python phonon/studies/_conv1e10.py TAG L NFREQ A_LOW MIX_THZ MIX SIGMA_TOL \
-      MAX_ITER CUTOFF NRANKS [MIXING_METHOD]
 """
 import os
 import shutil

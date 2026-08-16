@@ -1,25 +1,6 @@
 """Observable-level error of the decomposed SSE, against the FULL-vertex SSE.
 
-The FC3 fit residual ``eps_R = ||Phi - Phi_R||_F / ||Phi||_F`` is an error on the
-TENSOR. The self-energy is a contraction of that tensor against two Green's
-functions, so it need not inherit it: the components CP discards may be the ones
-the bubble weights least. This script measures what actually reaches the physics.
-
-It is the ONE-SHOT error: both self-energies are evaluated on the SAME Green's
-function (the device's harmonic/ballistic G at the real temperature), so what is
-measured is purely the vertex error propagated through the bubble -- no SCBA
-feedback, no error cancellation from re-converging. That isolates the vertex->Sigma
-map, which is the quantity the rank-truncation bound in the theory chapter claims.
-
-Reports, per rank, the relative error in
-  * Sigma^<, Sigma^>, Sigma^R           (the self-energy itself),
-  * Gamma = i(Sigma^> - Sigma^<)        (the scattering rate -- the physical one),
-  * the omega-resolved error, in-band and at the peak of the spectrum,
-against the dense q-folded vertex.
-
 Usage:
-    QX_CONFIG=<dense film config> python phonon/studies/_rank_error_sse.py \
-        --factors DIR --ranks 8,16,32,64,128
 """
 from __future__ import annotations
 

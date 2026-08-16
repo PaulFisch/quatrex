@@ -32,14 +32,7 @@ def _h(a):
 
 
 def _dynamical(sizes=(3, 3, 3), seed=0, coupling=0.4, separate=True):
-    """A real symmetric, positive-definite block-tridiagonal ``D``.
-
-    With ``separate=True`` the diagonal entries are laid out on a geometric
-    ladder and the coupling is weak, so the modes are well separated compared
-    with their linewidth and a single pole has an unambiguous Newton basin. With
-    ``separate=False`` the spectrum is dense -- the regime that motivates the
-    cluster/contour machinery, exercised by its own test below.
-    """
+    """A real symmetric, positive-definite block-tridiagonal ``D``."""
     rng = np.random.default_rng(seed)
     n = len(sizes)
     total = sum(sizes)
@@ -173,13 +166,7 @@ def test_trust_radius_caps_the_step():
 
 
 def test_dense_spectrum_needs_the_contour_not_a_crude_guess():
-    """With modes closer than the guess error, Newton lands on a neighbour.
-
-    This is not a defect of the corrector -- ``eps_nep`` certifies that it found
-    *a* genuine pole -- it is the reason the design pairs the predictor/corrector
-    with Beyn initialisation and cluster tracking rather than trusting a
-    frequency-sorted guess.
-    """
+    """With modes closer than the guess error, Newton lands on a neighbour."""
     d = _dynamical(sizes=(3, 3, 3), seed=0, separate=False)
     m_blocks, dm_blocks = _operator(*d)
     z_ex, _, _ = _exact_poles(_dense(*d))
@@ -197,14 +184,7 @@ def test_dense_spectrum_needs_the_contour_not_a_crude_guess():
 
 
 def test_left_vector_matches_an_svd_null_space():
-    """``M(z_alpha)`` is singular, so ``M^{-H}`` does not exist at the pole.
-
-    The adjoint inverse iteration that produces ``l`` is therefore worse
-    conditioned the better the pole solve gets. It is well posed for the
-    DIRECTION -- the solve amplifies exactly the null component sought -- and
-    this pins that against an independent SVD null vector, while ``eps_left``
-    reports the residual rather than leaving it implicit.
-    """
+    """``M(z_alpha)`` is singular, so ``M^{-H}`` does not exist at the pole."""
     import numpy as np
 
     rng = np.random.default_rng(3)
@@ -276,13 +256,7 @@ def test_dz_est_is_the_actual_frequency_error():
 
 
 def test_the_two_gates_disagree_and_the_frequency_one_is_the_physical_test():
-    """A pole located to a tiny fraction of its width can fail ``eps_nep``.
-
-    That is the arithmetic behind 142 of 144 refusals on the CNT bed:
-    ``eps_nep`` divides by ``|z|^2 + ||M||``, which is ``1e3-1e4 THz^2`` for a
-    phonon operator, so it is not a statement about frequency. The bed here
-    has the same shape, so the same thing must be visible on it.
-    """
+    """A pole located to a tiny fraction of its width can fail ``eps_nep``."""
     d = _dynamical(seed=7)
     m_blocks, dm_blocks = _operator(*d)
     z_ex, _, _ = _exact_poles(_dense(*d))

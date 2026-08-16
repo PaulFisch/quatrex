@@ -218,22 +218,18 @@ class PhononPhononInteraction(Interaction):
             _pole_analytic_sectors(scba, state, ssp)
             return
         if getattr(ps, "leg", "congruence") == "congruence":
-            # Nothing is added back, and nothing is dropped. The pole channel
-            # here is the POINT-minus-CELL-AVERAGE correction, so what the ring
-            # now convolves is <G~^{<,>}>_k -- the cell average of the
-            # congruence reconstruction, which is what a dw-weighted sum wants
-            # and what the raw grid sample gets wrong by order one for an
-            # under-resolved line (8.2e-01 relative on the h = 20 gamma bed).
+            # The pole channel here is the point-minus-cell-average
+            # correction, so the ring convolves the cell average of the
+            # congruence reconstruction -- what a dw-weighted sum wants, and
+            # what the raw grid sample gets wrong by order one for an
+            # under-resolved line. Being an average of PSD matrices, the leg is
+            # PSD however bad the pole model is, which is the difference from
+            # the superseded route.
             #
-            # It is an average of PSD matrices, so the leg is PSD however bad
-            # the pole model is. That is the whole difference from the
-            # superseded route, which fed the ring an indefinite remainder and
-            # anti-damped once the residue was off by 20 %.
-            #
-            # What this does NOT do is resolve the pole inside the CONVOLUTION:
-            # the output frequency resolution is still the grid's. Carrying
-            # SR/RS analytically needs a vertex contraction against per-pole
-            # pattern-valued coefficients, which is the remaining work.
+            # It does NOT resolve the pole inside the convolution: the output
+            # resolution is still the grid's. Carrying SR/RS analytically needs
+            # a vertex contraction against per-pole pattern-valued
+            # coefficients, which is not built.
             return
         if ps.sectors == "rr":
             # Deliberately incomplete: SS/SR/RS are not added back, so this
@@ -255,17 +251,13 @@ class PhononPhononInteraction(Interaction):
                                      conjugate=False)
             vr = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
                                      conjugate=True)
-            # Per-pole sources, NOT a single frozen value at the cluster
-            # centre. The exact residue at z_alpha is S(z_alpha)/gap, so each
-            # leg must carry the source where its own pole sits; one frozen
+            # Per-pole sources, NOT one frozen value at the cluster centre:
+            # each leg must carry the source where its own pole sits. A frozen
             # value is wrong as soon as a cluster holds more than one pole, and
-            # badly wrong once the set is closed under z -> -z^* (the partner
-            # is at -Omega while the frozen value was read at +Omega).
-            #
-            # This is what made G_PP -- built from the frequency-resolved
-            # source -- and the pole leg put back by the sectors different
-            # functions, which breaks the SPATIAL balance while leaving the
-            # scalar P_in = P_out identity nearly intact.
+            # badly wrong once the set is closed under z -> -z^*, where the
+            # partner sits at -Omega. It is what made G_PP and the pole leg the
+            # sectors put back different functions, which breaks the SPATIAL
+            # balance while leaving the scalar P_in = P_out nearly intact.
             # One source per pole PAIR: shared by both residues, which is what
             # keeps G_PP decaying like 1/w^2 (see source_at_poles).
             sa = source_at_poles(s_l, freqs, cl)
@@ -306,17 +298,12 @@ class PhononPhononInteraction(Interaction):
         g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
         reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
         reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
-        # Mask the background leg EXACTLY as the ring masks its own legs
-        # (sse_phonon_phonon: gl_in[conv_mask] = 0). The omega = 0 bin carries
-        # the near-singular acoustic spectral peak -- the ring's own comment
-        # says |G^>(0)| >> neighbours -- and the ring excludes it. Feeding the
-        # mixed convolution an UNMASKED leg makes the two sectors integrate
-        # different data, and injects that peak straight into Sigma.
-        #
-        # Measured: without this, Sigma^> is non-PSD by 0.15 at mid-band and
-        # the violation is strictly LINEAR in the injected mixed term, i.e. no
-        # cancellation at all -- the signature of a term that simply should
-        # not be there.
+        # Mask the background leg EXACTLY as the ring masks its own legs. The
+        # omega = 0 bin carries the near-singular acoustic peak and the ring
+        # excludes it; feeding the mixed convolution an unmasked leg makes the
+        # two sectors integrate different data and injects that peak into
+        # Sigma. Measured: without this, Sigma^> is non-PSD by 0.15 at mid-band,
+        # strictly linear in the injected term.
         low = max(1e-6, float(getattr(ssp, "_low_freq_mask", 0.0) or 0.0))
         leg_mask = xp.abs(freqs) < low
         if bool(leg_mask.any()):

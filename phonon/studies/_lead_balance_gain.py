@@ -1,38 +1,5 @@
 """Why does the MoS2 film show lead balance = 2 (h_L = -h_R)?
 
-h_L = -h_R means the two ends carry equal and OPPOSITE interface
-currents: the device is a net energy SOURCE (or sink) rather than a
-conduit. This script tests the natural mechanism -- that the state has
-GAIN -- against every locally available run, using the controls that
-must come back clean.
-
-The test. The solver stores occupation-positive Green's functions, so
-the diagonal of -i G^< is an occupation and must satisfy
-
-    (-i G^<)_ii (omega) >= 0    for every dof, slab, q and omega.
-
-`gl_diag_imag` in every run npz is exactly that diagonal, so the check
-is free on saved data. Threshold: an entry counts as gain only if it is
-below -1e-6 * GLOBAL max|gl|. (Normalising per-frequency instead turns
-the gapped high-omega bins -- pure 1e-13 noise -- into fake gain, and
-then even the ballistic control "fails": that mistake was made and
-caught here.)
-
-Why this localises the culprit. The Keldysh equation
-G^< = G^R Sigma^<_tot G^A = G^R Sigma^<_tot (G^R)^dagger is a
-CONGRUENCE, and congruence preserves positive semi-definiteness. So
-
-    -i Sigma^<_tot >= 0   ==>   -i G^< >= 0.
-
-Contrapositive: a measured negative occupation proves -i Sigma^<_tot
-has a negative eigenvalue. The lead part i n_alpha Gamma_alpha is PSD
-by construction (n >= 0, Gamma >= 0), so the gain must enter through
-the phonon-phonon bubble. This is assumption A7 of the conservation
-audit -- the one the thesis itself flags as never quantified
-(document/src/appendices/conservation.tex:9, "% REVIEW(open):
-sigma_convention positivity gate (-i Sigma^{><} >= 0) is named here but
-not quantified anywhere in the body").
-
 Run:  python phonon/studies/_lead_balance_gain.py
 """
 from __future__ import annotations

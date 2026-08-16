@@ -1,29 +1,8 @@
 """Diagnose a lead-balance failure by decomposing the conservation triad.
 
-Two-terminal balance I_{0,1} = I_{N,N+1} rests on a chain of identities
-(theory, sub:energy_conservation) that this script checks numerically,
-using only the saved run arrays:
-
-    Delta J  :=  I_{N,N+1} - I_{0,1}      (the observed lead imbalance)
-             ==  sum_i P_abs(i)           (A) current continuity / sum rule D
-             ==  J_s = sum_w (P_out-P_in) (B) slab<->bubble identity
-             ==  0                        (C) Baym-Kadanoff bubble conservation
-
-Reading the breaks:
-  (A) fails  (Delta J != sum P_abs)      -> identity D broken: the lead
-             imbalance is NOT accounted for by the device scattering, so
-             a CONTACT / Sigma^R-consistency violation injects energy.
-  (A) holds, (C) fails (J_s != 0)        -> the BUBBLE is non-conserving
-             (vertex symmetry / g_band band-truncation on interior slabs).
-
-Inputs: two run.npz (bare, dressed) with current_spectrum,
-bubble_balance_spectrum, slab_absorption, frequency_cell_widths,
-iter_heat, iter_bubble_balance (bubble_balance_check must have been on).
-
-    python phonon/scripts/figures/conservation_diagnosis.py \
-        --bare  out/cnt33_L4_conservation/bare/run.npz \
-        --dressed out/cnt33_L4_conservation/dressed/run.npz \
-        --out   out/cnt33_L4_conservation/conservation.png
+Data:
+  Inputs: two run.npz (bare, dressed) with current_spectrum,
+  python phonon/scripts/figures/conservation_diagnosis.py         --bare  out/cnt33_L4_conservation/bare/run.npz         --dressed out/cnt33_L4_conservation/dressed/run.npz         --out   out/cnt33_L4_conservation/conservation.png
 """
 from __future__ import annotations
 

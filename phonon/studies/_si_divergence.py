@@ -1,32 +1,8 @@
 """Why does the Si film stop converging when the grid is refined?
 
-The Si film converged to 9.6e-08 on a 121-point grid and ABORTS at
-iteration 4 with residual 2.4e+06 on a 15001-point one. Si is the system
-whose interaction mask is the identity by accident (its transport axis is
-x, on which the fcc cell has a 1.37 A extent, so the 10 A box cutoff never
-truncates -- `bubble_positivity.md` 6.11), so the MoS2 mechanism cannot be
-the cause here and something else is.
-
 This reads the saved run.npz of a resolution ladder and reports, per rung:
-
-* **negative occupation** -- ``min_i (-i G^<)_ii`` relative to the largest
-  positive diagonal. This is the observable signature of a broken
-  ``-i Sigma^<_tot >= 0``: since ``G^< = G^R Sigma^< G^A`` is a congruence,
-  a negative occupation PROVES the total lesser self-energy has a negative
-  eigenvalue (bubble_positivity.md section 3).
-* **where** it sits in frequency, and whether it tracks the band edge.
-* **registration** -- the per-orbital spectral sum rule
-  ``S_i = int 2w (-1/pi) Im G^R_ii dw``, which must tend to 1 once the grid
-  resolves the resonances. The grid audit's blind -> transition -> resolved
-  ladder predicts that a coarse grid reports trivial stability precisely
-  because S_B is small: the map is nearly ballistic and contracting while
-  the answer is wrong.
-* **lead balance and the iterate trace**, to separate "diverged" from
-  "not yet converged".
-
 Usage:
-    QTX_ARRAY_MODULE=numpy python phonon/studies/_si_divergence.py \
-        cluster/sichk_base cluster/sires501 cluster/sires1001 ...
+    QTX_ARRAY_MODULE=numpy python phonon/studies/_si_divergence.py         cluster/sichk_base cluster/sires501 cluster/sires1001 ...
 """
 
 from __future__ import annotations

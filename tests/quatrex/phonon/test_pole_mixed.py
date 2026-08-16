@@ -43,13 +43,8 @@ def _err(method, gamma, **kw):
 
 
 def test_grid_route_fails_below_the_grid_spacing():
-    """Sampling the pole on the grid collapses exactly where the sector is needed.
-
-    Above ``gamma ~ h`` the discrete convolution is fine; below it the error
-    grows without bound, because the narrow factor is never sampled near its
-    peak. This is the same registration failure the pole-pole channel removes,
-    and it is why the mixed terms cannot simply be left on the grid.
-    """
+    """Sampling the pole on the grid collapses exactly where the sector is
+    needed."""
     coarse = _err("grid", 2.0)
     assert coarse < 1e-2, f"grid should be fine at gamma/h = 20 ({coarse:.2e})"
     for gamma, floor in ((0.02, 0.1), (0.004, 1.0), (0.0008, 10.0)):

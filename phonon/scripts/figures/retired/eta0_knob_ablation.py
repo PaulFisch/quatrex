@@ -1,35 +1,5 @@
 """The eta=0 stabilisation-knob ablation + physics-sensitivity figures.
 
-Companion to eta0_convergence.py (which shows THAT the eta=0 fixed point
-exists); this pair shows WHAT each stabilisation knob does -- convergence
-with/without every knob, and how much the converged PHYSICS depends on it.
-Built ONLY from saved run traces (no new solver runs):
-
-  (1) eta0_knob_ablation.{pdf,png} -- rel Sigma^R residual vs SCBA iteration,
-      one panel per knob, each with the knob OFF and ON on the same axes:
-      (a) causal retarded Sigma^R (retarded_method half -> fft), cnt33 L3:
-          the half rule limit-cycles at O(0.1) under EVERY mixer; the causal
-          KK real part restores contraction and the production run converges.
-          [convergence/L3e0_A_half55_mix_*.log vs L3e0_Bc_fft55_mix_lin0.1.log
-           + prod/cnt33_eta0/L3_anh.log]
-      (b) infrared occupancy taper + smooth spectral window, cnt33 L2 (fft):
-          bare fft floors at ~2e-4; ir_taper_cells=3 stalls, =4 reaches 1e-2,
-          =6 + sse_smooth_window converges to a genuine 4e-11 fixed point.
-          [prod/cnt33_eta0/L2_anh.log, conv1e10/L2_taper3.log, L2_taper4s.log,
-           conv1e10/cnt33_smooth_L2.log]
-      (c) mixer choice on the marginal eta=0 mode, cnt33 L3 (fft): Anderson
-          and Broyden do NOT beat plain linear mixing (the marginal mode
-          defeats secant models); linear + patience converges.
-          [convergence/L3e0_B_fft55_mix_{lin,and,broy}0.1.log + Bc + prod]
-
-  (2) eta0_knob_sensitivity.{pdf,png} -- converged G*dw of cnt33 L2 eta=0
-      for each knob setting (npz last_heat * dw), showing which knobs move
-      the PHYSICS and by how much: retarded half->fft -6.1%; the IR taper
-      +25% (it REMOVES the unphysical IR-Bose contamination -- the tapered
-      number is the cutoff-insensitive one, extrapolating to G0=17.4 as
-      omega_reg->0); cutoff within the tapered family <=3.7%; grid 181->361
-      1%; mixers 0% (identical fixed point).
-
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/eta0_knob_ablation.py
 """
 from __future__ import annotations

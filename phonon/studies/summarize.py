@@ -1,29 +1,9 @@
 """Summarize PRODUCTION phonon-transport runs into conductances + the legacy
 CSV schema the dense-era plotters consume.
 
-The production engine ``run.py`` (phonon/studies/engine) snapshots
-``final_heat`` (the q-summed, hbar-omega-weighted lead heat current in the
-solver's internal units) -- NOT a physical ``thermal_conductance``. This module
-converts each run to a per-area conductance ``G [W/m^2/K]`` using the SAME
-normalization as the dense reference (``phonon/solver/dense.py``):
-
-    G = [sum_w hbar * w_rad * (n_L-n_R) * T(w)] * dw * 1e12 / (A_c * dT)
-
-Since the production ``final_heat`` IS that bracketed Landauer integral up to a
-fixed unit constant, and the ratio G_anh/G_ball is normalization-free, we report
-both: the exact ratio, and the absolute G via the analytic constant
-``C = dw[THz]*1e12 * hbar * 2pi*1e12 / (A_c * dT)`` (grid + geometry + dT only,
-T-independent), with A_c read from the device ``structure.xyz``.
-
-Input: a ``manifest.json`` (list of cells) written by the run driver
-(``phonon.studies.transport``), each with
-  {tag, sweep, t_mean, n_slabs, system, tdir, fmax, emin, nfreq, dt}
 and the run dir holding ``<tag>_ball.npz`` / ``<tag>_anh.npz``.
-
 Usage:
-    python -m phonon.studies.summarize --run-dir DIR [--out DIR2] [--plot]
 emits ``<out>/summary.csv`` (legacy cols) + ``<out>/summary.json``; ``--plot``
-adds quick-look sweep figures via :mod:`phonon.studies.style`.
 """
 import argparse
 import csv

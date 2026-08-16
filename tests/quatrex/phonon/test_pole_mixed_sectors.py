@@ -91,17 +91,7 @@ def _brute_ring(phi, off, a_leg, b_leg, w, rows, cols):
 
 
 def test_mixed_sectors_match_the_brute_force_ring():
-    """Index bookkeeping against a direct ring, on the FULL frequency axis.
-
-    The kernel is handed the background on ``[0, w_max]`` only -- exactly what
-    the solver holds -- and must reconstruct the negative half from
-    ``R(-w) = R(w)^*``. The brute force integrates the full axis directly. So
-    this now tests the reconstruction as well as the leg conventions.
-
-    The background is built conjugate-symmetric on purpose: a single Lorentzian
-    does NOT satisfy the bosonic relation, and with a non-bosonic bed the test
-    would measure the bed rather than the kernel.
-    """
+    """Index bookkeeping against a direct ring, on the FULL frequency axis."""
     gamma = 0.5
     h = 0.1
     w_pos = np.arange(0.0, 24.0 + 1e-9, h)         # gamma/h = 5: sampling is fine
@@ -214,18 +204,7 @@ def test_invalid_leg_raises():
 
 
 def test_production_kernel_matches_an_explicit_ring():
-    """The production path against an explicit ring, end to end.
-
-    Everything else in this campaign tested the DECOMPOSITION (sector sum) or
-    the kernel against another form of itself. This pins
-    ``mixed_self_energy_blocked`` -- the routine the interaction actually calls
-    -- against a direct evaluation of ``B(G_S,G_R) + B(G_R,G_S)``, with ``G_S``
-    built as exactly the partial-fraction object the kernel represents.
-
-    Run at ``gamma/h = 40`` so the discrete ring is itself accurate; the
-    kernel's advantage at small ``gamma`` is measured in ``test_pole_mixed.py``
-    and is not what is under test here.
-    """
+    """The production path against an explicit ring, end to end."""
     from quatrex.phonon.pole_bridge import (analytic_prefactor,
                                             mixed_self_energy_blocked)
 

@@ -1,20 +1,5 @@
 """cnt33 linewidths: phono3py (golden rule) vs NEGF single-shot vs NEGF SCBA,
 with the conserving vertex (raw hiphive FC3, no ASR projection).
-
-Periodic-q equilibrium SCBA: ``G^R = [(w + i eta)^2 - D(q) - Sigma^R]^-1``,
-``G^<,>`` from the fluctuation-dissipation theorem at uniform T, Sigma from
-the q-dense bubble (:mod:`phonon.studies.reference_kernels`), ``Sigma^R``
-via the production "half" rule (anti-Hermitian part). Linear mixing.
-
-Mode linewidths are extracted as
-``gamma_b = Re(e_b^H [0.5i (Sigma^> - Sigma^<)] e_b) / (2 w_b)`` and compared
-per probe q-point against phono3py's golden-rule gammas on the same mesh.
-
-CLI::
-
-    python -m phonon.studies linewidths run  [--nm 8] [--eta 0.2]
-                                             [--niter 25] [--mix 0.1]
-    python -m phonon.studies linewidths plot [--npz PATH]
 """
 
 from __future__ import annotations

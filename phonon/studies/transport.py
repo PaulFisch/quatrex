@@ -1,38 +1,7 @@
 """Production transport study: T-sweeps, length ladders, spectral current,
 summaries and the document figures.
 
-``run`` drives the PRODUCTION phonon-transport study matrices on the node,
-SEQUENTIALLY -- one mpirun at a time (node hygiene: ``pipeline.launch_cell``
-asserts the node is idle before every launch). Each cell = a ballistic
-baseline (QX_BALLISTIC=1) + the anharmonic SCBA, snapshotting both NPZs and
-recording a manifest that :mod:`phonon.studies.summarize` consumes. Resumable:
-a cell whose NPZ already exists is skipped.
-
-Geometry inputs (dynamical_matrix.mat, fc3_blocks.hdf5, structure.xyz) are
-built ONCE per (system, length) into a cached work dir; only
-quatrex_config.toml is rewritten per cell (T/eta/mixing). Snapshots +
-manifest.json go to ``phonon/scripts/out/prod/<study>/`` (the historical run
-dirs -- existing data is read from and resumed there).
-
-``plot`` renders either
-- ``--what transmission``: per-cell effective transmission
-  T(w) = I(w)/dn(w) and spectral heat current from the NPZ
-  ``current_spectrum`` (per-omega Meir-Wingreen, q-summed), or
-- ``--what figures``: the document transport figures from each study's
   ``summary.csv`` into ``document/fig/transport_sweeps/`` (existing names, so
-  the reruns drop in without touching the .tex includes).
-
-Usage (from the repo root)::
-
-    python -m phonon.studies transport run --study cnt33 [--dry-run]
-    python -m phonon.studies transport run --study sifilm --cells ns3_nk9
-    python -m phonon.studies transport plot --what transmission \
-        --run-dir phonon/scripts/out/prod/sinw_d5a [--tags T30 L2]
-    python -m phonon.studies transport plot --what figures [--studies cnt33 ...]
-
-The matrices encode the CLAUDE.md recipe (linear mixing for the soft d5a,
-Anderson depth 5 for the well-conditioned CNT/d11a, L>=2 for the prod OBC,
-SiNW eta 0.11, film q-parallel with block=1).
 """
 
 import argparse

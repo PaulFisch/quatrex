@@ -1,28 +1,8 @@
 """Validate the continuum residue derivation of the near-DC channel
 (phonon/docs/ir_residue_derivation.md) against the dense film bed.
 
-Derived (open harmonic system, eta = 0, transverse q = Gamma):
-
-  (i)   K t = 0 with K = D_dev + Sigma_L(0) + Sigma_R(0): the STATIC
-        lead-screened stiffness annihilates the mass-weighted uniform
-        translations t_beta exactly (leads follow a uniform shift).
-  (ii)  Gamma_alpha(w) = 2 w V_alpha + O(w^3): the lead broadening
-        opens linearly, V_alpha >= 0 (odd Gamma).
-  (iii) Laurent residues on the translation subspace T (3x3 blocks
-        X_T = t^T X t):
-
-            w^2 (-i G^<)(w)  ->  C2 = V_T^{-1} B V_T^{-1},
-            B = sum_alpha 2 c_alpha V_{alpha,T},  c_alpha = k_B T_alpha / h,
-            w   G^R(w)       ->  i V_T^{-1},   V_T = sum_alpha V_{alpha,T}.
-
-        (c_alpha = bose_pole_coeff = 6.25 THz at 300 K in the linear-THz
-        units of the code.)
-
-This script measures every object on the production-parity dense bed of
-_ir_killtest.py and reports predicted-vs-measured matrices.
-
-Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=1 \
-        python phonon/studies/_ir_residue_check.py
+(phonon/docs/ir_residue_derivation.md) against the dense film bed.
+Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=1         python phonon/studies/_ir_residue_check.py
 """
 from __future__ import annotations
 

@@ -1,24 +1,4 @@
 """Strong-coupling SCBA convergence investigation.
-
-With the conserving (raw, S3-exact) 3-phonon vertex the cnt33 scattering is
-~4-5x stronger than the superseded ASR-projected runs, and the transport SCBA
-no longer converges from a cold (Sigma=0) start with ANY plain mixing
-(2026-06-12 study: linear 0.02/0.05/0.1/0.4 all diverge -- the larger the
-factor the faster the blow-up -- and Anderson limit-cycles at residual ~0.55),
-while the *equilibrium* periodic SCBA on the same vertex contracts steadily.
-The fixed point exists; the cold-start transport map is just not contractive.
-This module drives the continuation strategies:
-
-- ``mix``    -- the (mixing_method, factor) grid, cold start (the baseline
-  record of what does NOT work).
-- ``lambda`` -- vertex-scale continuation: converge lambda=0.25, then
-  warm-start 0.5 -> 0.75 -> 1.0 from the previous Sigma, rescaled by
-  (lambda_new/lambda_old)^2 (Sigma ~ lambda^2).
-- ``anneal`` -- temperature annealing: converge low T, warm-start upward.
-
-Each cell saves the standard npz snapshot plus a Sigma snapshot for the next
-warm start. ``plot`` overlays the residual / lead-balance / bubble-balance
-traces of every cell found in the study directory.
 """
 
 import argparse

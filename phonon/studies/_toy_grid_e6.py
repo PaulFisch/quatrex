@@ -1,19 +1,4 @@
 """E6 v3: contact-broadening continuation of the sharp-sharp branch.
-
-The cold iteration at eta_w = 1e-6 lands on the ballistic fixed point for
-ALL grids (the flat pair's seed width ~4e-3 THz is unresolved, so the first
-bubble vanishes).  An eta bootstrap does NOT work: eta broadens G^R but
-injects no occupation, and the Keldysh bubble runs on G^lesser/greater --
-whose flat-band weight is fed only through the lead coupling.  The correct
-continuation knob is the contact broadening itself:
-
-  1. converge with a dispersive B pair (eps_flat = 1.0, lead-fed weight);
-  2. anneal eps_flat down to the flat limit 0.02 with warm starts -- the
-     self-generated Gamma_anh ~ 0.2 THz > dw carries the resolvability
-     once the lead width has shrunk below the grid;
-  3. at the final (true) system, compare against the cold control
-     (ballistic branch): two fixed points on the same grid = bistability;
-  4. ladder the sustained Sigma to coarser grids -> where the branch dies.
 """
 from __future__ import annotations
 

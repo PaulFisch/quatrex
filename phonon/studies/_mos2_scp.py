@@ -1,26 +1,4 @@
 """MoS2 SCP route: 4th-order refit + self-consistent phonons at T.
-
-The eta=0 film SCBA diverges because the cubic-only bubble softens the
-already-soft vdW interlayer modes without the quartic stiffening that
-stabilises real layered crystals at 300 K. This script produces the
-SCP-renormalised effective fc2(T):
-
-  1. refit the merged displacement batches with orders 2+3+4 -- the
-     production fit ([6.0, 4.0]) has NO quartic; the 4th-order cutoff
-     must span the vdW gap (cross-gap S-S 3.53 A), else the interlayer
-     stiffening is absent by construction. Gate: CV force RMSE must not
-     degrade vs the 3rd-order fit.
-  2. hiphive self_consistent_harmonic_model at T with the 4th-order
-     FCP as the force calculator (QM_statistics: quantum amplitudes).
-  3. gates vs EXPERIMENT: interlayer shear/breathing (bulk 2H-MoS2
-     Raman ~1.0 / ~1.7 THz at 300 K), no imaginary modes on the mesh,
-     c-axis acoustic bandwidth. Writes fcp_scp<T>.fcp + fc2 + a
-     0K-fit-vs-SCP comparison table.
-
-Run on a cluster node:
-  python phonon/studies/_mos2_scp.py \
-      --data <workdir> [<workdir_b> <workdir_c>] --out <outdir> \
-      [--c4 4.0 --temperature 300 --alpha 0.2 --n-iter 40 --n-struct 60]
 """
 from __future__ import annotations
 

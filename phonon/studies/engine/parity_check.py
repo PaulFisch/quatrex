@@ -1,18 +1,7 @@
 """Compare two engine run.npz snapshots on the physics observables.
 
-Backend-free (plain numpy): the parity gate between engine runs that must
-agree -- CPU vs GPU (QTX_ARRAY_MODULE), rank counts (bcs/qcs/stack), or
-comm backends. Cross-backend runs cannot be bit-identical (cuFFT/cuBLAS
-vs pocketfft/BLAS reorder reductions), so the gate is a relative
-tolerance on the observables plus the absolute conservation anchors
-carried inside each snapshot (iter_bubble_balance, lead balance).
-
+Compare two engine run.npz snapshots on the physics observables.
 Usage: python parity_check.py ref.npz other.npz [--rtol 1e-8] [--atol 0]
-Exit 0 iff every compared key agrees within tolerance.
-
-Caveat: at stack>1 the keys iter_heat and iter_sigma_max hold the rank-0
-frequency slice, not the full window -- compare those pairs only between
-runs with the same stack partition (bcs/qcs sweeps are fine).
 """
 import argparse
 import sys

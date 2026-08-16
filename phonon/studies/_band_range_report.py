@@ -1,35 +1,8 @@
 #!/usr/bin/env python
 """How many blocks the self-energy would need, measured on a real device.
 
-Hypothesis: ``sse_g_band`` is far shorter than the distance an anharmonically
-damped mode actually travels, and that is why the long-CNT band ladder brackets
-its answer by a factor 2.2 instead of converging
-(``document/src/results/64_gband.tex``).
-
-The test is a number rather than an argument. A damped mode's range is
-``xi = v_g / gamma`` in cells -- verified against the complex bands in
-``tests/quatrex/phonon/test_spatial_modal.py`` -- so with the group velocity
-from the harmonic dispersion and ``gamma`` from the pole census, the required
-band follows with no new calculation. ``exp(-b/xi)`` is then the fraction of a
-mode a boxcar of ``b`` blocks fails to remove.
-
-Falsifier: if the measured ranges come out at or below the bands in use, the
-truncation is a controlled approximation and the bracket has another cause.
-
-The stored keys ``[nx, ny, nz]`` are REAL-SPACE cell offsets on all three
-axes -- not a transport offset and two momentum indices, which is how the first
-version of this script read them. ``cm_channel.py`` reads the same file and
-sums over the transverse offsets to reach Gamma, which is what settles it. So a
-transverse momentum needs a Fourier sum,
-
-    D_n(q) = sum_{ny,nz} D[n, ny, nz] exp(i(q_y ny + q_z nz)),
-
-before the transport dispersion D(k; q) = D_0(q) + D_+1(q) e^{ik} + h.c. can be
-formed.
-
 Run:
-    python phonon/studies/_band_range_report.py \
-        cluster/sichk_base/dynamical_matrix.mat --gamma 0.16 --band 3
+    python phonon/studies/_band_range_report.py         cluster/sichk_base/dynamical_matrix.mat --gamma 0.16 --band 3
 """
 from __future__ import annotations
 

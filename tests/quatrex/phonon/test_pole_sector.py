@@ -139,16 +139,7 @@ def test_screening_rejects_a_grid_resolved_mode():
 
 
 def test_uncertifiable_poles_are_refused_not_promoted():
-    """A pole the corrector cannot certify must be rejected, not carried.
-
-    Built directly rather than by arranging for the corrector to fail: the
-    physical trust region now rescues the crude-seed case this used to rely on
-    (see ``test_physical_trust_region_rescues_a_crude_seed``), and a screen
-    test should not depend on a solver failure it no longer has.
-
-    Both acceptance modes are covered. ``locate`` refuses on the FREQUENCY
-    error, which is the physical question; ``residual`` is the legacy gate.
-    """
+    """A pole the corrector cannot certify must be rejected, not carried."""
     sec, sols, *_ = _run()
     good = sols[0]
     sep = sec.separations(sols)[0]
@@ -174,17 +165,7 @@ def test_uncertifiable_poles_are_refused_not_promoted():
 
 
 def test_physical_trust_region_rescues_a_crude_seed():
-    """A pole is a property of ``M(z)``, not of the storage grid.
-
-    ``trust_radius_cells * h`` ties the Newton search to the frequency grid,
-    so refining the grid shrinks the physical search domain -- and on a grid
-    ladder the sector then finds fewer poles on the fine rungs for a reason
-    unrelated to the poles. Measured here on the crude constant-linewidth
-    seeding, which is exactly the hard case:
-
-        radius 0.25 cells = 0.019 THz  ->  3 of 9 fail to converge
-        radius 0.5*min(sep, edge) = 0.53 THz  ->  0 of 9 fail
-    """
+    """A pole is a property of ``M(z)``, not of the storage grid."""
     freqs, d, delta, sizes = _bed(401)
     m_blocks, dm_blocks = _operator(d, freqs, delta, sizes)
     lam = np.linalg.eigvalsh(_dense_d(d, sizes))
@@ -358,13 +339,7 @@ def _context_run(nf=401, **cfg_kw):
 
 
 def test_refresh_agrees_with_the_manually_driven_operator():
-    """The operator context must build the same M(z) the manual route does.
-
-    The two routes seed differently, so the driver finds strictly more poles.
-    Where both converge they must agree to well within a linewidth -- that is
-    what pins the context assembly (block scatter, sparsity indices, contact
-    placement) against the direct dense construction.
-    """
+    """The operator context must build the same M(z) the manual route does."""
     state = _context_run().refresh()
     sec_man, sols, *_ = _run()
     manual = sec_man.build_clusters(sols)
@@ -383,14 +358,7 @@ def test_refresh_agrees_with_the_manually_driven_operator():
 
 
 def test_quasiparticle_seeding_beats_a_fixed_guess():
-    """The seed's linewidth cannot be a constant.
-
-    These linewidths are orders of magnitude below the grid spacing, so a fixed
-    guess is wrong by a comparable factor and starts the corrector outside the
-    basin. Seeding from the golden-rule estimate -- available from Delta alone,
-    since Im Sigma^R = Im Delta / 2 with no Kramers-Kronig half -- lands close
-    enough that every mode converges.
-    """
+    """The seed's linewidth cannot be a constant."""
     sec = _context_run()
     seeds = sec.harmonic_seeds()
     state = sec.refresh()
@@ -508,14 +476,7 @@ def test_a_lost_pole_set_triggers_a_reseed():
 
 
 def test_operator_reduces_a_frequency_resolved_contact_block():
-    """M(z) is ONE matrix, so the contacts must be sampled, not carried.
-
-    Regression from the first production run: ``obc_blocks.retarded[0]`` is
-    ``(n_freq, b, b)``, and passing it through unreduced assembled M at every
-    frequency at once. The bordered Newton then received a stack it could not
-    interpret. Holding the contact flat at the grid point nearest ``Re z`` is
-    the approximation ``set_operator_context`` documents.
-    """
+    """M(z) is ONE matrix, so the contacts must be sampled, not carried."""
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
@@ -571,17 +532,7 @@ def test_operator_reduces_a_frequency_resolved_contact_block():
 
 
 def test_hysteresis_survives_across_iterations():
-    """A promoted pole is judged at ``q_out``, not ``q_in``, next iteration.
-
-    Regression, and the cause of the sector's non-convergence: the promoted
-    set was stored as ``{id(sol)}``. ``bordered_newton`` builds a fresh
-    ``PoleSolution`` every iteration, so those CPython ids never matched and
-    the hysteresis was permanently disengaged -- every pole was screened at
-    the strict ``q_in``. Membership then churned between iterations (measured:
-    3 poles -> 0 -> 1 -> 0 over 25 SCBA iterations), which makes the
-    fixed-point map discontinuous and produces a limit cycle rather than
-    convergence. Identity across iterations must be carried by POSITION.
-    """
+    """A promoted pole is judged at ``q_out``, not ``q_in``, next iteration."""
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
@@ -643,13 +594,7 @@ def test_hysteresis_survives_across_iterations():
 # --- attributing a low promotion yield ------------------------------------- #
 
 def test_coverage_chain_separates_the_reasons_a_candidate_is_lost():
-    """"2/144" says the sector carries little; it does not say why.
-
-    A mode absent because the grid already resolves it, one absent because
-    Newton never reached it, and one absent because the representation was
-    refused need three different fixes. The chain is what tells them apart,
-    and each refusal must land in exactly one stage.
-    """
+    """"2/144" says the sector carries little; it does not say why."""
     from quatrex.phonon.pole_sector import PoleSectorState
 
     st = PoleSectorState()
@@ -700,16 +645,7 @@ def test_audit_reports_candidates_without_allocating_a_sector():
 
 
 def test_population_says_whether_there_is_anything_to_extract():
-    """Two ratios decide it, and both are physics rather than solver state.
-
-    Measured on the CNT bed at 300 K: median ``h/gamma = 1.35`` and median
-    ``gamma/spacing = 2.67`` with 85 % overlapping. At ``h/gamma = 1.35`` a
-    dw-weighted sum of point samples already carries 98-102 % of a
-    Lorentzian's total weight, so an exact cell average has nothing to
-    recover; and above ``gamma/spacing = 0.5`` no isolated simple pole exists
-    to be found. The low promotion yield there is the correct answer, not a
-    screening failure, and this is the number that says so.
-    """
+    """Two ratios decide it, and both are physics rather than solver state."""
     from quatrex.phonon.pole_keldysh import PoleCluster
     from quatrex.phonon.pole_sector import PoleSectorState
 
@@ -738,13 +674,7 @@ def test_population_says_whether_there_is_anything_to_extract():
 
 
 def test_the_grid_already_carries_a_barely_unresolved_line():
-    """Why ``h/gamma ~ 1.35`` means the sector has nothing to add.
-
-    The whole value of the pole treatment is that a dw-weighted sum of point
-    samples mis-weights a narrow line while an exact cell average does not.
-    That gap closes completely once the grid nearly resolves the line, and the
-    CNT bed sits there -- which is the real reason its promotion yield is low.
-    """
+    """Why ``h/gamma ~ 1.35`` means the sector has nothing to add."""
     w_max = 4000.0
     # A Lorentzian's tails are heavy: the weight outside +-w_max is
     # 2/(pi * w_max/gamma) exactly, and that -- not the method -- is the floor
@@ -771,17 +701,7 @@ def test_the_grid_already_carries_a_barely_unresolved_line():
 
 
 def test_extraction_only_reports_a_census_and_allocates_nothing(capsys):
-    """The mode exists to be pointed at an unknown bed safely.
-
-    Root finding and sector allocation fail for unrelated reasons (doc
-    Sec. 27), so the census has to be obtainable WITHOUT the sector: the ring
-    must see an empty pole set, and the run must therefore stay bit-identical
-    to the pole-free baseline while the numbers come out.
-
-    It is also the check that the mode is reachable at all. ``PoleSector.audit``
-    was written and then had no caller, which is the same defect as a metric
-    with no control -- it cannot be wrong, because it never runs.
-    """
+    """The mode exists to be pointed at an unknown bed safely."""
     sec = _context_run(extraction_only=True)
     state = sec.refresh()
 
@@ -801,17 +721,7 @@ def test_extraction_only_reports_a_census_and_allocates_nothing(capsys):
 
 
 def test_leg_weight_gate_is_exact_where_samples_per_halfwidth_is_a_guess():
-    """The resolution test in the units of the thing it decides.
-
-    ``q_omega = gamma/(p_Gamma h) < 1`` is a hand-chosen constant. The exact
-    statement is how much of the line's weight the grid can misrepresent,
-    worst case over where it falls between nodes, and it inverts in closed
-    form: ``h/gamma < 2 pi / log(1 + 2/eps)``.
-
-    It matters on real data. The CNT population at production mixing has
-    median ``h/gamma = 0.65``, where the grid carries the line to 1.3e-04 --
-    yet ``q_omega`` calls 140 of 144 candidates under-resolved.
-    """
+    """The resolution test in the units of the thing it decides."""
     freqs = np.linspace(0.0, 55.0, 181)
     sec = PoleSector(PoleSectorConfig(enabled=True), freqs)
     h = sec.h
@@ -832,12 +742,7 @@ def test_leg_weight_gate_is_exact_where_samples_per_halfwidth_is_a_guess():
 
 def test_leg_weight_gate_ships_on_and_the_legacy_rule_stays_reachable():
     """Since 2026-08-15 the exact gate is the default; 0 restores the legacy
-    ratio so earlier runs reproduce.
-
-    The two disagreed about a physics conclusion on the frozen Si census, not
-    merely about a threshold, which is why the default moved
-    (``pole_sector_observations.md`` Sec. 13.1).
-    """
+    ratio so earlier runs reproduce."""
     freqs = np.linspace(0.0, 55.0, 181)
     assert PoleSector(PoleSectorConfig(enabled=True), freqs).cfg.leg_weight_tol > 0.0
     base = PoleSector(
@@ -859,24 +764,7 @@ def test_leg_weight_gate_ships_on_and_the_legacy_rule_stays_reachable():
 
 
 def test_eps_z_gate_has_hysteresis():
-    r"""The ``eps_z`` acceptance gate must be lenient once a pole is promoted.
-
-    ``q_in``/``q_out`` had their gap from the start, but ``accept="locate"``
-    put ``eps_z <= locate_tol`` in FRONT of that gate as a single hard
-    threshold, and a hard threshold inside a fixed-point iteration closes a
-    feedback loop: the pole enters, its leg changes Sigma, ``eps_z`` drifts
-    past the threshold, the pole is demoted, Sigma changes back, the pole is
-    re-promoted.
-
-    Measured on Si (81 q, ``leg="congruence"``, ``h = 0.25``, run ``psi2``,
-    2026-08-14): the promoted set limit-cycled with period two between ~620
-    and ~460 poles for 34 SCBA iterations while the residual sat at O(1),
-    where the same bed with the sector off converged monotonically to
-    9.3e-04. The wall time alternated with it, 185 s against 85 s.
-
-    The older hysteresis test above cannot see this: it sets ``dz_est = 0`` so
-    that ``eps_z`` is identically zero and this gate never fires.
-    """
+    r"""The ``eps_z`` acceptance gate must be lenient once a pole is promoted."""
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
@@ -925,14 +813,7 @@ def test_eps_z_gate_has_hysteresis():
 
 
 def test_leg_weight_gate_has_hysteresis():
-    """``leg_weight_tol`` REPLACES the q_in/q_out branch, so it needs its own.
-
-    Setting ``leg_weight_tol`` takes the ``else`` branch away, and with it the
-    only hysteresis the resolution gate had. The inequality runs the other
-    way here than for ``eps_z``: this gate refuses a pole the grid already
-    resolves (``err <= tol``), so leniency for a promoted pole is a SMALLER
-    threshold.
-    """
+    """``leg_weight_tol`` REPLACES the q_in/q_out branch, so it needs its own."""
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
@@ -966,25 +847,7 @@ def test_leg_weight_gate_has_hysteresis():
 
 
 def test_a_rescan_adds_candidates_and_never_replaces_the_held_set():
-    r"""The period-two oscillator, as a gate.
-
-    ``_track`` calls ``tracker.update`` on a warm iteration and
-    ``tracker.adopt`` on a rescan; ``update`` arms a rescan whenever the
-    cluster count or a cluster size changes, and ``adopt`` disarms it. Since
-    membership moving is what changes those counts, a warm iteration always
-    arms the next rescan. While a rescan REPLACED the held set with the
-    harmonic spectrum, the sector therefore alternated between everything the
-    spectrum offers and whatever survived screening it -- period two, locked,
-    for as long as the run went on.
-
-    Measured on Si (81 q, h = 0.25, run ``siladder``): 650 <-> 485 poles over
-    150 iterations, with ``rel Sigma`` pinned at 2.5e-01 where the pole-free
-    arm converged to 9.3e-04. No threshold and no physics is involved -- it is
-    control flow -- which is why the ``locate_tol_out`` hysteresis could not
-    touch it.
-
-    So a rescan must be additive.
-    """
+    r"""The period-two oscillator, as a gate."""
     import numpy as np
 
     from quatrex.phonon.pole_sector import PoleSectorState
@@ -1039,20 +902,7 @@ def test_a_rescan_adds_candidates_and_never_replaces_the_held_set():
 
 
 def test_frozen_membership_holds_the_set_but_still_evicts_a_dead_pole():
-    """What ``freeze_membership`` must and must not do.
-
-    The promoted set is discrete and sits inside a fixed-point iteration, so
-    each pole entering or leaving moves Sigma by a finite amount and floors
-    ``rel Sigma``. Measured on Si after the seeding fix (``pfix150``):
-    membership jitters ~20 poles per iteration and ``rel Sigma`` holds a
-    3-5e-02 band against the pole-free arm's 9.3e-04, with excursions damping
-    back to that floor rather than through it.
-
-    Freezing must hold the SET without holding the physics: a member is
-    re-solved and kept even if a quality gate would now refuse it, a
-    non-member is not admitted, and a root that has stopped being a pole --
-    left the lower half plane, left the window -- is evicted anyway.
-    """
+    """What ``freeze_membership`` must and must not do."""
     import numpy as np
 
     from quatrex.phonon.pole_sector import PoleSectorState

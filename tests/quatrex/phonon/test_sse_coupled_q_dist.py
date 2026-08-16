@@ -181,13 +181,7 @@ def test_transverse_q_survives_block_parallel_transport() -> None:
 
 @pytest.mark.mpi(min_size=2)
 def test_internal_q_rotation_reproduces_the_replicated_result() -> None:
-    """A q-SECTIONED G must give the same Sigma as a replicated one.
-
-    This is the whole point of the rotation: the bubble is a convolution over
-    q, so a rank holding only its own internal slice cannot form even one
-    external momentum by itself. Leg B is passed around ``comm.q`` until every
-    ordered slice pair has been visited exactly once.
-    """
+    """A q-SECTIONED G must give the same Sigma as a replicated one."""
     whole = _run(block_comm_size=1, q_comm_size=global_comm.size)
     split = _run(block_comm_size=1, q_comm_size=global_comm.size,
                  q_distributed=True)

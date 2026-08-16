@@ -1,30 +1,8 @@
 """CNT observables atlas: every transport observable across the length ladder.
 
-Seven figures + a summary table over the eta=0 CNT campaigns, organised by
-the observables of document/src/theory/20_negf.tex (sub:negf_obs) and the
-conservation appendix:
-
-  1 atlas_ladder        G(L) [eq:G_thermal via eq:meir_wingreen], R(L),
-                        kappa_eff(L) = G L / A  (pi*d*h tube convention)
-  2 atlas_teff          effective transmission T_eff(w) [eq:T_eff] vs exact
-                        Bloch mode staircase M(w); spectral deficit
-  3 atlas_spectral_current  heat-current integrand + cumulative fraction
-  4 atlas_local         slab-resolved T_eff(i) [eq:Teff_local] + LDOS map
-                        [eq:dos]
-  5 atlas_conservation  energy ledger [eq:local_ledger] reconstruction,
-                        D(w) sum rule [eq:sumrule], per-rung conservation
-  6 atlas_stability     SCBA lead-current trajectories: g1/g2 divergence
-                        vs g3 / Bartlett-taper stability (eta=0)
-  7 atlas_tubes_T       conductance ratio r(T) [eq:cond_ratio] and
-                        r(length) at eta=0. NB the legacy (8,0) prod runs
-                        used eta=0.7 (pre-doctrine) and are EXCLUDED; an
-                        eta=0 (8,0) rerun is needed for any cross-tube
-                        comparison.
-
-Data: phonon/studies/out/cnt33_gband_length (L8/L10 x g1,g2,g3,g1t; full
-conservation keys), phonon/studies/out/cnt33_long_gband3 (L16/L24/L32),
-phonon/scripts/out/prod/cnt33_eta0 (L2-L4 + T-sweep anh/ball pairs),
-units_parity ballistic reference.
+Data:
+  Data: phonon/studies/out/cnt33_gband_length (L8/L10 x g1,g2,g3,g1t; full
+  conservation keys), phonon/studies/out/cnt33_long_gband3 (L16/L24/L32),
 
 Output: phonon/studies/out/fig/cnt33_atlas/ (png+pdf via style.save).
 Run:  python phonon/scripts/figures/cnt33_observables_atlas.py

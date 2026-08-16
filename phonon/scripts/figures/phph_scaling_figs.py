@@ -1,37 +1,10 @@
 """Production-scaling figures for results/90_scaling.tex (consolidated).
 
-Regenerates the four figures of \\cref{fig:res_phph_scaling,fig:res_phph_prod,
-fig:res_phph_memory}:
-
-  phph_scaling       -- earlier gather-based kernel: block vs energy/stack axis
-                        (Gamma-only conductors); 5.4x at 6 ranks on the block axis.
-  phph_q_scaling     -- earlier gather-based kernel: external-q communicator vs the
-                        replicated energy/stack axis; 6.6x at 8 ranks.
-  prod_phph_scaling  -- production kernel: per-phase profile (bubble = 99.8%) +
-                        strong scaling of the bubble (near-ideal stack to ~16 ranks).
-  phph_memory        -- dense vs streamed 3-phonon vertex peak memory vs N_q, with a
-                        measured tracemalloc point and the 80 GB single-GPU line.
-
-Data provenance
----------------
-* phph_scaling: wall times measured by the retired verify/phph_dist_scaling.py
-  (NBLK=6, BS=16, NE=96); literals recovered from
-  verify/plot_phph_scaling.py at commit 843c3069^.
-* phph_q_scaling: wall times measured by the retired verify/phph_q_dist_scaling.py
-  (4x4 transverse mesh) and the F22 replicated-stack measurement; literals
-  recovered from verify/plot_qresolved.py at commit 843c3069^.
-* prod_phph_scaling: bubble wall times read from
+Data:
   phonon/scripts/data/prod_scaling_results.csv (restored from
   prod/scaling_results.csv at commit 843c3069^; measured on the 256-core node,
-  1 thread/rank, --bind-to core). The per-phase profile literals are from the
-  same campaign (CNT(3,3) L=4 single-rank SCBA iteration), recovered from
-  prod/scaling_results.py at commit 843c3069^.
-* phph_memory: analytic O(N_q^2 n_dof^3) / O(N_q n_dof^2 dim_t + n_dof^3) curves;
-  the measured point is a tracemalloc run of the dense-vs-streamed Phi build
-  executed by this script (deterministic rng seed 0).
 
 Run:  python phonon/scripts/figures/phph_scaling_figs.py
-Figures -> document/fig/transport_sweeps/<name>.{pdf,png}
 """
 from __future__ import annotations
 

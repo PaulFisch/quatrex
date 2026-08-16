@@ -1,21 +1,7 @@
 """FC3 vertex compression by the CP/INDSCAL fit (fig:res_decomp_compression).
 
-  decomp_compression   left:  INDSCAL fit residual eps_R vs rank, with the 1%
-                              line that fixes the operating rank;
-                       right: vertex storage vs device length -- the factors are
-                              FLAT in device length (the fit is on the bulk FC3),
-                              while the dense q-folded vertex grows with it.
-
-The right panel is the structural argument for the decomposition and it is not a
-FLOP count: the dense q-fold is one npz per device length holding
-(7*n_slabs - 6) x N_q^2 blocks, and every MPI rank deserialises all of them. At
-L10 that is 1.56 GB in ~420k arrays -- the L10 dense reference never reached its
-first SCBA iteration because of it, while the factored legs converged in minutes.
-
-Data: eps_R and the file sizes are literals from the geometry build log
-      (cluster/sifilm-L10-geom/run.log), which reports the INDSCAL fit residual
-      per rank; the fits are cached on the BULK FC3 hash, so L3 and L10 get
-      byte-identical factor files.
+Data:
+  (cluster/sifilm-L10-geom/run.log), which reports the INDSCAL fit residual
 
 Run:  python phonon/scripts/figures/decomposed_sse_compression.py
 """

@@ -2,29 +2,10 @@
 taper crushes the low-frequency transmission, while the IR-occupancy
 subtraction (full physical Bose occupation) preserves the acoustic plateau.
 
-Reads ONLY saved data (phonon/studies/out/conv1e10/, sinw d5a L2, eta=1e-12,
-retarded=fft, 305/295 K, both ballistic i.e. vertex zeroed, both converged):
-
+Data:
+  Reads ONLY saved data (phonon/studies/out/conv1e10/, sinw d5a L2, eta=1e-12,
   sinw_d5a_L2_eta0_diag_ball.npz    lead occupancies multiplied by the
-      omega^2/(omega^2 + omega_reg^2) IR taper with ir_taper_cells = 5.891
-      -> omega_reg = 5.891*dw = 2.160 THz  (work/sinw_d5a_L2_eta0_diag/
-      quatrex_config.toml);
   sinw_d5a_L2_irsub2_smoke_ball.npz  sse_ir_subtraction = true: FULL physical
-      Bose occupation, no omega^2 taper (log: "IR occupation subtraction ON").
-
-No bare-Bose-without-either third variant exists in conv1e10 -- but the
-IR-subtracted run IS the full physical occupancy (the subtraction only acts
-inside the SSE bubble, which is zeroed here), so the two runs are exactly
-"physical occupancy" vs "omega^2-tapered occupancy".
-
-Effective transmission T(omega) = I(omega)/Delta n(omega) with the PHYSICAL
-Bose difference Delta n = n(omega,T_L) - n(omega,T_R) (same convention as
-_eta0_diag_plots.py / transmission_physicality.py; lead-averaged |I|).
-The d5a wire has N_ac = 4 acoustic channels (2 flexural + LA + twist) --
-the expected omega->0 plateau, marked as the dotted line (review fix: the
-old "(plateau)" y-label was vague; this is a transmission in channels).
-Right panel: the ratio T_taper/T_full against the analytic taper factor --
-the crushing is exactly the applied omega^2/(omega^2+omega_reg^2).
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/sinw_d5a_ballistic_plateau.py
 Figure -> document/fig/transport_sweeps/sinw_d5a_ballistic_plateau.{pdf,png}

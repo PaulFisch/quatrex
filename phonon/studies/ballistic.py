@@ -1,17 +1,4 @@
 """Direct Caroli ballistic conductance/transmission curves (d5a, d11a, cnt33).
-
-Pure harmonic NEGF: ``T(omega) = Tr(Gamma_L G^R Gamma_R G^A)`` via
-Sancho-Rubio surface Green's functions, with NO third-order force constants
-and NO bubble (unlike the SCBA transport sweep, whose ``--ballistic-only``
-still assembles the FC3 vertex). The ballistic transmission is temperature
-independent, so it is computed once per (wire, length) and integrated against
-every temperature weight for free. Reuses the exact conductance formula of
-``transmission_finite`` (phonon/solver/dense.py).
-
-CLI::
-
-    python -m phonon.studies ballistic run  [--wires ...] [--lengths ...]
-    python -m phonon.studies ballistic plot [--npz PATH]
 """
 
 from __future__ import annotations

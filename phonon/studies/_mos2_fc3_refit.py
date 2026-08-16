@@ -1,21 +1,6 @@
 """MoS2 fc3 refit: alternative fit methods on the existing displacement data.
 
-The production ARDR fit prunes every cross-gap (vdW) order-3 parameter
-to exact zero (the cluster space contains those orbits -- verified with
-an all-ones FCP). This study refits the SAME 40-structure [4,4,1] VASP
-data with non-sparsifying regressions and reports, per method:
-
-  - k-fold CV force RMSE (honest generalisation),
-  - cross-gap fc3 magnitude (max / Frobenius, [4,4,1] evaluation),
-  - fold-stability of the cross-gap signal (mean +/- std over folds:
-    consistent -> data-supported; scattered -> ARDR was right),
-  - inline fc2 gates (min/max frequency on a q-mesh, ASR residual).
-
-Per method it writes fcp_<method>.fcp and fc3_<method>.hdf5 (fc2+fc3,
-[4,4,1] supercell, thirdorder-compatible) for the finite_analysis CLI.
-
-Run: python phonon/studies/_mos2_fc3_refit.py \
-        --data cluster/mos2_refit/data --out cluster/mos2_refit
+Run: python phonon/studies/_mos2_fc3_refit.py         --data cluster/mos2_refit/data --out cluster/mos2_refit
 """
 from __future__ import annotations
 

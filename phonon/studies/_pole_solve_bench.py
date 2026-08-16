@@ -1,27 +1,7 @@
 """Micro-benchmark: what the pole solve costs, and whether it still loops.
 
-The pole sector cost 187 s per SCBA iteration on Si against the bubble's 7 s
-(job 4464697), and essentially none of it was arithmetic: the operator is
-block-tridiagonal with small blocks, so one solve is a few kFLOP. The time was
-Python-level call and kernel-launch overhead --
 ``phonon/docs/pole_solve_batching.md`` Sec. 0.
-
-So the number this reports is not wall time alone but **Python calls per
-candidate**. Wall time on a laptop says little about a GH200, where the same
-call count buys kernel launches instead of interpreter frames; the call count
-is the thing that has to fall by orders of magnitude rather than percent, and
-it is the thing that says whether the loop disappeared or merely moved.
-
-The second table is the one that matters for the device: it sweeps the number
-of candidates and reports calls per candidate. A batched solve does a
-CONSTANT amount of Python work per Newton step regardless of how many
-candidates are in flight, so that column must fall as the batch grows. If it is
-flat, something is still looping.
-
 Usage::
-
-    QTX_ARRAY_MODULE=numpy python phonon/studies/_pole_solve_bench.py
-    QTX_ARRAY_MODULE=numpy python phonon/studies/_pole_solve_bench.py --sizes 8,8,8,8
 """
 from __future__ import annotations
 

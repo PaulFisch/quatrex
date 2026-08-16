@@ -30,13 +30,7 @@ def _dev_pattern(p):
 
 
 def _configure_serial_comm() -> None:
-    """Configure the qttools comm singleton for serial DSDBSparse use.
-
-    The tests in this module exercise the production
-    :class:`SigmaPhononPhonon.compute` path, which constructs
-    DSDBSparse buffers and therefore needs the comm singleton in
-    place. Idempotent: re-configuration is a no-op once configured.
-    """
+    """Configure the qttools comm singleton for serial DSDBSparse use."""
     if _qtt_comm._is_configured:
         return
     backend = "device_mpi" if xp.__name__ == "numpy" else "host_mpi"
@@ -223,13 +217,7 @@ def _ref_compute_multiblock(
     dict[tuple[int, int], np.ndarray],
     dict[tuple[int, int], np.ndarray],
 ]:
-    """Independent multi-block dense reference for Sigma^{<,>,R}.
-
-    Full off-diagonal ring (NOT diagonal-G): each quad uses
-    ``G_a = G_{K1,K1'}`` and ``G_b = G_{K2,K2'}`` from the band dict.
-    Assembled from first principles so any change to the production
-    iteration is caught.
-    """
+    """Independent multi-block dense reference for Sigma^{<,>,R}."""
     n_blocks = len(block_sizes)
     ne = next(iter(gl_band.values())).shape[0]
     freqs = np.linspace(0.0, dw_thz * (ne - 1), ne)
@@ -324,15 +312,7 @@ def _ref_compute_multiblock(
 
 
 def test_compute_multiblock_matches_reference() -> None:
-    """Multi-block Σ_{IJ} parity for the refactored distributed bubble.
-
-    Pins the new ``SigmaPhononPhonon.compute()`` against an
-    independently-written multi-block reference. Exercises the FC3
-    block-pair index, the (K1, K2) accumulation, the Hilbert-derived
-    retarded SSE, and the per-block write-back path under
-    comm.block.size == comm.stack.size == 1 (the configuration
-    covered by the existing test infrastructure).
-    """
+    """Multi-block Σ_{IJ} parity for the refactored distributed bubble."""
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
     from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
@@ -524,14 +504,8 @@ def test_compute_restores_distribution_state() -> None:
 
 
 def _taper_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
-    """NN phi blocks, Hermitian-PSD-per-omega band G^{<,>}, and the
-    DSDBSparse buffers for a taper/causality test device.
-
-    The G inputs are the BT band of FULL Hermitian PSD matrices P(w)
-    (what the RGF hands the bubble): the causality theorem is about
-    M (.) P with the Bartlett M supported on that band, so PSD-ness of
-    the underlying full matrix is the correct premise.
-    """
+    """NN phi blocks, Hermitian-PSD-per-omega band G^{<,>}, and the DSDBSparse
+    buffers for a taper/causality test device."""
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
 
@@ -756,13 +730,7 @@ def _worst_neg(blocks, offs, N, ne, z):
 
 def test_bubble_psd_gamma_complete_band() -> None:
     """Theorem 1 at nq=1: PSD legs + a real, leg-exchange-symmetric vertex
-    give a PSD Sigma^{<,>} when NO band mask is active.
-
-    Two blocks is the largest device whose hard-wired output band
-    |I-J| <= 1 (sse_phonon_phonon.py:410) is complete, so this isolates
-    the congruence M (A x B) M^dagger from the masking of
-    test_taper_restores_causality_psd. See phonon/docs/bubble_positivity.md.
-    """
+    give a PSD Sigma^{<,>} when NO band mask is active."""
     ne, n_blocks, nbs = 15, 2, 3
     phi_blocks, _, _, block_sizes, offs, make_buffers = (
         _taper_fixture(n_blocks, nbs, ne))
@@ -807,17 +775,7 @@ def test_bubble_psd_broken_by_asymmetric_vertex() -> None:
 
 
 def test_bubble_psd_coupled_q_complete_band() -> None:
-    """Theorem 1 at nq>1 -- the case with no coverage before.
-
-    At coupled q the left vertex factor is CONJUGATED
-    (sse_phonon_phonon.py:1846-1848), so the congruence needs only the
-    q-carrying leg exchange
-
-        Phi(q2,q1)[(J,Kb,Ka)][a,d,b] = Phi(q1,q2)[(J,Ka,Kb)][a,b,d],
-
-    and NOT a real vertex. The fixture enforces exactly that and nothing
-    else, so a PSD result is evidence for the conjugation being right.
-    """
+    """Theorem 1 at nq>1 -- the case with no coverage before."""
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
 
@@ -966,17 +924,8 @@ def _ref_quad_scaled(phi_left, phi_right, G_a, G_b, dw_thz, scale):
 
 @pytest.mark.parametrize("g_band,n_blocks_par", [(1, 3), (2, 3), (3, 4)])
 def test_compute_coupled_q_matches_reference(g_band, n_blocks_par) -> None:
-    """Transverse-q (k>1) coupled-momentum SSE parity vs an independent
-    einsum oracle.
-
-    Pins the production ``SigmaPhononPhonon.compute()`` k>1 path (the
-    Phi-tilde(q,q') momentum convolution) against a hand-written
-    reference: for each external q_ext, Sigma(q_ext) = (1/N_q) sum_{q'}
-    ring[ Phi(q',q2), Phi(q2,q'), G(q')_{K1K1'}, G(q2)_{K2K2'} ] with
-    q2 = q_ext - q'. Random per-(iq1,iq2) vertices + a q_diff_map
-    exercise the q-indexing, the ring contraction and the 1/N_q prefactor
-    exactly; the (0,0) vertex defines the block-pair index.
-    """
+    """Transverse-q (k>1) coupled-momentum SSE parity vs an independent einsum
+    oracle."""
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
     from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
@@ -1138,17 +1087,7 @@ def test_coupled_q_greater_from_lesser_matches_six_ring(
     """Coupled-q (nq > 1) Sigma^> reconstruction A/B through the full
     ``compute()`` entry: ``sse_greater_from_lesser`` (4-ring bosonic tau
     fold + external q negation) == the legacy 6-ring path, on Sigma^< AND
-    Sigma^>.
-
-    The fold identity Sigma^>_IJ(q,tau) = Sigma^<_JI(-q,-tau)^T is
-    STRUCTURAL inside one compute() call (the reversed absorption legs are
-    built in-process from the very same gl/gg arrays), so the G bands are
-    arbitrary independent random -- no gl/gg relation is enforced. The one
-    INPUT condition is the vertex reality Phi(-q1,-q2) = conj(Phi(q1,q2))
-    (real real-space FC3; production qfold vertices satisfy it), enforced
-    here by symmetrising the random q-folded dict (the self-paired (0,0)
-    entry is made real). nq=3 so the q -> -q gather is actually exercised.
-    """
+    Sigma^>."""
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
 
@@ -1269,18 +1208,7 @@ def test_coupled_q_greater_from_lesser_matches_six_ring(
 @pytest.mark.parametrize("kernel", ["gram", "reconstruct"])
 @pytest.mark.parametrize("ansatz", ["INDSCAL", "CP"])
 def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
-    """Factored coupled-q kernel == dense path fed the SAME vertex.
-
-    Random per-leg factors with the physical TRS structure u(-q) = u(q)*
-    (Gamma blocks real); the dense q-folded dict is built FROM the factors
-    (``VertexFactors.reconstruct_block``), so the dense path (``qfold=``
-    injection, itself pinned against the hand-written reference above) and
-    the factored path (``vfactors=`` injection) compute the same bubble.
-    INDSCAL exercises the shared-leg Gram cache, CP the role-keyed two-Gram
-    branch; kernel="reconstruct" covers the rank-local dense-reconstruction
-    mode. G is random complex (non-TRS) -- kills any accidental g = g^T
-    assumption in the Gram pairing.
-    """
+    """Factored coupled-q kernel == dense path fed the SAME vertex."""
     g_band = 1  # these fixtures are band-1
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
@@ -1395,13 +1323,7 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
 
 
 def test_q_convolution_matches_explicit_q_diff_map_sum() -> None:
-    """The FFT circular convolution == the explicit q_diff_map double sum.
-
-    The factored kernel evaluates sum_{q'} Pa[q'] o Pb[q_ext - q'] by FFT. That
-    is only legitimate because ``build_q_diff_map`` is the circulant difference
-    map on the Gamma-centered mesh, so the sum is a genuine circular
-    convolution.
-    """
+    """The FFT circular convolution == the explicit q_diff_map double sum."""
     from quatrex.phonon.bubble_factored import _convolve_q
 
     nkx, nky = 4, 3
@@ -1435,13 +1357,7 @@ def test_q_convolution_matches_explicit_q_diff_map_sum() -> None:
 
 @pytest.mark.parametrize("ansatz", ["INDSCAL", "CP"])
 def test_compute_gamma_factored_matches_dense(ansatz) -> None:
-    """Factored kernel == dense ring at Gamma (nq == 1).
-
-    At the zone centre the momentum convolution is the identity, so what is
-    exercised here is the Gram collapse alone -- the regime of every
-    transversely-finite device (nanowires, CNTs), which the factored kernel
-    could not reach before.
-    """
+    """Factored kernel == dense ring at Gamma (nq == 1)."""
     g_band = 1  # these fixtures are band-1
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
@@ -1729,23 +1645,7 @@ def _run_coupled_q(bulk: bool, *, release: bool, share: str, seed: int = 11):
 
 
 def _assert_flag_is_inert(bulk: bool, ref, got, name: str) -> None:
-    """A memory flag must not move Sigma further than the backend itself does.
-
-    On numpy this is exact equality: the flag reorders nothing, so the bytes
-    match. On CuPy it cannot be, and that is not our arithmetic -- running
-    :meth:`SigmaPhononPhonon.compute` TWICE on the same bed, same settings,
-    same process already gives ~1e-13 relative differences in ~88% of the
-    entries (measured 2026-08-16 on an RTX A1000; the primitives are each
-    deterministic in isolation, so it is the ring's own launch decomposition).
-    Both tests failed from the commit that introduced them (bf4fdd31) for
-    exactly this reason and were reading the GPU's jitter as a flag defect.
-
-    So on CuPy the reference is the CONTROL -- the same run repeated -- and
-    the flag has to stay inside it. That still catches a flag that genuinely
-    changes the answer, which is the whole point, while asserting only what
-    the backend can deliver. The jitter is ~10 orders below the SCBA residual
-    floor (8e-03 on the lsM4 MoS2 rung), so it has no bearing on the physics.
-    """
+    """A memory flag must not move Sigma further than the backend itself does."""
     control = _run_coupled_q(bulk, release=False, share="off")
     exact = xp.__name__ == "numpy"
     for a, b, c in zip(ref, got, control):
@@ -1985,13 +1885,7 @@ def test_internal_q_slice_pairs_tile_the_convolution(nq, n_slices) -> None:
 
 @pytest.mark.parametrize("nq", [3, 5])
 def test_internal_q_reindexing_preserves_accumulation_order(nq) -> None:
-    """And the reindexing cannot reassociate a sum.
-
-    Distinct external momenta accumulate into distinct memory, and for a
-    fixed external momentum the internal ones still arrive ascending -- so
-    the whole-axis case is bit-identical to iterating the external momentum
-    outer, which is what the pre-rotation code did.
-    """
+    """And the reindexing cannot reassociate a sum."""
     qdm = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
     for q_lo, q_hi in ((0, nq), (1, nq - 1)):
         old = [(e, p) for e in range(q_lo, q_hi) for p in range(nq)]

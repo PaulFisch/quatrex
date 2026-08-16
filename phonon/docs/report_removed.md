@@ -55,11 +55,17 @@ broadening but the absolute values do.
 
 ## Not presented, and named as such
 
-The `mos2f3*` campaign: 39 jobs, close to 190 committed node-hours, every one
+The `mos2f3*` campaign: 43 ledger rows (39 distinct configs on disk), every one
 at `interaction_cutoff = 10 A` on a device longer than the cutoff, every one
-divergent. Results §7.4 states this explicitly rather than omitting it, because
-the ratio of that number to the 13.5 node-hours of the cutoff ladder that
-diagnosed it is the useful part.
+divergent. Results §7.4 states this explicitly rather than omitting it. It no
+longer quotes node-hours: Paul asked for the lesson without the accounting, and
+the figures that were there had been wrong in two ways -- "roughly 304 committed
+at submission" was a post-reset running total (the committed sum over all 222
+ledger rows is 545.83 nh, across three CSCS reconciliations), and "39 jobs" was
+a config count copied from `mos2_kappa_z_ladder.md`.
+
+Two `mos2f3*` sub-runs survive as data rather than as results: `mos2f3nu` feeds
+the grid-comb figure and `mos2f3b2` the harmonic ladder.
 
 ## Appendix removed entirely (2026-08-16, second pass)
 
@@ -96,3 +102,44 @@ contents no longer advertises it), and `phonon_solver.tex` /
 `finite_analysis.tex` (a documented package API parameter, each now stating
 it is zero in every calculation reported). `quatrex_doc.tex`'s worked config
 example had `phonon.eta = 0.45` and now has `0`.
+
+## Run families that were unrecorded, and their disposition (2026-08-16)
+
+An audit of the ledger against `document/src/results/` found 39 jobs whose
+outcome appeared in neither the report nor this file. Their disposition:
+
+### Now in the report
+
+| family | what it established | where |
+|---|---|---|
+| `tap*` (7 jobs, `tapT12b` on disk) | The triangular `interaction_cutoff_taper` is PSD at every radius, drives the worst occupation from -1.00 on 84.5 % of live bins to +2e-08 on none, **and the run still diverges**. The R = 30 control is decisive: applied to a support that already covers the device, i.e. to a converging model, the taper breaks it. Definiteness is necessary and not sufficient | results §3.1 |
+| `gl_*` (12 jobs) | The primary grid is ~7x finer than the observable needs; the auxiliary bubble grid is the expensive axis and is not converged (+10.20/+7.74/+4.36 % at `aux_dw` = 0.02/0.01/0.005); `sse_aux_restrict` moves the answer several per cent. Every ladder run in the report has the aux grid off | results §3.4 |
+| `srcoarse` / `speccoarse` (2 jobs) | `si4x2` runs clean under the spectral OBC at `ne = 141`, so the fine-grid divergence belongs to the grid and not the 2x2 blocking; Sancho-Rubio returns NaN at both spacings and so cannot be the independent arm | results §4.3 |
+| `mos2sood*`, `mos2L*n4{ball,scba}` (8 jobs) | Bed selection for the pole sector. Both reasons the layered material cannot test it -- the q-resolved beds run `retarded_method = "half"` where the sector needs `"fft"`, and their grids are fine enough that nothing is unresolved by construction | results §5.4 |
+
+### Probes with no separable result
+
+Recorded here rather than in the report, because each answered an engineering
+question inside another campaign and none is a finding on its own.
+
+- `mosreach*`, `mosr6b*` (4 jobs) -- `QX_GBAND` spatial-reach probes.
+- `mos2f4dense` (1 job) -- 4-cell dense-mask film; its row is in the
+  `mos2_kappa_z_ladder.md` mask audit.
+- `siDENSE`, `sireblk{,2,3}`, `si8kprobe` (5 jobs) -- dense/reblock/8k probes.
+- `pconv2`, `pnf` (2 jobs, 4.00 nh) -- **cancelled while pending and never
+  ran**; they are charged in the ledger because it charges submitted walltime.
+
+### Report claims whose raw data is no longer on disk
+
+Not a removal, but the provenance should be on the record:
+
+- results §7.3 (the memory scaling) rests entirely on five probes --
+  `lsM4probe`, `lsM6probe`, `lsM6probe16`, `lsM4q2`, `lsM6q2` -- whose run dirs
+  are gone. The numbers survive only in `sse_memory_scaling.md`.
+- `cvM6` (24 nh) is absent, but `cvM6b`, the run the ladder actually uses, is
+  present.
+- `sires4001`, `siladder`, `obcprobe`/`obc4k`/`obc8k2n`/`obcsr`/`obcfull`,
+  `cluster/bench-decomp`, `cluster/bench-legacy`, `cluster/l4bench`,
+  `cluster/filmq` are all referenced by a number in the report and absent from
+  disk; each figure generator carries the numbers as literals with the source
+  named in its module docstring.

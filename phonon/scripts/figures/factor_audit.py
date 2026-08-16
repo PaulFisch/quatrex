@@ -1,24 +1,10 @@
 """Vertex-factorisation audit figures (fig:res_factor_audit,
 fig:res_decomp_cons_postfix).
 
-  factor_audit          (a) INDSCAL fit error vs rank for the MoS2
-                        film and the Si film vertices, with the MoS2
-                        norm-weighted aggregate reconstruction points
-                        (aggregate ~ fit error = the convention chain
-                        is correct); (b) MoS2 per-offset-class
-                        reconstruction error at R=64/128: the
-                        transport-diagonal class follows the fit, the
-                        six cross-slab (vdW) classes stay at
-                        O(1) -- fit-noise, the weak-block failure.
-  decomp_cons_postfix   post-min-image conservation audit of the
-                        factored coupled-q SSE on the Si film (nk9,
-                        3-iteration bubble-balance identity, eta=0):
-                        balance residual and lead-to-lead heat vs
-                        rank against the dense reference.
-
-Data: phonon/scripts/data/factor_audit.npz, distilled by
-_extract_factor_audit.py from cluster/mos2decomp{2,3}/run.log,
-cluster/sifilmdecomp/run.log, cluster/sifilm_nk9r/run_*.npz.
+Data:
+  Data: phonon/scripts/data/factor_audit.npz, distilled by
+  _extract_factor_audit.py from cluster/mos2decomp{2,3}/run.log,
+  cluster/sifilmdecomp/run.log, cluster/sifilm_nk9r/run_*.npz.
 
 Run:  python phonon/scripts/figures/factor_audit.py
 """

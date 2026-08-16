@@ -1,75 +1,8 @@
-"""Numerical verification of the resonance / loop-gain theory of the
-phonon SCBA (thesis 40_scba.tex, sub:grid_resolution, eq:resolvent_gain).
+"""Numerical verification of the resonance / loop-gain theory of the phonon
+SCBA (thesis 40_scba.tex, sub:grid_resolution, eq:resolvent_gain).
 
-Runs on tortin against the stored jprobe Sigma snapshots (CNT(3,3),
-181-pt grid 0..55 THz, dw = 55/180 = 0.3056 THz, eta = 1e-12 i.e. the
-eta = 0 limit; NO broadening is added anywhere by this study). One NPZ
 per state under phonon/studies/out/resonance_gain/.
-
-Four demonstrations
--------------------
-1. spectra: rebuild G^R(omega) from the snapshot Sigma through the
-   PRODUCTION engine solver (same spectral OBC / system matrix /
-   z2 = omega^2 + 2i*eta*omega as the run that made the snapshot),
-   project the spectral function on the harmonic eigenmodes s of the
-   device dynamical matrix, A_s(omega) = -2 Im <s|G^R(omega)|s>
-   (thesis eq:spectral_mode with A = i(G^R - G^A)), and fit the
-   omega^2-Lorentzian A(omega) = 2 Z (2 Omega Gamma) /
-   ((omega^2-Omega^2)^2 + (2 Omega Gamma)^2) + c to every resolvable
-   peak. Independently, the half-width is read from the self-energy,
-   Gamma_s = -Im <s|Sigma^R(Omega_s)|s> / (2 Omega_s), split into the
-   anharmonic part (snapshot Sigma^R, BTD-banded as the Dyson solve
-   consumes it) and the lead part (OBC Sigma^R corners).
-2. kicks (L2_fp only): mode-diagonal perturbation
-   dSigma^R = amp * |s><s| on the three grid bins nearest Omega_s,
-   one engine Dyson re-solve (NO self-consistency), measure
-   ||dA_s|| / ||A_s|| (l2 over the grid) against the theory ratio
-   |dSigma| / (2 Omega_s Gamma_s). Two kick phases: amp*(-i)
-   (width-like) and amp*(+1) (pole-shift-like; the discretisation
-   mechanism of the theory acts on this one). Two amplitudes for
-   linearity.
-3. channels: bosonic full-axis extension of the engine G
-   (G^<_ij(-w) = G^>_ji(w), the engine's own fold; DC bin zeroed like
-   the production kernel), reference bubble through the dense kernel
-   phonon.solver.se_finite.compute_phph_self_energy_finite_multi_slab
-   with the ENGINE's vertex blocks (sse.phi_blocks) and prefactor
-   (0.5j hbar dw / 2pi), then the mode-pair channel decomposition:
-   with the mode-DIAGONAL approximation G^x ~ sum_s g^x_s |s><s|,
-   the bubble separates into scalar channels
-       Sigma^{x,(s1,s2)}_{s''}(w) = pref * K[s'',s1,s2]
-                                    * (g^x_{s1} (*) g^x_{s2})(w),
-   where K is the squared mode-basis vertex Phi~^2_{s'' s1 s2}
-   generalised to the slab-resolved quadratic form that carries the
-   kernel's g-band / sigma-band masks (the July snapshots were made
-   with the band-1 masked kernel; for L2 the band is complete).
-   Gates: (a) 'wiring': the kernel run on the exactly-mode-diagonal
-   G_test must equal the channel sum to rounding; (b) 'fixed point':
-   the kernel on the rebuilt G must reproduce the snapshot
-   Sigma^{<,>} on omega >= 0 (global sign recorded -- the engine
-   stores occupation-positive G/Sigma, the fold makes the bubble
-   even under the global <-> sign flip); (c) 'closure': channel sum
-   vs the full-G reference = the mode-off-diagonal error.
    Output: partial widths Gamma^{(s1,s2)}_{s''} =
-   -Im Sigma^{R,(s1,s2)}_{s''}(Omega_s'') / (2 Omega_s''), the
-   channel-fraction matrix and its row sums.
-4. gain: the theory's link-gain matrix (eq:resolvent_gain)
-       M[s'',s] = Omega_s'' * sum_{s'} (Gamma^{(s,s')}_{s''}
-                  + Gamma^{(s',s)}_{s''}) / (Omega_s Gamma_s)
-   (the two-term sum is the exact bilinear sensitivity of the channel
-   sum to mode s). Branch 'phys': Gamma_s = full physical width
-   (anharmonic + lead). Branch 'grid': each column multiplied by the
-   discretisation enhancement max(1, dw/Gamma_s) of the theory
-   (unresolved poles enter the discrete convolution with weight
-   sensitivity ~ dw/Gamma_s^2). Spectral radius over all modes /
-   sharp modes (Gamma < dw) / IR modes (Omega <= 2 THz), to be
-   compared with the measured power-iteration eigenvalues
-   (jp_* result.json): L2 fp 4.33/3.94, L2 stall 3.51/3.30,
-   L4 stall 5.07/4.75/4.15.
-
-Usage (tortin, single rank):
-    QX_ROOT=/usr/scratch/mont-fort11/pfischill/quatrex \
-    PYTHONPATH=$QX_ROOT/src:$QX_ROOT/phonon:$QX_ROOT \
-    python _resonance_gain_study.py --state L2_fp [--stages spectra,kicks,channels,gain]
 """
 from __future__ import annotations
 

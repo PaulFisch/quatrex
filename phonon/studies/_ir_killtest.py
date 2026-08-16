@@ -1,39 +1,10 @@
 """Kill-test for the exact-IR (residue) program: does the film vertex
 annihilate the divergent near-DC channel of the bubble legs?
 
-Measured fact (_ir_exponents.py): the ballistic film legs at q=Gamma go
-as G^{<,>} ~ -i C2/w^2 (even double pole, C2 plateau 5.43) with A ~ 1/w.
-A 1/w^2 even part is non-integrable, so the exact bubble integral is
-finite ONLY if the vertex contraction cancels that channel. Physically
-the channel is lead-driven uniform translation, and translation
-invariance (ASR) makes Phi annihilate it:  sum_j sqrt(m_j) Phi_{i,j,k}=0
-per Cartesian direction. This script MEASURES the cancellation on the
-real inputs:
-
- 1. assemble the Gamma-point transport blocks from
     cluster/mos2f3nu/dynamical_matrix.mat, dense-solve the ballistic
-    54-DOF device G (surface GF by decimation), and PARITY-CHECK
     against the recorded engine data (run_ballistic.npz);
- 2. verify the divergent channel's eigenvectors ARE the mass-weighted
-    translations (overlap with span{t_x,t_y,t_z});
- 3. measure the per-leg translation annihilation of the FULL 15-block
     vertex (cluster/mos2f3scp/fc3_blocks.hdf5 -- NOT the diagonal-only
-    nu build);
- 4. the decisive scaling: ring-contract (production index pairing,
-    bubble.py S[a,J] = Phi[a,c,e] Fa[c,b] Fb[e,d] Phi[J,d,b]) with one
-    leg at w'->0 (X1) and both legs at w'->0 (X2, fold partner
-    G^>(w')^T), and compare log-log slopes against the bare leg slopes
-    (-2 / -4).
-
-GO   : X1 gains >= 2 powers over bare (slope >= 0 - tol) -- the
-       integral is finite-by-cancellation; the quadrature program
-       (derivation note D3) proceeds.
-NO-GO: the contraction still diverges like the legs -- the exact
-       integral does not exist; stop and report (re-scope decision).
-
 eta: uses exactly the eta recorded in run_ballistic.npz (the branch
-infinitesimal of the production run) -- no new broadening is added.
-
 Run:  OMP_NUM_THREADS=1 python phonon/studies/_ir_killtest.py
 """
 from __future__ import annotations

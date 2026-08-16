@@ -1,25 +1,10 @@
-"""FC3 tensor-decomposition transport quality on the d11a nanowire (fig:res_decomp).
+"""FC3 tensor-decomposition transport quality on the d11a nanowire
+(fig:res_decomp).
 
-Two figures (method x rank vs the dense reference), from cached run data only:
-  d11a_decomp_ganh          anharmonic conductance vs FC3 parameter count
-  d11a_decomp_conservation  heat-flow conservation residual vs parameter count
-
-Data:  phonon/configs/sinw/reaps/sinw100_d11a_vasp_sc4/transport_quality/
-       transport_quality.csv
-Style: phonon/studies/style.py (unified).  Successor of the retired
-       phonon/scripts/verify/plot_report_new_figs.py::decomposition_figures()
-       (git 843c3069^), with the review-mandated improvements:
-  (a) ranks r=2/4/8/16 annotated on the mSVD and INDSCAL series;
-  (b) the negative-G mSVD rank-16 point drawn as an off-scale marker at the
-      axis edge with a "G<0" annotation (not silently clipped);
-  (c) legend entries for the X (conservation-violating) and open-circle
-      (collapsed-to-ballistic) markers;
-  (d) dense reference line labeled with its value;
-  (e) conservation panel annotates that the ~1e-8 collapsed-to-ballistic
-      points are trivially conserving (no anharmonic flow to conserve).
+Data:
+  transport_quality.csv
 
 Run:  python phonon/scripts/figures/d11a_decomposition.py
-Figures -> document/fig/transport_sweeps/d11a_decomp_{ganh,conservation}.{png,pdf}
 """
 from __future__ import annotations
 

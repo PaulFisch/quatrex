@@ -1,60 +1,21 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-r"""The leg the sectors should act on: a congruence, not a frozen remainder.
+r"""The leg the sectors act on: a congruence, not a frozen remainder.
 
-The pole split is applied to the RETARDED function, and the Keldysh components
-follow from it:
+The pole split is applied to the retarded function and the Keldysh components
+follow from it, so :math:`-i\tilde G^{\lessgtr}` is a congruence of a positive
+semi-definite matrix and is positive semi-definite at every frequency. That
+needs no accuracy from the pole model: a residue wrong by a factor of two is a
+worse approximation, never a wrong sign. The superseded reconstruction inverts
+at a 20 % residue error, and that inversion was the anti-damping.
 
-.. math::
-    \tilde G^R(\omega) = B^R_k + U D^R(\omega) V^\dagger, \qquad
-    B^R_k = G^R(\omega_k) - U D^R(\omega_k) V^\dagger,
+Grouped as :math:`G^R(\omega_k) + U[D^R(\omega) - D^R(\omega_k)]V^\dagger` the
+correction vanishes at the cell centre, so an empty pole set reproduces the
+grid solver bit for bit.
 
-.. math::
-    \tilde G^{\lessgtr}(\omega)
-        = \tilde G^R(\omega)\, \Sigma^{\lessgtr}_k\, \tilde G^A(\omega),
-
-with :math:`D^R_{\alpha\beta} = \delta_{\alpha\beta}/(\omega - z_\alpha)` and
-:math:`B^R_k`, :math:`\Sigma_k` the stored grid samples, frozen across cell
-``k``.
-
-Two properties, and both are the reason for the rewrite.
-
-:math:`-i\tilde G^{\lessgtr} \succeq 0` at **every** frequency, because it is a
-congruence :math:`\tilde G^R (-i\Sigma) \tilde G^{R\dagger}` of a PSD matrix.
-It needs no accuracy from the pole model: a residue wrong by a factor of two
-gives a worse approximation but never a wrong sign. The superseded
-reconstruction :math:`P^{\lessgtr}(\omega) + [G^{\lessgtr}(\omega_k) -
-P^{\lessgtr}(\omega_k)]` inverts at a **20 %** residue error
-(``test_pole_subcell.py``), and that inversion is the anti-damping.
-
-The reconstruction is EXACT at the cell centre. Grouped the other way,
-:math:`\tilde G^R(\omega) = G^R(\omega_k) + U[D^R(\omega) - D^R(\omega_k)]
-V^\dagger`, the correction vanishes at :math:`\omega_k`, so an empty pole set
-reproduces the grid solver bit-for-bit rather than approximately.
-
-Expanding the congruence gives the four bubble sectors as an identity,
-
-.. math::
-    \tilde G^{\lessgtr} =
-      \underbrace{B^R_k \Sigma B^A_k}_{RR}
-    + \underbrace{U D^R(\omega)\,[V^\dagger \Sigma B^A_k]}_{SR}
-    + \underbrace{[B^R_k \Sigma V]\, D^A(\omega) U^\dagger}_{RS}
-    + \underbrace{U D^R(\omega)\,[V^\dagger \Sigma V]\, D^A(\omega)
-                  U^\dagger}_{SS},
-
-each in a category the existing quadratures already handle -- ``SS`` by
-analytic residues, ``SR``/``RS`` by the cell resolvent, ``RR`` by the FFT
-ring. The redesign changes the COEFFICIENTS the sectors carry, not the
-quadratures, which review Sec. 9 showed were mutually consistent all along.
-
-Against the superseded code the differences are that the regular leg is the
-retarded background :math:`B^R_k` -- whose ring :math:`B^R_k \Sigma B^A_k` is
-PSD by congruence, where :math:`G^{\lessgtr} - G_{PP}^{\lessgtr}` was
-indefinite -- and that the sample subtracted from the ring must cover ``SR``
-and ``RS`` too, not only ``SS``. Those two terms are FIRST order in the pole
-while the retained one is second, so away from resonance they dominate exactly
-what was being dropped.
-
-See ``phonon/docs/pole_scba_divergence.md`` Sec. 3.3b.
+Expanding the congruence gives the four bubble sectors as an identity --
+``SS`` by analytic residues, ``SR``/``RS`` by the cell resolvent, ``RR`` by the
+FFT ring -- so the split changes the coefficients the sectors carry, not the
+quadratures.
 """
 from __future__ import annotations
 

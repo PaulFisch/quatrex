@@ -1,30 +1,8 @@
 """Build a NON-UNIFORM phonon frequency grid for phonon.frequency_grid="file".
 
-Flat phonon bands produce a comb of narrow, well-separated Lorentzians;
-a uniform grid resolving the narrowest width Gamma over [0, fmax] wastes
-~(1 - sum_s Gamma_s / fmax) of its points on empty gaps. This script
-concentrates the points on the mode frequencies instead: the target
-point DENSITY is a background floor plus a Lorentzian comb,
-
-    rho(omega) = 1/max_spacing
-               + sum_s (pts_per_line / pi) * w_s / ((omega-omega_s)^2 + w_s^2),
-
-capped at 1/min_spacing, and the grid points equidistribute its CDF
-(each line receives ~pts_per_line points; the spacing at a line centre
-is ~pi*w_s/pts_per_line). The result is written as phonon_energies.npy
-for the engine (pair with --freq-grid file and an auxiliary bubble grid
---aux-dw/--aux-fmax; the FFT convolution itself stays uniform).
-
-Mode-frequency sources (exactly one):
-  --modes FILE   .npy/.txt list of mode frequencies (THz)
   --npz FILE     previous run.npz: peaks of the DOS -Im Tr G^R
-  --dyn FILE     device dynamical matrix (THz^2): eigenfrequencies
                  (best effort: .npy/.npz/.mat with a square array)
-
-Example (a-posteriori refinement from a converged coarse run):
-  python phonon/studies/make_grid.py --npz out/base/run.npz \
-      --fmax 34 --width-thz 0.05 --pts-per-line 12 \
-      --out work/phonon_energies.npy
+  python phonon/studies/make_grid.py --npz out/base/run.npz       --fmax 34 --width-thz 0.05 --pts-per-line 12       --out work/phonon_energies.npy
 """
 
 from __future__ import annotations

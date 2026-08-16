@@ -33,13 +33,7 @@ def _spectral(omega, z, residue=1.0):
                                               (0.4, 0.4)])
 def test_a_passive_pole_carries_positive_spectral_weight(omega_pole, gamma):
     r"""The convention is :math:`e^{-i\omega t}`, so a decaying mode sits at
-    :math:`z = \Omega - i\gamma` with :math:`\gamma > 0`.
-
-    Under the opposite time convention the same physical mode would sit in the
-    UPPER half plane, and the spectral function built from it comes out
-    negative everywhere -- an unphysical density of states, which is what makes
-    this a test of the convention and not of arithmetic.
-    """
+    :math:`z = \Omega - i\gamma` with :math:`\gamma > 0`."""
     z = complex(omega_pole, -gamma)
     sol = _sol(z)
     assert sol.is_passive
@@ -89,14 +83,9 @@ def test_the_named_widths_agree_with_the_raw_imaginary_part():
 
 
 def test_the_resolution_gate_consumes_the_half_width():
-    r"""``leg_weight_error`` is :math:`2/(e^{2\pi h^{-1}\gamma \cdot 2\pi/...}-1)`
-    in the variable :math:`r = h/\gamma`, with ``gamma`` the HALF width.
-
-    Pinned through the closed-form inversion :math:`h/\gamma <
-    2\pi/\log(1+2/\epsilon)`: at exactly that ratio the error equals the
-    tolerance. Passing the full width instead lands on a different ratio and
-    the identity fails, which is the failure this test exists to catch.
-    """
+    r"""``leg_weight_error`` is :math:`2/(e^{2\pi h^{-1}\gamma \cdot
+    2\pi/...}-1)` in the variable :math:`r = h/\gamma`, with ``gamma`` the
+    HALF width."""
     from quatrex.core.config import PoleSectorConfig
     from quatrex.phonon.pole_sector import PoleSector
 
@@ -146,15 +135,7 @@ def test_finite_support_matches_the_infinite_formula_where_the_line_is_unresolve
 
 
 def test_a_resolved_line_floors_on_the_endpoint_term_not_on_the_pole():
-    r"""The two formulas stop agreeing once the grid carries the line.
-
-    Truncation cancels in the ratio, so what survives is the Euler-Maclaurin
-    endpoint term :math:`O(h^2 f')` at the ends of the support. It does not
-    vanish as the pole becomes well resolved, so the finite statement bottoms
-    out about two orders above the infinite one. Both still say "resolved" --
-    the point is that they say it for different reasons, and only the
-    unresolved regime is where they may be used interchangeably.
-    """
+    r"""The two formulas stop agreeing once the grid carries the line."""
     sec = _sector()
     inf_, fin = sec.leg_weight_error(0.4), sec.leg_weight_error_finite(0.4, 10.0)
     assert inf_ < 1e-8
@@ -188,16 +169,7 @@ def test_a_broad_line_at_the_edge_loses_weight_the_interior_test_cannot_see():
 
 
 def test_a_narrow_line_at_the_edge_is_relatively_better_carried():
-    r"""The inversion the finite statement exists to expose.
-
-    A line whose centre sits outside, or barely inside, the support has most of
-    its weight off the grid. The weight that IS represented is then carried
-    well in relative terms, so ``E_finite`` is small exactly where
-    ``E_leg^max`` is largest. That is a real statement about the represented
-    weight and NOT a licence to leave the pole on the grid: the in-band
-    lineshape is still mis-registered. It is why this is reported as a census
-    column rather than wired as a refusal.
-    """
+    r"""The inversion the finite statement exists to expose."""
     sec = _sector()
     gamma = 0.0252
     assert sec.leg_weight_error(gamma) > 0.5            # badly under-resolved
@@ -213,14 +185,7 @@ def test_finite_support_refuses_a_non_positive_width():
 # --- the census must not be written by every rank --------------------------- #
 
 def test_the_census_prints_on_one_rank_only(monkeypatch, capsys):
-    """Four ranks writing the same report to one stdout interleave mid-word.
-
-    Job 4479538 came back with rows like ``gamma [THz]    gamma [THz]
-    min/p25/...`` because every rank computes the same poles -- by construction,
-    that is the invariant -- and every rank printed them. ``_census_over_q``
-    already guards the ``q (...)`` header it emits, so the log carried 14
-    headers against 179 bodies.
-    """
+    """Four ranks writing the same report to one stdout interleave mid-word."""
     import quatrex.phonon.pole_sector as ps
 
     rows = [{"z": 3 - 0.01j, "gamma": 0.01, "separation": 1.0, "chi": 0.01,
@@ -256,14 +221,7 @@ def test_an_empty_census_is_also_silent_off_rank_zero(monkeypatch, capsys):
 # --- the shipped resolution gate is the exact one --------------------------- #
 
 def test_the_exact_line_weight_gate_is_the_default():
-    """It defaulted to 0 -- the legacy ratio -- until 2026-08-15.
-
-    On the frozen Si census the two rules disagreed about the physics
-    conclusion: the ratio reported the narrow population as surviving
-    self-consistency (under-resolved 95.5 % -> 95.1 %) while the exact rule
-    reported the median line going from unrepresentable to carried at 3 %.
-    A default that can invert a physics answer is not a threshold preference.
-    """
+    """It defaulted to 0 -- the legacy ratio -- until 2026-08-15."""
     from quatrex.core.config import PoleSectorConfig
 
     cfg = PoleSectorConfig()
@@ -274,13 +232,7 @@ def test_the_exact_line_weight_gate_is_the_default():
 
 
 def test_the_default_tolerance_splits_the_population_where_the_census_did():
-    r"""0.05 promotes the tail and leaves the median mode on the grid.
-
-    Pinned against the converged Si census numbers (Sec. 13): a median line at
-    ``E_leg^max = 0.0314`` must be refused as grid-carried, and the typical
-    worst line at 3.56 must be promoted. A default that failed either would be
-    carrying a different population than the measurement described.
-    """
+    r"""0.05 promotes the tail and leaves the median mode on the grid."""
     from quatrex.core.config import PoleSectorConfig
     from quatrex.phonon.pole_sector import PoleSector
 
@@ -327,12 +279,7 @@ def test_lead_band_edges_match_the_monatomic_chain_closed_form():
 
 def test_lead_band_edges_finds_both_branches_of_a_diatomic_chain():
     r"""Two masses give an acoustic and an optical branch with a gap between
-    them, so a correct sampler returns FOUR edges, not two.
-
-    Taking only the global min and max would report ``[0, omega_max]`` and
-    silently lose the gap -- and the gap edges are exactly the branch points a
-    pole must not be fitted through.
-    """
+    them, so a correct sampler returns FOUR edges, not two."""
     from quatrex.phonon.pole_sector import lead_band_edges
 
     k_s, m1, m2 = 1.0, 1.0, 3.0

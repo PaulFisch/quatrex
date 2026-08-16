@@ -30,13 +30,7 @@ from test_pole_sector import _bed, _h, _sparse_indices              # noqa: E402
 
 
 def _sector(scale=1.0, nf=401):
-    r"""The ``_context_run`` bed with ``Delta`` scaled by ``lambda``.
-
-    The continuation is linear in ``Delta``, so scaling it IS scaling
-    :math:`\Sigma_s^R`, which is what :math:`\lambda_j` means in Eq. (10).
-    There are no contacts on this bed, so the anharmonic channel is the only
-    thing that can give a pole a width.
-    """
+    r"""The ``_context_run`` bed with ``Delta`` scaled by ``lambda``."""
     freqs, d, delta, sizes = _bed(nf)
     d_ii, d_ij, d_ji = d
     sizes = list(sizes)
@@ -62,13 +56,7 @@ def _solved(sec, seeded=None):
 
 
 def test_sensitivity_is_the_first_derivative_of_the_pole_location():
-    """Finite difference against a re-solve at the perturbed coupling.
-
-    The predicted shift must be first order: halving nothing and taking the
-    step down a decade has to take the error down a decade with it. A constant
-    error would mean the contraction is picking up the right magnitude for the
-    wrong reason.
-    """
+    """Finite difference against a re-solve at the perturbed coupling."""
     sec = _sector()
     sols, seeded = _solved(sec)
     assert len(sols) > 3, "bed found too few poles to be a test"
@@ -88,15 +76,7 @@ def test_sensitivity_is_the_first_derivative_of_the_pole_location():
 
 
 def test_the_anharmonic_channel_accounts_for_the_whole_width_without_contacts():
-    r"""``gamma^sens = -Im dz/dlambda`` against ``gamma = -Im z``.
-
-    This bed has no contacts, so anharmonic scattering is the only channel that
-    can broaden a mode, and the one sensitivity must come back carrying the
-    entire half width. It is the physical check the finite difference cannot
-    make: a contraction with a transposed or conjugated factor would still
-    converge first order against its own re-solve while reporting a width that
-    has nothing to do with the pole.
-    """
+    r"""``gamma^sens = -Im dz/dlambda`` against ``gamma = -Im z``."""
     sec = _sector()
     sols, _ = _solved(sec)
     sens = sec.sensitivities(sols)

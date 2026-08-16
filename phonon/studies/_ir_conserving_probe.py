@@ -1,26 +1,6 @@
-"""Step 1 (math gate): is the residue-subtracted 3-phonon bubble CONSERVING and
-MORE accurate than the bare FFT bubble -- and how big is the correction for a
-realistic (bounded, no-clean-pole) device G^<?
-
-The conserving identity the production solver checks (scba.py:_phonon_bubble_
-energy_balance) is, on a symmetric grid through omega=0 with the bosonic fold
-G^<(-w)=G^>(w):
-
-    C = sum_w  w * [ Sigma^<(w) G^>(w) - Sigma^>(w) G^<(w) ]  ==  0 ,
-
-with Sigma^<>(w) = sum_w' G^<>(w') G^<>(w-w') dw'  (the bubble of the SAME G).
-
-We compare three bubbles:
-  bare   : plain discrete convolution of G (what conserves to ~roundoff today).
-  taper  : convolution of a omega^2-tapered G (conserves, but biased near DC).
-  ressub : DATA-DRIVEN residue-subtracted quadrature -- extract R=lim w'G(w')
-           from G itself, subtract the R/w' pole, trapezoid the regular part,
-           add the analytic PV (R * 0 on a symmetric grid).  Must (a) conserve
-           and (b) match the fine-grid reference better than bare/taper.
-
-Two G models:  (1) genuine pole  G^< ~ P/w (R=P, to exercise the machinery),
-               (2) realistic bounded G^< = -i n A with A~A'(0)w odd (R->0, as
-                   the real device data show: |G^<| bounded near DC).
+"""Step 1 (math gate): is the residue-subtracted 3-phonon bubble CONSERVING
+and MORE accurate than the bare FFT bubble -- and how big is the correction
+for a realistic (bounded, no-clean-pole) device G^<?
 
 Run:  OMP_NUM_THREADS=1 python phonon/studies/_ir_conserving_probe.py
 """

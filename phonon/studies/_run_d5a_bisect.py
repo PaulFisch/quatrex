@@ -1,42 +1,7 @@
 """d5a eta=0 divergence bisection: surgical frequency ablation (nf181).
 
-The raw d5a eta=0 SCBA diverges at every grid; the freeze-mask variant
-diverged EARLIER with the driver relocating to the last live bin below the
-cut, and its trace shows GLOBAL in-band spectral collapse while Sigma pumps
-to 1e17 in two-phonon-gap territory (through the global KK Re Sigma^R).
-This driver runs the ablation DECISION TREE with the sse_zero_bands_thz
-diagnostic knob (everything else raw, eta=1e-12, fft, linear 0.1):
-
-  ircut     sse_low_freq_mask_thz=1.5 -- kills the sub-grid soft-mode /
-            IR Bose seed (d5a twist modes at 0.0075-0.027 THz sit 20-50x
-            below the first bin with 1/omega occupancy)
-  gapzero   zero-bands [[28, 45]]   -- the freeze-run driver window
-  flatzero  zero-bands [[16.5, 28]] -- the flat Si-H bending region
-  ir+gap / ir+flat / ir+gap+flat    -- combinations (queued after singles)
-
-SCHEMA DRIFT (2026-08-10). Two knobs this driver was written against were
-removed from `PhononConfig` (see MISSING.md item 2), and `PhononConfig` is
-`extra="forbid"`, so nothing here ran as written:
-
-  * `sse_low_freq_cutoff_thz` -> replaced by `sse_low_freq_mask_thz`, which
-    has identical semantics (zero the bubble legs and outputs below omega_c;
-    masked bins keep their ballistic Dyson/transport content). The `ircut`
-    arms are migrated to it and the recorded verdict stands.
-  * `sse_zero_bands_thz` -> REMOVED with no replacement. The band-ablation
-    arms (gapzero/flatzero and the ir_* combinations) cannot be rerun until
-    that diagnostic is reintroduced; they are refused rather than silently
-    executed as an unablated run. Their recorded verdicts in
     `phonon/docs/d5a_eta0_bisection.md` document stored data.
-
-The stored template config also still carries the dead keys, so it is
-stripped here before use -- the current defaults ARE the fully-raw recipe.
-
-Each run prints an automatic divergence-localization table on exit (top
-growth bins vs the flat bands). Verdict = survives 150 iterations vs abort
-iteration + where the driver moved.
-
-Run:  nohup python phonon/studies/_run_d5a_bisect.py > \
-          phonon/studies/out/d5a_bisect/bisect.log 2>&1 &
+Run:  nohup python phonon/studies/_run_d5a_bisect.py >           phonon/studies/out/d5a_bisect/bisect.log 2>&1 &
 """
 from __future__ import annotations
 

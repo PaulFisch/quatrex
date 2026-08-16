@@ -1,18 +1,5 @@
 """Report-overhaul gap runs (sequential; respects run_one's live-rank guard).
 
-1) d11a L2 eta=0 soft-mode PROBE, relaunched at 8 ranks x 16 ring threads.
-   The 128-rank/ring-1 launch memory-thrashed (iteration-0 bubble 98379 s vs
-   ~9 min/iter for the LARGER cnt80 L3): 128 x per-rank bubble workspace on the
-   dense 315 MB d11a FC3 exceeds RAM. The d11a block size (135) is squarely in
-   the ring-pool's validated regime, so few ranks x many threads is the right
-   shape. Same physics recipe as the first probe (gentle linear + smooth
-   window + grid eta-floor).
-
-2) cnt80 L3 eta=0 FULL run with the probe-validated soft-mode kit (the 60-iter
-   probe descended 1.0 -> 3.8e-3, best lead-cons 1.8e-3): same recipe, full
-   iteration budget.
-
-Run (background, after node hygiene):
   nohup python phonon/studies/_gapruns.py > phonon/studies/out/conv1e10/_gapruns.log 2>&1 &
 """
 from phonon.studies import _conv1e10 as cv

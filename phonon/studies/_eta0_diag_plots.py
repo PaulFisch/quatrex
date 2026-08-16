@@ -1,27 +1,5 @@
 """Diagnostics for the sinw-d5a eta=0 SCBA fluctuation.
 
-d5a (the soft-twist SiNW) does NOT reach a genuine eta=0 fixed point (RPM
-diverges |lam| 28->200, JFNK stalls). These figures localise WHY / WHERE in
-frequency the iteration fluctuates:
-
-  bands        phonon dispersion Gamma->Z up to the band-top (which modes exist
-               and where the heat-carrying / Si-H bands sit).
-  convergence  the SCBA residual / lead-balance / bubble-balance history.
-  spectral     per-frequency, per-iteration overlays of
-                 - the Green's function fed INTO the bubble (-Im Tr G^R, a DOS),
-                 - the RAW vs WINDOWED G^< actually convolved (what the eta=0
-                   smooth window removes),
-                 - the SSE magnitude |Sigma(omega)|,
-                 - the G^R DOS resulting AFTER the Dyson re-solve (= next iter
-                   input),
-               for a spread of iterations -- this is what reveals the limit
-               cycle and the omega-bins where it lives.
-
-The `spectral` / `convergence` panels read the diagnostic npz + log produced by
-the instrumented run (engine/run.py: iter_gin_dos / iter_graw_w / iter_gwin_w /
-iter_sigR_w / iter_sigL_w + sse_window). `bands` is pure post-processing of the
-canonical FC2 and needs no run.
-
 Run:  OMP_NUM_THREADS=1 python -m phonon.studies._eta0_diag_plots [bands|diag|all]
 """
 from __future__ import annotations

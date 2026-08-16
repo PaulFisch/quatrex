@@ -1,31 +1,7 @@
-"""Distributed banded RGF on long CNT (3,3) chains: parity, scaling, and
-the L16/L24/L32 eta=0 physics push.
+"""Distributed banded RGF on long CNT (3,3) chains: parity, scaling, and the
+L16/L24/L32 eta=0 physics push.
 
 Phases (all idempotent -- a rung with run.npz / bench.json is skipped):
-
-  A. PARITY -- L8, g_band=3, 25 iterations, bcs=1 vs bcs=2 on identical
-     configs. The distributed off-diagonal post-pass must reproduce the
-     single-node trajectory (iter_heat / lead current to ~1e-8); L8_g3
-     converged at bcs=1 (lead 47.36), so any drift is a solver bug, not
-     physics.
-  B. BENCH -- L16, g_band=3, 4 iterations per point on the grid
-     (bcs, nranks, mpi bind) in {1,2,4} x {64,128} x {core,numa}; wall
-     seconds/iteration recorded to bench.json. Also answers the
-     socket-mapping question (64 ranks + --map-by core may pack one
-     socket of the 2x64-core EPYC).
-  C. PHYSICS -- L16 -> L24 -> L32, eta=0, g_band=3, bare contacts,
-     support-complete KK (aux_fmax=88), nf=361, max_iter=600, using the
-     fastest bench configuration. Plus a bartlett taper-1 rung at each
-     length (cheap causal-band-1 control, also exercises the distributed
-     tapered band-1 path at bcs=2). A divergence is a RESULT (eta=0
-     always; no smearing).
-
-Inputs are tiled on demand from cnt33_L8_inputs via _tile_device_inputs
-(bit-exact translation-invariance gate inside).
-
-Run (cluster, one node):
-    python phonon/scripts/tortin.py launch --name longg3 -- \
-        python phonon/studies/_run_cnt33_long_gband3.py
 """
 from __future__ import annotations
 

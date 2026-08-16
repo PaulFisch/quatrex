@@ -1,17 +1,5 @@
 """Results 2: ballistic conductance of the two silicon nanowires.
 
-G(T) at one transport cell for d5a and d11a, with their ratio inset. The
-length panel of the predecessor figure is gone: its decay with length was a
-coherence attenuation set by the broadening of that sweep, not physics, and
-the unbroadened calculation is length-independent (sub:res_coherent_film).
-
-CAVEAT, carried as a \\todo in the text: the archived sweep behind this
-figure was computed at a finite broadening (eta_factor 0.3). The ratio and
-the shape are robust to it; the absolute conductance is not fully. It cannot
-be regenerated on this machine because the third-order inputs it loads are
-not local -- `phonon/studies/ballistic.py` now takes --eta-factor 0 for
-whoever has them.
-
 Run:  python phonon/scripts/figures/r2_ballistic_wires.py
 """
 

@@ -1,23 +1,7 @@
 """Compare g_band = 1, 2, 3 on the longer CNT (3,3) chains (L8, L10).
 
-Does a wider inner-G self-energy band cure the eta = 0 divergence? For each
-(length, g_band) rung produced by _run_cnt33_length_gband.py this reports the
-convergence status and the two lead-balance diagnostics that the conservation
-derivation (theory, sub:energy_conservation) ties together:
-
-    lead_current   0.5(|J_L| + |J_R|)                the physical conductance
-    |dJ|/|I|       |I_{N,N+1} - I_{0,1}| / |I_lead|  current-continuity break
-    |J_s|/|I|      |sum_w (P_out - P_in)| / |I_lead|  bubble-conservation break
-
-g_band raises the self-energy completeness: 1 = tridiagonal-masked (non-causal
-gain on interior slabs), 2 = diagonal Sigma exact/causal, 3 = first
-off-diagonal Sigma exact/causal too. If the divergence is a causality
-artifact, the breaks should shrink and convergence should improve with g_band.
-
-    python phonon/scripts/figures/gband_length_scan.py \
-        --root phonon/studies/out/cnt33_gband_length \
-        --lengths 8 10 --gbands 1 2 3 \
-        --out phonon/studies/out/cnt33_gband_length/gband_scan.png
+Data:
+  python phonon/scripts/figures/gband_length_scan.py         --root phonon/studies/out/cnt33_gband_length         --lengths 8 10 --gbands 1 2 3         --out phonon/studies/out/cnt33_gband_length/gband_scan.png
 """
 from __future__ import annotations
 

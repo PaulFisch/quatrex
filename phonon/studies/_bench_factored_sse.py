@@ -1,25 +1,7 @@
 """Micro-benchmark: dense coupled-q contraction vs the legacy and the current
 factored (tensor-decomposed) kernels, on the real sifilm ns3_nk9 shapes.
 
-Three paths, all fed the SAME synthetic factors (the dense vertices are
-reconstructed from them), so all three outputs must agree -- the benchmark
-doubles as a large-shape parity check:
-
-* ``dense``  -- the per-task 3+3 ``ring_contract_pre`` loop of
-  ``SigmaPhononPhonon._contract_dense_q``. O(n_quads * N_q^2 * b^4).
-* ``legacy`` -- the superseded factored kernel: skinny Grams, one Hadamard per
-  quad, and the q'-sum as an explicit gather + reduce. O(n_quads * N_q^2 * R^2).
-* ``new``    -- ``quatrex.phonon.bubble_factored.contract_tau_q_factored``: the
-  quad sum collapses onto two summed Grams and the q'-sum is an FFT.
-  O(N_q * (R b^2 + R^2 b)).
-
-Reports TOTAL work (``--qown`` defaults to all N_q). The old per-rank shape
-(q_own = N_q / q_comm_size) is not a fair basis for comparison: the FFT removes
-the reason to shard the external momentum at all.
-
 Usage:
-    OMP_NUM_THREADS=1 python phonon/studies/_bench_factored_sse.py \
-        [--ranks 8,16,32,64,128] [--ntau 60] [--nk 9] [--nslabs 3] [--verify]
 """
 from __future__ import annotations
 

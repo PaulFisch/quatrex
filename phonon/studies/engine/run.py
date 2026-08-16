@@ -1,26 +1,6 @@
 """Production phonon-transport SCBA driver + snapshot.
 
-Honors the TOML ``[compute.comm]`` rank grid via :func:`setup_context` (a
-distributed run uses ``block_comm_size`` x ``q_comm_size``) and dumps the
-per-phase profiler JSON when the config enables it.
-
-Env overrides (optional, on top of the TOML):
   QX_CONFIG (required, toml path), QX_NPZ (snapshot out, default <dir>/run.npz),
-  QX_BALLISTIC=1 (zero the 3-phonon vertex -> the G_ball baseline),
-  QX_ETA QX_MIX QX_MAXIT QX_NE QX_RETARDED QX_FC3 QX_ETAOBC
-  QX_BCS QX_QCS (comm sizes -- override the TOML for a one-config rank sweep),
-  QX_COMM_BACKEND=host_mpi|device_mpi|nccl (all per-op comm selectors at once),
-  QX_FREQGRID=file (non-uniform grid from phonon_energies.npy),
-  QX_AUXDW/QX_AUXFMAX (auxiliary uniform bubble grid, THz),
-  QX_POLE=1 (pole-subtracted SCBA sector) with QX_POLE_NP QX_POLE_SECTORS
-  QX_POLE_WMIN QX_POLE_WMAX QX_POLE_SHEET QX_POLE_PGAMMA QX_POLE_AUDIT
-  QX_POLE_PSD QX_POLE_LEG QX_POLE_NEWTIT QX_POLE_TRUST
-  QX_POLE_ACCEPT QX_POLE_LOCTOL QX_POLE_LOCTOLOUT QX_POLE_TRUSTF.
-
-Backend: the array module (NumPy vs CuPy) is selected by QTX_ARRAY_MODULE
-(qttools default "cupy" with silent NumPy fallback); set it explicitly for
-reproducible CPU-vs-GPU parity runs.
-
 Run: ``mpirun -np N python run.py`` (config via QX_CONFIG).
 """
 import os
@@ -94,7 +74,7 @@ if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_preco
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
 if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
 if os.environ.get("QX_SSE_CMSUB"): cfg.phonon.sse_cm_subtraction = bool(int(os.environ["QX_SSE_CMSUB"]))
-# Pole-subtracted SCBA sector (phonon/docs/pole_subtracted_modal_scba.md).
+# Pole-subtracted SCBA sector (phonon/docs/pole_scba_implemented.md).
 # The config validators refuse the combinations that would be silently wrong
 # (retarded="half", an IR broadening floor, a pole window overlapping either the
 # low-frequency mask or the CM channel), so these overrides cannot smuggle one in.

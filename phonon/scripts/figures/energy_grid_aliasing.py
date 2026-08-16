@@ -1,31 +1,8 @@
 """Energy-grid resolution at eta=0 (fig:res_grid_comb, fig:res_grid_lottery).
 
-  grid_comb     (a) the ballistic spectral heat current of the MoS2
-                film on the resolution-matched non-uniform grid
-                (262 points, min spacing 0.020 THz): a comb of sharp
-                lines; the inset zooms the interlayer band with the
-                grid points marked. The narrowest resolved features
-                are a few grid spacings wide -- at eta=0 the line
-                width is set by the physics (escape rate), not by any
-                broadening, and a uniform grid at the coarse spacings
-                affordable over the full band steps OVER them.
-                (b) the CNT L4 converged A/B: the 287-point
-                non-uniform grid against the 361-point uniform grid,
-                spectral currents overlaid; integrals agree to 0.9%.
-  grid_lottery  the uniform-grid ne scan on the CNT L4 fixed point
-                under identical linear mixing: diverged at ne=161,
-                converged at 201, neither at 271 (350 iterations),
-                diverged again at 361 -- convergence is a lottery in
-                the grid density because the grid-to-line registration
-                changes with ne; the non-uniform grid (nu point)
-                converges and needs no lottery.
-
-Data: phonon/scripts/data/grid_aliasing.npz (distilled by
-_extract_grid_aliasing.py). All currents integral-convention
-(uniform sums multiplied by dw). d5a ladder context printed: both
-uniform legs (nf=181, 721) diverge -- density alone does not converge
-d5a; its eta=0 record needs the guarded Anderson scheme
-(sec:res_campaign).
+Data:
+  Data: phonon/scripts/data/grid_aliasing.npz (distilled by
+  _extract_grid_aliasing.py). All currents integral-convention
 
 Run:  python phonon/scripts/figures/energy_grid_aliasing.py
 """

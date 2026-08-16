@@ -1,26 +1,9 @@
-"""SCBA convergence of the decomposed three-phonon SSE (fig:res_decomp_convergence).
+"""SCBA convergence of the decomposed three-phonon SSE
+(fig:res_decomp_convergence).
 
-  decomp_scba_convergence  left:   the SCBA residual (rel. Sigma^R change) vs
-                                   iteration, per rank, on the L10 film;
-                           middle: the lead heat-flow imbalance |J_L-J_R|/J;
-                           right:  the bubble energy-balance residual
-                                   |P_in - P_out|/(|P_in|+|P_out|) vs iteration.
-
-The residual and lead-balance traces are parsed from the SCBA's own stdout, NOT
-from run.npz: `iter_heat` and `iter_sigma_max` are stored as the RANK-0-LOCAL
-frequency slice, and these runs use 121 ranks over 121 frequencies, so rank 0
-owns omega=0 alone -- where the heat current is identically zero. The bubble
-trace does come from the npz; it is all-reduced and therefore global.
-
-The right panel is the physical check, not a numerical one. The bubble is
-Phi-derivable, so P_in = P_out is an identity of the exact vertex. A low-rank
-CP fit is a DIFFERENT vertex, and nothing guarantees the truncated one still
-satisfies it -- a fit that broke the vertex's permutation symmetry would violate
-energy conservation outright. It does not: the residual sits at ~1e-6 at every
-rank down to R=8, whose FC3 residual is 15.5%.
-
-Data: phonon/scripts/data/decomposed_sse_spectra.npz (iter_heat, iter_sigma_max,
-      iter_bubble_balance, from the L10 campaign).
+Data:
+  from run.npz: `iter_heat` and `iter_sigma_max` are stored as the RANK-0-LOCAL
+  Data: phonon/scripts/data/decomposed_sse_spectra.npz (iter_heat, iter_sigma_max,
 
 Run:  python phonon/scripts/figures/decomposed_sse_convergence.py
 """

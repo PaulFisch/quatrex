@@ -1,36 +1,6 @@
 """Grid RESOLUTION: does |lambda| really track Delta_omega/Gamma?
 
-Tests thesis claims #1, #2, #3, #4 of the grid audit.
-
-  #1 `eq:grid_resolution` (theory/40_scba.tex:381): "The grid must
-     therefore resolve the narrowest anharmonic linewidth ... Delta_omega
-     <~ Gamma_anh, both for the STABILITY of the map and for the ACCURACY
-     of the frequency integrals."
-  #2 (40_scba:358-367) the discrete weight of an under-resolved pole is
-     W ~ (dw/pi) Gamma/(d^2 + Gamma^2), swinging between ~Gamma/dw and
-     ~dw/Gamma over one cell.
-  #3 (40_scba:372-375) "At the worst alignment it multiplies the link
-     gain by ~Delta_omega/Gamma_s, so cycles that are marginal when
-     resolved acquire |lambda| ~ Delta_omega/Gamma_s > 1."
-  #4 (40_scba:375-377) the resulting divergence is "erratic rather than
-     geometric" because the offset d changes every iterate.
-
-#3 has NEVER been run: the thesis's own resonance-gain study measured
-|lambda| only at states where every width was already resolved and
-explicitly excluded the grid enhancement as the mechanism there
-(62:274-277). This script measures the Jacobian spectral radius as a
-function of dw/Gamma AND of sub-cell pole alignment, which is the
-experiment the claim actually predicts.
-
-Part A (#2): the discrete pole weight against the closed form, swept
-across one cell -- pure quadrature, no SCBA.
-Part B (#1/#3): rho(J) = |lambda|_max via Arnoldi on the converged
-fixed point, over a dw/Gamma ladder.
-Part C (#3/#4): rho(J) at FIXED dw as the flat-band pole is translated
-across one cell -- the alignment law.
-
-Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4 \
-        python phonon/studies/_grid_stability_law.py
+Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4         python phonon/studies/_grid_stability_law.py
 """
 from __future__ import annotations
 

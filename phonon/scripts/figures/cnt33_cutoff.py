@@ -1,15 +1,8 @@
-"""(3,3) CNT cutoff-cube figure (fig:res_cnt_cutoff in document/src/results/30_cnt.tex).
+"""(3,3) CNT cutoff-cube figure (fig:res_cnt_cutoff in
+document/src/results/30_cnt.tex).
 
-Horizontal G_anh bars for the 8 corners of the (FC3-magnitude sigma,
-vertex-range v, Green's-function-range g) cutoff cube at n_slabs=2, against the
-full-coupling value (dashed) with its +11/-9% spread band shaded (the review
-spec: "All lie within +11/-9% of the full-coupling value").
-
-Data: phonon/scripts/out/cnt33_cutoff/summary.csv, produced by
-phonon/scripts/verify/cnt33_cutoff_sweep.py (one row per corner, written
-incrementally). Fails with a clear message if the csv is absent or the
-full-coupling reference corner has not finished yet; plots partial sweeps
-with a warning.
+Data:
+  Data: phonon/scripts/out/cnt33_cutoff/summary.csv, produced by
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/cnt33_cutoff.py
 """

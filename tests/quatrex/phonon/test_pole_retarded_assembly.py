@@ -32,14 +32,7 @@ def _h(a):
 # --------------------------------------------------------------------------
 
 def _bosonic_pole_pair(w, centre=9.0, gamma=0.4, weight=1.0):
-    r"""``Sigma^R`` of a bosonic resonance, as a conjugate-symmetric pole pair.
-
-    ``Sigma^R(-w) = Sigma^R(w)^*`` -- the relation the production Hilbert
-    kernel assumes for ``Delta``. A single pole does NOT satisfy it, and
-    neither does the pole DIFFERENCE: it has to be the sum. Getting this wrong
-    makes the transform look broken when it is the bed that is broken, which
-    is exactly how an earlier version of this check went astray.
-    """
+    r"""``Sigma^R`` of a bosonic resonance, as a conjugate-symmetric pole pair."""
     return weight * (1j / (w - centre + 1j * gamma)
                      + 1j / (w + centre + 1j * gamma))
 
@@ -61,13 +54,7 @@ def test_the_bed_has_the_symmetry_the_transform_assumes():
 # --------------------------------------------------------------------------
 
 def test_retarded_assembly_reproduces_an_exact_pole(monkeypatch):
-    r"""``1/2 Delta + i/2 H[Delta]`` returns the ``Sigma^R`` it came from.
-
-    Not to machine precision: ``hilbert_transform`` models ``Delta`` as
-    cell-wise constant, and a Lorentzian is not, so there is a genuine
-    quadrature error. What must hold is that it CONVERGES under refinement --
-    a sign or double-counting error would not.
-    """
+    r"""``1/2 Delta + i/2 H[Delta]`` returns the ``Sigma^R`` it came from."""
     prev = None
     for ne in (4096, 16384, 65536):
         w = np.linspace(0.0, 240.0, ne)
@@ -99,19 +86,7 @@ def test_the_opposite_sign_is_catastrophically_wrong():
 # --------------------------------------------------------------------------
 
 def test_analytic_injection_plus_the_global_half_is_the_full_retarded():
-    r"""The SS sector must inject the Kramers-Kronig half ALONE.
-
-    ``core/scba.py`` adds ``0.5 * (sigma_stored^< - sigma_stored^>)`` globally
-    to the retarded buffer, and the stored components are ``-1x`` the bubble
-    output. So for the total to come out as the true ``Sigma^R_SS``, the
-    injected piece must be
-
-        kk_half = Sigma^R_SS - 1/2 (Sigma^>_SS - Sigma^<_SS).
-
-    Supplying the full ``Sigma^R_SS`` instead double counts the half term and
-    silently breaks causality. This identity is exact, so it is tested at
-    roundoff rather than at a tolerance.
-    """
+    r"""The SS sector must inject the Kramers-Kronig half ALONE."""
     rng = np.random.default_rng(0)
     ne = 64
     acc_l = rng.normal(size=(ne, 5)) + 1j * rng.normal(size=(ne, 5))

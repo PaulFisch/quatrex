@@ -1,27 +1,4 @@
 """Conservation gates: bubble energy-balance replica + vertex S3 symmetry.
-
-Two machine-precision gates that together prove the discrete 3-phonon bubble
-is exactly energy-conserving:
-
-* :func:`replica_check` -- a standalone replica of the production discrete
-  bubble pipeline (zero-based grid, ``n_fft = 2*ne-1`` linear convolution,
-  index-reversal fold with the bosonic TRANSPOSE continuation
-  ``G^<(-w) = G^>(w)^T``, S3-symmetric vertex, transpose-paired trace).
-  Evaluates ``P_in = sum_w w Tr[Sigma^<(w) G^>(w)]`` against
-  ``P_out = sum_w w Tr[Sigma^>(w) G^<(w)]`` in float64 AND float128: the
-  residual scales down with precision iff the bubble is exactly conserving
-  and the production ~1e-6 floor is pure floating-point accumulation.
-
-* :func:`s3_violation` -- reads a device FC3 blocks HDF5 (``fc3_blocks``)
-  and measures the worst/mean violation of full S3 permutation symmetry
-  using the correct GROUP transport: 2-cycle key-permutations pair with the
-  same numpy transpose, while the 3-cycle key-perm (1,2,0) pairs with the
-  INVERSE transpose (2,0,1) and vice versa. Missing orbit members count as
-  zero. The bubble conserves energy at machine eps iff this is ~eps.
-
-CLI::
-
-    python -m phonon.studies conservation run [--fc3 PATH ...]
 """
 
 from __future__ import annotations

@@ -103,16 +103,7 @@ def test_variance_is_the_norm_the_bound_uses():
 
 
 def test_finite_cell_kernel_is_stable_at_the_combination_frequency():
-    r"""The small-denominator regime, which cannot actually be reached.
-
-    For two poles in the SAME half plane ``Im s = gamma_p + gamma_q > 0``
-    bounds ``|s|`` below however the output frequency is chosen, so the
-    logarithmic form is safe -- that is what this case checks, against mpmath
-    at 60 digits with the output placed exactly AT the combination frequency.
-
-    It does NOT generalise, and an earlier version of this docstring claimed it
-    did. See the mixed-pairing test below.
-    """
+    r"""The small-denominator regime, which cannot actually be reached."""
     mp = pytest.importorskip("mpmath")
     from quatrex.phonon.pole_bubble import pair_convolution
 
@@ -253,15 +244,7 @@ def test_negative_cells_produce_the_difference_channel():
 
 
 def test_the_mixed_pairing_drives_s_through_zero_and_is_still_exact():
-    r"""The case the same-half-plane argument does not cover.
-
-    A flattened family is ``[z, conj(z)]`` by construction, so it ALWAYS
-    contains pairings of a pole with its own conjugate. For those
-    ``zeta_p + zeta_q = 2 Re z`` is real, ``Im s = gamma_p - gamma_q = 0``, and
-    ``s`` passes exactly through zero as ``Omega`` sweeps -- including at
-    ``s = 0`` itself, where the previous code returned 0.0. Not an error: a
-    silently wrong number, in the kernel the whole correction is built on.
-    """
+    r"""The case the same-half-plane argument does not cover."""
     mp = pytest.importorskip("mpmath")
     from quatrex.phonon.pole_bubble import pair_convolution
 
@@ -342,13 +325,7 @@ def test_spectrum_correction_chunking_is_exact_and_bounds_the_working_set():
 
 
 def test_cells_from_clusters_of_different_size_pair_correctly():
-    """Two clusters, two pole counts -- the first real device call's crash.
-
-    ``modal_vertex_blocks`` required the two families to match, so pairing a
-    cell from a 2-pole cluster with one from a 12-pole cluster raised
-    "families disagree, 4 against 24" on the first device run. The projection
-    is rectangular; nothing about the algebra needs them equal.
-    """
+    """Two clusters, two pole counts -- the first real device call's crash."""
     from quatrex.phonon.pole_bridge import modal_vertex_blocks
     from quatrex.phonon.pole_covariance import spectrum_correction
 

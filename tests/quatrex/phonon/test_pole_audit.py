@@ -41,13 +41,7 @@ def _pattern(sizes):
 # --------------------------------------------------------------------------
 
 def _bubble(a, b, phi_l, phi_r, rows, cols, pref=1.0):
-    """Reference ring on the stored pattern, written from the definition.
-
-    ``Sigma_{mu mu'}(w) = pref * sum_{ab,cd} PhiL[mu,a,b] PhiR[mu',c,d]
-    (A_{ac} * B_{bd})(w)`` with ``*`` the discrete convolution over the grid.
-    Deliberately independent of ``pole_bridge``: it is the thing the sector
-    decomposition is being checked against.
-    """
+    """Reference ring on the stored pattern, written from the definition."""
     ne = a.shape[0]
     # conv[w, a, c, b, d] = sum_w' A[w', a, c] B[w-w', b, d]
     fa = np.fft.fft(a, axis=0)
@@ -77,13 +71,7 @@ def _bed(seed=0, ne=16, n_dof=4):
 
 
 def test_four_sectors_reassemble_the_undecomposed_bubble():
-    """B(G_S+G_R, G_S+G_R) == SS + SR + RS + RR, exactly.
-
-    The bubble is bilinear, so this is an algebraic identity -- but it is
-    exactly the identity that a dropped or double-counted sector violates, and
-    the one that makes ``sectors="rr"``/``"rr_ss"`` staging settings rather
-    than physics.
-    """
+    """B(G_S+G_R, G_S+G_R) == SS + SR + RS + RR, exactly."""
     sizes, rows, cols, phi_l, phi_r, g_s, g_r = _bed()
     total = _bubble(g_s + g_r, g_s + g_r, phi_l, phi_r, rows, cols)
     sectors = {
@@ -181,16 +169,7 @@ def test_keldysh_identity_is_at_roundoff_for_a_correct_assembly():
 
 
 def test_keldysh_identity_catches_a_double_counted_retarded_half():
-    """The recorded silent-wrong-answer: injecting more than the KK half.
-
-    ``core/scba.py`` already adds ``0.5*(Sigma^< - Sigma^>)`` globally, so an
-    injected analytic ``Sigma^R`` carrying the same half again breaks the
-    identity. The error is one of MAGNITUDE, not of symmetry: the doubled
-    skew part is still perfectly anti-Hermitian, so ``eps_delta_skew`` stays
-    at roundoff and only ``eps_ki`` (and the recovered KK part, which absorbs
-    the surplus) can see it. That asymmetry is the point of reporting three
-    numbers.
-    """
+    """The recorded silent-wrong-answer: injecting more than the KK half."""
     sr, sl, sg, rows, cols = _sigma_triple()
     doubled = sr + 0.5 * (sl - sg)
     rep = keldysh_identity(doubled, sl, sg, rows, cols)
@@ -248,13 +227,7 @@ def test_a_congruence_is_psd():
 
 
 def test_both_keldysh_components_use_the_same_sign():
-    """``sign=-1`` for lesser AND greater, in this solver's convention.
-
-    ``sigma^{<,>} = +i n(+1) Gamma``, so ``-i sigma^<`` and ``-i sigma^>`` are
-    both positive semidefinite. The textbook convention has ``+i G^> >= 0``,
-    and using it here reports a uniformly negative spectrum (worst exactly
-    -1.000) on data that is perfectly fine -- which is how this surfaced.
-    """
+    """``sign=-1`` for lesser AND greater, in this solver's convention."""
     vals, rows, cols, sizes, _ = _congruence_lesser(seed=7)
     assert psd_residual(vals, rows, cols, sizes, sign=-1.0)["worst"] > -1e-12
     flipped = psd_residual(vals, rows, cols, sizes, sign=+1.0)
@@ -271,27 +244,7 @@ def _full_pattern(sizes):
 
 
 def test_a_band_mask_breaks_positivity():
-    """``bubble_positivity.md`` Thm 3: a boxcar band mask is indefinite.
-
-    This is why the modal tail is carried as a congruence rather than a
-    truncation, so the gate must be able to see the failure. Three structural
-    facts set the test up.
-
-    Zeroing every off-diagonal block leaves a BLOCK-DIAGONAL matrix whose
-    blocks are principal submatrices of a PSD matrix, so that truncation is
-    always PSD and proves nothing. The mask has to keep a band and drop what
-    lies beyond it, which needs at least three blocks.
-
-    A random PSD matrix often survives the mask by luck -- the theorem says
-    positivity is not PRESERVED, not that it always fails. The counterexample
-    is uniform long-range correlation (``P = v v^T + eps I`` with ``v``
-    constant), which is exactly the regime the sector exists for: a device
-    whose ``G`` has no block-distance decay.
-
-    And the probe window must EXCEED the band width, not merely match it: to
-    notice that block ``(0, 2)`` was removed, the window has to contain blocks
-    0, 1 and 2 at once.
-    """
+    """``bubble_positivity.md`` Thm 3: a boxcar band mask is indefinite."""
     sizes = np.array([2, 2, 2])
     rows, cols = _full_pattern(sizes)
     n, ne = int(sizes.sum()), 3

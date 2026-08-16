@@ -1,26 +1,9 @@
-"""Measure the near-DC singularity class of the device Green's functions
-from recorded engine data (QX_SAVE_DIAG_G arrays).
+"""Measure the near-DC singularity class of the device Green's functions from
+recorded engine data (QX_SAVE_DIAG_G arrays).
 
-Establishes the empirical exponents the IR derivation must reproduce
 (phonon/docs/ir_residue_derivation.md, D1). On the ballistic MoS2 film
 (cluster/mos2f3nu/run_ballistic.npz, 2026-08-04 measurement):
-
-    |G^<|  ~ omega^-2   (log-log slopes -1.999, -1.982, -1.951 at q=Gamma)
-    |G^R|  ~ omega^-1   (slopes -0.986, -0.960, -0.920)
-    gapped q != Gamma bins carry ~1e-21 -- the singular channel lives
-    entirely in the q=Gamma acoustic subspace.
-
-i.e. G^{<,>} = -i C2/w^2 -/+ i C1/w + O(1): an EVEN double pole from
-n(w)~kT/hw times A(w)~1/w, with an odd 1/w subleading part. This
-falsifies all three prior recorded assumptions (bounded legs with
-A(0)=0 in the purged infrared appendix; simple 1/w contact pole in
-_ir_bubble_probe.py; the |G^<|~w^-0.5 note of commit b009ebcc).
-
 Interacting iterates (e.g. cluster/mos2f3long/run.npz) are resonance-
-dominated near DC and NOT power-law fittable -- exponent fits on
-diverging iterates measure the disease, not the physics; only
-ballistic data is fit here.
-
 Run:  python phonon/studies/_ir_exponents.py [path/to/run_ballistic.npz]
 """
 from __future__ import annotations

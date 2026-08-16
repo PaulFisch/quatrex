@@ -1,18 +1,5 @@
 """Bulk-Si phonon dispersion: DFPT (QE ph.x) vs finite-displacement FC2.
 
-FD bands are computed with phonopy from the reaps fc2.hdf5 (phono3py + symfc,
-2x2x2 supercell of the 2-atom FCC primitive cell). DFPT frequencies are parsed
-directly from ph.out (computed natively on the 2x2x2 q-mesh: Gamma, X and L)
--- this avoids any FC2 supercell-ordering mismatch -- and shown as markers at
-the high-symmetry points where they exist. The DFPT Gamma-acoustic modes sit
-at ~-0.18 THz (ph.x ASR artifact); they are dropped from the plot and noted in
-an annotation. An inset zooms on the Gamma optical cluster where the quoted
-15.12 (DFPT) vs 15.37 (FD) THz = 1.6% agreement is read off.
-
-Reads ONLY on-disk data:
-  FD FC2 : phonon/reaps/si_primitive_work/fc2.hdf5   (key force_constants)
-  DFPT   : phonon/configs/si_primitive/dfpt/ph.out
-
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/fc_method_dispersion_si.py
 Figure -> document/fig/transport_sweeps/fc_method_dispersion_si.{pdf,png}
 """

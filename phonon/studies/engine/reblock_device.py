@@ -1,34 +1,8 @@
-"""Re-block a transversely-periodic film device: N primitive transport
-cells, C of them per BTD block.
+"""Re-block a transversely-periodic film device: N primitive transport cells,
+C of them per BTD block.
 
-Why. The anharmonic self-energy is written only on the block-tridiagonal
-(``sse_phonon_phonon.py:410``, and the RGF reads nothing else), so the
-retained interaction range is +-1 BLOCK whatever ``sse_g_band`` says.
-That Hadamard mask is indefinite -- min eigenvalue ``1 - 2 cos(pi/(n+1))``
-in the number of blocks -- and it is the live PSD defect measured in
 ``phonon/docs/bubble_positivity.md``. Putting C transport cells in one
-block widens the retained physical range to +-C cells AND reduces the
-block count, so the mask gets both smaller support to damage and better
-conditioning. Unlike a taper it costs no vertex weight: it is an exact
-re-partition of the same operator.
-
-What this does. Everything here is a re-partition plus (for N > the
-source device) a replication along transport; no DFT, no hiphive refit,
-and no q-fold recomputation. The output is written as a device whose
-UNIT CELL is the C-cell block, with ``+-1`` transport keys, so the
-production loader's ``supercell_size = extent // 2``
-(``src/quatrex/device/inputs.py:993-998``) reads it back as C*nd-sized
-blocks with no change anywhere in ``src/quatrex``.
-
-Replication is exact only for a device whose slabs are translationally
-equivalent, which is checked, not assumed: every per-slab vertex block
-must be bit-identical across slabs (it is for the MoS2 film -- the fit
-prunes the vdW-gap fc3 to exact zero, so the vertex is intra-slab).
-
-Run (from the repo root):
-
-    python phonon/studies/engine/reblock_device.py \
-        --src cluster/mos2f3 --cells 6 --per-block 2 --out cluster/mos2f6x2
+    python phonon/studies/engine/reblock_device.py         --src cluster/mos2f3 --cells 6 --per-block 2 --out cluster/mos2f6x2
 """
 from __future__ import annotations
 

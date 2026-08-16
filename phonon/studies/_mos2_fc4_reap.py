@@ -1,21 +1,6 @@
 """Device FC4 blocks for the quartic (SCP) loop self-energy.
 
-Evaluates the o4 FCP on the [4,4,3] phonopy-ordered supercell and
-gathers the order-4 clusters (sparse dict -- the dense 4th-order array
-would be ~TB) into mass-weighted device blocks
-
-    {(I, J, K, Kp): Phi4[n_dof, n_dof, n_dof, n_dof]}  [eV/(A^4 amu^2)]
-
-with the first leg anchored to the primitive cell (translation
-invariance over transport cells, min-image offsets, boundary-clipped)
--- the layout consumed by quatrex.phonon.static_self_energy.
-sigma_loop_blocks. Self-check: sampled cluster entries reconstructed
-from the blocks against the hiphive dict directly.
-
-Run: python phonon/studies/_mos2_fc4_reap.py \
-        --fcp cluster/mos2_scp300v2/fcp_o4.fcp \
-        --meta cluster/mos2_film_reap_scp/hiphive_meta.json \
-        --nslabs 3 --out cluster/mos2film_L3_nk5_scp/fc4_blocks.hdf5
+Run: python phonon/studies/_mos2_fc4_reap.py         --fcp cluster/mos2_scp300v2/fcp_o4.fcp         --meta cluster/mos2_film_reap_scp/hiphive_meta.json         --nslabs 3 --out cluster/mos2film_L3_nk5_scp/fc4_blocks.hdf5
 """
 from __future__ import annotations
 

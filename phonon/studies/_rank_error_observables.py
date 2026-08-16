@@ -1,23 +1,7 @@
-"""Self-consistent observable error of the decomposed SSE vs the full-vertex SSE.
-
-Companion to ``_rank_error_sse.py``. That script measures the ONE-SHOT error (both
-self-energies on the same ballistic G, so the vertex error alone). This one runs the
-FULL SCBA at each rank and compares every observable against the dense q-folded-vertex
-run, so it includes the self-consistent feedback.
-
-The question it answers: the CP fit residual ``eps_R`` is an error on the FC3 TENSOR.
-The self-energy contracts that tensor against two Green's functions, and the observables
-integrate the result. Neither step need inherit ``eps_R`` -- the components the fit
-discards may be the ones the bubble weights least. The amplification table is the answer.
-
-COMPARISON FLOOR. The dense q-folded vertex and the factored vertex do not have the
-same FC3 block support: the q-fold keeps 7 transport-offset pairs, the factors span the
-full 5x5 offset window. The 18 extra pairs carry ~6.8e-5 of the vertex amplitude, and
-Sigma is bilinear in the vertex, so no observable error can fall below ~1.4e-4 however
-good the fit becomes. Errors at or under that floor measure the REFERENCE, not the rank.
+"""Self-consistent observable error of the decomposed SSE vs the full-vertex
+SSE.
 
 Usage:
-    python phonon/studies/_rank_error_observables.py --runs DIR [--dense dense]
 """
 from __future__ import annotations
 

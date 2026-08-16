@@ -1,17 +1,7 @@
 """Interpolate a saved self-energy snapshot onto a new frequency grid.
 
-Bridges QX_SAVE_SIGMA -> QX_SIGMA_INIT across a grid change (e.g. a
-refined non-uniform grid from make_grid.py): the flat (ne, nnz)
-sigma_lesser/greater/retarded arrays are linearly interpolated along
-the frequency axis from the old grid to the new one (zero outside the
-old span), so the SCBA warm-starts on the new grid instead of from
-Sigma = 0. Single-rank snapshot layouts only (same restriction as
-QX_SIGMA_INIT itself).
-
 Usage:
-  python phonon/studies/regrid_sigma.py --sigma old_sigma.npz \
-      --old-grid old/phonon_energies.npy --new-grid new/phonon_energies.npy \
-      --out new_sigma.npz [--scale 1.0]
+  python phonon/studies/regrid_sigma.py --sigma old_sigma.npz       --old-grid old/phonon_energies.npy --new-grid new/phonon_energies.npy       --out new_sigma.npz [--scale 1.0]
 """
 
 from __future__ import annotations

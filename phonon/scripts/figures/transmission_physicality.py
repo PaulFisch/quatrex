@@ -1,16 +1,7 @@
 """Physicality audit of the eta=0 phonon transmission curve (cnt33 L2).
 
-Checks the production MW transmission T(omega)=|I|/Delta n against ANALYTIC limits:
-  (1) ballistic T_ball(omega) == integer Landauer channel count N(omega), where
-      N(omega) = # bands crossing omega in the lead dispersion D(k)=H0+H1 e^{ik}+h.c.;
-  (2) acoustic plateau T_ball(omega->0) -> N_ac = 4 (armchair CNT: 2 flexural + LA + twist);
-  (3) unitarity bound 0 <= T_ball <= N(omega) (the unbounded I/Delta n must not overshoot);
-  (4) anharmonic bound T_anh(omega) <= T_ball(omega) (scattering only removes);
-  (5) quantised-conductance plateau hbar*omega*I(omega)/(kB*dT) -> N_ac as omega->0.
-
-Reads ONLY saved data:
+Data:
   cnt33 eta=0:  phonon/scripts/out/prod/cnt33_eta0/L2_{ball,anh}.npz  (current_spectrum)
-  dispersion :  phonon/scripts/out/prod/geom/cnt33_L2/dynamical_matrix.mat  (H0,H1 blocks)
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/transmission_physicality.py
 Figure -> document/fig/transport_sweeps/eta0_cnt33_transmission_physicality.{pdf,png}

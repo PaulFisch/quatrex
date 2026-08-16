@@ -314,17 +314,7 @@ def test_bosonic_partner_negates_transverse_axes():
 
 
 def test_pinned_anchor_makes_the_local_fit_continuous():
-    """``M(z)`` must be holomorphic, not piecewise holomorphic.
-
-    The fit stencil is chosen by ``round(Re z / h)``, so without an anchor it
-    switches discretely as ``z`` moves and ``Delta_an`` jumps. Newton's trust
-    radius is ``trust_radius_cells * h``, so steps routinely cross a boundary,
-    and a pole sitting near one can flip between SCBA iterations.
-
-    Measured at ``h = 0.25`` across the boundary at ``Re z = 9.375``: a
-    3.08e-01 step against ~3.4e-03 within a stencil, on a field of typical
-    magnitude 1.79 -- a 17 % discontinuity.
-    """
+    """``M(z)`` must be holomorphic, not piecewise holomorphic."""
     import numpy as np
 
     from quatrex.phonon.pole_kernel import delta_local_fit

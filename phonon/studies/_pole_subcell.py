@@ -1,29 +1,4 @@
 """Subcell positivity of the hybrid Green function (review Sec. 11-12).
-
-The pole sector stores ``R_k = G(w_k) - P(w_k)`` once per cell and treats it
-as piecewise constant, so the reconstruction used by every bubble sector is
-
-    G_h(w) = P(w) + R_k       for w in cell k.
-
-At the cell CENTRE this is exactly ``G(w_k)``, which is PSD. Away from the
-centre ``P(w)`` moves -- by orders of magnitude across one coarse cell near a
-narrow pole -- while ``R_k`` is frozen. Nothing forces the sum to stay
-positive in between.
-
-That matters because ``P`` is PSD at every frequency by construction:
-``pole_keldysh`` builds it as the congruence ``(U D^R) S (U D^R)^H``. So the
-indefiniteness can only enter through ``R_k``, and the mechanism is concrete:
-``R_k`` carries a negative eigenvalue of size ``~|P(w_k)|`` whenever the
-centre sits near the pole peak, and anywhere inside the cell where ``P(w)``
-falls below that, ``P(w) + R_k`` goes negative.
-
-This module measures whether it does. Run:
-
-    QTX_ARRAY_MODULE=numpy PYTHONPATH=src python phonon/studies/_pole_subcell.py
-
-Normalisation mirrors ``pole_audit.psd_residual``: the scale is GLOBAL (the
-largest eigenvalue over all frequencies), never per-frequency, because a
-per-omega scale turns numerically empty tails into apparent failures.
 """
 
 from __future__ import annotations

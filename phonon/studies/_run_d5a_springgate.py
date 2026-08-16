@@ -1,20 +1,4 @@
 """Phase-1 gate: does gapping the d5a twist mode alone converge eta=0?
-
-Emulates the oxide embedding with transverse pinning springs on the 12
-H-shell atoms of the CORRECTED d5a L2 inputs (the fixed n=2-folded
-export, validated by _run_d5a_fixed_export), with the translational ASR
-re-imposed (LA/TA stay gapless; only the rotational/twist stiffening
-survives -- phonon_inputs.embedded_extract). k_pin is bisected so the
-Gamma twist gap hits {0.2, 0.5, 1.0} THz.
-
-Rungs run BARE at eta=0 (no IR floor, no low-freq mask, standard linear
-mixing): if a gapped twist converges the SCBA, the embedding hypothesis
-is validated and the needed gap calibrated -> commit the oxide DFT
-campaign (Phase 2). If not, STOP and reassess. Divergence is a RESULT.
-
-Idempotent; needs the d5a_fixed_export inputs (cluster):
-    python phonon/scripts/tortin.py launch --name d5agate -- \
-        python phonon/studies/_run_d5a_springgate.py
 """
 from __future__ import annotations
 

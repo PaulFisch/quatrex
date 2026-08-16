@@ -98,13 +98,7 @@ def test_rhs_size_mismatch_raises():
 
 
 def test_matvec_accepts_blocks_carrying_a_singleton_stack_axis():
-    """The production assembly hands blocks a probe axis the vector lacks.
-
-    Regression: ``btd_matvec`` allocated its output with ``zeros_like(x)``, so
-    an in-place ``+=`` of a ``(1, b, nrhs)`` product into a ``(b, nrhs)``
-    buffer raised instead of broadcasting. Every unit test fed unstacked
-    blocks, so this only surfaced on the first production run.
-    """
+    """The production assembly hands blocks a probe axis the vector lacks."""
     b, nb = 3, 3
     rng = np.random.default_rng(0)
     a_ii = [rng.standard_normal((1, b, b)) + 0j for _ in range(nb)]
@@ -127,15 +121,7 @@ def test_matvec_accepts_blocks_carrying_a_singleton_stack_axis():
 
 
 def test_bordered_newton_matvec_carries_the_candidate_axis():
-    """The stack axis is the CANDIDATE axis and must survive the matvec.
-
-    This used to raise: the bordered Newton corrected one pole at a time, so a
-    non-singleton stack could only be a mistake, and folding it into the row
-    index would have returned a plausible-looking vector of the wrong length.
-    The solve is batched now -- the stack IS the seed set -- so the same input
-    must produce one matrix-vector product per candidate, each against that
-    candidate's own operator.
-    """
+    """The stack axis is the CANDIDATE axis and must survive the matvec."""
     from quatrex.phonon.pole_nevp import _matvec
 
     b, nb, npole = 2, 2, 4

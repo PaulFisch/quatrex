@@ -52,15 +52,8 @@ def _cluster_from_d(d_dense, g=G_DAMP, pick=None):
 
 
 def _sigma_lesser(omega, n_dof, g=G_DAMP, scatter=0.6, seed=99):
-    """Total Keldysh source ``Sigma^< = i n(w) [Gamma_contact + Gamma_scatter]``.
-
-    The contact part ``Gamma = 2 g w`` is isotropic on this bed. The ANHARMONIC
-    part is not: the three-phonon Sigma^< is a full matrix, so the total source
-    does not commute with D. That matters -- with an isotropic source and the
-    orthogonal eigenvectors of a symmetric D, the projected source ``V^H Sigma V``
-    would be exactly diagonal and there would be no modal coherence to test.
-    Both terms are PSD, so ``-i Sigma^< >= 0`` still holds exactly.
-    """
+    """Total Keldysh source ``Sigma^< = i n(w) [Gamma_contact +
+    Gamma_scatter]``."""
     rng = np.random.default_rng(seed)
     a = rng.normal(size=(n_dof, n_dof))
     w_psd = a @ a.T

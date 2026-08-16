@@ -1,19 +1,4 @@
 """Independent reference 3-phonon self-energy kernels (validation only).
-
-These are NOT the production path -- the solver computes the self-energy with
-the unified :func:`phonon.solver.se_finite.compute_phph_self_energy`. The two
-kernels here are deliberately separate, simpler implementations kept solely so
-the validation studies can cross-check the production kernel against an
-independent algorithm:
-
-* :func:`compute_phph_self_energy_finite` -- the Gamma-only bubble as two plain
-  :func:`bubble_dense` calls on a single vertex block.
-* :func:`compute_phph_self_energy_q_dense` -- the q-resolved slab-diagonal bubble
-  built from the gathering-matrix Fourier vertex (T(q) M T(q')), contracted with
-  a streaming batched einsum over a multiprocessing pool.
-
-Used by :mod:`phonon.studies.linewidths` (and historically by the legacy
-validation modules in ``phonon.studies``).
 """
 
 from __future__ import annotations

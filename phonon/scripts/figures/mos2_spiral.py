@@ -1,39 +1,7 @@
 """MoS2 film instability figures (fig:res_mos2_spiral, fig:res_mos2_stab).
 
-  mos2_spiral       the 95-iteration record of the eta=0 cubic-only
-                    film SCBA (SCP(300 K) fc2, linear 0.1 mixing,
-                    nu grid): (a) rel Sigma^R residual with the
-                    metastable orbit and the terminal burst; (b) the
-                    bounded, non-converging orbit in the leading two
-                    principal components of the per-iteration heat
-                    matrix; (c) max|Sigma^<| per (iteration, energy)
-                    on the low-frequency slice -- the burst locus
-                    sits on the soft interlayer modes.
-  mos2_stabilisers  (a) residual traces of the FULL-vertex stabiliser
-                    probes on the film fixed point: the 95-it linear
-                    record, the orbit-mean restart, the SCP tadpole,
-                    and the two quartic-loop attempts -- none
-                    descends below 0.62 and both loop probes
-                    diverge. (b) the vertex-ablation control: on the
-                    accidental diagonal-only (no cross-slab FC3)
-                    build the same iteration descends -- probe c
-                    monotonically to 0.087 before its 55-it cap
-                    (unrecorded per-run overrides), the
-                    current-code defaults continuation to 0.646
-                    before a late divergence at 66, and the
-                    full-provenance heavy-damped rerun (alpha=0.05,
-                    400-it budget, explicit job.sh env record) to
-                    0.355 before diverging at 47; the in-code
-                    ablation on the correct build + resolved grid
-                    (xs0, sse_cross_slab_scale=0) dips to 0.375 and
-                    diverges at 38. The ablated model is gentler but
-                    nowhere convergent -- the cross-slab channel
-                    destabilises, and probe c's monotone descent is
-                    unreproduced under recorded conditions.
-
-Data: phonon/scripts/data/mos2_spiral.npz, distilled by
-_extract_mos2_spiral.py (see its docstring for the full vertex
-provenance of every run). All runs eta=0.
+Data:
+  Data: phonon/scripts/data/mos2_spiral.npz, distilled by
 
 Run:  python phonon/scripts/figures/mos2_spiral.py
 """

@@ -70,14 +70,7 @@ def _driver_bed(nf=401):
 # --------------------------------------------------------------------------- #
 
 def test_block_layout_reproduces_the_scatter_it_replaces():
-    """Including the two cases that make it more than a reindexing.
-
-    An entry outside the band must be DROPPED (the Dyson operator is
-    block-tridiagonal and the scatter only ever materialised ``|I-J| <= 1``),
-    and a duplicated ``(row, col)`` must resolve the same way -- the scatter
-    used a fancy-index assignment, so the LAST occurrence wins, and a gather
-    built the other way round would silently pick the first.
-    """
+    """Including the two cases that make it more than a reindexing."""
     rng = np.random.default_rng(3)
     sizes = np.array([3, 2, 4])
     off = np.concatenate(([0], np.cumsum(sizes)))
@@ -129,15 +122,7 @@ def test_block_layout_blocks_are_views_of_one_buffer():
 # --------------------------------------------------------------------------- #
 
 def test_batched_operator_equals_the_operator_probed_one_at_a_time():
-    """Each candidate must see the operator its OWN anchor defines.
-
-    The fit anchor is pinned per candidate so that M(z) is holomorphic over
-    that candidate's whole Newton solve. Batching turns one pinned anchor into
-    a VECTOR of them, and the way to get that wrong is to share one anchor
-    across the batch -- which is invisible in the answer unless the candidates
-    straddle a stencil boundary, where the shared-anchor result jumps by a
-    measured 17 %. So the seeds here deliberately include boundary cases.
-    """
+    """Each candidate must see the operator its OWN anchor defines."""
     sec, freqs = _driver_bed()
     h = float(freqs[1] - freqs[0])
 
@@ -204,13 +189,7 @@ def _manual_bed(nf=401):
 
 
 def test_batched_newton_matches_the_per_candidate_iteration():
-    """Same operator both ways, so only the batching of the iteration varies.
-
-    ``bordered_newton`` is the per-candidate reference: it lifts a scalar
-    operator and runs a batch of one. Running the same seeds together must not
-    change where they land, how many steps they took, or whether they
-    converged.
-    """
+    """Same operator both ways, so only the batching of the iteration varies."""
     sec, m_blocks, dm_blocks, seeds = _manual_bed()
     assert len(seeds) > 1, "a batch of one does not test batching"
 
@@ -234,14 +213,7 @@ def test_batched_newton_matches_the_per_candidate_iteration():
 
 
 def test_the_acceptance_decision_is_unchanged_by_batching():
-    """What the sector DOES with the poles, not just where they are.
-
-    ``eps_nep`` and ``eps_z`` are residuals sitting at the double-precision
-    noise floor at a converged pole -- 1e-19 to 1e-10 against thresholds of
-    1e-10 and 5e-2 -- so their RELATIVE value moves freely under any change of
-    summation order and says nothing. The decision they feed is what has to
-    hold.
-    """
+    """What the sector DOES with the poles, not just where they are."""
     sec, m_blocks, dm_blocks, seeds = _manual_bed()
     together = sec.solve_poles(m_blocks, dm_blocks, seeds)
     apart = [
@@ -331,13 +303,7 @@ def test_solve_poles_handles_an_empty_seed_set():
 # --------------------------------------------------------------------------- #
 
 def test_changing_delta_invalidates_everything_derived_from_it():
-    """Delta is rebuilt every SCBA iteration precisely so it cannot go stale.
-
-    The batching caches three things derived from it -- the bosonic mirror and
-    the two block-layout gathers. A stale copy would silently continue the
-    PREVIOUS iteration's self-energy, which is the drift this module refuses to
-    risk, and it would look exactly like a converged pole set.
-    """
+    """Delta is rebuilt every SCBA iteration precisely so it cannot go stale."""
     sec, _ = _driver_bed()
     z = np.array([9.0 - 0.01j])
     before = _h(sec.continue_sigma(z, order=0)).copy()
@@ -360,13 +326,7 @@ def test_changing_delta_invalidates_everything_derived_from_it():
 # --------------------------------------------------------------------------- #
 
 def _q_sectors(nq=4, nf=201, seed0=0):
-    """``nq`` INDEPENDENT pole problems sharing a grid and a block layout.
-
-    Each q gets its own device and its own Delta, exactly as a q-resolved run
-    does: ``M_q(z) = z^2 I - D(q) - Sigma^R_q(z)`` and the pole sets are
-    unrelated. What they share is the shape of the work, which is the only
-    thing the batch relies on.
-    """
+    """``nq`` INDEPENDENT pole problems sharing a grid and a block layout."""
     from quatrex.phonon.pole_probe import BlockLayout
 
     sizes = (3, 3, 3)
@@ -421,14 +381,7 @@ def test_q_batching_returns_the_per_q_answer():
 
 
 def test_q_batching_survives_unequal_candidate_counts():
-    """The batch is a rectangle; the q are not.
-
-    Candidate counts differ per q -- the window keeps different numbers of
-    modes, and after the first iteration each q carries only the poles that
-    survived. The padding must not leak into the real slots, and in particular
-    a duplicated pad seed must not shrink its original's trust radius by
-    sitting at zero distance from it.
-    """
+    """The batch is a rectangle; the q are not."""
     from quatrex.phonon.pole_sector import refresh_many
 
     sectors = _q_sectors(nq=3)
@@ -492,16 +445,7 @@ def test_each_q_keeps_its_own_tracker_and_promoted_set():
 
 
 def test_q_batching_samples_each_q_contact_at_its_own_anchor():
-    """The contacts are per q AND per candidate, and both indices must land.
-
-    ``obc_blocks.retarded[0]`` is ``(n_freq,) + nk + (b, b)``: M(z) is one
-    matrix, so it is held at the grid point nearest the candidate's anchor.
-    Stacking the q turns that into a two-index gather, and getting it wrong --
-    one q's contact used for another, or one candidate's sample shared across
-    the batch -- changes what drives the device while leaving the pole set
-    looking entirely plausible. The q tests above run contact-free, so this is
-    the only thing that covers it.
-    """
+    """The contacts are per q AND per candidate, and both indices must land."""
     from quatrex.phonon.pole_sector import PoleQBatch, refresh_many
 
     nq = 3

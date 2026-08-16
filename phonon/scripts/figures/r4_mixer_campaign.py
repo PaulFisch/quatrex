@@ -1,16 +1,5 @@
 """Results 4.5: the mixer ranking inverts between the two systems.
 
-Residual histories on the exact production bubble, one panel per system.
-The claim the figure has to carry is that no scheme dominates: what wins on
-the stiff nanotube is not what wins on the soft nanowire, which is why the
-solver choices in this work rest on measured Jacobians rather than on the
-resonance-gain model.
-
-Four schemes per panel, because four is the ceiling of the validated
-palette (see phonon/studies/style.py). They are chosen to span the
-families -- damped linear, Anderson, and the two extrapolation/projection
-routes -- not to be a complete sweep; the full sweep is the campaign report.
-
 Run:  python phonon/scripts/figures/r4_mixer_campaign.py
 """
 

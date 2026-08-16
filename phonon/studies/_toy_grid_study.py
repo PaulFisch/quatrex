@@ -1,32 +1,5 @@
 """Synthetic grid-resolution study: flat bands, Lorentzians, SCBA stability.
 
-Tests the discretisation claims of the theory chapter (sub:eta_zero) on a
-controlled toy model where every scale is a dial:
-
-  model: 2 DOF/cell chain. Orbital A = dispersive acoustic branch
-  (omega: 0..omega_a, lead-broadened everywhere). Orbital B = flat
-  (Einstein) band at omega_flat inside A's two-phonon continuum
-  (omega_flat < 2*omega_a), coupled ONLY through the cubic vertex
-  phi[A,A,B]+perms = g  ->  B's total linewidth is purely anharmonic,
-  Gamma ~ g^2, with no contact broadening (kappa=0).
-
-Experiments (each a sweep of full dense scba_loop solves, seconds each):
-  E1 resolution ladder: nfreq x g  ->  iterations / divergence and the
-     effective |lambda| from the late-phase residual rate, against
-     dw/Gamma (theory: marginal |lambda|<~1 resolved; |lambda|~dw/Gamma
-     unresolved).
-  E2 alignment scan: omega_flat swept across one grid cell at fixed grid
-     (pole-to-bin distance d: 0..dw/2) -> stability + discrete-weight
-     swing of the unresolved peak.
-  E3 DC / acoustic handling: dc_handling {interpolate, zero, keep} and a
-     contact-broadened variant (kappa > 0; theory: lead-broadened modes
-     are harmless).
-  E4 window content: fmax at {2.2, 1.5, 1.1} x omega_max at fixed dw
-     (convolution support clipped) -> stability + fixed-point shift.
-
-Gamma is measured, not assumed: Lorentzian half-width of the B-projected
-spectral function of the converged run on the finest grid.
-
 Usage:  python phonon/studies/_toy_grid_study.py [--out DIR]
 """
 from __future__ import annotations

@@ -1,19 +1,5 @@
 """Results 1: the rigid-layer modes that decide which MoS2 fit to believe.
 
-A level diagram. The two lowest optical modes of 2H-MoS2 at Gamma are the
-rigid-layer shear (layers sliding) and breathing (layers separating) modes.
-They are set by the interlayer force constants the cross-plane problem
-depends on, and they are measured -- so they judge a fit with no transport
-calculation in the loop.
-
-The splitting is the discriminator, which is why the figure draws it: a
-sparsifying prior that prunes the cross-gap third-order blocks also flattens
-the harmonic doublet, and the collapse is visible at a glance.
-
-Frequencies come from phonon.studies._interlayer_modes.modes(), the same
-function the text report calls, so the figure cannot drift from the number
-in the table.
-
 Run:  QTX_ARRAY_MODULE=numpy python phonon/scripts/figures/r1_interlayer_modes.py
 """
 

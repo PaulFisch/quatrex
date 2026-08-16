@@ -20,6 +20,13 @@ reach, which tightens the existing two-point bar; (b) flatten the 5x5
 transverse mesh to one axis so `q_distributed` applies, which divides both the
 perm cache and the legs; (c) then `lsM6`.
 
+## 1b. RESOLVED -- the dual-grid ladder and the PSD cutoff taper
+
+Both were run (`gl_*`, 12 jobs; `tap*`, 7 jobs) and neither was written up.
+Both are now in the report: the auxiliary grid is the expensive and
+unconverged axis (results §3.4), and a PSD cutoff mask restores positivity
+without rescuing the run (results §3.1). See `report_removed.md`.
+
 ## 2. The static loop and tadpole, without broadening
 
 **Gains:** turns results §5.2 from a ratio into values. The sweep behind
@@ -44,7 +51,12 @@ takes `--eta-factor 0` for whoever has them.
 **Gains:** the one main-chapter figure not regenerated at thesis width in the
 2026-08-16 pass, so it is the one that will look different on the page.
 
-**Blocked on:** `fc3_hiphive_srtio3_small_vasp` is not local.
+**Blocked on:** the fitted `fcp` IS local
+(`phonon/configs/perovskite/fc3_hiphive_srtio3_small_vasp/fcp.fcp`, 368 KB),
+but the loader wants an `fc3.hdf5` under one of `fc3/`,
+`fc3_hiphive_srtio3_small_vasp/` or `dfpt/` and none is there, so `make_all.py`
+still fails this generator with `FileNotFoundError`. Deriving the hdf5 from the
+fcp is the missing step, not fetching new data.
 
 ## 5. DONE -- the mixer-campaign figure
 
@@ -89,8 +101,8 @@ from 0.75 to 1.52.
 
 ## 9. `QX_POLE_PSD=1` in production
 
-**Gains:** the positivity gate exists, is wired, is cheap, and has run in three
-0.33-node-hour debug jobs and nowhere else. Every production run should carry
+**Gains:** the positivity gate exists, is wired, is cheap, and has run in four
+short debug jobs (`mos2psd*`, 1.32 nh total) and nowhere else. Every production run should carry
 it, since it is the diagnostic that turns a divergence into a statement about
 which leg lost positivity.
 
@@ -124,9 +136,15 @@ where grid points crowd the band edges and a contour-based nonlinear
 eigenvalue solve struggles. Whether that drives the `nf^4.8` divergence or
 merely accompanies it is not established.
 
-**Blocked on:** nothing but a run. `phonon.obc.algorithm` takes `spectral`
-(default) and `sancho-rubio`, `nevp_solver` takes `beyn` (default) and
-`full`, both exposed as `QX_OBC_ALG` / `QX_NEVP`, and
-`phonon/studies/engine/obc_probe.sh` runs the three-arm separation. The
-probe was launched previously but its logs are not on the analysis machine,
-so its outcome could not be quoted.
+**Partly answered (2026-08-16).** The two coarse-grid controls are recorded in
+`pole_sector_observations.md`: at `ne = 141` `si4x2` runs clean under the
+spectral OBC (0 warnings, O(1) residuals, heat 12.17), so the divergence is a
+property of the GRID and not of the 2x2 blocking; and `sancho-rubio` returns
+NaN on this bed at BOTH spacings, so it fails unconditionally and cannot serve
+as the independent arm. Results §4.3 now says this.
+
+**Still blocked on:** an arm that works at both spacings. Varying
+`nevp_solver` (`beyn` / `full`) at fixed `obc.algorithm = spectral` is the
+remaining lever; `QX_OBC_ALG` / `QX_NEVP` and
+`phonon/studies/engine/obc_probe.sh` are in place. The original probe's logs
+are not on the analysis machine.

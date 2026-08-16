@@ -1,48 +1,14 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""Keldysh structure of the pole sector: the cluster occupation matrix.
 
-The nonequilibrium content of a pole is **not** a scalar occupation. Starting
-from the retarded split :math:`G^R = P^R + B^R` with
-
-.. math::
-    P^R(\omega) = U D^R(\omega) V^\dagger, \qquad
-    D^R_{\alpha\beta} = \frac{\delta_{\alpha\beta}}{\omega - z_\alpha},
-
-where :math:`U = [r_1 \dots r_{N_p}]`, :math:`V = [l_1 \dots l_{N_p}]` and the
-pairs are normalised by :math:`l_\alpha^\dagger M'(z_\alpha) r_\alpha = 1`, the
-exact Keldysh equation :math:`G^{\lessgtr} = G^R \Sigma^{\lessgtr} G^A` gives for
-the pole-pole sector
-
-.. math::
-    G_{PP}^{\lessgtr}(\omega) = U D^R(\omega) S^{\lessgtr}(\omega) D^A(\omega) U^\dagger,
-    \qquad S^{\lessgtr} = V^\dagger \Sigma_{\rm tot}^{\lessgtr} V,
-
-i.e.
-
-.. math::
-    G_{PP}^{\lessgtr}(\omega) = \sum_{\alpha\beta} r_\alpha
-        \frac{S^{\lessgtr}_{\alpha\beta}(\omega)}
-             {(\omega - z_\alpha)(\omega - z_\beta^*)} r_\beta^\dagger .
-
-The off-diagonal :math:`S_{\alpha\beta}` are modal coherences. Replacing them by
-independent scalar occupations :math:`n_\alpha` discards exactly those terms, and
-is justified only when the poles are well separated compared with their widths
-*and* the projected source is nearly diagonal. Under a temperature bias neither
-is guaranteed, so the matrix form is the default and
-:func:`coherence_metric` is what licenses the scalar reduction.
-
-Two properties matter for the rest of the solver:
-
-* :math:`G_{PP}^{\lessgtr} = (U D^R) S^{\lessgtr} (U D^R)^\dagger` is a
-  **congruence** of the projected source, so it inherits its semidefiniteness.
-  That is safer than assigning modal weights independently and clipping negative
-  occupations afterwards.
-* The split used downstream is ``G_S = G_PP``, ``G_R = G_direct - G_PP``. Both
-  halves are then computable, they sum to the untouched ``G`` identically, and
-  the pole-background interference is retained rather than dropped.
-
-Sign convention follows the solver: :math:`-i G^{\lessgtr} \succeq 0`
-(``phonon/docs/bubble_positivity.md`` Sec. 0).
+The nonequilibrium content of a pole is not a scalar occupation. The exact
+Keldysh equation gives the pole-pole sector as ``U D^R S D^A U^dagger`` with
+``S = V^dagger Sigma_tot V``, whose off-diagonal entries are modal coherences.
+Replacing them by independent scalar occupations discards exactly those terms,
+and is justified only when the poles are well separated compared with their
+widths AND the projected source is nearly diagonal. Under a temperature bias
+neither is guaranteed, so the matrix form is the default and
+:func:`coherence_metric` is what licenses a scalar reduction.
 """
 from __future__ import annotations
 

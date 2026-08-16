@@ -1,40 +1,7 @@
 """Why does lead balance fail with dressed contacts? Conservation-identity
 diagnostic on CNT (3,3) L4 (cheaper than L8, same mechanism).
 
-The two-terminal balance J_L = -J_R rests on TWO independent identities
-(theory, sub:energy_conservation):
-
-  (D)  global sum rule  D(w) = Tr[Sigma_tot^> G^< - Sigma_tot^< G^>] = 0,
-       pure Dyson+Keldysh algebra -- holds for an EXACT solve with
-       mutually consistent self-energies (Sigma^R - Sigma^A =
-       Sigma^> - Sigma^< per channel). Gives J_L + J_R + J_s = 0.
-  (Js) bubble conservation  J_s = 0  (eq:bubble_balance), Baym-Kadanoff
-       Phi-derivability of the S_3-symmetric 3-phonon vertex.
-
-Lead imbalance therefore means one of these is violated, and they
-SEPARATE the cause:
-  J_L + J_R + J_s != 0  ->  (D) broken: contact / Sigma^R consistency.
-  that is 0 but J_s != 0 ->  (Js) broken: bubble / vertex / g_band.
-
-All three are computable from the saved arrays: current_spectrum gives
-J_L(w), J_R(w) at the interfaces; bubble_balance_spectrum gives
-P_in(w), P_out(w) so J_s(w) = hbar w (P_out - P_in); slab_absorption +
-the bond currents give the per-slab ledger (eq:local_ledger).
-
-Rungs (all eta=0, g_band=2, bubble_balance_check on, nf=181, aux_fmax=88
-so KK support is complete and NOT a confound):
-  bare    : obc_scattering_contacts = False  (bare harmonic reservoirs).
-  dressed : obc_scattering_contacts = True   (device boundary Sigma^R
-            dresses the leads -- the setup whose lead balance degraded).
-
-The comparison isolates the CONTACT dressing: if bare conserves and
-dressed does not, the dressed contact breaks identity (D); if bare
-already violates it, the aux Sigma^R reconstruction is implicated.
-
-Run (background, cluster):
-    cd <repo>
-    nohup python phonon/studies/_run_cnt33_L4_conservation.py > \
-        phonon/studies/out/cnt33_L4_conservation/cons.log 2>&1 &
+    nohup python phonon/studies/_run_cnt33_L4_conservation.py >         phonon/studies/out/cnt33_L4_conservation/cons.log 2>&1 &
 """
 from __future__ import annotations
 

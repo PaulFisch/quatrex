@@ -1,32 +1,8 @@
 #!/usr/bin/env python
 """Evaluate the pole-sector correctness gates on a saved production run.
 
-Hypothesis: if the hybrid self-energy is assembled correctly, the Keldysh
-identity ``Sigma^R - Sigma^A == Sigma^< - Sigma^>`` holds at roundoff, because
-it is purely algebraic. Any departure localises a specific defect:
-
-* ``eps_ki`` alone is large        -> a magnitude error, e.g. a double-counted
-                                      retarded half (the symmetry checks are
-                                      blind to it);
-* ``eps_delta_skew`` is large      -> an analytic ``Sigma^{<,>}`` that is not a
-                                      congruence;
-* ``eps_kk_hermitian`` is large    -> the Kramers-Kronig part is not Hermitian.
-
-Falsifier: a leg that conserves energy on the device but fails ``eps_ki`` here
-would mean the identity is not the right diagnostic, and the gate should be
-retired rather than trusted.
-
-The saved ``sigma_retarded`` is the FULL retarded self-energy, not the
-Kramers-Kronig part alone: ``core/scba.py`` adds the skew half
-``0.5*(Sigma^< - Sigma^>)`` into ``sigma_retarded_hermitian`` inside the SCBA
-loop, before the snapshot is written. Passing the Hermitian part alone would
-make ``eps_ki`` meaningless rather than merely wrong, so the assembly is
-checked rather than assumed (``--assume-kk-only`` reconstructs it if a future
-snapshot ever changes).
-
 Run:
-    python phonon/studies/_pole_gate_report.py cluster/pgate/sig_fullf.npz \
-        --pattern cluster/pgate/run_fullf.npz
+    python phonon/studies/_pole_gate_report.py cluster/pgate/sig_fullf.npz         --pattern cluster/pgate/run_fullf.npz
 """
 from __future__ import annotations
 

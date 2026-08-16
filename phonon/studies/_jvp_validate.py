@@ -1,37 +1,4 @@
 """Validation of the exact (analytic) SCBA Jacobian-vector product.
-
-The exact JVP rests on two facts: the bubble S(G) is a homogeneous
-R-quadratic map, so its directional derivative is the polarisation
-identity S'(G)[dG] = S(G+dG) - S(G) - S(dG); and the Dyson solve
-linearises in closed form at frozen G. Both are checked here against
-independent references before the production solver uses them.
-
-Tests (run individually via --test, or all):
-
-  bubble   Sandbox three-way: polarisation identity vs an explicit
-           mixed-leg bubble (product rule on the ring contractions) vs
-           finite differences, on synthetic multi-slab data. Also
-           2-homogeneity S(aG) = a^2 S(G) and the forward-FD
-           epsilon V-curve (the noise floor the analytic JVP removes).
-  dyson    Frozen-A Dyson JVP vs finite differences of the production
-           RGF selected_solve. Demonstrates that the plain identity
-           G^R dSigma^< G^A only matches the implemented map on the
-           skew-hermitian subspace (RGF substitutes
-           Sigma_ji -> -Sigma_ij^dagger and skew-projects the diagonal),
-           and that projecting the direction onto that subspace fixes it.
-  kernel   Production SigmaPhononPhonon.compute (one-sided grid, bosonic
-           fold, DC mask, KK): 2-homogeneity + polarisation identity vs
-           forward FD on synthetic DSDBSparse inputs; fast paths
-           (sse_greater_from_lesser / hermitian pairs) vs legacy path.
-  spectrum Real-embedded Arnoldi eigenvalues of the toy-chain SCBA map:
-           FD-JVP Arnoldi (as in _toy_grid_e7) vs analytic-JVP Arnoldi
-           (polarisation bubble + dense Dyson identity).
-
-Symmetry of the underlying kernel Hessian is by construction: the
-JVP is the exact bilinear cross form of the implemented symmetric
-bubble, not a re-derived convenience form.
-
-Memory-light on purpose (laptop-safe): tiny blocks, short grids.
 """
 from __future__ import annotations
 

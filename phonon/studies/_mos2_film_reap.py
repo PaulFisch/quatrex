@@ -1,18 +1,6 @@
 """Re-materialize the MoS2 FCs on a [4,4,3] supercell for the film build.
 
-The bulk fit ran on a [4,4,1] supercell: along c the saved fc2/fc3
-arrays only know the q_z = 0 Fourier sum, so H00/H01 cannot be
-separated for CROSS-PLANE transport from the arrays alone. The fitted
-force-constant potential (fcp.fcp) is short-ranged by construction
-(pair cutoff 6.0 A < c/2 = 6.15 A), so evaluating it on a [4,4,3]
-supercell restores three distinct c-cells (n_qz = 3, the cnt33
-situation) with NO new DFT. Output: a CNT-format reap dir
-(fc3.hdf5 with fc2+fc3 datasets + hiphive_meta.json) consumed by the
-generic film builder.
-
-Run: python phonon/studies/_mos2_film_reap.py \
-        --reap cluster/mos2_reap --out cluster/mos2_film_reap
-(~6 GB peak for the dense (288,288,288,3,3,3) fc3.)
+Run: python phonon/studies/_mos2_film_reap.py         --reap cluster/mos2_reap --out cluster/mos2_film_reap
 """
 from __future__ import annotations
 

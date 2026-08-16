@@ -1,23 +1,6 @@
 """Tile an L-cell device input set from a stored per-length device dir.
 
-The cnt33_L{2,3,4} device inputs are exact translates of a bulk offset set
-with pure edge truncation (verified bit-for-bit across the stored lengths:
-interior blocks of L4 are translates of each other, edges and dynamical
-matrices bit-equal across L). This script materializes that structure for
-ANY device length:
-
-  * fc3_blocks.hdf5 : bulk offset blocks Phi(d1, d2) extracted from one
-    interior cell of the source, emitted as (I, I+d1, I+d2) for every cell
-    with in-range indices (edge truncation = index validity, exactly the
-    generator's behaviour);
-  * dynamical_matrix.mat, phonon_energies.npy, structure.xyz : copied
-    unchanged (unit-cell quantities, identical across lengths).
-
 Usage:
-    python phonon/studies/_tile_device_inputs.py \
-        --src <geom/cnt33_L4> --cells 10 --out <geom-like dir>
-    python phonon/studies/_tile_device_inputs.py --src <...L4> \
-        --selfcheck <...L2> <...L3> <...L4>     # bit-equality gate
 """
 from __future__ import annotations
 

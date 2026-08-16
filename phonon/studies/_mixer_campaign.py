@@ -1,17 +1,6 @@
 """Head-to-head SCBA mixer/scheme comparison on one testbed config.
 
-Clones the base config once per scheme (rewriting the [scba]/[phonon]
-mixing knobs in place), runs each through the production engine to a fixed
-iteration budget, and reports a ranked table: best residual, iterations to
-tolerance, trend at the budget, wall s/it, final heat currents and lead
-balance. Every run's npz keeps the full per-iteration record
-(iter_sigma_max, iter_mixer_* diagnostics when enabled).
-
 Usage:
-    python phonon/studies/_mixer_campaign.py \
-        --base .../cnt33_linear/quatrex_config.toml \
-        --budget 300 [--schemes lin02,and_d8,and_d8_r1e4,rre_c8,...] \
-        [--workdir .../mixer_campaign_L2] [--save-sigma-at N]
 """
 from __future__ import annotations
 

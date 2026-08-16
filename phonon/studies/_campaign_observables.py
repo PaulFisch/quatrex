@@ -1,21 +1,7 @@
 """Theory-chapter observables for every run of the anderson_test campaign.
 
-Generalizes the single-run CNT L2 analysis to all systems/lengths/schemes:
-for each registered run it computes what the snapshot allows —
-
-  full runs (gr/gl diagonals + spectra):
-    LDOS/DOS + sum rule, occupation n_i(w), T_eff per slab, per-atom MSD
-    (+ isolated-device mode-sum reference), ballistic Caroli + Fisher-Lee
-    (from the run's dynamical_matrix.mat), T_eff(w), spectral heat current
-    + IR plateau, G_anh / G_ball / r + G_ball(T), conservation ledger
-    (D(w), slab P_abs, telescoped spread);
-  spectra-only runs (campaign schemes, QX_SAVE_DIAG_G=0):
-    the transmission/heat/conductance/conservation subset.
-
 Writes campaign_report/<run>_obs.npz + a combined summary.json.
-
 Usage:
-    python phonon/studies/_campaign_observables.py [--only run1,run2]
 """
 from __future__ import annotations
 

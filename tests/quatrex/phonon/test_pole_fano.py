@@ -67,13 +67,8 @@ def test_the_bed_really_carries_two_very_different_widths():
 
 def test_the_narrow_feature_is_asymmetric_which_a_lone_lorentzian_is_not():
     r"""Fano interference: the broad mode supplies a background whose phase
-    slides through the narrow resonance, so the spectral function does not come
-    back to the same level on the two sides.
-
-    A single isolated pole would give ``A(Omega - d) == A(Omega + d)`` exactly.
-    Here the two shoulders differ by tens of percent, which is what makes this a
-    pole-plus-background bed rather than two independent poles.
-    """
+    slides through the narrow resonance, so the spectral function does not
+    come back to the same level on the two sides."""
     _, narrow = _broad_and_narrow()
     gn = -narrow.imag
     asym = []
@@ -87,13 +82,7 @@ def test_the_narrow_feature_is_asymmetric_which_a_lone_lorentzian_is_not():
 
 
 def test_the_gate_promotes_the_narrow_mode_and_leaves_the_broad_one_on_the_grid():
-    """The selection claim, on the bed built to break it.
-
-    With a grid spacing between the two widths, the exact line-weight gate must
-    call the broad mode carried and the narrow one not. Getting this backwards
-    -- or the same answer for both -- is the failure the sector would not
-    otherwise notice, because both modes are real poles of the same operator.
-    """
+    """The selection claim, on the bed built to break it."""
     broad, narrow = _broad_and_narrow()
     h = 0.05                                   # gamma_narrow << h << gamma_broad
     assert -narrow.imag < h < -broad.imag
@@ -105,14 +94,7 @@ def test_the_gate_promotes_the_narrow_mode_and_leaves_the_broad_one_on_the_grid(
 
 @pytest.mark.parametrize("h", [0.05, 0.1, 0.25])
 def test_the_grid_misrepresents_the_narrow_line_by_the_predicted_factor(h):
-    r"""The gate is not merely ordering the modes, it is quantitative.
-
-    Summing point samples of the narrow line's own Lorentzian over the grid and
-    comparing with its exact weight must reproduce ``E_leg^max`` to within the
-    sub-cell offset -- the gate returns the worst case over where the line falls
-    between nodes, so the measured error is bounded by it and, with the line put
-    on a node, attains it.
-    """
+    r"""The gate is not merely ordering the modes, it is quantitative."""
     _, narrow = _broad_and_narrow()
     gn, wn = -narrow.imag, narrow.real
     sec = PoleSector(PoleSectorConfig(), np.arange(0.0, 30.0 + h, h))
@@ -129,15 +111,8 @@ def test_the_grid_misrepresents_the_narrow_line_by_the_predicted_factor(h):
 
 def test_a_broad_mode_is_carried_to_better_than_a_part_per_billion():
     """The other half of the selection claim: nothing is gained by promoting a
-    mode the grid already integrates correctly, and the sector must be able to
-    say so rather than promoting everything and leaning on the solve.
-
-    Compared against the exact integral over the SAME finite window. Against
-    the full unit weight instead, the answer is 1.3e-04 -- which is the tail
-    that runs off the end of the window, not a discretisation error, and would
-    have made this read as a failure of the grid when it is a property of the
-    interval.
-    """
+    mode the grid already integrates correctly, and the sector must be able
+    to say so rather than promoting everything and leaning on the solve."""
     broad, _ = _broad_and_narrow()
     gb = -broad.imag
     h = 0.05

@@ -1,27 +1,7 @@
 """Build PRODUCTION quatrex phonon-transport inputs for a benchmark system.
 
-Committed, parameterized port of the (ephemeral) /tmp builders. Reuses the
-verified input machinery: ``phonon_inputs.convention.get_btd_blocks`` +
-``separable`` + ``phonon.solver.fc3_device`` / ``se_q`` +
-``phonon_inputs.quatrex_writer`` + ``quatrex.phonon.qfold``. THz convention.
-
-Two device families:
-
-  * CNT (``cnt33`` / ``cnt80``) -- transversely FINITE (Gamma-only, k==1), a
-    1-D BTD device. No qfold. Writes ``dynamical_matrix.mat`` ([ix,0,0] keys),
-    ``fc3_blocks.hdf5`` (Gamma device FC3), ``structure.xyz``,
-    ``phonon_energies.npy``.
-  * Si film (``sifilm``) -- transversely PERIODIC (k>1). The real-space cells
-    are the exact transverse-IDFT of the dense H(q) over the production
-    monkhorst mesh q=k/nk; the q-folded 3-phonon vertices go to
     ``qfold_vertices.npz``. Writes the above plus ``qfold_vertices.npz`` and a
-    ``kshift.npy`` (the kpoint_shift the config must use).
-
 Usage:
-    python build_inputs.py --system cnt33  -L 4         --out DIR
-    python build_inputs.py --system cnt80  -L 2         --out DIR
-    python build_inputs.py --system sifilm --nslabs 5 --nk 8 --out DIR \
-        [--fc3-subdir reaps/si_big_hiphive] [--tdir x]
 """
 import argparse
 import json

@@ -165,7 +165,7 @@ class PoleSectorConfig(BaseModel):
 
     The construction is a change of representation, not of the diagram: the
     split ``G = G_S + G_R`` is exact, and all four bubble sectors are retained.
-    See ``phonon/docs/pole_subtracted_modal_scba.md``. Research use only;
+    See ``phonon/docs/pole_scba_implemented.md``. Research use only;
     ``enabled = False`` is legacy (bit-identical)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -183,32 +183,7 @@ class PoleSectorConfig(BaseModel):
     to measure the size of what they drop -- neither is a production setting."""
 
     leg: Literal["congruence", "congruence_analytic", "keldysh"] = "congruence"
-    """WHICH Green's function the pole split is applied to.
-
-    ``"congruence"`` splits the RETARDED function, ``G~^R = G^R_k + U[D(w) -
-    D(w_k)]V^dagger``, and forms the Keldysh components from it as ``G~^{<,>} =
-    G~^R Sigma G~^A``. Being a congruence of a PSD source, ``-i G~^{<,>}`` is
-    PSD at EVERY frequency and for ANY pole set, right or wrong.
-
-    What reaches the bubble is the CELL AVERAGE of that reconstruction: the
-    ring's dw-weighted sum is a midpoint rule, and for a line narrower than a
-    cell the point sample is wrong by order one (8.2e-01 relative at
-    ``h = 20 gamma``) while the average is analytic and exact. An average of
-    PSD matrices is PSD, so the corrected leg cannot anti-damp. The pole is
-    therefore resolved in the leg WEIGHT but not yet inside the convolution --
-    the output frequency resolution is still the grid's, and carrying SR/RS
-    analytically beside the ring is the remaining work.
-
-    ``"keldysh"`` is the superseded route: split ``G^{<,>}`` directly and
-    freeze the remainder ``G^{<,>}(w_k) - P^{<,>}(w_k)`` across the cell. That
-    remainder is a difference of PSD objects, and two of the three terms it
-    hides still carry ``P^R(w)``, so it is neither positive nor smooth. It
-    inverts the sign of the reconstruction at a 20 % residue error
-    (``test_pole_subcell.py``), which is the anti-damping this sector showed.
-
-    Kept selectable to reproduce runs made before 2026-08-11. It is not a
-    production setting. Both routes are bit-identical for an empty pole set,
-    so no baseline result depends on this."""
+    """WHICH Green's function the pole split is applied to."""
 
     omega_min_thz: NonNegativeFloat = 0.0
     """Lower edge of the pole search (THz). Below it the quasiparticle picture
@@ -229,28 +204,13 @@ class PoleSectorConfig(BaseModel):
     resonance requires; it needs the spectral OBC, which exposes the modes."""
 
     samples_per_halfwidth: PositiveFloat = 2.0
-    """``p_Gamma``: samples per half-width below which a mode counts as
-    under-resolved and is promoted.
-
-    NOT CONSULTED under the shipped default. ``screen`` treats the exact
-    line-weight gate and this ratio as ALTERNATIVES, not as a stack, and
-    since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
-    branch is only reached when ``leg_weight_tol`` is set back to 0."""
+    """``p_Gamma``: samples per half-width below which a mode counts as under-
+    resolved and is promoted."""
     q_in: PositiveFloat = 1.0
-    """Promote when the resolution score falls below this.
-
-    NOT CONSULTED under the shipped default. ``screen`` treats the exact
-    line-weight gate and this ratio as ALTERNATIVES, not as a stack, and
-    since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
-    branch is only reached when ``leg_weight_tol`` is set back to 0."""
+    """Promote when the resolution score falls below this."""
     q_out: PositiveFloat = 2.0
     """Demote only above this. The gap to ``q_in`` is hysteresis: a mode that
-    changes sector every iteration makes the fixed-point map discontinuous.
-
-    NOT CONSULTED under the shipped default. ``screen`` treats the exact
-    line-weight gate and this ratio as ALTERNATIVES, not as a stack, and
-    since 2026-08-15 ``leg_weight_tol`` defaults to 0.05 -- so the ratio
-    branch is only reached when ``leg_weight_tol`` is set back to 0."""
+    changes sector every iteration makes the fixed-point map discontinuous."""
 
     cluster_factor: PositiveFloat = 3.0
     """Single-linkage clustering radius, in units of the summed half-widths."""
@@ -258,23 +218,7 @@ class PoleSectorConfig(BaseModel):
     """Above this, refuse to promote at all -- near a defective point the
     simple-pole expansion itself fails."""
     band_edges: Literal["none", "lead"] = "none"
-    """Where ``edge_factor`` gets the branch points it refuses poles near.
-
-    ``"none"`` supplies nothing, which is what every run before 2026-08-15 did
-    -- so the ``edge_factor`` gate and the band-edge term of the trust radius
-    were INERT in production, and the method proposal's "do not force band-edge
-    continua into isolated poles" was unenforced. ``"lead"`` derives them from
-    the periodic lead dispersion (:func:`~quatrex.phonon.pole_sector.
-    lead_band_edges`), homogenised from the dynamical matrix by the same
-    ``get_periodic_superblocks`` the OBC uses, so they are the branch points of
-    the contact self-energy the operator actually carries.
-
-    Default ``"none"`` because switching it on CHANGES WHICH POLES ARE
-    PROMOTED, and that is a measurement rather than a tidy-up. A band edge is a
-    branch point, not a simple pole; the frozen Si census returned 36 of 1456
-    roots in the upper half plane, which is the artefact class this refuses.
-
-    Per q on a transverse-q device: ``D`` depends on q, so the edges do too."""
+    """Where ``edge_factor`` gets the branch points it refuses poles near."""
     edge_factor: PositiveFloat = 5.0
     """Refuse promotion within this many half-widths of a contact band edge.
     Band edges are branch points, not simple poles; forcing one into a
@@ -283,109 +227,23 @@ class PoleSectorConfig(BaseModel):
     newton_tol: PositiveFloat = 1e-10
     """Acceptance threshold on the scaled nonlinear-eigenvalue residual."""
     accept: Literal["locate", "residual"] = "locate"
-    """Which quantity decides that a pole was found.
-
-    ``"residual"`` is the legacy gate: ``eps_nep < newton_tol``, on the SCALED
-    MATRIX residual ``||M(z)r|| / ((|z|^2 + ||M||)||r||)``. Its denominator is
-    ``1e3-1e4 THz^2`` for a phonon operator, so it is not a statement about
-    frequency at all -- on the CNT bed it refused 142 of 144 candidates, whose
-    residuals ran from 4.8e-10 to 2.8e-02, while a candidate at 1e-9 sits
-    within roughly ``1e-5`` of its own linewidth.
-
-    ``"locate"`` gates on ``eps_z = |dz_est| / min(gamma, separation,
-    h_local)`` instead: the estimated remaining frequency error measured
-    against the smallest scale the pole must be resolved against. Same solver,
-    same ``newton_tol`` (still reported), different question.
-    """
+    """Which quantity decides that a pole was found."""
     locate_tol: PositiveFloat = 0.05
-    """Acceptance threshold on ``eps_z`` under ``accept="locate"``.
-
-    A pole located to 5 % of the smallest of its own width, its separation
-    from its neighbour, and the local cell is located well enough for a
-    simple-pole representation: the residue it carries is wrong at that order,
-    and the sector's whole purpose is to replace a grid weight that is wrong
-    by factors of 6 to 1000 (see ``pole_sector_state_and_next_steps.md``).
-    """
+    """Acceptance threshold on ``eps_z`` under ``accept="locate"``."""
     freeze_membership: bool = False
-    """Hold sector MEMBERSHIP fixed except on ``epoch_iterations`` boundaries.
-
-    The promoted set is a discrete object inside a fixed-point iteration, so
-    every pole that enters or leaves moves ``Sigma`` by a finite amount and
-    puts a floor under ``rel Sigma`` that no amount of iterating removes.
-    Measured on Si after the seeding fix (``pfix150``): membership still
-    jitters about 20 poles per iteration and ``rel Sigma`` sits in a 3-5e-02
-    band, against the pole-free arm's 9.3e-04 on the same grid, with
-    excursions damping back to that floor rather than through it.
-
-    When frozen, a pole already in the sector is re-solved (its POSITION
-    tracks ``Sigma``, which is what makes the leg correct) but is neither
-    demoted on a quality gate nor joined by a new one. The hard gates still
-    evict it: a root that leaves the lower half plane or the pole window has
-    stopped being a pole and cannot be carried in spite of that.
-
-    ``PoleTracker.membership_frozen`` has existed since the tracker was
-    written and had no caller; this is what calls it. Off by default so the
-    change is measured rather than assumed.
-    """
+    """Hold sector MEMBERSHIP fixed except on ``epoch_iterations`` boundaries."""
     audit_every_iteration: bool = True
     """Offer the full harmonic candidate set EVERY iteration, not only on a
-    tracker rescan.
-
-    The candidate set should be "every mode that could be a pole": the
-    harmonic spectrum in the window, plus any tracked pole that has drifted
-    away from its harmonic origin. Restricting it to the held set between
-    rescans was a cost optimisation from when one pole solve cost 187 s per
-    SCBA iteration; batching brought that to 0.4-0.8 s against the bubble's
-    7.4 s, so the optimisation now buys nothing and costs correctness.
-
-    It cost correctness because the two branches have different YIELDS.
-    Measured on Si (81 q, run ``pdiag``): the harmonic branch offers ~1400
-    candidates and accepts ~630 (43 %), the held branch offers ~620 and
-    accepts ~470 (67 %). Alternating between them alternates the promoted
-    set, which alternates ``Sigma``, which pins ``rel Sigma`` at 2.5e-01 --
-    see ``pole_sector_observations.md`` Sec. 9.
-
-    Set False to restore the rescan-gated seeding.
-    """
+    tracker rescan."""
     locate_tol_out: PositiveFloat = 0.15
     """Demotion threshold on ``eps_z``: a pole already in the sector is only
-    dropped above THIS, not above ``locate_tol``.
-
-    The gap is hysteresis, and it exists for the same reason the ``q_in`` /
-    ``q_out`` gap does. Without it the acceptance test is a hard threshold
-    sitting inside a fixed-point iteration, and it closes a feedback loop:
-    the pole enters the sector, its leg changes Sigma, ``eps_z`` rises past
-    the threshold, the pole is demoted, Sigma changes back, and the pole is
-    re-promoted. Measured on Si (81 q, ``leg="congruence"``, run ``psi2``):
-    the promoted set limit-cycled with period two between ~620 and ~460
-    poles for 34 iterations while the residual sat at O(1), where the same
-    bed without the sector converged monotonically to 9.3e-04.
-
-    ``q_out``/``q_in`` did have their gap, but that gate runs BEHIND this one
-    and never sees a pole this one has already refused.
-
-    Must exceed ``locate_tol``; raising it only ever RETAINS a pole that
-    would otherwise be dropped, never admits one that ``locate_tol`` refused.
-    """
+    dropped above THIS, not above ``locate_tol``."""
     newton_max_iterations: PositiveInt = 8
     """Bordered-Newton steps per pole per SCBA iteration."""
     trust_radius_cells: PositiveFloat = 0.25
-    """FLOOR on the Newton trust radius, in grid cells.
-
-    Was the trust radius itself. A pole is a property of ``M(z)``, not of the
-    storage grid, so a radius of ``trust_radius_cells * h`` means refining the
-    frequency grid SHRINKS the physical pole search -- the sector then finds
-    fewer poles on the fine rungs of a grid ladder for a reason that has
-    nothing to do with the poles. It is kept as a lower bound so a coarse grid
-    still gets at least the old radius."""
+    """FLOOR on the Newton trust radius, in grid cells."""
     trust_factor: PositiveFloat = 0.5
-    """Physical trust radius as a fraction of the nearest competing scale.
-
-    ``r = trust_factor * min(distance to the nearest other seed, distance to
-    the nearest contact band edge)``, in THz, floored at
-    ``trust_radius_cells * h``. Below one half the step cannot reach the
-    midpoint between two seeds, which is what stops a Newton solve from
-    walking onto its neighbour's pole."""
+    """Physical trust radius as a fraction of the nearest competing scale."""
     delta_fit_order: NonNegativeInt = 2
     """Degree of the local polynomial continuation of Sigma^> - Sigma^<, which
     is the second-sheet term."""
@@ -408,25 +266,9 @@ class PoleSectorConfig(BaseModel):
     approximated. A source that is not smooth across its own pole window has no
     business being carried analytically."""
     mixed_scale: float = 1.0
-    """DIAGNOSTIC scale on the injected ``Sigma_SR + Sigma_RS``.
-
-    Not a physics knob -- 1.0 is the method. It exists to bisect a failure:
-    if a defect grows linearly with this, the mixed term is simply too large
-    or wrongly signed; if it appears abruptly, the cause is elsewhere. Kept
-    because the alternative is guessing mechanisms, which cost four wrong
-    hypotheses on this sector."""
+    """DIAGNOSTIC scale on the injected ``Sigma_SR + Sigma_RS``."""
     cell_average: bool = True
-    """Emit the analytic sectors as CELL AVERAGES rather than point samples.
-
-    The grid solver treats every array as piecewise constant over its cell and
-    integrates with weight ``dw``. Handing it the value AT ``omega_m`` instead
-    re-imports the registration error the sector exists to remove, right at
-    the interface -- measured 16.5 % at ``gamma/h = 0.4`` and 286 % at 0.08,
-    against a cell average that is exact to 1e-16 at every width. Promoted
-    poles satisfy ``gamma/h < q_in`` by construction, so the sector always
-    operates where this matters.
-
-    ``False`` restores point sampling, for reproducing earlier results."""
+    """Emit the analytic sectors as CELL AVERAGES rather than point samples."""
 
     psd_check: bool = False
     """Per-iteration positivity gate on the reconstructed total (never on
@@ -434,142 +276,26 @@ class PoleSectorConfig(BaseModel):
     checks this today, and the sector is the first thing that can break it
     structurally."""
     leg_weight_tol: NonNegativeFloat = 0.05
-    """Worst-case line-weight error above which a mode counts as unresolved.
-
-    0 restores the legacy ``q_in``/``samples_per_halfwidth`` rule, kept so
-    pre-2026-08-15 runs reproduce. The default is now the EXACT test, because
-    on the frozen Si census the two rules disagreed about the physics
-    conclusion and not merely about a threshold -- see the calibration below.
-
-    Summing point samples of a unit-weight Lorentzian over a uniform grid is a
-    theta function, not the nearest-node term:
-
-        W(r, x) = sinh(2 pi / r) / (cosh(2 pi / r) - cos(2 pi x)),
-        r = h/gamma,  x = the offset in cells.
-
-    The worst case is a line sitting ON a node, giving
-
-        E_leg^max(r) = coth(pi / r) - 1 = 2 / (e^{2 pi / r} - 1),
-
-    so a tolerance ``eps`` is met exactly when ``h/gamma < 2 pi/log(1 + 2/eps)``
-    -- 1.185 for 1 %, 1.692 for 5 %, 2.064 for 10 %.
-
-    This matters on real data. The CNT population at production mixing has
-    median ``h/gamma = 0.65``, where the grid carries the line to better than
-    1e-8, yet ``q_omega = gamma/(2h) < 1`` calls 140 of 144 candidates
-    under-resolved -- the old rule flags almost everything and then leans on
-    the root solve to refuse it.
-
-    **Why 0.05.** Measured on the converged Si census (81 q, 1456 candidates,
-    ``pole_sector_observations.md`` Sec. 13), the tolerance decides how much of
-    the population the sector is asked to carry:
-
-    ======  ======================  ==================================
-    eps     h/gamma called adequate q whose MEDIAN line is promoted
-    ======  ======================  ==================================
-    0.01    1.185                   76/81
-    0.05    1.692                   32/81
-    0.10    2.064                   18/81
-    ======  ======================  ==================================
-
-    The census found the bulk of that population carried by the grid to 3 %
-    once the SCBA converges, and a tail of roughly one to four modes per q that
-    is not. 0.01 promotes the bulk, which is the thing the census says is
-    unnecessary; 0.10 keeps only the extreme tail. 0.05 promotes the tail and
-    the worst quartile (80/81 q have a p75 line above it) and leaves the median
-    mode on the grid, which is the population split the measurement actually
-    found.
-
-    Promoting more is not the safe direction: the sector's own bubble balance
-    runs about 1000x looser than the pole-free baseline, so carrying a mode the
-    grid already integrates correctly trades a known small error for an
-    unexplained larger one."""
+    """Worst-case line-weight error above which a mode counts as unresolved."""
 
     leg_weight_tol_out: NonNegativeFloat = 0.0
     """Demotion threshold for ``leg_weight_tol``; 0 means "use
-    ``leg_weight_tol / 3``".
-
-    Same hysteresis as ``locate_tol`` / ``locate_tol_out``, with the
-    inequality the other way round: this gate REFUSES a pole the grid already
-    resolves (``err <= tol``), so leniency for a pole already in the sector
-    means a SMALLER threshold, not a larger one. Must be below
-    ``leg_weight_tol``.
-
-    This matters because setting ``leg_weight_tol`` replaces the
-    ``q_in``/``q_out`` branch outright -- it does not run in addition to it --
-    so without this the sector would have no hysteresis at all.
-    """
+    ``leg_weight_tol / 3``"."""
     bubble_correction: Literal["none", "local_covariance"] = "none"
     """Replace the ring's cell-mean product on ACTIVE cell pairs by the exact
-    finite-cell integral.
-
-    ``"local_covariance"`` adds the subcell covariance
-    ``Delta I = int B[dG_k, dG_l]`` that the FFT ring, working from cell means,
-    leaves out. It is an ADDITION -- nothing is removed from the ring's output
-    and no leg is modified -- so with no active cell it is exactly zero and the
-    run is bit-identical to the baseline. That is the structural difference
-    from the sector routes, where the leg subtracted and the leg restored must
-    be the same function over the same support under the same quadrature.
-
-    Independent of ``leg``: the ring can be corrected whether or not the legs
-    carry a cell-average correction. Off by default."""
+    finite-cell integral."""
     covariance_sigma_min: NonNegativeFloat = 0.0
     """Cell activity floor for ``bubble_correction``, relative to the largest
-    ``sigma_k`` on the axis. 0 corrects every cell that carries poles.
-
-    The screening quantity is the cell variance, not a pole-cell / not-a-pole
-    -cell flag: an unresolved line's tail reaches past the cell holding it, so
-    a binary rule both corrects irrelevant cells and misses relevant ones."""
+    ``sigma_k`` on the axis. 0 corrects every cell that carries poles."""
     q_stride: PositiveInt = 1
-    """Solve every ``q_stride``-th transverse q. 1 = all of them.
-
-    Coupled-q costs ``nq`` pole solves -- 25 for a ``[5,5,1]`` mesh, 81 for
-    ``[1,9,9]`` -- and a survey rarely needs all of them. Skipping is safe by
-    construction: an unpromoted q keeps its untouched leg and is bit-identical
-    to pole-off there. Skipped q are REPORTED, because a sampled run that reads
-    like a full one is the trap this knob would otherwise set."""
+    """Solve every ``q_stride``-th transverse q. 1 = all of them."""
     q_max: NonNegativeInt = 0
     """Hard cap on how many q are solved (0 = no cap), applied after
     ``q_stride``."""
     q_batch: NonNegativeInt = 0
-    """How many q share one bordered-Newton solve. 0 = all of them.
-
-    The pole problems at different q are independent, so solving them together
-    changes nothing about the answer -- it changes how much work each kernel
-    launch does. That matters because the per-q operator is tiny (three 6x6
-    blocks on Si) and the solve was launch-bound, not arithmetic-bound:
-    ``phonon/docs/pole_solve_batching.md``.
-
-    This is therefore a MEMORY knob, not a numerics one. A batch holds the
-    self-energy of its q gathered into the block layout, plus its bosonic
-    mirror, so peak use grows linearly with the batch. Lower it if the pole
-    solve runs out of device memory on a large device; there is no accuracy
-    reason to.
-
-    ONE solve is independent of it to well below a linewidth, which is a test.
-    A whole SCBA trajectory is not bit-independent of it, for the same reason
-    no two floating-point summation orders are: batched and unbatched GEMMs
-    differ in the last ulps, and an unconverged fixed-point iteration amplifies
-    that like any other perturbation. Measured on Si (job 4468380, 81 q, 4
-    iterations, ``rel Sigma`` still O(25)): 624 against 622 promoted poles at
-    the first iteration and 437 against 437 at the second. Do not use it to
-    reproduce a run bit-for-bit; do use it to fit one in memory."""
+    """How many q share one bordered-Newton solve. 0 = all of them."""
     extraction_only: bool = False
-    """Run the pole SOLVE and print the census, then allocate NO sector.
-
-    Doc Sec. 27. Root finding and sector allocation fail for unrelated
-    reasons, and a single yield number cannot separate them: a mode missing
-    because Newton did not reach it and one missing because the representation
-    was refused need opposite fixes. With this on, every SCBA iteration solves
-    its candidates, reports location, both acceptance metrics, conditioning
-    and the refusal each would receive, and then hands the ring an EMPTY pole
-    set -- so the run is bit-identical to the pole-free baseline and the census
-    costs only the pole solve.
-
-    That makes it safe to point at any bed, which is the question it exists to
-    answer: does this device HAVE a population of narrow, isolated modes? On
-    CNT at 300 K it does not (``cnt_observations.md`` Sec. 6), and no A/B
-    there can say anything about the method."""
+    """Run the pole SOLVE and print the census, then allocate NO sector."""
 
     @model_validator(mode="after")
     def check_pole_sector_consistency(self) -> Self:
@@ -864,19 +590,7 @@ class SCBAConfig(BaseModel):
     symmetric: bool = False
 
     align_self_energy_to_complex_axes: bool = True
-    r"""Whether to discard parts of the self-energy.
-
-    This affects the self-energy in the following way:
-    - The real parts of the lesser/greater self-energy are discarded.
-    - The imaginary part of the retarded self-energy from any previous
-    computation is zeroed.
-
-    This happens before the imaginary part of the retarded self-energy
-    is computed from the lesser and greater parts as
-    $$\mathrm{Im}\left[\mathbf{\Sigma}^R\right] =
-    \frac{\mathbf{\Sigma}^> - \mathbf{\Sigma}^<}{2i}$$.
-
-    """
+    r"""Whether to discard parts of the self-energy."""
 
 
 class ElectrostaticsConfig(BaseModel):
@@ -1728,32 +1442,7 @@ class PhononConfig(BaseModel):
     interaction_cutoff: PositiveFloat = 10.0  # Angstrom
 
     interaction_cutoff_taper: Literal["none", "triangular"] = "none"
-    """Shape of the spatial interaction cutoff applied to the phonon SSE.
-
-    ``compute_sparsity_pattern(strategy="box")`` keeps every orbital pair with
-    ``|z_i - z_j| < interaction_cutoff`` and drops the rest, i.e. it
-    Hadamard-multiplies both the G legs and the Sigma output by a BOXCAR of
-    the transport-axis separation. A boxcar is not a positive-definite
-    function -- its Fourier transform ``2 sin(kR)/k`` changes sign -- so the
-    mask is indefinite whenever it truncates anything, which destroys the
-    ``-i G^< >= 0`` premise the bubble positivity theorem needs. That is the
-    measured cause of the MoS2 film instability: at 21 A the pattern keeps
-    98.6 % of its entries and still diverges, at 22 A it is dense and
-    converges (`phonon/docs/bubble_positivity.md`, 6.9-6.11).
-
-    ``"triangular"`` multiplies the retained entries by
-    ``max(0, 1 - |z_i - z_j| / interaction_cutoff)``. That function has
-    Fourier transform ``R sinc^2(kR/2) >= 0``, so by Bochner the mask is PSD
-    for ANY orbital arrangement and ANY radius, with exactly the same support
-    -- same nnz, same memory, same ring cost. Measured worst relative negative
-    eigenvalue of ``-i Sigma^<`` on the 6-cell MoS2 film: boxcar 4.5e-02 to
-    2.0e-01 over R = 10-30 A, triangular 3e-14 throughout.
-
-    The trade is accuracy, not stability: at equal radius the taper discards
-    slightly MORE weight than the boxcar, and its error falls only as 1/R. It
-    is for devices too long to make the pattern dense, where the alternative
-    is a divergent run -- not a default. ``"none"`` reproduces the legacy
-    boxcar exactly."""
+    """Shape of the spatial interaction cutoff applied to the phonon SSE."""
 
     solver: SolverConfig = SolverConfig()
     obc: OBCConfig = OBCConfig()
@@ -1787,65 +1476,23 @@ class PhononConfig(BaseModel):
 
     # --- 3-phonon (anharmonic) scattering ----------------------------
     fc3_path: Path | None = None
-    """Path to the FC3 source consumed by ``SigmaPhononPhonon``.
-
-    Required when ``model == "negf"``. Format: HDF5 produced by the
-    ``phonon_inputs`` pipeline (block-sparse ``/fc3_blocks`` or dense
-    ``/fc3``).
-    """
+    """Path to the FC3 source consumed by ``SigmaPhononPhonon``."""
 
     qfold_path: Path | None = None
     """Path to the q-folded device vertices for transversely-periodic
-    (``kpoint_grid`` with k>1) anharmonic transport.
-
-    A ``.npz`` written by :func:`quatrex.phonon.qfold.save_qfold`
-    (built offline from the real-space FC3 + transverse Bloch phases via
-    ``phonon.solver.se_q``). Holds ``{(iq1, iq2): {(I,K,Kp): Phi}}`` plus
-    the ``q_diff_map``. Required when any ``kpoint_grid`` entry is > 1 and
-    ``model == "negf"``; ignored for the Gamma-only (k==1) device.
-    """
+    (``kpoint_grid`` with k>1) anharmonic transport."""
 
     decomposed_vertices_path: Path | None = None
-    """Path to the TENSOR-DECOMPOSED coupled-q device vertex factors.
-
-    A ``.npz`` written by
-    :func:`quatrex.phonon.vertex_factors.save_decomposed` (built offline
-    from a CP/INDSCAL factorisation of the bulk FC3 via
-    ``phonon/phonon_inputs/fc3_factor_device.py``). The exact per-leg
-    factorisation of the same q-folded blocks ``qfold_path`` holds densely
-    -- O(n_off * N_q * n_dof * R) instead of O(N_q^2) dense block dicts.
-    Mutually exclusive with ``qfold_path``.
-    """
+    """Path to the TENSOR-DECOMPOSED coupled-q device vertex factors."""
 
     sse_vertex_rank: int = 0
-    """Truncate the decomposed vertex to the leading ``rank`` components.
-
-    ``0`` (default) keeps the full stored rank. Columns are weight-sorted
-    at export, so this makes an R-sweep a config-only knob against one
-    high-rank factor file. Requires ``decomposed_vertices_path``.
-    """
+    """Truncate the decomposed vertex to the leading ``rank`` components."""
 
     decomposed_kernel: Literal["gram", "reconstruct"] = "gram"
-    """How the SSE consumes the decomposed vertex.
-
-    ``"gram"`` (default): the factored contraction
-    (``quatrex.phonon.bubble_factored``). The quad sum collapses onto two summed
-    Grams and the transverse-momentum sum runs as an FFT, which the dense vertex
-    cannot do, so this is asymptotically cheaper at every rank the fit needs.
-    ``"reconstruct"``: materialise the rank-local slice of the dense q-folded
-    dict from the factors and run the dense contraction. Keeps the storage win
-    but none of the arithmetic one; retained as a fallback and as the oracle the
-    parity test compares against.
-    """
+    """How the SSE consumes the decomposed vertex."""
 
     retarded_method: Literal["half", "fft"] = "fft"
-    """How to reconstruct ``Sigma^R`` from ``Sigma^{<,>}``.
-
-    - ``"half"``: ``Sigma^R = (Sigma^> - Sigma^<) / 2``.
-    - ``"fft"``: also add the bosonic Hilbert correction
-      ``i/2 * H[Sigma^> - Sigma^<]`` (uses the same FFT kernel as
-      ``coulomb_screening/polarization.py``).
-    """
+    """How to reconstruct ``Sigma^R`` from ``Sigma^{<,>}``."""
 
     phonon_phonon_truncation_warn: NonNegativeFloat = 0.01
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
@@ -1868,17 +1515,11 @@ class PhononConfig(BaseModel):
     """Number of SCBA solves over which to anneal ``eta_ir_floor_cells`` down to
     ``eta_ir_floor_final_cells`` (0 = off, hold the floor constant)."""
     buttiker_probe: bool = False
-    """Optional self-consistent Buttiker DEPHASING probe on the eta-broadening
-    channel (default OFF). The numerical broadening ``eta`` adds a damping
-    ``Gamma_eta = 4*eta*omega`` to G^R with NO matching fluctuation, which
-    violates the fluctuation-dissipation balance and, under a thermal bias,
-    injects a spurious energy current; when True, a matching fluctuation
-    ``Sigma_probe^{<,>} = i*Gamma_eta*(n_p + 0/1)`` is added to the device
-    source, with ``n_p = G^< / (G^> - G^<)`` updated self-consistently each
-    SCBA iteration so the LOCAL probe current vanishes at every energy.
-    NOTE: this injects elastic DEPHASING (physics, not a pure regularizer) --
-    for the pure coherent+anharmonic conductance use eta->0 extrapolation
-    instead. Single-block (block_comm_size==1) only."""
+    """Self-consistent Buttiker dephasing probe supplying the fluctuation that
+    matches the ``eta`` damping, with ``n_p`` solved each iteration so the
+    local probe current vanishes at every frequency. This is elastic
+    dephasing, i.e. physics rather than a regulariser, and it is identically
+    zero at ``eta = 0``. Single block-rank only."""
 
     bubble_balance_check: bool = False
     """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
@@ -1962,20 +1603,11 @@ class PhononConfig(BaseModel):
     primary grid (no extension beyond its top)."""
 
     sse_aux_restrict: Literal["adjoint", "sample"] = "adjoint"
-    """How Sigma comes back from the auxiliary bubble grid onto the
-    primary grid. ``"adjoint"`` (default): the adjoint of the leg
-    interpolation w.r.t. the ENERGY measure w*|omega|,
-    R = (W O)^-1 P^T (dw O_aux) -- the hbar*omega-weighted pairing
-    sum_m w_m om_m Tr[Sigma(w_m) G(w_m)] then equals the aux-grid
-    pairing EXACTLY, so the dual-grid bubble keeps the Phi-derivable
-    ENERGY balance (and the lead heat balance J_L - J_R = P_in - P_out)
-    to roundoff. A pointwise sample breaks it at the interpolation-error
-    level, concentrated where the primary grid is coarsest; the net
-    current is a small difference of large fluxes, so the leak dominates
-    the lead balance long before it is visible in Sigma itself.
-    ``"sample"``: pointwise linear sampling of the aux-grid Sigma
-    (sharper at resonance peaks, not conserving). Identical when the
-    grids coincide (up to the masked omega = 0 bin)."""
+    """How Sigma returns from the auxiliary bubble grid to the primary grid.
+    ``"adjoint"`` is the adjoint of the leg interpolation with respect to the
+    energy measure and keeps the Phi-derivable energy balance to roundoff;
+    ``"sample"`` is pointwise, sharper at resonance peaks and not conserving.
+    The two coincide when the grids do, up to the masked omega = 0 bin."""
 
     low_freq_mixing_thz: NonNegativeFloat = 0.0
     """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this
@@ -1992,44 +1624,14 @@ class PhononConfig(BaseModel):
 
     sse_release_leg_blocks: bool = False
     """Free the densified G leg blocks once the batched coupled-q kernel has
-    stacked them.
-
-    ``.blocks[K, Kp]`` densifies into a fresh array (it is not a view), so the
-    four ``*_blk`` dicts hold ``4 L`` arrays of ``(n_tau, N_q, b, b)``; the
-    batched kernel then calls ``xp.stack`` and builds a SECOND full copy before
-    the tau-chunk loop that would have bounded it. Both live simultaneously --
-    2 x 13.9 GB of a 100 GB SSE phase on the 6-cell MoS2 film.
-
-    With this set the leg dicts (and their halo sources) are released as soon
-    as the stacks exist, followed by a memory-pool flush. Purely an allocation
-    lifetime change: the stacks hold the same values, so results are bit
-    identical. Default ``False`` keeps the legacy lifetime."""
+    stacked them."""
 
     sse_perm_cache_share: Literal["off", "auto"] = "off"
     """Share pre-permuted vertex pairs across the block row in the dense
-    q-folded ring.
-
-    The permuted pairs are cached under a key that, for a dense q-folded
-    vertex, carries the ABSOLUTE block indices ``(I, K1, K2, J, K2p, K1p)``,
-    on the grounds that only the factor-reconstructed vertex is known to be
-    translationally invariant. For a bulk-homogeneous device the dense blocks
-    repeat across the block row too, and then the transport-offset key
-    ``(K1-I, K2-I, K2p-J, K1p-J)`` is equivalent and collapses the cache by
-    4-16x on every shipped device (to a single distinct key).
-
-    ``"auto"`` VERIFIES translational invariance of the q-folded vertex
-    exactly, once, before switching keys, and silently keeps the absolute key
-    if the check fails -- so it can never silently share blocks that differ.
-    Default ``"off"`` keeps the legacy key."""
+    q-folded ring."""
 
     sse_tau_chunk_bytes: PositiveInt = 256 * 1024 * 1024
-    """Memory cap on one tau chunk of the decomposed (``"gram"``) SSE kernel.
-
-    The kernel's Gram tables are ``(N_q, n_tau, R, R)``, so the working set grows
-    with the tau slice AND with the square of the rank: on a single rank at
-    R = 128 the full local tau axis is tens of GB. Tau is therefore split so that
-    one chunk's Gram stays under this cap, independently of the thread pool (the
-    GPU path has none). Results do not depend on the chunk size."""
+    """Memory cap on one tau chunk of the decomposed (``"gram"``) SSE kernel."""
 
     sse_ring_threads: NonNegativeInt = 0
     """Width of the omega/tau ring-contraction thread pool (bit-identical
@@ -2062,19 +1664,12 @@ class PhononConfig(BaseModel):
     Bit-identical; avoids allocator churn/contention at wide pools."""
 
     sse_greater_from_lesser: bool = False
-    """Reconstruct the cross terms of Sigma^> from the Sigma^< ring pass via
-    the exact bosonic tau-domain identity (the ji-transposed, tau-reversed
-    cross terms of pair (J, I) are the absorption terms of pair (I, J); at
-    coupled-q additionally at NEGATED external q): 4 instead of 6 ring
-    contractions per vertex quad, and the reversed-lesser leg is never built.
-    Construction-exact -- independent of any property of G -- up to summation
-    order (~1e-13 rel). Supported on the dense kernels: Gamma (nq == 1), and
-    at nq > 1 the dense coupled-q path fed EXPLICIT q-folded vertices
-    (``qfold_path``), whose reality Phi(-q1,-q2) = conj(Phi(q1,q2)) (real
-    real-space FC3, Gamma-centered mesh) the identity relies on. Refused
-    with the decomposed vertex (gram kernel unwired; the reconstructed
-    slice's reality is not audited). Verify with
-    ``sse_fold_verify_iterations``."""
+    """Reconstruct the cross terms of Sigma^> from the Sigma^< ring pass by the
+    exact bosonic tau-domain identity: 4 instead of 6 ring contractions per
+    vertex quad. Exact by construction up to summation order. Supported on the
+    dense kernels only -- Gamma, and coupled-q fed explicit q-folded vertices,
+    whose reality the identity relies on -- and refused with the decomposed
+    vertex. Verify with ``sse_fold_verify_iterations``."""
 
     sse_fold_verify_iterations: NonNegativeInt = 0
     """With ``sse_greater_from_lesser``: for the first N compute() calls run
@@ -2115,43 +1710,26 @@ class PhononConfig(BaseModel):
     harmonic reservoirs, scattering enters the device Dyson only."""
 
     sse_g_band: int = Field(default=3, ge=1, le=3)
-    """Inner Green's-function block band |K - K'| kept in the bubble
-    contraction. With 1 the RGF block-tridiagonal G masks the bubble
-    kernel G(x)G to that band -- a masked positive-semidefinite form is
-    NOT positive-semidefinite (Schur product with the indefinite
-    tridiagonal-ones mask), so interior slabs (>= 3 transport cells)
-    acquire non-causal gain components of Sigma. With 2, the solver
-    additionally produces the second off-diagonal G^{<,>} blocks and the
-    contraction keeps all links the nearest-neighbour vertex span needs:
-    the diagonal Sigma blocks become exact and causal. With 3, the third
-    off-diagonal G^{<,>} blocks are produced too, so the first off-diagonal
-    Sigma blocks become exact and causal as well. Extends the shared
-    G/Sigma sparsity pattern by the corresponding off-diagonal blocks
-    (Sigma's extra blocks stay structurally zero). Single block-rank only.
-
-    Default 3 (2026-08-01): the L16-L32 CNT ladder showed the band-1
-    boxcar's anomalous gain GROWS with length while the Bartlett-tapered
-    band-1 run underweights off-diagonal coherence ~2x -- both
-    incorrect; the full band-3 run is the reference. The value is
-    clamped at use to n_blocks - 1 (a band wider than the device has
-    off-diagonals is meaningless), so short devices keep their exact
-    full-band behaviour."""
+    """Inner Green's-function block band ``|K - K'|`` kept in the bubble
+    contraction. Band 1 masks the kernel to the RGF block-tridiagonal G, and a
+    masked positive semi-definite form is not positive semi-definite, so
+    interior slabs acquire non-causal gain. Band 2 makes the diagonal Sigma
+    blocks exact and causal, band 3 the first off-diagonals as well. Extends
+    the shared G/Sigma sparsity pattern by the corresponding off-diagonal
+    blocks, and is clamped at use to ``n_blocks - 1``. Single block-rank
+    only."""
 
     sse_g_band_taper: Literal["none", "bartlett"] = "none"
-    """PSD taper of the inner-G band mask. The boxcar band truncation is a
-    Schur product with the indefinite band-ones matrix; it destroys the
-    positive-semidefiniteness of the bubble kernel and injects non-causal
-    gain (the sse_g_band=1 instability). "bartlett" weights every inner G
-    link by w_d = 1 - d/(sse_g_band+1) (d = |K-K'|) and the Sigma output
-    blocks by the same w_{|I-J|}: the taper matrix is PSD (Fejer kernel),
-    so by the Schur product theorem -+i Sigma^{<,>} stays PSD -- causal at
-    ANY band -- and using the same taper on G and Sigma is the
-    Phi-derivable pair (Phi[M o G]), so Baym-Kadanoff energy conservation
-    is retained. Price: off-diagonal coherence is underweighted (band-1:
-    factor 1/2 per G link and on the off-diagonal Sigma blocks). "none" is
-    the legacy boxcar, bit-identical to previous behaviour. Not supported
-    with decomposed_kernel="gram" (per-quad weights do not factor through
-    the Gram collapse)."""
+    """Positive semi-definite taper of the inner-G band mask, against the
+    boxcar's non-causal gain. ``"bartlett"`` weights each inner G link by
+    ``w_d = 1 - d/(sse_g_band+1)`` and the Sigma output blocks by the same
+    weight, which is the Phi-derivable pair and so conserves energy. It
+    restores end-to-end positivity only at ``sse_g_band = 1``: the output
+    band is pinned at ``|I-J| <= 1``, whose tapered Toeplitz symbol needs
+    ``w_1 <= 1/2``. At wider bands it fixes the legs and not Sigma, and the
+    code warns. Price at band 1 is half the off-diagonal coherence.
+    ``"none"`` is the legacy boxcar. Not supported with
+    ``decomposed_kernel="gram"``."""
 
     sse_dense_q_batched: bool = True
     """Coupled-q dense ring: flatten the (q', quad) task axis into
@@ -2200,17 +1778,14 @@ class PhononConfig(BaseModel):
     0 disables (residual + lead heat balance only)."""
 
     scp_tadpole: bool = False
-    """Optional self-consistent-phonon (SCP) cubic tadpole static
-    self-energy (``model == "negf"``). The cubic tadpole
-    ``Sigma_T = Phi3 : <u>`` is a STATIC real self-energy that stiffens the
-    soft modes (the finite-T SCP renormalisation), stabilising the dynamic
-    bubble; it is recomputed every SCBA iteration from the current device
-    ``G^<`` and added to the dynamical matrix via ``Sigma^R``. Needs only
-    FC3 (the quartic loop, which would need FC4, is omitted). Default OFF;
-    cf. ``quatrex/phonon/static_self_energy.py``.
-
-    NOTE: the implementation assembles dense device-level arrays (FC3
-    tensor + Phi_eff eigensolve); intended for single / few-cell devices."""
+    """Optional self-consistent-phonon (SCP) cubic tadpole static self-energy
+    (``model == "negf"``). The cubic tadpole ``Sigma_T = Phi3 : <u>`` is a
+    STATIC real self-energy that stiffens the soft modes (the finite-T SCP
+    renormalisation), stabilising the dynamic bubble; it is recomputed
+    every SCBA iteration from the current device ``G^<`` and added to the
+    dynamical matrix via ``Sigma^R``. Needs only FC3 (the quartic loop,
+    which would need FC4, is omitted). Default OFF; cf.
+    ``quatrex/phonon/static_self_energy.py``."""
 
     scp_tadpole_term: bool = True
     """Include the cubic tadpole Phi3:<u> in the static SCP

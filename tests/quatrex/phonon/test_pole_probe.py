@@ -56,14 +56,8 @@ def _btd_pattern(block_sizes):
 # --------------------------------------------------------------------------- #
 
 def test_delta_sign_matches_the_stored_convention():
-    """Delta = Sigma^> - Sigma^< (raw) == sigma_lesser - sigma_greater (stored).
-
-    The bubble negates its output before writing, because the solver stores
-    occupation-positive quantities while the Keldysh feedback expects the
-    textbook sign. So the raw difference the retarded reconstruction is built
-    from is the NEGATIVE of the stored one, and Delta comes back with the
-    lesser/greater roles swapped.
-    """
+    """Delta = Sigma^> - Sigma^< (raw) == sigma_lesser - sigma_greater
+    (stored)."""
     rng = np.random.default_rng(0)
     sl_raw = rng.normal(size=(5, 3)) + 1j * rng.normal(size=(5, 3))
     sg_raw = rng.normal(size=(5, 3)) + 1j * rng.normal(size=(5, 3))

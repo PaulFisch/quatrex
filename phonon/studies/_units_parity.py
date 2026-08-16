@@ -1,24 +1,6 @@
 """Units-bridge parity: production engine (ballistic) vs exact mode count.
 
-Same device (cnt33 L4, dynamical_matrix.mat as consumed by the engine):
-
-  A. reference -- Landauer G from the lead Bloch mode count M(nu)
-     (assumption-free for a pristine wire; no NEGF, no surface GF),
-     integrated with the dense-stack convention
-     J = sum(hbar omega_rad (n_L - n_R) M) * dnu * 1e12, G = J/(A dT).
-  B. engine -- QX_BALLISTIC=1 single-rank run, then
      phonon.postproc.units.run_npz_conductance on run.npz.
-
-Validated 2026-07-29: engine T_eff = spectrum/(n_L - n_R) reproduces
-M(nu) on 361/361 bins exactly; G ratio 1.00000 (797.0 MW/m^2/K).
-
-The retired Sancho-Rubio reference (dense_reference below) is kept as
-a secondary check only: its eta_factor lead seed smears the stepped
-transmission and reads ~10% LOW on cnt33 (T peak 10.5 vs the true
-11-channel step at 40 THz). The same caveat applies to the stored
-ballistic.py d5a/d11a curves at ETA_FACTOR = 0.3.
-
-Run locally:  python phonon/studies/_units_parity.py
 """
 from __future__ import annotations
 

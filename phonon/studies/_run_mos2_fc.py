@@ -1,19 +1,4 @@
 """2H-MoS2 bulk FC campaign driver (cross-plane kappa_z vs Sood 2019).
-
-Two-stage, because VASP shares one k-mesh per config:
-  1. relax  -- mos2_relax_vasp.yaml, dense [12,12,4] on the 6-atom
-     primitive, ISIF=2 (cell fixed to experiment; only the S
-     z-parameter moves).
-  2. hiphive statics -- mos2_bulk_vasp.yaml regenerated with the
-     relaxed structure, [3,3,2] on the [4,4,1] 96-atom supercell,
-     then fc3-hiphive-all (sow -> run -> reap).
-
-Idempotent: a completed relax (CONTCAR + converged check inside
-run_vasp_relax) is reused; hiphive sow/run skip completed structures.
-
-Run on the cluster:
-    python phonon/scripts/tortin.py launch --name mos2fc -- \
-        python phonon/studies/_run_mos2_fc.py
 """
 from __future__ import annotations
 

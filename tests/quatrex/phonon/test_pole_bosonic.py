@@ -37,16 +37,7 @@ def _pattern(sizes):
 
 
 def _keldysh_pair(u, centre=11.0, gamma=0.4, kt=25.0):
-    """A physically valid ``(G^<, G^>)`` pair at equilibrium.
-
-    ``G^< = i n_B(w) A(w)``, ``G^> = i (n_B(w)+1) A(w)`` with ``A`` ODD in
-    ``w``. This pair satisfies the true bosonic relation
-    ``G^<(-w) = G^>(w)``; it does NOT satisfy ``G^<(-w) = conj(G^<(w))``.
-
-    Building the bed from the physics rather than from the relation under test
-    is the point: an earlier version of this module used a conjugate-symmetric
-    function, which made the wrong mirror look right.
-    """
+    """A physically valid ``(G^<, G^>)`` pair at equilibrium."""
     n_b = 1.0 / np.expm1(u / kt)
     a = (gamma / ((u - centre) ** 2 + gamma ** 2)
          - gamma / ((u + centre) ** 2 + gamma ** 2))
@@ -155,16 +146,7 @@ def test_state_separates_the_leg_set_from_the_solved_set():
 
 
 def test_closure_is_deferred_because_the_frozen_source_cannot_serve_both_branches():
-    """A measured decision, recorded so it is not silently re-attempted.
-
-    ``bubble_clusters()`` closes the pole set under ``z -> -z^*``, which puts
-    partners at NEGATIVE real frequency. The frozen source is evaluated at a
-    single index, the positive centre, so after closure one source is applied
-    to poles at both ``+Omega`` and ``-Omega`` -- and the partner's source is
-    the bosonic mirror of the original's, not the same matrix. Wiring the
-    closure in without that made ``rr_ss`` worse by 3400x on the production
-    bed (bubble balance 5.4e-08 -> 1.8e-04).
-    """
+    """A measured decision, recorded so it is not silently re-attempted."""
     rng = np.random.default_rng(2)
     z = np.array([8.0 - 0.3j, 11.0 - 0.4j])
     u = rng.normal(size=(6, 2)) + 1j * rng.normal(size=(6, 2))
@@ -178,14 +160,7 @@ def test_closure_is_deferred_because_the_frozen_source_cannot_serve_both_branche
 
 
 def test_sr_equals_rs_on_a_leg_symmetric_vertex():
-    """On a real vertex the two mixed sectors are the SAME object.
-
-    hiphive's ``symmetrize=True`` gives ``Phi[i,a,b] == Phi[i,b,a]``, and under
-    that symmetry ``Sigma_SR`` and ``Sigma_RS`` coincide exactly. Tests that
-    assert they differ are measuring the asymmetry of a random test vertex, not
-    physics -- worth pinning, because that asymmetry was once read as evidence
-    of a bug.
-    """
+    """On a real vertex the two mixed sectors are the SAME object."""
     from quatrex.phonon.pole_bridge import (
         _mixed_one_sector_blocked, mixed_vertex_block_dict)
 
@@ -242,13 +217,7 @@ def test_sr_equals_rs_on_a_leg_symmetric_vertex():
 
 
 def test_pair_source_is_exact_on_the_diagonal_and_averaged_off_it():
-    """One source per pole PAIR, at that pair's own frequency.
-
-    For ``alpha == beta`` the two poles share a real part, so the pair
-    frequency IS ``Re z_alpha`` and no accuracy is lost relative to a per-pole
-    evaluation. Only the cross terms are averaged, and their coefficients are
-    suppressed by a large ``gap``.
-    """
+    """One source per pole PAIR, at that pair's own frequency."""
     from quatrex.phonon.pole_bridge import source_at_poles
 
     w = np.linspace(0.0, 20.0, 401)
@@ -275,15 +244,7 @@ def test_pair_source_is_exact_on_the_diagonal_and_averaged_off_it():
 
 
 def test_gpp_decays_like_one_over_omega_squared():
-    """The asymptotics gate: ``c_a + c_b`` must vanish.
-
-    Writing the leg as ``c_a/(w-z_a) + c_b/(w-conj(z_b))``, the large-``w``
-    behaviour is ``(c_a+c_b)/w`` while the congruence it models decays as
-    ``1/w^2``. Using a DIFFERENT source at each pole leaves the sum nonzero
-    and gives ``G_PP`` a spurious ``1/w`` tail -- measured 17x too large at
-    ``w = 1e2`` and 18364x at ``1e5``, which is what made ``rr_ss`` regress
-    from 5.4e-08 to 4.9e-05.
-    """
+    """The asymptotics gate: ``c_a + c_b`` must vanish."""
     from quatrex.phonon.pole_bridge import source_at_poles
 
     w = np.linspace(0.0, 40.0, 4001)
@@ -332,14 +293,7 @@ def test_negative_frequency_poles_use_the_bosonic_mirror():
 
 
 def test_gpp_partial_fraction_form_matches_what_the_sectors_represent():
-    """The leg subtracted from the ring must BE the leg the sectors put back.
-
-    ``G_reg = G - G_PP`` is exact for any ``G_PP``, so the sector sum
-    ``B(G,G) = SS + SR + RS + RR`` holds iff both sides use literally the same
-    object. The resolved form ``U D^R S(w) D^A U^dag`` and the partial-fraction
-    form agree only when ``S`` is constant in frequency; otherwise they are
-    different functions and the decomposition is broken.
-    """
+    """The leg subtracted from the ring must BE the leg the sectors put back."""
     from quatrex.phonon.pole_bridge import pole_keldysh_pf_sparse
     from quatrex.phonon.pole_bubble import leg_partial_fractions
 
@@ -407,13 +361,7 @@ def test_resolved_and_partial_fraction_legs_differ_when_the_source_varies():
 
 
 def test_source_variation_is_a_measured_residual_not_an_asymptotic_claim():
-    """``source_fit_tol`` gates on THIS, not on ``O((|Im z|/h)^(p+1))``.
-
-    The asymptotic estimate omits the analyticity radius and higher
-    derivatives of the source, the pole's offset from the fit centre, the
-    window width and the conditioning of the fit. A source with structure of
-    its own is invisible to it and obvious here.
-    """
+    """``source_fit_tol`` gates on THIS, not on ``O((|Im z|/h)^(p+1))``."""
     from quatrex.phonon.pole_bridge import source_variation
 
     w = np.linspace(0.0, 40.0, 4001)
@@ -445,18 +393,7 @@ def test_state_records_the_source_fit_per_cluster():
 
 
 def test_sr_and_rs_are_computed_independently():
-    """The two mixed sectors must stay separate paths, not one doubled.
-
-    They ARE equal on a leg-exchange-symmetric vertex at Gamma -- that is
-    measured elsewhere in this module -- but the equality is a Gamma-only,
-    symmetrised-vertex fact, not a general identity. For ``q_perp != 0`` it
-    may additionally require exchanging the internal momenta, relabelling the
-    momentum sum, the full FC3 permutation symmetry, and a
-    conjugation/transposition. Until that is derived and tested for coupled
-    ``q``, neither path may be inferred from the other.
-
-    Perturbing ONE leg's vertex must therefore move exactly one of them.
-    """
+    """The two mixed sectors must stay separate paths, not one doubled."""
     from quatrex.phonon.pole_bridge import (
         _mixed_one_sector_blocked, mixed_vertex_block_dict)
 

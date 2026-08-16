@@ -1,29 +1,8 @@
 """MoS2 cross-plane kappa_z(t) against experiment (fig:res_mos2_kappa).
 
-  mos2_kappa_sood   (a) kappa_z vs film thickness: our eta=0 ballistic
-                    NEGF ladder (kappa = G t, thickness-independent
-                    G) against the quasi-ballistic band implied by
-                    the published TDTR asymptote and bulk spread of
-                    Sood et al.; (b) the volumetric resistance
-                    R = t/kappa: our ballistic bound is a
-                    thickness-independent 6.8 m^2K/GW below the
-                    measured ~10 m^2K/GW asymptote.
-
-Data: phonon/scripts/data/film_kappa.csv (distilled by
-_extract_film_kappa.py from the cluster/mos2f*b ballistic runs;
-eta=0, 5x5 shifted transverse mesh, 262-pt non-uniform grid).
-Experimental literals with provenance:
-  Sood et al., Nano Lett 19, 2434 (2019), DOI
-  10.1021/acs.nanolett.8b05174 -- films 20-240 nm; the volumetric
-  thermal resistance "asymptotes to a non-zero value,
-  ~10 m^2 K GW^-1"; bulk kappa_z measurements 2.0 (Liu), 2.5
-  (Muratore), 4.8 (Jiang) W/mK; their DFT ~5.
-  Lindroth & Erhart, PRB 94, 115205 (2016), DOI
-  10.1103/PhysRevB.94.115205 -- BTE bulk kappa_z 5.1 W/mK.
-The experiment band is the two-parameter quasi-ballistic form
-R(t) = R_asym + t/kappa_bulk with R_asym = 10 m^2K/GW and
-kappa_bulk in [2.0, 4.8] W/mK -- both parameters published, no fit
-of ours.
+Data:
+  Data: phonon/scripts/data/film_kappa.csv (distilled by
+  _extract_film_kappa.py from the cluster/mos2f*b ballistic runs;
 
 Run:  python phonon/scripts/figures/mos2_kappa_sood.py
 """

@@ -33,22 +33,7 @@ def _h(a):
 
 
 def _time_domain_pair(p, q, w, t_max=600.0):
-    """Independent reference for J(p, q; w), via the convolution theorem.
-
-    A direct real-axis quadrature is a poor reference here: the integrand decays
-    only as 1/x^2, so truncating at any affordable limit leaves a tail of the
-    same order as the answer (measured: 5.3e-05 against 1.6e-03 at R = 6000).
-
-    In the time domain the transform of a simple pole is one-sided,
-
-        int dw/(2pi) e^{-i w t} / (w - p) = -i theta(t)  e^{-i p t},   Im p < 0
-                                          = +i theta(-t) e^{-i p t},   Im p > 0
-
-    so the product of the two transforms is exponentially convergent, and the
-    MIXED case vanishes for a structural reason: the two factors have disjoint
-    support in time. Note this route goes through the convolution theorem, not
-    through residues, so it is a genuine independent check of the closed form.
-    """
+    """Independent reference for J(p, q; w), via the convolution theorem."""
     lower_p, lower_q = p.imag < 0, q.imag < 0
     if lower_p != lower_q:
         return 0.0 + 0.0j                       # disjoint support in t
@@ -67,15 +52,7 @@ def _pole_transform(p, t):
 
 
 def _time_domain_modal(poles1, coeffs1, poles2, coeffs2, w, t_max=600.0):
-    """Reference for a modal convolution, built from the partial fractions.
-
-    Independent of ``pair_convolution``: it evaluates the convolution theorem
-    numerically in ``t`` rather than summing residues in ``omega``. Adaptive
-    quadrature on the real frequency axis is not usable as a reference here --
-    resolving a half-width of 0.05 across the domain the 1/x^2 tails demand
-    needs more subdivisions than ``quad`` will spend, and it silently returns a
-    1e-3 answer.
-    """
+    """Reference for a modal convolution, built from the partial fractions."""
     def leg(poles, coeffs, t):
         return sum(c * _pole_transform(pp, t) for pp, c in zip(poles, coeffs))
 
@@ -149,13 +126,8 @@ def test_retarded_pair_gives_a_pole_at_the_sum():
 # --------------------------------------------------------------------------- #
 
 def test_modal_convolution_assembly_matches_an_explicit_pole_sum():
-    """Index assembly of Eq. (117) against an explicit loop over pole pairings.
-
-    ``pair_convolution`` is pinned separately against the convolution theorem
-    and ``leg_partial_fractions`` against the direct leg, so what is left to
-    check here is the bookkeeping -- which index of C pairs with which leg --
-    and that is exactly where an error would hide.
-    """
+    """Index assembly of Eq. (117) against an explicit loop over pole
+    pairings."""
     cl = _cluster(2)
     sa, sb = _psd_source(2, 1), _psd_source(2, 2)
     pa, ca = leg_partial_fractions(cl, sa)
@@ -183,13 +155,8 @@ def test_modal_convolution_assembly_matches_an_explicit_pole_sum():
 
 
 def test_modal_convolution_matches_the_convolution_theorem():
-    """Coarser end-to-end cross-check against numerical time-domain quadrature.
-
-    The tolerance is set by the REFERENCE: the integrand oscillates a few
-    hundred times over its decay length, so this route is good to about 1e-6,
-    while the closed form is exact. It is here to catch a systematic error, not
-    to bound the method.
-    """
+    """Coarser end-to-end cross-check against numerical time-domain
+    quadrature."""
     cl = _cluster(2)
     sa, sb = _psd_source(2, 1), _psd_source(2, 2)
     pa, ca = _h(leg_partial_fractions(cl, sa)[0]), _h(leg_partial_fractions(cl, sa)[1])
@@ -302,13 +269,7 @@ def test_modal_vertex_matches_the_definition():
 # --------------------------------------------------------------------------- #
 
 def test_discrete_convolution_is_catastrophic_where_the_analytic_form_is_exact():
-    """The grid-cost claim, on the object the pole sector replaces.
-
-    Convolving two narrow modes on a uniform grid does not degrade gracefully:
-    at production-like spacing it misses the line entirely or overshoots it by
-    orders of magnitude, depending on where the bins land. The analytic form has
-    no such parameter.
-    """
+    """The grid-cost claim, on the object the pole sector replaces."""
     p = q = 8.0 - 0.004j
     w_peak = 16.0
     exact = complex(_h(pair_convolution(np.array(p), np.array(q),
@@ -335,19 +296,7 @@ def test_discrete_convolution_is_catastrophic_where_the_analytic_form_is_exact()
 # --------------------------------------------------------------------------- #
 
 def test_retarded_only_equals_the_lower_half_plane_pole_sum():
-    """The claim, tested EXACTLY -- no quadrature, no truncation.
-
-    ``Delta_SS`` is a sum of simple poles at ``P = p_j + q_k`` with coefficients
-    ``c_j c_k s_jk``. Its Kramers-Kronig partner is the sub-sum over
-    ``Im P < 0`` (:func:`retarded_from_pole_sum`, pinned separately against the
-    Lorentzian partner). The three-case rule makes those exactly the
-    two-retarded pairings, so ``retarded_only=True`` must reproduce it to
-    machine precision.
-
-    A numerical KK reference cannot settle this: ``Delta`` decays only as
-    ``1/omega``, so a truncated principal value carries an ``O(1/W)`` error --
-    ~6e-03 at W = 400, which is the same size as the effect being checked.
-    """
+    """The claim, tested EXACTLY -- no quadrature, no truncation."""
     cl = _cluster(2, n_dof=2, seed=3)
     npp = cl.n_poles
     rng = np.random.default_rng(21)
@@ -397,17 +346,7 @@ def test_retarded_only_is_causal():
 
 
 def test_cell_average_is_exact_where_point_sampling_is_not():
-    """The analytic sector must enter the grid solver's own representation.
-
-    The solver treats every array as piecewise constant over its cell and
-    integrates with weight ``dw``. A point sample of a narrow pole is not that
-    average, and the discrepancy is the same registration error the sector
-    exists to remove -- reappearing at the interface between the analytic and
-    grid sectors.
-
-    Promoted poles satisfy ``gamma/h < q_in = 1`` by construction, so the
-    sector always operates in the regime tested here.
-    """
+    """The analytic sector must enter the grid solver's own representation."""
     h = 0.25
     w = np.arange(0.0, 40.0, h)
     # The pair convolution has COMBINED width 2*gamma, so it is better

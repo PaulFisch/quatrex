@@ -209,13 +209,7 @@ def test_mixed_channel_is_bit_identical_when_absent():
 
 
 def test_mixed_channel_reaches_the_retarded_self_energy():
-    """Unlike Sigma_SS, the mixed terms must be SEEN by the Hilbert transform.
-
-    They carry one narrow factor against a smooth background, so they are
-    ordinary grid objects and their Kramers-Kronig partner is the numerical
-    transform's job. If they were injected after ``delta`` was formed, Sigma^R
-    would silently omit them.
-    """
+    """Unlike Sigma_SS, the mixed terms must be SEEN by the Hilbert transform."""
     phi, bs, freqs, make = _fixture()
     gl, gg, sl, sg, sr = make()
     shape = sl.data.shape
@@ -242,15 +236,7 @@ def test_mixed_channel_reaches_the_retarded_self_energy():
 
 
 def test_bubble_correction_reaches_the_retarded_self_energy():
-    """It must be SEEN by the Hilbert transform, like the mixed sectors.
-
-    The covariance carries narrow structure at combination frequencies and has
-    no closed-form causal continuation of its own, so it has to join the raw
-    bubble output before ``delta`` is formed. Injected after, ``Sigma^R`` would
-    be missing exactly the dispersive part ``Sigma^{<,>}`` just gained -- the
-    fluctuation-dissipation break that showed up on the analytic route as
-    ``lead balance = 2.0000``.
-    """
+    """It must be SEEN by the Hilbert transform, like the mixed sectors."""
     phi, bs, freqs, make = _fixture()
     gl, gg, sl, sg, sr = make()
     shape = sl.data.shape

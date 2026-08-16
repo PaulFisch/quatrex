@@ -1,19 +1,8 @@
-"""Interlayer shear and breathing frequencies -- the experimental check on which
-MoS2 force-constant fit to believe.
-
-The two lowest optical modes at Gamma of 2H-MoS2 are rigid-layer modes: a
-doubly-degenerate shear (E, layers sliding) and a breathing mode (A, layers
-moving apart). They are the degrees of freedom that carry cross-plane heat, they
-are set by the same interlayer force constants the cross-plane ladder depends
-on, and they are measured: shear ~1.0 THz (32 cm^-1), breathing ~1.7 THz
-(57 cm^-1).
-
-So they are a free, independent judgement on a fit -- no transport calculation
-in the loop.
+"""Interlayer shear and breathing frequencies -- the experimental check on
+which MoS2 force-constant fit to believe.
 
 Usage::
-
-    python -m phonon.studies._interlayer_modes cluster/mos2_film_reap \\
+    python -m phonon.studies._interlayer_modes cluster/mos2_film_reap \
         cluster/mos2_film_reap_ls
 """
 

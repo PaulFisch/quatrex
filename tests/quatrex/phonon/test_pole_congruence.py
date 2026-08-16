@@ -309,18 +309,7 @@ def test_pf_self_energy_matches_a_dense_contraction():
 
 
 def test_leg_tail_is_the_residue_sum_and_the_closure_kills_it():
-    """The analytic leg is a GLOBAL function, so its tail is not cosmetic.
-
-    ``sum_p p_p q_p^T`` IS the coefficient of the ``1/w`` tail. The true
-    phonon ``G`` decays like ``1/w^2``, and a spurious ``1/w`` is what once
-    made ``G_PP`` 17x too large at ``w = 1e2`` and cost four orders
-    (``source_at_poles``). It vanishes exactly when ``sum_a u_a v_a^H = 0``,
-    which is the sum rule the BOSONICALLY CLOSED pole set satisfies: the
-    residue at ``-Omega`` cancels the one at ``+Omega``.
-
-    That closure is not optional decoration -- it is what makes the analytic
-    sector's tail legitimate.
-    """
+    """The analytic leg is a GLOBAL function, so its tail is not cosmetic."""
     from quatrex.phonon.pole_congruence import (
         background_coefficients, partial_fraction_legs, pf_leg_sample,
     )
@@ -363,14 +352,7 @@ def test_leg_tail_is_the_residue_sum_and_the_closure_kills_it():
 
 
 def test_pf_mixed_sectors_match_the_brute_force_ring():
-    """The new mixed kernel against a direct evaluation of the same ring.
-
-    Reuses the bed of ``test_pole_mixed_sectors``: a physical ``(G^<, G^>)``
-    pair built from the physics rather than from the mirror under test, and a
-    kernel handed only the non-negative half so it must rebuild the negative
-    axis itself. The pole set is closed under ``z -> -conj(z)`` so the flat
-    leg has no spurious ``1/w`` tail to contaminate the comparison.
-    """
+    """The new mixed kernel against a direct evaluation of the same ring."""
     import importlib.util
     import pathlib
 
@@ -521,17 +503,8 @@ def _analytic_harness(monkeypatch, mixed_scale=1.0, low_freq_mask=0.0):
 
 
 def test_analytic_mixed_sector_goes_through_the_hilbert_hook(monkeypatch):
-    """``SR + RS`` must reach ``set_pole_mixed``, not ``set_pole_self_energy``.
-
-    ``set_pole_self_energy`` lands AFTER ``delta = sigma^> - sigma^<`` is
-    formed, so anything routed there is invisible to the Kramers-Kronig
-    transform and must supply its own causal partner. ``SS`` can (the
-    two-retarded pairing); the mixed sector cannot, because one of its legs is
-    the numerical background. Folding it into the ``SS`` accumulator leaves
-    Sigma^R without the dispersive half of a term Sigma^{<,>} has in full --
-    a fluctuation-dissipation break, measured as ``lead balance = 2.0000``
-    (job 4398805).
-    """
+    """``SR + RS`` must reach ``set_pole_mixed``, not
+    ``set_pole_self_energy``."""
     seen = _analytic_harness(monkeypatch)
     assert "mx" in seen, "the mixed sector never reached set_pole_mixed"
     assert np.allclose(seen["mx"][0], 10.0), "mixed payload not the mixed term"
@@ -546,14 +519,7 @@ def test_analytic_mixed_sector_goes_through_the_hilbert_hook(monkeypatch):
 
 
 def test_analytic_mixed_sector_masks_the_background_leg(monkeypatch):
-    """The same low-frequency mask the ring applies to its own legs.
-
-    The omega = 0 bin carries the near-singular acoustic peak and the ring
-    excludes it; an unmasked background leg makes the two sectors integrate
-    different data and injects that peak into Sigma. Measured on the
-    ``rr_ss_sr`` route: Sigma^> non-PSD by 0.15, strictly LINEAR in the
-    injected mixed term.
-    """
+    """The same low-frequency mask the ring applies to its own legs."""
     seen = _analytic_harness(monkeypatch, low_freq_mask=1.5)
     regs = seen["reg"]
     assert regs, "the mixed kernel was never called"
@@ -574,13 +540,8 @@ def test_analytic_route_honours_mixed_scale(monkeypatch):
 # --- finite support: how far apart are the four sectors' quadratures? -------- #
 
 def test_finite_window_kernel_matches_quadrature_and_its_residue_limit():
-    """The four sectors do not integrate over the same axis, and this bounds it.
-
-    ``pf_self_energy`` uses the residue kernel, which integrates the analytic
-    leg over ``(-inf, inf)``; the mixed sectors and the ring only ever see the
-    stored window. The finite-window kernel is the same integral over
-    ``[a, b]``, so the gap between them IS the inconsistency.
-    """
+    """The four sectors do not integrate over the same axis, and this bounds
+    it."""
     from scipy.integrate import quad
 
     from quatrex.phonon.pole_bubble import pair_convolution
@@ -628,23 +589,7 @@ def test_window_and_cell_average_are_refused_together():
 
 
 def test_analytic_sectors_sum_to_the_bubble_of_the_same_hybrid():
-    """Review Sec. 24, the gate that was missing entirely.
-
-    ``SS + SR + RS + RR`` must reproduce ``B(Ghat, Ghat)`` where
-
-        Ghat(w) = G_S(w) + R_h(w)
-
-    is the hybrid the sector kernels actually assume -- the analytic leg plus
-    the piecewise-constant remainder -- and NOT the physical ``G``. Comparing
-    against ``G`` would fold representation error into the same number as
-    implementation error, and the whole point of the gate is to separate them.
-
-    ``B(Ghat, Ghat) = B(G_S,G_S) + B(G_S,R_h) + B(R_h,G_S) + B(R_h,R_h)`` is
-    an identity of a bilinear form, so any residual here is a defect: a
-    transposed vertex leg, a swapped ``(p, q)``, a dropped conjugation, or the
-    ring giving up more than the sectors put back -- which is the failure this
-    whole construction started from.
-    """
+    """Review Sec. 24, the gate that was missing entirely."""
     import importlib.util
     import pathlib
 
@@ -748,22 +693,7 @@ def _registration_bed(gamma, h, shift, w_max=800.0):
                                          (0.50, 0.50, 0.55)])
 def test_cell_averaged_legs_do_not_fix_the_bubble_registration(
         h_over_gamma, shift, lo, hi):
-    """An EXACT leg average still gets the combination line in the wrong bin.
-
-    The congruence route makes ``<G~>_k`` exact and stops there. That is not
-    the same as integrating the product: the cell average puts all of a line's
-    weight at its cell CENTRE, so a resonance sitting a quarter cell off has
-    its combination frequency ``Re(z_a + z_b)`` displaced by half a cell, and
-    the ring splits the peak between two bins.
-
-    The control parameter is the pole's SUB-CELL POSITION, not ``h/gamma``.
-    With the pole centred the ring is exact to 0.4 % at ``h = 20 gamma`` and
-    improves as ``h`` grows; a quarter cell off it is 79 % high and gets WORSE
-    with ``h``, asymptoting to a factor 2. Pole placement is set by the
-    physics, so the congruence route's accuracy here is an accident of
-    registration -- which is the reason to resolve the pole inside the
-    convolution rather than only in the leg weight.
-    """
+    """An EXACT leg average still gets the combination line in the wrong bin."""
     gamma = 0.05
     ratio, _ = _registration_bed(gamma, h_over_gamma * gamma, shift)
     assert lo < ratio < hi, (
@@ -772,17 +702,7 @@ def test_cell_averaged_legs_do_not_fix_the_bubble_registration(
 
 
 def test_registration_error_is_dominated_by_pole_cell_PAIRS():
-    """... and it is an ``|P|^2`` object, not an ``|P| * N`` one.
-
-    Displacing a line to its cell centre costs the convolution
-    ``O((delta/Gamma_other)^2)`` when the OTHER leg is resolved -- 2 % here,
-    at the worst possible placement -- but an order-one splitting when both
-    legs are displaced, because then the combination line moves a full cell
-    (46 % at the same placement, measured by the test above). Two orders
-    apart, so a correction that replaces the boxcar on just the cell PAIRS
-    with both ends in ``P`` recovers essentially all of it, and there are
-    ``|P|^2`` such pairs rather than ``|P| * N``.
-    """
+    """... and it is an ``|P|^2`` object, not an ``|P| * N`` one."""
     gamma, h, w_max = 0.05, 1.0, 800.0
     n = int(2 * w_max / h) // 2 * 2 + 1
     wk = (np.arange(n) - n // 2) * h
@@ -836,26 +756,7 @@ def _flat_bed(closed, n_dof=6, n_p=2, n_w=41, seed=4):
 
 @pytest.mark.parametrize("closed", [False, True])
 def test_flattened_residues_keep_the_conjugate_pole_antisymmetry(closed):
-    r"""``R_{conj z} = -R_z^dagger``, and it survives the freeze.
-
-    On the real axis the Keldysh leg must be anti-Hermitian, so a simple-pole
-    expansion has to pair each residue with minus the adjoint of its
-    conjugate partner's. The concern (review Sec. 21) is that ``c_sr`` and
-    ``c_rs`` are fitted INDEPENDENTLY, at different poles, so nothing
-    obviously enforces it.
-
-    It is enforced, and by two things that are easy to break by accident:
-
-    * ``conj(c_ss[b,a]) = -c_ss[a,b]`` survives ``source_at_poles`` because it
-      shares ``0.5*(P(z_a) + P(conj z_b))`` between the pair, evaluated from
-      ONE fit with a common anchor. A per-pole value would not.
-    * ``c_sr(z_a) = -c_rs(conj z_a)^dagger`` survives ``coefficients_at_poles``
-      because both fits run through the same REAL design matrix, so the fitted
-      coefficient matrices inherit ``A_n = -B_n^dagger`` from the data.
-
-    Change the anchor, the window, or the weighting on one side and this
-    breaks silently, which is why it is measured rather than argued.
-    """
+    r"""``R_{conj z} = -R_z^dagger``, and it survives the freeze."""
     cl, co, frozen, (zeta, p_row, q_col) = _flat_bed(closed)
 
     # the two identities the result rests on, before and after freezing
@@ -941,13 +842,7 @@ def test_pole_pair_weight_bounds_where_the_registration_error_can_live():
 
 
 def test_state_report_carries_the_promotion_yield():
-    """"2 pole(s)" reads like a small system; "2/144" reads like a threshold.
-
-    On the CNT bed 142 of 144 candidates are refused on ``eps_nep`` alone, and
-    that is why the sector moves the answer only in the fourth digit -- not
-    any property of its quadrature. The header has to say so, or the next
-    reader draws the same wrong conclusion from the same log.
-    """
+    """"2 pole(s)" reads like a small system; "2/144" reads like a threshold."""
     from quatrex.phonon.pole_keldysh import PoleCluster
     from quatrex.phonon.pole_sector import PoleSectorState
 
@@ -967,14 +862,7 @@ def test_state_report_carries_the_promotion_yield():
 # --- memory: the sector must be able to carry more than a handful of poles -- #
 
 def test_chunked_sector_kernels_match_the_unchunked_result_exactly():
-    """Chunking is a memory transform, not a numerical one.
-
-    The contraction that had to be broken up is ``take(c_sr, cols, axis=2)``,
-    shaped ``(n_omega, Np, nnz)``. Two of those per Keldysh component per call
-    is invisible at the 2 poles the CNT bed promotes and 290 GB at a few
-    dozen -- so the route could never be asked to carry the pole count the
-    physics needs. Splitting the pattern must not move a single bit.
-    """
+    """Chunking is a memory transform, not a numerical one."""
     from quatrex.phonon.pole_congruence import (
         sector_cell_average, sector_grid_sample,
     )
@@ -1020,18 +908,7 @@ def test_pattern_chunk_bounds_the_working_set_as_poles_are_added():
 # --- what the additive route is and is not required to satisfy ------------- #
 
 def test_an_additive_remainder_may_be_indefinite_while_the_total_is_fine():
-    """``G_R = G - G_S`` is a DIFFERENCE, so its sign is unconstrained.
-
-    The congruence route's leg is built as a positive cell-averaged
-    congruence, so ring-leg positivity is a real gate there. The analytic
-    route's leg is an additive remainder, and requiring it to be PSD is a
-    category error -- the same one ``bubble_positivity.md`` records when it
-    says the gate is on the total and never on a sector.
-
-    What the additive route must satisfy is the sector sum and the positivity
-    of the TOTAL, and both are tested elsewhere. This pins the negative
-    statement so it is not re-litigated from a scary-looking leg number.
-    """
+    """``G_R = G - G_S`` is a DIFFERENCE, so its sign is unconstrained."""
     rng = np.random.default_rng(2)
     n = 6
 
@@ -1114,22 +991,7 @@ def _w_exact(r, x):
 @pytest.mark.parametrize("r", [0.5, 1.0, 1.35, 2.0, 3.0, 5.0, 20.0, 100.0])
 @pytest.mark.parametrize("x", [0.0, 0.1, 0.25, 0.5])
 def test_exact_trapezoidal_line_weight(r, x):
-    r"""What the ring's ``dw``-weighted sum actually carries of a narrow line.
-
-    Summing point samples of a unit-weight Lorentzian over a uniform grid is a
-    theta-function, not the nearest-node term:
-
-    .. math::
-        W_\infty(r, x) = \frac{\sinh(2\pi/r)}
-                              {\cosh(2\pi/r) - \cos(2\pi x)},
-        \qquad r = h/\gamma,\ x = \text{offset in cells}.
-
-    An earlier note quoted ``r/(pi(1 + r^2 x^2))`` for this. That is the
-    NEAREST-NODE weight and it is wrong for the total by up to 2.5x -- at
-    ``r = 100, x = 0.5`` it gives 0.0127 against 0.0314. The distinction
-    matters because the whole argument for the sector is how much line weight
-    the grid misplaces, and the two formulas disagree about it.
-    """
+    r"""What the ring's ``dw``-weighted sum actually carries of a narrow line."""
     gamma, w_max = 0.05, 4000.0
     h = r * gamma
     n = int(2 * w_max / h) // 2 * 2 + 1
@@ -1140,14 +1002,7 @@ def test_exact_trapezoidal_line_weight(r, x):
 
 
 def test_line_weight_gate_inverts_the_tolerance_exactly():
-    r"""``E_leg^max(r) = coth(pi/r) - 1``, and its inverse is the gate.
-
-    The worst overestimate is at ``x = 0`` and the worst underestimate at
-    ``x = 1/2``; the overestimate is the stricter side, so a worst-case
-    tolerance ``eps`` needs ``h/gamma < 2 pi / log(1 + 2/eps)``. That is an
-    exact statement about represented weight, where ``samples_per_halfwidth``
-    was a constant chosen by hand.
-    """
+    r"""``E_leg^max(r) = coth(pi/r) - 1``, and its inverse is the gate."""
     for r in (0.5, 1.0, 2.0, 5.0, 20.0):
         assert abs(_w_exact(r, 0.0) - 1.0 / np.tanh(np.pi / r)) < 1e-12
         assert abs(_w_exact(r, 0.5) - np.tanh(np.pi / r)) < 1e-12

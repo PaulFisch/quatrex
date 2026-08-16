@@ -1,20 +1,7 @@
-"""Production coupled-q silicon-film figures (appendices/production_coupled_q).
-
-Regenerates fig:prod_qfilm_qconv and fig:prod_qfilm_conservation from the
-SURVIVING record. The raw run snapshots of the 2026-06-08 verification
-session (phonon/scripts/out/production_coupled_q/ and the consolidation
-script phonon/scripts/verify/production_coupled_q_summary.py) were purged
-in the studies reorganisation (commit 843c3069); the only surviving
-numerical record is the appendix itself, so every number below is
-hard-coded from
-  document/src/appendices/production_coupled_q.tex
-    tab:prod_film   (mesh sweep, n_slabs=3, eta=0.4 THz, zero-mode proj.)
-    tab:prod_dense  (dense cross-check at the matched nk=3 mesh)
-    sec:prod_dense text ("~1e-5 ... at the converged n_k>=8 mesh")
-No number here is new; see the inline comments for the exact source rows.
+"""Production coupled-q silicon-film figures
+(appendices/production_coupled_q).
 
 Run:  python phonon/scripts/figures/prod_qfilm.py
-Figures -> document/fig/transport_sweeps/prod_qfilm_{qconv,conservation}.{pdf,png}
 """
 from __future__ import annotations
 

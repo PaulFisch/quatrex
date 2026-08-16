@@ -1,24 +1,8 @@
 """Resonance / loop-gain verification figures (thesis eq:resolvent_gain).
 
-  resonance_response  (a) mode-projected spectral combs A_s(omega) at the
-                      CNT(3,3) L2 converged fixed point with their
-                      omega^2-Lorentzian fits (grid spacing marked);
-                      (b) one-shot distortion response of the kicked
-                      resonance against the theory ratio
-                      |dSigma|/(2 Omega_s Gamma_s), peak-local (filled)
-                      and l2-norm over the comb (open), for width-like
-                      (-i) and pole-shift-like (+1) kicks.
-  loop_gain           (a) channel-fraction heatmap
-                      F[s'', s] = sum_{s'} Gamma^{(s,s')}_{s''}/Gamma_{s''}
-                      over all device modes (ordered by Omega), with row
-                      sums; (b) predicted spectral radius of the
-                      link-gain matrix vs the measured power-iteration
-                      |lambda| for L2 fp / L2 stall / L4 stall.
-
-Data: phonon/scripts/data/resonance_gain_distilled.npz (committed-size
-distillate). Regenerate from the full study output
-(phonon/studies/out/resonance_gain/<state>.npz, produced on tortin by
-phonon/studies/_resonance_gain_study.py) with --distill.
+Data:
+  Data: phonon/scripts/data/resonance_gain_distilled.npz (committed-size
+  (phonon/studies/out/resonance_gain/<state>.npz, produced on tortin by
 
 Run:  python phonon/scripts/figures/resonance_gain.py [--distill]
 """

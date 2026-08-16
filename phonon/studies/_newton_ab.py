@@ -1,19 +1,4 @@
 """Production A/B gate for the exact analytic JVP (mixing_method=newton).
-
-Loads a Sigma snapshot, runs the REAL production SCBA loop, and inside a
-capture mixer compares the analytic Jacobian-vector product
-(PhononJVP.prepare/apply -- frozen-G dense Dyson + polarisation bubble)
-against central finite differences of the full production iteration, in
-the exact (x, gx) state the newton mixer would see. Agreement is
-expected at the FD's own accuracy (~1e-6 relative for eps_rel=1e-6).
-
-The direction is a random block-tridiagonal vector with the Sigma^{<,>}
-components projected onto the skew-hermitian subspace (the invariant
-subspace the Newton solve runs in; off it the RGF-implemented map is a
-different linear operator by construction).
-
-Environment: QX_CONFIG (config toml), QX_SNAPSHOT (sigma npz),
-QX_GBAND (optional), QX_AB_OUT (optional json). Single rank.
 """
 from __future__ import annotations
 

@@ -1,30 +1,6 @@
 """d5a L2 eta=0 NON-UNIFORM-grid experiment (dual-grid SSE).
 
-Companion to _run_d5a_gridladder.py: the ladder showed the eta=0
-residual floor tracks the grid resolution of the flat-band linewidths
-(d_omega < Gamma_anh). Here the resolution is delivered by a
-NON-UNIFORM primary grid concentrated on the flat bands
-(make_grid.build_grid, Lorentzian-comb CDF equidistribution) with the
-bubble on the auxiliary uniform grid (sse_aux_grid_dw_thz), instead of
-by a globally fine uniform grid. Three rungs, same recipe as the
-ladder (fully RAW, QX_DIAG_SPECTRAL=1, 64 ranks):
-
-  uni361 : uniform nf=361 at fmax=66 -- the ladder's medium rung,
-           rerun on current code (clean same-code baseline).
-  nu     : non-uniform primary grid (width 0.15 THz, 10 pts/line,
-           background floor 0.183 THz = the 361-rung spacing) with
-           aux dw = 66/1440 (the 1441-rung bubble resolution) and
-           aux fmax = 66. 1441-class convolution resolution at a
-           fraction of the Dyson solves.
-  nu_kk  : same primary grid, aux fmax = 132 THz >= 2*omega_max --
-           the SUPPORT-COMPLETE Kramers-Kronig integral the ladder
-           never had (all its rungs truncate the two-phonon weight at
-           66 THz), at zero extra Dyson solves.
-
-Run (background, cluster):
-    cd <repo>
-    nohup python phonon/studies/_run_d5a_nugrid.py > \
-        phonon/studies/out/d5a_nugrid/nugrid.log 2>&1 &
+    nohup python phonon/studies/_run_d5a_nugrid.py >         phonon/studies/out/d5a_nugrid/nugrid.log 2>&1 &
 """
 from __future__ import annotations
 

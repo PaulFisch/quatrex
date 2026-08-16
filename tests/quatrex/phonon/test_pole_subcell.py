@@ -164,14 +164,7 @@ def test_subcell_metric_reports_the_failure():
 
 
 def test_report_subcell_runs_on_a_production_shaped_state():
-    """Exercise the solver hook itself, not just the metric.
-
-    The first device run of this diagnostic died with ``NameError: state`` --
-    a parameter dropped during a refactor. Nothing local caught it because
-    ``psd_check`` is off by default, so the whole function body was dead in
-    every test. This calls it with the flag ON and a state shaped like the
-    production one.
-    """
+    """Exercise the solver hook itself, not just the metric."""
     import types
 
     from quatrex.core.config import PoleSectorConfig
@@ -251,14 +244,7 @@ def test_report_subcell_runs_on_a_production_shaped_state():
 
 
 def test_ring_leg_gate_excludes_the_bins_the_ring_masks():
-    """The w = 0 bin decided this gate, and the ring never integrates it.
-
-    On the CNT bed ``-i G^>(0)`` is indefinite AND carries the largest
-    eigenvalue in the window, so it fixes both the numerator and the global
-    normalisation: ``worst`` reads exactly -1.000 on the pole-free baseline
-    and reports the same -1.000 for every pole-sector variant. Excluding it
-    must change the answer, or nothing downstream of the gate means anything.
-    """
+    """The w = 0 bin decided this gate, and the ring never integrates it."""
     import types
 
     from quatrex.core.config import PoleSectorConfig
@@ -382,19 +368,7 @@ def _cell(scale=1.0, width=20.0):
 
 
 def test_four_sectors_are_the_congruence():
-    """The sector split is an identity, not a model.
-
-    ``G~^R S G~^A`` with ``G~^R = G^R_k + U dD V^H`` expands into
-
-        RR = G^R_k S G^A_k              (the untouched ring at the grid point)
-        SR = U dD [V^H S G^A_k]
-        RS = [G^R_k S V] dD^H U^H
-        SS = U dD [V^H S V] dD^H U^H
-
-    and the four sum to it exactly. ``dD = D(w) - D(w_k)`` vanishes at the
-    centre, so ``RR`` alone is the leg there and the rest is pure sub-cell
-    structure.
-    """
+    """The sector split is an identity, not a model."""
     w0, res, h, wk, s, g_r, _, _, cong, _ = _cell()
     gk = g_r(wk)
     for f in (0.0, 0.05, 0.2, -0.31, 0.5):
@@ -410,14 +384,7 @@ def test_four_sectors_are_the_congruence():
 
 
 def test_congruence_survives_a_wrong_residue_and_the_old_form_does_not():
-    """Why the redesign is necessary rather than merely tidier.
-
-    On the device the residue is a Newton solution of a truncated cluster
-    against a fitted source; it is never exact. The old reconstruction needs
-    it accurate to better than ~20 percent JUST TO KEEP THE SIGN, and nothing
-    enforced that. The congruence has no such requirement: it is a congruence
-    of a PSD source, so ``-i G~^< >= 0`` for ANY pole model, right or wrong.
-    """
+    """Why the redesign is necessary rather than merely tidier."""
     offs = np.linspace(-0.5, 0.5, 41)
     worst = {}
     for tag, scale in (("exact", 1.0), ("over", 1.2), ("double", 2.0),
@@ -453,25 +420,7 @@ def test_reconstruction_recovers_the_cell_average():
 
 
 def test_when_the_zero_filled_pattern_can_and_cannot_invent_a_violation():
-    """``psd_residual`` eigendecomposes ``M .* X``, and ``M`` is not PSD.
-
-    A hard mask is a Hadamard product with an indefinite matrix, so the
-    masked object need not inherit ``X``'s positivity. Whether that can fire
-    depends entirely on the pattern, and the two cases must not be confused
-    when a gate reading is interpreted:
-
-    * A BLOCK-BANDED pattern of bandwidth >= 1 leaves the two-block window
-      FULLY populated -- nothing inside it is masked -- so the window is a
-      genuine principal submatrix and the gate is exact. This is why the
-      pole-free baseline reads ``g_lesser worst = -1.8e-11`` on the device
-      rather than a healthy negative number.
-    * A pattern that is sparse WITHIN the window is a different object, and
-      there the zero fill really does invent violations of order 0.1.
-
-    So a negative reading is evidence of a defect only once the pattern's
-    within-window density is known. The boxcar/Fejer eigenvalues below are the
-    reason, and they are the same statement as ``bubble_positivity.md`` Thm 3.
-    """
+    """``psd_residual`` eigendecomposes ``M .* X``, and ``M`` is not PSD."""
     rng = np.random.default_rng(1)
     n, nbs = 12, 4
     idx = np.arange(n) // nbs
@@ -565,15 +514,7 @@ def test_census_walks_every_q_and_survives_one_failing(capsys):
 
 
 def test_bubble_covariance_correction_runs_on_a_production_shaped_state():
-    """Exercise the interaction hook itself, not just the kernels.
-
-    This project has twice paid for a pole path whose kernels all passed and
-    whose ASSEMBLY had never been executed: a helper indented into a class body
-    (three device runs lost to AttributeError) and a dropped parameter
-    (NameError on the first device run). Both were invisible to every kernel
-    test. So the correction gets a call with a production-shaped state before
-    it goes near a node.
-    """
+    """Exercise the interaction hook itself, not just the kernels."""
     import types
 
     import numpy as np
@@ -665,19 +606,7 @@ def test_bubble_covariance_correction_is_silent_without_promoted_poles():
 
 
 def test_the_q_slice_lands_on_the_transverse_axes_not_the_leading_one():
-    """The bug that failed every q of the first q-resolved census.
-
-    The transverse axes sit at the END of a buffer's stack shape, and different
-    buffers carry different leading ranks: the dynamical matrix has a singleton
-    where the Keldysh buffers have frequency. Indexing with a bare ``(i, j)``
-    therefore consumed the singleton and ONE q index on a ``(1, 9, 9)`` stack --
-    "could not broadcast (9,6,6) into (6,6)" -- and any ``i > 0`` ran off an
-    axis of size 1.
-
-    The earlier test for the q census stubbed ``_pole_blocks`` out entirely, so
-    it agreed with the assumption rather than checking it. This exercises the
-    padding itself.
-    """
+    """The bug that failed every q of the first q-resolved census."""
     import types
 
     import numpy as np
@@ -723,18 +652,7 @@ def test_the_q_slice_lands_on_the_transverse_axes_not_the_leading_one():
 
 
 def test_the_q_path_takes_its_clusters_from_the_sector_that_solved_that_q():
-    """The crash on the first real q-resolved pole run.
-
-    ``_build_pole_keldysh`` read its clusters from ``self._pole``. On a
-    q-resolved device the poles live in ``self._pole_q[iq]``; ``self._pole``
-    exists -- it is constructed before the q dispatch -- but was never given an
-    operator context, so it returned an empty closure. ``state.legs`` came back
-    empty, the accumulator stayed ``None``, and the next line raised
-    "'NoneType' object has no attribute 'reshape'".
-
-    Two things are pinned: the sector actually passed is the one consulted, and
-    an empty one is a NO-OP rather than a crash.
-    """
+    """The crash on the first real q-resolved pole run."""
     import types
 
     import numpy as np

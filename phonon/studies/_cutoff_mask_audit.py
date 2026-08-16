@@ -1,23 +1,6 @@
 """Is the H6 box mask active on this run?
 
-``phonon.interaction_cutoff`` is not a vertex knob: ``core/scba.py`` hands it to
-``compute_sparsity_pattern``, which (strategy ``"box"``) keeps a pair iff its
-separation ALONG THE TRANSPORT DIRECTION is within the cutoff. Every stored
-matrix lives on that pattern, ``G`` included, and a box-masked ``G`` is not
-positive semidefinite -- measured directly in ``bubble_positivity.md``
-Sec. 6.10c, where the violation is already there at iteration 0 with the
-self-energy identically zero.
-
-So the question "is this run contaminated by H6" is decided before any physics,
-by geometry alone: the mask is inactive iff the cutoff exceeds the largest
-transport-direction separation in the device.
-
-This reads a run's config, builds the grid through the solver's own loader and
-reports the answer with the fill fraction, rather than reasoning about lattice
-constants.
-
 Usage::
-
     python -m phonon.studies._cutoff_mask_audit cluster/*/quatrex_config.toml
 """
 

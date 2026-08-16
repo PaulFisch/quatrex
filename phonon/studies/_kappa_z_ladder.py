@@ -1,29 +1,6 @@
 """MoS2 cross-plane R(t) ladder: contact resistance and bulk kappa.
 
-Reads a set of converged eta=0 SCBA runs, converts each run's raw lead current
-into a thermal boundary resistance and fits
-
-    R(t) = R_c + t / kappa_bulk
-
-so contact and bulk separate. A single length cannot do this: at 2 layers the
-contact term is about 90 % of R, so kappa_z,eff from one thickness is mostly the
-interface.
-
-Bridge (verified against the two-point fit of 2026-08-10, R2 = 13.816):
-
-    G [W/m^2/K] = h * 1e24 * J_raw * df_THz / (A_c * dT * N_q)
-
-with ``A_c`` the transverse cell area in m^2, ``N_q`` the transverse q-count and
-``dT`` the applied bias. Every one of those constants is identical across the
-ladder, so they cancel in the SLOPE and only shift R_c.
-
-Each run must have the box mask inactive -- ``interaction_cutoff`` greater than
-the device's transport-direction span -- or the self-energy is not PSD and the
-current is not a physical number (``bubble_positivity.md`` Sec. 6.10c). This
-script refuses to fit a run that fails that test.
-
 Usage::
-
     python -m phonon.studies._kappa_z_ladder cluster/cvM2b cluster/cvM4e cluster/cvM6b
 """
 

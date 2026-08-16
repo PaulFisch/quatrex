@@ -79,13 +79,7 @@ def test_the_sweep_actually_crosses_the_transition(sweep):
 
 def test_overlap_does_not_break_the_pole_representation(sweep):
     r"""Audit Sec. 14: while the roots stay distinct, large :math:`\chi` does
-    not mathematically remove the poles.
-
-    The coherent cluster tracks the exact resolvent to the same accuracy at
-    :math:`\chi = 16` as at :math:`\chi = 0.08`. What overlap costs is the
-    ability to speak about the modes SEPARATELY, not the validity of the
-    expansion -- which is why the response is a cluster and not a refusal.
-    """
+    not mathematically remove the poles."""
     eps = [r["eps_pole"] for r in sweep]
     assert max(eps) < 2e-2
     assert max(eps) / min(eps) < 2.0, (
@@ -113,24 +107,7 @@ def test_scalar_occupations_degrade_monotonically_and_then_saturate(sweep):
 
 def test_the_hard_coded_half_is_where_the_scalar_picture_has_already_failed(
         sweep):
-    r"""Calibration of the 0.5 in ``chi``.
-
-    Measured on this bed, treating the pair as independent scalar modes costs
-
-    ======  =========
-    chi     eps_occ
-    ======  =========
-    0.085   2.7e-02
-    0.164   5.5e-02
-    0.320   1.1e-01
-    0.633   2.3e-01
-    1.570   2.9e-01
-    ======  =========
-
-    so 0.5 sits just past the 10 % crossing and just before saturation. It is
-    a defensible place to switch to a cluster -- not an arbitrary one -- and
-    this test fails if the curve moves out from under it.
-    """
+    r"""Calibration of the 0.5 in ``chi``."""
     below = [r["eps_occ"] for r in sweep if r["chi"] < 0.5]
     above = [r["eps_occ"] for r in sweep if r["chi"] >= 0.5]
     assert below and above

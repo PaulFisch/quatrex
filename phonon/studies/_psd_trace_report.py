@@ -1,20 +1,6 @@
 """Iteration-resolved positivity trace from a run log.
 
-``phonon/solver.py::_check_positivity`` (behind ``pole_sector.psd_check``, env
-``QX_POLE_PSD=1``) prints, once per SCBA iteration and per target,
-
-    positivity sigma_lesser    worst=-1.234e-03 at w[17]  VIOLATION
-
-for ``sigma_lesser``, ``sigma_greater``, ``g_lesser`` and ``g_greater``. Sigma is
-the ROOT check: ``G^< = G^R Sigma^< G^A`` is a congruence, so a PSD Sigma cannot
-produce a non-PSD G, and if G fails then Sigma failed first.
-
-This reads one or more logs and lays the trace out per iteration next to the
-SCBA residual, so "does positivity break before the blow-up, and at which
-omega" is answered by looking at one table.
-
 Usage::
-
     python -m phonon.studies._psd_trace_report cluster/mos2psd10/slurm-*.out ...
 """
 

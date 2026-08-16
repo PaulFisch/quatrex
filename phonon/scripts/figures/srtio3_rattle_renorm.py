@@ -1,24 +1,6 @@
 """SrTiO3 rattle-amplitude renormalisation of the FC2 dispersion
 (fig:res_srtio3).
 
-Overlays the harmonic (FC2) dispersion of cubic SrTiO3 along Gamma-X-M-R-Gamma
-for two hiphive fits of the same 2x2x2 VASP training cell:
-  small rattle (0.025 A, red) : bare FC2 -> AFD octahedral-rotation mode at R
-                                 is UNSTABLE (imaginary, plotted negative);
-  large rattle (0.08 A, blue) : effective (thermally renormalised) FC2 -> the
-                                 AFD mode is stabilised to a real frequency.
-Negative frequencies denote imaginary modes: sign(w^2) sqrt(|w^2|).
-
-Data (on-disk fits only, no reruns):
-  phonon/configs/perovskite/srtio3_small_vasp.yaml -> fc3_hiphive_srtio3_small_vasp/
-  phonon/configs/perovskite/srtio3_vasp.yaml       -> fc3_hiphive_srtio3_vasp/
-
-Method follows the retired phonon/scripts/verify/softmode_dispersion.py
-(git 843c3069^): load_system(cfg) -> dynamical_matrix_qpath ->
-frequencies_from_dynamical.  Review fixes vs the old figure: proper
-high-symmetry tick labels with vertical separators, no in-figure title, the
-AFD mode at R annotated with its actual value in THz and cm^-1.
-
 Run:  python phonon/scripts/figures/srtio3_rattle_renorm.py
 Figure -> document/fig/transport_sweeps/srtio3_rattle_renorm.{png,pdf}
 """

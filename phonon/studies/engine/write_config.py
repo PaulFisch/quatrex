@@ -1,22 +1,4 @@
 """Write a PRODUCTION quatrex phonon-transport config TOML.
-
-Committed, parameterized port of the /tmp config writers, emitting the
-converged anharmonic-SCBA recipe (``retarded_method="half"``, gentle linear
-mixing, heat-flow convergence) plus a
-``[compute]`` / ``[compute.comm]`` block so a distributed run honors the
-rank grid (``block_comm_size`` x ``q_comm_size``) from the config -- this is
-what the scaling sweep drives.
-
-Asserts the comm-grid constraints: ``block*q`` must divide the rank count
-(checked at launch), ``block<=L`` (CNT band halo), and the film keeps
-``block==1`` (the coupled-q SSE forbids nq>1 with block>1).
-
-Usage (CNT):
-    python write_config.py --system cnt33 --work DIR -L 4 \
-        --nfreq 161 --fmax 55 [--bcs 1 --qcs 1 --numba-threads 1]
-Usage (film):
-    python write_config.py --system sifilm --work DIR --nslabs 5 --nk 8 \
-        --tdir x --shift <kshift> --nfreq 121 --fmax 15 [--qcs 8]
 """
 import argparse
 from pathlib import Path

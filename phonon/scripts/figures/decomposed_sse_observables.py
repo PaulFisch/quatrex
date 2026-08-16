@@ -1,35 +1,7 @@
 """Every observable, dense vertex vs decomposed (fig:res_decomp_observables).
 
-  decomp_observables  the NEGF observables the SCBA produces, for the dense-vertex
-                      run and for the decomposed vertex at two ranks:
-                        LDOS(w)             rho = (2w/pi)(-Im G^R)
-                        occupation n(w)     Im G^< / (2(-Im G^R)), against Bose
-                        per-slab absorption P_abs(x), the 3-phonon energy sink
-                        net bubble rate     P_out(w) - P_in(w)
-
-Three things this figure is built to expose rather than hide.
-
-(1) The LDOS carries the 2w/pi Jacobian. Plotting the raw -Im G^R instead puts
-    99.97% of the weight in the omega=0 bin (the acoustic 1/omega^2) and flattens
-    the entire spectrum -- and any "where there is spectral weight" mask built on
-    it then keeps the DC bin ALONE and throws the band away.
-
-(2) n(w) is drawn against the Bose function, which is a gate, not decoration: with
-    no scattering the ballistic occupation must sit between n_B(T_L) and n_B(T_R).
-    At finite eta it does not -- the eta damping enters -Im G^R with no matching
-    fluctuation (the fluctuation-dissipation violation documented at
-    config.py::buttiker_probe), so n comes out uniformly BELOW Bose. At eta=0.4 THz
-    on this film it was low by ~9x. Recovering Bose is how the eta=0 runs are
-    verified.
-
-(3) P_in and P_out agree to ~1e-5, so plotting both draws one curve twice. The
-    informative quantity is the NET rate P_out - P_in.
-
-Everything below OMEGA_IR is masked: at omega -> 0 the acoustic G^R diverges and
-the grid cannot resolve it. The omega=0 bin is in any case already excluded from
-the bubble itself (sse_phonon_phonon.py, `sse_mask`).
-
-Data: phonon/scripts/data/decomposed_sse_spectra.npz.
+Data:
+  Data: phonon/scripts/data/decomposed_sse_spectra.npz.
 
 Run:  python phonon/scripts/figures/decomposed_sse_observables.py
 """

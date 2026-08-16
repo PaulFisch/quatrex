@@ -1,28 +1,9 @@
 """GPU campaign figures (fig:res_gpu_ceiling, fig:res_gpu_scaling).
 
-  gpu_ceiling       (a) the peak-gap verdict chain on one GH200 -- FP64
-                    tensor-core peak, sustained big-square GEMM, the
-                    b=36 batched ring-shape ceiling, and the in-engine
-                    rate; (b) the batched-ring shape ceiling vs block
-                    size b at three batch depths, with the in-engine
-                    operating points (CNT b=36, film b=18 legacy and
-                    batched, d11a b=135).
-  gpu_scaling_film  (a) strong scaling of the CNT L4 iteration over
-                    1-8 GH200 (stack axis) with parallel efficiency;
-                    (b) the film coupled-q iteration before/after the
-                    batched dense-q ring, split into ring/OBC/rest.
-
-All numbers are literals from phonon/docs/gpu_campaign_2026-07.md
-(sections 1-4, 9): the microbenches (ring-shape ceilings, sustained
-GEMM) ran standalone on a daint GH200 and are not derivable from any
-committed run.npz; the in-engine rates come from the campaign's slurm
-logs (cluster/l4bench, cluster/l*, cluster/mos2f3, cluster/filmq).
-Engine parity CPU/GPU at 8e-13 (commit 570dfbda) backs their
-correctness. The film pair (legacy 2.46 TF/s at per-launch batch
-w=241 vs batched 6.84 TF/s) is the section's central measurement:
-both sit ON the b=18 microbench curve -- the legacy loop was at its
-per-launch ceiling, the batched kernel at the deep-batch quantization
-ceiling.
+Data:
+  All numbers are literals from phonon/docs/gpu_campaign_2026-07.md
+  committed run.npz; the in-engine rates come from the campaign's slurm
+  logs (cluster/l4bench, cluster/l*, cluster/mos2f3, cluster/filmq).
 
 Run:  python phonon/scripts/figures/gpu_campaign_figs.py
 """

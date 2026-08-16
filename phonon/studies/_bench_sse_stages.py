@@ -1,28 +1,6 @@
 """Micro-benchmark: per-stage SSE cost across threading/allocator configs.
 
-Runs the REAL production SCBA loop (a few iterations of the configured
-device) in a child process per (ring-pool width x BLAS threads x malloc
-knobs) combination -- both thread counts must be fixed before numpy loads,
-hence the parent/child split -- and reads the per-stage times of the WP1
-profiler ranges (``PhPh SSE: 1..5``) from the in-process eventlog. Prints a
-ranked table and asserts that every combination produced the same Sigma
-(the ring result is bit-identical for any pool width; BLAS/allocator knobs
-must not change it either).
-
-Usage (laptop smoke, tiny sweep):
-    python phonon/studies/_bench_sse_stages.py \
-        --config phonon/studies/out/anderson_test/local_L2/quatrex_config.toml \
-        --ring 1,4 --blas 1,8 --iters 3
-
-Cluster sweep (one idle tortin node, ~13 x iters minutes):
-    python phonon/studies/_bench_sse_stages.py --config <cluster L2 toml> \
-        --ring 1,8,32,64 --blas 1,8,0 --malloc default,arena2
-
-June->July attribution (manual; old commits need era-matched configs since
-PhononConfig forbids unknown keys):
-    git worktree add ../qx-pre-fold 1550675d~1   # before exact 3-term fold
-    git worktree add ../qx-window  47794944~1    # spectral window present
-    (cd ../qx-pre-fold && PYTHONPATH=src python phonon/studies/_bench_sse_stages.py ...)
+    python phonon/studies/_bench_sse_stages.py         --config phonon/studies/out/anderson_test/local_L2/quatrex_config.toml         --ring 1,4 --blas 1,8 --iters 3
 """
 from __future__ import annotations
 

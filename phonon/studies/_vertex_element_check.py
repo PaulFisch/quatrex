@@ -1,44 +1,7 @@
-"""Vertex-element check: |Phi_{lambda lambda' lambda''}|^2, quatrex vs phono3py.
-
-Step 1 of the 2026-08-15 convergence plan. Compares the code's mode-projected
-three-phonon vertex against phono3py's ``Interaction.interaction_strength`` for
-the *same* triplets, on the checked-in Si primitive FC3.
-
-Why this and not a linewidth comparison: there is no delta function, no BZ sum,
-no broadening and no mesh convergence here, so it is immune to the joint-DOS
-starvation that made the mode-resolved linewidth ratio unusable (lab notebook
-F28).
-
-Four stages, each isolating one thing:
-
-S0  harness gate -- phono3py's own C kernel vs its pure-Python reference
-    (``RealToReciprocal`` + ``ReciprocalToNormal``). Must agree to machine
-    precision before anything of ours is compared. Also reports the size of
-    phono3py's ``make_r0_average`` convention, which the code does not apply.
-
-S1  reimplementation gate -- our own numpy contraction of phono3py's own
-    reciprocal-space FC3 must reproduce S0. Proves the harness drives the
-    formula correctly, independent of phono3py internals.
-
-S2  NORMALISATION -- the code's mass-weighted real-space vertex
-    (``build_realspace_fc3_matrices``) pushed through phono3py's Fourier
-    transform and phono3py's eigenvectors. The ratio to S1 must be the pure
-    constant ``CONVERSION_FC3_THZ**2`` for every triplet and band.
-
-S3  PHASE CONVENTION -- the same real-space vertex pushed through the *code's*
-    Fourier transform (``build_gathering_matrix``: a plain lattice-translation
-    phase ``exp(-2 pi i q . R_cell)``, no shortest-vector image average, no
-    umklapp prephase), against S2. This is the convention the production device
-    path uses (``solver/se_q.py::_qfold_device_blocks``).
-
-Both sides of every comparison use the *same* eigenvectors, so eigenvector gauge
-and degenerate-subspace rotation never enter.
+"""Vertex-element check: |Phi_{lambda lambda' lambda''}|^2, quatrex vs
+phono3py.
 
 Run::
-
-    python -m phonon.studies._vertex_element_check [--mesh 4 4 4] [--grid-point 5]
-
-No cluster time, no production path touched.
 """
 
 from __future__ import annotations

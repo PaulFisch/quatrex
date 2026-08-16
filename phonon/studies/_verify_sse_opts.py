@@ -1,26 +1,7 @@
 """Correctness A/B for the SSE fast-path options (WP3/WP4/WP5).
 
-From a base config, builds four variants
-
-    legacy  : all options off (reference)
-    gfl     : sse_greater_from_lesser (+ 2 fold-verify iterations)
-    herm    : sse_hermitian_pairs
-    both    : both reductions
-
-runs each for a few SCBA iterations (single rank), and compares the
-iteration trajectories (per-iteration heat currents and max|Sigma^<|)
-against the legacy reference. Expected agreement:
-
-    gfl   : ~1e-12 rel (construction-exact identity, summation order only)
-    herm  : ~solver anti-Hermiticity level (typically 1e-10..1e-12 rel)
-
-Also greps the fold-verify gate lines and the bubble-balance residuals
-from the run logs. Exit code 0 iff all variants pass their tolerance.
-
 Usage:
-    python phonon/studies/_verify_sse_opts.py \
-        --base phonon/studies/out/anderson_test/cnt33_linear/quatrex_config.toml \
-        --iters 4 [--ring 8] [--workdir .../sse_opt_verify]
+    python phonon/studies/_verify_sse_opts.py         --base phonon/studies/out/anderson_test/cnt33_linear/quatrex_config.toml         --iters 4 [--ring 8] [--workdir .../sse_opt_verify]
 """
 from __future__ import annotations
 

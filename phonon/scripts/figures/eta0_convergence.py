@@ -1,18 +1,8 @@
 """Figures + verified numbers for the eta->0 SCBA convergence write-up.
 
-Single source of truth for every number that enters the LaTeX (printed to
-stdout) and for the four figures, regenerated ONLY from VALID run data:
-
+Data:
   cnt33 (SOLVABLE eta=0):  phonon/studies/out/conv1e10/cnt33_smooth_L2.{log,npz}
-  cnt33 cutoff sweep:      the converged G*dw(omega_reg) table (from the runs;
-                           mirrored from phonon/studies/_taper_plot.py)
-  d5a (HARD eta=0):        sinw_d5a_L2_rpm_eta0.log (RPM, |lambda|),
-                           sinw_d5a_L2_nf181_jfnk_eta0.log (JFNK k=25),
-                           sinw_d5a_L2_nf181_jfnk_k50_eta0.log (JFNK k=50)
   d5a Gamma_anh anchor:    phonon/scripts/verify/d5a_gamma_anh.npz (NM=32,BW=0.2)
-
-Figures -> document/fig/transport_sweeps/{eta0_convergence_methods,
-eta0_cnt33_cutoff,eta0_cnt33_transmission,d5a_gamma_anh}.{pdf,png}
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/eta0_convergence.py
 """

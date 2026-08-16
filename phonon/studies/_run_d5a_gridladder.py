@@ -1,35 +1,8 @@
 """d5a L2 eta=0 BARE-SSE grid-resolution ladder + grid-band alignment scan.
 
-Hypothesis (flat bands): d5a's flat branches are sharp Lorentzian resonances
-whose self-consistent linewidth Gamma must be RESOLVED by the frequency grid
-(d_omega < Gamma) -- the eta=0 non-convergence may be a resolution problem,
-not a physics one. Two experiments, all rungs fully RAW (ir_taper_cells = 0,
-NO spectral window/mask -- the smooth support window was REMOVED 2026-07-06:
-it deleted the physical two-phonon combination continua; see
 phonon/docs/spectral_deformation_audit.md):
-
-  (1) RESOLUTION ladder: nfreq in {181, 361, 721, 1441} at fmax = 66 THz
-      (d_omega 0.367 -> 0.046 THz). Does the residual floor / limit cycle
-      shrink as d_omega crosses below the flat-band Gamma_anh
       (phonon/scripts/verify/d5a_gamma_anh.npz predicts the threshold)?
-  (2) ALIGNMENT scan: nfreq in {185, 189, 193} -- ~constant resolution, but
-      the bins shift RELATIVE to the flat bands (equivalent to shifting the
-      bands; the grid must stay zero-based -- an emin offset would break the
-      bosonic reflection fold). If the marginal bins are grid-band HITS, the
-      convergence behaviour changes qualitatively between micro-rungs.
-
-Every rung runs with QX_DIAG_SPECTRAL=1 (per-iteration full-omega G/Sigma
-spectra -> per-bin iteration variance localises the limit-cycling bins) and
-saves the standard npz (+ slab_absorption). Sequential rungs, 64 MPI ranks
-(omega-axis stack split; 63-DOF blocks -> ring pool not useful), single-thread
-BLAS per phonon/CLAUDE.md.
-
-Run (background):
-    cd <repo>
-    nohup python phonon/studies/_run_d5a_gridladder.py > \
-        phonon/studies/out/d5a_gridladder/ladder.log 2>&1 &
-
-Figure: phonon/scripts/figures/d5a_grid_ladder.py.
+    nohup python phonon/studies/_run_d5a_gridladder.py >         phonon/studies/out/d5a_gridladder/ladder.log 2>&1 &
 """
 from __future__ import annotations
 

@@ -124,24 +124,7 @@ def test_mpi_split_matches_the_serial_answer():
 
 @pytest.mark.mpi
 def test_the_production_frequency_context_matches_the_hand_split():
-    r"""Exercise ``PhononSolver._pole_frequency_context`` itself.
-
-    ``test_mpi_split_matches_the_serial_answer`` builds the split by hand with
-    raw ``mpi.Allreduce``, so it verifies the MATHS of the split and nothing
-    about the function that performs it in production. That function called
-
-        sizes = comm.stack.all_gather(np.array([local_freqs.size]))
-
-    but ``all_gather`` is IN-PLACE, ``all_gather(sendbuf, recvbuf) -> None``.
-    Every multi-rank pole run therefore died with "missing 1 required
-    positional argument: 'recvbuf'" on every rank, and no test noticed,
-    because the body is guarded by ``if comm.stack.size <= 1: return {}`` and
-    the whole suite runs on one rank.
-
-    This calls the real thing. It also uses an UNEVEN split -- 65 points over
-    4 ranks -- because equal counts are the case a naive all_gather happens to
-    survive.
-    """
+    r"""Exercise ``PhononSolver._pole_frequency_context`` itself."""
     from mpi4py.MPI import COMM_WORLD as mpi
 
     from qttools.comm import comm

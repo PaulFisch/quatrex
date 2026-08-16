@@ -1,48 +1,17 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-"""Tensor-decomposed (factored) three-phonon ring contraction.
+r"""Tensor-decomposed (factored) three-phonon ring contraction.
 
 With the folded device vertex factorised per leg (see
-``quatrex.phonon.vertex_factors``),
+:mod:`quatrex.phonon.vertex_factors`), the dense ring collapses to a Hadamard
+product of two skinny Grams sandwiched by the external leg. Two exact collapses
+make it asymptotically optimal: the quad sum factorises, because the two lines
+depend on disjoint index pairs and the quad set is their Cartesian product, so
+the Grams are summed before the Hadamard; and the internal momentum sum is a
+circular convolution, evaluated by FFT.
 
-    Phi~(q1,q2)[(I,K,K')][a,b,c] = sum_r lam_r D[a,r] UB[K-I][q1][b,r]
-                                                     UC[K'-I][q2][c,r],
-
-the dense ring  S[w,a,j] = conj(PhiL)[a,c,e] Ga[w,c,b] Gb[w,e,d] PhiR[j,d,b]
-collapses to a Hadamard product of two skinny Grams, sandwiched by the external
-leg:
-
-    S[w] = Dt @ ( Pa[w] o Pb[w] ) @ Dt.T,        Dt = D @ diag(lam)
-
-    Pa[w,r,s] = conj(UB[K1-I][q'])^T @ Ga[w,q'] @ UC[K1p-J][q']     (a-line)
-    Pb[w,r,s] = conj(UC[K2-I][q2])^T @ Gb[w,q2] @ UB[K2p-J][q2]     (b-line)
-
-The row factor is conjugated -- that IS the conjugated-left-vertex convention at
-factor level (D and lam are real). No ``g = g^T`` assumption is made anywhere.
-
-Two exact collapses make the evaluation asymptotically optimal.
-
-**The quad sum factorises.** Per output pair (I, J) the ring runs over quads
-(K1, K2, K1p, K2p). The a-line depends only on (K1, K1p), the b-line only on
-(K2, K2p), and the quad set is exactly the Cartesian product of the two -- the
-FC3 support of the factored vertex is a full offset product, and the G band
-constrains the two lines separately. Since the Hadamard is bilinear,
-
-    sum_quads Pa[a] o Pb[b] = ( sum_a Pa[a] ) o ( sum_b Pb[b] ),
-
-so the Grams are summed FIRST and the Hadamard is taken ONCE per pair instead of
-once per quad.
-
-**The q'-sum is a circular convolution.** Pa depends only on q' and Pb only on
-q2 = q_ext - q', so
-
-    H[q_ext] = sum_{q'} Pa[q'] o Pb[q_ext - q']
-
-is a circular convolution on the transverse mesh, evaluated by FFT in
-O(N_q log N_q) instead of O(N_q^2). This is available only in the factored form:
-the dense vertex Phi~(q', q_ext - q') does not separate in the momenta.
-
-The bosonic fold, DC-zeroing and masks are inherited upstream and NOT re-derived
-here.
+Convention: the row factor is conjugated, which is the conjugated-left-vertex
+convention at factor level (``D`` and ``lam`` are real). No ``g = g^T``
+assumption is made anywhere.
 """
 
 from __future__ import annotations

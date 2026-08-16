@@ -1,24 +1,4 @@
 """d5a re-baseline on the FIXED FC2 export (Phase 0 of the twist-mode plan).
-
-Every historical d5a run used a dynamical_matrix.mat whose 3-block
-export DROPPED the n=2 Fourier coefficient of the [1,1,4]-mesh fit
-(``get_btd_blocks`` truncation): Gamma acoustic sector [-0.274, -0.153,
-+0.135, +0.154] THz -- two imaginary branches instead of three exact
-zeros + the 0.0075 THz twist. The folded export
-(``get_btd_blocks_folded``) is exact at Gamma and the zone boundary
-(mid-zone error bounded by 2||H2|| ~ 6% of ||H1||).
-
-This study regenerates the d5a L2 inputs with the fixed builder,
-validates the emitted spectrum, and re-runs the eta=0 baseline:
-
-  bare  : no crutches -- the honest question: does the corrected FC2
-          change the eta=0 instability story? (Divergence is a RESULT.)
-  ircut : sse_low_freq_mask_thz = 1.5 (the historical necessary+
-          sufficient crutch) -- the control that should still converge.
-
-Idempotent; run on the cluster (needs the hiphive reap dir):
-    python phonon/scripts/tortin.py launch --name d5afix -- \
-        python phonon/studies/_run_d5a_fixed_export.py
 """
 from __future__ import annotations
 

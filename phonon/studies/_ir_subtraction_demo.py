@@ -1,24 +1,8 @@
 """Grid-convergence demonstration of the surgical rank-3 subtraction
 (phonon/docs/ir_residue_derivation.md, Sec. 3) on the dense film bed.
 
-Computes the vertex-contracted bubble output
-
-    Sigma^<(w_out) = dw * sum_{w'} ring(Phi, G^<(w'), G^<(w_out - w'))
-
-on a symmetric full frequency axis (fold-generated negative side,
-w = 0 bin zeroed, production index pairing) for a nested ladder of
-grid spacings, with
-
-  bare : legs = dense ballistic G (production parity)
-  sub  : legs = G - S, S the derived rank-3 Laurent channel
-         (C2/w^2 even, V_T^{-1}/w odd, from the run's own lead model)
-
-Derived prediction: bare grows ~ 1/dw (the uncancelled translation
-channel contributes ~ leak^2 C2 / w'^2 per bin), sub converges to a
-grid-independent limit. This is the disease and its cure in one plot.
-
-Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4 \
-        python phonon/studies/_ir_subtraction_demo.py
+(phonon/docs/ir_residue_derivation.md, Sec. 3) on the dense film bed.
+Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4         python phonon/studies/_ir_subtraction_demo.py
 """
 from __future__ import annotations
 

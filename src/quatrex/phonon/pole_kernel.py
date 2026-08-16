@@ -1,56 +1,22 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-r"""Analytic continuation of the phonon scattering self-energy to complex frequency.
+r"""Analytic continuation of the phonon scattering self-energy to complex z.
 
-The production retarded self-energy is the real-axis restriction of an explicit
-analytic function of a complex frequency :math:`z`. With
-:math:`\Delta = \Sigma^> - \Sigma^<` (the RAW, textbook-signed bubble output, which
-equals ``sigma_lesser.data - sigma_greater.data`` in the solver's stored,
-occupation-positive convention) the solver builds
+The real-axis retarded self-energy is already built as a cell-integrated
+Hilbert transform of :math:`\Delta = \Sigma^> - \Sigma^<`; continuing the same
+cell-wise model with the complex logarithm gives a function analytic off the
+real axis whose boundary value from above reproduces it to machine precision,
+so evaluating :math:`M(z)` off the axis adds no approximation production does
+not already make. Reaching the second sheet additionally needs
+:math:`\Delta` past the cut, supplied by :func:`delta_local_fit`; that fit is
+the one uncontrolled step. The report derives this under
+"Where the poles are".
 
-.. math::
-    \Sigma^R_s(\omega) = \tfrac12 \Delta(\omega)
-                       + \tfrac{i}{2}\,\mathcal{H}[\Delta](\omega),
+Sign convention: :math:`\Delta` is the raw, textbook-signed bubble output,
+which is ``sigma_lesser.data - sigma_greater.data`` in the solver's stored,
+occupation-positive convention.
 
-where :math:`\mathcal{H}` is :func:`quatrex.core.fft_utils.hilbert_transform`, a
-principal value discretised with *exact cell-integrated* weights. Modelling
-:math:`\Delta` as cell-wise constant -- exactly the model that kernel already
-uses -- and writing the same integral with the **complex** logarithm gives
-
-.. math::
-    F(z) = \frac{i}{2\pi}\sum_k \Delta_k
-             \left[\log(z-\omega_k+h/2) - \log(z-\omega_k-h/2)\right]
-         + \frac{i}{2\pi}\sum_k \bar\Delta_k
-             \left[\log(z+\omega_k+h/2) - \log(z+\omega_k-h/2)\right],
-
-with the bosonic mirror amplitude :math:`\bar\Delta_k = \Delta_k(-q)^*` and the
-:math:`\omega=0` cell counted once. Two facts make this the whole foundation of
-the pole sector:
-
-1. ``F(omega + i0) == 0.5*Delta + 0.5j*hilbert_transform(Delta)`` to machine
-   precision. The cell containing :math:`\omega` contributes
-   :math:`\log(i0+h/2)-\log(i0-h/2) = -i\pi`, i.e. exactly the
-   :math:`\tfrac12\Delta` term -- it is not a separate addition. So evaluating
-   :math:`M(z)` off the real axis introduces **no approximation beyond the one
-   production already makes**.
-2. The jump across the cut is exactly :math:`\Delta`, so the retarded branch
-   continued downward onto the resonance (second) sheet is
-
-   .. math::
-       \Sigma^{R,\mathrm{II}}(z) = F(z) + \Delta_{\rm an}(z),
-
-   with :math:`\Delta_{\rm an}` a local polynomial continuation of
-   :math:`\Delta` (:func:`delta_local_fit`). Poles worth promoting to the pole
-   sector have :math:`\gamma \ll h`, which is exactly the regime where that
-   local continuation is most accurate; poles with :math:`\gamma \gtrsim h` are
-   resolved by the grid and are not promoted.
-
-Everything here is pure array work -- no MPI, no ``DSDBSparse`` -- so it is
-unit-testable against the production Hilbert kernel directly. The contraction is
-linear in :math:`\Delta`, which is what lets the caller evaluate it in the
-``"nnz"`` distribution state with zero communication.
-
-See ``phonon/docs/pole_subtracted_modal_scba.md`` (in particular Secs. 2, 3, 9
-and 36) for the formulation.
+Pure array work, no MPI. The contraction is linear in :math:`\Delta`, which is
+what lets the caller evaluate it in the ``"nnz"`` state with no communication.
 """
 from __future__ import annotations
 

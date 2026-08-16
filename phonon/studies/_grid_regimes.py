@@ -1,43 +1,6 @@
 """Is coarse-grid convergence just BLINDNESS to the resonance?
 
-Paul's hypothesis (2026-08-07), against the naive reading of the
-measured rho(dw/Gamma) non-monotonicity:
-
-  "if we have e.g. Delta_omega/Gamma = 60, I don't intuitively see how
-   we can accurately represent the resonance. Intuitively, the reason we
-   converge is that we are so far away from what drives the physics that
-   we don't even register it. Then, only as we get smaller, we hit some
-   resonances, but don't resolve them enough to converge. Hence this
-   non-monotonicity would make sense, and we would need to resolve even
-   more to converge a proper resonance."
-
-Three regimes, and the test needs a metric for "does the grid register
-the resonance at all". Use the exact per-orbital spectral sum rule: for
-each orbital i, completeness of the eigenvectors gives
-
-    S_i = int_0^inf 2 omega (-1/pi) Im G^R_ii(omega) d omega = 1
-
-exactly. Restricted to the two flat-band (B) orbitals -- whose entire
-linewidth is anharmonic in this model -- S_B is a clean 0..1
-"fraction of the resonance the grid registered".
-
-Predictions, pre-registered in the output JSON before the run:
-  R1 blind      S_B << 1  -> rho_damped < 1 (converges) but Gamma_em is
-                            badly wrong and the state sits near ballistic
-  R2 transition S_B ~ 0.2-0.95 -> rho_damped maximal, may exceed 1
-  R3 resolved   S_B -> 1  -> rho_damped < 1 AGAIN and Gamma_em -> Gamma_ref
-Falsifier: if rho_damped rises monotonically as S_B -> 1, the
-instability is physical, not a representation artefact.
-
-STABILITY CONVENTION (a correction to the earlier _grid_stability_law
-run): arnoldi_spectrum returns the Jacobian of the RAW map F. The SCBA
-iterate is damped, x <- (1-a) x + a F(x), so its eigenvalue is
-m = 1 - a + a*lambda and the convergence criterion is |m| < 1, NOT
-|lambda| < 1. Both are reported; rho_damped is the one that decides
-convergence.
-
-Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4 \
-        python phonon/studies/_grid_regimes.py
+Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4         python phonon/studies/_grid_regimes.py
 """
 from __future__ import annotations
 

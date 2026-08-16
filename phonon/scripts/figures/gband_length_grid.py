@@ -1,24 +1,8 @@
 """Long-chain CNT g_band ladder (fig:res_gband_ladder).
 
-  gband_ladder   (a) converged lead heat current (integral
-                 convention) vs device length for the exact-band
-                 g_band=3 kernel and the tapered g_band=1 kernel at
-                 ne=161, with the ne=361 grid check at L16 (open
-                 markers): the g3 current GROWS with length --
-                 anomalous for a wire at fixed temperature bias --
-                 and the growth is grid-stable (-3.1% under a 2.24x
-                 finer grid), so it is the band truncation's
-                 non-causal residue compounding with length, not
-                 grid aliasing; the tapered series saturates
-                 physically but underweights coherence ~2.2x.
-                 (b) interior heat-profile spread vs length: the
-                 structural incompleteness of both kernels grows
-                 with L (g3 6-18%, g1t 47-86%).
-
-Data: phonon/scripts/data/gband_ladder.npz, distilled by
-_extract_gband_ladder.py from the cluster/l{16,24,32}f-* GPU runs
-(2x4 GH200, eta=0, all converged) and the L16 ne=361 pair
-(jobs 4321907/4321908).
+Data:
+  Data: phonon/scripts/data/gband_ladder.npz, distilled by
+  _extract_gband_ladder.py from the cluster/l{16,24,32}f-* GPU runs
 
 Run:  python phonon/scripts/figures/gband_length_grid.py
 """

@@ -1,23 +1,6 @@
 """Validate an IR singularity-subtracted bubble CONVOLUTION against scipy
 quadrature, in the scalar model, BEFORE wiring it into the solver.
 
-Sigma(w) = PV integral_{-W}^{W} Ga(w') Gb(w-w') dw'   (symmetric grid through 0)
-
-is intrinsically a PRINCIPAL VALUE: out of equilibrium the device G^< inherits
-the genuine contact pole  G(w') ~ -i c A(0)/w'  (A(0)!=0, c=kT/hbar), so the
-integrand has simple poles at w'=0 (from Ga) and w'=w (from Gb). The production/
-dense bubbles just ZERO the w'=0 bin (the plateau-destroying taper). We instead
-RESIDUE-double-subtract -- the exact generalisation of the proven
-phonon.solver.retarded.retarded_from_lesser_greater pattern:
-
-  Sigma(w) = integral [ g(w') - r0/w' - rw/(w-w') ] dw'    (regular -> trapezoid)
-           + r0 * PV integral dw'/w'                        ( = 0 on a symmetric grid)
-           + rw * PV integral dw'/(w-w')                    ( = ln|(w+W)/(w-W)| )
-
-with g(w')=Ga(w')Gb(w-w'), residues r0 = lim_{w'->0} w' g = (-i c A(0)) Gb(w),
-rw = lim_{w'->w} (w-w') g = Ga(w) (-i c A(0)). The removable nodes are filled by
-the finite-difference derivative of (g - poles), as in retarded.py.
-
 Run:  OMP_NUM_THREADS=1 python phonon/studies/_ir_bubble_probe.py
 """
 from __future__ import annotations

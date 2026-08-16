@@ -1,67 +1,12 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""Analytic pole-pole three-phonon bubble, evaluated without a frequency grid.
 
-The pole-pole sector of the cubic bubble,
-
-.. math::
-    \Sigma_{SS}^{\lessgtr}(\omega) = \frac{i\hbar}{2}
-      \sum_{\alpha\beta\gamma\delta}
-      \bar\Phi_{\mu,\alpha\beta}\,\bar\Phi^*_{\mu',\gamma\delta}
-      \int\!\frac{d\omega'}{2\pi}
-      F^{\lessgtr}_{\alpha\delta}(\omega')\,F^{\lessgtr}_{\beta\gamma}(\omega-\omega'),
-
-is a convolution of *rational* functions, so it has a closed form. Writing the
-modal Keldysh matrix of :mod:`quatrex.phonon.pole_keldysh`,
-
-.. math::
-    F^{\lessgtr}_{\alpha\beta}(\omega)
-      = \frac{S^{\lessgtr}_{\alpha\beta}}{(\omega-z_\alpha)(\omega-z_\beta^*)},
-
-in partial fractions turns every leg into a sum of **simple** poles, one in each
-half plane. The elementary convolution of two simple poles then has only three
-cases:
-
-.. math::
-    J(p,q;\omega) = \int\!\frac{d\omega'}{2\pi}
-        \frac{1}{(\omega'-p)\,(\omega-\omega'-q)}
-      = \begin{cases}
-        -i/(\omega-p-q) & \operatorname{Im}p<0,\ \operatorname{Im}q<0\\
-        +i/(\omega-p-q) & \operatorname{Im}p>0,\ \operatorname{Im}q>0\\
-        0 & \text{mixed.}
-        \end{cases}
-
-The first line is the doc's Eq. (30): the convolution of two retarded poles is a
-pole at the sum of their locations, which is where the three-phonon
-:math:`\Omega_\alpha \pm \Omega_\beta` structures come from. The mixed case
-vanishing is what makes the sum short -- only two of every four pole pairings
-survive.
-
-Two consequences worth stating separately:
-
-* **No grid is involved.** The result is exact at any frequency, at a cost set
-  by the number of pole pairs rather than by the sharpest linewidth. This is the
-  whole point: a discrete convolution of two Lorentzians of half-width
-  :math:`\gamma` needs :math:`\Delta\omega \ll \gamma` to be even approximately
-  right, and at :math:`\Delta\omega/\gamma \sim 50` it does not merely lose
-  weight, it *gains* it by two orders of magnitude depending on where the bins
-  fall.
-* **The retarded partner is free.** Because
-  :math:`\Sigma^R(z) = \frac{i}{2\pi}\int \Delta(\omega')/(z-\omega')\,d\omega'`
-  and :math:`\Delta_{SS}` is a sum of simple poles, closing the contour leaves
-
-  .. math:: \Sigma^R_{SS}(\omega) = \sum_{j:\ \operatorname{Im}p_j<0}
-            \frac{c_j}{\omega-p_j},
-
-  i.e. **keep the lower-half-plane poles of** :math:`\Delta` **and drop the
-  rest**. Manifestly causal, and it must not be passed through the numerical
-  Hilbert transform (doc Sec. 36). As a check, a Lorentzian
-  :math:`\Delta = L_{\Omega,\gamma}` has LHP coefficient :math:`+i` at
-  :math:`\Omega-i\gamma`, reproducing :math:`i/(\omega-\Omega+i\gamma)`.
-
-The pole set fed here must be closed under the bosonic partner map
-:math:`z \mapsto -z^*` (doc Sec. 3.2), or the fold
-:math:`\Sigma^<(-\omega) = \Sigma^>(\omega)^T` will not hold; see
-:func:`bosonic_closure`.
+The pole-pole sector convolves two rational functions, so it has a closed form.
+Partial-fractioning the modal Keldysh matrix turns every leg into a sum of
+simple poles, one per half plane, and the elementary convolution of two simple
+poles has only three cases: two retarded poles give a pole at the sum of their
+locations, which is where the three-phonon sum and difference structures come
+from; two advanced poles give the conjugate; a mixed pair vanishes.
 """
 from __future__ import annotations
 

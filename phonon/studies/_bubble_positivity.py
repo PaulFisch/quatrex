@@ -1,27 +1,6 @@
 """Does the three-phonon bubble preserve positivity, and if not, where?
 
 Companion to `phonon/docs/bubble_positivity.md`. The theory note proves
-
-    -i G^{<,>} >= 0  and  vertex leg-exchange symmetry   ==>  -i Sigma >= 0
-
-because the ring S[a,J] = Phi_L[a,c,e] A[c,b] B[e,d] Phi_R[J,d,b] is the
-congruence M (A (x) B) M^dagger with M[a,(c,e)] = Phi_L[a,c,e], PROVIDED
-
-    Phi_R[(J,Kb,Ka)][a,d,b] = conj(Phi_L[(J,Ka,Kb)][a,b,d]).       (1)
-
-Gamma-only (nq=1) both factors are the same real-space dict, so (1) is
-"real AND symmetric under exchanging the two contracted legs". At
-coupled-q the left factor is conjugated in the code
-(sse_phonon_phonon.py:1846-1848), so reality is NOT needed and (1)
-becomes the q-carrying exchange
-
-    Phi(q2,q1)[(J,Kb,Ka)][a,d,b] = Phi(q1,q2)[(J,Ka,Kb)][a,b,d].    (1')
-
-Nothing in the tree ever checked either one on a SHIPPED vertex: the
-audit referenced at phonon/solver/se_finite.py:372
-(phonon/scripts/verify/audit_qfold_trs.py) does not exist. Sub-command
-`vertex` is that audit.
-
 Run:  QTX_ARRAY_MODULE=numpy python phonon/studies/_bubble_positivity.py vertex
 """
 from __future__ import annotations

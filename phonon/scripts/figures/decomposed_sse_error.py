@@ -1,30 +1,8 @@
-"""Rank-truncation error of the decomposed SSE (fig:res_decomp_error, fig:res_decomp_amp).
+"""Rank-truncation error of the decomposed SSE (fig:res_decomp_error,
+fig:res_decomp_amp).
 
-  decomp_rank_error   left:  the ONE-SHOT vertex error -- both self-energies
-                             evaluated on the SAME ballistic G, so this is the
-                             vertex error propagated through the bubble with no
-                             SCBA feedback. Drawn against the theory chapter's
-                             bound, 2 eps_R.
-                      right: the SELF-CONSISTENT observable errors -- a full SCBA
-                             per rank against the dense-vertex run, every
-                             observable, with the comparison floor shaded.
-  decomp_amplification  observable error / eps_R. This is the result: the vertex
-                        -> Sigma map is faithful (amplification ~1), but the
-                        Sigma -> observable map suppresses the error by one to
-                        three orders of magnitude.
-
-THE COMPARISON FLOOR. The dense q-folded vertex and the factored vertex do not
-carry the same FC3 block support: the q-fold keeps 7 transport-offset pairs, the
-factors span the full 5x5 window over offsets [-2..2]. The 18 extra pairs hold
-6.8e-5 of the vertex amplitude (measured), and Sigma is bilinear in the vertex, so
-no error against this reference can fall below ~1.4e-4 however good the fit gets.
-R=64 already sits there. Errors at or under the shaded band measure the REFERENCE,
-not the rank -- which is why the curves stop descending, and why R=128 is not an
-improvement on R=64.
-
-Data: one-shot numbers are literals from phonon/studies/_rank_error_sse.py
-      (scratch rank_err.log); the self-consistent ones from
-      phonon/scripts/data/decomposed_sse.csv (the L3 accuracy campaign).
+Data:
+  phonon/scripts/data/decomposed_sse.csv (the L3 accuracy campaign).
 
 Run:  python phonon/scripts/figures/decomposed_sse_error.py
 """

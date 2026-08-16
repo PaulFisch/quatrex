@@ -1,28 +1,11 @@
 """Distil the energy-grid resolution studies into a committed dataset.
 
-Sources (uncommitted run artifacts):
+Data:
   cluster/mos2f3nu/run_ballistic.npz          MoS2 film L3 ballistic on the
-                                              262-point non-uniform grid
-                                              (min spacing 0.020 THz)
   phonon/studies/out/cnt33_L4_nugrid/{nu2,uni}/run.npz
-                                              CNT L4 converged A/B: 287-pt
-                                              non-uniform vs 361-pt uniform,
-                                              identical physics otherwise
   phonon/studies/out/anderson_test/cnt33_L4_linear/run_ne{161,201,271,361}.npz
-                                              the uniform-grid ne scan under
-                                              fixed linear mixing (the
-                                              convergence lottery)
   phonon/studies/out/d5a_gridladder/nf{181,721}/run.npz
-                                              d5a uniform ladder (both legs
-                                              diverge; density alone does
-                                              not cure the d5a fixed point
-                                              -- its converged eta=0 record
-                                              is the guarded Anderson
-                                              scheme of sec:res_campaign)
-
-Writes phonon/scripts/data/grid_aliasing.npz. Uniform-grid lead
-currents are multiplied by dw (integral convention) so all quoted
-currents are grid-convention-free.
+  Writes phonon/scripts/data/grid_aliasing.npz. Uniform-grid lead
 
 Run:  python phonon/scripts/figures/_extract_grid_aliasing.py
 """

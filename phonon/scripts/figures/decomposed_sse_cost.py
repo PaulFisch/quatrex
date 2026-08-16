@@ -1,21 +1,11 @@
-"""Cost of the decomposed three-phonon SSE (fig:res_decomp_cost, fig:res_decomp_scaling).
+"""Cost of the decomposed three-phonon SSE (fig:res_decomp_cost,
+fig:res_decomp_scaling).
 
-  decomp_kernel_speedup   ring-contraction speedup over the dense vertex vs rank,
-                          for the coupled-q film (b=6, N_q=81) and the Gamma-only
-                          wire (b=63); the R ~ 130 break-even is marked.
-  decomp_cost_scaling     measured per-iteration SSE cost vs rank on the L10 film
-                          against the R^2 term of the cost model, plus the
-                          end-to-end SCBA wall time.
-
-Kernel timings are literals: they come from the standalone micro-benchmark
-`phonon/studies/_bench_factored_sse.py --verify` run on tortin at
-OMP_NUM_THREADS=1 over the full q mesh (logs: cluster/bench-decomp/run.log,
-cluster/bench-legacy/run.log, and the Gamma/b=63 shape in scratch gamma63.log).
-They are not derivable from any committed run.npz -- the benchmark contracts the
-ring in isolation, which no production run does. Parity vs the dense ring fed the
-identical vertex was ~5e-15 at every point.
-
-The SCBA points come from phonon/scripts/data/decomposed_sse.csv.
+Data:
+  OMP_NUM_THREADS=1 over the full q mesh (logs: cluster/bench-decomp/run.log,
+  cluster/bench-legacy/run.log, and the Gamma/b=63 shape in scratch gamma63.log).
+  They are not derivable from any committed run.npz -- the benchmark contracts the
+  The SCBA points come from phonon/scripts/data/decomposed_sse.csv.
 
 Run:  python phonon/scripts/figures/decomposed_sse_cost.py
 """

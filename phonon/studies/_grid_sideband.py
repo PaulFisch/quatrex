@@ -1,35 +1,7 @@
 """Grid EXTENT: measure the sideband weight above 2*omega_max.
 
-Tests thesis claims #11, #12, #15, #16 of the grid audit
 (phonon/docs/grid_audit.md). The thesis asserts, and flags with its own
-todo at document/src/theory/50_computation.tex:106
-("Measure the sideband weight above $2\\omega_{\\max}$ on a converged run
-to bound the truncation error"):
-
-  #11 in the BALLISTIC limit G^{<,>} lives inside [-w_max, w_max], so the
-      first bubble is supported on [-2 w_max, 2 w_max]  (eq:conv_support)
-  #12 self-consistency does NOT preserve that bound: the fixed point
-      carries multi-phonon sidebands at every order, the n-phonon one at
-      n-1 powers of |Phi3|^2, so the grid extent is a TRUNCATION, not an
-      exact window
-  #15 the grid must reach 2 w_max to retain the two-phonon shoulder,
-      which carries no terminal heat but enters Re Sigma^R through
-      Kramers-Kronig
-  #16 a grid reaching exactly 2 w_max discards only sidebands carrying
-      further powers of |Phi3|^2
-
-The toy bed is the right instrument precisely because the cubic
-amplitude g is a free knob, so the predicted |Phi3|^2-per-order scaling
-of #12/#16 is directly falsifiable: fit log(sideband weight) vs log(g).
-
-Method: converge the 2-DOF flat-band chain of _toy_grid_study on a grid
-extending to EXT * w_max (default 4x) at fixed dw, then integrate the
-scattering-rate density |Tr i(Sigma^> - Sigma^<)| and the spectral
-weight |Tr A| over (w_max, 2 w_max] and (2 w_max, top], relative to the
-whole positive axis.
-
-Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4 \
-        python phonon/studies/_grid_sideband.py
+Run:  QTX_ARRAY_MODULE=numpy OMP_NUM_THREADS=4         python phonon/studies/_grid_sideband.py
 """
 from __future__ import annotations
 

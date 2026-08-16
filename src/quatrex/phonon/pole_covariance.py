@@ -1,84 +1,15 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""What the cell-averaged ring misses: the subcell covariance.
 
-The ring evaluates the bubble from cell means. Write the local hybrid function
-on cell :math:`I_k` as a mean plus a zero-mean fluctuation,
-
-.. math::
-    \tilde G_k(u) = \bar G_k + \delta G_k(u), \qquad
-    \frac{1}{h}\int_{I_k}\delta G_k(u)\,du = 0 .
-
-On a uniform grid with output :math:`\Omega_m = m h`, the reflection
-:math:`v = \Omega_m - u` maps :math:`I_k` exactly onto :math:`I_l`,
-:math:`l = m - k`, so both mixed mean/fluctuation terms integrate to zero and
-
-.. math::
-    \int_{I_k}\frac{du}{2\pi} B[\tilde G_k(u), \tilde G_l(\Omega_m - u)]
-      = \underbrace{\frac{h}{2\pi} B(\bar G_k, \bar G_l)}_{\text{the ring}}
-      + \underbrace{\Delta I_{kl}}_{\text{this module}} ,
-
-.. math::
-    \Delta I_{kl} = \int_{I_k}\frac{du}{2\pi}
-                    B[\delta G_k(u), \delta G_l(\Omega_m - u)] .
-
-That exact cancellation of the cross terms is what makes the correction cheap:
-the ring already computes the first term, and nothing else has to be recomputed
-or removed. It is the difference from the subtract-a-pole-model-and-add-sectors
-routes, where the leg taken out and the leg put back have to be the same
-function over the same support under the same quadrature -- three separate ways
-to be wrong, none of which arises here.
-
-**The basis.** With the local congruence partial-fractioned to
-:math:`\tilde G_k(u) = C_k + \sum_p R_{kp}/(u - \zeta_{kp})`, the centred pole
-functions
-
-.. math::
-    \phi_{kp}(u) = \frac{1}{u - \zeta_{kp}} - d_{kp}, \qquad
-    d_{kp} = \frac{1}{h}\int_{I_k}\frac{du}{u - \zeta_{kp}}
-
-have zero cell mean by construction, and :math:`\delta G_k = \sum_p R_{kp}
-\phi_{kp}`. The constant :math:`C_k` drops out entirely -- it is part of the
-mean -- which is why no background model is needed for the leading correction.
-
-**The kernel.** Expanding the two centred factors and using
-:math:`\int_{I_k} du/(\Omega - u - \zeta_q) = h\,d_{lq}` (the same reflection),
-
-.. math::
-    K_{pq} = J_{[a,b]}(\zeta_{kp}, \zeta_{lq}; \Omega_m)
-             - \frac{h}{2\pi} d_{kp} d_{lq},
-
-with :math:`J` the finite-interval two-pole integral already in
-:func:`~quatrex.phonon.pole_bubble.pair_convolution` under ``window=``.
-
-**Stability.** :math:`s = \Omega - \zeta_p - \zeta_q` does vanish, and both
-places it can are ordinary here.
-
-For two poles in the SAME half plane :math:`\operatorname{Im} s =
-\gamma_p + \gamma_q > 0` bounds :math:`|s|` below, and the logarithmic form
-holds to 2e-16 down to :math:`\gamma/h = 10^{-10}`. But a flattened family is
-:math:`[z, \bar z]` by construction, so it always contains MIXED pairings, and
-for those :math:`\zeta_p + \zeta_q = 2\operatorname{Re} z` is real:
-:math:`\operatorname{Im} s = \gamma_p - \gamma_q = 0` and :math:`s` passes
-exactly through zero as :math:`\Omega` sweeps.
-:func:`~quatrex.phonon.pole_bubble.pair_convolution` therefore carries the
-review's series branch after all, switched on :math:`|s|` against
-:math:`\min_u |u - \zeta_p|` -- which for a pole inside its own cell is
-:math:`\gamma_p`, not the distance to the cell endpoints.
-
-The same degeneracy makes :math:`\zeta_p = \bar\zeta_q` the rule rather than
-the exception in :func:`centred_gram`, where the partial fraction is 0/0 and
-the limit is the elementary double-pole integral.
-
-**Cost.** Every residue here is rank one, :math:`R_p = x_p y_p^\dagger`, so
-
-.. math::
-    B(R_p, R_q)_{\mu\nu} \propto
-        \Big[\sum_{ab}\Phi_{\mu ab} x_{p,a} x_{q,b}\Big]
-        \Big[\sum_{cd}\Phi_{\nu cd} \bar y_{q,c} \bar y_{p,d}\Big],
-
-one projected pair vertex on each side. The pole algebra is quadratic in the
-flattened residue count, not quartic; a quartic cost would be a redundant modal
-index rather than the method.
+The ring evaluates the bubble from cell means. Splitting each leg into a mean
+plus a zero-mean fluctuation, the reflection that maps one cell onto another on
+a uniform grid makes both mixed mean/fluctuation terms integrate to zero, so
+the exact cell integral is the ring's term plus a pure fluctuation-fluctuation
+correction. That cancellation is what makes the correction cheap: the ring
+already computes the first term and nothing has to be recomputed or removed,
+unlike the subtract-a-pole-model-and-add-sectors routes, where the leg taken
+out and the leg put back must agree over the same support under the same
+quadrature.
 """
 from __future__ import annotations
 

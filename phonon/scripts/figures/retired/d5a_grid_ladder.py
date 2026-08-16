@@ -1,22 +1,8 @@
 """d5a eta=0 BARE-SSE grid ladder: resolution, spectral variance, alignment.
 
-Four panels from phonon/studies/out/d5a_gridladder/nf{N}/ (driver:
-phonon/studies/_run_d5a_gridladder.py; all rungs bare -- no IR taper):
-
-  (a) rel Sigma^R residual (+ lead balance, thin) vs SCBA iteration for the
-      RESOLUTION rungs nf {181, 361, 721, 1441}: does the limit-cycle floor
-      drop once d_omega resolves the flat-band linewidths?
-  (b) WHERE the iteration variance lives: per-omega relative std of
-      max|Sigma^<(w)| over the last iterations (QX_DIAG_SPECTRAL arrays),
-      one curve per rung, with the FLAT bands of the d5a dispersion
-      (bandwidth < d_omega) marked -- the grid-hits hypothesis test.
-  (c) summary vs d_omega: residual floor, best lead balance and best-iterate
-      G*dw, with the transport-relevant Gamma_anh distribution
-      (phonon/scripts/verify/d5a_gamma_anh.npz) as the predicted
-      d_omega < Gamma transition band.
-  (d) ALIGNMENT scan nf {181, 185, 189, 193} (~constant resolution, bins
-      shifted relative to the bands): residual floor vs the flat-band/grid
-      alignment metric min_b dist(omega_b, grid)/d_omega.
+Data:
+  Four panels from phonon/studies/out/d5a_gridladder/nf{N}/ (driver:
+  (phonon/scripts/verify/d5a_gamma_anh.npz) as the predicted
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/d5a_grid_ladder.py
 """

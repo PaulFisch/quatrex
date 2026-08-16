@@ -43,13 +43,7 @@ def _leg(rng, centre, zeta, bg_order, n_dof=3):
 
 
 def _bed(gamma, n=41, h=0.25, offsets=(0.11, -0.30), seed=11, n_dof=3):
-    """A rational spectrum with two narrow poles and two wide ones.
-
-    The leg is exactly representable by :class:`~quatrex.phonon.pole_local.
-    LocalLeg` only where the background is; away from the poles the background
-    is a rational function that the polynomial model approximates, so the bed
-    exercises the model error rather than hiding it.
-    """
+    """A rational spectrum with two narrow poles and two wide ones."""
     rng = np.random.default_rng(seed)
     freqs = np.arange(n) * h
     cells = (13, 27)

@@ -1,18 +1,5 @@
 """Normal vs Umklapp decomposition and mode Gruneisen for bulk Si (FD FC3).
 
-Recomputes the phono3py RTA thermal conductivity with the N/U split
-(is_N_U=True) and the FC3 mode Gruneisen parameters -- the two standard
-measures of which scattering processes limit kappa and how strongly anharmonic
-each mode is.  The (cheap, bounded-thread) phono3py recompute reads only
-phonon/reaps/si_primitive_work/{phono3py.yaml, fc2.hdf5, fc3.hdf5}.
-
-Panels:
-  (a) per-mode Umklapp fraction of the 3-phonon scattering rate vs frequency,
-      with a horizontal line at the kappa-weighted Umklapp fraction (and the
-      unweighted scattering-rate-summed fraction printed for comparison);
-  (b) mode Gruneisen distribution with the mean |gamma| line and the
-      experimental bulk-Si value (~1) marked.
-
 Run:  OMP_NUM_THREADS=8 python phonon/scripts/figures/phph_NU_gruneisen_si.py
 Figure -> document/fig/transport_sweeps/phph_NU_gruneisen_si.{pdf,png}
 """
