@@ -2460,6 +2460,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 import cupyx
                 # cupy.add.at has no complex support -> scatter the real
                 # and imaginary float64 views separately.
+                #
+                # This is why the GPU bubble is not reproducible run to
+                # run: cupyx.scatter_add resolves duplicate indices with
+                # atomicAdd, whose ORDER is not fixed. Measured on an RTX
+                # A1000 (2026-08-16): repeated scatter_add of 4e5 values
+                # into 4096 slots varies at 5.4e-13 relative, and the
+                # whole compute() varies at ~1e-13 in ~88% of Sigma's
+                # entries with the bed, the settings and the process all
+                # held fixed. np.add.at above is exact, so the CPU path
+                # IS bit-reproducible -- run bit-identity gates under
+                # QTX_ARRAY_MODULE=numpy, never on the GPU. The jitter is
+                # ~10 orders below the SCBA residual floor and explains
+                # no convergence behaviour.
                 cupyx.scatter_add(outT.real, idx, vals.real)
                 cupyx.scatter_add(outT.imag, idx, vals.imag)
 

@@ -1728,24 +1728,57 @@ def _run_coupled_q(bulk: bool, *, release: bool, share: str, seed: int = 11):
             np.asarray(get_host(s_g.data)).copy())
 
 
+def _assert_flag_is_inert(bulk: bool, ref, got, name: str) -> None:
+    """A memory flag must not move Sigma further than the backend itself does.
+
+    On numpy this is exact equality: the flag reorders nothing, so the bytes
+    match. On CuPy it cannot be, and that is not our arithmetic -- running
+    :meth:`SigmaPhononPhonon.compute` TWICE on the same bed, same settings,
+    same process already gives ~1e-13 relative differences in ~88% of the
+    entries (measured 2026-08-16 on an RTX A1000; the primitives are each
+    deterministic in isolation, so it is the ring's own launch decomposition).
+    Both tests failed from the commit that introduced them (bf4fdd31) for
+    exactly this reason and were reading the GPU's jitter as a flag defect.
+
+    So on CuPy the reference is the CONTROL -- the same run repeated -- and
+    the flag has to stay inside it. That still catches a flag that genuinely
+    changes the answer, which is the whole point, while asserting only what
+    the backend can deliver. The jitter is ~10 orders below the SCBA residual
+    floor (8e-03 on the lsM4 MoS2 rung), so it has no bearing on the physics.
+    """
+    control = _run_coupled_q(bulk, release=False, share="off")
+    exact = xp.__name__ == "numpy"
+    for a, b, c in zip(ref, got, control):
+        if exact:
+            np.testing.assert_array_equal(
+                a, b, err_msg=f"{name} changed Sigma on a deterministic "
+                              f"backend (bulk={bulk})")
+            continue
+        scale = max(float(np.abs(a).max()), 1e-300)
+        noise = float(np.abs(a - c).max())
+        delta = float(np.abs(a - b).max())
+        assert delta <= max(4.0 * noise, 1e-11 * scale), (
+            f"{name} moved Sigma by {delta:.3e} (bulk={bulk}), well past the "
+            f"backend's own run-to-run noise {noise:.3e} on a scale of "
+            f"{scale:.3e} -- that is the flag, not the GPU")
+
+
 @pytest.mark.parametrize("bulk", [True, False])
-def test_release_leg_blocks_is_bit_identical(bulk: bool) -> None:
+def test_release_leg_blocks_is_inert(bulk: bool) -> None:
     """`sse_release_leg_blocks` only changes when the leg dicts are freed."""
     ref = _run_coupled_q(bulk, release=False, share="off")
     got = _run_coupled_q(bulk, release=True, share="off")
-    for a, b in zip(ref, got):
-        np.testing.assert_array_equal(a, b)
+    _assert_flag_is_inert(bulk, ref, got, "sse_release_leg_blocks")
 
 
 @pytest.mark.parametrize("bulk", [True, False])
-def test_perm_cache_share_is_bit_identical(bulk: bool) -> None:
+def test_perm_cache_share_is_inert(bulk: bool) -> None:
     """`sse_perm_cache_share="auto"` must be inert on the numbers whether or
     not the vertex passes the invariance gate -- on a non-bulk vertex it has
     to fall back to the absolute key rather than share blocks that differ."""
     ref = _run_coupled_q(bulk, release=False, share="off")
     got = _run_coupled_q(bulk, release=False, share="auto")
-    for a, b in zip(ref, got):
-        np.testing.assert_array_equal(a, b)
+    _assert_flag_is_inert(bulk, ref, got, "sse_perm_cache_share")
 
 
 def test_qfold_translation_invariance_gate() -> None:
