@@ -20,6 +20,12 @@ A = ROOT / "phonon/studies/out/anderson_test"
 FIG = A / "campaign_report/fig"
 FIG.mkdir(parents=True, exist_ok=True)
 
+# One of the seven campaign figures is referenced by the report. It is
+# written into the document tree as well, so make_all.py sees it
+# regenerated instead of reporting it as a hand-copied orphan; the other
+# six stay in the campaign report only.
+DOC_FIG = {"w3_gband_mechanism": ROOT / "document/fig/gband"}
+
 RE_RES = re.compile(r"rel Sigma\^R residual ([0-9.e+-]+)")
 
 
@@ -33,10 +39,13 @@ def residuals(log: Path, segment: int = 0) -> np.ndarray:
 
 
 def save(fig, name):
-    fig.savefig(FIG / f"{name}.png", dpi=160)
-    fig.savefig(FIG / f"{name}.pdf")
+    targets = [FIG] + ([DOC_FIG[name]] if name in DOC_FIG else [])
+    for d in targets:
+        d.mkdir(parents=True, exist_ok=True)
+        fig.savefig(d / f"{name}.png", dpi=160)
+        fig.savefig(d / f"{name}.pdf")
     plt.close(fig)
-    print("saved", name, flush=True)
+    print(f"wrote {name} -> {', '.join(str(d) for d in targets)}", flush=True)
 
 
 # ---------------------------------------------------------------- W1

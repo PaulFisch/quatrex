@@ -11,13 +11,16 @@ import re
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-
 REPO = Path(__file__).resolve().parents[3]
+for _p in (str(REPO), str(REPO / "phonon")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+from phonon.studies import style  # noqa: E402
+
 CL = REPO / "cluster"
-FIG = REPO / "phonon/studies/out/newton_pc_bench"
+# Writes into the report directly, so make_all.py sees it regenerated;
+# it used to land in studies/out and be copied across by hand.
+FIG = REPO / "document/fig/newton"
 FIG.mkdir(parents=True, exist_ok=True)
 
 PAT = re.compile(
@@ -43,12 +46,18 @@ def parse(arm: str):
 
 
 def main():
-    arms = sys.argv[1:] or ["none", "recycle", "fresh"]
-    colors = {"none": "tab:gray", "recycle": "tab:blue",
-              "fresh": "tab:orange", "none-x": "black",
-              "recycle-x": "tab:green"}
-    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8),
-                             constrained_layout=True)
+    # The report figure is the EXTENDED pair: those are the runs whose
+    # numbers results 4.6 quotes (295 exact products against 642, bare
+    # median m = 30 at the cap). make_all.py runs generators with no
+    # arguments, so this default is what keeps the committed figure and
+    # the text in agreement; pass arms explicitly for the short arms.
+    arms = sys.argv[1:] or ["none-x", "recycle-x"]
+    # Validated slots, not matplotlib's tab: defaults. The bare arm is the
+    # reference the others are measured against, so it wears reference grey.
+    colors = {"none": style.C_REFERENCE, "recycle": style.C_BALLISTIC,
+              "fresh": style.C_ANHARMONIC, "none-x": "0.15",
+              "recycle-x": style.C_THIRD}
+    fig, axes = style.doc_figure(ncols=2, aspect=0.40)
     print(f"{'arm':>8} {'steps':>5} {'sum_m':>6} {'+setup':>6} "
           f"{'total_jvp':>9} {'final ||R||':>12} {'median m':>8}")
     for arm in arms:
@@ -78,17 +87,12 @@ def main():
         axes[1].semilogy(xs, rs, "o-", color=colors.get(arm), label=arm)
     axes[0].set_xlabel("Newton step")
     axes[0].set_ylabel("GMRES dimension m")
-    axes[0].set_title("inner-solve cost per step")
     axes[0].legend()
     axes[1].set_xlabel("cumulative exact JVPs")
     axes[1].set_ylabel(r"$\|R\|$")
-    axes[1].set_title("residual vs true cost")
     axes[1].legend()
-    fig.suptitle("Newton inner-GMRES deflation benchmark "
-                 "(CNT L4, from the stall snapshot)")
-    fig.savefig(FIG / "pc_bench.png", dpi=160)
-    fig.savefig(FIG / "pc_bench.pdf")
-    print("saved", FIG / "pc_bench.png")
+    # No suptitle or per-panel titles: the LaTeX caption carries them.
+    style.save(fig, "pc_bench", directory=FIG)
 
 
 if __name__ == "__main__":

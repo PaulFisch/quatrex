@@ -46,7 +46,19 @@ takes `--eta-factor 0` for whoever has them.
 
 **Blocked on:** `fc3_hiphive_srtio3_small_vasp` is not local.
 
-## 5. The long-chain band ladder, `b_G = 4, 5`
+## 5. DONE -- the mixer-campaign figure
+
+Recorded here as a correction. An earlier note in this file said the campaign
+panels "exist as archived PDFs with no surviving generator". That was wrong:
+`phonon/studies/_campaign_figures.py` generates them from
+`studies/out/anderson_test/mixer_campaign_{L2,d5a_v2}/<scheme>/run.log`, and
+that data is on disk. Results section 4.5 now carries
+`r4_mixer_campaign`, built by a generator under the make_all gate. It shows
+the inversion the section claims: on the nanotube plain linear reaches
+9.6e-04 while Anderson plateaus at 1.1e-01; on the nanowire Anderson is the
+worst of four at 7.9e-03 and RRE the best at 3.3e-04.
+
+## 6. The long-chain band ladder, `b_G = 4, 5`
 
 **Gains:** closes the factor-2.2 bracket of results §3.2. At 16 cells and
 beyond the boxcar is an upper bracket carrying non-causal gain and the taper a
@@ -55,7 +67,7 @@ transport result.
 
 **Blocked on:** nothing. Mechanical with the GPU machinery.
 
-## 6. Bulk silicon conductivity from this solver in the diffusive limit
+## 7. Bulk silicon conductivity from this solver in the diffusive limit
 
 **Gains:** the end-to-end test that has never been run, and the only thing that
 separates what the force constants cost from what the transport method costs.
@@ -65,7 +77,7 @@ and the Boltzmann result from the same force constants is ~110 W/mK.
 
 **Blocked on:** device size for a diffusive limit.
 
-## 7. The spectral sector at low temperature
+## 8. The spectral sector at low temperature
 
 **Gains:** decides whether the construction of `70_spectral_sector.tex` is
 useful or merely correct. At 300 K neither system has a population that is
@@ -75,7 +87,7 @@ from 0.75 to 1.52.
 
 **Blocked on:** choosing a bed. The widths must not grow.
 
-## 8. `QX_POLE_PSD=1` in production
+## 9. `QX_POLE_PSD=1` in production
 
 **Gains:** the positivity gate exists, is wired, is cheap, and has run in three
 0.33-node-hour debug jobs and nowhere else. Every production run should carry
@@ -83,3 +95,22 @@ it, since it is the diagnostic that turns a divergence into a statement about
 which leg lost positivity.
 
 **Blocked on:** nothing. One environment variable.
+
+## 10. Wide code lines in the package appendices
+
+**Gains:** typography. Building the document (198 pages, lualatex + biber,
+clean: 0 errors, 0 undefined references, 0 undefined citations) leaves 77
+overfull hboxes, 43 of them over 20pt and the worst at 240pt. They are almost
+entirely long dotted Python identifiers and file paths in `input_gen.tex`,
+`finite_analysis.tex` and `phonon_solver.tex` -- code documentation that has
+no break opportunity and runs into the margin. The main chapters are clean;
+their four long strings now carry explicit `\allowbreak` points.
+
+**Blocked on:** finding a remedy that does not break the build. Two were
+tried and reverted: making `.` `_` `/` active inside `\texttt` (conflicts
+with the other packages -- 50 errors) and `\usepackage[htt]{hyphenat}`
+(halves the count, to 38 boxes and 14 over 20pt, but raises 34 "Improper
+discretionary list" errors against the class's LuaLaTeX font setup). The
+options not yet tried are `seqsplit` applied selectively, or simply adding
+`\allowbreak` to the appendix identifiers the way the main chapters now do,
+which is mechanical but touches on the order of a hundred sites.
