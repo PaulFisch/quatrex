@@ -1,15 +1,36 @@
 """Consolidated Si thin-film cross-plane conductance vs thickness (300 K).
 
-Ballistic and anharmonic NEGF with the 2x2x2 (QE-FD) and 5x5x5 (VASP-hiPhive)
-bulk-Si force constants, against Guo, Bescond & Zhang, PRB 102, 195412 (2020).
-
 Data:
-  eta = 0 runs, live: phonon/scripts/data/film_kappa.csv, written by
-    _extract_film_kappa.py from cluster/sifilm{3,5,8}{b,s}.
-  older finite-eta sweeps: literals from phonon/docs/lab_notebook_archive.md
-    (notebook F29 for the 5x5x5 VASP FC3 sweep, F23 for the 2x2x2 QE-FD one);
-    their raw JSONs under scripts/out/si_film/ are gone.
-  Guo et al. 2020: literals from the paper (1 uc = 5.4018 A).
+  The raw sweep JSONs (scripts/out/si_film/*.json) are gone; the authoritative
+  surviving record is phonon/docs/lab_notebook_archive.md, from which every
+  number below is hard-coded:
+
+  5x5x5 VASP FC3 sweep  (notebook F29, "si_film_kappa_bigfc3"; nk=8,
+  121 freq, eta_factor 0.1, native prefactor; heat-flow cons. 5-8e-4):
+      3 L (1.16 nm)  G_ball 907  G_anh 470
+      5 L (1.93 nm)  G_ball 849  G_anh 378
+      8 L (3.09 nm)  G_ball 775  G_anh 296        [MW m^-2 K^-1]
+
+  2x2x2 QE-FD FC3  (notebook F23; nk=8, nfreq=121, eta_factor 0.1):
+      ballistic: 1034 at 4 layers ~ 1.55 nm (~3 uc); 952 at 5 uc (2.70 nm);
+                 928 at 8 layers (3.09 nm), the nk=8 entry of the 8-layer
+                 mesh-convergence series nk=4/8/12/16 -> 970/928/921/920
+                 (q-converged ~920).
+      anharmonic (native prefactor): 570 at ~1.55 nm ONLY -- the small-eta
+                 SCBA with this short-cutoff FC destabilises away from that
+                 single thickness, so no series exists (do not invent one).
+                 The retracted /4-convention values (831/704) are NOT plotted.
+
+  eta=0 coupled-q re-runs (2026-08-03, the finite-eta supersession):
+      read live from phonon/scripts/data/film_kappa.csv (extractor
+      _extract_film_kappa.py; runs cluster/sifilm{3,5,8}{b,s} --
+      nk=9 shifted mesh, 121 freq, eta=0, converged fixed points
+      70/52 iterations at L3/L8, 5x5x5 VASP constants, nk9r rebuilt
+      post-min-image build). Slab here = the FCC-primitive transport
+      cell (V/A_perp = 3.16 A), so thicknesses are 0.95/1.58/2.53 nm
+      -- thinner per layer count than the old finite-eta series.
+      The finite-eta curves above stay plotted, greyed, as the
+      retracted record.
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/si_film_vs_guo.py
 Figure -> document/fig/transport_sweeps/si_film_vs_guo.{pdf,png}

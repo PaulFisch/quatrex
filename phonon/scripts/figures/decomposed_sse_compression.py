@@ -1,7 +1,10 @@
 """FC3 vertex compression by the CP/INDSCAL fit (fig:res_decomp_compression).
 
 Data:
-  (cluster/sifilm-L10-geom/run.log), which reports the INDSCAL fit residual
+  eps_R and the file sizes are literals from the geometry build log
+        (cluster/sifilm-L10-geom/run.log), which reports the INDSCAL fit residual
+        per rank; the fits are cached on the BULK FC3 hash, so L3 and L10 get
+        byte-identical factor files.
 
 Run:  python phonon/scripts/figures/decomposed_sse_compression.py
 """

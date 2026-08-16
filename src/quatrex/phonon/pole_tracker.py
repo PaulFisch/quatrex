@@ -57,22 +57,17 @@ def cluster_poles(
 ) -> list[list[int]]:
     r"""Group poles that overlap, doc Eq. (55).
 
-    Single-linkage on :math:`|z_\alpha - z_\beta| \le c_{\rm cl}(\gamma_\alpha+\gamma_\beta)`.
-    Overlapping poles must be carried together: their individual eigenvectors are
-    not a stable numerical object even where their span is.
+        Parameters
+        ----------
+        z : NDArray
+            ``(Np,)`` pole locations (lower half plane).
+        factor : float, optional
+            ``c_cl``. Default 3.
 
-    Parameters
-    ----------
-    z : NDArray
-        ``(Np,)`` pole locations (lower half plane).
-    factor : float, optional
-        ``c_cl``. Default 3.
-
-    Returns
-    -------
-    list[list[int]]
-        Index groups, each sorted, ordered by their lowest member.
-
+        Returns
+        -------
+        list[list[int]]
+            Index groups, each sorted, ordered by their lowest member.
     """
     zz = np.asarray(_host(z)).reshape(-1)
     n = zz.size
@@ -114,20 +109,15 @@ def subspace_basis(vectors: NDArray) -> NDArray:
 def principal_angles(q1: NDArray, q2: NDArray) -> NDArray:
     r"""Principal angles between two subspaces, doc Eqs. (57)-(58).
 
-    The singular values of :math:`Q_1^\dagger Q_2` are the cosines of the
-    principal angles. A small largest angle means the same cluster has been
-    tracked even if the individual modes exchanged labels.
+        Parameters
+        ----------
+        q1, q2 : NDArray
+            ``(n_dof, k)`` orthonormal bases.
 
-    Parameters
-    ----------
-    q1, q2 : NDArray
-        ``(n_dof, k)`` orthonormal bases.
-
-    Returns
-    -------
-    NDArray
-        ``(k,)`` angles in radians, ascending.
-
+        Returns
+        -------
+        NDArray
+            ``(k,)`` angles in radians, ascending.
     """
     s = xp.linalg.svd(xp.conj(q1).T @ q2, compute_uv=False)
     return xp.arccos(xp.clip(xp.real(s), -1.0, 1.0))
@@ -145,29 +135,22 @@ def match_cost(
 ) -> NDArray:
     r"""Assignment cost between isolated candidates, doc Eq. (61).
 
-    .. math::
-        C_{\alpha\beta} = w_z \frac{|z_\alpha - z_\beta|}{s_z}
-                        + w_u\left(1 - |\hat r_\alpha^\dagger \hat r_\beta|\right)
+        Parameters
+        ----------
+        z_old, z_new : NDArray
+            Pole locations of the two iterations.
+        r_old, r_new : NDArray
+            ``(n_dof, N)`` right vectors, matching columns.
+        w_z, w_u : float, optional
+            Weights of the displacement and overlap terms.
+        s_z : float, optional
+            Displacement scale. Defaults to the median half-width, so the cost is
+            measured in linewidths rather than in THz.
 
-    Only for well-separated poles; clusters are matched by subspace instead.
-
-    Parameters
-    ----------
-    z_old, z_new : NDArray
-        Pole locations of the two iterations.
-    r_old, r_new : NDArray
-        ``(n_dof, N)`` right vectors, matching columns.
-    w_z, w_u : float, optional
-        Weights of the displacement and overlap terms.
-    s_z : float, optional
-        Displacement scale. Defaults to the median half-width, so the cost is
-        measured in linewidths rather than in THz.
-
-    Returns
-    -------
-    NDArray
-        ``(N_old, N_new)`` cost matrix.
-
+        Returns
+        -------
+        NDArray
+            ``(N_old, N_new)`` cost matrix.
     """
     zo = xp.asarray(z_old).reshape(-1, 1)
     zn = xp.asarray(z_new).reshape(1, -1)
@@ -222,19 +205,18 @@ class TrackedCluster:
 class PoleTracker:
     """State machine over pole clusters (doc Sec. 8).
 
-    Parameters
-    ----------
-    cluster_factor : float
-        ``c_cl`` of Eq. (55).
-    angle_tol : float
-        Largest principal angle still accepted as the same cluster.
-    rescan_iterations : int
-        Force a contour audit every N updates even when tracking looks healthy.
-    epoch_iterations : int
-        Hold membership fixed for this many updates. Sector membership must not
-        change every iteration: an approximate implementation is not invariant
-        under repartitioning, so a mode that jumps changes the fixed-point map.
-
+        Parameters
+        ----------
+        cluster_factor : float
+            ``c_cl`` of Eq. (55).
+        angle_tol : float
+            Largest principal angle still accepted as the same cluster.
+        rescan_iterations : int
+            Force a contour audit every N updates even when tracking looks healthy.
+        epoch_iterations : int
+            Hold membership fixed for this many updates. Sector membership must not
+            change every iteration: an approximate implementation is not invariant
+            under repartitioning, so a mode that jumps changes the fixed-point map.
     """
 
     cluster_factor: float = 3.0

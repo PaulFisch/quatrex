@@ -105,37 +105,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class LocalLeg:
-    r"""One cell's leg: a polynomial background plus shared analytic poles.
-
-    .. math::
-        G_k(s) = \sum_{j} A_{kj}\,(s - c_k)^j
-               + \sum_p \frac{R_p}{s - \zeta_p},
-
-    the review's Eq. (9) with the constant promoted to a polynomial. The pole
-    set is the SAME in every cell -- a promoted pole is known analytically on
-    the whole axis, not only where it sits -- and only the background
-    coefficients are per cell.
-
-    That is what makes the background smooth enough to interpolate. A cell next
-    to an unresolved pole has a stored sample tens of times its neighbours', so
-    a polynomial fitted through the raw samples is worse than useless, and
-    worse at higher degree: measured on the bed, a degree-4 stencil was less
-    accurate than degree 2 because the wider stencil reached further into the
-    pole's tail. Deflating the poles first removes exactly that structure.
-
-    This subtraction is not the global pole split of
-    :mod:`quatrex.phonon.pole_congruence`. It builds a local interpolant and
-    nothing else: no whole-axis residue integral, no tail constraint, no
-    Kramers-Kronig bypass. Every number that reaches the output is an integral
-    of this model over one cell.
-
-    ``residues`` is stored dense, ``(P,) + G.shape``, which is the reference
-    form the bed and the tests check against dense quadrature. A device path
-    carries the rank-one ``p_row``/``q_col`` factors instead and contracts them
-    through the projected vertex; nothing here inspects ``residues`` beyond
-    handing it to the bilinear form, so that substitution is confined to
-    :func:`pair_terms`' term list.
-    """
+    r"""One cell's leg: a polynomial background plus shared analytic poles."""
 
     bg: NDArray
     centre: float
@@ -206,23 +176,8 @@ def background_from_samples(
 def resolvent_moments(
     zeta: NDArray, a: float, b: float, centre: float, order: int
 ) -> NDArray:
-    r"""``R_j = int_a^b (s - centre)^j / (s - zeta) ds`` for ``j = 0 .. order``.
-
-    .. math::
-        R_0 = \mathrm{Log}(b-\zeta) - \mathrm{Log}(a-\zeta), \qquad
-        R_j = \alpha R_{j-1} + \frac{T_2^j - T_1^j}{j},
-
-    with :math:`\alpha = \zeta - c`, :math:`T_1 = a - c`, :math:`T_2 = b - c`,
-    from :math:`\tau^j = (\tau^j - \alpha^j) + \alpha^j` under
-    :math:`\tau = s - c`.
-
-    The poles sit strictly off the real axis, so ``b - zeta`` and ``a - zeta``
-    lie in the same half plane and the difference of principal Logs has no
-    branch ambiguity -- the same argument as
-    :func:`~quatrex.phonon.pole_congruence.cell_weights`.
-
-    Returns ``(order + 1,) + zeta.shape``.
-    """
+    r"""``R_j = int_a^b (s - centre)^j / (s - zeta) ds`` for ``j = 0 ..
+    order``."""
     z = xp.asarray(zeta, dtype=xp.complex128)
     if bool(xp.any(xp.imag(z) == 0.0)):
         raise ValueError(
@@ -262,29 +217,7 @@ def cross_polynomial_moments(
 def pair_terms(
     leg_k: LocalLeg, leg_l: LocalLeg, a: float, b: float, omega: float
 ) -> tuple[NDArray, NDArray, NDArray]:
-    r"""Exact :math:`\int_{[a,b]} \frac{du}{2\pi} B[G_k(u), G_l(\omega-u)]`.
-
-    Returned as a term list ``(c, x, y)`` with
-
-    .. math::
-        \int_{[a,b]}\frac{du}{2\pi}\,B[G_k(u), G_l(\omega-u)]
-            = \sum_t c_t\, B[x_t, y_t],
-
-    so the caller supplies the bilinear form. Keeping the contraction outside
-    is what lets a device path group these into one einsum against the
-    projected vertex while the synthetic bed sums them directly; both then
-    exercise the same frequency-side algebra.
-
-    ``leg_k`` lives in ``u`` over the cell ``[a, b]``; ``leg_l`` is a function
-    of ``v = omega - u``. Four blocks, all closed form: background against
-    background by :func:`cross_polynomial_moments`, each background against the
-    other's poles by :func:`resolvent_moments`, and poles against poles by
-    :func:`~quatrex.phonon.pole_bubble.pair_convolution`'s ``window`` branch.
-
-    All four half-plane pairings are kept in that last block. Their
-    cancellation is a whole-axis contour statement; on one cell the mixed
-    pairings are a genuine part of the integral.
-    """
+    r"""Exact :math:`\int_{[a,b]} \frac{du}{2\pi} B[G_k(u), G_l(\omega-u)]`."""
     two_pi = 2.0 * xp.pi
     omega = float(omega)
     ok, ol = leg_k.order, leg_l.order
@@ -423,84 +356,66 @@ def correct_spectrum(
 ) -> tuple[NDArray, dict]:
     r"""The total correction to add to the ring's output.
 
-    The ring's output at :math:`\Omega_m` is a sum over ONE index,
-    :math:`\sum_k B[G(\omega_k), G(\omega_{m-k})]`, so the terms needing
-    replacement are exactly those where ``k`` or ``m - k`` is a pole cell. Each
-    is corrected once. When only ``m - k`` holds the pole the roles are
-    exchanged through
+        Parameters
+        ----------
+        freqs : NDArray
+            ``(n_omega,)`` uniform grid; the ring's own axis.
+        g : NDArray
+            ``(n_omega,) + G.shape`` stored point samples, exactly as convolved.
+        pole_cells : iterable
+            Grid indices of the promoted cells.
+        zeta, residues : NDArray
+            The promoted pole set, shared by every cell.
+        radius : int
+            Cells on each side of a promoted cell to correct as well. The
+            rectangle rule fails across an unresolved pole's TAIL, not only in the
+            cell that holds it: a neighbouring cell sits one spacing from the pole,
+            where the leg still varies by order one across the cell. Measured on
+            the bed at ``gamma/h = 0.02``, the residual error against the exact
+            cell integrals was
 
-    .. math::
-        \int_{I_k}\!du\; B[G_k(u), G_l(\Omega-u)]
-        = \int_{I_l}\!dv\; B[G_k(\Omega-v), G_l(v)],
+            ======= ========= =======
+            radius  error     gain
+            ======= ========= =======
+            0       4.07e-02  30
+            1       1.48e-03  819
+            2       7.45e-04  1624
+            3       7.10e-04  1705
+            ======= ========= =======
 
-    so the integration variable always runs over a pole cell and the argument
-    order is restored by :func:`_swap`.
+            so 1 buys a factor 27 over correcting the pole cell alone and 2 has
+            converged. The cost is linear in it.
+        rho_min : float
+            Output-resolution floor for pole-POLE cell pairs, see
+            :func:`output_resolution`. DEFAULT 0, i.e. off, and the measurement is
+            why.
 
-    No term is skipped. Near a grid edge the background stencil narrows toward
-    degree 0, which is always constructible, and ``n_degraded`` counts how
-    often that happened.
+            Refusing an unresolved pair leaves the ring's rectangle value in place,
+            and that value is worst at exactly the outputs the gate protects: on
+            the bed the refused set is the combination frequencies
+            ``Omega = omega_p + omega_q`` and their immediate neighbours, where
+            declining to correct costs a factor 7.34 while correcting costs
+            2.7e-06. Away from them the gate changes nothing (1.99e-05 against
+            2.72e-06). So the gate is strictly worse pointwise and buys nothing
+            measurable.
 
-    Parameters
-    ----------
-    freqs : NDArray
-        ``(n_omega,)`` uniform grid; the ring's own axis.
-    g : NDArray
-        ``(n_omega,) + G.shape`` stored point samples, exactly as convolved.
-    pole_cells : iterable
-        Grid indices of the promoted cells.
-    zeta, residues : NDArray
-        The promoted pole set, shared by every cell.
-    radius : int
-        Cells on each side of a promoted cell to correct as well. The
-        rectangle rule fails across an unresolved pole's TAIL, not only in the
-        cell that holds it: a neighbouring cell sits one spacing from the pole,
-        where the leg still varies by order one across the cell. Measured on
-        the bed at ``gamma/h = 0.02``, the residual error against the exact
-        cell integrals was
+            What ``rho_out`` measures is real, but it is not visible in a pointwise
+            comparison: the corrected value is accurate AT each grid point even at
+            ``rho_out = 0.08``; what is missing is the peak BETWEEN samples, which
+            costs weight when the stored ``Sigma`` is later integrated or handed to
+            Dyson. Refusing the correction does not restore that weight either.
+            Treat ``report["rho_out"]`` as a diagnostic on whether the output grid
+            can carry the answer, and reach for a rational output representation
+            (review Sec. 24) when it says no -- not for this veto, which is kept
+            only so the ablation can be rerun.
 
-        ======= ========= =======
-        radius  error     gain
-        ======= ========= =======
-        0       4.07e-02  30
-        1       1.48e-03  819
-        2       7.45e-04  1624
-        3       7.10e-04  1705
-        ======= ========= =======
-
-        so 1 buys a factor 27 over correcting the pole cell alone and 2 has
-        converged. The cost is linear in it.
-    rho_min : float
-        Output-resolution floor for pole-POLE cell pairs, see
-        :func:`output_resolution`. DEFAULT 0, i.e. off, and the measurement is
-        why.
-
-        Refusing an unresolved pair leaves the ring's rectangle value in place,
-        and that value is worst at exactly the outputs the gate protects: on
-        the bed the refused set is the combination frequencies
-        ``Omega = omega_p + omega_q`` and their immediate neighbours, where
-        declining to correct costs a factor 7.34 while correcting costs
-        2.7e-06. Away from them the gate changes nothing (1.99e-05 against
-        2.72e-06). So the gate is strictly worse pointwise and buys nothing
-        measurable.
-
-        What ``rho_out`` measures is real, but it is not visible in a pointwise
-        comparison: the corrected value is accurate AT each grid point even at
-        ``rho_out = 0.08``; what is missing is the peak BETWEEN samples, which
-        costs weight when the stored ``Sigma`` is later integrated or handed to
-        Dyson. Refusing the correction does not restore that weight either.
-        Treat ``report["rho_out"]`` as a diagnostic on whether the output grid
-        can carry the answer, and reach for a rational output representation
-        (review Sec. 24) when it says no -- not for this veto, which is kept
-        only so the ablation can be rerun.
-
-    Returns
-    -------
-    delta : NDArray
-        Same shape as ``g``; add it to the ring's self-energy.
-    report : dict
-        ``n_corrected``, ``n_refused_rho``, ``n_degraded``, the full
-        ``rho_out`` pole-pair matrix, and its minimum ``rho_worst``.
-
+        Returns
+        -------
+        delta : NDArray
+            Same shape as ``g``; add it to the ring's self-energy.
+        report : dict
+            ``n_corrected``, ``n_refused_rho``, ``n_degraded``, the full
+            ``rho_out`` pole-pair matrix, and its minimum ``rho_worst``.
     """
     freqs = xp.asarray(freqs, dtype=float)
     n = int(freqs.shape[0])
@@ -565,46 +480,7 @@ def correct_spectrum(
 def output_resolution(
     zeta_p: NDArray, zeta_q: NDArray, h: float, omega_0: float = 0.0
 ) -> tuple[NDArray, NDArray]:
-    r"""Whether a corrected pair's OUTPUT structure fits the output grid.
-
-    A pair puts a feature at :math:`\Omega_{pq} = \Re(\zeta_p + \zeta_q)` of
-    width :math:`\gamma_p + \gamma_q`, so
-
-    .. math::
-        \rho^{\text{out}}_{pq} = \frac{2(\gamma_p + \gamma_q)}{h}, \qquad
-        x^{\text{out}}_{pq} = \frac{\Re(\zeta_p+\zeta_q)
-                                    - \omega_{\text{nearest}}}{h},
-
-    the review's Eqs. (33) and (34). Integrating the INPUT exactly does not
-    make the output representable: at ``rho_out`` well below one the stored
-    value depends on where the feature falls between samples, which is the
-    registration lottery the correction exists to remove, displaced from the
-    input axis to the output axis. Worst-case ratio of the peak to a grid
-    sample, measured:
-
-    ======= ======= ========= =========================
-    gamma_p gamma_q rho_out   peak / worst grid sample
-    ======= ======= ========= =========================
-    0.020   0.300   0.640     1.9
-    0.020   0.020   0.080     12.5
-    0.005   0.300   0.610     1.9
-    0.005   0.005   0.020     50.0
-    ======= ======= ========= =========================
-
-    Pole against background stays near-resolved because the background carries
-    the width; pole against pole does not, and it is second order in the
-    residue.
-
-    Pairings across the two half planes return ``inf``, not zero. Such a pair
-    has :math:`\Im(\zeta_p + \zeta_q) = 0` when the poles are conjugates, but
-    it generates no output pole at all -- that is the pairing whose whole-axis
-    convolution vanishes by contour closure -- so a width of zero there is the
-    absence of a feature, not an infinitely sharp one. Reading it as the latter
-    made the gate refuse every pair on a bosonically closed set, where every
-    pole is present with its conjugate.
-
-    Returns ``(rho_out, x_out)``, each broadcast over the pole pair.
-    """
+    r"""Whether a corrected pair's OUTPUT structure fits the output grid."""
     zp = xp.asarray(zeta_p, dtype=xp.complex128)
     zq = xp.asarray(zeta_q, dtype=xp.complex128)
     total = zp + zq

@@ -2,6 +2,9 @@
 
 Data:
   Inputs: two run.npz (bare, dressed) with current_spectrum,
+  bubble_balance_spectrum, slab_absorption, frequency_cell_widths,
+  iter_heat, iter_bubble_balance (bubble_balance_check must have been on).
+
   python phonon/scripts/figures/conservation_diagnosis.py         --bare  out/cnt33_L4_conservation/bare/run.npz         --dressed out/cnt33_L4_conservation/dressed/run.npz         --out   out/cnt33_L4_conservation/conservation.png
 """
 from __future__ import annotations

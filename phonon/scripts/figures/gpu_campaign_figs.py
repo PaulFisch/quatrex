@@ -2,8 +2,16 @@
 
 Data:
   All numbers are literals from phonon/docs/gpu_campaign_2026-07.md
+  (sections 1-4, 9): the microbenches (ring-shape ceilings, sustained
+  GEMM) ran standalone on a daint GH200 and are not derivable from any
   committed run.npz; the in-engine rates come from the campaign's slurm
   logs (cluster/l4bench, cluster/l*, cluster/mos2f3, cluster/filmq).
+  Engine parity CPU/GPU at 8e-13 (commit 570dfbda) backs their
+  correctness. The film pair (legacy 2.46 TF/s at per-launch batch
+  w=241 vs batched 6.84 TF/s) is the section's central measurement:
+  both sit ON the b=18 microbench curve -- the legacy loop was at its
+  per-launch ceiling, the batched kernel at the deep-batch quantization
+  ceiling.
 
 Run:  python phonon/scripts/figures/gpu_campaign_figs.py
 """

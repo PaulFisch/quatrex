@@ -35,18 +35,17 @@ __all__ = [
 class PoleCluster:
     """A group of poles carried together with their biorthogonal vectors.
 
-    Attributes
-    ----------
-    z : NDArray
-        ``(Np,)`` pole locations in the lower half plane.
-    u : NDArray
-        ``(n_dof, Np)`` right vectors ``r_alpha``.
-    v : NDArray
-        ``(n_dof, Np)`` left vectors ``l_alpha``, normalised so that
-        ``l^H M'(z) r == 1`` and hence ``R_alpha = r_alpha l_alpha^H``.
-    label : str
-        Free-form identifier, used for tracking across SCBA iterations.
-
+        Attributes
+        ----------
+        z : NDArray
+            ``(Np,)`` pole locations in the lower half plane.
+        u : NDArray
+            ``(n_dof, Np)`` right vectors ``r_alpha``.
+        v : NDArray
+            ``(n_dof, Np)`` left vectors ``l_alpha``, normalised so that
+            ``l^H M'(z) r == 1`` and hence ``R_alpha = r_alpha l_alpha^H``.
+        label : str
+            Free-form identifier, used for tracking across SCBA iterations.
     """
 
     z: NDArray
@@ -157,26 +156,19 @@ def pole_keldysh(
 ) -> NDArray:
     r"""Pole-pole Keldysh Green's function, doc Eqs. (83)/(85).
 
-    .. math::
-        G_{PP}^{\lessgtr}(\omega) = U D^R S^{\lessgtr} D^A U^\dagger
+        Parameters
+        ----------
+        omega : NDArray
+            ``(n_omega,)`` real frequencies.
+        cluster : PoleCluster
+        source : NDArray
+            ``(n_omega, Np, Np)`` projected source, or ``(Np, Np)`` to freeze it
+            across the window (the smooth-source approximation, doc Eq. 91).
 
-    Evaluated as a congruence ``(U D^R) S (U D^R)^H`` so the semidefiniteness of
-    the source is inherited exactly rather than approximately.
-
-    Parameters
-    ----------
-    omega : NDArray
-        ``(n_omega,)`` real frequencies.
-    cluster : PoleCluster
-    source : NDArray
-        ``(n_omega, Np, Np)`` projected source, or ``(Np, Np)`` to freeze it
-        across the window (the smooth-source approximation, doc Eq. 91).
-
-    Returns
-    -------
-    NDArray
-        ``(n_omega, n_dof, n_dof)``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega, n_dof, n_dof)``.
     """
     dr, _ = modal_denominator(omega, cluster.z)
     s = xp.asarray(source, dtype=xp.complex128)
@@ -197,18 +189,10 @@ def occupation_matrix(
 ) -> NDArray:
     r"""Pole-cluster covariance matrix, doc Eq. (88).
 
-    .. math::
-        N_{\mathcal C} = \frac{i}{2\pi}\int_{\mathcal W} d\omega\, D^R S^< D^A
-
-    The window must be finite: under the frozen-source model the integrand does
-    not decay, so the caller restricts ``omega`` to the cluster window (a few
-    tens of half-widths).
-
-    Returns
-    -------
-    NDArray
-        ``(Np, Np)``.
-
+        Returns
+        -------
+        NDArray
+            ``(Np, Np)``.
     """
     dr, da = modal_denominator(omega, cluster.z)
     s = xp.asarray(source, dtype=xp.complex128)
@@ -241,37 +225,28 @@ def coherence_metric(n_matrix: NDArray) -> float:
 def source_poly_fit(
     omega: NDArray, source: NDArray, centre: float, scale: float, order: int = 2
 ) -> tuple[NDArray, float]:
-    r"""Least-squares polynomial model of the projected source (doc Sec. 15, Option B).
+    r"""Least-squares polynomial model of the projected source (doc Sec. 15,
+    Option B).
 
-    Fits :math:`S(\omega) \simeq \sum_{m=0}^{p} S_m ((\omega-\Omega_c)/h)^m` over
-    the cluster window. All pole-sector integrals of such a model are moments of
-    known rational functions and are available in closed form, so the narrow
-    denominator never touches a grid.
+        Parameters
+        ----------
+        omega : NDArray
+            ``(n_omega,)`` sample frequencies in the window.
+        source : NDArray
+            ``(n_omega, Np, Np)`` sampled source.
+        centre, scale : float
+            Expansion point and scaling, normally the cluster centre and the grid
+            spacing.
+        order : int, optional
+            Polynomial degree. Default 2.
 
-    A rational (AAA/vector-fitting) model would be more compact but is rejected
-    here: its classic failure mode is a spurious upper-half-plane pole, which
-    would break the causality of the reconstructed retarded self-energy.
-
-    Parameters
-    ----------
-    omega : NDArray
-        ``(n_omega,)`` sample frequencies in the window.
-    source : NDArray
-        ``(n_omega, Np, Np)`` sampled source.
-    centre, scale : float
-        Expansion point and scaling, normally the cluster centre and the grid
-        spacing.
-    order : int, optional
-        Polynomial degree. Default 2.
-
-    Returns
-    -------
-    coeff : NDArray
-        ``(order + 1, Np, Np)`` coefficients.
-    residual : float
-        Relative Frobenius residual of the fit. The caller demotes the cluster
-        when this exceeds its tolerance rather than approximating silently.
-
+        Returns
+        -------
+        coeff : NDArray
+            ``(order + 1, Np, Np)`` coefficients.
+        residual : float
+            Relative Frobenius residual of the fit. The caller demotes the cluster
+            when this exceeds its tolerance rather than approximating silently.
     """
     t = (xp.asarray(omega, dtype=float) - centre) / scale
     vander = xp.stack([t**m for m in range(order + 1)], axis=1).astype(xp.complex128)

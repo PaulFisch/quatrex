@@ -1,10 +1,14 @@
-"""Cost of the decomposed three-phonon SSE (fig:res_decomp_cost,
-fig:res_decomp_scaling).
+"""Cost of the decomposed three-phonon SSE (fig:res_decomp_cost, fig:res_decomp_scaling).
 
 Data:
+  Kernel timings are literals: they come from the standalone micro-benchmark
+  `phonon/studies/_bench_factored_sse.py --verify` run on tortin at
   OMP_NUM_THREADS=1 over the full q mesh (logs: cluster/bench-decomp/run.log,
   cluster/bench-legacy/run.log, and the Gamma/b=63 shape in scratch gamma63.log).
   They are not derivable from any committed run.npz -- the benchmark contracts the
+  ring in isolation, which no production run does. Parity vs the dense ring fed the
+  identical vertex was ~5e-15 at every point.
+
   The SCBA points come from phonon/scripts/data/decomposed_sse.csv.
 
 Run:  python phonon/scripts/figures/decomposed_sse_cost.py

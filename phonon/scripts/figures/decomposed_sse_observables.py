@@ -1,7 +1,7 @@
 """Every observable, dense vertex vs decomposed (fig:res_decomp_observables).
 
 Data:
-  Data: phonon/scripts/data/decomposed_sse_spectra.npz.
+  phonon/scripts/data/decomposed_sse_spectra.npz.
 
 Run:  python phonon/scripts/figures/decomposed_sse_observables.py
 """

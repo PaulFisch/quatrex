@@ -1,10 +1,21 @@
 """Distil the vertex-factorisation audit into a committed dataset.
 
 Data:
-  cluster/mos2decomp3/run.log   MoS2 film INDSCAL fit ladder with the
-  cluster/mos2decomp2/run.log   same ladder under the OLD
-  cluster/sifilmdecomp/run.log  Si film ladder (homogeneous weights)
-  cluster/sifilm_nk9r/run_{dense,r8,r32,r128}.npz
+  Sources (uncommitted run artifacts, pulled from tortin):
+    cluster/mos2decomp3/run.log   MoS2 film INDSCAL fit ladder with the
+                                  norm-weighted aggregate gate and the
+                                  per-offset-class diagnostics (post
+                                  mass-weighted-ASR, post min-image)
+    cluster/mos2decomp2/run.log   same ladder under the OLD
+                                  max-single-block gate (the r64
+                                  "phase-convention mismatch" false
+                                  alarm) -- only the rel_err series is
+                                  taken from here for low ranks
+    cluster/sifilmdecomp/run.log  Si film ladder (homogeneous weights)
+    cluster/sifilm_nk9r/run_{dense,r8,r32,r128}.npz
+                                  post-min-image conservation ladder
+                                  (3-iteration bubble-balance audit)
+
   Writes phonon/scripts/data/factor_audit.npz.
 
 Run:  python phonon/scripts/figures/_extract_factor_audit.py

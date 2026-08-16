@@ -108,27 +108,26 @@ def mixed_convolution(
 ) -> NDArray:
     r"""``C(omega) = int dw'/2pi [coeff/(w'-pole)] R(omega-w')``.
 
-    Parameters
-    ----------
-    omega : NDArray
-        Output frequencies.
-    pole : complex
-        The narrow pole, in the lower half plane.
-    coeff : complex
-        Its coefficient.
-    r_vals : NDArray
-        ``R`` sampled on ``freqs``.
-    freqs : NDArray
-        Uniform grid on which ``R`` is known.
-    method : {"grid", "cells", "moments"}
-    order, window : int
-        Model parameters for the local routes.
+        Parameters
+        ----------
+        omega : NDArray
+            Output frequencies.
+        pole : complex
+            The narrow pole, in the lower half plane.
+        coeff : complex
+            Its coefficient.
+        r_vals : NDArray
+            ``R`` sampled on ``freqs``.
+        freqs : NDArray
+            Uniform grid on which ``R`` is known.
+        method : {"grid", "cells", "moments"}
+        order, window : int
+            Model parameters for the local routes.
 
-    Returns
-    -------
-    NDArray
-        ``C`` at each ``omega``.
-
+        Returns
+        -------
+        NDArray
+            ``C`` at each ``omega``.
     """
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS} (got {method!r})")
@@ -187,60 +186,28 @@ def bosonic_extend(
 ) -> tuple[NDArray, NDArray]:
     r"""Extend a Keldysh component onto the full frequency axis.
 
-    The mixed convolution
-    :math:`\int d\omega' F(\omega') R(\omega-\omega')` runs over the WHOLE
-    axis, but the solver only holds :math:`R` for :math:`\omega \ge 0`. The
-    negative half is fixed by the bosonic steady-state relation
+        Parameters
+        ----------
+        r_same : NDArray
+            ``(n_freq, nnz)`` the component being extended, on ``w >= 0``.
+        r_other : NDArray
+            Its Keldysh partner on the same grid: pass ``G^>`` when extending
+            ``G^<``, and ``G^<`` when extending ``G^>``.
+        freqs : NDArray
+            ``(n_freq,)`` non-negative, uniform, zero-anchored.
+        transpose_index : NDArray, optional
+            Permutation taking pattern entry ``(i, j)`` to ``(j, i)``, from
+            :func:`~quatrex.phonon.pole_audit.transpose_index`. Required whenever
+            the pattern is not symmetric under the index swap; omitting it assumes
+            the transpose is the identity, which holds only for a diagonal bed.
+        transverse_shape : tuple, optional
+            Transverse momentum grid; the mirror carries ``q -> -q``.
 
-    .. math:: G^<_{ij}(\mathbf q, -\omega) = G^>_{ji}(-\mathbf q, \omega)
-
-    and its partner with :math:`<` and :math:`>` exchanged. So the negative
-    axis of a LESSER component is built from the GREATER one, transposed and
-    with :math:`\mathbf q \to -\mathbf q` -- **not** by conjugating the same
-    component.
-
-    An earlier version used ``R(-w) = R(w)^*``. That is the correct relation
-    for :math:`\Delta = \Sigma^> - \Sigma^<` (which is why
-    :func:`~quatrex.phonon.pole_kernel.bosonic_partner` and the production
-    Hilbert transform use it) but it is **wrong for a lesser or greater
-    component**. Measured on an equilibrium bed
-    (:math:`G^< = i n_B A`, :math:`G^> = i(n_B{+}1)A`, :math:`A` odd):
-
-    ========================================  ==========
-    identity                                  residual
-    ========================================  ==========
-    ``G^<(-w) == G^>(w)``                     8.9e-16
-    ``G^<(-w) == conj(G^<(w))``               7.65 (244 % relative)
-    ``D(-w) == conj(D(w))``, ``D = S^>-S^<``  5.6e-17
-    ========================================  ==========
-
-    Omitting the extension entirely is a 28 % error; using the conjugate
-    relation is worse than that, because it is wrong in a way that looks
-    plausible at equilibrium and at :math:`\Gamma`.
-
-    Parameters
-    ----------
-    r_same : NDArray
-        ``(n_freq, nnz)`` the component being extended, on ``w >= 0``.
-    r_other : NDArray
-        Its Keldysh partner on the same grid: pass ``G^>`` when extending
-        ``G^<``, and ``G^<`` when extending ``G^>``.
-    freqs : NDArray
-        ``(n_freq,)`` non-negative, uniform, zero-anchored.
-    transpose_index : NDArray, optional
-        Permutation taking pattern entry ``(i, j)`` to ``(j, i)``, from
-        :func:`~quatrex.phonon.pole_audit.transpose_index`. Required whenever
-        the pattern is not symmetric under the index swap; omitting it assumes
-        the transpose is the identity, which holds only for a diagonal bed.
-    transverse_shape : tuple, optional
-        Transverse momentum grid; the mirror carries ``q -> -q``.
-
-    Returns
-    -------
-    tuple[NDArray, NDArray]
-        ``(r_full, freqs_full)`` on ``[-w_max, w_max]``, ascending, with the
-        zero bin present exactly once.
-
+        Returns
+        -------
+        tuple[NDArray, NDArray]
+            ``(r_full, freqs_full)`` on ``[-w_max, w_max]``, ascending, with the
+            zero bin present exactly once.
     """
     w = xp.asarray(freqs, dtype=float)
     same = xp.asarray(r_same)

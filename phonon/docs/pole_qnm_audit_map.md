@@ -270,8 +270,8 @@ every conservation ratio. Any absolute quantity built on `bubble_balance`,
 `slab_absorption` or `final_heat` on a uniform grid is short one factor of `dw`.
 
 A third, smaller point: the "contour fallback" described in `refresh`'s docstring
-(`pole_sector.py:1012`) does not exist. `beyn_contour` and `ellipse_contour`
-(`pole_nevp.py:493`, `:460`) are called from tests only and `contour_quad_points` is
+(`pole_sector.py:1012`) does not exist. `beyn_contour`, `ellipse_contour` and
+`contour_quad_points` were removed on 2026-08-16 as unreachable; historically they were
 read by nothing. The actual fallback is a harmonic re-seed and re-solve
 (`pole_sector.py:1436-1443`).
 

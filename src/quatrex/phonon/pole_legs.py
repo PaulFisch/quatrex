@@ -84,18 +84,17 @@ class CoefficientViews(Sequence):
 class ClusterBatch:
     """Pole clusters of several q, padded to one rectangle.
 
-    Attributes
-    ----------
-    z : NDArray
-        ``(Q, M, P)`` pole locations; padded entries hold ``_PAD_Z``.
-    u, v : NDArray
-        ``(Q, M, n_dof, P)`` right and left vectors; padded entries are zero,
-        which is what makes the padding inert.
-    live : NDArray
-        ``(Q, M)`` whether that slot is a real cluster.
-    counts : list[int]
-        Clusters per q, for unpacking the result.
-
+        Attributes
+        ----------
+        z : NDArray
+            ``(Q, M, P)`` pole locations; padded entries hold ``_PAD_Z``.
+        u, v : NDArray
+            ``(Q, M, n_dof, P)`` right and left vectors; padded entries are zero,
+            which is what makes the padding inert.
+        live : NDArray
+            ``(Q, M)`` whether that slot is a real cluster.
+        counts : list[int]
+            Clusters per q, for unpacking the result.
     """
 
     z: NDArray
@@ -220,32 +219,31 @@ def congruence_legs(
 ):
     r"""The congruence leg for every q and cluster at once.
 
-    Parameters
-    ----------
-    batch : ClusterBatch
-        Padded clusters, ``(Q, M, P)``.
-    layout : BlockLayout
-        The shared pattern-to-band map.
-    sigma : NDArray
-        ``(Q, n_omega, nnz)`` Keldysh self-energy on the stored pattern.
-    g_retarded : NDArray
-        ``(Q, n_omega, nnz)`` retarded Green's function on the same pattern.
-    corners : tuple
-        ``((block, i), ...)`` dense contact self-energies and the block row
-        they sit on. ``block`` is ``(Q, n_omega, b, b)``.
-    omega, cell_widths : NDArray
-        ``(n_omega,)`` cell centres and widths.
+        Parameters
+        ----------
+        batch : ClusterBatch
+            Padded clusters, ``(Q, M, P)``.
+        layout : BlockLayout
+            The shared pattern-to-band map.
+        sigma : NDArray
+            ``(Q, n_omega, nnz)`` Keldysh self-energy on the stored pattern.
+        g_retarded : NDArray
+            ``(Q, n_omega, nnz)`` retarded Green's function on the same pattern.
+        corners : tuple
+            ``((block, i), ...)`` dense contact self-energies and the block row
+            they sit on. ``block`` is ``(Q, n_omega, b, b)``.
+        omega, cell_widths : NDArray
+            ``(n_omega,)`` cell centres and widths.
 
-    Returns
-    -------
-    sample : NDArray
-        ``(Q, M, n_omega, nnz)`` the grid sample MINUS the cell average -- what
-        the ring must give up so that what it keeps is the PSD congruence.
-    source : NDArray
-        ``(Q, M, n_omega, P, P)`` the projected source ``V^dagger Sigma_tot V``.
-    coefficients : tuple
-        ``(c_sr, c_rs, c_ss)`` over the whole stack.
-
+        Returns
+        -------
+        sample : NDArray
+            ``(Q, M, n_omega, nnz)`` the grid sample MINUS the cell average -- what
+            the ring must give up so that what it keeps is the PSD congruence.
+        source : NDArray
+            ``(Q, M, n_omega, P, P)`` the projected source ``V^dagger Sigma_tot V``.
+        coefficients : tuple
+            ``(c_sr, c_rs, c_ss)`` over the whole stack.
     """
     n_q, m_max, p_max = batch.shape
     if m_max == 0 or p_max == 0:
@@ -288,22 +286,13 @@ def congruence_legs(
 
 def source_fit(batch: ClusterBatch, source: NDArray, omega: NDArray,
                window: int = 4, order: int = 2) -> NDArray:
-    r"""``eps_fit`` per (q, cluster): how far the source strays from its pair value.
+    r"""``eps_fit`` per (q, cluster): how far the source strays from its pair
+    value.
 
-    The batched form of
-    :func:`~quatrex.phonon.pole_bridge.source_variation`, which carries the
-    same meaning -- carrying a source analytically presumes it is smooth across
-    its own pole window, and this is the measured statement of that.
-
-    The compact fit weights are used rather than
-    :meth:`~quatrex.phonon.pole_kernel.LocalFitPlan.weights`: there is one
-    probe per pole PAIR per cluster per q, so a full ``(n_probe, n_omega)``
-    weight matrix would be hundreds of megabytes of mostly zeros.
-
-    Returns
-    -------
-    NDArray
-        ``(Q, M)`` relative residual, zero for a padded slot.
+        Returns
+        -------
+        NDArray
+            ``(Q, M)`` relative residual, zero for a padded slot.
     """
     from quatrex.phonon.pole_kernel import LocalFitPlan
 

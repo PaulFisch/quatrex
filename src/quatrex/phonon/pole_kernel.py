@@ -45,24 +45,23 @@ _DC_ANCHOR = 0.25
 def cell_width(energies: NDArray) -> float:
     """Uniform cell width of a frequency grid.
 
-    Parameters
-    ----------
-    energies : NDArray
-        Ascending, uniform frequency grid (THz).
+        Parameters
+        ----------
+        energies : NDArray
+            Ascending, uniform frequency grid (THz).
 
-    Returns
-    -------
-    float
-        The spacing ``h``.
+        Returns
+        -------
+        float
+            The spacing ``h``.
 
-    Raises
-    ------
-    ValueError
-        If the grid is not uniform. The cell-wise-constant model of ``Delta``
-        (and the production Hilbert kernel it must reproduce) is only defined on
-        a uniform grid; with the auxiliary bubble grid enabled the relevant grid
-        is the uniform convolution grid, not the primary one.
-
+        Raises
+        ------
+        ValueError
+            If the grid is not uniform. The cell-wise-constant model of ``Delta``
+            (and the production Hilbert kernel it must reproduce) is only defined on
+            a uniform grid; with the auxiliary bubble grid enabled the relevant grid
+            is the uniform convolution grid, not the primary one.
     """
     e = np.asarray(_host(energies), dtype=float)
     if e.ndim != 1 or e.size < 2:
@@ -88,40 +87,29 @@ def continuation_weights(
     *,
     order: int = 0,
 ) -> tuple[NDArray, NDArray]:
-    r"""Cell-integrated weights of the analytic continuation, or its derivatives.
+    r"""Cell-integrated weights of the analytic continuation, or its
+    derivatives.
 
-    Returns ``(w_pos, w_mir)`` such that, for the ``order``-th derivative,
+        Parameters
+        ----------
+        z : NDArray
+            Complex frequencies (THz), shape ``(P,)``. Must lie strictly off the
+            real axis: on it, the branch of the cell containing ``Re z`` is decided
+            by the sign of a floating-point zero. For the retarded real-axis limit
+            pass ``omega + 1j*tiny`` with ``tiny > 0``.
+        energies : NDArray
+            Ascending, uniform, non-negative frequency grid (THz), shape ``(K,)``.
+        order : int, optional
+            Derivative order in ``z``: 0, 1 or 2. Default 0.
 
-    .. math::
-        \partial_z^{(n)} F(z_p)
-          = \sum_k w^{\rm pos}_{pk}\,\Delta_k
-          + \sum_k w^{\rm mir}_{pk}\,\bar\Delta_k .
-
-    The derivatives are needed by the bordered-Newton corrector, the residue
-    normalisation and the pole conditioning, and are cheapest to ship as extra
-    probe slots in the same contraction.
-
-    Parameters
-    ----------
-    z : NDArray
-        Complex frequencies (THz), shape ``(P,)``. Must lie strictly off the
-        real axis: on it, the branch of the cell containing ``Re z`` is decided
-        by the sign of a floating-point zero. For the retarded real-axis limit
-        pass ``omega + 1j*tiny`` with ``tiny > 0``.
-    energies : NDArray
-        Ascending, uniform, non-negative frequency grid (THz), shape ``(K,)``.
-    order : int, optional
-        Derivative order in ``z``: 0, 1 or 2. Default 0.
-
-    Returns
-    -------
-    w_pos : NDArray
-        ``(P, K)`` weights against ``Delta``.
-    w_mir : NDArray
-        ``(P, K)`` weights against the bosonic partner ``Delta(-q)^*``. The
-        ``omega = 0`` column is zeroed when the grid is anchored at zero, so
-        that cell is counted exactly once.
-
+        Returns
+        -------
+        w_pos : NDArray
+            ``(P, K)`` weights against ``Delta``.
+        w_mir : NDArray
+            ``(P, K)`` weights against the bosonic partner ``Delta(-q)^*``. The
+            ``omega = 0`` column is zeroed when the grid is anchored at zero, so
+            that cell is counted exactly once.
     """
     if order not in (0, 1, 2):
         raise ValueError(f"order must be 0, 1 or 2 (got {order}).")
@@ -159,27 +147,20 @@ def continuation_weights(
 
 
 def bosonic_partner(a: NDArray, transverse_shape: tuple = ()) -> NDArray:
-    r"""Mirror amplitude :math:`\bar\Delta_k = \Delta_k(-q)^*` of the continuation.
+    r"""Mirror amplitude :math:`\bar\Delta_k = \Delta_k(-q)^*` of the
+    continuation.
 
-    The exact bosonic continuation of ``a = Sigma^> - Sigma^<`` is
-    ``a(q, -omega) = a*(-q, omega)``; on a Gamma-centred mesh (closed under
-    ``q -> -q``) that is a conjugation plus a negation of the transverse axes.
-    This is the same construction as ``fft_utils.hilbert_transform`` performs at
-    its lines 103-107, without the frequency reversal -- :func:`continuation_weights`
-    indexes the mirror cells by ``k`` directly rather than through a convolution.
+        Parameters
+        ----------
+        a : NDArray
+            ``Delta`` on the positive-frequency grid; leading axis is frequency.
+        transverse_shape : tuple, optional
+            Sizes of the transverse-momentum axes following the frequency axis.
 
-    Parameters
-    ----------
-    a : NDArray
-        ``Delta`` on the positive-frequency grid; leading axis is frequency.
-    transverse_shape : tuple, optional
-        Sizes of the transverse-momentum axes following the frequency axis.
-
-    Returns
-    -------
-    NDArray
-        The mirror amplitude, same shape as ``a``.
-
+        Returns
+        -------
+        NDArray
+            The mirror amplitude, same shape as ``a``.
     """
     out = a
     for ax, k in enumerate(transverse_shape, start=1):
@@ -192,31 +173,28 @@ def contract_delta(
     a: NDArray, w_pos: NDArray, w_mir: NDArray, *, transverse_shape: tuple = (),
     mirror: NDArray | None = None,
 ) -> NDArray:
-    """Apply continuation weights to ``Delta`` along the leading frequency axis.
+    """Apply continuation weights to ``Delta`` along the leading frequency
+    axis.
 
-    Linear in ``a``, hence evaluable as a single GEMM. The caller is free to
-    contract a rank-local slice and reduce afterwards.
+        Parameters
+        ----------
+        a : NDArray
+            ``Delta``, shape ``(K, ...)``; leading axis is frequency.
+        w_pos, w_mir : NDArray
+            Weights from :func:`continuation_weights`, shape ``(P, K)``.
+        transverse_shape : tuple, optional
+            Transverse-momentum axis sizes, passed to :func:`bosonic_partner`.
+        mirror : NDArray, optional
+            A precomputed :func:`bosonic_partner` of ``a``. It does NOT depend on
+            ``z``, so a caller that contracts the same ``Delta`` at many probe
+            points -- the bordered Newton does it about 6 times per candidate --
+            should build it once and pass it here rather than have it rebuilt on
+            every call.
 
-    Parameters
-    ----------
-    a : NDArray
-        ``Delta``, shape ``(K, ...)``; leading axis is frequency.
-    w_pos, w_mir : NDArray
-        Weights from :func:`continuation_weights`, shape ``(P, K)``.
-    transverse_shape : tuple, optional
-        Transverse-momentum axis sizes, passed to :func:`bosonic_partner`.
-    mirror : NDArray, optional
-        A precomputed :func:`bosonic_partner` of ``a``. It does NOT depend on
-        ``z``, so a caller that contracts the same ``Delta`` at many probe
-        points -- the bordered Newton does it about 6 times per candidate --
-        should build it once and pass it here rather than have it rebuilt on
-        every call.
-
-    Returns
-    -------
-    NDArray
-        Shape ``(P,) + a.shape[1:]``.
-
+        Returns
+        -------
+        NDArray
+            Shape ``(P,) + a.shape[1:]``.
     """
     n_freq = a.shape[0]
     if w_pos.shape[-1] != n_freq:
@@ -236,31 +214,17 @@ def contract_delta(
 class LocalFitPlan:
     r"""The anchor-dependent half of :func:`local_fit_weights`, computed once.
 
-    ``Delta_an(z)`` is a least-squares polynomial in ``(omega - w_c)/h`` over a
-    fixed stencil, evaluated at ``z``. The stencil, the fit centre ``w_c``, the
-    branch, and ``pinv(vander)`` depend only on the ANCHOR -- and the anchor is
-    pinned per candidate for the whole bordered-Newton solve, precisely so that
-    ``M(z)`` is a genuine analytic function of ``z``
-    (:class:`~quatrex.phonon.pole_sector.PoleSector`, doc Sec. 2.4). Only
-    ``s = (z - w_c)/h`` moves between Newton steps.
-
-    Splitting it that way turns the per-step pseudo-inverse -- 117 SVDs for
-    nine candidates on the local bed -- into one batched ``pinv`` per SCBA
-    iteration, and leaves a per-step cost of two elementwise expressions and a
-    scatter.
-
-    Parameters
-    ----------
-    energies : NDArray
-        Uniform ascending grid (THz), ``(K,)``.
-    anchors : NDArray
-        ``(P,)`` real fit anchors, one per probe. A negative anchor selects the
-        mirror branch, where the model is a function of ``-z``.
-    order : int, optional
-        Polynomial degree. Default 2.
-    window : int, optional
-        Cells on each side of the anchor. Default 4.
-
+        Parameters
+        ----------
+        energies : NDArray
+            Uniform ascending grid (THz), ``(K,)``.
+        anchors : NDArray
+            ``(P,)`` real fit anchors, one per probe. A negative anchor selects the
+            mirror branch, where the model is a function of ``-z``.
+        order : int, optional
+            Polynomial degree. Default 2.
+        window : int, optional
+            Cells on each side of the anchor. Default 4.
     """
 
     def __init__(self, energies: NDArray, anchors: NDArray, *,
@@ -354,39 +318,14 @@ def local_fit_weights(
     deriv: int = 0,
     anchor: float | NDArray | None = None,
 ) -> tuple[NDArray, NDArray]:
-    r"""``(P, K)`` weights of :math:`\Delta_{\rm an}(z)`, as a linear map on Delta.
+    r"""``(P, K)`` weights of :math:`\Delta_{\rm an}(z)`, as a linear map on
+    Delta.
 
-    Same object as :func:`delta_local_fit`, expressed the way
-    :func:`continuation_weights` is: the least-squares fit is linear in the
-    sampled values, and its coefficients depend only on the GRID, so
-    ``coeff = pinv(vander) @ src`` and the whole continuation collapses to a
-    weight matrix.
-
-    That matters for more than tidiness. It is what makes the pole sector
-    work on a distributed frequency axis: every rank can build the weights for
-    the global grid, contract only the columns it owns, and one
-    ``all_reduce(sum)`` completes the continuation. Neither branch reindexes
-    the frequency axis -- the mirror is elementwise (a conjugation plus a
-    transverse ``q -> -q``), and the negative-frequency reflection lives in the
-    ``z + omega_k`` argument -- so a rank never needs a frequency another rank
-    owns.
-
-    The fit centre and stencil are chosen from ``anchor`` when given, so that
-    Delta_an is a genuine analytic function of z. Deriving them from Re z
-    instead makes M(z) only PIECEWISE holomorphic: the stencil index is
-    round(Re z / h), so it switches discretely and the value jumps. Measured on
-    a random Delta at h = 0.25: a 3.08e-01 step at the boundary against
-    ~3.4e-03 within a stencil and a typical scale of 1.79, i.e. a 17 %
-    discontinuity. Newton's trust radius is trust_radius_cells * h, so steps
-    routinely cross one. ``anchor`` may be a scalar (shared) or ``(P,)`` (one
-    per probe, which is what a batched pole solve needs).
-
-    Returns
-    -------
-    tuple[NDArray, NDArray]
-        ``(w_pos, w_mir)``, to be used exactly like
-        :func:`continuation_weights`' output in :func:`contract_delta`.
-
+        Returns
+        -------
+        tuple[NDArray, NDArray]
+            ``(w_pos, w_mir)``, to be used exactly like
+            :func:`continuation_weights`' output in :func:`contract_delta`.
     """
     zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
     if anchor is None:
@@ -411,42 +350,30 @@ def delta_local_fit(
 ) -> NDArray:
     r"""Local polynomial continuation :math:`\Delta_{\rm an}(z)` of ``Delta``.
 
-    The second-sheet term of :math:`\Sigma^{R,\rm II}(z) = F(z) + \Delta_{\rm an}(z)`.
-    ``Delta`` is known only on the grid, so it is continued off the axis by a
-    degree-``order`` least-squares polynomial in the scaled variable
-    ``(omega - Re z)/h`` over the ``window`` nearest cells on each side, then
-    evaluated at ``z``. The error is ``O((|Im z|/h)^(order+1))``, which is
-    controlled precisely because the poles this is used for satisfy
-    ``gamma << h``.
+        Parameters
+        ----------
+        a : NDArray
+            ``Delta``, shape ``(K, ...)``.
+        energies : NDArray
+            Uniform ascending grid (THz), shape ``(K,)``.
+        z : NDArray
+            Complex frequencies, shape ``(P,)``.
+        order : int, optional
+            Polynomial degree. Default 2.
+        window : int, optional
+            Number of cells on each side of ``Re z``. Must give at least
+            ``order + 1`` samples. Default 4.
+        deriv : int, optional
+            Order of the ``z``-derivative of the model to return. The chain rule
+            carries a sign on the mirror branch, where the model is a function of
+            ``-z``. Default 0.
+        transverse_shape : tuple, optional
+            Transverse-momentum axis sizes.
 
-    ``Delta`` is continued from its bosonically completed axis, so a ``z`` with
-    negative real part is served by the mirror branch.
-
-    Parameters
-    ----------
-    a : NDArray
-        ``Delta``, shape ``(K, ...)``.
-    energies : NDArray
-        Uniform ascending grid (THz), shape ``(K,)``.
-    z : NDArray
-        Complex frequencies, shape ``(P,)``.
-    order : int, optional
-        Polynomial degree. Default 2.
-    window : int, optional
-        Number of cells on each side of ``Re z``. Must give at least
-        ``order + 1`` samples. Default 4.
-    deriv : int, optional
-        Order of the ``z``-derivative of the model to return. The chain rule
-        carries a sign on the mirror branch, where the model is a function of
-        ``-z``. Default 0.
-    transverse_shape : tuple, optional
-        Transverse-momentum axis sizes.
-
-    Returns
-    -------
-    NDArray
-        Shape ``(P,) + a.shape[1:]``.
-
+        Returns
+        -------
+        NDArray
+            Shape ``(P,) + a.shape[1:]``.
     """
     h = cell_width(energies)
     e = xp.asarray(energies, dtype=xp.float64)
@@ -512,38 +439,35 @@ def sigma_retarded_at_z(
     delta_window: int = 4,
     anchor: float | None = None,
 ) -> NDArray:
-    r"""Scattering :math:`\Sigma^R_s(z)` at complex frequency, or its derivative.
+    r"""Scattering :math:`\Sigma^R_s(z)` at complex frequency, or its
+    derivative.
 
-    Convenience wrapper: ``F(z)`` from :func:`continuation_weights` plus, on the
-    resonance sheet, the local continuation of ``Delta``.
+        Parameters
+        ----------
+        a : NDArray
+            ``Delta = Sigma^> - Sigma^<`` (raw sign), shape ``(K, ...)``.
+        energies : NDArray
+            Uniform ascending grid (THz).
+        z : NDArray
+            Complex frequencies, shape ``(P,)``, strictly off the real axis.
+        sheet : {"I", "II"}, optional
+            ``"I"`` is the plain Cauchy branch (correct where the device has no cut,
+            i.e. modes in a lead gap); ``"II"`` adds ``Delta_an(z)`` and is the
+            continuation of the *retarded* branch through the cut, which is where
+            an in-band resonance lives. Default ``"II"``.
+        order : int, optional
+            Derivative order in ``z``. On sheet II the local model of ``Delta`` is
+            differentiated analytically, so ``M'(z)`` is available in closed form
+            rather than by finite differences.
+        transverse_shape : tuple, optional
+            Transverse-momentum axis sizes.
+        delta_order, delta_window : int, optional
+            Passed to :func:`delta_local_fit`.
 
-    Parameters
-    ----------
-    a : NDArray
-        ``Delta = Sigma^> - Sigma^<`` (raw sign), shape ``(K, ...)``.
-    energies : NDArray
-        Uniform ascending grid (THz).
-    z : NDArray
-        Complex frequencies, shape ``(P,)``, strictly off the real axis.
-    sheet : {"I", "II"}, optional
-        ``"I"`` is the plain Cauchy branch (correct where the device has no cut,
-        i.e. modes in a lead gap); ``"II"`` adds ``Delta_an(z)`` and is the
-        continuation of the *retarded* branch through the cut, which is where
-        an in-band resonance lives. Default ``"II"``.
-    order : int, optional
-        Derivative order in ``z``. On sheet II the local model of ``Delta`` is
-        differentiated analytically, so ``M'(z)`` is available in closed form
-        rather than by finite differences.
-    transverse_shape : tuple, optional
-        Transverse-momentum axis sizes.
-    delta_order, delta_window : int, optional
-        Passed to :func:`delta_local_fit`.
-
-    Returns
-    -------
-    NDArray
-        Shape ``(P,) + a.shape[1:]``.
-
+        Returns
+        -------
+        NDArray
+            Shape ``(P,) + a.shape[1:]``.
     """
     if sheet not in ("I", "II"):
         raise ValueError(f"sheet must be 'I' or 'II' (got {sheet!r}).")
@@ -560,30 +484,17 @@ def sigma_retarded_at_z(
 def lorentz_retarded(omega: NDArray, centre: complex) -> NDArray:
     r"""Causal retarded function of a single Lorentzian spectral term.
 
-    For :math:`\Delta(\omega) = L_{\Omega,\gamma}(\omega) = 2\gamma/((\omega-\Omega)^2+\gamma^2)`
-    the exact Hilbert partner is :math:`\mathcal{H}[L] = 2(\omega-\Omega)/((\omega-\Omega)^2+\gamma^2)`,
-    so
+        Parameters
+        ----------
+        omega : NDArray
+            Real frequencies (THz).
+        centre : complex
+            The pole ``Omega - 1j*gamma`` with ``gamma > 0``.
 
-    .. math::
-        \tfrac12 L + \tfrac{i}{2}\mathcal{H}[L]
-          = \frac{i}{\omega - \Omega + i\gamma},
-
-    a single causal pole. This is why an analytic pole-sector contribution to
-    ``Delta`` must **not** be passed through the numerical Hilbert transform:
-    its Kramers-Kronig partner is known in closed form.
-
-    Parameters
-    ----------
-    omega : NDArray
-        Real frequencies (THz).
-    centre : complex
-        The pole ``Omega - 1j*gamma`` with ``gamma > 0``.
-
-    Returns
-    -------
-    NDArray
-        ``i / (omega - Omega + i*gamma)``.
-
+        Returns
+        -------
+        NDArray
+            ``i / (omega - Omega + i*gamma)``.
     """
     c = complex(centre)
     if c.imag >= 0.0:
@@ -597,24 +508,17 @@ def lorentz_retarded(omega: NDArray, centre: complex) -> NDArray:
 def lorentz_pair_retarded(omega: NDArray, centre: complex) -> NDArray:
     r"""Retarded partner of a Lorentzian **and** its bosonic mirror.
 
-    The production Hilbert transform completes ``Delta`` to negative frequencies
-    with ``a(-omega) = a*(omega)`` before transforming. An analytic contribution
-    that bypasses that transform must add its own mirror partner at
-    :math:`-\Omega`, or the analytic and numerical halves of :math:`\Sigma^R` are
-    built from different integrands.
+        Parameters
+        ----------
+        omega : NDArray
+            Real frequencies (THz).
+        centre : complex
+            The pole ``Omega - 1j*gamma``.
 
-    Parameters
-    ----------
-    omega : NDArray
-        Real frequencies (THz).
-    centre : complex
-        The pole ``Omega - 1j*gamma``.
-
-    Returns
-    -------
-    NDArray
-        ``i/(omega - Omega + i*gamma) + i/(omega + Omega + i*gamma)``.
-
+        Returns
+        -------
+        NDArray
+            ``i/(omega - Omega + i*gamma) + i/(omega + Omega + i*gamma)``.
     """
     c = complex(centre)
     return lorentz_retarded(omega, c) + lorentz_retarded(omega, complex(-c.real, c.imag))

@@ -1,13 +1,21 @@
-"""Energy-conservation audit of the decomposed three-phonon SSE
-(decomp_conservation).
+"""Energy-conservation audit of the decomposed three-phonon SSE (decomp_conservation).
 
 Data:
-  Data: phonon/scripts/data/decomp_conservation.npz -- extracted read-only from the
-  cluster campaign cluster/eta0-L3/{ball,dense,r8,r16,r32,r64} (stdout.log +
-  run.npz) and from a symmetry probe over the shipped vertices
-  (cluster/prod/geom/sifilm_L3_nk9/qfold_vertices.npz, decomposed_vertices_r*.npz)
-  fc3_factors_indscal_r*.npz). The S2/S3 defects are relative Frobenius norms
-  qfold_vertices.npz to 0.0 (bit-identical), which is what pins "the solver
+  phonon/scripts/data/decomp_conservation.npz -- extracted read-only from the
+        cluster campaign cluster/eta0-L3/{ball,dense,r8,r16,r32,r64} (stdout.log +
+        run.npz) and from a symmetry probe over the shipped vertices
+        (cluster/prod/geom/sifilm_L3_nk9/qfold_vertices.npz, decomposed_vertices_r*.npz)
+        and the cached real-space INDSCAL factors (phonon/reaps/si_big_hiphive/
+        fc3_factors_indscal_r*.npz). The S2/S3 defects are relative Frobenius norms
+            S2: Phi^{q1,q2}_{I,K,K'}[a,b,c] - Phi^{q2,q1}_{I,K',K}[a,c,b]
+            S3: Phi^{q1,q2}_{I,K,K'}[a,b,c] - Phi^{q3,q2}_{K,I,K'}[b,a,c], q3=-(q1+q2)
+        over all 15 device blocks and 61 sampled (q1,q2) pairs (9 pairs for the
+        re-folded dense controls, which cost a full fold each). S2 swaps the two
+        CONTRACTED legs -- the one permutation INDSCAL enforces by construction and
+        the one the conservation proof cannot use. S3 moves the EXTERNAL leg.
+        The probe re-folds the vertex from the raw FC3 and reproduces the shipped
+        qfold_vertices.npz to 0.0 (bit-identical), which is what pins "the solver
+        really did consume raw cell indices".
 
 Run:  python phonon/scripts/figures/decomposed_sse_conservation.py
 """

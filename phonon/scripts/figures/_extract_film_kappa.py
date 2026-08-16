@@ -2,8 +2,13 @@
 
 Data:
   Writes phonon/scripts/data/film_kappa.csv with one row per run:
+  system, tag, kind, n_slabs, t_nm, J, uniform, dw_thz, A_c_m2, dT, N_q,
+  G_W_m2K, converged, n_iter.
+
   Sources: cluster/mos2f{3nu,6b,10b,16b} (ballistic, nu grid),
   cluster/sifilm{3,5,8}{b,s} (ballistic + SCBA legs, uniform 121 grid).
+  Missing dirs are skipped with a warning (SCBA legs appear as they
+  land).
 
 Run:  python phonon/scripts/figures/_extract_film_kappa.py
 """

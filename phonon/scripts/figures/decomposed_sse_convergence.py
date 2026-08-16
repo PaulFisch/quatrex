@@ -1,9 +1,14 @@
-"""SCBA convergence of the decomposed three-phonon SSE
-(fig:res_decomp_convergence).
+"""SCBA convergence of the decomposed three-phonon SSE (fig:res_decomp_convergence).
 
 Data:
+  The residual and lead-balance traces are parsed from the SCBA's own stdout, NOT
   from run.npz: `iter_heat` and `iter_sigma_max` are stored as the RANK-0-LOCAL
+  frequency slice, and these runs use 121 ranks over 121 frequencies, so rank 0
+  owns omega=0 alone -- where the heat current is identically zero. The bubble
+  trace does come from the npz; it is all-reduced and therefore global.
+
   Data: phonon/scripts/data/decomposed_sse_spectra.npz (iter_heat, iter_sigma_max,
+        iter_bubble_balance, from the L10 campaign).
 
 Run:  python phonon/scripts/figures/decomposed_sse_convergence.py
 """

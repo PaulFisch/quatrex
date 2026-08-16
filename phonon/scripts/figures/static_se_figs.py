@@ -1,7 +1,10 @@
 """Static-correction magnitude study figure (results/50_static_scp).
 
 Data:
+  One merged 2x2 figure (static_se_study) replacing the old
+  static_se_study + static_se_tadpole_breakdown pair, from the regenerated
   snapshots (phonon/scripts/out/snapshots/study_*.npz, produced by
+  phonon/scripts/verify/_static_se_sweep.sh; the original snapshots were purged).
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/static_se_figs.py
 """

@@ -1,7 +1,11 @@
 """cnt33 finite-eta bias demonstration (results/80_approx, fig:res_cnt_T).
 
 Data:
+  Regenerates cnt33_temperature_{g,ratio} from the ARCHIVED dense-reference
   sweeps (phonon/docs/lab_notebook_archive.md, F30 -- the raw npz were purged in
+  the studies reorganisation; the notebook tables are the surviving record of
+  the converged runs) and overlays the conserving eta=0 production sweep
+  (phonon/scripts/out/prod/cnt33_eta0/summary.json).
 
 Run:  python phonon/scripts/figures/cnt33_finite_eta_bias.py
 """

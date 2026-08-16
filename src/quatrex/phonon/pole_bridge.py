@@ -68,20 +68,19 @@ def project_source_sparse(
 ) -> NDArray:
     r"""``S(w) = V^dagger Sigma(w) V`` from sparse values, without densifying.
 
-    Parameters
-    ----------
-    sigma_values : NDArray
-        ``(n_omega, nnz)`` self-energy on the stored pattern.
-    rows, cols : NDArray
-        ``(nnz,)`` global row/column indices.
-    v : NDArray
-        ``(n_dof, Np)`` left vectors.
+        Parameters
+        ----------
+        sigma_values : NDArray
+            ``(n_omega, nnz)`` self-energy on the stored pattern.
+        rows, cols : NDArray
+            ``(nnz,)`` global row/column indices.
+        v : NDArray
+            ``(n_dof, Np)`` left vectors.
 
-    Returns
-    -------
-    NDArray
-        ``(n_omega, Np, Np)``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega, Np, Np)``.
     """
     vr = xp.conj(xp.take(v, xp.asarray(rows), axis=0))     # (nnz, Np)
     vc = xp.take(v, xp.asarray(cols), axis=0)              # (nnz, Np)
@@ -93,21 +92,16 @@ def add_contact_source(
 ) -> NDArray:
     r"""Add a dense contact block's contribution to the projected source.
 
-    The lead self-energies live only on the first and last diagonal blocks and
-    are held as dense corners rather than on the pattern, so they are projected
-    separately. Omitting them would drop the injection that drives the device.
-
-    Parameters
-    ----------
-    source : NDArray
-        ``(n_omega, Np, Np)`` accumulator.
-    corner : NDArray
-        ``(n_omega, b, b)`` contact self-energy on its diagonal block.
-    v : NDArray
-        ``(n_dof, Np)`` left vectors.
-    offset : int
-        Row index at which the block starts.
-
+        Parameters
+        ----------
+        source : NDArray
+            ``(n_omega, Np, Np)`` accumulator.
+        corner : NDArray
+            ``(n_omega, b, b)`` contact self-energy on its diagonal block.
+        v : NDArray
+            ``(n_dof, Np)`` left vectors.
+        offset : int
+            Row index at which the block starts.
     """
     b = int(corner.shape[-1])
     vb = v[offset:offset + b]                              # (b, Np)
@@ -144,28 +138,7 @@ def modal_vertex_blocks(
     phi_blocks: dict, block_sizes: NDArray, u: NDArray, conjugate: bool,
     v: NDArray | None = None,
 ) -> NDArray:
-    r"""Project the block-sparse cubic vertex onto the modal basis.
-
-    ``Vbar[mu, alpha, beta] = sum_{ab} Phi[mu, a, b] u[a, alpha] u[b, beta]``
-    (doc Eq. 116), accumulated block by block so the dense ``(n_dof,)^3`` tensor
-    is never formed.
-
-    ``conjugate`` selects the right-hand factor, whose modal vectors are
-    conjugated -- that is what makes the contraction a congruence and carries
-    the positivity statement (``bubble_positivity.md`` Thm 1).
-
-    ``v`` supplies a SECOND family for the beta index, giving
-    ``Vbar[mu, alpha, beta] = sum_ab Phi[mu,a,b] u[a,alpha] v[b,beta]``, and the
-    result is RECTANGULAR when the two families differ in size. The subcell
-    covariance correction needs exactly that: its two legs belong to different
-    cells, and those cells can belong to different CLUSTERS, which carry
-    different pole counts. An earlier version required the two to match and
-    refused the first real device call with "families disagree, 4 against 24" --
-    the guard was loud, which was right, but the assumption behind it was wrong.
-
-    Every other caller convolves a leg with itself and leaves ``v`` as ``None``,
-    for which this is bit-identical.
-    """
+    r"""Project the block-sparse cubic vertex onto the modal basis."""
     sizes = np.asarray(_host(block_sizes), dtype=int)
     off = np.concatenate(([0], np.cumsum(sizes)))
     n_dof, npp = int(off[-1]), int(u.shape[1])
@@ -196,21 +169,10 @@ def ss_self_energy_sparse(
 ) -> NDArray:
     r"""Analytic pole-pole self-energy, evaluated on the stored pattern.
 
-    .. math::
-        \Sigma_{SS}(\omega)_{\mu\mu'} = \frac{i\hbar}{2}
-          \sum_{\alpha\beta\gamma\delta} \bar\Phi_{\mu,\alpha\beta}
-          \bar\Phi^*_{\mu',\gamma\delta}\,
-          C_{\alpha\delta\beta\gamma}(\omega)
-
-    with ``C`` the closed-form modal convolution. Only pattern entries
-    ``(rows[k], cols[k])`` are produced, so the ``|I-J| <= 1`` output band the
-    solver can actually consume is respected automatically.
-
-    Returns
-    -------
-    NDArray
-        ``(n_omega, nnz)``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega, nnz)``.
     """
     if prefactor is None:
         prefactor = analytic_prefactor()
@@ -225,26 +187,7 @@ def mixed_vertex_blocks(
     phi_blocks: dict, block_sizes: NDArray, u: NDArray, *, leg: int,
     conjugate: bool,
 ) -> NDArray:
-    r"""Vertex with ONE leg projected onto the modal basis (doc Eq. 119).
-
-    ``leg`` and ``conjugate`` are INDEPENDENT, because the two mixed sectors
-    reduce different legs. For the ring
-    ``Phi_L[a,c,e] A[c,b] B[e,d] Phi_R[J,d,b]``:
-
-    ===========  ==================================  ==================================
-    sector       left factor                         right factor
-    ===========  ==================================  ==================================
-    ``Sigma_SR`` ``B_a[a,e] = sum_c Phi_L[a,c,e]u``  ``B*_d[J,d] = sum_b Phi_R[J,d,b]u*``
-                 (``leg=0``)                          (``leg=1``, conjugate)
-    ``Sigma_RS`` ``C_b[a,c] = sum_e Phi_L[a,c,e]u``  ``D_g[J,b] = sum_d Phi_R[J,d,b]u*``
-                 (``leg=1``)                          (``leg=0``, conjugate)
-    ===========  ==================================  ==================================
-
-    Tying ``leg`` to ``conjugate`` would silently compute ``Sigma_SR`` twice.
-
-    Returns ``(n_dof, n_dof, Np)``: the free device index, then the surviving
-    vertex leg, then the mode.
-    """
+    r"""Vertex with ONE leg projected onto the modal basis (doc Eq. 119)."""
     if leg not in (0, 1):
         raise ValueError(f"leg must be 0 or 1 (got {leg}).")
     sizes = np.asarray(_host(block_sizes), dtype=int)
@@ -281,35 +224,19 @@ def _mixed_one_sector(
 ) -> NDArray:
     r"""ONE mixed sector, given its pair of single-leg vertices.
 
-    Use :func:`mixed_self_energy_sparse`, which evaluates ``Sigma_SR`` and
-    ``Sigma_RS`` as the symmetric pair the conserving decomposition requires.
-
-    .. math::
-        \Sigma_{SR}(\omega)_{aJ} = \sum_{\alpha\delta}\sum_{ed}
-            B_\alpha[a,e]\, M_{\alpha\delta}[e,d](\omega)\, B^*_\delta[J,d]
-
-    with ``M`` the pole convolved against the regular Green's function. The
-    convolution is done ONCE per pole pair as a matmul over the grid (the narrow
-    denominator is integrated over each cell, never sampled); what remains is a
-    frequency-LOCAL bilinear contraction, so there is no second convolution.
-
-    ``Sigma_RS`` is the same object with the legs exchanged, and is obtained by
-    transposing rather than recomputing.
-
-    Parameters
-    ----------
-    g_reg : NDArray
-        ``(n_freq, nnz)`` regular Green's function ``G - G_PP`` on the pattern.
-    bl, br : NDArray
-        ``(n_dof, n_dof, Np)`` single-leg modal vertices from
-        :func:`mixed_vertex_blocks`.
-    max_nnz : int
-        Guard. The pattern-level contraction here is ``O(nnz^2)`` per pole pair,
-        which is fine for the small devices this sector is currently gated to
-        and hopeless at production size. The production route reuses the ring's
-        block-structured GEMM at fixed frequency; refusing loudly is better than
-        quietly running for hours.
-
+        Parameters
+        ----------
+        g_reg : NDArray
+            ``(n_freq, nnz)`` regular Green's function ``G - G_PP`` on the pattern.
+        bl, br : NDArray
+            ``(n_dof, n_dof, Np)`` single-leg modal vertices from
+            :func:`mixed_vertex_blocks`.
+        max_nnz : int
+            Guard. The pattern-level contraction here is ``O(nnz^2)`` per pole pair,
+            which is fine for the small devices this sector is currently gated to
+            and hopeless at production size. The production route reuses the ring's
+            block-structured GEMM at fixed frequency; refusing loudly is better than
+            quietly running for hours.
     """
     from quatrex.phonon.pole_audit import transpose_index
     from quatrex.phonon.pole_bubble import _split_leg
@@ -368,18 +295,7 @@ def mixed_self_energy_sparse(
     prefactor: complex | None = None,
     max_nnz: int = 4096,
 ) -> NDArray:
-    r"""``Sigma_SR + Sigma_RS`` -- the mixed sectors, as a symmetric pair.
-
-    These are the pole-background three-phonon processes. They must be evaluated
-    together and with the same quadrature: dropping either, or approximating one
-    differently from the other, breaks the Phi-derivable energy balance that
-    makes the decomposition conserving (doc Sec. 37).
-
-    Both reduce to the same object -- the pole convolved against the regular
-    Green's function, ``M = int dw'/2pi F(w') G_R(w-w')`` -- because convolution
-    commutes; they differ only in which vertex legs carry the modal index. So
-    ``M`` is formed once per pole pair and reused.
-    """
+    r"""``Sigma_SR + Sigma_RS`` -- the mixed sectors, as a symmetric pair."""
     m_vertex = mixed_vertex_blocks
     kw = dict(freqs=freqs, rows=rows, cols=cols, g_partner=g_partner,
               prefactor=prefactor, max_nnz=max_nnz)
@@ -626,37 +542,10 @@ def source_at_poles(
 ) -> NDArray:
     r"""The projected source for each pole PAIR, continued to the poles.
 
-    Two requirements pull against each other and both are met here.
-
-    **Asymptotics.** Writing the leg as ``c_a/(w - z_a) + c_b/(w - conj(z_b))``
-    with ``c_a = S_a/gap`` and ``c_b = -S_b/gap``, the large-``w`` behaviour is
-    ``(c_a + c_b)/w``, while the congruence it models decays as ``1/w^2``. The
-    two agree only if ``c_a + c_b = 0``, i.e. only if the SAME value serves
-    both residues of a pair. Distinct per-pole values give ``G_PP`` a spurious
-    ``1/w`` tail -- measured 17x too large at ``w = 1e2`` and 18364x at
-    ``1e5``, which made ``rr_ss`` regress from 5.4e-08 to 4.9e-05.
-
-    **Accuracy.** The exact residue at ``z_a`` carries ``S(z_a)``, at the
-    COMPLEX pole. ``S^{<,>}`` is a real-axis Keldysh object with no canonical
-    continuation, so ``S(z_a)`` is necessarily the value of a chosen local
-    model; :func:`source_variation` is the error estimator that says whether
-    that model is justified.
-
-    Both are satisfied by fitting a local polynomial about the pair's centre,
-    evaluating it at ``z_a`` and ``conj(z_b)``, and sharing their mean. For
-    ``alpha == beta`` the two are complex conjugates, so the mean is real and
-    captures the curvature that sampling at ``Re z_a`` misses.
-
-    > Measured on a quadratic source at ``gamma = 0.5``: sampling at
-    > ``Re(pole)`` is wrong by 2.0e-04, the fitted pair value by **3.1e-14**.
-
-    Negative-frequency partners are served by the mirrored branch of the fit.
-
-    Returns
-    -------
-    NDArray
-        ``(Np, Np)``.
-
+        Returns
+        -------
+        NDArray
+            ``(Np, Np)``.
     """
     from quatrex.phonon.pole_kernel import LocalFitPlan
 
@@ -692,26 +581,7 @@ def source_at_poles(
 def source_variation(
     source: NDArray, freqs: NDArray, cluster: PoleCluster, window: int = 4
 ) -> float:
-    r"""How far the projected source strays from its per-pair value.
-
-    A MEASURED residual, replacing the asymptotic
-    ``O((|Im z|/h)^(p+1))`` claim, which omits the analyticity radius and
-    higher derivatives of the source, the pole's offset from the fit centre,
-    the window width and the conditioning of the fit.
-
-    .. math::
-        \epsilon_{\rm fit} = \max_{k \in \mathcal K}
-          \frac{\|S(\omega_k) - S_{\rm pair}\|}{\max_j \|S(\omega_j)\| + \epsilon_0}
-
-    over the ``window`` cells either side of each pole. Carrying a source
-    analytically presumes it is smooth across its own pole window; this is the
-    number that says whether it is. Above ``source_fit_tol`` the cluster
-    should be demoted rather than approximated.
-
-    The normalisation is GLOBAL, not per-frequency: a per-omega denominator
-    turns the numerically empty tails of the window into apparent failures,
-    which is the recorded trap that once made a ballistic control "fail".
-    """
+    r"""How far the projected source strays from its per-pair value."""
     w = xp.asarray(freqs, dtype=xp.float64)
     z = xp.asarray(cluster.z, dtype=xp.complex128)
     src = xp.asarray(source, dtype=xp.complex128)
@@ -751,36 +621,16 @@ def pole_keldysh_pf_sparse(
 ) -> NDArray:
     r"""``G_PP`` in the PARTIAL-FRACTION representation the sectors use.
 
-    :func:`pole_keldysh_sparse` builds ``U D^R S(w) D^A U^dag`` from the
-    frequency-resolved source. The analytic sectors cannot represent that: they
-    split every leg into simple poles, which carries only a rational source. So
-    the two are different functions whenever ``S`` varies with frequency --
-    measured 7e-3 apart on a source with a 2%/THz slope, against 7e-16 for a
-    constant one.
+        Parameters
+        ----------
+        s_a, s_b : NDArray
+            ``(Np, Np)`` source at the row pole and at the column pole, from
+            :func:`source_at_poles`.
 
-    That difference is not a small inaccuracy, it is a broken decomposition.
-    ``G_reg = G - G_PP`` is exact for ANY ``G_PP``, so the sector sum
-    ``B(G,G) = SS + SR + RS + RR`` holds only if the leg SUBTRACTED from the
-    ring and the leg the sectors PUT BACK are literally the same object. Using
-    the resolved form on one side and partial fractions on the other violates
-    doc Sec. 37's "same reconstructed G on both legs", and it breaks the
-    balance spatially while leaving the scalar ``P_in = P_out`` nearly intact.
-
-    This builds the leg from the same coefficients
-    :func:`~quatrex.phonon.pole_bubble.leg_partial_fractions` produces, so the
-    two agree to roundoff by construction.
-
-    Parameters
-    ----------
-    s_a, s_b : NDArray
-        ``(Np, Np)`` source at the row pole and at the column pole, from
-        :func:`source_at_poles`.
-
-    Returns
-    -------
-    NDArray
-        ``(n_omega, nnz)`` on the stored pattern.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega, nnz)`` on the stored pattern.
     """
     w = xp.asarray(omega, dtype=xp.complex128)[:, None, None]
     za = cluster.z[None, :, None]

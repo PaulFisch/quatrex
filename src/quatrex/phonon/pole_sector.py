@@ -73,33 +73,7 @@ def _report_rank() -> int:
 
 
 def lead_band_edges(d_00, d_01, d_10, n_k: int = 257) -> NDArray:
-    r"""Band extrema of the periodic lead, in THz.
-
-    The lead dispersion of a nearest-layer chain is the eigenproblem
-
-    .. math:: D(k) = D_{00} + D_{01}e^{ik} + D_{10}e^{-ik},
-              \qquad \lambda_n(k) = \omega_n(k)^2,
-
-    and its extrema are the band edges -- the van Hove points where the number
-    of propagating channels changes, and where :math:`\Sigma_c^R(\omega)` has a
-    branch point rather than a pole.
-
-    Why the sector needs them: a branch point is not a simple pole, and forcing
-    a continuum edge into a single-pole fit is a documented failure mode (the
-    method proposal's Sec. 49, "do not force band-edge continua into isolated
-    poles"). The frozen Si census returned 36 of 1456 roots in the UPPER half
-    plane, which is the artefact class this anticipates.
-
-    Sampled rather than solved. Eigenvalues are sorted at every ``k``, so the
-    "branches" are the sorted ones; they are continuous, and their extrema over
-    the sampled interval are the band extrema plus, at worst, a zone-boundary
-    value that is already an edge. Erring toward extra edges is the safe
-    direction for a gate that REFUSES, so a sampled answer is preferred to a
-    root solve that could miss one.
-
-    Only ``[0, pi]`` is sampled: ``D(-k) = D(k)^*`` for real blocks, so the
-    spectrum is symmetric and the other half repeats these values.
-    """
+    r"""Band extrema of the periodic lead, in THz."""
     d0 = np.asarray(_host(d_00))
     d1 = np.asarray(_host(d_01))
     d2 = np.asarray(_host(d_10))
@@ -229,27 +203,7 @@ class PoleSectorState:
         return chain
 
     def population(self) -> dict[str, float]:
-        r"""Is there a population of NARROW, ISOLATED modes to extract at all?
-
-        Two ratios decide whether the sector can do anything, and both are
-        properties of the physics rather than of the solver:
-
-        ``h_over_gamma``
-            How badly the grid mis-weights the line. A ``dw``-weighted sum of
-            point samples carries 98-102 % of a Lorentzian's total weight at
-            ``h/gamma = 1.35`` and between 15 % and 660 % at ``h/gamma = 20``
-            -- so below roughly 3 there is nothing for an exact cell average
-            to recover.
-        ``gamma_over_spacing``
-            Whether a simple pole exists to be found. Above about one half the
-            line overlaps its neighbour, no isolated pole is well defined, and
-            a bordered Newton reports exactly that by failing to localise.
-
-        On the CNT bed at 300 K the refused candidates have median
-        ``h/gamma = 1.35`` and median ``gamma/spacing = 2.67``, with 85 %
-        overlapping. That is not a screening failure: the bed has no narrow
-        isolated resonances, and the low yield is the correct answer.
-        """
+        r"""Is there a population of NARROW, ISOLATED modes to extract at all?"""
         z = [complex(s.z) for s in self.solutions]
         z += [complex(a) for a, _ in self.rejected]
         if not z:
@@ -312,25 +266,24 @@ def _host(a):
 class PoleSector:
     """Stateful driver over SCBA iterations.
 
-    Parameters
-    ----------
-    config : PoleSectorConfig
-        The ``phonon.pole_sector`` block.
-    freqs : NDArray
-        The uniform convolution grid the continuation is built on.
-    band_edges : NDArray, optional
-        Known contact band edges / branch points (THz). Poles closer than
-        ``edge_factor`` half-widths to one are refused: a band edge is a branch
-        point, not a simple pole, and forcing one into a single-pole fit is the
-        documented failure mode.
+        Parameters
+        ----------
+        config : PoleSectorConfig
+            The ``phonon.pole_sector`` block.
+        freqs : NDArray
+            The uniform convolution grid the continuation is built on.
+        band_edges : NDArray, optional
+            Known contact band edges / branch points (THz). Poles closer than
+            ``edge_factor`` half-widths to one are refused: a band edge is a branch
+            point, not a simple pole, and forcing one into a single-pole fit is the
+            documented failure mode.
 
-        NEVER SUPPLIED IN PRODUCTION. Both solver call sites construct the
-        sector without it, so the ``edge_factor`` gate and the band-edge term of
-        :meth:`trust_radius` are inert on every real run; only tests pass it.
-        Supplying it means deriving the lead band edges from the contact
-        dispersion, and doing so would change which poles are promoted -- so it
-        is a deliberate measurement, not a wiring oversight to fix in passing.
-
+            NEVER SUPPLIED IN PRODUCTION. Both solver call sites construct the
+            sector without it, so the ``edge_factor`` gate and the band-edge term of
+            :meth:`trust_radius` are inert on every real run; only tests pass it.
+            Supplying it means deriving the lead band edges from the contact
+            dispersion, and doing so would change which poles are promoted -- so it
+            is a deliberate measurement, not a wiring oversight to fix in passing.
     """
 
     def __init__(self, config, freqs: NDArray, band_edges: NDArray | None = None,
@@ -395,20 +348,7 @@ class PoleSector:
     # -- window ------------------------------------------------------------ #
 
     def window(self, low_freq_mask: float = 0.0) -> tuple[float, float]:
-        """Resolved pole-search window (THz).
-
-        ``omega_min_thz = 0`` resolves to ``max(4*dw, mask + 2*dw)``: below that
-        the quasiparticle picture does not apply, and the continuation has no cut
-        where the self-energy has been masked to zero.
-
-        The top comes from the GLOBAL axis, not this rank's slice. Every rank
-        assembles the same operator and is supposed to solve the same poles
-        (see ``PhononSolver._pole_frequency_context``); taking the default from
-        ``self.freqs[-1]`` gave each rank a different search window, so on a
-        distributed run the ranks screened against different bounds and could
-        promote different sets. Serial runs are unaffected -- ``global_freqs``
-        IS ``freqs`` there.
-        """
+        """Resolved pole-search window (THz)."""
         lo = self.cfg.omega_min_thz or max(4.0 * self.h, low_freq_mask + 2.0 * self.h)
         hi = self.cfg.omega_max_thz or float(_host(self.global_freqs)[-1])
         return float(lo), float(hi)
@@ -424,23 +364,7 @@ class PoleSector:
         return gamma / (self.cfg.samples_per_halfwidth * self.h)
 
     def locate_error(self, sol: PoleSolution, separation: float) -> float:
-        r"""``eps_z = |dz_est| / min(gamma, separation, h)`` -- doc Eq. 49.
-
-        The acceptance metric in the units the physics is in. ``eps_nep`` is a
-        scaled matrix residual whose denominator ``|z|^2 + ||M||`` is
-        ``1e3-1e4 THz^2`` here, so it answers a different question: on the CNT
-        bed it refused 142 of 144 candidates, with residuals from 4.8e-10 to
-        2.8e-02, while a candidate at 1e-9 is within about ``1e-5`` of its own
-        linewidth.
-
-        The three scales are the three ways a mislocated pole does damage. Its
-        own width, because a residue displaced by more than ``gamma`` is the
-        wrong residue. Its separation from the next pole, because beyond that
-        the simple-pole split assigns weight to the wrong mode. The local
-        cell, because a displacement larger than ``h`` moves the line into a
-        different bin, which is the registration error the sector exists to
-        remove.
-        """
+        r"""``eps_z = |dz_est| / min(gamma, separation, h)`` -- doc Eq. 49."""
         gamma = max(-float(np.imag(sol.z)), 0.0)
         scale = min(x for x in (gamma, float(separation), self.h) if x > 0.0)
         return abs(complex(sol.dz_est)) / max(scale, 1e-300)
@@ -456,19 +380,7 @@ class PoleSector:
         return [float(x) for x in d.min(axis=1)]
 
     def _match_previous(self, solutions: list[PoleSolution]) -> list[bool]:
-        """Which of these were in the sector last iteration.
-
-        Identity across SCBA iterations is carried by an optimal ASSIGNMENT on
-        both displacement and eigenvector overlap
-        (:func:`~quatrex.phonon.pole_tracker.match_poles`), not by position
-        alone. Position is sufficient for well-separated poles and fails
-        exactly where it matters: at degeneracies, avoided crossings, pole
-        splitting and satellite generation, an eigenvector rotates smoothly
-        while its frequency ordering does not.
-
-        Displacement is measured in grid cells so the threshold is the same
-        ``cluster_factor`` that defines "the same mode" elsewhere.
-        """
+        """Which of these were in the sector last iteration."""
         if not self._promoted or not solutions:
             return [False] * len(solutions)
 
@@ -503,18 +415,7 @@ class PoleSector:
         return flags
 
     def leg_weight_error(self, gamma: float) -> float:
-        r"""Worst-case relative error in a line's represented weight.
-
-        .. math::
-            E^{\max}_{\rm leg}(r) = \coth(\pi/r) - 1
-                                   = \frac{2}{e^{2\pi/r} - 1},
-            \qquad r = h/\gamma,
-
-        the maximum of the exact trapezoidal sum
-        :math:`\sinh(2\pi/r)/(\cosh(2\pi/r) - \cos(2\pi x))` over the
-        sub-cell offset ``x``, attained with the line on a node. Small means
-        the grid already carries the line however it happens to fall.
-        """
+        r"""Worst-case relative error in a line's represented weight."""
         g = float(gamma)
         if g <= 0.0:
             return float("inf")
@@ -525,46 +426,7 @@ class PoleSector:
         return float("inf") if arg > 700.0 else 2.0 / np.expm1(arg)
 
     def leg_weight_error_finite(self, gamma: float, centre: float) -> float:
-        r"""Relative error in a line's represented weight over the FINITE grid.
-
-        .. math::
-            E_{\rm finite} =
-              \frac{|W^{[a,b]}_{\rm point} - W^{[a,b]}_{\rm exact}|}
-                   {W^{[a,b]}_{\rm exact} + \epsilon},
-
-        with :math:`W_{\rm point} = \frac{h}{2\pi}\sum_{\omega_n\in[a,b]}
-        L_\gamma(\omega_n)` and :math:`W_{\rm exact} = \int_a^b
-        \frac{d\omega}{2\pi} L_\gamma(\omega)`, for the unit-weight Lorentzian
-        :math:`L_\gamma(\omega) = 2\gamma/((\omega-\Omega)^2+\gamma^2)`.
-
-        :meth:`leg_weight_error` is the infinite-grid statement and knows
-        nothing about where the line sits. It is the right question for a mode
-        in the middle of the band and the wrong one near a support boundary,
-        where a Lorentzian tail runs off the end of the grid: there the
-        trapezoidal sum can be accurate about a weight that is itself only a
-        fraction of the line. This measures the quantity the ring actually
-        integrates, over the support it actually has.
-
-        The two agree in the regime that matters. Where the line is
-        under-resolved and sits well inside the support, the sum departs from
-        the integral by the pole's own discretisation error and this returns
-        :math:`|W_\infty(r,x) - 1|`, whose worst case over the sub-cell offset
-        ``x`` is :meth:`leg_weight_error`; with the line on a node the two
-        agree to better than a percent.
-
-        They do NOT agree once the grid resolves the line. Truncation cancels
-        in the ratio -- numerator and denominator run over the same ``[a,b]``
-        -- so what is left is the Euler-Maclaurin endpoint term,
-        :math:`O(h^2 f'(b) - h^2 f'(a))`, which does not vanish with the pole.
-        On a 20 THz grid at ``h = 0.125`` a line of half width 0.4 reads
-        3.4e-07 here against 3.7e-09 from the infinite formula: both say
-        "resolved", by different mechanisms. Read this gate as a statement
-        about a line the grid cannot carry, not as a refinement of one it can.
-
-        ``centre`` is the resonance frequency :math:`\Omega = \Re z`; ``gamma``
-        is the HALF width (see
-        :attr:`~quatrex.phonon.pole_nevp.PoleSolution.gamma_hwhm`).
-        """
+        r"""Relative error in a line's represented weight over the FINITE grid."""
         g = float(gamma)
         if g <= 0.0:
             return float("inf")
@@ -648,20 +510,7 @@ class PoleSector:
         return None
 
     def trust_radius(self, z0: complex, seeds: list[complex], k: int) -> float:
-        r"""Newton trust radius for one seed, in THz -- doc Eq. 50.
-
-        A pole is a property of :math:`M(z)`, not of the storage grid, so the
-        search region is set by the scales that can actually mislead the solve:
-        the nearest competing seed (step past its midpoint and the iteration
-        can converge onto the neighbour's pole) and the nearest contact band
-        edge (a branch point, where the local model of ``Sigma^R(z)`` stops
-        being a simple-pole model at all).
-
-        ``trust_radius_cells * h`` survives only as a FLOOR. As the radius
-        itself it made grid refinement shrink the physical pole search, so a
-        grid ladder would find fewer poles on its fine rungs for a reason
-        entirely unrelated to the poles.
-        """
+        r"""Newton trust radius for one seed, in THz -- doc Eq. 50."""
         scales = [abs(complex(z0) - complex(s))
                   for j, s in enumerate(seeds) if j != k]
         if self.band_edges is not None and self.band_edges.size:
@@ -703,21 +552,7 @@ class PoleSector:
         seed_vectors: list[NDArray] | None = None,
         *, batched: bool = False,
     ) -> list[PoleSolution]:
-        """Correct a whole seed set with the bordered Newton iteration.
-
-        One batched call, not one call per seed. Each candidate keeps its OWN
-        pinned fit anchor -- that is what makes M(z) holomorphic over its solve
-        -- so the anchors travel as a vector alongside the seeds rather than as
-        a single value set and reset around each candidate.
-
-        ``batched`` says whether the operator callables already take a VECTOR
-        of probe points, as :meth:`operator` produces. It defaults to False, so
-        a caller holding a scalar ``z -> blocks`` closure -- the toy beds, and
-        anything outside this class -- still works: such an operator is lifted
-        by evaluating it once per probe point, which is arithmetically the
-        per-candidate solve this method replaced, and is the reference the
-        batched path is verified against.
-        """
+        """Correct a whole seed set with the bordered Newton iteration."""
         if len(seeds) == 0:
             return []
         if not batched:
@@ -843,23 +678,7 @@ class PoleSector:
         self, *, delta, d_blocks, obc_left, obc_right, block_sizes, rows, cols,
         layout: BlockLayout | None = None, band_edges=None,
     ) -> None:
-        r"""Store everything :math:`M(z)` needs for this SCBA iteration.
-
-        ``delta`` is ``Sigma^> - Sigma^<`` on the full frequency grid; the rest
-        is the operator's frequency-independent part plus the contact blocks.
-        The contacts are held at their real-axis value: continuing the lead
-        self-energy off the axis is the outgoing-sheet work, and on the physical
-        sheet -- which is where the currently supported pole classes live, in a
-        contact gap or weakly coupled -- the contact contribution is flat over a
-        window narrower than its own scale.
-
-        Everything that does NOT depend on ``z`` is built here, once. The
-        bordered Newton evaluates the operator about six times per candidate
-        and used to rebuild all of it every time: the bosonic mirror of
-        ``Delta`` (identical on every call, ``a`` being ``Delta``), the scatter
-        from the stored sparsity pattern into dense blocks, and the dense
-        ``D``. See :class:`~quatrex.phonon.pole_probe.BlockLayout`.
-        """
+        r"""Store everything :math:`M(z)` needs for this SCBA iteration."""
         d = xp.asarray(delta)
         if d.ndim > 2:
             nq = int(np.prod(d.shape[1:-1]))
@@ -1077,24 +896,8 @@ class PoleSector:
         return m_blocks, dm_blocks
 
     def harmonic_seeds(self) -> list[complex]:
-        r"""Initial pole guesses from the harmonic spectrum and the golden rule.
-
-        The real part comes from the eigenvalues of the frequency-independent
-        part. The imaginary part must NOT be a fixed guess: the linewidths this
-        sector exists for are orders of magnitude below the grid spacing, and a
-        seed that overestimates them by a factor of a few hundred starts the
-        corrector outside the pole's basin. Instead use the quasiparticle
-        estimate obtained by taking the imaginary part of
-        :math:`z^2 - \Omega_0^2 - \Sigma^R = 0` at :math:`z = \Omega - i\gamma`,
-
-        .. math:: \gamma \simeq -\frac{\operatorname{Im}\Sigma^R(\Omega)}{2\Omega},
-
-        which needs no Hilbert transform: with :math:`\Delta = -i\Gamma` and
-        :math:`\Gamma` real, :math:`\operatorname{Im}\Sigma^R = \tfrac12
-        \operatorname{Im}\Delta` exactly -- the Kramers-Kronig half is purely
-        real. So :math:`\gamma \simeq -\operatorname{Im}
-        (v^\dagger \Delta v)/(4\Omega)`, read straight off the grid.
-        """
+        r"""Initial pole guesses from the harmonic spectrum and the golden
+        rule."""
         n_dof = int(np.sum(self._block_sizes))
         off = np.concatenate(([0], np.cumsum(self._block_sizes)))
         dense = np.zeros((n_dof, n_dof), dtype=complex)
@@ -1132,27 +935,7 @@ class PoleSector:
         return [complex(o, -g) for o, g in zip(om, gamma)]
 
     def refresh(self) -> PoleSectorState:
-        """One SCBA iteration's worth of pole tracking.
-
-        Predictor -> corrector -> subspace match -> harmonic re-seed, in that
-        order. The seed comes from the first-order response of the previous
-        poles to the change in the scattering self-energy (doc Eq. 43), which
-        costs one projection; the harmonic/golden-rule estimate is used on the
-        first iteration, when a rescan offers new candidates, and as the
-        fallback when no pole survived the corrector.
-
-        There is no contour fallback; the fallback that actually runs is the
-        harmonic re-seed in :func:`refresh_many`.
-
-        Sector membership is held fixed within an adaptation epoch: an
-        approximate implementation is not invariant under repartitioning, so a
-        mode that changes sector every iteration changes the fixed-point map
-        itself.
-
-        The one-q case of :func:`refresh_many`, so that the single-q path and
-        the q-batched path are the same code and every test of this method also
-        tests that one.
-        """
+        """One SCBA iteration's worth of pole tracking."""
         return refresh_many([self])[0]
 
     # -- the three phases refresh_many drives ------------------------------- #
@@ -1225,23 +1008,7 @@ class PoleSector:
 
     @staticmethod
     def _report_census(rows: list[dict]) -> None:
-        """The extraction-only summary, as a distribution rather than a count.
-
-        Rank 0 only. Every rank assembles the same operator and solves the same
-        poles by construction, so without the guard all of them write the same
-        report to one stdout and the lines interleave mid-word -- the census of
-        job 4479538 came back with rows like ``gamma [THz]    gamma [THz]
-        min/p25/...`` and was unparseable. ``_census_over_q`` already guards the
-        ``q (...)`` header it prints, which is what made the mismatch visible:
-        14 headers against 179 bodies.
-
-        A count says how many poles the sector would carry; the distributions
-        say whether the bed HAS anything to carry. ``q_omega`` below one is the
-        grid failing to resolve the line -- the condition the whole method is
-        for -- and ``gamma/separation`` above about a half means neighbouring
-        lines overlap, so no isolated simple pole exists for a bordered Newton
-        to find however good the solver is.
-        """
+        """The extraction-only summary, as a distribution rather than a count."""
         if _report_rank() != 0:
             return
         if not rows:
@@ -1287,32 +1054,7 @@ class PoleSector:
               flush=True)
 
     def _seed(self):
-        """Warm-start seeds, PLUS the harmonic estimate when an audit is due.
-
-        A rescan ADDS candidates; it must never replace the held set. Replacing
-        it makes the sector a period-two oscillator, and the mechanism is pure
-        control flow -- no physics, no threshold, in it:
-
-        * ``_track`` calls ``tracker.update`` on a warm iteration and
-          ``tracker.adopt`` on a rescan. ``update`` arms a rescan whenever the
-          cluster COUNT or any cluster SIZE changes; ``adopt`` disarms it.
-        * membership moving is what changes those counts, and membership moves
-          every iteration, so a warm iteration always arms the next rescan.
-        * the rescan then discarded the held poles and re-seeded from the
-          harmonic spectrum, which re-found them all.
-
-        So the sector alternated between everything the harmonic spectrum
-        offers and whatever survived screening it, locked at period two. On Si
-        (81 q, ``h = 0.25``) that was 650 <-> 485 poles for 150 iterations,
-        and because the ring convolves the cell average of the reconstruction,
-        an alternating pole set makes ``Sigma`` alternate too -- pinning
-        ``rel Sigma`` at 2.5e-01 where the pole-free arm reaches 9.3e-04. The
-        floor was the discontinuity, not slow convergence.
-
-        The acceptance hysteresis in :meth:`screen` cannot reach this: the
-        oscillation is in which seeds the corrector is handed, decided before
-        any pole is screened.
-        """
+        """Warm-start seeds, PLUS the harmonic estimate when an audit is due."""
         prev = self.state.solutions
         if not prev:
             return self.harmonic_seeds(), None
@@ -1379,38 +1121,7 @@ class PoleSector:
         return _vdot(l, _matvec(blocks, r))
 
     def sensitivities(self, sols: list[PoleSolution]) -> list[complex]:
-        r"""``dz/dlambda`` for the anharmonic channel -- audit Eq. (10).
-
-        Scaling one self-energy component by :math:`\lambda_j` gives
-        :math:`M(z,\lambda_j) = M(z,0) - \lambda_j \Sigma_j^R(z)`, and implicit
-        differentiation of :math:`l^\dagger M r = 0` gives
-
-        .. math::
-            \frac{dz_\alpha}{d\lambda_j}
-              = \frac{l_\alpha^\dagger \Sigma_j^R(z_\alpha) r_\alpha}
-                     {l_\alpha^\dagger M'(z_\alpha) r_\alpha},
-
-        whose denominator is 1 under the normalisation
-        :func:`~quatrex.phonon.pole_nevp.bordered_newton_batch` already applies.
-        The imaginary part, :math:`\gamma^{\rm sens}_{\alpha,j} = -\Im\,
-        dz_\alpha/d\lambda_j`, is how much of the pole's half width that channel
-        accounts for.
-
-        Only ``j = anharmonic`` is available. The two contact channels need
-        :math:`\Sigma_c(z)`, and the operator holds the contacts at a real
-        anchor with no ``z`` dependence at all (see
-        :meth:`set_operator_context`), so their derivative is identically zero
-        by construction rather than small -- reporting it would be reporting the
-        approximation, not the physics.
-
-        These are diagnostics. They are exact first derivatives of the pole
-        location, but the channels are not independent and the widths they
-        return do not have to sum to :math:`\gamma`.
-
-        Reuses the contraction :meth:`_predicted_shifts` uses, against the full
-        ``Delta`` rather than its change: block-tridiagonal, one batched pass
-        over the whole pole set, no dense ``(n_dof, n_dof)`` per pole.
-        """
+        r"""``dz/dlambda`` for the anharmonic channel -- audit Eq. (10)."""
         if not sols:
             return []
         z = xp.asarray([complex(s.z) for s in sols], dtype=xp.complex128)
@@ -1453,33 +1164,13 @@ class PoleSector:
 class PoleQBatch:
     r"""One :math:`M(z)` assembly shared by several independent q.
 
-    A q-resolved device has one pole problem PER q -- ``M_q(z) = z^2 I - D(q) -
-    Sigma^R_q(z)`` -- and the sets are unrelated, so the driver keeps a
-    :class:`PoleSector` per q with its own tracker, promoted set and epoch
-    counter. What the q have in common is the SHAPE of the work: the same
-    block layout, the same frequency grid, the same number of Newton steps. So
-    the solve is shared even though nothing else is.
-
-    Batching within a q already removed the per-candidate Python loop. What is
-    left after that is a loop over q, and on a device like Si -- 81 q, three
-    6x6 blocks -- the per-q work is far too small to occupy a GPU: the whole
-    operator assembly is two GEMMs on matrices of a few hundred entries. This
-    class stacks the q, so the candidate axis the bordered Newton sees is
-    ``nq * n_probe`` and every kernel launch does ``nq`` times more work.
-
-    The candidate axis is FLATTENED rather than kept as ``(nq, P)``, so
-    :func:`~quatrex.phonon.pole_nevp.bordered_newton_batch` and
-    :mod:`~quatrex.phonon.btd_linalg` need no notion of q at all -- they see one
-    batch of independent operators, which is what they already handle.
-
-    Parameters
-    ----------
-    sectors : list[PoleSector]
-        The per-q sectors, each with its operator context already set. They
-        must share a frequency grid and a block layout; that is checked.
-    n_probe : int
-        Candidates per q. Shorter seed sets are padded by the caller.
-
+        Parameters
+        ----------
+        sectors : list[PoleSector]
+            The per-q sectors, each with its operator context already set. They
+            must share a frequency grid and a block layout; that is checked.
+        n_probe : int
+            Candidates per q. Shorter seed sets are padded by the caller.
     """
 
     def __init__(self, sectors: list["PoleSector"], n_probe: int):
@@ -1587,18 +1278,7 @@ class PoleQBatch:
 
 
 def _pad_seeds(seeded, n_probe: int):
-    """Pad every q's seed list to ``n_probe``, and say which slots are real.
-
-    Candidate counts differ per q: ``harmonic_seeds`` keeps only the modes
-    inside the pole window, and the predictor carries only the poles that
-    survived last iteration. The batch needs a rectangle.
-
-    Padding REPEATS a real seed rather than inventing one. A made-up ``z``
-    could sit on a pole of the operator, and the batched ``inv`` behind the BTD
-    factorisation raises for the whole batch if any single matrix is singular
-    -- so one meaningless slot would take out every q. A duplicate is
-    guaranteed to be as well conditioned as the seed it copies.
-    """
+    """Pad every q's seed list to ``n_probe``, and say which slots are real."""
     seeds, vectors, valid = [], [], []
     for sd, vec in seeded:
         n = len(sd)

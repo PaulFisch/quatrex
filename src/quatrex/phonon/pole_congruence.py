@@ -55,29 +55,23 @@ def apply_sparse(
 ) -> NDArray:
     r"""``out[w, i, a] = sum_j A[w, i, j] v[j, a]`` for ``A`` on the pattern.
 
-    The congruence needs two such applies per Keldysh component,
-    :math:`\Sigma V` and :math:`G^R (\Sigma V)`, and nothing else touches the
-    full operator. Done one pole-column at a time so the intermediate is the
-    size of the stored self-energy rather than ``N_p`` times it.
-
-    Parameters
-    ----------
-    values : NDArray
-        ``(n_omega, nnz)`` on the stored pattern.
-    rows, cols : NDArray
-        ``(nnz,)`` global indices.
-    v : NDArray
-        ``(n_dof, Np)`` dense columns, or ``(n_omega, n_dof, Np)`` when the
-        right-hand side is itself frequency dependent -- which it is for the
-        second apply, ``G^R_k (\Sigma V)``.
-    n_dof : int
-        Rows of the operator.
-    corners : tuple
-        ``(block, offset)`` pairs for operators held as dense corners rather
-        than on the pattern -- the lead self-energies. Omitting them drops the
-        injection that drives the device, and then ``G^R Sigma G^A`` is not
-        ``G^<`` at all.
-
+        Parameters
+        ----------
+        values : NDArray
+            ``(n_omega, nnz)`` on the stored pattern.
+        rows, cols : NDArray
+            ``(nnz,)`` global indices.
+        v : NDArray
+            ``(n_dof, Np)`` dense columns, or ``(n_omega, n_dof, Np)`` when the
+            right-hand side is itself frequency dependent -- which it is for the
+            second apply, ``G^R_k (\Sigma V)``.
+        n_dof : int
+            Rows of the operator.
+        corners : tuple
+            ``(block, offset)`` pairs for operators held as dense corners rather
+            than on the pattern -- the lead self-energies. Omitting them drops the
+            injection that drives the device, and then ``G^R Sigma G^A`` is not
+            ``G^<`` at all.
     """
     r, c = xp.asarray(rows), xp.asarray(cols)
     n_w, n_p = int(values.shape[0]), int(v.shape[-1])
@@ -112,40 +106,25 @@ def background_coefficients(
 ) -> tuple[NDArray, NDArray, NDArray]:
     r"""Coefficients of the three analytic sectors, per frequency.
 
-    The caller supplies the two contractions that need the full operator --
-    :math:`\Sigma V` and :math:`G^R_k \Sigma V`, each one sparse apply against
-    ``Np`` dense columns. Everything else is :math:`O(N_p^2)`.
+        Parameters
+        ----------
+        cluster : PoleCluster
+            Poles ``z``, right vectors ``u``, left vectors ``v``.
+        omega : NDArray
+            ``(n_omega,)`` cell centres.
+        sigma_v : NDArray
+            ``(n_omega, n_dof, Np)``, :math:`\Sigma V`.
+        g_sigma_v : NDArray
+            ``(n_omega, n_dof, Np)``, :math:`G^R(\omega_k) \Sigma V`.
 
-    ``B^R_k`` is never formed. It enters only through
-
-    .. math::
-        B^R_k \Sigma V = G^R_k \Sigma V - U D^R(\omega_k)\,[V^\dagger \Sigma V],
-
-    and the ``SR`` bracket follows from the ``RS`` one because
-    :math:`\Sigma^{\lessgtr\dagger} = -\Sigma^{\lessgtr}` -- which is exactly
-    the statement that :math:`-i\Sigma^{\lessgtr}` is Hermitian, the convention
-    this solver runs in.
-
-    Parameters
-    ----------
-    cluster : PoleCluster
-        Poles ``z``, right vectors ``u``, left vectors ``v``.
-    omega : NDArray
-        ``(n_omega,)`` cell centres.
-    sigma_v : NDArray
-        ``(n_omega, n_dof, Np)``, :math:`\Sigma V`.
-    g_sigma_v : NDArray
-        ``(n_omega, n_dof, Np)``, :math:`G^R(\omega_k) \Sigma V`.
-
-    Returns
-    -------
-    c_sr : NDArray
-        ``(n_omega, Np, n_dof)``, :math:`V^\dagger \Sigma B^A_k`.
-    c_rs : NDArray
-        ``(n_omega, n_dof, Np)``, :math:`B^R_k \Sigma V`.
-    c_ss : NDArray
-        ``(n_omega, Np, Np)``, :math:`V^\dagger \Sigma V`.
-
+        Returns
+        -------
+        c_sr : NDArray
+            ``(n_omega, Np, n_dof)``, :math:`V^\dagger \Sigma B^A_k`.
+        c_rs : NDArray
+            ``(n_omega, n_dof, Np)``, :math:`B^R_k \Sigma V`.
+        c_ss : NDArray
+            ``(n_omega, Np, Np)``, :math:`V^\dagger \Sigma V`.
     """
     z = xp.asarray(cluster.z)
     w = xp.asarray(omega, dtype=xp.complex128)
@@ -158,24 +137,7 @@ def background_coefficients(
 
 def _pattern_chunk(n_omega: int, n_p: int, nnz: int,
                    budget_bytes: int = 1 << 28) -> int:
-    r"""Pattern rows per chunk, sized so the working set fits ``budget_bytes``.
-
-    The natural way to write these contractions materialises
-    ``(n_omega, N_p, nnz)`` -- ``take(c_sr, cols, axis=2)`` and its ``c_rs``
-    partner. At the two poles the CNT bed promotes that is invisible; at a few
-    dozen it is hundreds of gigabytes, and raising the Newton budget on that
-    bed died with
-
-        OutOfMemoryError: allocating 290,488,467,456 bytes
-
-    so the route could never be asked to carry the pole count the physics
-    needs. Chunking over the pattern makes the peak
-    ``O(n_omega * N_p * chunk)`` with ``chunk`` set here rather than by the
-    device size.
-
-    The default budget is 256 MB of complex128, which keeps the chunk count in
-    the hundreds for a production pattern rather than the thousands.
-    """
+    r"""Pattern rows per chunk, sized so the working set fits ``budget_bytes``."""
     per = max(1, 16 * n_omega * max(n_p, 1))
     return int(max(1, min(nnz, budget_bytes // per)))
 
@@ -271,24 +233,7 @@ def _h(a):
 def cell_weights(
     cluster: PoleCluster, omega: NDArray, h
 ) -> tuple[NDArray, NDArray]:
-    r"""Cell averages of the pole factors over ``[w_k - h/2, w_k + h/2]``.
-
-    .. math::
-        \langle D_a \rangle_k = \frac{1}{h}\big[
-            \mathrm{Log}(\omega_k + h/2 - z_a)
-          - \mathrm{Log}(\omega_k - h/2 - z_a)\big],
-
-    .. math::
-        \langle D_a \bar D_b \rangle_k =
-            \frac{\langle D_a\rangle_k - \overline{\langle D_b\rangle_k}}
-                 {z_a - \bar z_b},
-
-    the second by partial fractions. The poles sit off the real axis, so the
-    difference of Logs has no branch ambiguity: the ``2 pi i`` cancels.
-
-    Returns ``(d1, d2)`` of shapes ``(n_omega, Np)`` and
-    ``(n_omega, Np, Np)``.
-    """
+    r"""Cell averages of the pole factors over ``[w_k - h/2, w_k + h/2]``."""
     z = xp.asarray(cluster.z)
     w = xp.asarray(omega, dtype=xp.complex128)[:, None]
     # per-bin widths, because the frequency grid need not be uniform
@@ -349,50 +294,21 @@ def partial_fraction_legs(
 ) -> tuple[NDArray, NDArray, NDArray]:
     r"""Flatten the congruence into simple poles with rank-1 residues.
 
-    .. math::
-        \tilde G(\omega) - B^R \Sigma B^A
-            = \sum_p \frac{p_p\, q_p^{\mathsf T}}{\omega - \zeta_p},
-        \qquad p = 1 \dots 2N_p,
+        Parameters
+        ----------
+        cluster : PoleCluster
+        coefficients : tuple
+            ``(c_sr, c_rs, c_ss)`` of shapes ``(Np, n_dof)``, ``(n_dof, Np)`` and
+            ``(Np, Np)`` -- :func:`background_coefficients` output with the
+            frequency axis already reduced to the poles.
 
-    by partial-fractioning ``SS``'s double pole and collecting every term that
-    shares a pole. For :math:`\zeta_p = z_a` the row factor is :math:`u_a` and
-    everything else lands in the column factor; for :math:`\zeta_p = \bar z_b`
-    it is the other way round:
-
-    .. math::
-        q_a = c^{SR}_{a,:} + \sum_b \frac{c^{SS}_{ab}}{z_a - \bar z_b}\,
-              \bar u_b, \qquad
-        y_b = c^{RS}_{:,b} - \sum_a \frac{c^{SS}_{ab}}{z_a - \bar z_b}\, u_a .
-
-    This is what makes the analytic convolution affordable. A leg with an OPEN
-    (non-modal) index would force the cubic vertex to be re-contracted at every
-    frequency; here both families are fixed vectors, so the vertex is projected
-    onto them once per iteration exactly as it is onto ``U`` today, and the
-    bubble of two such legs is the existing pole-pole algebra over ``2 Np``
-    poles instead of ``Np``.
-
-    The coefficients must already be FROZEN -- one value per pole, not one per
-    cell -- for the families to be frequency independent. That is the same
-    approximation :func:`~quatrex.phonon.pole_bridge.source_at_poles` makes for
-    the source, and it is better justified here: the poles have been removed
-    from :math:`B^R` by construction, so it is the smooth part being sampled.
-
-    Parameters
-    ----------
-    cluster : PoleCluster
-    coefficients : tuple
-        ``(c_sr, c_rs, c_ss)`` of shapes ``(Np, n_dof)``, ``(n_dof, Np)`` and
-        ``(Np, Np)`` -- :func:`background_coefficients` output with the
-        frequency axis already reduced to the poles.
-
-    Returns
-    -------
-    zeta : NDArray
-        ``(2 Np,)`` poles, the first ``Np`` retarded and the rest their
-        conjugates.
-    p_row, q_col : NDArray
-        ``(n_dof, 2 Np)`` row and column families.
-
+        Returns
+        -------
+        zeta : NDArray
+            ``(2 Np,)`` poles, the first ``Np`` retarded and the rest their
+            conjugates.
+        p_row, q_col : NDArray
+            ``(n_dof, 2 Np)`` row and column families.
     """
     c_sr, c_rs, c_ss = (xp.asarray(a, dtype=xp.complex128)
                         for a in coefficients)
@@ -417,33 +333,19 @@ def partial_fraction_legs_percell(
 ) -> tuple[NDArray, NDArray, NDArray]:
     r"""":func:`partial_fraction_legs` keeping the per-cell frequency axis.
 
-    Same algebra, one leading axis. The global route reduces
-    :func:`background_coefficients`' output to the poles and gets ONE flattened
-    leg for the whole axis; the local route
-    (:mod:`quatrex.phonon.pole_local`) needs the leg frozen at each cell it
-    corrects, which is what those coefficients already are before that
-    reduction. Nothing new is computed here -- the frequency axis is simply not
-    thrown away.
+        Parameters
+        ----------
+        cluster : PoleCluster
+        coefficients : tuple
+            ``(c_sr, c_rs, c_ss)`` of shapes ``(M, Np, n_dof)``,
+            ``(M, n_dof, Np)`` and ``(M, Np, Np)``.
 
-    Restrict ``coefficients`` to the pole cells before calling. The families
-    are frequency dependent now, so the cubic vertex must be projected once per
-    cell rather than once per iteration, and that is affordable only because
-    the pole cells are few.
-
-    Parameters
-    ----------
-    cluster : PoleCluster
-    coefficients : tuple
-        ``(c_sr, c_rs, c_ss)`` of shapes ``(M, Np, n_dof)``,
-        ``(M, n_dof, Np)`` and ``(M, Np, Np)``.
-
-    Returns
-    -------
-    zeta : NDArray
-        ``(2 Np,)`` -- cell independent, the poles do not move.
-    p_row, q_col : NDArray
-        ``(M, n_dof, 2 Np)``.
-
+        Returns
+        -------
+        zeta : NDArray
+            ``(2 Np,)`` -- cell independent, the poles do not move.
+        p_row, q_col : NDArray
+            ``(M, n_dof, 2 Np)``.
     """
     c_sr, c_rs, c_ss = (xp.asarray(a, dtype=xp.complex128)
                         for a in coefficients)
@@ -507,29 +409,7 @@ def pf_self_energy(
     cell=None,
     chunk: int = 1 << 17,
 ) -> NDArray:
-    r"""Analytic bubble of two partial-fraction legs, on the stored pattern.
-
-    .. math::
-        \Sigma(\omega)_{\mu\nu} = \mathcal{P} \sum_{pq}
-            \bar\Phi^{L}_{\mu, pq}\, \bar\Phi^{R}_{\nu, qp}\,
-            \int\!\frac{d\omega'}{2\pi}
-            \frac{1}{\omega' - \zeta_p}\,\frac{1}{\omega-\omega' - \zeta_q}
-
-    -- the same algebra as the pole-pole sector, over ``2 Np`` simple poles
-    with unit coefficients instead of ``Np`` poles carrying a source matrix.
-    The residue coefficients live in the vertex projections, because the
-    residues are rank one: ``vl`` is the cubic vertex projected onto the ROW
-    family and ``vr`` onto the COLUMN family, each through
-    :func:`~quatrex.phonon.pole_bridge.modal_vertex_blocks`.
-
-    ``retarded_only`` keeps the pairings of two poles in the lower half plane,
-    whose combined pole ``zeta_p + zeta_q`` also lies there. That is the causal
-    part in closed form, with no Hilbert transform.
-
-    Chunked over the pattern: ``vl[rows]`` is ``(nnz, 2Np, 2Np)``, four times
-    the pole-pole sector's footprint, and at ``max_poles = 16`` that is 1024
-    complex numbers per stored entry.
-    """
+    r"""Analytic bubble of two partial-fraction legs, on the stored pattern."""
     from quatrex.phonon.pole_bridge import analytic_prefactor
     from quatrex.phonon.pole_bubble import pair_convolution
 
@@ -565,21 +445,7 @@ def pf_mixed_self_energy(
     cols: NDArray,
     prefactor: complex | None = None,
 ) -> NDArray:
-    r"""``Sigma_SR + Sigma_RS`` for a partial-fraction leg.
-
-    The same block triple product as
-    :func:`~quatrex.phonon.pole_bridge.mixed_self_energy_blocked`, with one
-    change: the pole leg's row and column modes are no longer independent
-    indices :math:`(\alpha, \delta)` over a single family, but a single index
-    :math:`p` over TWO families, because every residue here is rank one. The
-    double loop over ``(Np, Np)`` therefore collapses to a single loop over
-    ``2 Np``, and the vertex is projected onto ``p_row`` on the left and
-    ``q_col`` on the right rather than onto ``u`` and ``conj(u)``.
-
-    ``q_col`` already carries whatever conjugation each pole needs -- ``conj u``
-    at :math:`\bar z_b`, the ``SR`` bracket at :math:`z_a` -- so both
-    projections are taken unconjugated.
-    """
+    r"""``Sigma_SR + Sigma_RS`` for a partial-fraction leg."""
     from quatrex.phonon.pole_audit import transpose_index
     from quatrex.phonon.pole_bridge import (
         analytic_prefactor, block_offsets, blocks_from_pattern,
@@ -643,21 +509,7 @@ def coefficients_at_poles(
     order: int = 2,
     window: int = 4,
 ) -> tuple[NDArray, NDArray, NDArray]:
-    r"""Freeze the sector coefficients at their own poles.
-
-    The partial-fraction families are only frequency independent if the
-    coefficients are, so they must be continued off the real axis exactly as
-    the projected source is. ``c_ss`` goes through
-    :func:`~quatrex.phonon.pole_bridge.source_at_poles`, which shares one value
-    between the two residues of a pair -- that is what keeps ``c_a + c_b = 0``
-    and the pole-pole leg decaying like ``1/w^2``.
-
-    ``c_sr`` and ``c_rs`` have no pair structure: each belongs to a SINGLE
-    pole, ``c_sr[a]`` to ``z_a`` and ``c_rs[:, b]`` to ``conj(z_b)``, so each
-    is evaluated at its own. Their asymptotics are governed instead by
-    ``sum_a u_a v_a^H = 0``, the sum rule the bosonically closed pole set
-    satisfies, and :func:`residue_sum` is what measures it.
-    """
+    r"""Freeze the sector coefficients at their own poles."""
     from quatrex.phonon.pole_bridge import source_at_poles
     from quatrex.phonon.pole_kernel import delta_local_fit
 
@@ -724,27 +576,7 @@ def remainder_resolution(
     values: NDArray, frozen: NDArray, freqs: NDArray, cluster: PoleCluster,
     order: int = 2, window: int = 4, refine: int = 16,
 ) -> float:
-    r"""``eps_reg,int`` -- is the REGULARIZED remainder carried by the grid?
-
-    This replaces the coefficient-variation gate, which asked the wrong
-    question. For :math:`F = c(\omega)/(\omega - z)` with locally analytic
-    ``c``, the principal part is exactly :math:`c(z)/(\omega - z)` and
-
-    .. math::
-        F(\omega) - \frac{c(z)}{\omega - z}
-            = \frac{c(\omega) - c(z)}{\omega - z}
-
-    has a REMOVABLE singularity, tending to :math:`c'(z)`. So ``c`` varying
-    across the pole window is not an error and not grounds for refusing the
-    pole -- the variation lands in a regular function, and the only question is
-    whether the grid can integrate that function. Measuring the variation
-    instead (the retired ``coefficient_variation``) reported 0.908 on a bed
-    where nothing was wrong with the principal-part split.
-
-    Measured as doc Eq. 37: the grid's own midpoint rule over the pole's
-    window against a ``refine``-times denser quadrature of the same interval,
-    both applied to the local model of the remainder.
-    """
+    r"""``eps_reg,int`` -- is the REGULARIZED remainder carried by the grid?"""
     from quatrex.phonon.pole_kernel import delta_local_fit
 
     w = np.asarray(_h(freqs), dtype=float)

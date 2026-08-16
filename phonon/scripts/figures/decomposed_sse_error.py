@@ -1,8 +1,9 @@
-"""Rank-truncation error of the decomposed SSE (fig:res_decomp_error,
-fig:res_decomp_amp).
+"""Rank-truncation error of the decomposed SSE (fig:res_decomp_error, fig:res_decomp_amp).
 
 Data:
-  phonon/scripts/data/decomposed_sse.csv (the L3 accuracy campaign).
+  one-shot numbers are literals from phonon/studies/_rank_error_sse.py
+        (scratch rank_err.log); the self-consistent ones from
+        phonon/scripts/data/decomposed_sse.csv (the L3 accuracy campaign).
 
 Run:  python phonon/scripts/figures/decomposed_sse_error.py
 """

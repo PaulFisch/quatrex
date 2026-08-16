@@ -1,7 +1,8 @@
 """Local (bond) vs Meir-Wingreen heat current: the continuity identity figure.
 
 Data:
-  Data: phonon/studies/out/local_mw/{L3_eta0,L3_eta07}/run.npz (launch recipe
+  phonon/studies/out/local_mw/{L3_eta0,L3_eta07}/run.npz (launch recipe
+  in phonon/scripts/verify/local_vs_mw_current.py).
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/local_vs_mw_current.py
 """

@@ -1,11 +1,15 @@
 """MoS2 force-constant fit audit (fig:res_mos2_fits).
 
 Data:
-  phonon/scripts/data/mos2_refit_results_56.json  original 56-structure set
-  phonon/scripts/data/mos2_refit_results_80.json  +2 VASP batches (80)
-  phonon/scripts/data/mos2_scp_results.json       o3-vs-o4 CV + SCP gates
+  Data (committed copies of the campaign result files):
+    phonon/scripts/data/mos2_refit_results_56.json  original 56-structure set
+    phonon/scripts/data/mos2_refit_results_80.json  +2 VASP batches (80)
+    phonon/scripts/data/mos2_scp_results.json       o3-vs-o4 CV + SCP gates
   originals in cluster/mos2_refit{,80}/refit_results.json and
   cluster/mos2_scp300v2/scp_results.json (gitignored run dirs). The
+  cross_frob entries are Frobenius norms of the device FC3 blocks whose
+  anchor and partner atoms lie in different slabs (the vdW-gap
+  couplings); cross_frob_folds_* are their spread over k-fold refits.
 
 Run:  python phonon/scripts/figures/mos2_fit_audit.py
 """

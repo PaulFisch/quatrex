@@ -1,8 +1,12 @@
 """Energy-grid resolution at eta=0 (fig:res_grid_comb, fig:res_grid_lottery).
 
 Data:
-  Data: phonon/scripts/data/grid_aliasing.npz (distilled by
+  phonon/scripts/data/grid_aliasing.npz (distilled by
   _extract_grid_aliasing.py). All currents integral-convention
+  (uniform sums multiplied by dw). d5a ladder context printed: both
+  uniform legs (nf=181, 721) diverge -- density alone does not converge
+  d5a; its eta=0 record needs the guarded Anderson scheme
+  (sec:res_campaign).
 
 Run:  python phonon/scripts/figures/energy_grid_aliasing.py
 """

@@ -1,8 +1,10 @@
 """Resonance / loop-gain verification figures (thesis eq:resolvent_gain).
 
 Data:
-  Data: phonon/scripts/data/resonance_gain_distilled.npz (committed-size
+  phonon/scripts/data/resonance_gain_distilled.npz (committed-size
+  distillate). Regenerate from the full study output
   (phonon/studies/out/resonance_gain/<state>.npz, produced on tortin by
+  phonon/studies/_resonance_gain_study.py) with --distill.
 
 Run:  python phonon/scripts/figures/resonance_gain.py [--distill]
 """

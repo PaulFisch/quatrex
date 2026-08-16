@@ -2,7 +2,17 @@
 inversion, and distributed energy-parallel speedup.
 
 Data:
-  guides.  Data: phonon/scripts/out/rgf_vs_dense_scaling.csv.
+  Left panel : selected-inversion wall time vs number of transport-cell blocks
+               (fixed 192-dof block) -- RGF linear, dense cubic, with slope
+               guides.  Data: phonon/scripts/out/rgf_vs_dense_scaling.csv.
+  Right panel: distributed energy-parallel speedup vs MPI ranks with the ideal
+               slope-1 guide.
+               PROVENANCE: the wall times are literals from the retired
+               dist_scaling.py run (N=1536 phonon-Dyson problem, 128 energy
+               points; ranks 1/2/4/8 -> 2.053/1.108/0.722/0.384 s), carried
+               here verbatim because that benchmark script no longer exists.
+               NB the report body quotes 1.55->0.28 s (a different run of the
+               same benchmark); both give the same ~5.3-5.5x at 8 ranks.
 
 Run:  python phonon/scripts/figures/solver_scaling.py
 Figure -> document/fig/transport_sweeps/solver_scaling.{png,pdf}

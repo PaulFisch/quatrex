@@ -1,7 +1,9 @@
 """Physicality audit of the eta=0 phonon transmission curve (cnt33 L2).
 
 Data:
-  cnt33 eta=0:  phonon/scripts/out/prod/cnt33_eta0/L2_{ball,anh}.npz  (current_spectrum)
+  Reads ONLY saved data:
+    cnt33 eta=0:  phonon/scripts/out/prod/cnt33_eta0/L2_{ball,anh}.npz  (current_spectrum)
+    dispersion :  phonon/scripts/out/prod/geom/cnt33_L2/dynamical_matrix.mat  (H0,H1 blocks)
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/transmission_physicality.py
 Figure -> document/fig/transport_sweeps/eta0_cnt33_transmission_physicality.{pdf,png}

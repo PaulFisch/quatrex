@@ -1,8 +1,10 @@
 """CNT observables atlas: every transport observable across the length ladder.
 
 Data:
-  Data: phonon/studies/out/cnt33_gband_length (L8/L10 x g1,g2,g3,g1t; full
+  phonon/studies/out/cnt33_gband_length (L8/L10 x g1,g2,g3,g1t; full
   conservation keys), phonon/studies/out/cnt33_long_gband3 (L16/L24/L32),
+  phonon/scripts/out/prod/cnt33_eta0 (L2-L4 + T-sweep anh/ball pairs),
+  units_parity ballistic reference.
 
 Output: phonon/studies/out/fig/cnt33_atlas/ (png+pdf via style.save).
 Run:  python phonon/scripts/figures/cnt33_observables_atlas.py

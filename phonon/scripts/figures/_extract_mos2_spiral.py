@@ -3,9 +3,39 @@
 Data:
   Reduces the uncommitted cluster/ artifacts of the film campaign to
   phonon/scripts/data/mos2_spiral.npz for the mos2_spiral.py generator.
+
+  VERTEX PROVENANCE (established 2026-08-03, the decisive fact for how
   these series may be read): the early cluster/mos2f3 and mos2f3nu
-  record (cluster/mos2f3long, job 4318325: SCP(300 K)
+  builds were materialised from the ARDR-era film reap, whose vdW-gap
+  FC3 is exact zero -- their device vertex holds ONLY the three
+  slab-diagonal blocks (build_device_fc3_blocks drops hard-zero
+  blocks), i.e. NO cross-slab three-phonon coupling. The mos2f3scp and
+  mos2f3o4 builds (and every mos2film_L*_nk5_* build) carry the full
+  15-block vertex with 12 cross-slab blocks. Runs on the broken build
+  are therefore probes of a DIFFERENT physical model (intra-slab-only
+  anharmonicity) -- kept here as the vertex-ablation control, not as
+  stabiliser evidence.
+
+  res_long        (94, 3) rel Sigma^R residual, lead balance,
+                  internal spread per iteration of the 95-iteration
+                  record (cluster/mos2f3long, job 4318325: SCP(300 K)
+                  fc2, FULL vertex, eta=0, linear 0.1, nu grid)
+  heat_long       (95, 5, 5) per-iteration heat matrix (rank-summed)
+  sigmax_long     (95, 67) per-iteration max|Sigma^<| on rank 0's
+                  low-frequency energy slice
+  energies_lo     (67,) those energies (THz)
+
+  BROKEN-vertex (diagonal-only) probes -- the ablation control:
   res_abl_a/b/c   three 55-it probes on cluster/mos2f3 (jobs
+                  4315556/4315564/4315592; per-run env overrides not
+                  preserved; c descends monotonically to 0.087 and
+                  was cut by the iteration cap)
+  res_abl_floor   annealed eta_ir floor ramp on the same broken
+                  build (4315641)
+  res_abl_cont    the 2026-08-03 continuation (mos2f3-b2cont, job
+                  4322408, current code, same broken build: descends
+                  to 0.646 then diverges at 66 -- the ablated model
+                  is gentler, not stable)
 
 Run:  python phonon/scripts/figures/_extract_mos2_spiral.py
 """

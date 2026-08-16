@@ -1,8 +1,9 @@
-"""Anharmonic vs harmonic transport with the decomposed vertex
-(fig:res_decomp_harmonic).
+"""Anharmonic vs harmonic transport with the decomposed vertex (fig:res_decomp_harmonic).
 
 Data:
-  Data: phonon/scripts/data/decomposed_sse_spectra.npz (harmonic leg = `ball`,
+  phonon/scripts/data/decomposed_sse_spectra.npz (harmonic leg = `ball`,
+        produced with QX_BALLISTIC=1, which zeroes the vertex in place and keeps
+        the leads/OBC/Meir-Wingreen machinery identical).
 
 Run:  python phonon/scripts/figures/decomposed_sse_harmonic.py
 """

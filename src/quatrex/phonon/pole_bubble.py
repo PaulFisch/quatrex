@@ -33,68 +33,67 @@ def pair_convolution(
 ) -> NDArray:
     r"""Elementary convolution :math:`J(p,q;\omega)` of two simple poles.
 
-    Parameters
-    ----------
-    p, q : NDArray
-        Pole locations, broadcastable against each other.
-    omega : NDArray
-        ``(n_omega,)`` real frequencies; prepended as a leading axis.
+        Parameters
+        ----------
+        p, q : NDArray
+            Pole locations, broadcastable against each other.
+        omega : NDArray
+            ``(n_omega,)`` real frequencies; prepended as a leading axis.
 
-    window : tuple, optional
-        ``(a, b)``: integrate over ``[a, b]`` instead of the whole axis,
+        window : tuple, optional
+            ``(a, b)``: integrate over ``[a, b]`` instead of the whole axis,
 
-        .. math::
-            J_{[a,b]} = \frac{\log(b-p) - \log(a-p)
-                              - \log(\omega-b-q) + \log(\omega-a-q)}
-                             {2\pi\,(\omega - p - q)} .
+            .. math::
+                J_{[a,b]} = \frac{\log(b-p) - \log(a-p)
+                                  - \log(\omega-b-q) + \log(\omega-a-q)}
+                                 {2\pi\,(\omega - p - q)} .
 
-        This is the production kernel of the LOCAL route
-        (:mod:`quatrex.phonon.pole_local`), where ``[a, b]`` is one grid cell
-        and the result replaces what the ring's rectangle rule put there.
-        Verified against dense composite Gauss-Legendre on one cell, pole cell
-        against a smooth partner, as relative error of the pair contribution:
+            This is the production kernel of the LOCAL route
+            (:mod:`quatrex.phonon.pole_local`), where ``[a, b]`` is one grid cell
+            and the result replaces what the ring's rectangle rule put there.
+            Verified against dense composite Gauss-Legendre on one cell, pole cell
+            against a smooth partner, as relative error of the pair contribution:
 
-        ======== ============ ================ ==========
-        gamma/h  rectangle    cell-avg product  this
-        ======== ============ ================ ==========
-        0.400    5.14e-01     3.29e-01          2.5e-18
-        0.100    1.77e+00     5.29e-01          4.7e-16
-        0.020    9.41e+00     6.06e-01          1.8e-16
-        0.005    3.82e+01     6.21e-01          2.2e-16
-        0.001    1.92e+02     6.26e-01          2.2e-16
-        ======== ============ ================ ==========
+            ======== ============ ================ ==========
+            gamma/h  rectangle    cell-avg product  this
+            ======== ============ ================ ==========
+            0.400    5.14e-01     3.29e-01          2.5e-18
+            0.100    1.77e+00     5.29e-01          4.7e-16
+            0.020    9.41e+00     6.06e-01          1.8e-16
+            0.005    3.82e+01     6.21e-01          2.2e-16
+            0.001    1.92e+02     6.26e-01          2.2e-16
+            ======== ============ ================ ==========
 
-        The rectangle rule diverges as ``1/gamma`` and the product of cell
-        averages saturates at an O(1) error (the missing piece is the subcell
-        covariance); this form is exact at every width. Moving the pole from
-        cell centre to edge at ``gamma/h = 0.02`` swings the rectangle error
-        9.41 -> 0.27 -- the registration lottery -- while this stays at 1e-16.
+            The rectangle rule diverges as ``1/gamma`` and the product of cell
+            averages saturates at an O(1) error (the missing piece is the subcell
+            covariance); this form is exact at every width. Moving the pole from
+            cell centre to edge at ``gamma/h = 0.02`` swings the rectangle error
+            9.41 -> 0.27 -- the registration lottery -- while this stays at 1e-16.
 
-        Note that ALL FOUR half-plane pairings are kept here. The mixed ones
-        vanish only under whole-axis contour closure; on a finite interval
-        they are a genuine part of the integral, and the residue form's zero
-        is what would be wrong.
+            Note that ALL FOUR half-plane pairings are kept here. The mixed ones
+            vanish only under whole-axis contour closure; on a finite interval
+            they are a genuine part of the integral, and the residue form's zero
+            is what would be wrong.
 
-        As a GLOBAL replacement for the residue form it is instead a
-        diagnostic, measuring the cost of the four sectors not acting on one
-        common function: the residue form integrates the analytic leg over the
-        whole axis while the mixed sectors and the ring only ever see the
-        stored window. On a CNT-shaped pole pair (``z = 3 - 0.1i``,
-        ``5 - 0.2i``, ``omega = 7``), truncating at ``+-100`` moves a
-        same-half-plane pairing by 3.3e-03 relative and gives the
-        opposite-half-plane pairing -- which the residue form sets to exactly
-        zero -- a magnitude 3.3e-03 of it; at ``+-60`` both are 5.5e-03. So
-        that inconsistency is a sub-percent effect at a realistic window, and
-        it is NOT what makes the analytic route diverge.
+            As a GLOBAL replacement for the residue form it is instead a
+            diagnostic, measuring the cost of the four sectors not acting on one
+            common function: the residue form integrates the analytic leg over the
+            whole axis while the mixed sectors and the ring only ever see the
+            stored window. On a CNT-shaped pole pair (``z = 3 - 0.1i``,
+            ``5 - 0.2i``, ``omega = 7``), truncating at ``+-100`` moves a
+            same-half-plane pairing by 3.3e-03 relative and gives the
+            opposite-half-plane pairing -- which the residue form sets to exactly
+            zero -- a magnitude 3.3e-03 of it; at ``+-60`` both are 5.5e-03. So
+            that inconsistency is a sub-percent effect at a realistic window, and
+            it is NOT what makes the analytic route diverge.
 
-        Mutually exclusive with ``cell`` -- the cell average of the log form
-        has no elementary antiderivative.
+            Mutually exclusive with ``cell`` -- the cell average of the log form
+            has no elementary antiderivative.
 
-    Returns
-    -------
-    NDArray
-        ``(n_omega,) + broadcast(p, q).shape``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega,) + broadcast(p, q).shape``.
     """
     if window is not None and cell:
         raise ValueError(
@@ -174,32 +173,27 @@ def leg_partial_fractions(
 ) -> tuple[NDArray, NDArray]:
     r"""Split every modal leg into two simple poles.
 
-    :math:`F_{\alpha\beta} = S_{\alpha\beta}/((\omega-z_\alpha)(\omega-z_\beta^*))
-    = c/(\omega-z_\alpha) - c/(\omega-z_\beta^*)` with
-    :math:`c = S_{\alpha\beta}/(z_\alpha - z_\beta^*)`.
+        Parameters
+        ----------
+        cluster : PoleCluster
+        source : NDArray
+            ``(Np, Np)`` frozen projected source (doc Eq. 91).
 
-    Parameters
-    ----------
-    cluster : PoleCluster
-    source : NDArray
-        ``(Np, Np)`` frozen projected source (doc Eq. 91).
+        Returns
+        -------
+        poles : NDArray
+            ``(Np, Np, 2)`` -- ``[..., 0]`` is ``z_alpha`` (lower half plane),
+            ``[..., 1]`` is ``conj(z_beta)`` (upper).
+        coeffs : NDArray
+            ``(Np, Np, 2)`` matching coefficients ``(+c, -c)``.
 
-    Returns
-    -------
-    poles : NDArray
-        ``(Np, Np, 2)`` -- ``[..., 0]`` is ``z_alpha`` (lower half plane),
-        ``[..., 1]`` is ``conj(z_beta)`` (upper).
-    coeffs : NDArray
-        ``(Np, Np, 2)`` matching coefficients ``(+c, -c)``.
-
-    Raises
-    ------
-    ValueError
-        If a pole coincides with a partner's conjugate, where the simple-pole
-        split is undefined and a higher-order principal part is needed. The
-        design note calls for a cluster/rational fallback there rather than a
-        scalar pole label.
-
+        Raises
+        ------
+        ValueError
+            If a pole coincides with a partner's conjugate, where the simple-pole
+            split is undefined and a higher-order principal part is needed. The
+            design note calls for a cluster/rational fallback there rather than a
+            scalar pole label.
     """
     z = cluster.z
     s = xp.asarray(source, dtype=xp.complex128)
@@ -299,31 +293,25 @@ def modal_convolution(
 ) -> NDArray:
     r"""The four-index modal convolution of doc Eq. (117).
 
-    .. math::
-        C_{\alpha\delta\beta\gamma}(\omega)
-          = \int\!\frac{d\omega'}{2\pi}
-            F^{(a)}_{\alpha\delta}(\omega')\,F^{(b)}_{\beta\gamma}(\omega-\omega')
+        Parameters
+        ----------
+        omega : NDArray
+            ``(n_omega,)`` real frequencies.
+        cluster : PoleCluster
+        source_a, source_b : NDArray
+            ``(Np, Np)`` frozen sources of the two legs.
+        retarded_only : bool, optional
+            Keep only the pairings of two RETARDED poles. Those are exactly the
+            terms whose combined pole ``p + q`` lands in the lower half plane, so
+            this returns the causal part of the pole sum -- i.e. the Kramers-Kronig
+            partner of the full result, in closed form and with no Hilbert
+            transform. See :func:`retarded_from_pole_sum` for the same statement in
+            its general form. Default ``False``.
 
-    Parameters
-    ----------
-    omega : NDArray
-        ``(n_omega,)`` real frequencies.
-    cluster : PoleCluster
-    source_a, source_b : NDArray
-        ``(Np, Np)`` frozen sources of the two legs.
-    retarded_only : bool, optional
-        Keep only the pairings of two RETARDED poles. Those are exactly the
-        terms whose combined pole ``p + q`` lands in the lower half plane, so
-        this returns the causal part of the pole sum -- i.e. the Kramers-Kronig
-        partner of the full result, in closed form and with no Hilbert
-        transform. See :func:`retarded_from_pole_sum` for the same statement in
-        its general form. Default ``False``.
-
-    Returns
-    -------
-    NDArray
-        ``(n_omega, Np, Np, Np, Np)`` indexed ``[w, alpha, delta, beta, gamma]``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega, Np, Np, Np, Np)`` indexed ``[w, alpha, delta, beta, gamma]``.
     """
     pa, ca = _split_leg(cluster, source_a)             # (Np,Np,2)
     pb, cb = _split_leg(cluster, source_b)
@@ -347,20 +335,17 @@ def modal_convolution(
 def modal_vertex(phi: NDArray, u: NDArray) -> NDArray:
     r"""Project the cubic vertex onto the modal basis, doc Eq. (116).
 
-    .. math:: \bar\Phi_{\mu,\alpha\beta} = \sum_{ab}\Phi_{\mu ab}u_{a\alpha}u_{b\beta}
+        Parameters
+        ----------
+        phi : NDArray
+            ``(n_dof, n_dof, n_dof)`` cubic vertex.
+        u : NDArray
+            ``(n_dof, Np)`` right modal vectors.
 
-    Parameters
-    ----------
-    phi : NDArray
-        ``(n_dof, n_dof, n_dof)`` cubic vertex.
-    u : NDArray
-        ``(n_dof, Np)`` right modal vectors.
-
-    Returns
-    -------
-    NDArray
-        ``(n_dof, Np, Np)``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_dof, Np, Np)``.
     """
     return xp.einsum("mab,aA,bB->mAB", phi, u, u)
 
@@ -376,34 +361,27 @@ def ss_self_energy(
 ) -> NDArray:
     r"""Pole-pole self-energy :math:`\Sigma_{SS}(\omega)`, doc Eq. (117).
 
-    The index placement mirrors the production ring
-    (``phonon/docs/bubble_positivity.md`` Sec. 1): the second vertex is
-    contracted with its leg pair **transposed**, ``Phi_R[J, d, b]``, which is the
-    ordering that makes the contraction a congruence and carries the positivity
-    statement. Passing the vertices in any other order silently destroys it.
+        Parameters
+        ----------
+        omega : NDArray
+            ``(n_omega,)`` real frequencies.
+        cluster : PoleCluster
+        source_a, source_b : NDArray
+            ``(Np, Np)`` frozen projected sources of the two internal lines.
+        phi_left : NDArray
+            ``(n_dof, n_dof, n_dof)`` -- ``Phi_L[a, c, e]``.
+        phi_right : NDArray
+            ``(n_dof, n_dof, n_dof)`` -- ``Phi_R[J, d, b]``.
+        prefactor : complex
+            The bubble prefactor, ``i*hbar/2`` in the doc's normalisation; the
+            production value is :func:`quatrex.phonon.units.bubble_prefactor_thz`
+            divided by the grid spacing it carries (no ``dw`` here -- this term
+            never touches a quadrature).
 
-    Parameters
-    ----------
-    omega : NDArray
-        ``(n_omega,)`` real frequencies.
-    cluster : PoleCluster
-    source_a, source_b : NDArray
-        ``(Np, Np)`` frozen projected sources of the two internal lines.
-    phi_left : NDArray
-        ``(n_dof, n_dof, n_dof)`` -- ``Phi_L[a, c, e]``.
-    phi_right : NDArray
-        ``(n_dof, n_dof, n_dof)`` -- ``Phi_R[J, d, b]``.
-    prefactor : complex
-        The bubble prefactor, ``i*hbar/2`` in the doc's normalisation; the
-        production value is :func:`quatrex.phonon.units.bubble_prefactor_thz`
-        divided by the grid spacing it carries (no ``dw`` here -- this term
-        never touches a quadrature).
-
-    Returns
-    -------
-    NDArray
-        ``(n_omega, n_dof, n_dof)``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega, n_dof, n_dof)``.
     """
     u = cluster.u
     vl = xp.einsum("ace,cA,eB->aAB", phi_left, u, u)
@@ -415,33 +393,22 @@ def ss_self_energy(
 def retarded_from_pole_sum(
     omega: NDArray, poles: NDArray, coeffs: NDArray
 ) -> NDArray:
-    r"""Causal retarded partner of a self-energy given as a sum of simple poles.
+    r"""Causal retarded partner of a self-energy given as a sum of simple
+    poles.
 
-    For :math:`\Delta(\omega) = \sum_j c_j/(\omega-p_j)`,
+        Parameters
+        ----------
+        omega : NDArray
+            ``(n_omega,)`` real frequencies.
+        poles : NDArray
+            ``(...,)`` pole locations.
+        coeffs : NDArray
+            ``(...,)`` matching coefficients, broadcastable with ``poles``.
 
-    .. math:: \Sigma^R(\omega) = \sum_{j:\ \operatorname{Im}p_j<0}
-              \frac{c_j}{\omega-p_j},
-
-    obtained by closing the Kramers-Kronig contour. The upper-half-plane poles
-    of :math:`\Delta` drop out entirely. This replaces the numerical Hilbert
-    transform for the analytic sector (doc Sec. 36) -- passing an analytic pole
-    term through the discrete transform would both cost resolution and
-    reintroduce the grid dependence the sector exists to remove.
-
-    Parameters
-    ----------
-    omega : NDArray
-        ``(n_omega,)`` real frequencies.
-    poles : NDArray
-        ``(...,)`` pole locations.
-    coeffs : NDArray
-        ``(...,)`` matching coefficients, broadcastable with ``poles``.
-
-    Returns
-    -------
-    NDArray
-        ``(n_omega,) + poles.shape``.
-
+        Returns
+        -------
+        NDArray
+            ``(n_omega,) + poles.shape``.
     """
     p = xp.asarray(poles, dtype=xp.complex128)
     c = xp.asarray(coeffs, dtype=xp.complex128)
@@ -453,28 +420,14 @@ def retarded_from_pole_sum(
 def bosonic_closure(cluster: PoleCluster) -> PoleCluster:
     r"""Close a pole set under the bosonic partner map :math:`z \mapsto -z^*`.
 
-    Retarded bosonic symmetry pairs every positive-frequency resonance with a
-    negative-frequency partner. The bubble's fold
-    :math:`\Sigma^<_{ij}(q,-\omega) = \Sigma^>_{ji}(-q,\omega)` only holds if the
-    pole set used to build the legs is closed under that map, so this must be
-    applied before the sector is contracted.
+        Parameters
+        ----------
+        cluster : PoleCluster
 
-    The residue transformation is *not* a sign flip on the real part: it carries
-    the conjugation inherited from :math:`G^R(-\omega) \leftrightarrow G^R(\omega)^*`
-    (doc Sec. 3.2 warns about exactly this). For a real dynamical matrix at the
-    Gamma point that is ``r -> conj(r)``, ``l -> conj(l)``; a q-resolved caller
-    must additionally negate the transverse momentum, which is why this helper
-    refuses to guess and takes the Gamma-only case only.
-
-    Parameters
-    ----------
-    cluster : PoleCluster
-
-    Returns
-    -------
-    PoleCluster
-        With ``2 Np`` poles: the originals followed by their partners.
-
+        Returns
+        -------
+        PoleCluster
+            With ``2 Np`` poles: the originals followed by their partners.
     """
     z = xp.concatenate([cluster.z, -xp.conj(cluster.z)])
     u = xp.concatenate([cluster.u, xp.conj(cluster.u)], axis=1)

@@ -1,8 +1,23 @@
-"""Production-scaling figures for results/90_scaling.tex (consolidated).
+"""Production-scaling figures for results/70_cost.tex (consolidated).
 
 Data:
-  phonon/scripts/data/prod_scaling_results.csv (restored from
-  prod/scaling_results.csv at commit 843c3069^; measured on the 256-core node,
+  Data provenance
+  ---------------
+  * phph_scaling: wall times measured by the retired verify/phph_dist_scaling.py
+    (NBLK=6, BS=16, NE=96); literals recovered from
+    verify/plot_phph_scaling.py at commit 843c3069^.
+  * phph_q_scaling: wall times measured by the retired verify/phph_q_dist_scaling.py
+    (4x4 transverse mesh) and the F22 replicated-stack measurement; literals
+    recovered from verify/plot_qresolved.py at commit 843c3069^.
+  * prod_phph_scaling: bubble wall times read from
+    phonon/scripts/data/prod_scaling_results.csv (restored from
+    prod/scaling_results.csv at commit 843c3069^; measured on the 256-core node,
+    1 thread/rank, --bind-to core). The per-phase profile literals are from the
+    same campaign (CNT(3,3) L=4 single-rank SCBA iteration), recovered from
+    prod/scaling_results.py at commit 843c3069^.
+  * phph_memory: analytic O(N_q^2 n_dof^3) / O(N_q n_dof^2 dim_t + n_dof^3) curves;
+    the measured point is a tracemalloc run of the dense-vs-streamed Phi build
+    executed by this script (deterministic rng seed 0).
 
 Run:  python phonon/scripts/figures/phph_scaling_figs.py
 """

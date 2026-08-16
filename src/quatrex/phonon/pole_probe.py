@@ -74,25 +74,24 @@ def nnz_to_blocks(
 ) -> dict[tuple[int, int], NDArray]:
     """Scatter a sparse value vector into dense block-tridiagonal blocks.
 
-    Parameters
-    ----------
-    values : NDArray
-        ``(..., nnz)`` values on the stored pattern.
-    rows, cols : NDArray
-        ``(nnz,)`` global row and column indices.
-    block_sizes : NDArray
-        Block partition.
-    band : int, optional
-        Widest block offset to materialise. Default 1 (block-tridiagonal), which
-        is all the Dyson operator ever needs: the scattering self-energy output
-        band is pinned at ``|I-J| <= 1``.
+        Parameters
+        ----------
+        values : NDArray
+            ``(..., nnz)`` values on the stored pattern.
+        rows, cols : NDArray
+            ``(nnz,)`` global row and column indices.
+        block_sizes : NDArray
+            Block partition.
+        band : int, optional
+            Widest block offset to materialise. Default 1 (block-tridiagonal), which
+            is all the Dyson operator ever needs: the scattering self-energy output
+            band is pinned at ``|I-J| <= 1``.
 
-    Returns
-    -------
-    dict[tuple[int, int], NDArray]
-        ``(I, J) -> (..., b_I, b_J)`` dense blocks, zero where the pattern is
-        empty.
-
+        Returns
+        -------
+        dict[tuple[int, int], NDArray]
+            ``(I, J) -> (..., b_I, b_J)`` dense blocks, zero where the pattern is
+            empty.
     """
     sizes = np.asarray(_host(block_sizes), dtype=int)
     off = np.concatenate(([0], np.cumsum(sizes)))
@@ -123,38 +122,20 @@ def _host(a):
 class BlockLayout:
     r"""Precomputed map from the stored sparsity pattern to BTD block views.
 
-    :func:`nnz_to_blocks` answers the same question, but it re-derives the
-    answer on every call: two ``np.searchsorted`` passes over ``nnz``, then a
-    ``np.where((br == i) & (bc == j))`` scan and a fresh allocation per block
-    pair. Inside the bordered Newton that runs once per candidate per step --
-    117 times for nine candidates on the local bed -- for an answer that
-    depends only on ``(rows, cols, block_sizes)``, which are fixed for a whole
-    SCBA iteration.
-
-    So the scan is done once and stored as a single gather. The band blocks are
-    laid out end to end in a flat buffer of length ``total``; ``source`` says,
-    for each slot of that buffer, which ``nnz`` column feeds it, with a
-    sentinel for slots the pattern leaves empty. Applying the layout to
-    ``Delta`` is then one fancy-index gather, and the BTD block list is a set
-    of **zero-copy reshaped views** of the flat buffer -- a ``(*stack, total)``
-    array with unit last stride reshapes to ``(*stack, b_i, b_j)`` without a
-    copy, so materialising the blocks costs no kernel at all.
-
-    Attributes
-    ----------
-    block_sizes : np.ndarray
-        The partition, as given.
-    total : int
-        Length of the flat band buffer, ``sum_{|I-J| <= band} b_I b_J``.
-    source : NDArray
-        ``(total,)`` index into a value array PADDED with one trailing zero
-        column; ``nnz`` marks an empty slot.
-    diag : NDArray
-        ``(n_dof,)`` flat positions of the operator's diagonal entries, in
-        increasing global-index order.
-    slices : list[tuple[tuple[int, int], slice, int, int]]
-        ``((I, J), slice, b_I, b_J)`` in buffer order.
-
+        Attributes
+        ----------
+        block_sizes : np.ndarray
+            The partition, as given.
+        total : int
+            Length of the flat band buffer, ``sum_{|I-J| <= band} b_I b_J``.
+        source : NDArray
+            ``(total,)`` index into a value array PADDED with one trailing zero
+            column; ``nnz`` marks an empty slot.
+        diag : NDArray
+            ``(n_dof,)`` flat positions of the operator's diagonal entries, in
+            increasing global-index order.
+        slices : list[tuple[tuple[int, int], slice, int, int]]
+            ``((I, J), slice, b_I, b_J)`` in buffer order.
     """
 
     def __init__(self, rows, cols, block_sizes, *, band: int = 1):

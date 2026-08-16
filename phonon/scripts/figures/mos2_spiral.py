@@ -1,7 +1,9 @@
 """MoS2 film instability figures (fig:res_mos2_spiral, fig:res_mos2_stab).
 
 Data:
-  Data: phonon/scripts/data/mos2_spiral.npz, distilled by
+  phonon/scripts/data/mos2_spiral.npz, distilled by
+  _extract_mos2_spiral.py (see its docstring for the full vertex
+  provenance of every run). All runs eta=0.
 
 Run:  python phonon/scripts/figures/mos2_spiral.py
 """

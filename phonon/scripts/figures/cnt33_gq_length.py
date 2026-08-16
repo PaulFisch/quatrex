@@ -1,9 +1,20 @@
-"""CNT (3,3) length series in thermal conductance quanta (fig:res_cnt_length;
-replaces the generator-less campaign_length.pdf).
+"""CNT (3,3) length series in thermal conductance quanta
+(fig:res_cnt_length; replaces the generator-less campaign_length.pdf).
 
 Data:
+  Data. Absolute anchor: the committed eta=0 production set
+  phonon/scripts/out/prod/cnt33_eta0/summary.json (L2/L3 converged
+  pairs; conversion G_wire = G_per_area * A_c). The L2-L7 anharmonic
+  series is the exact-kernel (sse_g_band=2) campaign of
   fig:res_gband_series -- its run.npz files (phonon/studies/out/
   anderson_test/cnt33_L*_linear/run_gband2.npz, tortin campaign) are
+  not committed, so the ratio series enters as literals here:
+  r = 0.569, 0.500, 0.453, 0.417, 0.396, 0.362 at L = 2..7. The
+  absolute series is r * G_ball with the (L-independent) ballistic
+  anchor. Note the two independent L2 measurements: the production set
+  gives r(L2) = 0.574 (181-pt grid), the campaign 0.569 (its own grid)
+  -- a 0.9% two-run spread, both converged; the figure uses each
+  series' own value.
 
 Run:  python phonon/scripts/figures/cnt33_gq_length.py
 """

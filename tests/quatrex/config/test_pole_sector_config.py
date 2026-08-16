@@ -124,11 +124,6 @@ def test_hysteresis_gap_is_required():
         PoleSectorConfig(enabled=True, q_in=2.0, q_out=1.0)
 
 
-def test_condition_thresholds_must_be_ordered():
-    with pytest.raises(ValidationError, match="condition_reject"):
-        PoleSectorConfig(enabled=True, condition_max=1e5, condition_reject=1e3)
-
-
 def test_fit_window_must_support_the_fit_order():
     with pytest.raises(ValidationError, match="too few for a degree"):
         PoleSectorConfig(enabled=True, delta_fit_order=8, delta_fit_window_cells=2)

@@ -1,11 +1,12 @@
 """Transport physics from the CONVERGENT cnt33 η=0 calculations (companion to
-eta0_convergence.py). Only converged runs are used (L4_anh did NOT converge
-and is excluded). Panel titles are omitted on purpose -- the LaTeX caption
-supplies them; axis labels and legends are kept. All numbers are printed
-for the text.
+eta0_convergence.py). Only converged runs are used (L4_anh did NOT converge and
+is excluded). Panel titles are omitted on purpose -- the LaTeX caption supplies
+them; axis labels and legends are kept. All numbers are printed for the text.
 
 Data:
-  L3_ball, T30..T300_anh}.npz   (181-pt / 0-55 THz grid).
+  Sources (verified converged, eta=1e-12, retarded=fft, lead-conserving):
+    phonon/scripts/out/prod/cnt33_eta0/{summary.json, L2_anh, L2_ball, L3_anh,
+    L3_ball, T30..T300_anh}.npz   (181-pt / 0-55 THz grid).
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/eta0_physics.py
 """

@@ -1,8 +1,11 @@
-"""(3,3) CNT cutoff-cube figure (fig:res_cnt_cutoff in
-document/src/results/30_cnt.tex).
+"""(3,3) CNT cutoff-cube figure (fig:res_cnt_cutoff in document/src/results/30_truncation.tex).
 
 Data:
-  Data: phonon/scripts/out/cnt33_cutoff/summary.csv, produced by
+  phonon/scripts/out/cnt33_cutoff/summary.csv, produced by
+  phonon/scripts/verify/cnt33_cutoff_sweep.py (one row per corner, written
+  incrementally). Fails with a clear message if the csv is absent or the
+  full-coupling reference corner has not finished yet; plots partial sweeps
+  with a warning.
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/cnt33_cutoff.py
 """

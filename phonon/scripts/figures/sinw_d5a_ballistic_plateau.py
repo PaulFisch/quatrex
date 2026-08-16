@@ -4,8 +4,14 @@ subtraction (full physical Bose occupation) preserves the acoustic plateau.
 
 Data:
   Reads ONLY saved data (phonon/studies/out/conv1e10/, sinw d5a L2, eta=1e-12,
+  retarded=fft, 305/295 K, both ballistic i.e. vertex zeroed, both converged):
+
   sinw_d5a_L2_eta0_diag_ball.npz    lead occupancies multiplied by the
+      omega^2/(omega^2 + omega_reg^2) IR taper with ir_taper_cells = 5.891
+      -> omega_reg = 5.891*dw = 2.160 THz  (work/sinw_d5a_L2_eta0_diag/
+      quatrex_config.toml);
   sinw_d5a_L2_irsub2_smoke_ball.npz  sse_ir_subtraction = true: FULL physical
+      Bose occupation, no omega^2 taper (log: "IR occupation subtraction ON").
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/sinw_d5a_ballistic_plateau.py
 Figure -> document/fig/transport_sweeps/sinw_d5a_ballistic_plateau.{pdf,png}

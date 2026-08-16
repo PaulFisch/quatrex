@@ -71,41 +71,22 @@ def keldysh_identity(
 ) -> dict[str, float]:
     r"""``eps_KI`` and the two failure modes it decomposes into.
 
-    In the solver's stored convention ``Sigma^R = H + \tfrac12(Sigma^< -
-    Sigma^>)`` with ``H`` the Hermitian Kramers-Kronig part, so
+        Parameters
+        ----------
+        sigma_retarded, sigma_lesser, sigma_greater : NDArray
+            ``(n_omega, nnz)`` values on the stored pattern.
+        rows, cols : NDArray
+            ``(nnz,)`` global indices.
 
-    .. math:: \Sigma^R - \Sigma^A = \Sigma^< - \Sigma^>
-
-    holds identically provided ``H`` really is Hermitian and ``Sigma^< -
-    Sigma^>`` really is anti-Hermitian. Those are the two independent things
-    that break when an analytic contribution is injected wrongly, so each is
-    reported alongside the identity residual.
-
-    Note that ``Sigma^R - Sigma^A`` is anti-Hermitian by construction, so
-    splitting the RESIDUAL into Hermitian and anti-Hermitian projections
-    measures nothing. The two auxiliary numbers here are therefore built from
-    the inputs, not from a projection of the residual: ``eps_delta_skew``
-    tests ``Sigma^< - Sigma^>`` directly, and ``eps_kk_hermitian`` tests the
-    Kramers-Kronig part recovered as ``Sigma^R - \tfrac12(Sigma^< -
-    Sigma^>)``.
-
-    Parameters
-    ----------
-    sigma_retarded, sigma_lesser, sigma_greater : NDArray
-        ``(n_omega, nnz)`` values on the stored pattern.
-    rows, cols : NDArray
-        ``(nnz,)`` global indices.
-
-    Returns
-    -------
-    dict
-        ``eps_ki`` (the identity residual -- the only one that sees a pure
-        magnitude error such as a double-counted retarded half),
-        ``eps_delta_skew`` (non-anti-Hermiticity of ``Sigma^< - Sigma^>``,
-        i.e. an analytic ``Sigma^{<,>}`` that is not a congruence) and
-        ``eps_kk_hermitian`` (non-Hermiticity of the recovered KK part), each
-        relative to ``||Sigma^< - Sigma^>||_F``.
-
+        Returns
+        -------
+        dict
+            ``eps_ki`` (the identity residual -- the only one that sees a pure
+            magnitude error such as a double-counted retarded half),
+            ``eps_delta_skew`` (non-anti-Hermiticity of ``Sigma^< - Sigma^>``,
+            i.e. an analytic ``Sigma^{<,>}`` that is not a congruence) and
+            ``eps_kk_hermitian`` (non-Hermiticity of the recovered KK part), each
+            relative to ``||Sigma^< - Sigma^>||_F``.
     """
     t = xp.asarray(transpose_index(rows, cols))
     delta = sigma_lesser - sigma_greater
@@ -131,48 +112,31 @@ def psd_residual(
     window: int = 2,
     skip: NDArray | None = None,
 ) -> dict[str, float]:
-    r"""Worst normalised eigenvalue of ``sign * i * G`` over the diagonal blocks.
+    r"""Worst normalised eigenvalue of ``sign * i * G`` over the diagonal
+    blocks.
 
-    Positive semidefiniteness of the whole matrix implies it for every
-    principal submatrix, so a sliding window of ``window`` consecutive blocks
-    is a valid NECESSARY test and the only affordable one -- the full
-    ``(n_dof, n_dof)`` matrix is never formed. A negative return value is a
-    genuine violation; a non-negative one is evidence, not proof.
+        Parameters
+        ----------
+        values : NDArray
+            ``(n_omega, nnz)`` ``G^<`` or ``G^>`` on the stored pattern.
+        sign : float
+            ``-1`` for ``G^<`` (``-i G^< >= 0``), ``+1`` for ``G^>``.
+        skip : NDArray, optional
+            ``(n_omega,)`` boolean; ``True`` drops that bin from BOTH the search
+            and the normalisation. Pass the bubble's own ``conv_mask``. Without it
+            the gate is decided by bins the ring never integrates: on the CNT bed
+            ``G^>`` at ``w = 0`` -- the near-singular acoustic bin the ring zeroes
+            -- carries the largest eigenvalue in the whole window AND the most
+            negative one, so ``worst`` saturates at exactly ``-1.000`` on the
+            POLE-FREE baseline and reports the same ``-1.000`` for every variant
+            of the pole sector. A gate that reads the same with the feature on and
+            off is measuring the feature not at all.
 
-    ``window`` must be at least 2 to see the failure mode this gate exists
-    for. A block-distance (boxcar) mask on ``G`` only ever zeroes OFF-diagonal
-    blocks, so a window of 1 is blind to it by construction, and
-    ``bubble_positivity.md`` Thm 3 -- the indefiniteness of exactly that mask
-    -- would go unmeasured.
-
-    The normalisation is GLOBAL (the largest eigenvalue over all blocks and all
-    frequencies), not per-frequency: a per-omega normalisation turns the
-    numerically empty tails of the window into apparent failures, which is the
-    recorded trap that once made a ballistic control "fail".
-
-    Parameters
-    ----------
-    values : NDArray
-        ``(n_omega, nnz)`` ``G^<`` or ``G^>`` on the stored pattern.
-    sign : float
-        ``-1`` for ``G^<`` (``-i G^< >= 0``), ``+1`` for ``G^>``.
-    skip : NDArray, optional
-        ``(n_omega,)`` boolean; ``True`` drops that bin from BOTH the search
-        and the normalisation. Pass the bubble's own ``conv_mask``. Without it
-        the gate is decided by bins the ring never integrates: on the CNT bed
-        ``G^>`` at ``w = 0`` -- the near-singular acoustic bin the ring zeroes
-        -- carries the largest eigenvalue in the whole window AND the most
-        negative one, so ``worst`` saturates at exactly ``-1.000`` on the
-        POLE-FREE baseline and reports the same ``-1.000`` for every variant
-        of the pole sector. A gate that reads the same with the feature on and
-        off is measuring the feature not at all.
-
-    Returns
-    -------
-    dict
-        ``worst`` (most negative normalised eigenvalue; 0 if none),
-        ``scale`` (the global normalisation) and ``omega_index`` of the worst.
-
+        Returns
+        -------
+        dict
+            ``worst`` (most negative normalised eigenvalue; 0 if none),
+            ``scale`` (the global normalisation) and ``omega_index`` of the worst.
     """
     sizes = np.asarray(_host(block_sizes), dtype=int)
     off = np.concatenate(([0], np.cumsum(sizes)))
@@ -224,49 +188,28 @@ def pole_pair_weight(
 ) -> dict[str, float]:
     r"""What fraction of the ring's weight comes from POLE-CELL PAIRS.
 
-    The bubble's registration error is confined to output bins whose ring sum
-    is fed by cell pairs :math:`(k, m-k)` with BOTH ends in a pole cell:
-    displacing one leg to its cell centre against a resolved partner costs
-    :math:`O((\delta/\Gamma)^2)` (2 % at the worst placement), while
-    displacing both moves the combination line a full cell and costs order one
-    (46-79 %). So the error in :math:`\Sigma` is bounded by this fraction
-    times that factor, and nothing else in the solver measures it.
+        Parameters
+        ----------
+        leg_norms : NDArray
+            ``(n_omega,)`` per-bin norm of the leg the ring convolves.
+        pole_cells : NDArray
+            ``(n_omega,)`` boolean, True where a promoted pole sits.
+        freqs : NDArray, optional
+            Only used to report where the worst bin is.
+        skip : NDArray, optional
+            ``(n_omega,)`` boolean over OUTPUT bins, excluded from ``worst`` and
+            ``mean``. Pass the ring's own mask: a single pole pairs with itself at
+            the DIFFERENCE frequency ``omega = 0``, where the fraction is ~1 by
+            construction and where the ring sets ``Sigma`` to zero anyway, so an
+            unmasked report is pinned there and says nothing.
 
-    The weight used is :math:`\|\bar G_k\|\,\|\bar G_{m-k}\|`, a scalar
-    PROXY for the actual vertex contraction: it ignores the cubic vertex's
-    selectivity and cannot see cancellation between pairings, so it is an
-    upper bound on the fraction rather than the fraction. That is the right
-    direction for a gate -- a small value here is conclusive, a large one is a
-    reason to measure properly.
-
-    The sum runs over the FULL axis via the bosonic mirror ``|m - k|``: the
-    solver holds ``omega >= 0`` and the ring folds the negative half back, so
-    restricting to ``k <= m`` would drop roughly the half of the convolution
-    that carries the difference-frequency (``Omega_a - Omega_b``) pairings.
-
-    Parameters
-    ----------
-    leg_norms : NDArray
-        ``(n_omega,)`` per-bin norm of the leg the ring convolves.
-    pole_cells : NDArray
-        ``(n_omega,)`` boolean, True where a promoted pole sits.
-    freqs : NDArray, optional
-        Only used to report where the worst bin is.
-    skip : NDArray, optional
-        ``(n_omega,)`` boolean over OUTPUT bins, excluded from ``worst`` and
-        ``mean``. Pass the ring's own mask: a single pole pairs with itself at
-        the DIFFERENCE frequency ``omega = 0``, where the fraction is ~1 by
-        construction and where the ring sets ``Sigma`` to zero anyway, so an
-        unmasked report is pinned there and says nothing.
-
-    Returns
-    -------
-    dict
-        ``worst`` (largest pair fraction over output bins), ``omega_index``
-        and ``omega`` of that bin, and ``mean`` (weighted by total ring
-        weight, i.e. the fraction of ALL the ring's weight that sits on pole
-        cell pairs).
-
+        Returns
+        -------
+        dict
+            ``worst`` (largest pair fraction over output bins), ``omega_index``
+            and ``omega`` of that bin, and ``mean`` (weighted by total ring
+            weight, i.e. the fraction of ALL the ring's weight that sits on pole
+            cell pairs).
     """
     g = np.abs(np.asarray(_host(leg_norms), dtype=float)).ravel()
     p = np.asarray(_host(pole_cells), dtype=bool).ravel()
@@ -333,59 +276,25 @@ def subcell_positivity(
 ) -> dict[str, float]:
     r"""Is the reconstructed hybrid function physical BETWEEN grid points?
 
-    The sectors do not act on ``G``. They act on
+        Parameters
+        ----------
+        g_full, g_pole : NDArray
+            ``(n_omega, nnz)`` the stored Green's function and the pole part
+            evaluated on the SAME grid, so ``R_k = g_full - g_pole``.
+        pole_at : callable
+            ``omega -> (n_omega, nnz)``, the pole part at arbitrary frequency.
+        centres : NDArray
+            Grid indices of the cells to probe -- normally the promoted poles'.
+        n_sub : int
+            Sub-cell samples per cell, spanning the full width.
 
-    .. math:: \tilde G_h(\omega) = P(\omega) + R_k,\qquad
-              R_k = G(\omega_k) - P(\omega_k),
-
-    the analytic pole sum plus a piecewise-constant remainder. That equals
-    ``G`` exactly AT each cell centre and nowhere else: inside a cell ``P``
-    varies while ``R_k`` is frozen.
-
-    ``R_k`` is a DIFFERENCE of positive semidefinite objects and is generically
-    indefinite. At the centre ``P(\omega_k)`` cancels it exactly; a little way
-    off, ``P`` has decayed and the frozen indefinite remainder dominates.
-    Measured on a 2x2 device with a narrow resonance, sweeping across one cell:
-
-    ==================  ====================  ==================
-    offset into cell    ``|P|`` rel. centre   ``lambda_min``
-    ==================  ====================  ==================
-    0.00                1.0000                **+2.219e-02**
-    0.05                0.7191                **-1.000**
-    0.50                0.0250                **-1.000**
-    ==================  ====================  ==================
-
-    while the true ``G`` stays at ``+2.2e-02`` throughout. ``SR``, ``RS`` and
-    ``RR`` all integrate over whole cells, so they all see the unphysical
-    region, and ``B(\tilde G_h, \tilde G_h)`` acquires GAIN even though every
-    stored sample is physical. That is anti-damping, and it is what drives the
-    sector's divergence (``lead balance = 2``).
-
-    This must be evaluated BEFORE any bubble contraction: a failure here is a
-    property of the representation, not of the sectors, and catching it at the
-    source is the difference between a named cause and a blow-up thirty
-    iterations later.
-
-    Parameters
-    ----------
-    g_full, g_pole : NDArray
-        ``(n_omega, nnz)`` the stored Green's function and the pole part
-        evaluated on the SAME grid, so ``R_k = g_full - g_pole``.
-    pole_at : callable
-        ``omega -> (n_omega, nnz)``, the pole part at arbitrary frequency.
-    centres : NDArray
-        Grid indices of the cells to probe -- normally the promoted poles'.
-    n_sub : int
-        Sub-cell samples per cell, spanning the full width.
-
-    Returns
-    -------
-    dict
-        ``worst`` (most negative normalised eigenvalue over all probes),
-        ``worst_centre`` (the cell index where it occurred) and
-        ``at_centres`` (the same measure evaluated only AT the centres, which
-        should be healthy -- if it is not, the failure is upstream).
-
+        Returns
+        -------
+        dict
+            ``worst`` (most negative normalised eigenvalue over all probes),
+            ``worst_centre`` (the cell index where it occurred) and
+            ``at_centres`` (the same measure evaluated only AT the centres, which
+            should be healthy -- if it is not, the failure is upstream).
     """
     w = np.asarray(_host(freqs), dtype=float)
     if w.size < 2:
@@ -430,43 +339,10 @@ def subcell_congruence(
 ) -> dict[str, float]:
     r"""Subcell positivity of the CONGRUENCE reconstruction.
 
-    Instead of freezing the Keldysh remainder, split the RETARDED function and
-    rebuild the Keldysh component from it:
-
-    .. math::
-        \tilde G^R(\omega) = P^R(\omega) + R^R_k,\qquad
-        R^R_k = G^R(\omega_k) - P^R(\omega_k),
-
-    .. math::
-        \tilde G^{\lessgtr}(\omega)
-          = \tilde G^R(\omega)\,\Sigma^{\lessgtr}_k\,\tilde G^A(\omega).
-
-    Because ``-i G^R \Sigma G^A = G^R(-i\Sigma)G^A`` is a congruence of a
-    positive semidefinite matrix, the sign survives at EVERY frequency. No
-    approximation to ``G^R`` can break it, which is what makes this structural
-    rather than incidental.
-
-    Equivalently, expanding the congruence shows the regular leg is NOT
-    constant across a cell:
-
-    .. math::
-        G_{\rm reg}(\omega) = P^R(\omega)\Sigma R^{A}_k
-                            + R^R_k\Sigma P^A(\omega)
-                            + R^R_k\Sigma R^A_k
-
-    and freezing it -- which is what the current sectors do -- is precisely
-    what loses positivity. Measured on a 2x2 device with a narrow resonance,
-    five percent of a cell off centre: frozen gives ``-1.000``, congruent
-    gives ``+1.3e-05``, against a true ``G`` of ``+2.3e-02``.
-
-    Densifies the whole matrix, so it is a diagnostic for small beds only and
-    refuses above ``max_dof`` rather than silently thrashing.
-
-    Returns
-    -------
-    dict
-        ``worst`` and ``worst_centre``, as :func:`subcell_positivity`.
-
+        Returns
+        -------
+        dict
+            ``worst`` and ``worst_centre``, as :func:`subcell_positivity`.
     """
     r = np.asarray(_host(rows), dtype=np.int64)
     c = np.asarray(_host(cols), dtype=np.int64)

@@ -2,8 +2,16 @@
 (fig:res_cutoffs).
 
 Data:
-  d11a : phonon/configs/sinw/reaps/sinw100_d11a_vasp_sc4/cutoffs/cutoffs_sweep.csv
-  d5a  : phonon/reaps/hiphive_sinw100_d5a_vasp/cutoffs/cutoffs_sweep.csv
+  Data (cached CSVs only, no reruns):
+    d11a : phonon/configs/sinw/reaps/sinw100_d11a_vasp_sc4/cutoffs/cutoffs_sweep.csv
+    d5a  : phonon/reaps/hiphive_sinw100_d5a_vasp/cutoffs/cutoffs_sweep.csv
+           PROVENANCE: the on-disk copy was purged with reaps_old/; this file was
+           restored verbatim from git (commit 9ee70acf "cutoff data", path
+           phonon/reaps/hiphive_sinw100_d5a_vasp/...). It is the pre-sc4 d5a reap
+           the retired plot_cutoff_sse.py used, and it reproduces the report's
+           numbers exactly (diag-G 5.0x, 1e-3 threshold -> 0.68%). Note git also
+           carries an sc4-era d5a sweep (sinw100_d5a_vasp_sc4, diag-G 77x) --
+           rerun the cutoff study on the current reap if the sc4 fit is wanted.
 
 Run:  python phonon/scripts/figures/cutoff_sse.py
 Figure -> document/fig/transport_sweeps/cutoff_sse_d5_d11.{png,pdf}

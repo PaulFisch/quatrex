@@ -1,10 +1,24 @@
 """Conservation figures for the energy-conservation write-up (appendix
 ``app:conservation`` + the eta=0 results section). Companion to
-``eta0_convergence.py``/``eta0_physics.py``; same style and output
-directory, so the reruns drop straight into the document includes.
+``eta0_convergence.py``/``eta0_physics.py``; same style and output directory, so
+the reruns drop straight into the document includes.
 
 Data:
-  phonon/scripts/out/prod/cnt33_eta0/L2_anh.npz  (iter_heat,
+  F1 conservation vs SCBA iteration   eta0_cnt33_conservation_iter
+        phonon/scripts/out/prod/cnt33_eta0/L2_anh.npz  (iter_heat,
+        iter_bubble_balance, iter_sigma_max) -- the production transport
+        iteration: the bubble balance is pinned at machine precision every
+        step while the Sigma^< residual proxy and the lead imbalance converge.
+  F2/F3 conductance ratio + lead balance vs broadening eta and grid
+        eta0_cnt33_ratio_eta
+        the matched-eta sweep of tab:cons_ratio (conservation.ratio_eta) with
+        the eta->0 extrapolation, plus the 181/241-pt grid points.
+  F4 lead conservation + iteration count vs temperature
+        eta0_cnt33_conservation_T
+        phonon/scripts/out/prod/cnt33_eta0/summary.json.
+  F5 discrete-bubble energy balance is exactly conserving (roundoff floor)
+        conservation_bubble_replica
+        phonon.studies.conservation.replica_check() (float64 vs float128).
 
 Run:  OMP_NUM_THREADS=1 python phonon/scripts/figures/conservation_figs.py
 """

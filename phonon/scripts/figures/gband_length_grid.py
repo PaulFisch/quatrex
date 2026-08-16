@@ -1,8 +1,10 @@
 """Long-chain CNT g_band ladder (fig:res_gband_ladder).
 
 Data:
-  Data: phonon/scripts/data/gband_ladder.npz, distilled by
+  phonon/scripts/data/gband_ladder.npz, distilled by
   _extract_gband_ladder.py from the cluster/l{16,24,32}f-* GPU runs
+  (2x4 GH200, eta=0, all converged) and the L16 ne=361 pair
+  (jobs 4321907/4321908).
 
 Run:  python phonon/scripts/figures/gband_length_grid.py
 """

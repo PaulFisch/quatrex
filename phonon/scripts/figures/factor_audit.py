@@ -2,7 +2,7 @@
 fig:res_decomp_cons_postfix).
 
 Data:
-  Data: phonon/scripts/data/factor_audit.npz, distilled by
+  phonon/scripts/data/factor_audit.npz, distilled by
   _extract_factor_audit.py from cluster/mos2decomp{2,3}/run.log,
   cluster/sifilmdecomp/run.log, cluster/sifilm_nk9r/run_*.npz.
 

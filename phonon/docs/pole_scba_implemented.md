@@ -709,7 +709,8 @@ was checked numerically before being accepted or rejected.
   means modelling the `ω → 0` form, and it is `G^>`, not `G^<`, that is
   near-singular (`G^> = G^< + (G^R − G^A)`). And sector consistency is binding:
   the ring masks, so dropping it must happen on both sides together.
-* Six config fields still unconsumed: `audit_frequencies`, `ss_kernel`,
-  `keldysh_split`, `contour_quad_points`, `source_model`, `source_fit_tol`.
+* Removed 2026-08-16 as inert: `audit_frequencies`, `ss_kernel`,
+  `keldysh_split`, `contour_quad_points`, `source_model`. `source_fit_tol`
+  survives -- it is reported but never applied.
 * Phase 6: outgoing sheet, aux grid, coupled-q (`nq > 1`), `comm.block > 1`.
 * Part II (spatial/modal) entirely.
