@@ -49,6 +49,14 @@ from quatrex.phonon.units import bubble_prefactor_thz
 
 profiler = Profiler()
 
+#: Slots in the ``_ensure_tau_buffers`` tuple that hold the Sigma(tau)
+#: ACCUMULATORS rather than a leg. The order is
+#: ``(gtl, gtg, stl, stg, gtlr, gtgr[, dgtl, dgtg, dgtlr, dgtgr])``.
+#: They are the only buffers that must stay whole when ``comm.q`` sections the
+#: transverse axis, because the bubble is a convolution over q and one slice
+#: pair contributes to every external momentum.
+_SIGMA_TAU_SLOTS = frozenset({2, 3})
+
 class SigmaPhononPhonon(ScatteringSelfEnergy):
     """3-phonon SCBA scattering self-energy.
 
@@ -910,39 +918,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
         nq = int(np.prod(nk)) if len(nk) else 1
-        if nq > 1 and getattr(g_lesser, "q_section_offsets", None) is not None:
-            # Diagnosed 2026-08-12; ONE piece is left, and it is on the
-            # OUTPUT side rather than anywhere it first appeared to be.
-            #
-            # What looked like a deadlock never was: the tau buffers were
-            # allocated at the full mesh while the G legs carried a slice, so
-            # one rank raised on the shape and its peer blocked in the next
-            # collective. Tau buffers now inherit the sectioning, and the run
-            # fails fast and symmetrically instead.
-            #
-            # What remains: the rotation accumulates Sigma at EVERY external
-            # momentum (correctly -- a slice pair contributes to the whole
-            # mesh), but the Sigma buffer is now sectioned too, so writing a
-            # full-nq accumulator into it overflows:
-            #   IndexError: index 2 is out of bounds for axis 1 with size 1
-            # The missing step is the reduce-scatter over comm.q that turns
-            # those per-rank partial sums into each rank's own q section --
-            # exactly the asymmetry recorded in
-            # phonon/docs/bubble_positivity.md Sec. 7 (the legs section, the
-            # Sigma accumulator does not until this reduction).
-            #
-            # Ruled out along the way: the ring exchange (correct in a
-            # standalone 2-rank probe), non-deterministic dict order (keys are
-            # sorted now), and the external-q restriction being applied on top
-            # of the rotation (dropped now).
-            raise NotImplementedError(
-                "the phonon-phonon SSE cannot yet consume a q-sectioned "
-                f"Green's function (comm.q.size={ranks.q.size}): the "
-                "internal-q ring exchange in _rotate_q_buffers deadlocks and "
-                "is not yet diagnosed. Run with q_distributed=False, where "
-                "the q axis is replicated and the external-q loop alone is "
-                "distributed."
-            )
+        # A q-SECTIONED G: the legs carry only this rank's slice of the
+        # transverse mesh. The bubble is a convolution over q, so the rotation
+        # in :meth:`_rotate_internal_q` accumulates at EVERY external momentum
+        # and only the reduction over ``comm.q`` completes it -- the asymmetry
+        # recorded in phonon/docs/bubble_positivity.md Sec. 7 (the legs
+        # section, the Sigma accumulator does not until that reduction).
+        #
+        # The two halves of the reduce-scatter therefore live apart: the
+        # accumulators are allocated WHOLE (``_SIGMA_TAU_SLOTS``), summed over
+        # comm.q after the rotation, and only then cut down to this rank's
+        # section, in stage (5) where the outputs are formed. Covered by
+        # test_internal_q_rotation_reproduces_the_replicated_result.
+        q_split = (nq > 1
+                   and getattr(g_lesser, "q_section_offsets", None) is not None)
         if nq > 1 and self._qvertices is None and self._vfactors is None:
             raise ValueError(
                 f"Transverse-q device (mesh {nk}, n_kpts={nq}) requires the "
@@ -1077,6 +1066,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # not for the asymmetric cross B(dG, G) + B(G, dG). The
             # linearized bubble always runs the plain 6-ring path.
             fast_now = halve_now = verify_now = False
+        if q_split:
+            # The fast path parks its cross-term accumulator in the gtlr LEG
+            # slot (``stx = gtlr`` below). Under q sectioning a leg is a slice
+            # and an accumulator is whole, so one buffer cannot be both. The
+            # fast path is an optimisation, not a correctness requirement, so
+            # it stands down rather than the sectioning.
+            fast_now = False
 
         bufs = self._ensure_tau_buffers(g_lesser, n_fft, with_dg=lin)
         gtl, gtg, stl, stg, gtlr, gtgr = bufs[:6]
@@ -1210,7 +1206,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # FFT, so the already-FFT'd decay legs are reused without a second
             # FFT of the reversed source.
             Xl, Xg = gtl.data, gtg.data
-            if nq > 1:
+            if nq > 1 and q_split:
+                # Sectioned: q -> -q lands on another rank's slice, so the
+                # axis has to be reassembled for the negation. One transverse
+                # axis by construction under q_distributed.
+                _lo = int(g_lesser.local_q_offset)
+                _hi = _lo + int(g_lesser.local_q_shape[0])
+                Xl = self._negate_q_across_comm(Xl, nq, _lo, _hi, xp)
+                Xg = self._negate_q_across_comm(Xg, nq, _lo, _hi, xp)
+            elif nq > 1:
                 # negate the transverse momentum axes (Gamma-centered IDFT
                 # meshes are closed under q -> -q)
                 for ax, k in enumerate(nk, start=1):
@@ -1677,10 +1681,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 qv = self._qvertices
 
                 def _qflat(d):
-                    # (tau, *nk, b, b) -> (tau, N_q, b, b); the q-axis is contiguous
-                    # in the same C-order as global_stack_shape[1:].
+                    # (tau, *nk, b, b) -> (tau, N_q_local, b, b); the q-axis is
+                    # contiguous in the same C-order as global_stack_shape[1:].
+                    # Sized from the ARRAY rather than from nq: when comm.q
+                    # sections the axis the local width is smaller, and the
+                    # rotation carries the global count separately (it needs
+                    # global bounds, the legs are local).
                     return {
-                        kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
+                        kk: v.reshape(v.shape[0], -1, v.shape[-2], v.shape[-1])
                         for kk, v in d.items()
                     }
 
@@ -1723,8 +1731,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
                     (gl_q, gg_q, glr_q, ggr_q), _fold_l, _fold_g,
                     stlv, stgv, start, xp,
-                    q_split=getattr(g_lesser, "q_section_offsets", None)
-                    is not None,
+                    q_split=q_split,
                     fast_now=fast_now, verify_now=verify_now,
                     stxv=stx.stack[...] if fast_now else None,
                     release=(_release_leg_blocks
@@ -1787,6 +1794,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stg.data[1:] += xs[:0:-1]
             sl_conv = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_conv]
             sg_conv = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_conv]
+            if q_split:
+                # The SCATTER half of the reduce-scatter. The rotation
+                # accumulated at every external momentum and the comm.q sum
+                # above completed them, so every rank now holds the WHOLE
+                # Sigma; the outputs are sectioned, so each keeps only the
+                # section it owns. Cut here, before the corrections and masks,
+                # so everything downstream sees one consistent q extent.
+                #
+                # ``q_distributed`` admits exactly one transverse axis
+                # (dsdbsparse.py: a mesh with several must be flattened first),
+                # so this is axis 1 and the slice is the buffer's own.
+                q_out = sigma_lesser.local_q_slice
+                sl_conv = sl_conv[:, q_out]
+                sg_conv = sg_conv[:, q_out]
             if self._bubble_correction is not None:
                 # Before the masks and before delta: see set_bubble_correction.
                 _cl, _cg = self._bubble_correction
@@ -2122,6 +2143,27 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             buf = self._rotate_q_buffers(buf, bounds, rank, size, step, xp)
 
     @staticmethod
+    def _negate_q_across_comm(x, nq, lo, hi, xp):
+        """``q -> -q`` on an axis that ``comm.q`` has sectioned.
+
+        The negation is not local: it maps a rank's own section onto the
+        section of whichever rank owns the negated momenta, so it needs the
+        whole axis. Rebuild it by summing zero-padded contributions -- the
+        sections are disjoint, so the sum IS the gather, and it needs no
+        padding arithmetic for an uneven split (``all_gather_v`` would pad to
+        the widest section and the trim would have to be undone by hand).
+
+        The full-axis temporary is transient and one leg wide; the buffers
+        themselves stay sectioned, which is where the memory is.
+        """
+        full = xp.zeros(x.shape[:1] + (nq,) + x.shape[2:], dtype=x.dtype)
+        full[:, lo:hi] = x
+        recv = xp.empty_like(full)
+        ranks.q.all_reduce(xp.ascontiguousarray(full), recv, op="sum")
+        neg = (-xp.arange(nq)) % nq
+        return xp.take(recv, neg, axis=1)[:, lo:hi]
+
+    @staticmethod
     def _rotate_q_buffers(buf, bounds, rank, size, step, xp):
         """One hop of the leg-B ring: send to ``rank-1``, receive ``rank+1``.
 
@@ -2438,13 +2480,28 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     return None, None
                 return xp.stack([xp.ascontiguousarray(d[k]) for k in keys]), \
                     {k: i for i, k in enumerate(keys)}
-            GL, gl_i = _stack(gl_q)
-            GG, gg_i = _stack(gg_q)
-            GGR, ggr_i = _stack(ggr_q)
+            # Leg A is always this rank's own family; leg B is the SAME
+            # family on the replicated path and the ROTATING one under the q
+            # rotation, where it is a different rank's slice and generally a
+            # different width. Stacking only the A family (as this path did
+            # until 2026-08-16) silently contracts a rank's own slice against
+            # itself and, once the widths differ, indexes out of bounds. The
+            # serial path above always read gl_b/gg_b/glr_b/ggr_b.
+            GL, gl_i = _stack(gl_a)
+            GG, gg_i = _stack(gg_a)
+            GGR, ggr_i = _stack(ggr_a)
             # Fast mode never contracts the reversed-lesser legs (its
             # buffer is repurposed as stx and holds zeros here).
-            GLR, _glr_i = (GG, gg_i) if fast_now else _stack(glr_q)
-            if GL is None or GG is None or GGR is None or GLR is None:
+            GLR, _glr_i = (GG, gg_i) if fast_now else _stack(glr_a)
+            if legs_b is None:
+                GLb, GGb, GGRb, GLRb, glb_i = GL, GG, GGR, GLR, gl_i
+            else:
+                GLb, glb_i = _stack(gl_b)
+                GGb, _ = _stack(gg_b)
+                GGRb, _ = _stack(ggr_b)
+                GLRb = GGb if fast_now else _stack(glr_b)[0]
+            if any(x is None for x in
+                   (GL, GG, GGR, GLR, GLb, GGb, GGRb, GLRb)):
                 return _contract_tau_q(lo, hi)
             if release is not None:
                 # The stacks now hold every value the leg dicts did, and the
@@ -2495,10 +2552,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     iqe = xp.asarray([t[0] for t in ts], dtype=xp.int64)
                     a_id = xp.asarray([gl_i[(t[3], t[4])] for t in ts],
                                       dtype=xp.int64)
-                    b_id = xp.asarray([gl_i[(t[5], t[6])] for t in ts],
+                    # B-family index map: the rotating stack is keyed by its
+                    # own sorted links, which need not match leg A's.
+                    b_id = xp.asarray([glb_i[(t[5], t[6])] for t in ts],
                                       dtype=xp.int64)
-                    qa = xp.asarray([t[1] for t in ts], dtype=xp.int64)
-                    qb = xp.asarray([t[2] for t in ts], dtype=xp.int64)
+                    # GLOBAL momenta in the task tuples, LOCAL rows in the leg
+                    # arrays: subtract the slice offsets, exactly as the serial
+                    # path does at ``iqp - a_off`` / ``iq2 - b_off``. Both are
+                    # zero unless the q rotation is running, so this is a no-op
+                    # on the replicated path.
+                    qa = xp.asarray([t[1] for t in ts], dtype=xp.int64) - a_off
+                    qb = xp.asarray([t[2] for t in ts], dtype=xp.int64) - b_off
                     wq = xp.asarray([t[7] for t in ts], dtype=xp.float64)
                     for c0 in range(0, Tn, C):
                         c1 = min(c0 + C, Tn)
@@ -2535,15 +2599,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                 # mixed lesser rings kept separate: they
                                 # double as the Sigma^> cross-term source
                                 # of the bosonic tau fold
-                                Ga, Gb = _legs(GL, GGR)
+                                Ga, Gb = _legs(GL, GGRb)
                                 tx = _ring(Ga, Gb)
-                                Ga, Gb = _legs(GGR, GL)
+                                Ga, Gb = _legs(GGR, GLb)
                                 tx = tx + _ring(Ga, Gb)
-                                Ga, Gb = _legs(GL, GL)
+                                Ga, Gb = _legs(GL, GLb)
                                 sl = _ring(Ga, Gb) + tx
                             else:
                                 sl = None
-                                for A, B in ((GL, GL), (GL, GGR), (GGR, GL)):
+                                for A, B in ((GL, GLb), (GL, GGRb), (GGR, GLb)):
                                     Ga, Gb = _legs(A, B)
                                     s = _ring(Ga, Gb)
                                     sl = s if sl is None else sl + s
@@ -2552,18 +2616,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                 # ring (g^>, g^>); the cross terms come
                                 # from (J, I)'s folded out_x at negated
                                 # external q.
-                                Ga, Gb = _legs(GG, GG)
+                                Ga, Gb = _legs(GG, GGb)
                                 sg = _ring(Ga, Gb)
                             elif verify_now:
-                                Ga, Gb = _legs(GG, GLR)
+                                Ga, Gb = _legs(GG, GLRb)
                                 t56 = _ring(Ga, Gb)
-                                Ga, Gb = _legs(GLR, GG)
+                                Ga, Gb = _legs(GLR, GGb)
                                 t56 = t56 + _ring(Ga, Gb)
-                                Ga, Gb = _legs(GG, GG)
+                                Ga, Gb = _legs(GG, GGb)
                                 sg = _ring(Ga, Gb) + t56
                             else:
                                 sg = None
-                                for A, B in ((GG, GG), (GG, GLR), (GLR, GG)):
+                                for A, B in ((GG, GGb), (GG, GLRb), (GLR, GGb)):
                                     Ga, Gb = _legs(A, B)
                                     s = _ring(Ga, Gb)
                                     sg = s if sg is None else sg + s
@@ -3015,19 +3079,28 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if self._tau_cache is not None and self._tau_cache[0] == key
             else ()
         )
+        q_split = getattr(g_lesser, "q_section_offsets", None) is not None
         bufs = existing + tuple(
             cls.from_sparray(
                 pattern, self.block_sizes, global_stack_shape=(n_fft,) + nk,
-                # Inherit the source's transverse sectioning. Without this the
-                # tau buffers span the WHOLE mesh while the G legs written
-                # into them carry only this rank's slice, and the assignment
-                # fails on the shape -- asymmetrically, so one rank raises
-                # while its peers block in the next collective and the run
-                # looks like a deadlock rather than an error.
-                q_distributed=getattr(
-                    g_lesser, "q_section_offsets", None) is not None,
+                # Inherit the source's transverse sectioning -- but only on the
+                # LEGS. Without it the tau buffers span the WHOLE mesh while the
+                # G legs written into them carry only this rank's slice, and the
+                # assignment fails on the shape -- asymmetrically, so one rank
+                # raises while its peers block in the next collective and the
+                # run looks like a deadlock rather than an error.
+                #
+                # Slots 2 and 3 are the Sigma ACCUMULATORS (stl, stg) and must
+                # stay whole. The rotation is a convolution over q: one slice
+                # pair contributes to EVERY external momentum, so a rank
+                # legitimately accumulates across the whole mesh and only owns a
+                # section of the RESULT. Sectioning them here is what produced
+                #   IndexError: index 2 is out of bounds for axis 1 with size 1
+                # The section is taken after the comm.q reduction instead --
+                # ``_scatter_sigma_q`` below.
+                q_distributed=q_split and slot not in _SIGMA_TAU_SLOTS,
             )
-            for _ in range(n_needed - len(existing))
+            for slot in range(len(existing), n_needed)
         )
         gt_rows, gt_cols = bufs[0].spy()
         if not (

@@ -179,10 +179,6 @@ def test_transverse_q_survives_block_parallel_transport() -> None:
             )
 
 
-@pytest.mark.skip(
-    reason="the q rotation needs a reduce-scatter of Sigma over comm.q: it "
-           "accumulates at every external momentum, but the Sigma buffer is "
-           "sectioned, so the full-nq accumulator overflows it")
 @pytest.mark.mpi(min_size=2)
 def test_internal_q_rotation_reproduces_the_replicated_result() -> None:
     """A q-SECTIONED G must give the same Sigma as a replicated one.
@@ -196,11 +192,17 @@ def test_internal_q_rotation_reproduces_the_replicated_result() -> None:
     split = _run(block_comm_size=1, q_comm_size=global_comm.size,
                  q_distributed=True)
 
+    # The sectioned run legitimately holds only its own slice of the
+    # transverse axis -- that IS the memory saving -- so compare it against
+    # the matching slice of the replicated result, not against the whole mesh.
+    size, rank = global_comm.size, global_comm.rank
+    qs = slice(rank * NQ // size, (rank + 1) * NQ // size)
+
     shared = sorted(set(whole) & set(split))
     assert shared
     for key in shared:
-        for name, a, b in (("Sigma^<", split[key][0], whole[key][0]),
-                           ("Sigma^>", split[key][1], whole[key][1])):
+        for name, a, b in (("Sigma^<", split[key][0], whole[key][0][:, qs]),
+                           ("Sigma^>", split[key][1], whole[key][1][:, qs])):
             scale = max(float(np.abs(b).max()), 1e-300)
             np.testing.assert_allclose(
                 a, b, rtol=1e-10, atol=1e-10 * scale,
