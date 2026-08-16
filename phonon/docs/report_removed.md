@@ -60,3 +60,39 @@ at `interaction_cutoff = 10 A` on a device longer than the cutoff, every one
 divergent. Results §7.4 states this explicitly rather than omitting it, because
 the ratio of that number to the 13.5 node-hours of the cutoff ladder that
 diagnosed it is the useful part.
+
+## Appendix removed entirely (2026-08-16, second pass)
+
+`src/appendices/production_coupled_q.tex` (260 lines, plus
+`prod_qfilm_qconv` and `prod_qfilm_conservation`). Three independent
+reasons, any one of which would have been enough:
+
+* its central open issue -- "the production film is numerically stable only
+  for eta >= 0.4 THz; at eta <= 0.2 the Dyson solve produces NaN" -- is
+  **contradicted** by the converged unbroadened coupled-q film now in
+  results section 2.2 (70 iterations at three cells, 52 at eight). Keeping
+  it would have put a false statement in the document;
+* its CNT length ladder ran at eta = 0.45 THz, did not settle to a fixed
+  point ("the final iterate diverges and is discarded"), and its snapshots
+  were purged in commit 843c3069, so its ratios are unreproducible;
+* its own text says the contribution is "software and verification, not new
+  physics", and that verification is now results section 7.1 (dense parity
+  across 144 cases, 8e-13 CPU/GPU agreement, rank-invariance at 2e-15).
+
+Nothing outside the file referenced any of its ten labels.
+
+## Broadening evidence consolidated
+
+The section "The conductance ratio requires eta -> 0 extrapolation" moved
+out of the conservation appendix into `broadening.tex`, with its table and
+figure. It is the measured core of that appendix's argument: at matched
+broadening the lead balance sits flat at 1e-5 while the conductance ratio
+swings 13 points, so the conservation diagnostic does not see the bias.
+
+After this pass the broadening parameter appears in exactly four files:
+`broadening.tex` (its subject), `conservation.tex` (the mechanism -- what a
+damping term does to the conservation identity, retitled so the table of
+contents no longer advertises it), and `phonon_solver.tex` /
+`finite_analysis.tex` (a documented package API parameter, each now stating
+it is zero in every calculation reported). `quatrex_doc.tex`'s worked config
+example had `phonon.eta = 0.45` and now has `0`.
