@@ -114,3 +114,19 @@ discretionary list" errors against the class's LuaLaTeX font setup). The
 options not yet tried are `seqsplit` applied selectively, or simply adding
 `\allowbreak` to the appendix identifiers the way the main chapters now do,
 which is mechanical but touches on the order of a hundred sites.
+
+## 11. Separate the open-boundary solver from the Si fine-grid divergence
+
+**Gains:** closes the one candidate results section 4.4 leaves open. At
+`ne = 8001` on `si4x2` the spectral surface Green's function misses its own
+defining recursion by 65 % (relative 6.5e-01), which is exactly the regime
+where grid points crowd the band edges and a contour-based nonlinear
+eigenvalue solve struggles. Whether that drives the `nf^4.8` divergence or
+merely accompanies it is not established.
+
+**Blocked on:** nothing but a run. `phonon.obc.algorithm` takes `spectral`
+(default) and `sancho-rubio`, `nevp_solver` takes `beyn` (default) and
+`full`, both exposed as `QX_OBC_ALG` / `QX_NEVP`, and
+`phonon/studies/engine/obc_probe.sh` runs the three-arm separation. The
+probe was launched previously but its logs are not on the analysis machine,
+so its outcome could not be quoted.
