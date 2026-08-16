@@ -94,21 +94,15 @@ def _eta0_rows():
 
 
 def main():
-    fig, ax = style.figure(width=4.8, height=3.4)
+    fig, ax = style.doc_figure(frac=0.72, aspect=0.71)
 
-    # retracted finite-eta record, greyed (see docstring)
-    ax.plot(TWO_BALL_L, TWO_BALL, "o-", color="0.75",
-            label=r"finite-$\eta$ $2{\times}2{\times}2$ (retracted)")
-    ax.plot(TWO_ANH_L, TWO_ANH, "s", color="0.75", mfc="none", mew=1.4)
-    ax.plot(BIG_L, BIG_BALL, "o-", color="0.55",
-            label=r"finite-$\eta$ $5{\times}5{\times}5$ (retracted)")
-    ax.plot(BIG_L, BIG_ANH, "s--", color="0.55")
-
+    # The retracted broadened series that used to be greyed in here is gone:
+    # it is the subject of the broadening appendix, not of this comparison.
     e0 = _eta0_rows()
-    ax.plot(*e0["ballistic"], "o-", color=C[0], lw=1.6,
-            label=r"$\eta=0$ coupled-$q$, ballistic")
-    ax.plot(*e0["scba"], "s-", color=C[3], lw=1.6,
-            label=r"$\eta=0$ coupled-$q$, anharmonic")
+    ax.plot(*e0["ballistic"], "o-", color=style.C_BALLISTIC, lw=1.6,
+            label="ballistic")
+    ax.plot(*e0["scba"], "s-", color=style.C_ANHARMONIC, lw=1.6,
+            label="anharmonic")
 
     ax.plot(GUO_ANH_L, GUO_ANH, "*", color="k", ms=11, ls="none",
             label="Guo et al. 2020, anharmonic")
@@ -118,7 +112,7 @@ def main():
     ax.set_xlabel("film thickness $L$ (nm)")
     ax.set_ylabel(r"cross-plane conductance $G$ (MW m$^{-2}$K$^{-1}$)")
     ax.set_xlim(0.8, 3.3)
-    ax.set_ylim(0, 1150)
+    ax.set_ylim(700, 1150)
     # legend OUTSIDE the axes so it cannot mask any data point (review fix)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
 

@@ -84,7 +84,7 @@ def main() -> None:
     qpath, dist, ticks, labels = build_path()
     i_R = int(np.argmin(np.abs(dist - ticks[3])))  # the R node sample
 
-    fig, ax = style.figure(width=5.2, height=3.6)
+    fig, ax = style.doc_figure(frac=0.7, aspect=0.69)
     x_mid = 0.5 * (ticks[2] + ticks[3])  # middle of the flat M-R AFD branch
     afd = {}
     for label, yaml_rel, color in FITS:

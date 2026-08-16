@@ -44,7 +44,7 @@ def main() -> None:
     FIGDIR.mkdir(parents=True, exist_ok=True)
     lad = np.load(DATA)["ladder"]  # L, band, ne, conv, I, n_it, spread
 
-    fig, (ax_a, ax_b) = style.figure(ncols=2, width=4.3, height=3.3)
+    fig, (ax_a, ax_b) = style.doc_figure(ncols=2, aspect=0.38)
     colors = style.RC["axes.prop_cycle"].by_key()["color"]
 
     sel = {}

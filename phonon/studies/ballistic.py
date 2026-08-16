@@ -68,6 +68,11 @@ def run(argv) -> int:
                         help=f"temperatures in K (default {TEMPS})")
     parser.add_argument("--npz", type=Path, default=DEFAULT_NPZ,
                         help=f"results snapshot path (default {DEFAULT_NPZ})")
+    parser.add_argument("--eta-factor", type=float, default=ETA_FACTOR,
+                        help="lead/device broadening in units of the grid "
+                             "spacing. 0 is the physical value and what the "
+                             "report uses; the %(default)s default is kept "
+                             "so the archived snapshot reproduces.")
     args = parser.parse_args(argv)
 
     warnings.filterwarnings("ignore")
@@ -96,7 +101,7 @@ def run(argv) -> int:
         A_c = np.linalg.norm(np.cross(a1, a2)) * 1e-20
 
         freqs_thz, dw_thz, eta_w, z2_arr, pos_mask, mid = build_frequency_grid(
-            FREQ_RANGE, eta_factor=ETA_FACTOR)
+            FREQ_RANGE, eta_factor=args.eta_factor)
         omega_rad = freqs_thz * THZ_TO_RAD
         freqs_out = freqs_thz
 

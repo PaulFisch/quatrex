@@ -81,7 +81,7 @@ def main() -> None:
 
     order = np.argsort(ga)
     y = np.arange(len(rows))
-    fig, ax = style.figure(width=4.6, height=3.0)
+    fig, ax = style.doc_figure(frac=0.62, aspect=0.65)
     ax.axvspan(BAND[0] * g_full, BAND[1] * g_full, color="0.88", zorder=0,
                label=r"$+11/{-}9\%$ of full coupling")
     ax.barh(y, ga[order], height=0.62, zorder=2,

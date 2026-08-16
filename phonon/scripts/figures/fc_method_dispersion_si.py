@@ -120,7 +120,7 @@ def main():
           f"{dfpt['G'][dfpt['G'] < 1.0].mean():.2f} THz")
 
     # ---- figure: FD lines + DFPT markers, inset on the Gamma opticals ----
-    fig, ax = style.figure(width=4.8, height=3.5)
+    fig, ax = style.doc_figure(frac=0.6, aspect=0.73)
     for i, (seg_d, seg_f) in enumerate(zip(bs["distances"], bs["frequencies"])):
         for b in range(seg_f.shape[1]):
             ax.plot(seg_d, seg_f[:, b], color="C0", lw=1.2,

@@ -65,7 +65,7 @@ def feature_widths(e: np.ndarray, y: np.ndarray) -> list[float]:
 
 
 def fig_comb(d) -> None:
-    fig, (ax_a, ax_b) = style.figure(ncols=2, width=4.4, height=3.3)
+    fig, (ax_a, ax_b) = style.doc_figure(ncols=2, aspect=0.38)
     colors = style.RC["axes.prop_cycle"].by_key()["color"]
 
     e, y = d["film_e"], d["film_ball_spec"]
@@ -110,7 +110,7 @@ def fig_comb(d) -> None:
 
 
 def fig_lottery(d) -> None:
-    fig, ax = style.figure(width=5.0, height=3.2)
+    fig, ax = style.doc_figure(frac=0.7, aspect=0.64)
     colors = style.RC["axes.prop_cycle"].by_key()["color"]
 
     rows = d["nescan"]

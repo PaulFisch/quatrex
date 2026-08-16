@@ -48,7 +48,7 @@ def main() -> None:
     s80 = json.loads((DATA / "mos2_refit_results_80.json").read_text())
     scp = json.loads((DATA / "mos2_scp_results.json").read_text())
 
-    fig, (ax_a, ax_b) = style.figure(ncols=2, width=4.3, height=3.3)
+    fig, (ax_a, ax_b) = style.doc_figure(ncols=2, aspect=0.38)
     colors = style.RC["axes.prop_cycle"].by_key()["color"]
 
     x = np.arange(len(METHODS))
