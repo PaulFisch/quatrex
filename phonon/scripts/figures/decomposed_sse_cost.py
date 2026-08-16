@@ -92,7 +92,7 @@ def main() -> None:
           f"{film[128]:.1f}x the dense ring.")
 
     # ---------------- figure 1: speedup ------------------------------------
-    fig, ax = style.figure(width=5.0, height=3.6)
+    fig, ax = style.doc_figure(frac=0.48, aspect=0.80)
     ax.loglog(RANKS, [film[r] for r in RANKS], "o-", color="C0",
               label=r"film, coupled $q_\perp$ ($b=6$, $N_q=81$)")
     ax.loglog(sorted(wire), [wire[r] for r in sorted(wire)], "s-", color="C2",

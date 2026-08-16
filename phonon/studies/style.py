@@ -52,9 +52,27 @@ RC = {
     "grid.linewidth": 0.6,
     "lines.linewidth": 1.4,
     "lines.markersize": 4.5,
+    # Slot order is VALIDATED, not chosen by eye. Run
+    #   node <dataviz>/scripts/validate_palette.js \
+    #        "#0173b2,#cc78bc,#029e73,#d55e00" --mode light --pairs all
+    # -> all four checks PASS (worst all-pairs CVD dE 8.4 protan,
+    #    normal-vision floor 18.5, lightness and chroma in band).
+    #
+    # This is the seaborn colorblind palette with slots 2 and 5 swapped. The
+    # shipped order put #de8f05 (amber) at slot 2 and #d55e00 (vermillion) at
+    # slot 4, and that PAIR FAILS: dE 11.4 under NORMAL vision, below the 15
+    # floor -- full-colour readers cannot separate them either, and the amber
+    # also sits at 2.55:1 against the page. Any figure drawing four unlabelled
+    # series hit it; phph_physics_si had both in one panel.
+    #
+    # Slots 5-8 are the unvalidated tail and are kept only so an existing
+    # script does not crash on a 5th series. Adding a 5th HUE does not pass
+    # here at all-pairs -- four is the ceiling for this palette. A 5th series
+    # must carry secondary encoding (marker shape plus a direct label), which
+    # is what the decomposition-family figures do.
     "axes.prop_cycle": plt.cycler(
-        color=["#0173b2", "#de8f05", "#029e73", "#d55e00",
-               "#cc78bc", "#ca9161", "#fbafe4", "#949494"]
+        color=["#0173b2", "#cc78bc", "#029e73", "#d55e00",
+               "#de8f05", "#ca9161", "#949494", "#fbafe4"]
     ),
     "figure.constrained_layout.use": True,
 }

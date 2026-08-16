@@ -90,7 +90,7 @@ def main():
     print("Umklapp fraction: not stored in kappa-m191919.hdf5 -- "
           "see phph_NU_gruneisen_si.py")
 
-    fig, ax = style.figure(ncols=3, width=3.3, height=2.9)
+    fig, ax = style.doc_figure(ncols=3, aspect=0.30)
 
     # (a) lifetimes + omega^-2 envelope
     ax[0].scatter(fr_v, tau_v, s=5, alpha=0.3, color="C0", lw=0)
@@ -101,7 +101,8 @@ def main():
     ax[0].set_xlabel("frequency (THz)")
     ax[0].set_ylabel(r"lifetime $\tau$ (ps)")
     ax[0].legend(loc="upper right")
-    ax[0].set_title(rf"median $\tau$ = {np.median(tau_v):.1f} ps", fontsize=8)
+    # No in-panel title: the LaTeX caption carries the panel description,
+    # and the median is quoted in the text.
 
     # (b) kappa accumulation vs MFP
     ax[1].semilogx(mfp_sorted, kcum, color="C3", lw=1.6)
@@ -131,9 +132,11 @@ def main():
                       lw=0, label=lab)
     ax[2].set_xlabel("frequency (THz)")
     ax[2].set_ylabel(r"mode $\kappa$ (W m$^{-1}$K$^{-1}$)")
-    ax[2].legend(loc="upper right")
+    # Legend and annotation shared the upper-right corner and overlapped.
+    # The legend keeps the corner; the share statement moves under it.
+    ax[2].legend(loc="upper right", framealpha=0.92)
     ax[2].annotate(f"acoustic: {100 * ac_band:.0f}% of $\\kappa$",
-                   xy=(0.97, 0.72), xycoords="axes fraction", ha="right",
+                   xy=(0.97, 0.55), xycoords="axes fraction", ha="right",
                    fontsize=8, color="C0")
 
     style.save(fig, "phph_physics_si", directory=FIGDIR)

@@ -85,7 +85,7 @@ def main():
           f"max|g| = {np.abs(gam).max():.2f}  (exp. Si ~ {EXP_GRUENEISEN:g})")
 
     # --- figure ---
-    fig, ax = style.figure(ncols=2, width=3.6, height=2.9)
+    fig, ax = style.doc_figure(ncols=2, aspect=0.36)
 
     ax[0].scatter(freq[m], u_mode[m], s=6, alpha=0.3, color="C3", lw=0)
     ax[0].axhline(u_kappa, color="0.2", lw=1.1, ls="--")

@@ -33,7 +33,12 @@ import numpy as np                                  # noqa: E402
 from phonon.studies import style                    # noqa: E402
 
 NPZ = ROOT / "studies" / "out" / "ballistic_curves.npz"
-WIRES = (("d5a", style.C_BALLISTIC, "o"), ("d11a", style.C_ANHARMONIC, "s"))
+# Both series here ARE ballistic, so neither may wear the chapter's
+# anharmonic vermillion -- colour follows the entity, and vermillion
+# already means "anharmonic" in every other figure. Blue+green also
+# clears 3:1 contrast where the purple slot only WARNs.
+# Validated pair: dE 18.5 normal / 17.7 protan, both >= 3:1.
+WIRES = (("d5a", style.C_BALLISTIC, "o"), ("d11a", style.C_THIRD, "s"))
 
 
 def main() -> int:
@@ -51,15 +56,19 @@ def main() -> int:
 
     ax.set_xlabel("temperature (K)")
     ax.set_ylabel(r"$G_\mathrm{ball}$ ($10^{7}$ W m$^{-2}$K$^{-1}$)")
-    ax.legend(loc="lower right")
+    ax.legend(loc="upper left")
 
     # The ratio is the claim in the text, so it is drawn rather than asserted.
     t5, g5 = curves["d5a"]
     t11, g11 = curves["d11a"]
     assert np.array_equal(t5, t11)
     ratio = g11 / g5
-    inset = ax.inset_axes((0.16, 0.60, 0.40, 0.34))
-    inset.plot(t5, ratio, color=style.C_THIRD, marker="^", ms=3.5, lw=1.1)
+    # Lower right: the only region no series passes through. The inset used
+    # to sit at upper left, directly on top of the d11a curve.
+    # The ratio is a DERIVED quantity, not a third entity, so it wears the
+    # reference grey rather than a series hue -- green now means d11a.
+    inset = ax.inset_axes((0.54, 0.10, 0.42, 0.30))
+    inset.plot(t5, ratio, color=style.C_REFERENCE, marker="^", ms=3.5, lw=1.1)
     inset.set_ylim(1.4, 1.9)
     inset.set_xlabel("T (K)", fontsize=7, labelpad=1)
     inset.set_ylabel("ratio", fontsize=7, labelpad=1)

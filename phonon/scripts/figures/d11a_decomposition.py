@@ -57,7 +57,7 @@ def ganh_figure(rows: list[dict], dense: dict) -> None:
     g_ball = float(dense["G_ball_W_per_m2_K"]) / MW
     n_dense = float(dense["n_params"])
 
-    fig, ax = style.figure(width=4.6, height=3.5)
+    fig, ax = style.doc_figure(frac=0.48, aspect=0.80)
     ax.axhline(g_dense, color="k", lw=1.3)
     ax.annotate(f"dense FC3: $G_\\mathrm{{anh}}={g_dense:.1f}$",
                 (1.9e6, g_dense + 4), fontsize=7.5, color="k")
@@ -116,7 +116,7 @@ def ganh_figure(rows: list[dict], dense: dict) -> None:
 
 
 def conservation_figure(rows: list[dict], dense: dict) -> None:
-    fig, ax = style.figure(width=4.6, height=3.5)
+    fig, ax = style.doc_figure(frac=0.48, aspect=0.80)
     e_dense = float(dense["conservation_err"])
     ax.axhline(e_dense, color="k", lw=1.3)
     ax.annotate(f"dense FC3: {e_dense:.1e}", (1.15e6, e_dense * 1.35),
