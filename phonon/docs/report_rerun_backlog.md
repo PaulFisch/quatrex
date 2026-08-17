@@ -46,17 +46,31 @@ conductance is not fully.
 (`fc3_sinw100_d5a_sc4_vasp` and friends). `phonon/studies/ballistic.py` now
 takes `--eta-factor 0` for whoever has them.
 
-## 4. `srtio3_rattle_renorm`, regenerated
+## 4. DONE -- `srtio3_rattle_renorm`, regenerated
 
-**Gains:** the one main-chapter figure not regenerated at thesis width in the
-2026-08-16 pass, so it is the one that will look different on the page.
+The blocker was never missing data. The committed `fcp.fcp` holds the fit; what
+was absent is the `fc3.hdf5` the loader resolves, which the reap normally writes
+beside it. Two obstacles, both now removed:
 
-**Blocked on:** the fitted `fcp` IS local
-(`phonon/configs/perovskite/fc3_hiphive_srtio3_small_vasp/fcp.fcp`, 368 KB),
-but the loader wants an `fc3.hdf5` under one of `fc3/`,
-`fc3_hiphive_srtio3_small_vasp/` or `dfpt/` and none is there, so `make_all.py`
-still fails this generator with `FileNotFoundError`. Deriving the hdf5 from the
-fcp is the missing step, not fetching new data.
+* the `.fcp` files were pickled by a numpy whose `_frombuffer` takes a fifth
+  argument -- the axis permutation for arrays stored in `'K'` (keep-layout)
+  order -- and numpy 2.1's takes four, so `ForceConstantPotential.read` died
+  with a TypeError. `phonon/scripts/derive_fc3_from_fcp.py` supplies the
+  five-argument form and checks its inverse against a synthetic non-contiguous
+  array before reading anything;
+* the supercell is rebuilt with the pipeline's own `_build_supercell` +
+  `structure_to_ase`, so atom ordering matches the original fit.
+
+The derived tensors are committed beside the fits (198 KB each) and pass their
+gates: FC2 ASR 7.1e-15 / 3.6e-15, FC2 pair symmetry exactly 0, FC3 residual
+identical across all three axes (so it is the fit residual, not an axis
+artefact). The figure then reproduces both numbers the report quotes -- the AFD
+mode at R is -55.2i cm^-1 on the small-rattle fit against the quoted 55i, and
++38.8 cm^-1 on the large one against the quoted +39.
+
+`make_all.py` now regenerates 23 of 23 referenced figures; this was the last
+one outstanding, and it was also the last main-chapter figure still at
+pre-style-pass width (382.8 x 267.6 pt, now 300.1 x 209.7).
 
 ## 5. DONE -- the mixer-campaign figure
 

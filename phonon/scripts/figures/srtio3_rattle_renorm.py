@@ -117,8 +117,8 @@ def main() -> None:
         print(f"{label:32s}: omega_R = {w:+.3f} THz = "
               f"{'-' if w < 0 else '+'}{cm:.1f}{'i' if w < 0 else ''} cm^-1 "
               f"({kind})")
-    print("report claims: small fit 55i-92i cm^-1 (converging up; PBEsol ref "
-          "76i), large fit +90 cm^-1")
+    print("report (results 1.4): small fit 55i cm^-1 against the PBEsol "
+          "reference 76i, large fit +39 cm^-1")
 
 
 if __name__ == "__main__":
