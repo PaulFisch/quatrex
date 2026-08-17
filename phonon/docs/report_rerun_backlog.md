@@ -84,14 +84,30 @@ the inversion the section claims: on the nanotube plain linear reaches
 9.6e-04 while Anderson plateaus at 1.1e-01; on the nanowire Anderson is the
 worst of four at 7.9e-03 and RRE the best at 3.3e-04.
 
-## 6. The long-chain band ladder, `b_G = 4, 5`
+## 6. CLOSED -- the long-chain band ladder cannot be widened
 
-**Gains:** closes the factor-2.2 bracket of results §3.2. At 16 cells and
-beyond the boxcar is an upper bracket carrying non-causal gain and the taper a
-lower bracket with halved coherence, and neither is a converged-in-band
-transport result.
+This item read "`b_G = 4, 5` ... closes the factor-2.2 bracket of results
+section 3.2". It is ill-posed twice over.
 
-**Blocked on:** nothing. Mechanical with the GPU machinery.
+`sse_g_band` is `Field(default=3, ge=1, le=3)`, and the cap is structural, not
+arbitrary: with vertex reach `p = 1` and the output pinned at `|I-J| <= 1`, an
+exact `Sigma_IJ` consumes propagator links only out to `|K-K'| <= |I-J| + 2`,
+so `b_G = 3` already makes every block the Dyson solve reads exact. Measured on
+a gapped chain, the relative error on the retained output band is 3.18e-01,
+1.04e-01 and 0.000 at `b_G` = 1, 2, 3. There is nothing above 3 to run.
+
+The bracket it was meant to close is also gone. The band-1 Bartlett taper arm
+converged -- faster than the boxcar, 67/71/71 against 98/97/177 iterations --
+but to an answer with an interior heat spread of 47/72/86 % against 6/11/18 %,
+collapsing with length where the `b_G = 3` answer does not. That is not a lower
+bracket, and both tapers were removed from the report on 2026-08-17.
+
+**What is actually open** is the stored pattern, not the band: the
+block-tridiagonal output mask is itself a boxcar of bandwidth one and inherits
+the same indefiniteness, and it discards ~30 % of the self-energy on a
+settled-length device. Its lever is the blocking (32.1 -> 5.4 -> 2.5 -> 0.30 %
+at 1/2/3/4 cells per block), so the experiment that would close section 3.2 is a
+re-blocked long chain, not a wider band.
 
 ## 7. Bulk silicon conductivity from this solver in the diffusive limit
 

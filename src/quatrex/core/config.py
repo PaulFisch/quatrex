@@ -1716,8 +1716,8 @@ class PhononConfig(BaseModel):
     interior slabs acquire non-causal gain. Band 2 makes the diagonal Sigma
     blocks exact and causal, band 3 the first off-diagonals as well. Extends
     the shared G/Sigma sparsity pattern by the corresponding off-diagonal
-    blocks, and is clamped at use to ``n_blocks - 1``. Single block-rank
-    only."""
+    blocks, and is clamped at use to ``n_blocks - 1``. Distributed use
+    needs every block rank to own at least ``sse_g_band + 1`` blocks."""
 
     sse_g_band_taper: Literal["none", "bartlett"] = "none"
     """Positive semi-definite taper of the inner-G band mask, against the
