@@ -1,0 +1,82 @@
+## phonon_inputs config: 2H-MoS2 bulk, 4x4x2 supercell -- HIPHIVE STATICS.
+##
+## WHY THIS EXISTS. The production 4x4x1 cell (mos2_bulk_vasp.yaml) samples
+## the primitive Brillouin zone at q = (i/4, j/4, 0) only: q_z is ALWAYS
+## ZERO, so the A point -- the zone boundary along the cross-plane
+## direction -- is never sampled. The interlayer force constants are then
+## fixed only by the in-cell contacts and the Gamma-A dispersion is an
+## extrapolation. Measured consequences (phonon/docs/mos2_kappa_z_not_converged.md):
+## kappa_zz swings 20.9 / 65.4 / 19.9 / 23.9 W/mK over cubic cutoffs
+## 4.0-5.5 A with no plateau while kappa_xx converges cleanly; sweeping the
+## PAIR cutoff, the A-point acoustic mode goes imaginary at 5.0 A
+## (-0.317 THz) and the cross-plane group velocity swings 1124 / 17 /
+## 2112 m/s.
+##
+## 4x4x2 samples q_z = 0 AND 1/2, so the A point is constrained directly by
+## the data rather than extrapolated. That is the point of this run.
+##
+## Note what it does NOT buy: the isotropic cutoff limit rises only from
+## 6.147 to 6.320 A, because the in-plane box (12.640 A) becomes the binding
+## constraint once the c axis is doubled. Cutoffs are set just under it.
+##
+## Structure is the relaxed cell taken from the 4x4x1 campaign metadata
+## (cluster/mos2_refit/hiphive_meta.json), so the two runs share a geometry
+## and the comparison is like-for-like.
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Mo, Mo, S, S, S, S]
+  lattice:
+    - [3.1600, 0.0000, 0.0000]
+    - [-1.5800, 2.7366402760, 0.0000]
+    - [0.0000, 0.0000, 12.2940]
+  scaled_positions:
+    - [0.333333333333, 0.666666666667, 0.250000000000]
+    - [0.666666666667, 0.333333333333, 0.750000000000]
+    - [0.666666666667, 0.333333333333, 0.122788640000]
+    - [0.666666666667, 0.333333333333, 0.377211360000]
+    - [0.333333333333, 0.666666666667, 0.622788640000]
+    - [0.333333333333, 0.666666666667, 0.877211360000]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Mo: Mo_sv
+    S: S
+  encut: 400
+  ediff: 1.0e-6
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: Auto                      # 192-atom supercell: real-space projectors
+  lwave: false
+  lcharg: false
+  ncore: 8
+  kpar: 2
+  kpoints_scf: [3, 3, 1]           # c axis doubled -> halve the k-mesh along c
+  incar_extra: {IVDW: 11}          # D3, as in the 4x4x1 campaign
+  vasp_command: "export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib; ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: relax               # not used: the structure above is relaxed
+  forc_conv_thr: 0.001
+  calculator: vasp
+  work_dir: ./relax_mos2_vasp
+
+hiphive:
+  supercell: [4, 4, 2]             # 192 atoms, 12.640 x 12.640 x 24.588 A
+  n_structures: 40                 # matches the 4x4x1 set for comparability
+  rattle_method: mc
+  rattle_std: 0.03                 # Angstrom, as in the 4x4x1 campaign
+  rattle_d_min: 2.0                # min pair separation (Mo-S bond 2.41 A)
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [6.3, 4.0]              # [FC2, FC3] A; < min(L)/2 = 6.320 A
+  fit_method: least-squares        # the sweep refits every regressor anyway
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: vasp
+  work_dir: ./fc3_hiphive_mos2_442_vasp
+  pw_timeout: 14400                # 192-atom statics; 96-atom took ~460 s
