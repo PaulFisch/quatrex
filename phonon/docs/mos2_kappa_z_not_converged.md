@@ -101,6 +101,60 @@ kappa_zz sits *above* the reference while our NEGF kappa_bulk sits *below* the
 measurement. Both are reading the same badly-determined interlayer constants through
 different sensitivities.
 
+## 5b. CORRECTION (2026-08-26): the supercell is not what separates us from
+## the reference
+
+An audit of the reference protocol overturns part of section 3. Lindroth & Erhart
+used a **3x3x1 supercell** -- also one primitive cell along c, so their calculation
+samples q_z = 0 only, exactly as ours does -- and still obtained 5.1 W/mK. The
+A-point-sampling limitation is therefore *shared with the reference* and cannot be
+what makes us differ from it.
+
+What still stands from sections 1-2 is that **our own number is not converged**:
+kappa_zz swings by a factor 3.3 across cubic cutoffs and the A-point mode goes
+imaginary at a 5.0 A pair cutoff. That is a property of our cluster-expansion fit
+with a tunable cutoff, which the reference's finite-displacement construction does
+not have -- their FCs are whatever the 54-atom cell supports, with no cutoff to
+sweep.
+
+Protocol differences, measured rather than assumed:
+
+| | ours | Lindroth & Erhart |
+|---|---|---|
+| XC / vdW | PBE + D3 zero-damping (IVDW=11) | **vdW-DF-CX** (self-consistent nonlocal) |
+| supercell | 4x4x1 (96 atoms) | 3x3x1 (54 atoms) |
+| FC construction | hiphive cluster expansion, cutoffs [6.0, 4.0] | finite displacement, FC3 cutoff 3.8 A |
+| isotopes | not included in our quoted number | **included** |
+| solver | RTA | RTA |
+| kappa_xx, kappa_z | 124, 20.9 | 83, 5.1 (anisotropy **16.3**, not ~30) |
+
+Excluded by measurement: geometry (our relaxed z_S and c match theirs to 0.02 %);
+harmonic velocities (our Gamma-A LA is 3022 m/s against their 3.3 km/s, i.e. 8 %
+*softer*, which pushes kappa_z the wrong way); the FC3 cutoff (3.8 and 4.0 A both
+contain exactly the one cross-gap S-S shell at 3.528 A and both exclude the next at
+4.446 A); and the BTE solver (the reference is RTA too).
+
+Isotopes are a real protocol difference and asymmetric: Mo has mass variance
+g2 = 5.97e-4 against W's 6.97e-5, so MoS2's isotope correction is much larger than
+the WS2 numbers the paper quotes. Matching the protocol **collapses the in-plane gap
+to ~1.0x** -- our kappa_xx is essentially exact -- and leaves cross-plane at
+**2.5-3.3x**.
+
+**Leading remaining hypothesis: the vdW treatment.** Plain PBE has almost no
+interlayer binding, so in our model 100 % of both the cross-gap restoring force and
+the cross-gap *anharmonicity* comes from the additive analytic D3 pair term, whose
+third derivative at 3.528 A is fixed by the damping-function form with no density
+response. Getting Phi2 roughly right (our breathing 52.6 cm^-1 against 55.7 measured)
+while Phi3 is ~1.8x too small is entirely possible for that functional form, and
+1.8x in |Phi3| is what 3.3x in kappa_z requires. Direction is right: too little
+cross-gap anharmonicity, too little cross-plane scattering, kappa_z too high.
+
+Also worth propagating to the draft: the right comparison target is the
+equilibrium-limit 4.8-5.1 W/mK, not 2.0. The 2.0 value (Liu, Choi & Cahill, JAP 116,
+233107) is a TDTR number, and Jiang et al. (Adv. Mater. 29, 1701068) show the
+apparent through-plane kappa of MoS2 is modulation-frequency dependent and needs a
+two-channel nonequilibrium model to reach the intrinsic value.
+
 ## 6. The fix, and what it costs
 
 **A 4x4x2 supercell** (192 atoms, c = 24.6 A, aliasing limit 12.3 A). That would:
