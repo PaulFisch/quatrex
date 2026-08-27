@@ -166,6 +166,166 @@ def decompressed_blocks(bed: FrozenBed, mat, band: int, *, rank=None,
     return out, n_fitted
 
 
+def hybrid_retarded(bed: FrozenBed, band: int, *, rank=None, eps: float = 1e-3,
+                    m_edge: int = 2, accept: float = 1e-2):
+    r"""``G~^R``: exact inside ``band``, modal continuation outside.
+
+    The proposal's Eq. (44), on the RETARDED function -- which is the object the
+    spatial modal picture actually represents, and which the rank measurement
+    says needs 2-3 exponentials where ``G^<`` needs 4-5. That gap is the whole
+    reason route B exists.
+
+    The model is used only where the model FITS. ``accept`` bounds the fit's own
+    reconstruction error on the sequence it was fitted to; above it the exact
+    blocks are kept at that frequency and the sample is counted as refused.
+    Without that guard the substitution is applied at band edges, where the
+    modal range is hundreds of cells and nothing has decayed, and the far blocks
+    come back wrong by two orders -- which measures the bed's damping, not the
+    representation.
+
+    Returns ``(G~^R, stats)``. The far-block error is reported against the exact
+    blocks it replaces, as a median and a worst case, so a congruence result can
+    be attributed to the reconstruction rather than to the congruence.
+    """
+    from quatrex.phonon.spatial_hankel import ExponentialSeries, matrix_pencil
+
+    nd, n = bed.n_dof, bed.n_slabs
+    dropped_w = kept_w = 0.0
+    anchor_i = bed.p + m_edge
+    span = max(3, n - 2 * anchor_i)
+    out = np.array(bed.g_retarded, copy=True)
+    n_fitted = n_refused = 0
+    errs = []
+    for iw in range(bed.freqs_thz.size):
+        seq = [bed.g_retarded[iw, anchor_i * nd:(anchor_i + 1) * nd,
+                              (anchor_i + r) * nd:(anchor_i + r + 1) * nd]
+               for r in range(span)]
+        if np.abs(np.asarray(seq)).max() <= 0.0:
+            continue
+        try:
+            fit = matrix_pencil(seq, rank=rank, eps=eps)
+        except np.linalg.LinAlgError:
+            n_refused += 1
+            continue
+        if float(fit.rel_error(seq).max()) > accept:
+            n_refused += 1
+            continue
+        # An outward continuation must not grow. The pencil legitimately
+        # returns |xi| > 1 -- in a two-terminal device that branch carries the
+        # wave from the FAR contact -- but using it to extrapolate away from the
+        # anchor diverges, and the far blocks come back wrong by a factor 40
+        # rather than by a few percent. Dropped, with the weight it carried
+        # recorded so the drop is visible.
+        keep = np.abs(fit.xi) <= 1.0 + 1e-9
+        if not keep.any():
+            n_refused += 1
+            continue
+        dropped_w += float(np.linalg.norm(fit.residues[~keep]))
+        kept_w += float(np.linalg.norm(fit.residues[keep]))
+        fit = ExponentialSeries(xi=fit.xi[keep],
+                                residues=fit.residues[keep],
+                                spectrum=fit.spectrum)
+        n_fitted += 1
+        for k in range(n):
+            for kp in range(n):
+                d = abs(k - kp)
+                if d <= band:
+                    continue
+                ref = bed.g_retarded[iw, k * nd:(k + 1) * nd,
+                                     kp * nd:(kp + 1) * nd]
+                blk = fit.block(d)
+                out[iw, k * nd:(k + 1) * nd, kp * nd:(kp + 1) * nd] = blk
+                den = np.linalg.norm(ref)
+                if den > 0.0:
+                    errs.append(float(np.linalg.norm(blk - ref) / den))
+    stats = {"n_fitted": n_fitted, "n_refused": n_refused,
+             "growing_weight": dropped_w / (dropped_w + kept_w + 1e-300),
+             "far_block_err": float(np.max(errs)) if errs else 0.0,
+             "far_block_err_median": float(np.median(errs)) if errs else 0.0}
+    return out, stats
+
+
+def sigma_congruence(bed: FrozenBed, band: int, *, rank=None, eps=1e-3,
+                     m_edge: int = 2, n_threads=None):
+    r"""Route B: modal ``G~^R``, then ``G~^{<,>} = G~^R Sigma_tot^{<,>} G~^A``.
+
+    ``G~^A`` is literally ``G~^R`` conjugate-transposed, so ``i G~^{<,>}`` is a
+    congruence of ``i Sigma_tot^{<,>}`` and inherits its sign structure exactly.
+    A direct exponential fit of ``G^<`` has no such guarantee, which is the
+    proposal's Sec. 9 point and the reason to measure the two side by side.
+
+    ``Sigma_tot`` carries the CONTACT terms as well as the anharmonic source;
+    they dominate it, and leaving them out is the standard way to get this
+    wrong.
+    """
+    from solver.dense import _device_g_blocks, _scatter_blocks
+    from solver.se_finite import compute_phph_self_energy_finite_multi_slab
+
+    g_r, stats = hybrid_retarded(bed, band, rank=rank, eps=eps, m_edge=m_edge)
+    g_a = g_r.conj().transpose(0, 2, 1)
+    sig_l_tot = (bed.obc["Sigma_L_lesser"] + bed.obc["Sigma_R_lesser"]
+                 + bed.sigma_lesser)
+    sig_g_tot = (bed.obc["Sigma_L_greater"] + bed.obc["Sigma_R_greater"]
+                 + bed.sigma_greater)
+    g_l = g_r @ sig_l_tot @ g_a
+    g_g = g_r @ sig_g_tot @ g_a
+
+    gl = _device_g_blocks(g_l, bed.n_slabs, bed.n_dof, None, has_q_axis=False)
+    gg = _device_g_blocks(g_g, bed.n_slabs, bed.n_dof, None, has_q_axis=False)
+    sl_b, sg_b = compute_phph_self_energy_finite_multi_slab(
+        gl, gg, bed.phi, bed.n_slabs, bed.freqs_thz, bed.dw_thz,
+        sigma_cutoff=None, g_cutoff=None, n_threads=n_threads)
+
+    def densify(blocks):
+        o = np.zeros((bed.freqs_thz.size, bed.n_d, bed.n_d), dtype=complex)
+        _scatter_blocks(o, blocks, bed.n_dof)
+        return o
+
+    keldysh_err = float(np.abs(g_l - bed.g_lesser).max()
+                        / (np.abs(bed.g_lesser).max() + 1e-300))
+    return densify(sl_b), densify(sg_b), dict(
+        stats, keldysh_err=keldysh_err,
+        psd_lesser=psd_negative_weight(g_l, bed.pos_mask),
+        psd_lesser_exact=psd_negative_weight(bed.g_lesser, bed.pos_mask))
+
+
+def psd_negative_weight(mat, pos_mask, *, stride: int = 17) -> float:
+    r"""Worst share of ``i M``'s spectrum that is negative, over positive
+    frequencies.
+
+    Two things it is easy to get wrong here, and both give a number near 1 that
+    reads as a catastrophic failure.
+
+    ``i M`` and not ``-i M``: this tree sets ``Sigma^< = -i n Gamma``, so ``i``
+    is the positive convention (the proposal's is the other one).
+
+    And POSITIVE frequencies only. The symmetric axis carries the
+    ``Sigma^<(-w) <-> Sigma^>(w)`` image, where the Bose factor changes sign, so
+    ``i G^<`` is negative-definite for ``w < 0`` by construction. Sweeping the
+    whole axis reports ~0.999 negative weight for an exact, perfectly physical
+    ``G^<``.
+
+    Weighted by spectral mass rather than maximised over frequency. The
+    unweighted maximum is taken BELOW the band, where the contacts inject
+    nothing, ``G^<`` is sourced entirely by the anharmonic ``Sigma_s^<`` -- which
+    is itself not positive -- and the negative fraction is 1.000 on an amplitude
+    four orders below the band's. That is a true statement about a negligible
+    part of the object and it drowns the question being asked.
+
+    Sampled rather than swept: an ``eigvalsh`` at every frequency costs more
+    than the bubble it is checking.
+    """
+    idx = np.where(np.asarray(pos_mask))[0][::max(1, stride)]
+    neg = tot = 0.0
+    for iw in idx:
+        h = 1j * mat[iw]
+        h = 0.5 * (h + h.conj().T)
+        ev = np.linalg.eigvalsh(h)
+        neg += float(np.sum(np.abs(ev[ev < 0.0])))
+        tot += float(np.sum(np.abs(ev)))
+    return neg / (tot + 1e-300)
+
+
 def sigma_decompressed(bed: FrozenBed, band: int, *, rank=None, eps=1e-3,
                        m_edge: int = 2, n_threads=None):
     """The wide bubble with far legs supplied modally instead of stored."""
@@ -435,6 +595,29 @@ def run(bed: FrozenBed, *, m_edge: int = 2, n_threads=None, verbose=True):
     except Exception as exc:                       # pragma: no cover
         print(f"  arm E failed: {type(exc).__name__}: {exc}", flush=True)
 
+    # Arm F, route B: the congruence. The modal continuation is applied to G^R
+    # -- the object the modal picture represents, and the one that needs 2-3
+    # exponentials where G^< needs 4-5 -- and G^{<,>} is then REBUILT rather
+    # than fitted, so positivity is structural.
+    try:
+        sl_c, sg_c, info_c = sigma_congruence(bed, 3, m_edge=m_edge,
+                                              n_threads=n_threads)
+        arm = solve_arm(bed, sl_c, sg_c)
+        arm.update(sigma_lesser=sl_c, sigma_greater=sg_c,
+                   sigma_cutoff=None, g_cutoff="congr>3", **info_c)
+        arms["F"] = arm
+        if verbose:
+            print(f"  arm F (congruence, modal G^R beyond band 3): "
+                  f"J_L={arm['J_L']:.6e}  {info_c['n_fitted']} fitted / "
+                  f"{info_c['n_refused']} refused  far-block err "
+                  f"{info_c['far_block_err_median']:.2e} med / "
+                  f"{info_c['far_block_err']:.2e} max  G^< err "
+                  f"{info_c['keldysh_err']:.2e}  neg-weight "
+                  f"{info_c['psd_lesser']:.2e} vs exact "
+                  f"{info_c['psd_lesser_exact']:.2e}", flush=True)
+    except Exception as exc:                       # pragma: no cover
+        print(f"  arm F failed: {type(exc).__name__}: {exc}", flush=True)
+
     ref = arms["D"]
     # The reblocked arms: the same reference Sigma, masked at m cells per block.
     for m_cells in (2, 3, 4):
@@ -513,10 +696,12 @@ def report(bed: FrozenBed, res: dict) -> None:
     print("    arm  sigma_cut  g_cut |  eps(J_L)   eps(J_R)   eps(J_s)  | "
           "first-order dJ_L/J_L")
     labels = {"A": "production pin", "B": "pin, wide G",
-              "C": "no pin, band 3", "E": "modal legs beyond band 3",
+              "C": "no pin, band 3",
+              "E": "modal legs beyond band 3 (direct fit of G^<)",
+              "F": "congruence: modal G^R, G^< rebuilt",
               "R2": "reblock 2 cells/block", "R3": "reblock 3",
               "R4": "reblock 4"}
-    for t in [k for k in ("A", "B", "C", "E", "R2", "R3", "R4")
+    for t in [k for k in ("A", "B", "C", "E", "F", "R2", "R3", "R4")
               if k in res["eps"]]:
         lbl = labels[t]
         e, dl = res["eps"][t], res["lin"][t]
