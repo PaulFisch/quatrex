@@ -288,3 +288,138 @@ def symmetric_cubic_vertex(
         + raw.transpose(2, 1, 0)
     ) / 6.0
     return scale * sym
+
+
+# ---------------------------------------------------------------------------
+# Gapped beds for the spatial-tail programme
+# ---------------------------------------------------------------------------
+#
+# The ring is a convolution, so Sigma(Omega) needs G at omega AND at
+# Omega - omega and the frequency grid has to start at zero. An exact eta = 0
+# reference needs the grid to avoid the band. A GAPPED chain satisfies both --
+# an on-site pinning puts the band at [w0, sqrt(w0**2 + 4 k_s)] and the grid
+# sits below w0, where the Brillouin-zone integrand never vanishes. The
+# ungapped ``monatomic_chain`` above cannot: its acoustic branch reaches zero,
+# so any grid starting at zero runs through the band.
+#
+# Promoted from ``tests/quatrex/phonon/test_spatial_modal.py``, where they were
+# module-private, because the spatial-tail STUDIES need the same beds as the
+# tests and one definition is the point. Behaviour is unchanged: the tests that
+# consumed the originals still pass against these.
+
+
+def gapped_chain(w0: float = 1.0, k_s: float = 4.0, cubic: float = 0.0):
+    """1-DOF chain with an on-site pinning ``w0``: band ``[w0, sqrt(w0^2+4k)]``.
+
+    One DOF per cell, so a block IS a cell -- which is what makes the block
+    bookkeeping of the self-energy support law readable.
+    """
+    h00 = np.array([[w0 ** 2 + 2.0 * k_s]], dtype=float)
+    h01 = np.array([[-k_s]], dtype=float)
+    phi = np.array([[[cubic]]], dtype=float)
+    lo, hi = float(w0), float(np.sqrt(w0 ** 2 + 4.0 * k_s))
+    return ToyModel(
+        name="gapped_chain",
+        n_dof=1,
+        masses=np.array([1.0], dtype=float),
+        h00=h00,
+        h01=h01,
+        phi=phi,
+        description=(
+            f"1D chain pinned at w0={w0}, spring {k_s}; band [{lo:.4g}, "
+            f"{hi:.4g}] THz, so a grid below {lo:.4g} is regular at eta = 0"
+        ),
+    )
+
+
+def gapped_chain_root(omega: float, w0: float = 1.0, k_s: float = 4.0) -> complex:
+    """Decaying Bloch factor of :func:`gapped_chain` (real, in ``(0, 1)``).
+
+    ``scimath.sqrt`` and the ``argmin(|lambda|)`` selection are both
+    load-bearing: the discriminant turns negative inside the band, and the
+    reciprocal partner must not be returned.
+    """
+    a, b, c = k_s, omega * omega - (w0 ** 2 + 2.0 * k_s), k_s
+    disc = np.lib.scimath.sqrt(b * b - 4.0 * a * c)
+    lam = np.array([(-b + disc) / (2.0 * a), (-b - disc) / (2.0 * a)])
+    return complex(lam[np.argmin(np.abs(lam))])
+
+
+def gapped_chain_green(omega: float, n_max: int, w0: float = 1.0,
+                       k_s: float = 4.0, n_k: int = 4096) -> np.ndarray:
+    """``G(n)``, ``n = 0..n_max``, by PERIODIC-trapezoid BZ quadrature.
+
+    Periodic, not ``linspace``: including both endpoints double counts and the
+    reference then stops decaying at ~5e-6, which looks like a Green function
+    reaching a floor and is arithmetic. Independent of
+    :func:`gapped_chain_root`, so a modal reconstruction checked against it is
+    a real comparison.
+    """
+    k = 2.0 * np.pi * np.arange(n_k) / n_k
+    denom = omega ** 2 - (w0 ** 2 + 2.0 * k_s) + 2.0 * k_s * np.cos(k)
+    return np.array([np.sum(np.exp(1j * k * n) / denom) / n_k
+                     for n in range(n_max + 1)])
+
+
+def bulk_green_blocks(a_ii, a_ij, a_ji, n_max: int, n_k: int = 2048) -> dict:
+    """``{n: G(n)}`` of an infinite periodic chain, by the same quadrature.
+
+    ``a_xx`` are SYSTEM-matrix blocks in the OBC convention, the ones
+    :func:`quatrex.phonon.spatial_modes.bloch_modes` takes -- so a caller
+    cannot accidentally feed the pencil one convention and the reference
+    another.
+    """
+    a_ii = np.asarray(a_ii)
+    k = 2.0 * np.pi * np.arange(n_k) / n_k
+    ph = np.exp(1j * k)[:, None, None]
+    a_k = a_ii[None] + np.asarray(a_ij)[None] * ph + np.asarray(a_ji)[None] * np.conj(ph)
+    inv = np.linalg.inv(a_k)
+    return {n: (inv * np.exp(1j * k * n)[:, None, None]).sum(0) / n_k
+            for n in range(n_max + 1)}
+
+
+# A 2-DOF cell whose inter-cell coupling is INVERTIBLE. A rank-deficient D_01
+# makes the pencil degenerate -- roots collapse to 0 and infinity and the mode
+# count is wrong -- so the coupling is chosen full rank and callers assert it.
+CHAIN2_D00 = np.array([[2.6, -0.4], [-0.4, 2.2]])
+CHAIN2_D01 = np.array([[-0.9, -0.25], [-0.2, -0.8]])
+
+
+def chain2_system_blocks(omega: float, d00=None, d01=None):
+    """``(a_ii, a_ij, a_ji)`` of the 2-DOF chain at ``omega``."""
+    d00 = CHAIN2_D00 if d00 is None else d00
+    d01 = CHAIN2_D01 if d01 is None else d01
+    return (omega * omega * np.eye(d00.shape[0]) - d00, -d01, -d01.conj().T)
+
+
+def chain2_band_top(d00=None, d01=None, n_k: int = 2001) -> float:
+    """Top of the 2-DOF chain's band, for placing a grid outside it."""
+    d00 = CHAIN2_D00 if d00 is None else d00
+    d01 = CHAIN2_D01 if d01 is None else d01
+    top = 0.0
+    for x in np.linspace(0.0, np.pi, n_k):
+        dk = d00 + d01 * np.exp(1j * x) + d01.conj().T * np.exp(-1j * x)
+        top = max(top, np.sqrt(np.linalg.eigvalsh(
+            0.5 * (dk + dk.conj().T)).max()))
+    return float(top)
+
+
+def neighbour_cubic_vertex(n_cell: int, seed: int = 5) -> np.ndarray:
+    """Cubic vertex coupling each cell to its neighbours, index-symmetric.
+
+    ``Phi[i, a, b]`` nonzero for ``|i-a| <= 1`` and ``|i-b| <= 1``, i.e. vertex
+    reach ``p = 1`` -- the production reach.
+
+    The draw happens INSIDE the bounds check, so the random sequence depends on
+    ``n_cell``. That is not incidental: the measured pin-versus-length numbers
+    in ``phonon/docs/spatial_truncation_derivation.md`` were taken with this
+    ordering, and reordering the draws moves them. Preserved deliberately.
+    """
+    rng = np.random.default_rng(seed)
+    phi = np.zeros((n_cell, n_cell, n_cell))
+    for i in range(n_cell):
+        for a in (i - 1, i, i + 1):
+            for b in (i - 1, i, i + 1):
+                if 0 <= a < n_cell and 0 <= b < n_cell:
+                    phi[i, a, b] = rng.normal()
+    return (phi + phi.transpose(0, 2, 1)) / 2.0
