@@ -249,7 +249,90 @@ linearises any length -- checked on a degree-4 3x3 pencil, all 12 roots at
 8.8e-14. The consequence propagates: the root count is `2Mb`, the retained
 branch `Mb`, so `r = M n_dof` and not `n_dof` in every cost estimate.
 
-## 9. Open
+## 9. First gate readings, on a converged 20-cell chain
 
-The gates. E1's `C -> D` on a real bed, and the source-resolved Keldysh rank on
-the same states, both waiting on frozen beds converged at production settings.
+`chain_L20`: gapped 1-DOF chain, 20 cells, cubic 6e16, 281 frequencies,
+`eta = 0`, converged to `resid = 9.7e-09` with `conservation = 1.4e-03` in 66
+iterations. It satisfies the sizing law (`R <= 13`). The floor pre-registered
+from its own conservation error is `4.06e-03`.
+
+### E1, the four-arm factorial
+
+| arm | `sigma_cutoff` | `g_cutoff` | `eps(J_L)` | first-order `dJ_L/J_L` |
+|---|---|---|---|---|
+| A | 1 | 3 | 6.311e-03 | -1.51e-02 |
+| B | 1 | None | 6.311e-03 | -1.51e-02 |
+| C | None | 3 | 6.382e-03 | -1.66e-03 |
+
+**A and B agree to every printed digit**, on this bed as on the 8-cell one.
+Widening `G` while the output stays pinned at `|I-J| <= 1` changes no current at
+all -- `spatial_truncation_derivation.md`'s "the pin does not care how far `G`
+reaches", reproduced at the level of a current rather than a block norm, on a
+different bed, through different code.
+
+`C -> D` -- the question nothing had asked -- came out at **6.38e-03 against a
+floor of 4.06e-03**, i.e. above it by a factor 1.6. Given the pin already
+removed, widening `G` does move the lead current, by about 0.6 %. Marginal, and
+on a bed that cannot yet be trusted for it: `G^R`'s block profile is flat out to
+`R = 9` because the median modal range is 2.05 cells but the range at the
+frequency carrying most of `G^<` is 636, so the bed's own tail is not resolved.
+The number is reported as a gate reading, not as a physical result.
+
+`eps_Toeplitz` is 3-9 % on `Sigma` and 1-11 % on `G` over the interior, falling
+with distance. So a separation-only representation is a few-percent
+approximation here rather than an exact one, which is the direction the
+semiseparable structure predicts.
+
+The shell decomposition separates cleanly at every distance: `R = 0..2` carried
+by leg shells 0-2, `R = 5` by `(6+, 4-5)` at 23 %, `R >= 6` almost entirely by
+`(6+, 6+)`. That is the vertex-near / propagation-tail split the proposal asks
+for, and it is what the band sweep cannot produce.
+
+### E3/E4, the Keldysh rank -- **the second gate passes**
+
+Eleven frequencies spread over the band, interior anchor, span 14 blocks. The
+source arms reproduce the frozen `G^<` to `1.2e-15`, so the decomposition is
+exact and a rank can be attributed.
+
+Median numerical rank over frequency, at four tolerances (Hankel cap 7):
+
+| object | 1e-2 | 1e-3 | 1e-4 | 1e-6 |
+|---|---|---|---|---|
+| `G^R` | 2 | 3 | 4 | 7 (cap) |
+| `G^<` | 4 | 5 | 7 (cap) | 7 (cap) |
+| `G^>` | 4 | 5 | 7 (cap) | 7 (cap) |
+| `Y = G^R L` | 5 | 7 (cap) | 7 (cap) | 7 (cap) |
+
+Three readings.
+
+**The Keldysh rank is bounded, not device-scaling.** Four to five exponentials
+at a practical tolerance on a 20-cell device. The proposal's Sec. 39.2 stop
+condition -- "Keldysh rank scales like the full device" -- is not met.
+
+**It costs about twice the retarded rank**, 4 against 2 at 1e-2 and 5 against 3
+at 1e-3. That is the pre-registered prediction from the source-resolved
+derivation: two contact families, each contributing the retarded set and its
+reciprocal partner.
+
+**The positivity factor `Y` is not lower rank than what it factorises** -- 5
+against 4 at 1e-2, and saturating earlier. So the factorised formulation of the
+proposal's Sec. 9 buys positivity by construction and does not buy rank, which
+was the other thing it was hoped for.
+
+A rank at the cap is a lower bound and is reported as one: a Hankel matrix
+cannot express more than its own size, and a span of 14 blocks gives a cap of 7.
+Resolving the 1e-4 column needs a longer device.
+
+## 10. Open
+
+- E1's `C -> D` on a bed whose own tail is resolved (`xi` of a few cells across
+  the band, not 600 at the band bottom), and on a real device.
+- The exponent identity: whether the recovered exponents are the advanced
+  conjugates along `J` and the retarded roots along `I`. Not yet answered,
+  because the operator's bands are ill-defined on this bed -- `Sigma^R` carries
+  only 45 % of its weight within `|I-J| <= 1` and 90 % only by `|I-J| <= 8`, so
+  there is no low-order pencil to compare against.
+- The decompressor and the analytic contraction, both gated on the E6 cost
+  argument in Sec. 1.
+- Whether any real device admits a frozen state at all under the reference
+  kernel; see Sec. 4.

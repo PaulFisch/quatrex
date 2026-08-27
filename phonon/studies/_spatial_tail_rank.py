@@ -240,8 +240,17 @@ def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
             r_eps = numerical_rank(sq, eps)
             est = matrix_pencil(sq, rank=rank, eps=eps)
             uniq, mult = cluster_exponents(est.xi, 1e-4)
+            # A rank equal to the Hankel's own size is "at least", not "equal
+            # to": the matrix cannot express more, so the number is a property
+            # of the sequence LENGTH and not of the physics. Reported at a
+            # ladder of tolerances with the cap beside it, because a single
+            # tolerance on a short sequence saturates and reads as a result.
+            cap = est.spectrum.size
             entry[along] = {"r_eps": r_eps, "xi": uniq, "mult": mult,
-                            "spectrum": est.spectrum,
+                            "spectrum": est.spectrum, "cap": cap,
+                            "ladder": {t: numerical_rank(sq, t)
+                                       for t in (1e-2, 1e-3, 1e-4, 1e-6)},
+                            "saturated": r_eps >= cap,
                             "recon": float(est.rel_error(sq).max())}
         out["arms"][name] = entry
     return out
@@ -310,11 +319,75 @@ def report(bed: FrozenBed, res: dict) -> None:
     print()
 
 
+def sweep(bed: FrozenBed, iws, **kw):
+    """Run at several frequencies and summarise, because one is not a result.
+
+    A single frequency near the band bottom is the LEAST damped point on the
+    grid and is where a rank is largest and an exponent least determined; the
+    quantity the gate needs is how the rank behaves across the band.
+    """
+    rows = []
+    for iw in iws:
+        try:
+            r = run(bed, iw=int(iw), **kw)
+        except np.linalg.LinAlgError:
+            continue
+        rows.append(r)
+    return rows
+
+
+def sweep_report(bed: FrozenBed, rows) -> None:
+    if not rows:
+        print("  no frequency produced a usable estimate")
+        return
+    names = list(rows[0]["arms"])
+    print(f"\n{bed.name}: rank across {len(rows)} frequencies "
+          f"({rows[0]['w']:.3f} .. {rows[-1]['w']:.3f} THz), "
+          f"span {rows[0]['span']} blocks")
+    print("  linearity of the source arms: worst "
+          f"{max(r['linearity_residual'] for r in rows):.2e}")
+    xi_g = []
+    for r in rows:
+        d = r["lam_decaying"]
+        if d.size:
+            xi_g.append(float(np.max(-1.0 / np.log(np.abs(d)))))
+    if xi_g:
+        print(f"  longest modal range xi over the sweep: "
+              f"min {min(xi_g):.2f}  median {np.median(xi_g):.2f}  "
+              f"max {max(xi_g):.2f} cells "
+              f"(the device is {bed.n_slabs} cells; a range longer than that "
+              "means the bed cannot show a tail)")
+    print(f"  min |1 - lambda_m lambda_n^*| over the sweep: "
+          f"{min(r['min_one_minus_prod'] for r in rows):.3e}")
+
+    cap = rows[0]["arms"][names[0]].get(
+        "J", rows[0]["arms"][names[0]]["I"])["cap"]
+    print(f"\n  numerical rank, median over frequency, at four tolerances "
+          f"(Hankel cap {cap})")
+    print("    object           1e-2 1e-3 1e-4 1e-6 | saturated at 1e-6 | "
+          "worst recon")
+    for name in names:
+        e = [r["arms"][name].get("J", r["arms"][name].get("I")) for r in rows]
+        med = [int(np.median([x["ladder"][t] for x in e]))
+               for t in (1e-2, 1e-3, 1e-4, 1e-6)]
+        sat = sum(1 for x in e if x["saturated"])
+        lbl = name if "J" in rows[0]["arms"][name] else f"{name} (I)"
+        print(f"    {lbl:16s} " + " ".join(f"{m:4d}" for m in med)
+              + f" | {sat:2d}/{len(e)} frequencies | "
+                f"{max(x['recon'] for x in e):.1e}")
+    print("    A rank at the cap is a lower bound, not a measurement: the "
+          "Hankel\n    matrix cannot express more than its own size.")
+    print()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--bed", type=Path, required=True)
     ap.add_argument("--iw", type=int, default=None,
                     help="frequency sample; default is the largest |G^<|")
+    ap.add_argument("--n-freqs", type=int, default=9,
+                    help="sweep this many frequencies spread over the "
+                         "positive axis where G^< carries weight; 1 uses --iw")
     ap.add_argument("--eps", type=float, default=1e-6)
     ap.add_argument("--rank", type=int, default=None)
     ap.add_argument("--m-edge", type=int, default=2)
@@ -322,14 +395,18 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     bed = FrozenBed.load(a.bed)
-    iw = a.iw
-    if iw is None:
-        weight = np.abs(bed.g_lesser).max(axis=(1, 2))
-        weight[~bed.pos_mask] = 0.0
-        iw = int(np.argmax(weight))
+    weight = np.abs(bed.g_lesser).max(axis=(1, 2))
+    weight[~bed.pos_mask] = 0.0
+    iw = a.iw if a.iw is not None else int(np.argmax(weight))
 
     res = run(bed, iw=iw, eps=a.eps, m_edge=a.m_edge, rank=a.rank)
     report(bed, res)
+
+    if a.n_freqs > 1:
+        live = np.where(weight > 1e-6 * weight.max())[0]
+        iws = np.unique(np.linspace(live[0], live[-1], a.n_freqs).astype(int))
+        sweep_report(bed, sweep(bed, iws, eps=a.eps, m_edge=a.m_edge,
+                                rank=a.rank))
 
     out = a.out or (OUT.parent / "spatial_tail" / f"{bed.name}_rank.npz")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
