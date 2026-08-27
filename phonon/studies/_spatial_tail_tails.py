@@ -440,10 +440,11 @@ def run(bed: FrozenBed, *, m_edge: int = 2, n_threads=None, verbose=True):
     for m_cells in (2, 3, 4):
         if bed.n_slabs // m_cells < 2:
             continue
-        arm = solve_arm(bed,
-                        block_mask(bed, ref["sigma_lesser"], m_cells),
-                        block_mask(bed, ref["sigma_greater"], m_cells))
-        arm.update(sigma_cutoff=f"blk{m_cells}", g_cutoff=None,
+        msk_l = block_mask(bed, ref["sigma_lesser"], m_cells)
+        msk_g = block_mask(bed, ref["sigma_greater"], m_cells)
+        arm = solve_arm(bed, msk_l, msk_g)
+        arm.update(sigma_lesser=msk_l, sigma_greater=msk_g,
+                   sigma_cutoff=f"blk{m_cells}", g_cutoff=None,
                    discarded=discarded_fraction(bed, ref["sigma_lesser"],
                                                 m_cells))
         arms[f"R{m_cells}"] = arm

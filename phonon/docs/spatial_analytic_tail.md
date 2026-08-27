@@ -323,7 +323,42 @@ A rank at the cap is a lower bound and is reported as one: a Hankel matrix
 cannot express more than its own size, and a span of 14 blocks gives a cap of 7.
 Resolving the 1e-4 column needs a longer device.
 
-## 10. Open
+## 10. The analytic contraction is exact where it is supposed to be
+
+Eq. (47), verified against the ring it would replace, on a bed whose legs are
+exactly modal (the gapped chain's bulk `G(n) = G(0) lambda^n` is rank one in the
+Bloch factor, so any disagreement is the algebra and not the representation):
+
+| `R` | 0 | 1 | 2 | 3 | 5 | 8 |
+|---|---|---|---|---|---|---|
+| rel. err | 6.7e-01 | 7.2e-02 | 3.7e-16 | 6.7e-16 | 3.2e-16 | 1.5e-16 |
+
+Roundoff from `R = 2p` outwards, and deliberately wrong below it. The negative
+control matters: a formula that happened to work everywhere would mean the
+validity window `R >= R0 + 2p` was not what was being tested. Below it an
+internal leg is asked for a NEGATIVE separation, where `lambda^{-n}` is the
+growing partner and the modal form is not the Green function.
+
+Three things in Eq. (47) are easy to get wrong and none of them fails loudly.
+The proposal's `a,b,c,d` are CELL indices while `bubble.py`'s are DOF indices,
+and they collide. The left vertex is conjugated (`se_finite.py`) and the modal
+factors are not conjugated with it -- a no-op at Gamma with a real FC3 and
+wrong in `se_q`. And `zeta^R` stays inside the frequency integral. That last one
+decides the implementation: `analytic_tail` drives the ORDINARY kernel with
+rank-one modal legs rather than reimplementing the contraction, so the frequency
+convolution is the same FFT and a disagreement is unambiguous.
+
+Pairs are screened by FC3-weighted tail amplitude (Eq. 50) and not by
+`|lambda|`, because a mode near the unit circle that the vertex barely projects
+onto is still irrelevant. `|zeta| >= 1` has no geometric sum and returns `inf`
+unless given a device length, rather than a plausible negative number.
+
+**This verifies the algebra. It does not demonstrate a saving** -- see the cost
+argument in Sec. 1, which says the analytic route is 0.6x on Si and 0.1x on CNT
+at full rank, and worse if the Keldysh legs need the doubled exponent set that
+Sec. 9 measured.
+
+## 11. Open
 
 - E1's `C -> D` on a bed whose own tail is resolved (`xi` of a few cells across
   the band, not 600 at the band bottom), and on a real device.
