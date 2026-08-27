@@ -159,8 +159,41 @@ physically exists, which is the state production reaches -- `sigma_cutoff = 1`,
 `g_cutoff = 3`, and >= 2 cells per block on Si. That is not a compromise of the
 experiment: "frozen" means the arms differ only in how `Sigma` is REPRESENTED
 when evaluated on a fixed state, and the state is an input to that, not an
-output of it. It does mean every number carries the settings its state was
-converged at.
+output of it.
+
+### Reblocked, at the production settings: still no frozen real bed
+
+Following the tree's own recipe -- coarser blocking plus `g_band = 3` -- on
+devices reblocked exactly (`reblock_device.py` verifies the dense FC2 and FC3
+operators are unchanged), with `retarded = "half"`, `sigma_cutoff = 1`,
+`g_cutoff = 3`, `eta = 0`:
+
+| bed | blocking | blocks x dof | outcome |
+|---|---|---|---|
+| Si film | 2 cells/block | 16 x 12 | diverges, resid 95 by iteration 16 |
+| Si film | 3 cells/block | 12 x 18 | oscillates at resid ~1.1, `dJ/J` 2 %, **conservation 0.05-0.09** |
+| Si film | 1 cell/block | 16 x 6 | stalls at resid 0.80 (`fft`) / diverges (Anderson) |
+| CNT (3,3) | 1 cell/block | 13 x 36 | diverges at iteration 7 |
+| CNT (3,3) | 2 cells/block | 8 x 72 | running |
+
+Coarser blocking does help, and measurably: the 3-cell blocking brings the lead
+balance from 1.000 -- both leads emitting, the divergence signature -- to
+0.05-0.09, while the 1-cell and 2-cell blockings do not. That is the tree's
+`bubble_positivity.md` Sec. 6.11a result reproduced from the other side. But the
+`Sigma` residual still does not fall, so none of these is a frozen state.
+
+Three things the dense reference does not have that production does, each a
+candidate and each a change to a shared reference solver rather than to this
+programme: per-frequency mixing (`low_freq_mixing_factor = 0.02` in the stored
+config, and `scba_loop` has no per-frequency mixing at all); the frequency grid
+(production runs `energy_window_max = 15` on Si, i.e. `fmax ~ omega_max`, where
+the aliasing gate here forces `2 omega_max`); and the IR machinery
+(`sse_low_freq_mask_thz`, `eta_ir_floor`), which an acoustic device at `eta = 0`
+plausibly needs and which the gapped chain demonstrably does not.
+
+So the quantitative results below are the analytic chain's. Whether they carry
+to a device is open, and closing it is a question about the reference solver's
+convergence, not about the spatial representation.
 
 ## 5. First result: arms A and B are bit-identical
 
