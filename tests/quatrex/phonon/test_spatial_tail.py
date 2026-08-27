@@ -560,3 +560,106 @@ def test_the_semiseparable_fit_cross_validates_on_cells_it_never_saw():
 def test_the_pencil_refuses_a_sequence_too_short_to_shift():
     with pytest.raises(ValueError, match="at least 2"):
         matrix_pencil([np.eye(2)])
+
+
+# --- the analytic modal-pair contraction ------------------------------------ #
+#
+# The proposal's Eq. (47). Three things in it are easy to get wrong and none of
+# them fails loudly: the cell offsets (its a,b,c,d are CELLS while bubble.py's
+# are DOF), the conjugation of the left vertex, and the fact that zeta^R stays
+# INSIDE the frequency integral because the two legs sit at omega and
+# Omega - omega. The bed below is exact by construction -- the gapped chain's
+# bulk G(n) = G(0) lambda^n is rank one in the Bloch factor -- so any
+# disagreement is the algebra and not the representation.
+
+from solver.se_finite import (                                   # noqa: E402
+    bubble_prefactor, compute_phph_self_energy_finite_multi_slab)
+
+from quatrex.phonon.spatial_bubble import (                      # noqa: E402
+    analytic_tail, pair_importance, pair_vertex_projection)
+from quatrex.phonon.spatial_fit import ModalSeries               # noqa: E402
+
+
+def _exact_modal_ring(n_cell=20, npos=10, offset=0.35, seed=7):
+    """Explicit ring on legs that ARE exactly modal, and the modal series."""
+    dw = 0.06
+    w = np.concatenate([-np.arange(npos, 0, -1), [0],
+                        np.arange(1, npos + 1)]) * dw
+    lam = np.array([gapped_chain_root(abs(om) + offset) for om in w])
+    g0 = np.array([gapped_chain_green(abs(om) + offset, 0)[0] for om in w])
+    idx = np.abs(np.subtract.outer(np.arange(n_cell), np.arange(n_cell)))
+    legs = g0[:, None, None] * lam[:, None, None] ** idx[None]
+    g = {(k, kp): legs[:, k, kp][:, None, None].astype(complex)
+         for k in range(n_cell) for kp in range(n_cell)}
+
+    rng = np.random.default_rng(seed)
+    psi = {(a, b): np.array([[[rng.normal()]]])
+           for a in (-1, 0, 1) for b in (-1, 0, 1)}
+    phi = {(i, i + a, i + b): psi[(a, b)] for i in range(n_cell)
+           for a in (-1, 0, 1) for b in (-1, 0, 1)
+           if 0 <= i + a < n_cell and 0 <= i + b < n_cell}
+    sigma, _ = compute_phph_self_energy_finite_multi_slab(
+        g, g, phi, n_cell, w, dw)
+    series = [ModalSeries(lam=np.array([lam[iw]]), vecs=np.array([[1.0 + 0j]]),
+                          coef=np.array([[g0[iw]]]), anchor=(1,))
+              for iw in range(w.size)]
+    return dict(w=w, dw=dw, psi=psi, sigma=sigma, series=series,
+                n_cell=n_cell, pref=bubble_prefactor(dw))
+
+
+def test_the_analytic_contraction_is_exact_in_the_pure_tail_region():
+    r"""``Sigma_R^{pq} = pref int dw V^L (x) V^R [xi eta]^R`` against the ring.
+
+    Exact only for ``R >= R0 + 2p``: below it an internal leg is asked for a
+    NEGATIVE separation, where ``lambda^{-n}`` is the growing partner and the
+    representation is not the Green function. The failure below the window is
+    asserted too -- a formula that happened to work everywhere would mean the
+    validity condition was not the one being tested.
+    """
+    bed_ = _exact_modal_ring()
+    p = 1
+    tail, info = analytic_tail(bed_["psi"], bed_["series"], bed_["series"],
+                               range(0, 9), freqs_thz=bed_["w"],
+                               dw_thz=bed_["dw"], prefactor=bed_["pref"],
+                               n_cells=bed_["n_cell"])
+    assert info["pairs"] == 1 and info["kept"] == 1
+
+    def rel(r_out):
+        i = bed_["n_cell"] // 2 - r_out // 2
+        ref = bed_["sigma"][(i, i + r_out)]
+        return float(np.abs(tail[r_out] - ref).max()
+                     / max(np.abs(ref).max(), 1e-300))
+
+    for r_out in range(2 * p, 9):
+        assert rel(r_out) < 1e-13, f"R={r_out}: {rel(r_out):.3e}"
+    assert rel(0) > 1e-3, "R=0 must NOT be reproduced; the window is not tested"
+    assert rel(1) > 1e-3, "R=1 must NOT be reproduced"
+
+
+def test_the_pair_projection_factorises_into_an_outer_product():
+    """``V^L (x) V^R`` is rank one per modal pair, which is what makes the
+    pair sum cheaper than the block sum in the first place."""
+    bed_ = _exact_modal_ring(n_cell=8, npos=4)
+    s = bed_["series"][5]
+    v_l, v_r = pair_vertex_projection(
+        bed_["psi"], s.lam[0], s.vecs[:, 0], s.coef[0],
+        s.lam[0], s.vecs[:, 0], s.coef[0])
+    outer = np.outer(v_l, v_r)
+    assert np.linalg.matrix_rank(outer, tol=1e-12 * np.abs(outer).max()) == 1
+
+
+def test_pair_importance_prefers_a_coupled_pair_over_a_slow_one():
+    r"""Screening on ``|lambda|`` alone keeps a long-range mode the vertex
+    barely touches; the proposal's Eq. (50) weight does not."""
+    slow_weak = pair_importance(np.array([1e-6]), np.array([1e-6]), 0.99, 4)
+    fast_strong = pair_importance(np.array([1.0]), np.array([1.0]), 0.5, 4)
+    assert fast_strong > slow_weak
+
+
+def test_pair_importance_refuses_a_geometric_sum_it_cannot_take():
+    """``|zeta| >= 1`` has no geometric sum; ``inf`` is honest, a finite-device
+    sum is usable, and silently returning a negative number is neither."""
+    assert np.isinf(pair_importance(np.array([1.0]), np.array([1.0]), 1.2, 3))
+    finite = pair_importance(np.array([1.0]), np.array([1.0]), 1.2, 3,
+                             n_cells=8)
+    assert np.isfinite(finite) and finite > 0.0
