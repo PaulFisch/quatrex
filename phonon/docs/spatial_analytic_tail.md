@@ -358,7 +358,53 @@ argument in Sec. 1, which says the analytic route is 0.6x on Si and 0.1x on CNT
 at full rank, and worse if the Keldysh legs need the doubled exponent set that
 Sec. 9 measured.
 
-## 11. Open
+## 11. The observable comparison, and criterion 5
+
+Seven arms on the same frozen 20-cell chain, one dense Dyson/Keldysh re-solve
+each, all relative to the untruncated reference D.
+
+| arm | what | `eps(J_L)` | `|Sigma|` discarded |
+|---|---|---|---|
+| A | production pin, band 3 | 6.31e-03 | -- |
+| B | pin, wide `G` | 6.31e-03 | -- |
+| C | no pin, band 3 | 6.38e-03 | -- |
+| **E** | **modal legs beyond band 3** | **2.43e-01** | -- |
+| **R2** | **reblock, 2 cells/block** | **2.74e-03** | 58.8 % |
+| R3 | reblock, 3 cells/block | 1.18e-02 | 47.4 % |
+| R4 | reblock, 4 cells/block | 1.12e-02 | 37.8 % |
+
+Two readings, and they point the same way.
+
+**Reblocking at two cells per block is more accurate than the production pin**,
+2.74e-03 against 6.31e-03, while discarding 58.8 % of `|Sigma|` by weight. The
+discarded weight is not the error: a tridiagonal restriction at a coarser
+blocking throws away more of the matrix and keeps more of the current, because
+what it keeps is what the current is made of.
+
+**The modal decompression is 38x worse than the pin it would replace.** Supplying
+every leg block beyond band 3 from an exponential fit instead of from storage
+moves the lead current by 24 %.
+
+So the proposal's fifth go/no-go criterion -- "a reduced modal-pair
+representation is cheaper than reblocking or direct wider-band recursion at the
+same accuracy" -- is not met on this bed. It is not at the same accuracy. And
+this is the criterion the tree already expected to fail:
+`spatial_truncation_derivation.md` measured the discarded weight moving five
+points with the range of `G` and thirty with the blocking, and concluded "the
+modal route addresses the smaller term". That was an argument from block
+weights; this is the same conclusion at the level of a current, with the modal
+machinery actually built.
+
+Three limits on it, all real. The bed is a 1-DOF chain with a random vertex, so
+the percentages are the bed's. Arm E uses the DIRECT fit of the `G^{<,>}`
+sequence -- route A of the proposal's Sec. 8, the one it itself calls least
+safe, and the one that does not preserve the matrix sign structure -- with one
+fit per frequency reused at every cell pair, which is the translation-invariance
+assumption that `eps_Toeplitz` says is 8-11 % wrong. The congruence route
+(modal `G^R` then `G^R Sigma_tot G^A`) is not measured here and could do
+better; whether it does is the one thing that would change this verdict.
+
+## 12. Open
 
 - E1's `C -> D` on a bed whose own tail is resolved (`xi` of a few cells across
   the band, not 600 at the band bottom), and on a real device.
@@ -370,4 +416,8 @@ Sec. 9 measured.
 - The decompressor and the analytic contraction, both gated on the E6 cost
   argument in Sec. 1.
 - Whether any real device admits a frozen state at all under the reference
-  kernel; see Sec. 4.
+  kernel; see Sec. 4. The CNT bed does not converge under `retarded="fft"` nor
+  under production's `"half"` with the production cutoffs, and the Si film does
+  not converge at one cell per block under any arm tried.
+- The congruence route for arm E, which is the only construction that could
+  overturn Sec. 11.
