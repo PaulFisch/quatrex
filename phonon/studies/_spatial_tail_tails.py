@@ -216,18 +216,56 @@ def admissible_i(bed, r_out, m_edge: int):
     return list(range(lo, hi + 1))
 
 
-def distance_profile(sigma, bed, *, m_edge: int = 0, weight=None):
-    """``{R: (mean ||Sigma_{I,I+R}||_F, n_anchors)}`` over interior anchors."""
-    w = np.ones(sigma.shape[0]) if weight is None else weight
+def distance_profile(sigma, bed, *, m_edge: int = 0, weight=None, freqs=None):
+    """``{R: (mean ||Sigma_{I,I+R}||_F, n_anchors)}`` over interior anchors.
+
+    ``freqs`` restricts the frequency samples the norm is taken over. That is
+    not a detail: a device whose modal range varies by two orders across the
+    band has its integrated profile set by whichever frequency is least damped,
+    and on the gapped chain that is the band-bottom sample, where the range is
+    600 cells and no tail is resolved at all. The proposal asks for the split
+    frequency-resolved AND frequency-integrated for this reason.
+    """
+    sl = slice(None) if freqs is None else freqs
+    sig = sigma[sl]
+    w = np.ones(sig.shape[0]) if weight is None else np.asarray(weight)[sl]
     prof = {}
     for r_out in range(bed.n_slabs):
         idx = admissible_i(bed, r_out, m_edge)
         if not idx:
             continue
-        vals = [np.linalg.norm(block_of(sigma, bed, i, i + r_out)
+        vals = [np.linalg.norm(block_of(sig, bed, i, i + r_out)
                                * w[:, None, None]) for i in idx]
         prof[r_out] = (float(np.mean(vals)), len(idx))
     return prof
+
+
+def modal_range_by_frequency(bed, *, m_edge: int = 2):
+    """Longest decaying modal range at each frequency, in cells.
+
+    The quantity that says whether a bed can show a tail at all: a range longer
+    than the device means ``G`` has not decayed anywhere in it.
+    """
+    from quatrex.phonon.spatial_modes import bloch_modes
+
+    nd, anchor = bed.n_dof, bed.p + m_edge
+    out = np.full(bed.freqs_thz.size, np.nan)
+    for iw in np.where(bed.pos_mask)[0]:
+        w = float(bed.freqs_thz[iw])
+        s = bed.sigma_retarded[iw]
+        d = s[anchor * nd:(anchor + 1) * nd, anchor * nd:(anchor + 1) * nd]
+        o = s[anchor * nd:(anchor + 1) * nd,
+              (anchor + 1) * nd:(anchor + 2) * nd]
+        try:
+            m = bloch_modes((w * w) * np.eye(nd) - bed.d00 - d,
+                            -bed.d01 - o, -bed.d10 - o.conj().T)
+        except np.linalg.LinAlgError:
+            continue
+        lam = np.abs(np.asarray(m.lam))
+        lam = lam[(lam > 0.0) & (lam < 1.0)]
+        if lam.size:
+            out[iw] = float(np.max(-1.0 / np.log(lam)))
+    return out
 
 
 def toeplitz_residual(sigma, bed, *, m_edge: int = 0):
@@ -292,6 +330,14 @@ def run(bed: FrozenBed, *, m_edge: int = 2, n_threads=None, verbose=True):
     toe_s = toeplitz_residual(ref["sigma_lesser"], bed, m_edge=m_edge)
     toe_g = toeplitz_residual(bed.g_lesser, bed, m_edge=m_edge)
 
+    # Frequency-resolved: keep only the samples whose own modal range is short
+    # enough for the device to show a tail. Reported beside the integrated
+    # profile, never instead of it.
+    xi = modal_range_by_frequency(bed, m_edge=m_edge)
+    resolved = np.where(np.isfinite(xi) & (xi < bed.n_slabs / 2.0))[0]
+    prof_res = (distance_profile(ref["sigma_lesser"], bed, m_edge=m_edge,
+                                 freqs=resolved) if resolved.size else None)
+
     shell_norm = None
     if shells is not None:
         nb = len(bins)
@@ -306,7 +352,9 @@ def run(bed: FrozenBed, *, m_edge: int = 2, n_threads=None, verbose=True):
                      for i in idx])
 
     return {"arms": arms, "eps": eps, "interaction": interaction, "lin": lin,
-            "profile": prof, "toeplitz_sigma": toe_s, "toeplitz_g": toe_g,
+            "profile": prof, "profile_resolved": prof_res, "xi": xi,
+            "n_resolved": int(resolved.size),
+            "toeplitz_sigma": toe_s, "toeplitz_g": toe_g,
             "shell_norm": shell_norm, "shell_bins": bins, "m_edge": m_edge}
 
 
@@ -338,14 +386,24 @@ def report(bed: FrozenBed, res: dict) -> None:
     print(f"    interaction |D-C-B+A|/|J_L| = {res['interaction']:.3e} "
           "(small = the two truncations are separable)")
 
+    xi = res["xi"]
+    fin = xi[np.isfinite(xi)]
+    if fin.size:
+        print(f"\n  modal range over the band: min {fin.min():.2f}  median "
+              f"{np.median(fin):.2f}  max {fin.max():.2f} cells, device "
+              f"{bed.n_slabs}\n  -> {res['n_resolved']} of {fin.size} samples "
+              f"have a range under half the device and can show a tail")
     print(f"\n  Sigma^< by output distance (interior anchors, m_edge="
           f"{res['m_edge']})")
-    print("    R  | n_anchors | ||Sigma_R||_F | eps_Toeplitz(Sigma) | eps_Toeplitz(G)")
+    print("    R  | n_anch | ||Sigma_R||  all freq | resolved freq only | "
+          "eps_Toep(Sig) | eps_Toep(G)")
+    pr = res.get("profile_resolved")
     for r_out, (val, n) in sorted(res["profile"].items()):
         ts = res["toeplitz_sigma"].get(r_out)
         tg = res["toeplitz_g"].get(r_out)
-        print(f"    {r_out:2d} | {n:9d} | {val:13.4e} | "
-              f"{'    n/a' if ts is None else f'{ts:19.4f}'} | "
+        rv = pr.get(r_out, (float("nan"), 0))[0] if pr else float("nan")
+        print(f"    {r_out:2d} | {n:6d} | {val:20.4e} | {rv:18.4e} | "
+              f"{'      n/a' if ts is None else f'{ts:13.4f}'} | "
               f"{'    n/a' if tg is None else f'{tg:.4f}'}")
 
     if res["shell_norm"] is not None:
