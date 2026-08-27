@@ -499,7 +499,7 @@ def freeze(d00, d01, d10, phi, n_cells: int, *, name: str,
            mixing: float = 0.3, solver: str = "anderson",
            anderson_mixing: bool = True, anderson_depth: int = 8,
            divergence_guard: bool = True, edge_margin: float = 0.01,
-           zero_mode_projection: bool = False,
+           zero_mode_projection: bool = False, retarded: str = "fft",
            sigma_cutoff=None, g_cutoff=None, extra_meta: dict | None = None,
            n_threads=None, verbose: bool = True) -> FrozenBed:
     """Drive an assembled device to an SCBA fixed point, keep the dense state.
@@ -583,7 +583,7 @@ def freeze(d00, d01, d10, phi, n_cells: int, *, name: str,
         max_scba_iter=max_scba_iter, scba_tol=scba_tol,
         conservation_tol=1e-3, mixing=mixing,
         anderson_mixing=anderson_mixing, anderson_depth=anderson_depth,
-        scattering_contacts=False, retarded="fft",
+        scattering_contacts=False, retarded=retarded,
         verbose=verbose, solver=solver, causality_projection=False,
         zero_mode_projection=zero_mode_projection,
         divergence_guard=divergence_guard,
@@ -601,6 +601,7 @@ def freeze(d00, d01, d10, phi, n_cells: int, *, name: str,
         "symmetry_factor": "PHPH_SYMMETRY_FACTOR (see constants.py)",
         "solver": solver, "mixing": mixing, "max_scba_iter": max_scba_iter,
         "zero_mode_projection": zero_mode_projection,
+        "retarded": retarded,
     }
     meta.update(extra_meta or {})
     return FrozenBed(
@@ -687,6 +688,15 @@ def main(argv=None) -> int:
     ap.add_argument("--tl", type=float, default=305.0)
     ap.add_argument("--tr", type=float, default=295.0)
     ap.add_argument("--zero-mode-projection", action="store_true")
+    ap.add_argument("--retarded", default="fft", choices=["fft", "pv", "half"],
+                    help="how Sigma^R is rebuilt from Sigma^{<,>}. Production "
+                         "runs 'half' on both real beds -- 0.5(Sigma^> - "
+                         "Sigma^<), purely anti-Hermitian, so Gamma_Sigma is "
+                         "PSD by construction and causality cannot break. "
+                         "'fft' is the full Kramers-Kronig reconstruction and "
+                         "is the honest object, but it is what the reference "
+                         "kernel diverges under at eta = 0 on a real bed. A "
+                         "frozen state carries which one it used.")
     ap.add_argument("--sigma-cutoff", type=int, default=None,
                     help="max |I-J| of the produced Sigma while the STATE is "
                          "being converged. The reference kernel diverges at "
@@ -708,7 +718,8 @@ def main(argv=None) -> int:
         mixing=a.mixing, scba_tol=a.tol, t_left=a.tl, t_right=a.tr,
         n_threads=a.threads, sigma_cutoff=a.sigma_cutoff,
         g_cutoff=a.g_cutoff,
-        zero_mode_projection=a.zero_mode_projection, verbose=True)
+        zero_mode_projection=a.zero_mode_projection,
+        retarded=a.retarded, verbose=True)
     if a.chain:
         from solver.toy_models import gapped_chain
         common["name"] = a.name or f"chain_L{a.cells}"

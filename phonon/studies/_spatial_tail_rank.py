@@ -117,13 +117,25 @@ def source_arms(bed: FrozenBed):
     return arms, float(resid), zero
 
 
-def _seq(mat, bed, anchor, span, *, along):
-    """Block sequence from a dense one-frequency matrix, in one direction."""
+def _seq(mat, bed, anchor, span, *, along, column_is_cell: bool = True):
+    """Block sequence from a dense one-frequency matrix, in one direction.
+
+    ``column_is_cell=False`` keeps the whole column width, which is what
+    ``Y = G^R L`` needs: ``L``'s columns index the SOURCE eigenbasis, not a
+    transport cell, so slicing them as cells and asking for a ``J`` direction
+    measures nothing. The proposal's claim about ``Y`` is that it is modal in
+    ``I`` for each source column, which is the ``I`` sequence at full width.
+    """
     nd = bed.n_dof
 
     def blk(i, j):
         return mat[i * nd:(i + 1) * nd, j * nd:(j + 1) * nd]
 
+    if not column_is_cell:
+        if along != "I":
+            return None
+        return [mat[(anchor + r) * nd:(anchor + r + 1) * nd, :]
+                for r in range(span)]
     if along == "J":
         return [blk(anchor, anchor + r) for r in range(span)]
     if along == "I":
@@ -132,10 +144,10 @@ def _seq(mat, bed, anchor, span, *, along):
 
 
 def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
-        rank: int | None = None):
+        rank: int | None = None, sigma_range_tol: float = 1e-6):
     from quatrex.phonon.spatial_hankel import (cluster_exponents,
                                                matrix_pencil, numerical_rank)
-    from quatrex.phonon.spatial_modes import bloch_modes
+    from quatrex.phonon.spatial_modes import bloch_modes, bloch_modes_poly
 
     arms, resid, _ = source_arms(bed)
     anchor = bed.p + m_edge
@@ -151,25 +163,60 @@ def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
             f"law N >= R + 2(p + m_edge) + 1 wants a longer device.",
             stacklevel=2)
 
-    # The operator's own bands at this frequency, for the comparison.
+    # The operator's own bands at this frequency, for the comparison -- at the
+    # degree the operator ACTUALLY has. Sigma^R reaches 2p+b once the output pin
+    # is off, so the spatial recurrence is sum_{n=-M}^{M} a_n lambda^n = 0 and a
+    # quadratic pencil is a different operator. Comparing data-derived exponents
+    # against the wrong operator is a false negative, not a null result.
     nd = bed.n_dof
     w = float(bed.freqs_thz[iw])
     sig_r = bed.sigma_retarded[iw]
-    a_ii = (w * w) * np.eye(nd) - bed.d00 - sig_r[anchor * nd:(anchor + 1) * nd,
-                                                 anchor * nd:(anchor + 1) * nd]
-    off = sig_r[anchor * nd:(anchor + 1) * nd,
-                (anchor + 1) * nd:(anchor + 2) * nd]
-    a_ij = -bed.d01 - off
-    a_ji = -bed.d10 - off.conj().T
-    modes = bloch_modes(a_ii, a_ij, a_ji, residual=True)
+
+    def sblk(i, j):
+        return sig_r[i * nd:(i + 1) * nd, j * nd:(j + 1) * nd]
+
+    peak = np.abs(sig_r).max()
+    m_sig = 0
+    for d in range(1, bed.n_slabs):
+        ok = [i for i in range(bed.n_slabs - d)
+              if np.abs(sblk(i, i + d)).max() > sigma_range_tol * peak]
+        if ok:
+            m_sig = d
+    m_pencil = max(1, m_sig)
+
+    a_blocks = []
+    for n in range(-m_pencil, m_pencil + 1):
+        i, j = (anchor, anchor + n) if n >= 0 else (anchor - n, anchor)
+        block = -sblk(anchor, anchor + n) if n >= 0 else -sblk(anchor + (-n) * 0,
+                                                               anchor)
+        # Sigma^R at separation n, taken from the anchor row.
+        block = -sblk(anchor, anchor + n) if 0 <= anchor + n < bed.n_slabs             else np.zeros((nd, nd), complex)
+        if n == 0:
+            block = block + (w * w) * np.eye(nd) - bed.d00
+        elif n == 1:
+            block = block - bed.d01
+        elif n == -1:
+            block = block - bed.d10
+        a_blocks.append(block)
+    modes = bloch_modes_poly(a_blocks, residual=True)
     lam = np.asarray(modes.lam)
-    dec = lam[np.abs(lam) < 1.0]
+    good = modes.converged(tol=1e-6) & np.isfinite(lam)
+    dec = lam[good & (np.abs(lam) < 1.0)]
+
+    # the quadratic reading, kept beside it so the difference is visible
+    modes2 = bloch_modes((w * w) * np.eye(nd) - bed.d00 - sblk(anchor, anchor),
+                         -bed.d01 - sblk(anchor, anchor + 1),
+                         -bed.d10 - sblk(anchor, anchor + 1).conj().T,
+                         residual=True)
+    lam2 = np.asarray(modes2.lam)
+    dec2 = lam2[np.abs(lam2) < 1.0]
 
     prod = np.abs(1.0 - np.outer(dec, np.conj(dec)))
     closeness = float(prod.min()) if prod.size else float("nan")
 
     out = {"w": w, "iw": iw, "linearity_residual": resid, "anchor": anchor,
            "span": span, "lam": lam, "lam_decaying": dec,
+           "lam_quadratic": dec2, "m_sigma": m_sig, "m_pencil": m_pencil,
            "min_one_minus_prod": closeness, "arms": {}}
 
     seqs = {"G^R": bed.g_retarded[iw], "G^<": bed.g_lesser[iw],
@@ -183,15 +230,19 @@ def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
         seqs[f"G^<[{tag}]"] = g_l[iw]
 
     for name, mat in seqs.items():
+        cell_cols = not name.startswith("Y")
         entry = {}
         for along in ("J", "I", "diag"):
-            s = _seq(mat, bed, anchor, span, along=along)
-            r_eps = numerical_rank(s, eps)
-            est = matrix_pencil(s, rank=rank, eps=eps)
+            sq = _seq(mat, bed, anchor, span, along=along,
+                      column_is_cell=cell_cols)
+            if sq is None:
+                continue
+            r_eps = numerical_rank(sq, eps)
+            est = matrix_pencil(sq, rank=rank, eps=eps)
             uniq, mult = cluster_exponents(est.xi, 1e-4)
             entry[along] = {"r_eps": r_eps, "xi": uniq, "mult": mult,
                             "spectrum": est.spectrum,
-                            "recon": float(est.rel_error(s).max())}
+                            "recon": float(est.rel_error(sq).max())}
         out["arms"][name] = entry
     return out
 
@@ -207,35 +258,55 @@ def report(bed: FrozenBed, res: dict) -> None:
           f"{'OK' if res['linearity_residual'] < 1e-10 else 'FAILED -- the arms are not the decomposition'}")
     print(f"  anchor cell {res['anchor']}, span {res['span']} blocks "
           f"(p={bed.p})")
-    print(f"  operator bands: {lam.size} decaying of {res['lam'].size}, "
-          f"|lambda| in [{np.abs(lam).min():.4f}, {np.abs(lam).max():.4f}]"
-          if lam.size else "  operator bands: none decaying")
+    print(f"  Sigma^R reaches |I-J| <= {res['m_sigma']}, so the spatial pencil "
+          f"is degree {2 * res['m_pencil']} (not 2)")
+    if lam.size:
+        print(f"  operator bands: {lam.size} decaying of {res['lam'].size} "
+              f"(residual-converged), |lambda| in "
+              f"[{np.abs(lam).min():.4f}, {np.abs(lam).max():.4f}]")
+        q = res["lam_quadratic"]
+        if q.size:
+            print(f"  the QUADRATIC reading would give {q.size} decaying, "
+                  f"|lambda| in [{np.abs(q).min():.4f}, {np.abs(q).max():.4f}]")
+    else:
+        print("  operator bands: none decaying")
     print(f"  min |1 - lambda_m lambda_n^*| = {res['min_one_minus_prod']:.3e} "
           "(-> 0 is where the source sum degenerates and the rank doubles)")
     print(f"  PSD factor L (i*Sigma convention): clipped negative weight "
           f"{res['psd_clipped']:.2e}  -- how far the frozen source is from PSD")
 
     print("\n  numerical rank r_eps by direction, and the exponents recovered")
-    print("    object          | r(J) r(I) r(d) | recon(J) | |xi| along J")
+    print("    object          | r(J) r(I) r(d) | recon | |xi| (largest first)")
     for name, entry in res["arms"].items():
-        j, i, d = entry["J"], entry["I"], entry["diag"]
-        mods = np.sort(np.abs(j["xi"]))[::-1][:4]
-        print(f"    {name:15s} | {j['r_eps']:4d} {i['r_eps']:4d} {d['r_eps']:4d} "
-              f"| {j['recon']:.2e} | "
+        ref_dir = "J" if "J" in entry else "I"
+        e = entry[ref_dir]
+        cols = " ".join(f"{entry[d]['r_eps']:4d}" if d in entry else "   -"
+                        for d in ("J", "I", "diag"))
+        mods = np.sort(np.abs(e["xi"]))[::-1][:4]
+        print(f"    {name:15s} | {cols} | {e['recon']:.1e} | "
               + " ".join(f"{m:.4f}" for m in mods))
 
     if lam.size:
-        print("\n  do the recovered exponents match the operator's bands?")
+        print("\n  are the operator's bands present in what the pencil found?")
+        print("    (per band: distance to the NEAREST recovered exponent -- the "
+              "other\n     direction, max over recovered, counts spurious roots "
+              "and says nothing)")
         adv = np.conj(lam)
         for name in ("G^R", "G^<", "G^>"):
-            e = res["arms"][name]
+            e = res["arms"].get(name)
+            if e is None:
+                continue
             for along, ref, lbl in (("J", adv, "lambda*"), ("I", lam, "lambda")):
+                if along not in e:
+                    continue
                 xi = e[along]["xi"]
                 if xi.size == 0 or ref.size == 0:
                     continue
-                dist = float(np.max([np.min(np.abs(ref - z)) for z in xi]))
-                print(f"    {name:6s} along {along}: worst distance to "
-                      f"{lbl} = {dist:.3e}")
+                per_band = [float(np.min(np.abs(xi - z))) for z in ref]
+                covered = sum(1 for d in per_band if d < 1e-2)
+                print(f"    {name:6s} along {along} vs {lbl:8s}: "
+                      f"{covered}/{ref.size} bands within 1e-2, worst "
+                      f"{max(per_band):.3e}")
     print()
 
 
@@ -267,7 +338,8 @@ def main(argv=None) -> int:
         linearity_residual=res["linearity_residual"],
         lam=res["lam"], min_one_minus_prod=res["min_one_minus_prod"],
         psd_clipped=res["psd_clipped"],
-        ranks=np.array([[res["arms"][k][d]["r_eps"] for d in ("J", "I", "diag")]
+        ranks=np.array([[res["arms"][k][d]["r_eps"] if d in res["arms"][k]
+                         else -1 for d in ("J", "I", "diag")]
                         for k in res["arms"]]),
         objects=np.array(list(res["arms"]), dtype=object).astype(str),
         meta=np.array(repr(bed.meta)))
