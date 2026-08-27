@@ -115,6 +115,97 @@ def sigma_dense(bed: FrozenBed, *, sigma_cutoff=None, g_cutoff=None,
     return sl, sg, shells
 
 
+def decompressed_blocks(bed: FrozenBed, mat, band: int, *, rank=None,
+                        eps: float = 1e-3, m_edge: int = 2):
+    r"""``{(K, K'): block}`` with ``|K-K'| > band`` supplied by a modal fit.
+
+    The proposal's Eq. (44) hybrid, on the Keldysh object directly: exact inside
+    the band, exponential continuation outside, and piecewise rather than
+    additive so the two never double count. The exponents come from
+    block-ESPRIT on the interior sequence -- route A of the proposal's Sec. 8,
+    the cheapest and the one that does not preserve the matrix sign structure,
+    which is why the congruence route is measured beside it.
+
+    One fit per frequency, taken at an interior anchor, and reused at every
+    cell pair: that IS the translation-invariance assumption, and
+    ``eps_Toeplitz`` is what says how good it is.
+    """
+    from quatrex.phonon.spatial_hankel import matrix_pencil
+
+    nd, n = bed.n_dof, bed.n_slabs
+    anchor = bed.p + m_edge
+    span = max(3, n - 2 * anchor)
+    out = {}
+    n_fitted = 0
+    fits = []
+    for iw in range(bed.freqs_thz.size):
+        seq = [mat[iw, anchor * nd:(anchor + 1) * nd,
+                   (anchor + r) * nd:(anchor + r + 1) * nd]
+               for r in range(span)]
+        if np.abs(np.asarray(seq)).max() <= 0.0:
+            fits.append(None)
+            continue
+        try:
+            fits.append(matrix_pencil(seq, rank=rank, eps=eps))
+            n_fitted += 1
+        except np.linalg.LinAlgError:
+            fits.append(None)
+
+    for k in range(n):
+        for kp in range(n):
+            d = abs(k - kp)
+            blk = np.empty((bed.freqs_thz.size, nd, nd), dtype=complex)
+            if d <= band:
+                blk[:] = mat[:, k * nd:(k + 1) * nd, kp * nd:(kp + 1) * nd]
+            else:
+                for iw, f in enumerate(fits):
+                    blk[iw] = (mat[iw, k * nd:(k + 1) * nd,
+                                   kp * nd:(kp + 1) * nd] if f is None
+                               else f.block(d))
+            out[(k, kp)] = blk
+    return out, n_fitted
+
+
+def sigma_decompressed(bed: FrozenBed, band: int, *, rank=None, eps=1e-3,
+                       m_edge: int = 2, n_threads=None):
+    """The wide bubble with far legs supplied modally instead of stored."""
+    from solver.dense import _scatter_blocks
+    from solver.se_finite import compute_phph_self_energy_finite_multi_slab
+
+    gl, n_l = decompressed_blocks(bed, bed.g_lesser, band, rank=rank, eps=eps,
+                                  m_edge=m_edge)
+    gg, n_g = decompressed_blocks(bed, bed.g_greater, band, rank=rank, eps=eps,
+                                  m_edge=m_edge)
+    sl_b, sg_b = compute_phph_self_energy_finite_multi_slab(
+        gl, gg, bed.phi, bed.n_slabs, bed.freqs_thz, bed.dw_thz,
+        sigma_cutoff=None, g_cutoff=None, n_threads=n_threads)
+
+    def densify(blocks):
+        o = np.zeros((bed.freqs_thz.size, bed.n_d, bed.n_d), dtype=complex)
+        _scatter_blocks(o, blocks, bed.n_dof)
+        return o
+
+    return densify(sl_b), densify(sg_b), (n_l, n_g)
+
+
+def block_mask(bed: FrozenBed, sigma, cells_per_block: int):
+    r"""``Sigma`` with ``|I//m - J//m| > 1`` zeroed: what reblocking discards.
+
+    Reblocking changes the partition, not the physics, and the dense Dyson solve
+    has no block-tridiagonal restriction, so masking IS the exact statement of
+    the reblocked arm. Regenerating a device would be a null comparison.
+    """
+    nd, n = bed.n_dof, bed.n_slabs
+    out = np.zeros_like(sigma)
+    blk = np.arange(n) // int(cells_per_block)
+    for i in range(n):
+        for j in range(n):
+            if abs(blk[i] - blk[j]) <= 1:
+                out[..., i * nd:(i + 1) * nd, j * nd:(j + 1) * nd] = \
+                    sigma[..., i * nd:(i + 1) * nd, j * nd:(j + 1) * nd]
+    return out
+
+
 def solve_arm(bed: FrozenBed, sigma_l, sigma_g):
     """One frozen Dyson/Keldysh solve and its observables."""
     from phonon_inputs.constants import THZ_TO_RAD
@@ -196,6 +287,21 @@ def first_order(bed: FrozenBed, ref, d_sigma_l, d_sigma_g):
 # ---------------------------------------------------------------------------
 # spatial statistics
 # ---------------------------------------------------------------------------
+
+
+def discarded_fraction(bed: FrozenBed, sigma, cells_per_block: int) -> float:
+    """Share of ``|Sigma|`` the reblocked pin drops, as a weight."""
+    nd, n = bed.n_dof, bed.n_slabs
+    blk = np.arange(n) // int(cells_per_block)
+    num = den = 0.0
+    for i in range(n):
+        for j in range(n):
+            w = float(np.abs(sigma[..., i * nd:(i + 1) * nd,
+                                   j * nd:(j + 1) * nd]).sum())
+            den += w
+            if abs(blk[i] - blk[j]) > 1:
+                num += w
+    return num / (den + 1e-300)
 
 
 def block_of(mat, bed, i, j):
@@ -314,17 +420,49 @@ def run(bed: FrozenBed, *, m_edge: int = 2, n_threads=None, verbose=True):
                   f"J_L={arm['J_L']:.6e} J_R={arm['J_R']:.6e} "
                   f"J_s={arm['J_s']:.3e} D={arm['D']:.3e}", flush=True)
 
+    # The modal-extended arm: far legs supplied by an exponential fit rather
+    # than stored, everything else identical to D.
+    try:
+        sl_m, sg_m, n_fit = sigma_decompressed(bed, 3, m_edge=m_edge,
+                                               n_threads=n_threads)
+        arm = solve_arm(bed, sl_m, sg_m)
+        arm.update(sigma_lesser=sl_m, sigma_greater=sg_m,
+                   sigma_cutoff=None, g_cutoff="modal>3", n_fitted=n_fit)
+        arms["E"] = arm
+        if verbose:
+            print(f"  arm E (modal legs beyond band 3, {n_fit[0]} frequencies "
+                  f"fitted): J_L={arm['J_L']:.6e} D={arm['D']:.3e}", flush=True)
+    except Exception as exc:                       # pragma: no cover
+        print(f"  arm E failed: {type(exc).__name__}: {exc}", flush=True)
+
     ref = arms["D"]
+    # The reblocked arms: the same reference Sigma, masked at m cells per block.
+    for m_cells in (2, 3, 4):
+        if bed.n_slabs // m_cells < 2:
+            continue
+        arm = solve_arm(bed,
+                        block_mask(bed, ref["sigma_lesser"], m_cells),
+                        block_mask(bed, ref["sigma_greater"], m_cells))
+        arm.update(sigma_cutoff=f"blk{m_cells}", g_cutoff=None,
+                   discarded=discarded_fraction(bed, ref["sigma_lesser"],
+                                                m_cells))
+        arms[f"R{m_cells}"] = arm
+        if verbose:
+            print(f"  arm R{m_cells} (pin at {m_cells} cells/block, "
+                  f"{arm['discarded'] * 100:.1f} % of |Sigma| discarded): "
+                  f"J_L={arm['J_L']:.6e}", flush=True)
+
     scale = abs(ref["J_L"]) + 1e-300
-    eps = {t: {k: abs(arms[t][k] - ref[k]) / scale for k in ("J_L", "J_R", "J_s")}
-           for t in "ABC"}
+    others = [t for t in arms if t != "D"]
+    eps = {t: {k: abs(arms[t][k] - ref[k]) / scale
+               for k in ("J_L", "J_R", "J_s")} for t in others}
     interaction = abs(ref["J_L"] - arms["C"]["J_L"] - arms["B"]["J_L"]
                       + arms["A"]["J_L"]) / scale
 
     lin = {t: first_order(bed, ref,
                           ref["sigma_lesser"] - arms[t]["sigma_lesser"],
                           ref["sigma_greater"] - arms[t]["sigma_greater"])
-           for t in "ABC"}
+           for t in others}
 
     prof = distance_profile(ref["sigma_lesser"], bed, m_edge=m_edge)
     toe_s = toeplitz_residual(ref["sigma_lesser"], bed, m_edge=m_edge)
@@ -373,10 +511,15 @@ def report(bed: FrozenBed, res: dict) -> None:
     print("\n  the 2x2 factorial, relative to arm D (reference)")
     print("    arm  sigma_cut  g_cut |  eps(J_L)   eps(J_R)   eps(J_s)  | "
           "first-order dJ_L/J_L")
-    for t, lbl in (("A", "production pin"), ("B", "pin, wide G"),
-                   ("C", "no pin, band 3")):
+    labels = {"A": "production pin", "B": "pin, wide G",
+              "C": "no pin, band 3", "E": "modal legs beyond band 3",
+              "R2": "reblock 2 cells/block", "R3": "reblock 3",
+              "R4": "reblock 4"}
+    for t in [k for k in ("A", "B", "C", "E", "R2", "R3", "R4")
+              if k in res["eps"]]:
+        lbl = labels[t]
         e, dl = res["eps"][t], res["lin"][t]
-        print(f"    {t}   {str(res['arms'][t]['sigma_cutoff']):>9} "
+        print(f"    {t:3s} {str(res['arms'][t]['sigma_cutoff']):>9} "
               f"{str(res['arms'][t]['g_cutoff']):>6} | "
               f"{e['J_L']:.3e}  {e['J_R']:.3e}  {e['J_s']:.3e}  | "
               f"{dl['dJ_L'] / (abs(ref['J_L']) + 1e-300):.3e}   ({lbl})")
@@ -468,9 +611,10 @@ def main(argv=None) -> int:
         shell_norm=(res["shell_norm"] if res["shell_norm"] is not None
                     else np.zeros(0)),
         shell_bins=np.array(res["shell_bins"]),
+        arm_names=np.array(sorted(res["arms"])),
         J=np.array([[res["arms"][t]["J_L"], res["arms"][t]["J_R"],
                      res["arms"][t]["J_s"], res["arms"][t]["D"]]
-                    for t in "ABCD"]),
+                    for t in sorted(res["arms"])]),
         meta=np.array(repr(bed.meta)))
     print(f"  wrote {out}")
     return 0
