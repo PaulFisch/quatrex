@@ -628,3 +628,39 @@ Causality couples every frequency. Paying for it in the REPRESENTATION needs a
 common spatial basis, and that basis is not compact (Sec. 14). Paying for it in
 the ACTION needs a search space spanning the cell space, which costs the same as
 materialising. Both horns are measured, on this bed.
+
+## 16. Gate G2/G4: the self-energy rank grows with device length
+
+Off-diagonal (quasiseparable) rank, median over the band, on the 1-DOF chain at
+fixed coupling and grid. The cap is the largest rank the corner block can have,
+and a rank at the cap is a lower bound rather than a measurement.
+
+| `N` | cap | `G^R` 1e-2 / 1e-3 | `G^<` | `Sigma^<` | `Sigma` as % of cap |
+|---|---|---|---|---|---|
+| 10 | 4 | 2 / 3 | 3 / 4 | 4 / 5 (capped) | -- |
+| 16 | 10 | 2 / 3 | 4 / 5 | 6 / 8 | 60 % |
+| 20 | 14 | 2 / 4 | 4 / 6 | 7 / 9 | 50 % |
+| 32 | 29 | 3 / 6 | 6 / 8 | 10 / 13 | 34 % |
+
+Over the uncapped points `N = 16 -> 32`, `Sigma` goes `6 -> 10`, i.e. about
+`N^0.75`: **sublinear, and not saturating.** The fraction of the cap falls,
+which is why it is not simply linear, but the absolute rank has no plateau over
+a factor two in length. The document's success condition is
+`r_Sigma` approximately independent of `N` (§49) and its stop condition is a
+rank growing with length (§48.2-3); this is between them and on the wrong side
+for an augmented Dyson, whose whole point is a local block of fixed size.
+
+At `N = 32` the augmented block would be `d + 2 r = 21` against a 2-cell
+reblock's `2d = 2`.
+
+The joint spatial-frequency rank degrades with length too: `78/140` (56 %) at
+`N = 20` becomes `108/140` (77 %) at `N = 32`, and the subspace turn rises from
+64 to 78 degrees. Whatever Sec. 14 measured, a longer device makes it worse.
+
+**One qualification, and it is the useful one.** This is the WIDE `Sigma`, with
+no spatial truncation at all -- the object the programme wants to carry. The
+`Sigma` production actually computes is banded at `2p + b = 5`, and a banded
+matrix has quasiseparable rank at most its bandwidth, so its rank is bounded by
+construction and needs no modal machinery. The representation is being asked to
+compress the one object that is not already compressible, and it grows with the
+device.
