@@ -140,6 +140,96 @@ large: only ne = 161 converged, so four of the five rows are iterates at
 residual 1e-2 to 5e-2 and not transport numbers. The comparison is honest
 for the question "does the exact band close it" and not for any value.
 
+## 3b. Which runs actually converged, and on what
+
+`outcome = converged` means the log printed `SCBA converged after N`
+with an anharmonic loop behind it. 53 directories qualify;
+10 of them are multi-arm campaign directories where at least
+one arm converged and the row is not a single run. A further 20
+directories report convergence with `ballistic = True` in their npz and
+are excluded -- the loop never ran, so they say nothing about the
+anharmonic fixed point. `x` in the blocking column is blocks x cells.
+
+### Si film (2-atom cell, transport x, nk = [1,9,9])
+
+| run | blocks x cells | `g_band` | ne | wmax | cutoff | iters | residual | gates failed |
+|---|---|---|---|---|---|---|---|---|
+| `sichk_base` | 3 x 1 | 2 | 121 | 15.0 | 10.0 | 69 | 9.5663e-08 | gband=2, cells_per_block=1, crash |
+| `sichk_ext` | 3 x 1 | 2 | 121 | 20.0 | 10.0 | 59 | 8.8278e-08 | gband=2, cells_per_block=1, crash |
+| `sifilm3s2` | 3 x ? | 2 | 121 | 15.0 | 10.0 | 69 | 0.00099284 | gband=2, cells_per_block=unknown |
+| `sifilm5s2` | 5 x 1 | 3 | 121 | 15.0 | 10.0 | 57 | 0.00093941 | cells_per_block=1 |
+| `sifilm8s` | 8 x 1 | 3 | 121 | 15.0 | 10.0 | 51 | 0.00093319 | cells_per_block=1 |
+
+### MoS2 film (6-atom 2H cell, transport z, nk = [5,5,1])
+
+| run | blocks x cells | `g_band` | ne | wmax | cutoff | iters | residual | gates failed |
+|---|---|---|---|---|---|---|---|---|
+| `cvM2b` | 2 x 1 | 1 | 6001 | 24.0 | 30.0 | 10 | 5.1148e-06 | gband=1, cells_per_block=1 |
+| `cvM4e` | 2 x 2 | 1 | 6001 | 24.0 | 48.0 | 38 | 9.1636e-06 | gband=1 |
+| `cvM6b` | 2 x 3 | 1 | 6001 | 24.0 | 72.0 | 52 | 9.452e-06 | gband=1 |
+| `lsM2f` | 2 x ? | 1 | 6001 | 24.0 | 30.0 | 2 | 0.00048135 | gband=1, cells_per_block=unknown |
+| `mos2L2conv` | 2 x 1 | 1 | 4001 | 16.0 | 30.0 | 29 | 0.00093354 | gband=1, cells_per_block=1 |
+| `mos2L4conv` | 2 x 2 | 1 | 4001 | 16.0 | 48.0 | 30 | 0.00090419 | gband=1 |
+
+### CNT (3,3) (12-atom cell, transport z)
+
+| run | blocks x cells | `g_band` | ne | wmax | cutoff | iters | residual | gates failed |
+|---|---|---|---|---|---|---|---|---|
+| `local_mw/L2_bare_nf361` | 2 x ? | 1 | 361 | 55.0 | 10.0 | 149 | 0.00097393 | gband=1, cells_per_block=unknown |
+| `local_mw/L2_bare_nf541` | 2 x ? | 1 | 541 | 55.0 | 10.0 | 110 | 0.00087587 | gband=1, cells_per_block=unknown |
+| `local_mw/L2_eta0_tight` | 2 x ? | 1 | 181 | 55.0 | 10.0 | 56 | 7.9545e-11 | gband=1, cells_per_block=unknown |
+| `local_mw/L2_plain_fft` | 2 x ? | 1 | 181 | 55.0 | 10.0 | 219 | 0.00098845 | gband=1, cells_per_block=unknown |
+| `local_mw/L2_taper_only` | 2 x ? | 1 | 181 | 55.0 | 10.0 | 48 | 8.7894e-11 | gband=1, cells_per_block=unknown |
+| `cnt-L3-eta0` | 3 x ? | 1 | 181 | ? | -- | 209 | 0.00099495 | gband=1, cells_per_block=unknown, extent-truncated=2.6% |
+| `cnt-L3-eta0-mask` | 3 x ? | 1 | 181 | ? | -- | 52 | 0.00088637 | gband=1, cells_per_block=unknown, extent-truncated=13% |
+| `cnt-L3-eta0-scat` | 3 x ? | 1 | 181 | ? | -- | 304 | 1.9772e-05 | gband=1, cells_per_block=unknown, extent-truncated=2.6% |
+| `cnt-L3-gband2` | 3 x ? | 2 | 181 | ? | -- | 209 | 0.00099495 | gband=2, cells_per_block=unknown, extent-truncated=2.6% |
+| `local_mw/L3_eta0` | 3 x ? | 1 | 181 | 55.0 | 10.0 | 295 | 0.00099407 | gband=1, cells_per_block=unknown |
+| `local_mw/L3_eta07` | 3 x ? | 1 | 181 | 55.0 | 10.0 | 68 | 0.00092923 | finite-eta=0.7, gband=1, cells_per_block=unknown |
+| `cnt-L4-gband2` | 4 x 1 | 2 | 181 | 55.0 | 10.0 | 311 | 0.00098081 | gband=2, cells_per_block=1, extent-truncated=2.6% |
+| `cnt-L4-nescan` | 4 x 1 | 1 | 161 | 55.0 | 10.0 | 249 | 0.01764 | gband=1, cells_per_block=1, extent-truncated=1.4% |
+| `newton-L4-v2` | 4 x ? | 1 | 181 | ? | -- | 309 | 1.9147e-10 | gband=1, cells_per_block=unknown, extent-truncated=2.6% |
+| `cnt-L5-gband2` | 5 x 1 | 2 | 181 | 55.0 | 10.0 | 304 | 0.00098811 | gband=2, cells_per_block=1, extent-truncated=2.6%, crash |
+| `cnt-L56-chain` | 5 x 1 | 1 | 181 | 55.0 | 10.0 | 239 | 0.00095302 | gband=1, cells_per_block=1, extent-truncated=2.6% |
+| `cnt-L7-gband2` | 7 x 1 | 2 | 181 | 55.0 | 10.0 | 313 | 0.00098758 | gband=2, cells_per_block=1, extent-truncated=2.6% |
+| `cnt33_gband_length/L8_g1t` | 8 x ? | 1 | 361 | ? | -- | 107 | 0.00096859 | gband=1, cells_per_block=unknown |
+| `cnt33_gband_length/L8_g3` | 8 x ? | 3 | 361 | ? | -- | 362 | 0.00098738 | cells_per_block=unknown, extent-truncated=3.1% |
+| `cnt33_gband_length/L10_g1t` | 10 x ? | 1 | 361 | ? | -- | 128 | 0.00099697 | gband=1, cells_per_block=unknown |
+| `cnt33_long_gband3/L16_g1t` | 16 x ? | 1 | 361 | ? | -- | 115 | 0.00099163 | gband=1, cells_per_block=unknown |
+| `l16f-g1t` | 16 x 1 | 1 | 161 | 55.0 | 10.0 | 66 | 0.0009901 | gband=1, cells_per_block=1 |
+| `l16f-g1t-361` | 16 x 1 | 1 | 361 | 55.0 | 10.0 | 96 | 0.00097227 | gband=1, cells_per_block=1 |
+| `l16f-g3` | 16 x 1 | 3 | 161 | 55.0 | 10.0 | 97 | 0.00096263 | cells_per_block=1 |
+| `l16f-g3-361` | 16 x 1 | 3 | 361 | 55.0 | 10.0 | 157 | 0.0009824 | cells_per_block=1 |
+| `cnt33_long_gband3/L24_g1t` | 24 x ? | 1 | 361 | ? | -- | 117 | 0.0009851 | gband=1, cells_per_block=unknown |
+| `l24f-g1t` | 24 x 1 | 1 | 161 | 55.0 | 10.0 | 70 | 0.00098296 | gband=1, cells_per_block=1 |
+| `l24f-g3` | 24 x 1 | 3 | 161 | 55.0 | 10.0 | 96 | 0.00099703 | cells_per_block=1 |
+| `cnt33_long_gband3/L32_g1t` | 32 x ? | 1 | 361 | ? | -- | 120 | 0.00098011 | gband=1, cells_per_block=unknown |
+| `l32f-g1t` | 32 x 1 | 1 | 161 | 55.0 | 10.0 | 70 | 0.00098695 | gband=1, cells_per_block=1 |
+| `l32f-g3` | 32 x 1 | 3 | 161 | 55.0 | 10.0 | 176 | 0.00024494 | cells_per_block=1 |
+
+### unattributed
+
+| run | blocks x cells | `g_band` | ne | wmax | cutoff | iters | residual | gates failed |
+|---|---|---|---|---|---|---|---|---|
+| `cnt-nescan-g3` | ? x ? | 3 | ? | ? | -- | 201 | 0.022301 | cells_per_block=unknown |
+
+### Multi-arm campaign directories
+
+One log, many arms; at least one converged. Read the arm, not the row.
+
+| directory | arms | system |
+|---|---|---|
+| `prod` | 126 | unknown |
+| `anderson_test/jprobe_snaps` | 111 | cnt33 |
+| `anderson_test/mixer_campaign_L2` | 17 | unknown |
+| `anderson_test/campaign_report` | 16 | unknown |
+| `conv1e10` | 15 | unknown |
+| `eta0-L3` | 10 | si_film |
+| `anderson_test/rre_sweep_L2` | 7 | unknown |
+| `mos2f3` | 6 | mos2_film |
+| `anderson_test/mixer_campaign_d5a_v2` | 6 | unknown |
+| `sifilm-L10-sweep` | 5 | si_film |
+
 ## 4. What is not invalidated
 
 Failing a gate invalidates a transport number. It does not invalidate a

@@ -368,7 +368,8 @@ each, all relative to the untruncated reference D.
 | A | production pin, band 3 | 6.31e-03 | -- |
 | B | pin, wide `G` | 6.31e-03 | -- |
 | C | no pin, band 3 | 6.38e-03 | -- |
-| **E** | **modal legs beyond band 3** | **2.43e-01** | -- |
+| **E** | **modal legs beyond band 3, direct fit** | **2.43e-01** | -- |
+| **F** | **congruence: modal `G^R`, `G^<` rebuilt** | **3.27e-02** | -- |
 | **R2** | **reblock, 2 cells/block** | **2.74e-03** | 58.8 % |
 | R3 | reblock, 3 cells/block | 1.18e-02 | 47.4 % |
 | R4 | reblock, 4 cells/block | 1.12e-02 | 37.8 % |
@@ -395,14 +396,46 @@ modal route addresses the smaller term". That was an argument from block
 weights; this is the same conclusion at the level of a current, with the modal
 machinery actually built.
 
-Three limits on it, all real. The bed is a 1-DOF chain with a random vertex, so
-the percentages are the bed's. Arm E uses the DIRECT fit of the `G^{<,>}`
-sequence -- route A of the proposal's Sec. 8, the one it itself calls least
-safe, and the one that does not preserve the matrix sign structure -- with one
-fit per frequency reused at every cell pair, which is the translation-invariance
-assumption that `eps_Toeplitz` says is 8-11 % wrong. The congruence route
-(modal `G^R` then `G^R Sigma_tot G^A`) is not measured here and could do
-better; whether it does is the one thing that would change this verdict.
+### The congruence route, measured
+
+Arm E is the DIRECT fit of `G^{<,>}` -- route A of the proposal's Sec. 8, the
+one it itself calls least safe. Route B continues `G^R` modally instead and
+rebuilds `G~^{<,>} = G~^R Sigma_tot^{<,>} G~^A` with `G~^A` literally the
+conjugate transpose, so positivity is a congruence rather than a hope. Adding it
+as arm F:
+
+| arm | `eps(J_L)` | negative spectral weight of `i G^<` |
+|---|---|---|
+| E, direct fit of `G^<` | 2.43e-01 | 0.090 |
+| **F, congruence via modal `G^R`** | **3.27e-02** | **0.071** |
+| (exact) | -- | 0.067 |
+| R2, reblock 2 cells/block | 2.74e-03 | -- |
+
+**The congruence route is 7.4x better than the direct fit and lands on the exact
+positivity**, which is both of the proposal's Sec. 9 claims confirmed. Its error
+is also flat in the fit tolerance -- 0.69, 0.71, 0.72 on `G^<` at
+`eps = 1e-2, 1e-3, 1e-4` -- where the direct fit runs away by eight orders,
+0.24, 1.75, 7.7e+07. A congruence of a bounded source cannot blow up.
+
+**It does not overturn the verdict.** Arm F is still 5x worse than the
+production pin and 12x worse than reblocking at two cells per block.
+
+And the reason is measurable rather than a matter of tuning: **26-30 % of the
+fitted residue weight sits in exponents with `|xi| > 1`.** That branch is
+physical -- in a two-terminal device it is the wave from the FAR contact, which
+the scalar prototype of Sec. 7 already showed -- but an outward continuation
+from an interior anchor cannot carry it, because extrapolating a growing
+exponent away from the anchor diverges (keeping it puts the far blocks out by a
+factor 40 rather than by a few percent). Dropping it is required, and it costs a
+quarter of the amplitude. No rank and no tolerance recovers that; it is a
+property of continuing a one-sided sequence in a two-terminal device, and the
+repair is the proposal's own "explicit boundary + modal interior" architecture
+rather than a better fit.
+
+Two limits remain. The bed is a 1-DOF chain with a random vertex, so the
+percentages are the bed's. And one fit per frequency is reused at every cell
+pair, which is the translation-invariance assumption `eps_Toeplitz` puts at
+8-11 %.
 
 ## 12. Open
 
@@ -419,5 +452,7 @@ better; whether it does is the one thing that would change this verdict.
   kernel; see Sec. 4. The CNT bed does not converge under `retarded="fft"` nor
   under production's `"half"` with the production cutoffs, and the Si film does
   not converge at one cell per block under any arm tried.
-- The congruence route for arm E, which is the only construction that could
-  overturn Sec. 11.
+- Whether the "explicit boundary + modal interior" architecture recovers the
+  30 % of weight the one-sided continuation has to drop. That is the only
+  remaining construction that could change Sec. 11, and it is a different
+  experiment rather than a better fit.
