@@ -663,3 +663,228 @@ def test_pair_importance_refuses_a_geometric_sum_it_cannot_take():
     finite = pair_importance(np.array([1.0]), np.array([1.0]), 1.2, 3,
                              n_cells=8)
     assert np.isfinite(finite) and finite > 0.0
+
+
+# --- the bidirectional semiseparable operator ------------------------------ #
+#
+# The repair for the measured failure of the one-sided continuation: 26-30 % of
+# the fitted residue weight sits in exponents with |xi| > 1, which is the wave
+# from the far contact, and no outward continuation can carry it. These pin the
+# two claims that matter -- that the representation is exact where the one-sided
+# one is not, and that it is an OPERATOR, applied in O(N r^2) without ever
+# forming a long-range block.
+
+from solver.leads import build_device_hamiltonian                # noqa: E402
+from studies._spatial_bed import spectral_obc                    # noqa: E402
+
+from quatrex.phonon.spatial_hankel import ExponentialSeries      # noqa: E402
+from quatrex.phonon.spatial_operator import (                    # noqa: E402
+    SemiSepOperator, directional_modes)
+
+
+def _chain_device(n_cells, k_lead, omega, w0=1.0, k_s=4.0):
+    """Ballistic chain with a lead that need not match the device.
+
+    ``k_lead != k_s`` mismatches the contact, so the interior carries a genuine
+    reflected wave from each end -- the two-terminal structure a one-sided
+    outward continuation cannot represent.
+    """
+    dev = gapped_chain(w0=w0, k_s=k_s)
+    d00 = np.asarray(dev.h00, dtype=complex)
+    d01 = np.asarray(dev.h01, dtype=complex)
+    h_d = build_device_hamiltonian(d00, d01, n_cells)
+    l00 = np.array([[w0 ** 2 + 2 * k_lead]], dtype=complex)
+    l01 = np.array([[-k_lead]], dtype=complex)
+    obc = spectral_obc(np.array([omega]), l00, l01, l01.conj().T, n_cells,
+                       305.0, 295.0)
+    a = ((omega ** 2) * np.eye(n_cells) - h_d
+         - obc["Sigma_L_R"][0] - obc["Sigma_R_R"][0])
+    return np.linalg.inv(a), d00, d01
+
+
+@pytest.mark.parametrize("n_cells,n_dof", [(8, 2), (12, 1), (6, 3)])
+def test_the_realisation_of_a_dense_matrix_is_exact(n_cells, n_dof):
+    """Full rank must reproduce anything; otherwise a small error later cannot
+    be attributed to the compression rather than to the representation."""
+    rng = np.random.default_rng(n_cells * 10 + n_dof)
+    n = n_cells * n_dof
+    mat = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    op = SemiSepOperator.from_dense(mat, n_dof)
+
+    assert np.abs(op.to_dense() - mat).max() < 1e-12 * np.abs(mat).max()
+    x = rng.normal(size=(n, 3)) + 1j * rng.normal(size=(n, 3))
+    ref = mat @ x
+    assert np.abs(op.apply(x) - ref).max() < 1e-12 * np.abs(ref).max()
+    assert np.abs(op.apply(x[:, 0]) - ref[:, 0]).max() < 1e-12 * np.abs(ref).max()
+
+
+def test_sample_block_and_apply_agree_on_the_generator_order():
+    r"""``apply`` unrolls to ``C_i A_{i-1} ... A_{j+1} B_j``, so the factors go
+    from the SOURCE outwards -- ascending rightward, descending leftward.
+
+    Reversing them still produces a decaying tail of the right magnitude, so
+    the two routes are checked against each other rather than eyeballed.
+    """
+    rng = np.random.default_rng(2)
+    n_cells, n_dof = 9, 2
+    n = n_cells * n_dof
+    mat = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    op = SemiSepOperator.from_dense(mat, n_dof)
+
+    eye = np.eye(n, dtype=complex)
+    from_apply = op.apply(eye)
+    for i in (0, 3, 8):
+        for j in (0, 2, 5, 8):
+            got = op.sample_block(i, j)
+            want = from_apply[i * n_dof:(i + 1) * n_dof,
+                              j * n_dof:(j + 1) * n_dof]
+            assert np.abs(got - want).max() < 1e-11 * np.abs(want).max() + 1e-13
+
+
+def test_a_planted_semiseparable_matrix_realises_at_its_own_rank():
+    rng = np.random.default_rng(3)
+    n_cells, n_dof, r = 14, 2, 3
+    u = rng.normal(size=(n_cells, n_dof, r)) + 1j * rng.normal(
+        size=(n_cells, n_dof, r))
+    v = rng.normal(size=(n_cells, r, n_dof)) + 1j * rng.normal(
+        size=(n_cells, r, n_dof))
+    lam = rng.uniform(0.3, 0.8, r)
+    mat = np.zeros((n_cells * n_dof,) * 2, dtype=complex)
+    for i in range(n_cells):
+        for j in range(i):
+            mat[i * n_dof:(i + 1) * n_dof, j * n_dof:(j + 1) * n_dof] = (
+                u[i] @ (lam[:, None] ** (i - j - 1) * v[j]))
+
+    op = SemiSepOperator.from_dense(mat, n_dof, tol=1e-10)
+    assert op.rank[0] == r
+    assert np.abs(op.to_dense() - mat).max() < 1e-12 * np.abs(mat).max()
+
+
+def test_the_inverse_of_a_block_tridiagonal_matrix_has_quasiseparable_rank_d():
+    r"""The textbook fact that makes ``G^R`` cheap, and a strong correctness
+    check on the realisation.
+
+    A block-tridiagonal inverse is block-semiseparable of rank ``d`` exactly.
+    So the augmented Dyson block for a NEAREST-NEIGHBOUR operator is
+    ``d + r+ + r- = 3d`` against a 2-cell reblock's ``2d`` -- known without
+    measuring anything. It stops being ``d`` only when ``Sigma^R`` widens the
+    operator, which is the whole premise of the programme.
+    """
+    rng = np.random.default_rng(4)
+    n_cells, d = 10, 2
+    n = n_cells * d
+    a = np.zeros((n, n), dtype=complex)
+    for i in range(n_cells):
+        a[i * d:(i + 1) * d, i * d:(i + 1) * d] = (
+            4.0 * np.eye(d) + rng.normal(size=(d, d)))
+        if i + 1 < n_cells:
+            blk = rng.normal(size=(d, d))
+            a[i * d:(i + 1) * d, (i + 1) * d:(i + 2) * d] = blk
+            a[(i + 1) * d:(i + 2) * d, i * d:(i + 1) * d] = blk.T
+
+    op = SemiSepOperator.from_dense(np.linalg.inv(a), d, tol=1e-9)
+    assert op.rank == (d, d), f"expected ({d}, {d}), got {op.rank}"
+    assert op.augmented_block == 3 * d
+
+
+def test_two_sided_is_exact_where_one_sided_fails_on_a_reflecting_device():
+    r"""Gate G1, as an inequality with a wide gap.
+
+    With a matched lead the interior carries no reflected wave and a one-sided
+    exponential continuation is exact, so a matched bed cannot discriminate --
+    the mismatched one is the test, and both arms are run on both beds so the
+    matched case is the negative control.
+    """
+    n_cells, omega = 24, 2.5
+
+    matched, _, _ = _chain_device(n_cells, 4.0, omega)
+    mismatched, _, _ = _chain_device(n_cells, 1.0, omega)
+
+    def errors(g):
+        op = SemiSepOperator.from_dense(g, 1, tol=1e-8)
+        anchor, span = 4, n_cells - 8
+        seq = [g[anchor:anchor + 1, anchor + r:anchor + r + 1]
+               for r in range(span)]
+        fit = matrix_pencil(seq, eps=1e-6)
+        keep = np.abs(fit.xi) <= 1.0 + 1e-9
+        one = ExponentialSeries(xi=fit.xi[keep], residues=fit.residues[keep],
+                                spectrum=fit.spectrum)
+        e_one, e_two = [], []
+        for i in range(4, n_cells - 4):
+            for j in range(4, n_cells - 4):
+                if abs(i - j) < 4:
+                    continue
+                ref = g[i:i + 1, j:j + 1]
+                den = np.linalg.norm(ref)
+                e_one.append(np.linalg.norm(one.block(abs(i - j)) - ref) / den)
+                e_two.append(np.linalg.norm(op.sample_block(i, j) - ref) / den)
+        return float(np.median(e_one)), float(np.median(e_two)), op.rank
+
+    one_m, two_m, _ = errors(matched)
+    assert one_m < 1e-10 and two_m < 1e-10, (
+        "the matched bed must not discriminate; if it does, the mismatched "
+        "result below is measuring something else")
+
+    one_x, two_x, rank = errors(mismatched)
+    assert one_x > 1e-2, (
+        f"the one-sided continuation must fail on a reflecting device, got "
+        f"{one_x:.2e}")
+    assert two_x < 1e-10, f"two-sided left {two_x:.2e}"
+    assert rank == (1, 1), (
+        f"a 1-DOF tridiagonal inverse is semiseparable of rank 1, got {rank}")
+
+
+def test_direct_sum_is_exact_and_the_rank_adds():
+    """Which is why an accumulation has to be recompressed, not only appended."""
+    rng = np.random.default_rng(5)
+    n_cells, n_dof = 7, 2
+    n = n_cells * n_dof
+    a = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    b = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    op_a = SemiSepOperator.from_dense(a, n_dof, rank=2)
+    op_b = SemiSepOperator.from_dense(b, n_dof, rank=3)
+    total = op_a.direct_sum(op_b)
+
+    assert total.rank == (5, 5)
+    want = op_a.to_dense() + op_b.to_dense()
+    assert np.abs(total.to_dense() - want).max() < 1e-11 * np.abs(want).max()
+    x = rng.normal(size=(n, 2)) + 1j * rng.normal(size=(n, 2))
+    assert np.abs(total.apply(x) - want @ x).max() < 1e-11 * np.abs(want @ x).max()
+
+
+# --- directional mode selection -------------------------------------------- #
+
+def test_the_eta_rule_picks_the_root_the_green_function_actually_uses():
+    r"""In-band both roots sit on the unit circle and the modulus says nothing.
+
+    The rule is an infinitesimal retarded damping -- perturb the pencil by
+    ``+i eta`` and keep the root that moves inside. Checked against the ratio
+    ``G[i, i-2] / G[i, i-1]`` read off an actual device, which IS
+    ``lambda_plus`` by definition. A group-velocity partition transcribed from
+    the OBC's ``Re dE/dk < 0`` picks the complex conjugate here, because that
+    test selects modes travelling INTO the lead -- the opposite sense.
+    """
+    n_cells = 24
+    for omega in (1.5, 2.5, 3.5):
+        g, d00, d01 = _chain_device(n_cells, 4.0, omega)
+        truth = g[12, 10] / g[12, 11]
+        modes = directional_modes(
+            (-d01.conj().T, (omega ** 2) * np.eye(1) - d00, -d01))
+        assert modes.n_unit == 2, "this frequency is meant to be in the band"
+        assert modes.rank_plus == 1 and modes.rank_minus == 1
+        assert modes.lam_plus[0] == pytest.approx(truth, rel=1e-4)
+
+
+def test_both_directional_families_are_stored_as_decaying_factors():
+    r"""Nothing in the class ever holds a factor of modulus above one -- a
+    representation that stores the growing partner invites it being
+    propagated, which is the failure the whole construction repairs."""
+    chain = gapped_chain()
+    d00 = np.asarray(chain.h00, dtype=complex)
+    d01 = np.asarray(chain.h01, dtype=complex)
+    for omega in (0.5, 2.5, 6.0):
+        a_ii = (omega ** 2) * np.eye(1) - d00 - 0.3j * np.eye(1)
+        modes = directional_modes((-d01.conj().T, a_ii, -d01))
+        assert modes.rank_plus + modes.rank_minus == 2, "a root went missing"
+        assert np.all(np.abs(modes.lam_plus) <= 1.0 + 1e-9)
+        assert np.all(np.abs(modes.lam_minus) <= 1.0 + 1e-9)
