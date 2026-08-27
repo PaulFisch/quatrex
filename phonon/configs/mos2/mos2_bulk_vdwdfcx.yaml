@@ -1,0 +1,104 @@
+## ---- vdW-DF-CX VARIANT ----------------------------------------------
+## Identical to mos2_bulk_vasp.yaml in every respect except the
+## exchange-correlation treatment, so the pair is a controlled test of the
+## functional: same experimental cell, same supercell, same k-mesh, same
+## rattle amplitude and seed, same cutoffs, same fit.
+##
+## WHY. phonon/docs/mos2_kappa_z_not_converged.md section 6 shows kappa_zz is
+## noise-limited rather than cutoff-limited: two matched PBE+D3 campaigns at
+## 4x4x1 and 4x4x2 agree to 0.3 % on everything the data determines and differ
+## by 3x in kappa_zz, with the whole disagreement sitting in the cross-gap
+## cubic channel. The remaining hypothesis is the vdW treatment itself. Under
+## PBE+D3 the entire cross-gap restoring force AND anharmonicity come from an
+## additive analytic pair term whose third derivative at the 3.53 A S-S
+## contact is fixed by the damping-function form with no density response.
+## vdW-DF-CX supplies the same physics self-consistently from the density, and
+## is what Lindroth & Erhart PRB 94, 115205 used to obtain kappa_z = 5.1 W/mK.
+##
+## FUNCTIONAL SETTINGS (VASP 6.3.0; the build carries the cx13 exchange and
+## generates the nonlocal kernel internally -- no vdw_kernel.bindat needed):
+##   GGA = CX          vdW-DF-cx exchange
+##   LUSE_VDW = .TRUE. nonlocal correlation on (replaces IVDW = 11)
+##   AGGAC = 0.0       GGA correlation off; the nonlocal term supplies it
+##   LASPH = .TRUE.    aspherical PAW contributions, recommended for vdW-DF
+## ZAB_VDW is left at its default (-0.8491, the vdW-DF1 kernel), which is the
+## kernel vdW-DF-cx is built on.
+##
+## The one unavoidable extra difference is LASPH, which the PBE+D3 campaign
+## did not set. It is required for a correct vdW-DF evaluation, not a tuning
+## choice.
+
+## phonon_inputs config: 2H-MoS2 bulk -- HIPHIVE STATICS STAGE.
+## The structure section is REWRITTEN by `_run_mos2_fc.py --variant
+## vdwdfcx` with the relaxed cell from mos2_relax_vdwdfcx.yaml before
+## sow/run/reap
+## (the generated copy lives next to the hiphive work_dir).
+##
+## Supercell [4,4,1] = 96 atoms (12.64 x 12.64 x 12.29 A): the
+## primitive cell already spans two layers along c, so interlayer
+## FC2/FC3 (S-S contacts ~3.5 A) are captured within the cell and to
+## the c-neighbour image. Cutoffs < min(L)/2 = 6.15 A.
+##   FC2 6.0 A: intralayer up to 3rd shell + all interlayer S-S/Mo-S
+##   FC3 4.0 A: intralayer + interlayer S-S triplets (the cross-plane
+##              anharmonic channel)
+## The vdW functional acts on every static: interlayer anharmonicity is
+## almost entirely the dispersion channel, which is exactly the term
+## under test here.
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Mo, Mo, S, S, S, S]
+  lattice:
+    - [3.1600, 0.0000, 0.0000]
+    - [-1.5800, 2.7366402760, 0.0000]
+    - [0.0000, 0.0000, 12.2940]
+  scaled_positions:                # placeholder -- driver injects relaxed
+    - [0.333333333333, 0.666666666667, 0.250000]
+    - [0.666666666667, 0.333333333333, 0.750000]
+    - [0.666666666667, 0.333333333333, 0.121000]
+    - [0.666666666667, 0.333333333333, 0.379000]
+    - [0.333333333333, 0.666666666667, 0.621000]
+    - [0.333333333333, 0.666666666667, 0.879000]
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Mo: Mo_sv
+    S: S
+  encut: 400
+  ediff: 1.0e-6
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: Auto                      # 96-atom supercell: real-space projectors
+  lwave: false
+  lcharg: false
+  ncore: 8
+  kpar: 2
+  kpoints_scf: [3, 3, 2]           # [4,4,1] supercell ~ primitive 12x12x2
+  incar_extra: {GGA: CX, LUSE_VDW: ".TRUE.", AGGAC: 0.0, LASPH: ".TRUE."}
+  vasp_command: "export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib; ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: relax               # not used (driver runs relax stage config)
+  forc_conv_thr: 0.001
+  calculator: vasp
+  work_dir: ./relax_mos2_vdwdfcx
+
+hiphive:
+  supercell: [4, 4, 1]             # 96 atoms
+  n_structures: 40
+  rattle_method: mc
+  rattle_std: 0.03                 # Angstrom
+  rattle_d_min: 2.0                # min pair separation (Mo-S bond 2.41 A)
+  rattle_n_iter: 2
+  rattle_seed: 42
+  cutoffs: [6.0, 4.0]              # [FC2, FC3] A; < L/2 = 6.15 A
+  fit_method: ardr
+  fit_kwargs: {}
+  rotational_sum_rule: post_fit
+  calculator: vasp
+  work_dir: ./fc3_hiphive_mos2_vdwdfcx_vasp
+  pw_timeout: 14400                # vdW-DF is ~2x a D3 static

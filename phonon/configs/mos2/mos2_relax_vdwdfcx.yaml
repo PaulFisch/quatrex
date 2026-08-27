@@ -1,0 +1,92 @@
+## ---- vdW-DF-CX VARIANT ----------------------------------------------
+## Identical to mos2_relax_vasp.yaml in every respect except the
+## exchange-correlation treatment, so the pair is a controlled test of the
+## functional: same experimental cell, same supercell, same k-mesh, same
+## rattle amplitude and seed, same cutoffs, same fit.
+##
+## WHY. phonon/docs/mos2_kappa_z_not_converged.md section 6 shows kappa_zz is
+## noise-limited rather than cutoff-limited: two matched PBE+D3 campaigns at
+## 4x4x1 and 4x4x2 agree to 0.3 % on everything the data determines and differ
+## by 3x in kappa_zz, with the whole disagreement sitting in the cross-gap
+## cubic channel. The remaining hypothesis is the vdW treatment itself. Under
+## PBE+D3 the entire cross-gap restoring force AND anharmonicity come from an
+## additive analytic pair term whose third derivative at the 3.53 A S-S
+## contact is fixed by the damping-function form with no density response.
+## vdW-DF-CX supplies the same physics self-consistently from the density, and
+## is what Lindroth & Erhart PRB 94, 115205 used to obtain kappa_z = 5.1 W/mK.
+##
+## FUNCTIONAL SETTINGS (VASP 6.3.0; the build carries the cx13 exchange and
+## generates the nonlocal kernel internally -- no vdw_kernel.bindat needed):
+##   GGA = CX          vdW-DF-cx exchange
+##   LUSE_VDW = .TRUE. nonlocal correlation on (replaces IVDW = 11)
+##   AGGAC = 0.0       GGA correlation off; the nonlocal term supplies it
+##   LASPH = .TRUE.    aspherical PAW contributions, recommended for vdW-DF
+## ZAB_VDW is left at its default (-0.8491, the vdW-DF1 kernel), which is the
+## kernel vdW-DF-cx is built on.
+##
+## The one unavoidable extra difference is LASPH, which the PBE+D3 campaign
+## did not set. It is required for a correct vdW-DF evaluation, not a tuning
+## choice.
+
+## phonon_inputs config: 2H-MoS2 bulk -- RELAX STAGE ONLY (dense k-mesh).
+## Cross-plane (c-axis) thermal-transport campaign vs Sood et al.,
+## Nano Lett. 19, 2434 (2019): measured kappa_z(t) 0.9->2.0 W/mK over
+## 20-240 nm films.
+##
+## Cell FIXED to experiment (a=3.160, c=12.294 A; Bronsema 1986):
+## kappa_z is exquisitely sensitive to the interlayer distance, and
+## cell errors along c would pollute the comparison. Only the internal
+## S z-parameter relaxes (ISIF=2). The nonlocal vdW functional is
+## essential: the interlayer restoring forces ARE the cross-plane
+## channel.
+##
+## Driven by `_run_mos2_fc.py --variant vdwdfcx` (relax here at dense k;
+## statics in mos2_bulk_vdwdfcx.yaml at supercell-appropriate k).
+
+fc_method: hiphive
+
+structure:
+  source: inline
+  symbols: [Mo, Mo, S, S, S, S]
+  lattice:
+    - [3.1600, 0.0000, 0.0000]
+    - [-1.5800, 2.7366402760, 0.0000]
+    - [0.0000, 0.0000, 12.2940]
+  scaled_positions:
+    - [0.333333333333, 0.666666666667, 0.250000]   # Mo (2c)
+    - [0.666666666667, 0.333333333333, 0.750000]   # Mo
+    - [0.666666666667, 0.333333333333, 0.121000]   # S (4f, z ~ 0.121)
+    - [0.666666666667, 0.333333333333, 0.379000]   # S
+    - [0.333333333333, 0.666666666667, 0.621000]   # S
+    - [0.333333333333, 0.666666666667, 0.879000]   # S
+
+vasp:
+  potcar_dir: /home/jiacao/vasp/potpaw_PBE
+  potcar_map:
+    Mo: Mo_sv
+    S: S
+  encut: 400
+  ediff: 1.0e-7                    # tight: one internal parameter, cheap cell
+  ismear: 0
+  sigma: 0.05
+  prec: Accurate
+  lreal: .FALSE.                   # 6-atom cell: reciprocal projectors
+  lwave: false
+  lcharg: false
+  ncore: 4
+  kpar: 4
+  kpoints_scf: [12, 12, 4]         # dense: 6-atom primitive relax
+  incar_extra: {GGA: CX, LUSE_VDW: ".TRUE.", AGGAC: 0.0, LASPH: ".TRUE."}
+  vasp_command: "export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib; ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
+
+relax:
+  calculation: relax               # ISIF=2: ions only, cell fixed to experiment
+  forc_conv_thr: 0.001             # eV/A -- one free parameter, converge hard
+  calculator: vasp
+  work_dir: ./relax_mos2_vdwdfcx
+
+hiphive:                           # unused in this stage (driver splits stages)
+  supercell: [4, 4, 1]
+  n_structures: 40
+  calculator: vasp
+  work_dir: ./fc3_hiphive_mos2_vdwdfcx_vasp
