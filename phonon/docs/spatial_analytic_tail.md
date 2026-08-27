@@ -514,3 +514,117 @@ median far-block error among those accepted is 1.0, i.e. 100 %.
   30 % of weight the one-sided continuation has to drop. That is the only
   remaining construction that could change Sec. 11, and it is a different
   experiment rather than a better fit.
+
+---
+
+# Part II — the matrix-free programme
+
+`~/Downloads/matrix_free_spatial_modal_scba_plan.md` (2026-08-27) proposes the
+repair for Sec. 11's failure -- a bidirectional semiseparable interior between
+explicit boundaries -- and on top of it a much larger ambition: never
+materialise the long-range `G` or `Sigma` at all, and close the SCBA loop
+through a common spatial basis so the Hilbert transform acts only on small
+coefficient functions. It names two gates as decisive. Both are now measured.
+
+## 13. Gate G1 passes: the bidirectional form is exact where one-sided fails
+
+A two-terminal chain with a **mismatched contact**, so the interior carries a
+genuine reflected wave. A matched lead is the negative control -- it carries no
+reflection, so both routes are exact there and it cannot discriminate.
+
+| lead / device spring | one-sided ESPRIT | bidirectional semiseparable | rank |
+|---|---|---|---|
+| 1.00 (matched) | 5e-16 | 7e-16 | (1, 1) |
+| 0.63 | 3.9e-01 | 6.7e-16 | (1, 1) |
+| 0.25 | 8.0e-01 | 7.1e-16 | (1, 1) |
+
+Exact at the MINIMAL rank, which is also a correctness check: the inverse of a
+block-tridiagonal matrix is block-semiseparable of rank exactly `d`, and this
+is the 1-DOF case of that.
+
+Two things had to be right, and the obvious choice was wrong in both.
+
+**The generators must be per cell.** A homogeneous interior `A_i = Lambda`
+provably cannot represent a reflecting device: a reflected wave contributes a
+term going like `lambda^{i+j}`, and no product `U Lambda^{i-j-1} V` with
+cell-independent `U, V` produces one. Measured: the homogeneous two-sided fit
+is 40-200 % wrong on exactly the beds where the one-sided fit is.
+
+**The direction rule is an infinitesimal retarded damping, not a group
+velocity.** In-band both roots sit on the unit circle and the modulus says
+nothing. Transcribing the OBC's `Re dE/dk < 0` test picks the complex
+**conjugate** at every in-band frequency -- right modulus, wrong phase, a
+plausible decaying tail that is 150 % wrong -- because that test selects modes
+travelling INTO the lead, the opposite sense from the tail of `G` on one side of
+a source. Perturbing the pencil by `+i eta` and keeping the root that moves
+inside the unit circle reproduces the true ratio `G[i,i-2]/G[i,i-1]` to four
+digits at every in-band frequency.
+
+`SemiSepOperator` also supplies the `O(N r^2)` matvec that
+`spatial_hankel.Semiseparable`'s docstring advertises and never had.
+
+## 14. Gate G5 fails: no compact common spatial basis
+
+`DeltaSigma(omega)` as a (spatial-operator element x frequency) matrix, on three
+converged chains that differ only in coupling:
+
+| bed | cubic | `xi` med / max (cells) | live `omega` | `r@1e-3` | fraction |
+|---|---|---|---|---|---|
+| L16 | 2e16 | 1.08 / 3726 | 91 | 42 | 46 % |
+| L16 | 5e16 | 1.07 / 743 | 91 | 53 | 58 % |
+| L20 | 6e16 | 1.08 / 265 | 140 | 78 | 56 % |
+
+The singular spectrum is flat and essentially **unchanged** across a factor 3 in
+coupling and 14 in modal range: `0.87, 0.72, 0.67, 0.58` against
+`0.91, 0.71, 0.66, 0.59`. The windowed fallback is a repackaging -- splitting
+140 frequencies into 1/2/4/8/16/32 windows gives total state counts
+`78, 85, 97, 110, 127, 140`, rising monotonically to exactly the frequency
+count. The mechanism: the dominant 3-dimensional spatial subspace turns
+**64 degrees (max 90) between frequencies three grid steps apart**.
+
+Weaker damping moves the fraction the right way (58 % -> 46 %), so the effect is
+real but nowhere near enough. Not yet tested on a bed with a sharp resonance
+INSIDE the band, which is where one basis is most likely to serve many
+frequencies; that measurement is running.
+
+## 15. A causal `Sigma^R` action needs no common basis -- and costs the same
+
+The common basis is needed for **generators**. It is not needed for **actions**:
+the transform is linear and acts pointwise in `(i, j)` along frequency, so for a
+frequency-independent probe `H[Sigma x] = H[Sigma] x`.
+
+| probe | error |
+|---|---|
+| complex | 7.4e-01 |
+| **real** | **3.7e-16** |
+
+The production transform is complex-linear on its positive branch and
+CONJUGATE-linear on the bosonic mirror (`core/fft_utils.py` takes
+`a[::-1].conj()`), so it commutes only with a real probe. That is free: the SCBA
+map is R-linear and not C-linear (`core/jfnk.py:26`), so a Krylov solver on it
+already runs in the real embedding.
+
+**It works end to end.** A Dyson solve using only the causal action -- no
+`Sigma^R` ever formed, no common basis anywhere -- reproduces the explicit
+widened solve to **1.7e-14** on the 20-cell chain and **4.2e-13** at `N_D = 96`.
+
+**And it buys nothing.** One frequency pass yields the action at every frequency
+at once, so the route is efficient exactly when the Krylov vectors can be shared
+across frequencies. They cannot:
+
+| bed | `N_D` | basis needed | ratio against forming `Sigma^R` |
+|---|---|---|---|
+| chain L20 | 20 | 20 | 1.00x |
+| Si film L16 | 96 | 96 | 1.00x |
+
+The shared space has to span the whole cell space, because different frequencies
+need different directions. Preconditioning with the local operator at any
+reference frequency does not shrink it at all (20 of 20 in every arm). So
+`m N_w = N_D N_w` structured applications -- exactly the cost of forming
+`Sigma^R` outright.
+
+**The conclusion is symmetric and it is the programme's real difficulty.**
+Causality couples every frequency. Paying for it in the REPRESENTATION needs a
+common spatial basis, and that basis is not compact (Sec. 14). Paying for it in
+the ACTION needs a search space spanning the cell space, which costs the same as
+materialising. Both horns are measured, on this bed.

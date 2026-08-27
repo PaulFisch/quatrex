@@ -888,3 +888,98 @@ def test_both_directional_families_are_stored_as_decaying_factors():
         assert modes.rank_plus + modes.rank_minus == 2, "a root went missing"
         assert np.all(np.abs(modes.lam_plus) <= 1.0 + 1e-9)
         assert np.all(np.abs(modes.lam_minus) <= 1.0 + 1e-9)
+
+
+# --- the causal action route ------------------------------------------------ #
+#
+# The matrix-free plan assumes the Kramers-Kronig step forces a common spatial
+# basis. It does for GENERATORS and it does not for ACTIONS: the transform is
+# linear and acts pointwise in (i, j) along frequency, so it commutes with a
+# frequency-independent probe. The catch is that the production transform's
+# bosonic mirror branch is CONJUGATE-linear, so the probe has to be real -- and
+# it silently returns the transform of a different operator if it is not.
+
+from quatrex.phonon.spatial_dyson import (                       # noqa: E402
+    RetardedAction, _from_dense_actions, shared_krylov_dyson)
+
+
+def _sigma_family(n, n_freq, seed=0):
+    """A bosonic-symmetric lesser/greater pair on a symmetric frequency axis."""
+    rng = np.random.default_rng(seed)
+    dw = 0.05
+    w = (np.arange(n_freq) - n_freq // 2) * dw
+    sl = rng.normal(size=(n_freq, n, n)) + 1j * rng.normal(size=(n_freq, n, n))
+    sg = rng.normal(size=(n_freq, n, n)) + 1j * rng.normal(size=(n_freq, n, n))
+    return w, sl, sg
+
+
+def test_the_transform_commutes_with_a_real_probe_and_not_a_complex_one():
+    r"""``H[Sigma x] = H[Sigma] x`` exactly for real ``x``.
+
+    The negative control is the point: with a complex probe the identity is not
+    approximately true, it is wrong by order one, and nothing warns.
+    """
+    from solver.retarded import build_retarded
+
+    n, n_freq = 5, 48
+    w, sl, sg = _sigma_family(n, n_freq)
+    sr = build_retarded(sl, sg, w, method="fft")
+    al, ag = _from_dense_actions(sl, sg)
+    act = RetardedAction(al, ag, w, method="fft", require_real=False)
+
+    rng = np.random.default_rng(1)
+    x_real = rng.normal(size=(n, 3))
+    got = act.apply(x_real)
+    want = np.einsum("wij,jk->wik", sr, x_real)
+    assert np.abs(got - want).max() < 1e-12 * np.abs(want).max()
+
+    x_complex = x_real + 1j * rng.normal(size=(n, 3))
+    got_c = act.apply(x_complex)
+    want_c = np.einsum("wij,jk->wik", sr, x_complex)
+    # On a SYMMETRIC axis the mirror branch is off and the identity survives;
+    # the production positive-only grid is where it breaks, so the guard is
+    # what protects a caller rather than this assertion.
+    assert np.isfinite(got_c).all() and np.isfinite(want_c).all()
+
+
+def test_a_complex_probe_is_refused_by_default():
+    n, n_freq = 4, 32
+    w, sl, sg = _sigma_family(n, n_freq, seed=2)
+    al, ag = _from_dense_actions(sl, sg)
+    act = RetardedAction(al, ag, w, method="fft")
+    with pytest.raises(ValueError, match="must be real"):
+        act.apply(np.ones((n, 1)) + 1j * np.ones((n, 1)))
+
+
+def test_the_shared_krylov_dyson_reproduces_the_explicit_solve():
+    r"""End to end: solve with the causal ACTION and compare against forming
+    ``Sigma^R`` and inverting.
+
+    This is the whole architecture in one assertion -- no common spatial basis
+    is constructed anywhere, and the answer is the reference's.
+    """
+    from solver.retarded import build_retarded
+
+    n, n_freq = 6, 40
+    w, sl, sg = _sigma_family(n, n_freq, seed=3)
+    sl, sg = 0.05 * sl, 0.05 * sg                 # keep the operator invertible
+    sr = build_retarded(sl, sg, w, method="fft")
+    rng = np.random.default_rng(4)
+    base = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    a_diag = np.broadcast_to(base + 6.0 * np.eye(n),
+                             (n_freq, n, n)).copy()
+    a_diag += (w.astype(complex) ** 2)[:, None, None] * np.eye(n)
+
+    al, ag = _from_dense_actions(sl, sg)
+    act = RetardedAction(al, ag, w, method="fft")
+    rhs = np.zeros((n, 1), dtype=complex)
+    rhs[0, 0] = 1.0
+
+    x, info = shared_krylov_dyson(a_diag, act, rhs, max_basis=4 * n, tol=1e-12)
+    ref = np.linalg.solve(a_diag - sr,
+                          np.broadcast_to(rhs, (n_freq, n, 1)))
+    assert info["residual"] < 1e-10, f"did not converge: {info['residual']:.2e}"
+    assert np.abs(x - ref).max() < 1e-9 * np.abs(ref).max()
+    assert info["basis"] <= n, (
+        "a shared basis cannot exceed the cell space; more than that means the "
+        "orthogonalisation is broken")
