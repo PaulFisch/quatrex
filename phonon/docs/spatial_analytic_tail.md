@@ -470,6 +470,31 @@ percentages are the bed's. And one fit per frequency is reused at every cell
 pair, which is the translation-invariance assumption `eps_Toeplitz` puts at
 8-11 %.
 
+### The ordering survives a real device, on a state that does not
+
+The same eight arms on the reblocked Si film -- 12 blocks of 18 DOF, 36
+primitive cells, the production FC3, `retarded = "half"`, `g_cutoff = 3` -- whose
+frozen state DIVERGED (`resid = 1.0`, lead balance 1.0, `J_L = -3.0e-08` against
+`J_R = +3.6e-08`, i.e. both leads emitting). Every absolute number there is
+meaningless and none is quoted. What is legible is the ordering, because the
+arms differ only in how `Sigma` is represented on one fixed `(G, Sigma)` pair,
+which is a well-posed question whether or not that pair is a fixed point:
+
+| bed | reblock | congruence | no pin | pin | direct fit |
+|---|---|---|---|---|---|
+| chain (converged) | 2.7e-03 | 3.3e-02 | 6.4e-03 | 6.3e-03 | 2.4e-01 |
+| Si film (diverged) | 1.4e-01 | 6.4e-01 | 1.0e+00 | 2.0e+00 | 1.0e+01 |
+
+Reblocking is the most accurate representation on both and the direct modal fit
+is the worst on both, by an order of magnitude at each end. That is
+corroboration and not evidence: a diverged state can order representations
+correctly by accident. It is recorded because the alternative -- quoting nothing
+from the only real device that ran -- would hide a consistency that does exist.
+
+On that bed the modal continuation is in any case unusable on its own terms:
+half the frequencies refuse the fit outright (241 accepted, 240 refused) and the
+median far-block error among those accepted is 1.0, i.e. 100 %.
+
 ## 12. Open
 
 - E1's `C -> D` on a bed whose own tail is resolved (`xi` of a few cells across
