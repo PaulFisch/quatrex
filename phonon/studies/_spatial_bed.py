@@ -246,9 +246,21 @@ def tile_fc3(bed_dir: Path, n_cells: int) -> dict:
 
 
 def vertex_reach(phi_blocks: dict) -> int:
-    """``p``: the largest cell offset the vertex actually carries."""
-    return max(max(abs(k - i), abs(kp - i), abs(k - kp))
-               for (i, k, kp) in phi_blocks)
+    r"""``p``: how far the vertex reaches FROM ITS OUTPUT CELL.
+
+    ``max(|I-K|, |I-K'|)`` and deliberately not ``max(..., |K-K'|)``. It is the
+    former that enters the support law, by the chain
+
+        |I - J| <= |I - K1| + |K1 - K1'| + |K1' - J| <= p + b + p,
+
+    so ``supp(Sigma) = {|I-J| <= 2p + b}`` with ``p`` bounding the distance from
+    the vertex's own cell to its legs. The separation between the two legs is
+    bounded by ``2p`` as a consequence and is not an independent reach: the
+    nearest-neighbour shell of a real FC3 has ``|K-K'| = 2`` triplets absent
+    only because the force constants have none, while ``|I-K| = 1`` is what the
+    supercell resolves.
+    """
+    return max(max(abs(k - i), abs(kp - i)) for (i, k, kp) in phi_blocks)
 
 
 def spectral_obc(freqs_thz, d00, d01, d10, n_slabs, t_left, t_right):

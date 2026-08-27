@@ -61,6 +61,36 @@ def _filter_g_blocks(g_blocks, g_cutoff):
     }
 
 
+def shell_binner(shell_bins):
+    """``|K - K'| -> bin index`` for the leg-distance decomposition.
+
+    ``shell_bins`` is a list of inclusive ``(lo, hi)`` ranges that must
+    partition the distances a device can carry. Returns ``None`` when
+    ``shell_bins`` is ``None``, which is the default (undecomposed) path.
+    """
+    if shell_bins is None:
+        return None
+    edges = [(int(lo), int(hi)) for lo, hi in shell_bins]
+    if any(hi < lo for lo, hi in edges):
+        raise ValueError(f"shell_binner: empty range in {shell_bins}")
+    for (a_lo, a_hi), (b_lo, b_hi) in zip(edges, edges[1:]):
+        if b_lo != a_hi + 1:
+            raise ValueError(
+                f"shell_binner: bins must partition contiguously, got "
+                f"{shell_bins}")
+    if edges[0][0] != 0:
+        raise ValueError("shell_binner: bins must start at distance 0")
+
+    def which(d):
+        for i, (lo, hi) in enumerate(edges):
+            if lo <= d <= hi:
+                return i
+        raise ValueError(
+            f"shell_binner: leg distance {d} outside {shell_bins}")
+
+    return which
+
+
 def _build_pair_index(phi_blocks, g_keys, n_slabs, *, sigma_cutoff):
     """Enumerate (I, J) -> [(K1, K2, K1', K2', phi_left, phi_right), ...].
 
@@ -274,6 +304,8 @@ def compute_phph_self_energy(
     dc_handling="interpolate",
     n_threads=None,
     symmetry_factor=None,
+    shell_bins=None,
+    shells_out=None,
 ):
     """Unified multi-slab 3-phonon self-energy (Gamma or q-resolved).
 
@@ -308,6 +340,22 @@ def compute_phph_self_energy(
         Maximum ``|K - K'|`` for G blocks used in the inner sum.
     dc_handling
         Treatment of the omega = 0 sample of G before the bubble FFT.
+    shell_bins, shells_out
+        Optional EXACT decomposition of the result by the leg-distance shell
+        of each internal Green-function link. ``Sigma`` is bilinear in ``G``,
+        so writing ``G = sum_m G^(m)`` by shell ``m = |K - K'|`` gives
+
+            Sigma_IJ = sum_{m, m'} Sigma_IJ^{(m, m')}
+
+        exactly -- of which a ``g_cutoff`` sweep is only the partial sums, and
+        cumulative ones at that (raising the band changes blocks that already
+        existed, through interference). ``shell_bins`` is a contiguous list of
+        inclusive ``(lo, hi)`` distance ranges starting at 0; ``shells_out``,
+        if given, is filled with ``{(bin_a, bin_b): (sigma_lesser,
+        sigma_greater)}`` in the same block-dict layout as the return value.
+        The returned totals are unchanged either way -- they are the sum over
+        shells, formed from the same accumulation -- so the default path is
+        bit-identical to not passing these at all.
 
     Returns
     -------
@@ -382,6 +430,8 @@ def compute_phph_self_energy(
     if not tasks:
         return sl_out, sg_out
 
+    which_shell = shell_binner(shell_bins)
+
     def compute_one(kind_task, max_bytes):
         kind, task = kind_task
         I, J, iq_ext, iqp, iq2, K1, K2, K1p, K2p, pl, pr = task
@@ -392,7 +442,10 @@ def compute_phph_self_energy(
             ne=n_freq, prefactor=prefactor, out_slice=freq_sl,
             max_bytes=max_bytes,
         )
-        return (I, J, iq_ext, kind), blk
+        if which_shell is None:
+            return (I, J, iq_ext, kind), blk
+        return ((I, J, iq_ext, kind,
+                 which_shell(abs(K1 - K1p)), which_shell(abs(K2 - K2p))), blk)
 
     itemsize = 16  # complex128
     unique_phi = {id(p): p for d in vertices.values() for p in d.values()}
@@ -411,9 +464,25 @@ def compute_phph_self_energy(
         fixed_bytes=fixed_bytes, n_threads=n_threads, label="phph",
     )
 
-    for (I, J, iq_ext, kind), blk in accumulated.items():
+    if which_shell is None:
+        for (I, J, iq_ext, kind), blk in accumulated.items():
+            out = sl_out if kind == "lesser" else sg_out
+            out[(I, J)][iq_ext] = blk
+        return sl_out, sg_out
+
+    n_bins = len(shell_bins)
+    if shells_out is not None:
+        for m in range(n_bins):
+            for mp in range(n_bins):
+                shells_out[(m, mp)] = (
+                    {k: np.zeros_like(v) for k, v in sl_out.items()},
+                    {k: np.zeros_like(v) for k, v in sg_out.items()})
+    for (I, J, iq_ext, kind, m, mp), blk in accumulated.items():
         out = sl_out if kind == "lesser" else sg_out
-        out[(I, J)][iq_ext] = blk
+        out[(I, J)][iq_ext] += blk
+        if shells_out is not None:
+            pair = shells_out[(m, mp)][0 if kind == "lesser" else 1]
+            pair[(I, J)][iq_ext] += blk
     return sl_out, sg_out
 
 
@@ -430,6 +499,8 @@ def compute_phph_self_energy_finite_multi_slab(
     dc_handling="interpolate",
     n_threads=None,
     symmetry_factor=None,
+    shell_bins=None,
+    shells_out=None,
 ):
     """Gamma-only multi-slab self-energy: thin wrapper over
     :func:`compute_phph_self_energy` with a single (Gamma) q-point.
@@ -447,6 +518,11 @@ def compute_phph_self_energy_finite_multi_slab(
         sigma_cutoff=sigma_cutoff, g_cutoff=g_cutoff,
         dc_handling=dc_handling, n_threads=n_threads,
         symmetry_factor=symmetry_factor,
+        shell_bins=shell_bins, shells_out=shells_out,
     )
+    if shells_out is not None:
+        for key, (sl_s, sg_s) in list(shells_out.items()):
+            shells_out[key] = ({k: v[0] for k, v in sl_s.items()},
+                               {k: v[0] for k, v in sg_s.items()})
     return ({k: v[0] for k, v in sl.items()},
             {k: v[0] for k, v in sg.items()})

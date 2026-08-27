@@ -189,7 +189,14 @@ def bloch_modes_poly(a_blocks, nevp=None, *, residual: bool = False) -> ModeSet:
             "bloch_modes_poly: need an odd number of coefficient blocks "
             f"(2M+1, M >= 1), got {len(a_blocks)}")
 
-    arrs = tuple(xp.asarray(a) for a in a_blocks)
+    # Complex on the way in. The linearisation inverts sum(a_xx) and hands the
+    # companion matrix to a numba eig kernel that requires a complex dtype; a
+    # caller passing real blocks -- which a dynamical matrix naturally is --
+    # otherwise fails inside the kernel with a SystemError rather than
+    # anywhere legible.
+    dtype = np.result_type(*(np.asarray(_host(a)).dtype for a in a_blocks),
+                           np.complex128)
+    arrs = tuple(xp.asarray(a).astype(dtype, copy=False) for a in a_blocks)
     if arrs[0].shape[-1] != arrs[0].shape[-2]:
         raise ValueError(
             f"bloch_modes: blocks must be square, got {arrs[0].shape[-2:]}")
