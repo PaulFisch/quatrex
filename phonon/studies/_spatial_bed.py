@@ -268,6 +268,8 @@ def vertex_reach(phi_blocks: dict) -> int:
     only because the force constants have none, while ``|I-K| = 1`` is what the
     supercell resolves.
     """
+    if not phi_blocks:
+        return 0
     return max(max(abs(k - i), abs(kp - i)) for (i, k, kp) in phi_blocks)
 
 
@@ -630,34 +632,50 @@ def build_frozen(bed_dir, n_cells: int, *, name: str | None = None,
 
 def build_frozen_chain(model, n_cells: int, *, name: str | None = None,
                        cubic: float = 0.0, reach: int = 1, seed: int = 5,
-                       **kw) -> FrozenBed:
-    """:func:`freeze` on a toy chain, with a reach-``p`` random cubic vertex.
+                       vertex: str = "random", **kw) -> FrozenBed:
+    """:func:`freeze` on a toy chain.
 
-    The vertex is the one the analytic-bed measurements use
-    (:func:`solver.toy_models.neighbour_cubic_vertex`) lifted to ``n_dof``
-    per cell, so a 1-DOF chain reproduces those numbers exactly and a
-    multi-DOF cell exercises the matrix-valued path.
+    ``vertex="random"`` builds a reach-``p`` random index-symmetric cubic
+    vertex, lifted to ``n_dof`` per cell -- what the analytic-bed measurements
+    use, so a 1-DOF chain reproduces those numbers exactly.
+
+    ``vertex="model"`` uses the model's OWN ``phi``, on-site only, which is how
+    ``ToyModel.phi_dev_blocks`` and ``phonon/studies/_toy_grid_study.py`` drive
+    these beds. For the sharp-line models the physics IS which modes the vertex
+    couples -- a random vertex would broaden every branch and destroy the
+    narrow line the bed exists to carry. Note this makes the vertex reach
+    ``p = 0``, so the support law is ``|I-J| <= b`` rather than ``2p + b``;
+    that is a property of the bed, not a bug, and ``FrozenBed.p`` reports it.
     """
+    if vertex not in ("random", "model"):
+        raise ValueError(f"build_frozen_chain: vertex must be 'random' or "
+                         f"'model', got {vertex!r}")
     d00 = np.asarray(model.h00, dtype=complex)
     d01 = np.asarray(model.h01, dtype=complex)
     nd = d00.shape[0]
-    rng = np.random.default_rng(seed)
     phi: dict = {}
-    base: dict = {}
-    for i in range(n_cells):
-        for a in range(i - reach, i + reach + 1):
-            for b in range(i - reach, i + reach + 1):
-                if not (0 <= a < n_cells and 0 <= b < n_cells):
-                    continue
-                key = (a - i, b - i)
-                if key not in base:
-                    raw = rng.normal(size=(nd, nd, nd))
-                    base[key] = cubic * (raw + raw.transpose(0, 2, 1)) / 2.0
-                phi[(i, a, b)] = base[key]
+    if vertex == "model":
+        blk = cubic * np.asarray(model.phi, dtype=complex)
+        for i in range(n_cells):
+            phi[(i, i, i)] = blk
+    else:
+        rng = np.random.default_rng(seed)
+        base: dict = {}
+        for i in range(n_cells):
+            for a in range(i - reach, i + reach + 1):
+                for b in range(i - reach, i + reach + 1):
+                    if not (0 <= a < n_cells and 0 <= b < n_cells):
+                        continue
+                    key = (a - i, b - i)
+                    if key not in base:
+                        raw = rng.normal(size=(nd, nd, nd))
+                        base[key] = cubic * (raw + raw.transpose(0, 2, 1)) / 2.0
+                    phi[(i, a, b)] = base[key]
     return freeze(d00, d01, d01.conj().T, phi, n_cells,
                   name=name or f"{model.name}_L{n_cells}",
                   extra_meta={"toy": model.name, "cubic": cubic,
-                              "reach": reach, "seed": seed}, **kw)
+                              "reach": reach, "seed": seed,
+                              "vertex": vertex}, **kw)
 
 
 def main(argv=None) -> int:
