@@ -50,6 +50,14 @@ from pathlib import Path
 
 os.environ.setdefault("QTX_ARRAY_MODULE", "numpy")
 
+# A long cluster run whose stdout is a pipe is block-buffered, so `tortin.py
+# tail` shows an empty log for the whole run and there is no progress signal at
+# all. The dense solver's own prints do not flush.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):        # pragma: no cover - odd stdout
+    pass
+
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -655,9 +663,15 @@ def main(argv=None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--bed", required=True, type=Path,
+    ap.add_argument("--bed", type=Path, default=None,
                     help="stored device dir with dynamical_matrix.mat + "
                          "fc3_blocks.hdf5")
+    ap.add_argument("--chain", action="store_true",
+                    help="build the analytic gapped chain instead of a device")
+    ap.add_argument("--cubic", type=float, default=1e17,
+                    help="toy vertex scale (--chain only); the bubble "
+                         "prefactor carries the SI hbar, so an O(1) vertex "
+                         "gives Sigma ~ 1e-33 THz^2 and no physics at all")
     ap.add_argument("--cells", type=int, required=True)
     ap.add_argument("--axis", default="z", choices=["x", "y", "z"],
                     help="transport direction, matching the bed's config")
@@ -673,17 +687,38 @@ def main(argv=None) -> int:
     ap.add_argument("--tl", type=float, default=305.0)
     ap.add_argument("--tr", type=float, default=295.0)
     ap.add_argument("--zero-mode-projection", action="store_true")
+    ap.add_argument("--sigma-cutoff", type=int, default=None,
+                    help="max |I-J| of the produced Sigma while the STATE is "
+                         "being converged. The reference kernel diverges at "
+                         "eta=0 on both real beds with no cutoff at all, so a "
+                         "physical frozen state is the one production reaches: "
+                         "1 here and 3 for --g-cutoff. The experiment then "
+                         "varies the representation of Sigma evaluated ON that "
+                         "state, which is what 'frozen' means.")
+    ap.add_argument("--g-cutoff", type=int, default=None,
+                    help="max |K-K'| of the G legs, while converging")
     ap.add_argument("--threads", type=int, default=None)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--name", default=None)
     a = ap.parse_args(argv)
 
-    bed = build_frozen(
-        a.bed, a.cells, name=a.name, tdir="xyz".index(a.axis), q=tuple(a.q),
-        nfreq_pos=a.nfreq_pos, max_scba_iter=a.max_iter, solver=a.solver,
-        anderson_mixing=a.solver != "linear", mixing=a.mixing, scba_tol=a.tol,
-        t_left=a.tl, t_right=a.tr, n_threads=a.threads,
+    common = dict(
+        name=a.name, nfreq_pos=a.nfreq_pos, max_scba_iter=a.max_iter,
+        solver=a.solver, anderson_mixing=a.solver != "linear",
+        mixing=a.mixing, scba_tol=a.tol, t_left=a.tl, t_right=a.tr,
+        n_threads=a.threads, sigma_cutoff=a.sigma_cutoff,
+        g_cutoff=a.g_cutoff,
         zero_mode_projection=a.zero_mode_projection, verbose=True)
+    if a.chain:
+        from solver.toy_models import gapped_chain
+        common["name"] = a.name or f"chain_L{a.cells}"
+        bed = build_frozen_chain(gapped_chain(), a.cells, cubic=a.cubic,
+                                 **common)
+    else:
+        if a.bed is None:
+            ap.error("give --bed or --chain")
+        bed = build_frozen(a.bed, a.cells, tdir="xyz".index(a.axis),
+                           q=tuple(a.q), **common)
     out = a.out or (OUT / f"{bed.name}.npz")
     bed.save(out)
     print(f"\n{bed.name}: {bed.n_slabs} cells x {bed.n_dof} dof, "

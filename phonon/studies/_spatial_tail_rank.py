@@ -1,0 +1,279 @@
+"""Is the KELDYSH Green function low rank in the same spatial basis as G^R?
+
+The second gate, and the proposal's own "most important missing test" (its
+Sec. 7). The spatial complex-band pencil represents ``G^R``; the bubble uses
+``G^{<,>}``, which is not the resolvent of anything. If the Keldysh object needs
+a rank that grows with the device, there is nothing to compress and the
+programme ends whatever the tail attribution said.
+
+The measurement is SOURCE-RESOLVED rather than a rank taken on the total, which
+costs almost nothing because ``G^R`` is already in hand:
+
+    arm L : Sigma^{<,>} = the left contact only
+    arm R : the right contact only
+    arm S : the frozen anharmonic Sigma_s^{<,>} only
+
+Two batched matmuls per arm, and by linearity ``L + R + S`` must reproduce the
+frozen ``G^<`` to roundoff -- which is the arm's own correctness assert, not a
+separate test. Then the pencil runs along three DIRECTIONS per arm. For a source
+at ``s``,
+
+    G^<_{IJ} = sum_{mn} U_m lambda_m^{I-s} S_mn (lambda_n^*)^{J-s} U_n^dagger ,
+
+so along ``J`` at fixed ``I`` the exponents are the ADVANCED conjugates
+``lambda_n^*``, along ``I`` at fixed ``J`` the retarded ``lambda_m``, and along
+the diagonal the products ``lambda_m lambda_n^*``. Three unambiguous answers
+where a single Hankel rank on the total gives one ambiguous one -- and the
+residue ``(lambda_m lambda_n^*)^I`` is what makes ``Sigma`` semiseparable rather
+than Toeplitz, which decides the class of the eventual state-space fit.
+
+The quantity to watch is ``min_{mn} |1 - lambda_m lambda_n^*|``. Where it goes
+to zero the geometric sum over sources degenerates into a term linear in device
+length -- polynomial times geometric, a rank doubling -- and that is exactly the
+weakly damped regime the whole programme is aimed at.
+
+Also reported: the Hankel spectra of ``G^R``, ``G^<``, ``G^>`` and the
+positivity factor ``Y = G^R L`` with ``-i Sigma^{<,>}_tot = L L^dagger``, so a
+large rank can be attributed to a source rather than merely noted.
+
+Run:
+    QTX_ARRAY_MODULE=numpy python phonon/studies/_spatial_tail_rank.py \
+        --bed phonon/studies/out/spatial_bed/si16_lin.npz
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import warnings
+from pathlib import Path
+
+os.environ.setdefault("QTX_ARRAY_MODULE", "numpy")
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[2]
+for _p in (str(ROOT), str(ROOT / "src"), str(ROOT / "phonon")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):        # pragma: no cover
+    pass
+
+from studies._spatial_bed import FrozenBed, OUT                  # noqa: E402
+
+
+def psd_factor(mat, *, floor: float = 0.0, sign: float = +1.0):
+    r"""``L`` with ``L L^dagger = i M``, from an eigendecomposition.
+
+    **Sign.** The proposal writes ``-i Sigma^{<,>} = L L^dagger``; this tree's
+    convention is the opposite one. ``grids.boson_contact_self_energies_from_gamma``
+    sets ``Sigma^< = -i n Gamma``, so ``i Sigma^<`` is the positive object, and
+    measured on a frozen chain the negative spectral weight of ``i G^<`` is
+    5.6e-04 against 9.994e-01 for ``-i G^<``. Getting this backwards does not
+    fail loudly -- it clips almost the entire spectrum and returns a factor of
+    the wrong object.
+
+    A Cholesky would refuse a source that is only numerically semi-definite,
+    which every frozen SCBA source is: the anharmonic ``Sigma_s^<`` carries real
+    negative weight (11.7 % on that same chain, and the bubble's positivity is a
+    known open question). The clipped fraction is returned so a caller reports
+    it rather than assuming it away.
+    """
+    herm = sign * 1j * np.asarray(mat)
+    herm = 0.5 * (herm + herm.conj().swapaxes(-1, -2))
+    ev, vec = np.linalg.eigh(herm)
+    clipped = float(np.sum(np.abs(ev[ev < floor])))
+    total = float(np.sum(np.abs(ev)))
+    ev = np.clip(ev, floor, None)
+    return vec * np.sqrt(ev)[..., None, :], clipped / (total + 1e-300)
+
+
+def source_arms(bed: FrozenBed):
+    """``{'L','R','S'}`` -> ``(G^<, G^>)`` from that source alone, plus a check."""
+    from solver.leads import solve_green_batch
+
+    z2 = bed.freqs_thz.astype(complex) ** 2
+    zero = np.zeros_like(bed.sigma_lesser)
+    empty = {k: np.zeros_like(v) for k, v in bed.obc.items()}
+
+    def solve(sig_l, sig_g):
+        _, g_l, g_g = solve_green_batch(
+            z2, bed.h_d, {**empty, "Sigma_L_R": bed.obc["Sigma_L_R"],
+                          "Sigma_R_R": bed.obc["Sigma_R_R"]},
+            bed.sigma_retarded, sig_l, sig_g)
+        return g_l, g_g
+
+    arms = {
+        "L": solve(bed.obc["Sigma_L_lesser"], bed.obc["Sigma_L_greater"]),
+        "R": solve(bed.obc["Sigma_R_lesser"], bed.obc["Sigma_R_greater"]),
+        "S": solve(bed.sigma_lesser, bed.sigma_greater),
+    }
+    total_l = sum(a[0] for a in arms.values())
+    resid = (np.abs(total_l - bed.g_lesser).max()
+             / (np.abs(bed.g_lesser).max() + 1e-300))
+    return arms, float(resid), zero
+
+
+def _seq(mat, bed, anchor, span, *, along):
+    """Block sequence from a dense one-frequency matrix, in one direction."""
+    nd = bed.n_dof
+
+    def blk(i, j):
+        return mat[i * nd:(i + 1) * nd, j * nd:(j + 1) * nd]
+
+    if along == "J":
+        return [blk(anchor, anchor + r) for r in range(span)]
+    if along == "I":
+        return [blk(anchor + r, anchor) for r in range(span)]
+    return [blk(anchor + r, anchor + r) for r in range(span)]
+
+
+def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
+        rank: int | None = None):
+    from quatrex.phonon.spatial_hankel import (cluster_exponents,
+                                               matrix_pencil, numerical_rank)
+    from quatrex.phonon.spatial_modes import bloch_modes
+
+    arms, resid, _ = source_arms(bed)
+    anchor = bed.p + m_edge
+    span = max(3, bed.n_slabs - 2 * anchor)
+    # A pencil needs more samples than it has exponents to find, by a margin.
+    # A rank-r estimate from an r+1 point sequence fits noise and reports it as
+    # physics, which is the failure mode this whole file exists to avoid.
+    if span < 8:
+        warnings.warn(
+            f"{bed.name}: the interior span is {span} blocks at m_edge="
+            f"{m_edge}; a pencil estimate needs roughly 2r+2 samples and this "
+            f"bed supports at most r ~ {max(1, (span - 2) // 2)}. The sizing "
+            f"law N >= R + 2(p + m_edge) + 1 wants a longer device.",
+            stacklevel=2)
+
+    # The operator's own bands at this frequency, for the comparison.
+    nd = bed.n_dof
+    w = float(bed.freqs_thz[iw])
+    sig_r = bed.sigma_retarded[iw]
+    a_ii = (w * w) * np.eye(nd) - bed.d00 - sig_r[anchor * nd:(anchor + 1) * nd,
+                                                 anchor * nd:(anchor + 1) * nd]
+    off = sig_r[anchor * nd:(anchor + 1) * nd,
+                (anchor + 1) * nd:(anchor + 2) * nd]
+    a_ij = -bed.d01 - off
+    a_ji = -bed.d10 - off.conj().T
+    modes = bloch_modes(a_ii, a_ij, a_ji, residual=True)
+    lam = np.asarray(modes.lam)
+    dec = lam[np.abs(lam) < 1.0]
+
+    prod = np.abs(1.0 - np.outer(dec, np.conj(dec)))
+    closeness = float(prod.min()) if prod.size else float("nan")
+
+    out = {"w": w, "iw": iw, "linearity_residual": resid, "anchor": anchor,
+           "span": span, "lam": lam, "lam_decaying": dec,
+           "min_one_minus_prod": closeness, "arms": {}}
+
+    seqs = {"G^R": bed.g_retarded[iw], "G^<": bed.g_lesser[iw],
+            "G^>": bed.g_greater[iw]}
+    sig_tot_l = (bed.obc["Sigma_L_lesser"][iw] + bed.obc["Sigma_R_lesser"][iw]
+                 + bed.sigma_lesser[iw])
+    l_fac, clipped = psd_factor(sig_tot_l)
+    seqs["Y=G^R L"] = bed.g_retarded[iw] @ l_fac
+    out["psd_clipped"] = clipped
+    for tag, (g_l, _g) in arms.items():
+        seqs[f"G^<[{tag}]"] = g_l[iw]
+
+    for name, mat in seqs.items():
+        entry = {}
+        for along in ("J", "I", "diag"):
+            s = _seq(mat, bed, anchor, span, along=along)
+            r_eps = numerical_rank(s, eps)
+            est = matrix_pencil(s, rank=rank, eps=eps)
+            uniq, mult = cluster_exponents(est.xi, 1e-4)
+            entry[along] = {"r_eps": r_eps, "xi": uniq, "mult": mult,
+                            "spectrum": est.spectrum,
+                            "recon": float(est.rel_error(s).max())}
+        out["arms"][name] = entry
+    return out
+
+
+def report(bed: FrozenBed, res: dict) -> None:
+    lam = res["lam_decaying"]
+    print(f"\n{bed.name} at omega = {res['w']:.4f} THz "
+          f"(sample {res['iw']} of {bed.freqs_thz.size})")
+    print(f"  frozen state: converged={bed.meta.get('converged')} "
+          f"resid={bed.meta.get('scba_residual'):.2e}")
+    print(f"  source arms L+R+S reproduce the frozen G^<: "
+          f"{res['linearity_residual']:.2e}  "
+          f"{'OK' if res['linearity_residual'] < 1e-10 else 'FAILED -- the arms are not the decomposition'}")
+    print(f"  anchor cell {res['anchor']}, span {res['span']} blocks "
+          f"(p={bed.p})")
+    print(f"  operator bands: {lam.size} decaying of {res['lam'].size}, "
+          f"|lambda| in [{np.abs(lam).min():.4f}, {np.abs(lam).max():.4f}]"
+          if lam.size else "  operator bands: none decaying")
+    print(f"  min |1 - lambda_m lambda_n^*| = {res['min_one_minus_prod']:.3e} "
+          "(-> 0 is where the source sum degenerates and the rank doubles)")
+    print(f"  PSD factor L (i*Sigma convention): clipped negative weight "
+          f"{res['psd_clipped']:.2e}  -- how far the frozen source is from PSD")
+
+    print("\n  numerical rank r_eps by direction, and the exponents recovered")
+    print("    object          | r(J) r(I) r(d) | recon(J) | |xi| along J")
+    for name, entry in res["arms"].items():
+        j, i, d = entry["J"], entry["I"], entry["diag"]
+        mods = np.sort(np.abs(j["xi"]))[::-1][:4]
+        print(f"    {name:15s} | {j['r_eps']:4d} {i['r_eps']:4d} {d['r_eps']:4d} "
+              f"| {j['recon']:.2e} | "
+              + " ".join(f"{m:.4f}" for m in mods))
+
+    if lam.size:
+        print("\n  do the recovered exponents match the operator's bands?")
+        adv = np.conj(lam)
+        for name in ("G^R", "G^<", "G^>"):
+            e = res["arms"][name]
+            for along, ref, lbl in (("J", adv, "lambda*"), ("I", lam, "lambda")):
+                xi = e[along]["xi"]
+                if xi.size == 0 or ref.size == 0:
+                    continue
+                dist = float(np.max([np.min(np.abs(ref - z)) for z in xi]))
+                print(f"    {name:6s} along {along}: worst distance to "
+                      f"{lbl} = {dist:.3e}")
+    print()
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--bed", type=Path, required=True)
+    ap.add_argument("--iw", type=int, default=None,
+                    help="frequency sample; default is the largest |G^<|")
+    ap.add_argument("--eps", type=float, default=1e-6)
+    ap.add_argument("--rank", type=int, default=None)
+    ap.add_argument("--m-edge", type=int, default=2)
+    ap.add_argument("--out", type=Path, default=None)
+    a = ap.parse_args(argv)
+
+    bed = FrozenBed.load(a.bed)
+    iw = a.iw
+    if iw is None:
+        weight = np.abs(bed.g_lesser).max(axis=(1, 2))
+        weight[~bed.pos_mask] = 0.0
+        iw = int(np.argmax(weight))
+
+    res = run(bed, iw=iw, eps=a.eps, m_edge=a.m_edge, rank=a.rank)
+    report(bed, res)
+
+    out = a.out or (OUT.parent / "spatial_tail" / f"{bed.name}_rank.npz")
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        out, name=bed.name, w=res["w"], iw=res["iw"],
+        linearity_residual=res["linearity_residual"],
+        lam=res["lam"], min_one_minus_prod=res["min_one_minus_prod"],
+        psd_clipped=res["psd_clipped"],
+        ranks=np.array([[res["arms"][k][d]["r_eps"] for d in ("J", "I", "diag")]
+                        for k in res["arms"]]),
+        objects=np.array(list(res["arms"]), dtype=object).astype(str),
+        meta=np.array(repr(bed.meta)))
+    print(f"  wrote {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

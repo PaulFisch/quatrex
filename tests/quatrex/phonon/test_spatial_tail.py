@@ -402,3 +402,161 @@ def test_the_reblocking_arm_is_a_mask_and_the_block_count_is_what_drives_it():
     assert bed.discarded(sigma, 6) == 0.0        # 2 blocks: nothing to discard
     for n_cell, m in ((6, 3), (8, 4)):
         assert bed.discarded(bed.long_bed(n_cell), m) == 0.0
+
+
+# --- the exponents that come from the DATA, not from the operator ---------- #
+#
+# spatial_modes solves the pencil the device defines. These get the exponents by
+# fitting the sequence, which is the only route open for G^{<,>}: the Keldysh
+# object is not the resolvent of anything, and whether it is a sum of
+# exponentials in the separation at all is a measurement.
+
+from quatrex.phonon.spatial_hankel import (                      # noqa: E402
+    cluster_exponents, directional_exponents, matrix_pencil, numerical_rank,
+    semiseparable_fit, singular_spectrum)
+
+
+def _same_set(got, want, tol=1e-8):
+    """Compared as a SET. A conjugate pair has equal real parts, so any sort
+    tie-breaks on the imaginary part by last-digit noise and can hand back the
+    two in either order -- which says nothing about the solver."""
+    got, want = np.asarray(got), np.asarray(want)
+    if got.size != want.size:
+        return False
+    return (all(np.min(np.abs(got - w)) < tol for w in want)
+            and all(np.min(np.abs(want - g)) < tol for g in got))
+
+
+def _planted(xi, residues, n=24):
+    return [sum(a * z ** k for a, z in zip(residues, xi)) for k in range(n)]
+
+
+def test_a_scalar_sequence_of_r_exponentials_has_hankel_rank_r():
+    rng = np.random.default_rng(0)
+    xi = np.array([0.8 + 0.2j, 0.55 - 0.3j, 0.2])
+    a = rng.normal(size=3) + 1j * rng.normal(size=3)
+    seq = _planted(xi, a)
+    assert numerical_rank(seq, 1e-10) == 3
+    sv = singular_spectrum(seq)
+    assert sv[2] > 1e-6 and sv[3] < 1e-12, "the rank cliff is not where it says"
+
+
+def test_a_block_sequence_has_hankel_rank_r_times_the_residue_rank():
+    r"""The correction that matters: ``rank H = sum_p rank(A_p)``.
+
+    Reading a block-Hankel rank as an exponent count overstates it by the block
+    size, and the whole programme turns on an exponent count.
+    """
+    rng = np.random.default_rng(1)
+    b, r = 2, 4
+    xi = np.array([0.9 * np.exp(0.3j), 0.9 * np.exp(-0.3j), 0.4, 0.15])
+
+    full = [rng.normal(size=(b, b)) + 1j * rng.normal(size=(b, b))
+            for _ in range(r)]
+    assert numerical_rank(_planted(xi, full), 1e-10) == r * b
+
+    rank_one = [np.outer(rng.normal(size=b) + 0j, rng.normal(size=b))
+                for _ in range(r)]
+    assert numerical_rank(_planted(xi, rank_one), 1e-10) == r
+
+
+def test_the_pencil_recovers_planted_exponents_and_their_multiplicity():
+    rng = np.random.default_rng(1)
+    b, r = 2, 4
+    xi = np.array([0.9 * np.exp(0.3j), 0.9 * np.exp(-0.3j), 0.4, 0.15])
+    res = [rng.normal(size=(b, b)) + 1j * rng.normal(size=(b, b))
+           for _ in range(r)]
+    seq = _planted(xi, res)
+
+    est = matrix_pencil(seq)
+    assert est.rank == r * b, "the matrix rank is the multiplicity-counted one"
+    assert est.n_exponents() == r
+    uniq, mult = cluster_exponents(est.xi)
+    assert _same_set(uniq, xi, tol=1e-9)
+    assert list(mult) == [b] * r
+    assert est.rel_error(seq).max() < 1e-10
+
+
+def test_the_pencil_degrades_monotonically_as_noise_is_added():
+    """Zero noise is not a demanding test on its own; the interesting property
+    is that the estimate does not fall off a cliff."""
+    rng = np.random.default_rng(4)
+    xi = np.array([0.85, 0.45 + 0.2j, 0.45 - 0.2j])
+    a = rng.normal(size=3) + 1j * rng.normal(size=3)
+    clean = np.asarray(_planted(xi, a, n=30))
+    scale = np.abs(clean).max()
+
+    prev = 0.0
+    for level in (0.0, 1e-10, 1e-7, 1e-4):
+        noisy = clean + level * scale * (rng.normal(size=clean.shape)
+                                         + 1j * rng.normal(size=clean.shape))
+        est = matrix_pencil(noisy, rank=3)
+        err = max(np.min(np.abs(est.xi - z)) for z in xi)
+        assert err >= prev * 0.5, f"error fell as noise grew: {err} < {prev}"
+        assert err < max(1e-9, 300.0 * level), (
+            f"noise {level:.0e} gave exponent error {err:.2e}")
+        prev = err
+
+
+def test_a_toeplitz_object_and_a_semiseparable_one_are_distinguishable():
+    r"""The structural question, decided without any fitting choice.
+
+    ``M_{IJ}`` that is a function of ``J - I`` alone gives the SAME exponents
+    along ``I`` and along ``J``. One with a residue ``(mu nu)^I`` -- which is
+    what a source-resolved Keldysh derivation produces -- does not, and that
+    difference is what says the ``Sigma_R = C A^{R-1} B`` ansatz is the wrong
+    class rather than merely underranked.
+    """
+    n = 14
+    lam = np.array([0.75 + 0.1j, 0.35])
+    amp = np.array([1.0 + 0.0j, 0.4 - 0.2j])
+    toe = np.array([[sum(amp * lam ** abs(j - i)) for j in range(n)]
+                    for i in range(n)])
+    d = directional_exponents(toe, rank=2, anchor=3, span=8)
+    assert _same_set(d["along_J"].xi, d["along_I"].xi, tol=1e-7)
+
+    mu = np.array([0.7 + 0.1j, 0.3])
+    nu = np.array([0.6 - 0.2j, 0.25])
+    coef = np.array([[1.0, 0.5], [-0.3, 0.8]], dtype=complex)
+    sep = np.array([[sum(coef[a, c] * mu[a] ** i * nu[c] ** j
+                         for a in range(2) for c in range(2))
+                     for j in range(n)] for i in range(n)])
+    d2 = directional_exponents(sep, rank=2, anchor=3, span=8)
+    assert not _same_set(d2["along_J"].xi, d2["along_I"].xi, tol=1e-3)
+
+
+def test_the_semiseparable_fit_reproduces_the_class_it_is_written_for():
+    n = 12
+    mu = np.array([0.7 + 0.1j, 0.3])
+    nu = np.array([0.6 - 0.2j, 0.25])
+    coef = np.array([[1.0, 0.5], [-0.3, 0.8]], dtype=complex)
+    mat = np.array([[sum(coef[a, c] * mu[a] ** i * nu[c] ** j
+                         for a in range(2) for c in range(2))
+                     for j in range(n)] for i in range(n)])
+
+    fit = semiseparable_fit(mat, n_dof=1, rank=2)
+    assert _same_set(fit.mu, mu, tol=1e-9)
+    assert _same_set(fit.nu, nu, tol=1e-9)
+    assert fit.rel_error(mat, 1) < 1e-10
+
+
+def test_the_semiseparable_fit_cross_validates_on_cells_it_never_saw():
+    """A fit that only reproduces its own training cells has proved nothing."""
+    n = 16
+    mu = np.array([0.72, 0.28 + 0.15j])
+    nu = np.array([0.66, 0.31 - 0.1j])
+    coef = np.array([[1.0, -0.4], [0.7, 0.25]], dtype=complex)
+    mat = np.array([[sum(coef[a, c] * mu[a] ** i * nu[c] ** j
+                         for a in range(2) for c in range(2))
+                     for j in range(n)] for i in range(n)])
+
+    train = list(range(2, 10))
+    held = list(range(10, 16))
+    fit = semiseparable_fit(mat, n_dof=1, rank=2, cells=train)
+    assert fit.rel_error(mat, 1, cells=train) < 1e-10
+    assert fit.rel_error(mat, 1, cells=held) < 1e-8, "no generalisation"
+
+
+def test_the_pencil_refuses_a_sequence_too_short_to_shift():
+    with pytest.raises(ValueError, match="at least 2"):
+        matrix_pencil([np.eye(2)])

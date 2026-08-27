@@ -55,6 +55,14 @@ from pathlib import Path
 
 os.environ.setdefault("QTX_ARRAY_MODULE", "numpy")
 
+# A long cluster run whose stdout is a pipe is block-buffered, so `tortin.py
+# tail` shows an empty log for the whole run and there is no progress signal at
+# all. The dense solver's own prints do not flush.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):        # pragma: no cover - odd stdout
+    pass
+
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
