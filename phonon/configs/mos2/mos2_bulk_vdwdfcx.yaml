@@ -79,6 +79,11 @@ vasp:
   kpar: 2
   kpoints_scf: [3, 3, 2]           # [4,4,1] supercell ~ primitive 12x12x2
   incar_extra: {GGA: CX, LUSE_VDW: ".TRUE.", AGGAC: 0.0, LASPH: ".TRUE."}
+  # Stage the nonlocal kernel instead of regenerating it: VASP takes ~2.3 h
+  # to build it from scratch in each process, which would dominate 41
+  # statics.  Generated once by the relax stage and copied out of its work
+  # dir; see phonon/docs/mos2_kappa_z_not_converged.md section 6.5.
+  aux_files: [/usr/scratch/mont-fort11/pfischill/vasp_aux/vdw_kernel.bindat]
   vasp_command: "export LD_LIBRARY_PATH=/usr/scratch/mont-fort11/pfischill/vasprt-venv/lib:/home/jiacao/openmpi/4.1.1-ifort/lib; ulimit -s unlimited; export OMP_STACKSIZE=512m; export OMP_NUM_THREADS=1; /home/jiacao/openmpi/4.1.1-ifort/bin/mpirun -np 128 --bind-to core --map-by socket:PE=1 /home/jiacao/Software/vasp.6.3.0/bin/vasp_std"
 
 relax:

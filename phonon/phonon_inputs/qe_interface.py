@@ -494,6 +494,9 @@ def _write_vasp_relax_inputs(
         for key, val in getattr(vasp_config, "incar_extra", {}).items():
             f.write(f"{key} = {val}\n")
 
+    from .thirdorder import _stage_aux_files
+    _stage_aux_files(work_dir, vasp_config)
+
     # --- KPOINTS (use denser mesh for relaxation) ---
     kpts = vasp_config.kpoints_scf
     with open(work_dir / "KPOINTS", "w") as f:

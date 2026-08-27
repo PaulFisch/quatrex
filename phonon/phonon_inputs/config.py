@@ -71,6 +71,14 @@ class VASPConfig:
     # dispersion correction of the oxide-embedded wire (the steric
     # H...O contact IS the vdW physics there).
     incar_extra: dict = field(default_factory=dict)
+    # Files copied verbatim into every calculation directory before the run.
+    # Needed for vdW-DF (LUSE_VDW): VASP regenerates the nonlocal kernel from
+    # scratch in each process when vdw_kernel.bindat is absent, which costs
+    # ~2.3 h here -- more than the physics -- and would be paid once per
+    # displacement. VASP writes the kernel out after generating it, so stage
+    # that file and every static reads it instead. Paths are resolved relative
+    # to the config file's directory when not absolute.
+    aux_files: list[str] = field(default_factory=list)
 
 
 @dataclass

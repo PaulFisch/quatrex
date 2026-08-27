@@ -429,6 +429,28 @@ def _write_vasp_inputs(
                 with open(pp_path) as pp_in:
                     potcar_out.write(pp_in.read())
 
+    _stage_aux_files(disp_dir, vasp_config)
+
+
+def _stage_aux_files(target_dir: Path, vasp_config) -> None:
+    """Copy vasp.aux_files into a calculation directory.
+
+    Relative paths resolve against the working directory. Missing sources are a
+    hard error rather than a warning: an absent vdw_kernel.bindat does not fail
+    the run, it silently makes every displacement regenerate the kernel, which
+    is only visible in the timings.
+    """
+    for src in getattr(vasp_config, "aux_files", []) or []:
+        src_path = Path(src).expanduser()
+        if not src_path.exists():
+            raise FileNotFoundError(
+                f"vasp.aux_files entry not found: {src} (resolved to "
+                f"{src_path}). Remove it from the config or stage the file."
+            )
+        dst = target_dir / src_path.name
+        if not dst.exists() or dst.stat().st_size != src_path.stat().st_size:
+            shutil.copy2(src_path, dst)
+
 
 def _parse_vasp_forces(disp_dir: Path, n_atoms: int) -> np.ndarray:
     """Parse forces from VASP vasprun.xml, restoring the original atom order."""
