@@ -208,3 +208,123 @@ def test_bubble_input_not_mutated_when_zero_freq_set():
         out_slice=slice(0, n_freq), zero_freq_idx=n_freq // 2,
     )
     np.testing.assert_array_equal(G, G_snapshot)
+
+
+# --------------------------------------------------------------------------
+# Task batching: the same contraction with the task axis carried as a batch.
+#
+# Not a CPU optimisation -- measured 2.5x at d=1, 0.68-0.90x at d=4-6, where
+# numpy is already at its FLOP/memory bound. It exists because a GPU cannot
+# use the per-task form: on a GH200 the per-task path runs at 0.09-1.3x of the
+# CPU while the batched one runs at 13x/5.5x/72x/111x for d=1/2/4/6. These
+# tests pin it to the per-task path BIT-for-bit, because the whole argument
+# for enabling it rests on it being the same arithmetic.
+# --------------------------------------------------------------------------
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "phonon"))
+
+
+@pytest.mark.parametrize("n_dof", [1, 2, 3])
+@pytest.mark.parametrize("max_bytes", [None, 1 << 13])
+def test_the_task_batched_bubble_is_bit_identical_to_the_per_task_call(
+        n_dof, max_bytes):
+    from solver.bubble import (bubble_dense_from_fft,
+                               bubble_dense_from_fft_task_batched)
+
+    rng = np.random.default_rng(17)
+    n_task, n_fft, ne = 6, 45, 23
+    d = n_dof
+
+    def mk(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    pl, pr = mk(n_task, d, d, d), mk(n_task, d, d, d)
+    ga, gb = mk(n_task, n_fft, d, d), mk(n_task, n_fft, d, d)
+    sl, pre = slice(11, 11 + ne), 0.5 - 0.25j
+
+    ref = np.stack([
+        bubble_dense_from_fft(phi_left=pl[t], phi_right=pr[t], G_a_fft=ga[t],
+                              G_b_fft=gb[t], ne=ne, prefactor=pre,
+                              out_slice=sl)
+        for t in range(n_task)])
+    got = bubble_dense_from_fft_task_batched(
+        phi_left=pl, phi_right=pr, G_a_fft=ga, G_b_fft=gb, ne=ne,
+        prefactor=pre, out_slice=sl, max_bytes=max_bytes)
+
+    assert got.shape == ref.shape
+    assert np.array_equal(got, ref), np.abs(got - ref).max()
+
+
+def _random_phph_inputs(rng, n_slabs, n_dof, n_freq):
+    """A small Gamma-only multi-slab problem: nearest-neighbour G and a local
+    vertex, which is enough to exercise every task-key collision."""
+    def mk(*s):
+        return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+    gl, gg = {}, {}
+    for i in range(n_slabs):
+        for j in range(n_slabs):
+            if abs(i - j) <= 1:
+                gl[(i, j)] = mk(n_freq, n_dof, n_dof)
+                gg[(i, j)] = mk(n_freq, n_dof, n_dof)
+    phi = {(i, k, kp): mk(n_dof, n_dof, n_dof)
+           for i in range(n_slabs)
+           for k in range(n_slabs) for kp in range(n_slabs)
+           if abs(i - k) <= 1 and abs(i - kp) <= 1}
+    return gl, gg, phi
+
+
+@pytest.mark.parametrize("n_dof", [1, 2])
+def test_the_batched_self_energy_equals_the_per_task_one_bit_for_bit(n_dof):
+    """The switch is opt-in precisely because every stored result came from
+    the per-task path; that is only defensible if the two agree exactly."""
+    from solver.se_finite import compute_phph_self_energy_finite_multi_slab
+
+    rng = np.random.default_rng(23)
+    n_slabs, n_freq = 4, 33
+    gl, gg, phi = _random_phph_inputs(rng, n_slabs, n_dof, n_freq)
+    freqs = np.linspace(0.0, 4.0, n_freq)
+    kw = dict(sigma_cutoff=None, g_cutoff=None, dc_handling="interpolate",
+              n_threads=1)
+
+    prev = os.environ.get("QX_PHPH_BATCHED")
+    try:
+        os.environ.pop("QX_PHPH_BATCHED", None)
+        ref_l, ref_g = compute_phph_self_energy_finite_multi_slab(
+            gl, gg, phi, n_slabs, freqs, 0.125, **kw)
+        os.environ["QX_PHPH_BATCHED"] = "1"
+        got_l, got_g = compute_phph_self_energy_finite_multi_slab(
+            gl, gg, phi, n_slabs, freqs, 0.125, **kw)
+    finally:
+        os.environ.pop("QX_PHPH_BATCHED", None)
+        if prev is not None:
+            os.environ["QX_PHPH_BATCHED"] = prev
+
+    assert set(got_l) == set(ref_l) and set(got_g) == set(ref_g)
+    for key in ref_l:
+        assert np.array_equal(got_l[key], ref_l[key]), key
+        assert np.array_equal(got_g[key], ref_g[key]), key
+
+
+def test_an_unknown_array_module_is_refused_rather_than_silently_ignored():
+    """A typo in QX_PHPH_XP must not fall back to numpy and quietly produce a
+    CPU run the caller believes was on a GPU."""
+    from solver.se_finite import compute_phph_self_energy_finite_multi_slab
+
+    rng = np.random.default_rng(5)
+    gl, gg, phi = _random_phph_inputs(rng, 3, 1, 17)
+    prev = os.environ.get("QX_PHPH_XP")
+    try:
+        os.environ["QX_PHPH_XP"] = "cuppy"
+        with pytest.raises(ValueError, match="expected numpy or cupy"):
+            compute_phph_self_energy_finite_multi_slab(
+                gl, gg, phi, 3, np.linspace(0.0, 2.0, 17), 0.125,
+                sigma_cutoff=None, g_cutoff=None, n_threads=1)
+    finally:
+        os.environ.pop("QX_PHPH_XP", None)
+        if prev is not None:
+            os.environ["QX_PHPH_XP"] = prev

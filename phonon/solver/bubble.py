@@ -135,6 +135,105 @@ def _bubble_contract_batched_matmul(phi_left, phi_right,
     return S_hat
 
 
+def _bubble_contract_task_batched(phi_left, phi_right, G_a_fft, G_b_fft):
+    """``_bubble_contract_chunk`` with a leading TASK axis.
+
+    Same three matmuls and the same index structure; the frequency axis stays
+    the inner batch and the task axis is prepended, so the result must agree
+    with looping ``_bubble_contract_chunk`` to roundoff (and does, exactly, on
+    numpy -- see ``test_bubble_kernel``).
+
+    This is not a CPU optimisation. Measured on a 16-cell chain it is 2.5x at
+    ``d = 1``, where the per-task arrays are ``(n_fft, 1, 1)`` and the Python
+    overhead is everything, and 0.68-0.90x at ``d = 4-6``, where numpy is
+    already at its FLOP/memory bound. It exists because a GPU cannot use the
+    per-task form at all: on a GH200 the per-task path runs at 0.09-1.3x of the
+    CPU (it is 21000 launches of a few microseconds' work each), while this one
+    runs at 13x, 5.5x, 72x, 111x for ``d = 1, 2, 4, 6``. Batching is the
+    difference between a GPU that helps and one that does not.
+
+    Shapes, with ``t`` the task axis:
+    ``phi_left (t, nI, bK1, bK2)``, ``phi_right (t, nJ, bK2p, bK1p)``,
+    ``G_a_fft (t, n_w, bK1, bK1p)``, ``G_b_fft (t, n_w, bK2, bK2p)``
+    -> ``(t, n_w, nI, nJ)``.
+    """
+    nt, n_w = G_a_fft.shape[0], G_a_fft.shape[1]
+    nI, bK1, bK2 = phi_left.shape[1], G_a_fft.shape[2], G_b_fft.shape[2]
+    bK1p, bK2p, nJ = G_a_fft.shape[3], G_b_fft.shape[3], phi_right.shape[1]
+
+    # Step 1: T1[t, w, a, c, d] = sum_e phi_L[t, a, c, e] G_b[t, w, e, d]
+    t1 = phi_left.reshape(nt, 1, nI * bK1, bK2) @ G_b_fft
+    t1 = t1.reshape(nt, n_w, nI, bK1, bK2p)
+
+    # Step 2: T2[t, w, a, d, b] = sum_c T1[t, w, a, c, d] G_a[t, w, c, b]
+    t2 = t1.transpose(0, 1, 2, 4, 3).reshape(nt, n_w, nI * bK2p, bK1) @ G_a_fft
+    t2 = t2.reshape(nt, n_w, nI, bK2p, bK1p)
+
+    # Step 3: S[t, w, a, J] = sum_{b, d} T2[t, w, a, d, b] phi_R[t, J, d, b]
+    return (t2.reshape(nt, n_w, nI, bK2p * bK1p)
+            @ phi_right.reshape(nt, 1, nJ, bK2p * bK1p).transpose(0, 1, 3, 2))
+
+
+def bubble_task_batch_bytes(*, n_fft, nI, nJ, bK1, bK1p, bK2, bK2p,
+                            itemsize: int = 16) -> int:
+    """Transient bytes the task-batched kernel holds PER TASK.
+
+    The two ``(n_fft, nI, d, d)`` intermediates dominate; the caller divides
+    its budget by this to pick a task-chunk length, the way the per-task
+    kernel divides by :func:`bubble_chunk_peak_bytes_per_w`.
+    """
+    big = n_fft * nI * max(bK1, bK2p) * max(bK1p, bK2p) * itemsize
+    io = n_fft * (bK1 * bK1p + bK2 * bK2p + nI * nJ) * itemsize
+    return int(2 * big + io)
+
+
+def bubble_dense_from_fft_task_batched(
+    *,
+    phi_left,
+    phi_right,
+    G_a_fft,
+    G_b_fft,
+    ne: int,
+    prefactor,
+    out_slice: slice | None = None,
+    max_bytes: int | None = None,
+    xp=None,
+):
+    """:func:`bubble_dense_from_fft` over a batch of tasks at once.
+
+    Every input carries a leading task axis; the return is
+    ``(n_task, len(out_slice), nI, nJ)``. ``max_bytes`` chunks the TASK axis
+    rather than the frequency axis, because the point of the batch is to keep
+    the frequency axis whole -- a batched FFT over ``(t, n_fft, nI, nJ)`` is
+    one call where the per-task form is ``t`` of them.
+    """
+    if xp is None:
+        xp = np
+    if out_slice is None:
+        out_slice = slice(0, ne)
+
+    n_task = G_a_fft.shape[0]
+    chunk = n_task
+    if max_bytes is not None:
+        per_task = bubble_task_batch_bytes(
+            n_fft=G_a_fft.shape[1], nI=phi_left.shape[1],
+            nJ=phi_right.shape[1], bK1=G_a_fft.shape[2],
+            bK1p=G_a_fft.shape[3], bK2=G_b_fft.shape[2], bK2p=G_b_fft.shape[3],
+        )
+        chunk = max(1, min(n_task, int(max_bytes // max(per_task, 1))))
+
+    n_out = len(range(*out_slice.indices(G_a_fft.shape[1])))
+    out = xp.empty((n_task, n_out, phi_left.shape[1], phi_right.shape[1]),
+                   dtype=complex)
+    for t0 in range(0, n_task, chunk):
+        t1 = min(t0 + chunk, n_task)
+        s_hat = _bubble_contract_task_batched(
+            phi_left[t0:t1], phi_right[t0:t1],
+            G_a_fft[t0:t1], G_b_fft[t0:t1])
+        out[t0:t1] = prefactor * xp.fft.ifft(s_hat, axis=1)[:, out_slice]
+    return out
+
+
 def bubble_dense_from_fft(
     *,
     phi_left,

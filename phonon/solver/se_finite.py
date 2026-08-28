@@ -30,6 +30,8 @@ from phonon_inputs.constants import HBAR_SI, PHPH_SYMMETRY_FACTOR
 from .bubble import (
     bubble_chunk_peak_bytes_per_w,
     bubble_dense_from_fft,
+    bubble_dense_from_fft_task_batched,
+    bubble_task_batch_bytes,
     precompute_g_fft,
 )
 
@@ -284,6 +286,106 @@ def _run_bubble_tasks(
     return out
 
 
+def _resident_g_stack(g_fft, xp):
+    """Pack ``{(K, K'): [array per q]}`` into one resident array plus an index.
+
+    Returns ``(stacked, key_index)`` with ``stacked[b, iq]`` the pre-FFT'd
+    block for ``key_index[(K, K')] == b``. The point is that the gather for a
+    task batch becomes fancy indexing INTO this array rather than a Python
+    loop building a new one: on a GPU the dict form would mean a host round
+    trip per task, which is the cost the batching exists to remove.
+    """
+    keys = sorted(g_fft)
+    stacked = xp.asarray(np.stack([np.stack(g_fft[k]) for k in keys]))
+    return stacked, {k: i for i, k in enumerate(keys)}
+
+
+def _run_bubble_tasks_task_batched(
+    kind_tasks, *, gl_fft, gg_fft, key_of, n_freq, n_fft, prefactor,
+    freq_sl, n_dof, fixed_bytes, xp=None, label="phph", verbose=False,
+):
+    """Every bubble in one batched contraction per chunk, instead of one call
+    each.
+
+    The incumbent ``_run_bubble_tasks`` issues one ``bubble_dense_from_fft``
+    per task through a thread pool -- 251384 calls for six SCBA iterations on a
+    16-cell 4-DOF chain, and 98 % of the iteration. Two measurements motivate
+    this path and neither is about Python overhead on the CPU:
+
+    * the thread pool HURTS. Scanned on a 256-core tortin node, the per-task
+      loop runs fastest at ONE worker for d = 1, 2, 4 and at two for d = 6; a
+      16-worker pool is 0.15-0.26x of serial at d = 2-4. The tasks are small
+      enough that pool and GIL traffic outweigh the parallelism.
+    * batching is a wash on the CPU (2.5x at d = 1, 0.68-0.90x at d = 4-6,
+      where numpy is already at its bound) but it is what makes a GPU usable:
+      on a GH200 the per-task path runs at 0.09-1.3x of the CPU while the
+      batched one runs at 13x, 5.5x, 72x, 111x for d = 1, 2, 4, 6.
+
+    Results are summed by ``key_of(kind, task)``, exactly as the per-task
+    runner accumulates them, so the two paths agree to the bit on numpy.
+    """
+    if xp is None:
+        xp = np
+    out: dict = {}
+    if not kind_tasks:
+        return out
+
+    gl_s, gl_i = _resident_g_stack(gl_fft, xp)
+    gg_s, gg_i = _resident_g_stack(gg_fft, xp)
+
+    per_task = bubble_task_batch_bytes(
+        n_fft=n_fft, nI=n_dof, nJ=n_dof, bK1=n_dof, bK1p=n_dof,
+        bK2=n_dof, bK2p=n_dof)
+    budget = int(0.7 * _available_memory_bytes()) - fixed_bytes
+    if budget < per_task:
+        raise MemoryError(
+            f"[{label}] task-batched bubble needs "
+            f"{per_task / (1 << 20):.1f} MiB for a single task but only "
+            f"{budget / (1 << 20):.1f} MiB is free after the resident G and "
+            "vertex storage. Reduce n_slabs / g_cutoff, or raise "
+            "QUATREX_PHPH_MEMORY_GB.")
+    chunk = max(1, min(len(kind_tasks), int(budget // per_task)))
+    if verbose:
+        print(f"  [{label}] task-batched: {len(kind_tasks)} tasks in "
+              f"{-(-len(kind_tasks) // chunk)} chunk(s) of <= {chunk}",
+              flush=True)
+
+    for c0 in range(0, len(kind_tasks), chunk):
+        sub = kind_tasks[c0:c0 + chunk]
+        pl = xp.asarray(np.stack([t[9] for _k, t in sub]))
+        pr = xp.asarray(np.stack([t[10] for _k, t in sub]))
+        ia = np.empty(len(sub), dtype=np.int64)
+        ib = np.empty(len(sub), dtype=np.int64)
+        qa = np.empty(len(sub), dtype=np.int64)
+        qb = np.empty(len(sub), dtype=np.int64)
+        lesser = np.empty(len(sub), dtype=bool)
+        for n, (kind, t) in enumerate(sub):
+            idx = gl_i if kind == "lesser" else gg_i
+            ia[n], ib[n] = idx[(t[5], t[7])], idx[(t[6], t[8])]
+            qa[n], qb[n] = t[3], t[4]
+            lesser[n] = kind == "lesser"
+
+        blocks = xp.empty((len(sub), n_freq, n_dof, n_dof), dtype=complex)
+        for src, stack, mask in ((gl_s, gl_s, lesser), (gg_s, gg_s, ~lesser)):
+            if not mask.any():
+                continue
+            sel = np.flatnonzero(mask)
+            xsel = xp.asarray(sel)
+            ga = stack[xp.asarray(ia[sel]), xp.asarray(qa[sel])]
+            gb = stack[xp.asarray(ib[sel]), xp.asarray(qb[sel])]
+            blocks[xsel] = bubble_dense_from_fft_task_batched(
+                phi_left=pl[xsel], phi_right=pr[xsel],
+                G_a_fft=ga, G_b_fft=gb, ne=n_freq, prefactor=prefactor,
+                out_slice=freq_sl, max_bytes=None, xp=xp)
+
+        host = blocks if xp is np else xp.asnumpy(blocks)
+        for n, (kind, t) in enumerate(sub):
+            key = key_of(kind, t)
+            prev = out.get(key)
+            out[key] = host[n] if prev is None else prev + host[n]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Multi-slab kernel
 # ---------------------------------------------------------------------------
@@ -456,13 +558,46 @@ def compute_phph_self_energy(
         + 2 * len(pair_index) * n_kpts * n_freq * n_dof * n_dof * itemsize
     )
 
-    accumulated = _run_bubble_tasks(
-        [("lesser", t) for t in tasks] + [("greater", t) for t in tasks],
-        compute_one,
-        n_fft=n_fft, nI=n_dof, nJ=n_dof,
-        bK1=n_dof, bK1p=n_dof, bK2=n_dof, bK2p=n_dof,
-        fixed_bytes=fixed_bytes, n_threads=n_threads, label="phph",
-    )
+    kind_tasks = ([("lesser", t) for t in tasks]
+                  + [("greater", t) for t in tasks])
+
+    # Task-batching and the GPU are OPT-IN and off by default: the per-task
+    # path above is the one every stored result was produced with, and the two
+    # agree to the bit on numpy (tests/quatrex/phonon/test_bubble_kernel.py).
+    # QX_PHPH_XP=cupy implies batching -- the per-task form on a GPU measures
+    # 0.09-1.3x of the CPU, so offering it would only be a trap.
+    xp_name = os.environ.get("QX_PHPH_XP", "numpy").lower()
+    want_batched = (os.environ.get("QX_PHPH_BATCHED", "0") == "1"
+                    or xp_name != "numpy")
+    if want_batched:
+        if xp_name in ("cupy", "gpu"):
+            import cupy as _xp
+        elif xp_name == "numpy":
+            _xp = np
+        else:
+            raise ValueError(f"QX_PHPH_XP={xp_name!r}: expected numpy or cupy")
+
+        def key_of(kind, t):
+            if which_shell is None:
+                return (t[0], t[1], t[2], kind)
+            return (t[0], t[1], t[2], kind,
+                    which_shell(abs(t[5] - t[7])),
+                    which_shell(abs(t[6] - t[8])))
+
+        accumulated = _run_bubble_tasks_task_batched(
+            kind_tasks, gl_fft=gl_fft, gg_fft=gg_fft, key_of=key_of,
+            n_freq=n_freq, n_fft=n_fft, prefactor=prefactor, freq_sl=freq_sl,
+            n_dof=n_dof, fixed_bytes=fixed_bytes, xp=_xp, label="phph",
+            verbose=os.environ.get("QX_PHPH_VERBOSE") == "1",
+        )
+    else:
+        accumulated = _run_bubble_tasks(
+            kind_tasks,
+            compute_one,
+            n_fft=n_fft, nI=n_dof, nJ=n_dof,
+            bK1=n_dof, bK1p=n_dof, bK2=n_dof, bK2p=n_dof,
+            fixed_bytes=fixed_bytes, n_threads=n_threads, label="phph",
+        )
 
     if which_shell is None:
         for (I, J, iq_ext, kind), blk in accumulated.items():
