@@ -157,13 +157,65 @@ def bench(d: int, n_fft: int, n_task: int, reps: int = 3) -> None:
           f"<-- porting WITHOUT batching")
 
 
+def thread_scan(dofs, n_fft: int, n_task: int, pools) -> None:
+    """How the per-task thread pool scales, which is what ``se_finite`` does.
+
+    Measured because the answer is not the core count. On a 16-core laptop the
+    optimum is 1 thread at d=1 and 2-4 at d=4-6, and a 16-thread pool runs at
+    HALF the speed of serial at d=4 -- the tasks are small enough that pool
+    and GIL traffic outweigh the parallelism. A 256-core node has more memory
+    bandwidth to give, so it has to be measured there rather than inferred.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from solver.bubble import _bubble_contract_chunk
+
+    rng = np.random.default_rng(0)
+    print(f"\n  per-task loop through a thread pool, {n_task} tasks, "
+          f"n_fft={n_fft} -- the structure se_finite issues")
+    for d in dofs:
+        def mk(*s):
+            return rng.normal(size=s) + 1j * rng.normal(size=s)
+
+        pl, pr = mk(n_task, d, d, d), mk(n_task, d, d, d)
+        ga, gb = mk(n_task, n_fft, d, d), mk(n_task, n_fft, d, d)
+
+        def one(t):
+            return np.fft.ifft(
+                _bubble_contract_chunk(pl[t], pr[t], ga[t], gb[t]), axis=0)
+
+        row = []
+        for nthr in pools:
+            if nthr == 1:
+                t0 = time.perf_counter()
+                [one(t) for t in range(n_task)]
+            else:
+                with ThreadPoolExecutor(nthr) as ex:
+                    t0 = time.perf_counter()
+                    list(ex.map(one, range(n_task)))
+            row.append(time.perf_counter() - t0)
+        base = row[0]
+        best = min(range(len(row)), key=lambda i: row[i])
+        print(f"    d={d}: " + "  ".join(
+            f"{n}thr {t * 1e3:7.1f}ms ({base / t:4.2f}x)"
+            for n, t in zip(pools, row))
+            + f"   BEST {pools[best]} threads")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dof", type=int, nargs="+", default=[1, 4, 6])
     ap.add_argument("--n-fft", type=int, default=481)
     ap.add_argument("--tasks", type=int, default=512)
+    ap.add_argument("--thread-scan", action="store_true",
+                    help="scan the per-task pool size instead of benchmarking "
+                         "the batched kernel")
+    ap.add_argument("--pools", type=int, nargs="+",
+                    default=[1, 2, 4, 8, 16, 32])
     a = ap.parse_args(argv)
     print(__doc__.split("\n\n")[0])
+    if a.thread_scan:
+        thread_scan(a.dof, a.n_fft, a.tasks, a.pools)
+        return 0
     for d in a.dof:
         bench(d, a.n_fft, a.tasks)
     return 0
