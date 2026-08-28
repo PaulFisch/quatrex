@@ -376,14 +376,16 @@ def sigma_semiseparable(bed: FrozenBed, sigma_l, sigma_g, rank: int):
     the only arm whose block width ``d + r+ + r-`` is a number the RGF cost
     depends on.
 
-    The compression is applied per frequency and then projected back onto the
-    anti-Hermitian subspace. ``Sigma^<`` obeys ``Sigma^< = -(Sigma^<)^H`` --
-    that is what makes ``i Sigma^<`` Hermitian and lets positivity be a
-    statement about its spectrum -- and the two triangles are realised by
-    separate truncated SVDs, which does not preserve the relation. The
-    projection ``(M - M^H)/2`` is onto a subspace that contains the exact
-    answer, so it can only reduce the error; leaving it out is what turns a
-    rank-truncation into a positivity violation.
+    The compression is applied per frequency and then projected onto the
+    anti-Hermitian subspace with ``(M - M^H)/2``. That projection was put in
+    to repair a truncation and measures as a no-op: ``_sss_realisation``
+    obtains the upper triangle by flipping the cell order and running the same
+    algorithm, so the two truncated SVDs cut conjugate-related subspaces and
+    ``Sigma^< = -(Sigma^<)^H`` survives a rank cut to roundoff. It is kept as a
+    guard -- the relation is what makes ``i Sigma^<`` Hermitian and lets
+    positivity be a statement about a spectrum, and it costs one subtraction --
+    but the structure is preserved by the realisation, not by this line. See
+    ``test_the_realisation_preserves_hermitian_symmetry_under_truncation``.
     """
     from quatrex.phonon.spatial_operator import SemiSepOperator
 

@@ -983,3 +983,107 @@ def test_the_shared_krylov_dyson_reproduces_the_explicit_solve():
     assert info["basis"] <= n, (
         "a shared basis cannot exceed the cell space; more than that means the "
         "orthogonalisation is broken")
+
+
+class _StubBed:
+    """The bed fields ``sigma_semiseparable`` actually reads.
+
+    It touches only ``n_dof``, so a full frozen bed is not needed to test what
+    the arm does to a matrix -- and a synthetic anti-Hermitian input is a
+    sharper test than a physical one, because the property under test can be
+    imposed exactly instead of held to the SCBA's residual.
+    """
+
+    def __init__(self, n_dof):
+        self.n_dof = n_dof
+
+
+def _anti_hermitian_stack(rng, n_freq, n):
+    a = rng.normal(size=(n_freq, n, n)) + 1j * rng.normal(size=(n_freq, n, n))
+    return a - a.conj().transpose(0, 2, 1)
+
+
+def test_arm_s_is_exact_at_the_quasiseparable_rank():
+    """At full rank the compression is a change of representation, not a loss.
+
+    The realisation is only meaningful if it can be exact somewhere; a routine
+    that is merely accurate at every rank would hide a systematic error in the
+    generator products behind the truncation.
+    """
+    from studies._spatial_tail_tails import sigma_semiseparable
+
+    rng = np.random.default_rng(11)
+    n_cells, n_dof = 8, 2
+    sl = _anti_hermitian_stack(rng, 3, n_cells * n_dof)
+    sg = _anti_hermitian_stack(rng, 3, n_cells * n_dof)
+
+    full = (n_cells // 2) * n_dof          # the corner cannot exceed this
+    out_l, out_g, info = sigma_semiseparable(_StubBed(n_dof), sl, sg, full)
+    assert info["ref_antiherm"] < 1e-14
+    assert info["sigma_err"] < 1e-12, info["sigma_err"]
+    assert np.abs(out_l - sl).max() < 1e-10 * np.abs(sl).max()
+    assert np.abs(out_g - sg).max() < 1e-10 * np.abs(sg).max()
+
+
+def test_the_realisation_preserves_hermitian_symmetry_under_truncation():
+    r"""A truncated realisation of a (anti-)Hermitian matrix stays one.
+
+    This was expected to fail. The two triangles are realised by separate
+    truncated SVDs, so there is no obvious reason a rank cut should respect
+    ``Sigma^< = -(Sigma^<)^H`` -- and if it did not, compression would turn
+    into a positivity violation, which is what arm F had to build a congruence
+    to avoid. It holds because ``_sss_realisation`` obtains the upper triangle
+    by flipping the cell order and running the SAME algorithm, so the two
+    truncations are of conjugate-related matrices and cut conjugate-related
+    subspaces.
+
+    Checked on both symmetries, several shapes and several ranks, because one
+    shape at one rank would not distinguish a structural property from an
+    accident of a particular SVD.
+    """
+    from quatrex.phonon.spatial_operator import SemiSepOperator
+
+    rng = np.random.default_rng(12)
+    for n_cells, n_dof in ((10, 2), (9, 3), (12, 1)):
+        n = n_cells * n_dof
+        a = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+        for mat, sign in ((a - a.conj().T, +1.0), (a + a.conj().T, -1.0)):
+            for rank in (1, 2, 3, 5):
+                d = SemiSepOperator.from_dense(mat, n_dof, rank=rank).to_dense()
+                skew = np.abs(d + sign * d.conj().T).max() / np.abs(d).max()
+                assert skew < 1e-12, (n_cells, n_dof, sign, rank, skew)
+
+
+def test_arm_s_leaves_an_anti_hermitian_input_untouched():
+    """The arm's projection is a guard, not a repair -- it must not move a
+    realisation that is already anti-Hermitian by the test above."""
+    from quatrex.phonon.spatial_operator import SemiSepOperator
+    from studies._spatial_tail_tails import sigma_semiseparable
+
+    rng = np.random.default_rng(14)
+    n_cells, n_dof, rank = 10, 2, 2
+    sl = _anti_hermitian_stack(rng, 2, n_cells * n_dof)
+
+    out_l, _, _ = sigma_semiseparable(_StubBed(n_dof), sl, sl.copy(), rank)
+    raw = np.stack([SemiSepOperator.from_dense(m, n_dof, rank=rank).to_dense()
+                    for m in sl])
+    assert np.abs(out_l - raw).max() < 1e-12 * np.abs(raw).max()
+
+
+def test_arm_s_error_decreases_monotonically_with_rank():
+    """The rank is a convergence knob; that is arm S's whole claim over a
+    reblock, whose block size is not one (Sec. 19)."""
+    from studies._spatial_tail_tails import sigma_semiseparable
+
+    rng = np.random.default_rng(13)
+    n_cells, n_dof = 12, 2
+    sl = _anti_hermitian_stack(rng, 2, n_cells * n_dof)
+    # A decaying tail, so the matrix has something to compress at low rank.
+    idx = np.arange(n_cells * n_dof)
+    sl = sl * np.exp(-0.6 * np.abs(idx[:, None] - idx[None, :]) / n_dof)
+    sl = sl - sl.conj().transpose(0, 2, 1)
+
+    errs = [sigma_semiseparable(_StubBed(n_dof), sl, sl.copy(), r)[2]["sigma_err"]
+            for r in (1, 2, 4, 6)]
+    assert all(b <= a + 1e-14 for a, b in zip(errs, errs[1:])), errs
+    assert errs[-1] < errs[0] / 10, errs

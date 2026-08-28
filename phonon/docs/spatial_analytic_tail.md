@@ -787,13 +787,20 @@ compresses `Sigma`, which is the object an augmented Dyson carries and the only
 one whose block width enters the RGF cost. Arm S does: `SemiSepOperator` at a
 stated rank per direction, per frequency, decompressed, re-solved.
 
-One structural point. `Sigma^<` is anti-Hermitian, `Sigma^< = -(Sigma^<)^H` --
-that is what makes `i Sigma^<` Hermitian and lets positivity be a statement
-about a spectrum. The two triangles are realised by separate truncated SVDs,
-which does not preserve the relation, so the result is projected back with
-`(M - M^H)/2`. The projection is onto a subspace containing the exact answer,
-so it can only reduce the error; without it a rank truncation becomes a
-positivity violation.
+One structural point, which came out the other way from the expectation.
+`Sigma^<` is anti-Hermitian, `Sigma^< = -(Sigma^<)^H`, and that is what makes
+`i Sigma^<` Hermitian and lets positivity be a statement about a spectrum. The
+two triangles are realised by separate truncated SVDs, so a rank cut has no
+obvious reason to respect it, and the arm projects with `(M - M^H)/2` to be
+safe. The projection measures as a no-op. `_sss_realisation` builds the upper
+triangle by flipping the cell order and running the same algorithm, so the two
+truncations cut conjugate-related subspaces and the symmetry survives to
+roundoff -- checked at ranks 1, 2, 3, 5 on three shapes, and on Hermitian
+inputs as well.
+
+**Compression preserves the positivity structure for free**, which is the thing
+arm F had to build a congruence to obtain. A semiseparable `Sigma` cannot be
+made non-physical by truncating its rank.
 
 On a converged 14-cell chain (`d = 1`, `resid = 9.9e-09`), against the
 untruncated reference:
