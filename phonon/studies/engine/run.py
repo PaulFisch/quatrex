@@ -405,6 +405,94 @@ except Exception:
     err = traceback.format_exc()
     print(f"[rank {ranks.rank}] RUN RAISED:\n{err}", flush=True)
 
+
+def _save_pole_states(path: str) -> None:
+    """Save the small q-resolved rational state, never the dense pole legs.
+
+    This is the bridge used by the auxiliary-SCBA rank gate.  The ordinary
+    engine snapshot stores only sampled G/Sigma arrays; that loses the pole
+    locations, coherent subspaces and projected Keldysh sources needed to ask
+    whether the exact cluster--cluster output can be carried with fewer states
+    than a fine frequency grid.  ``QX_SAVE_POLE_STATES`` is study-only and has
+    no effect on the solver or fixed point.
+    """
+    if ranks.rank != 0:
+        return
+    qstates = list(getattr(ph, "pole_q_states", []) or [])
+    if not qstates and getattr(ph, "pole_state", None) is not None:
+        qstates = [((), ph.pole_state)]
+    rows = []
+    for qidx, state in qstates:
+        if state is None:
+            continue
+        legs = list(getattr(state, "legs", []) or [])
+        sl = getattr(state, "source_lesser", [])
+        sg = getattr(state, "source_greater", [])
+        fit_values = list(getattr(state, "source_fit", []) or [])
+        for m, cl in enumerate(legs):
+            if m >= len(sl) or m >= len(sg):
+                continue
+            rows.append((tuple(int(i) for i in qidx), cl,
+                         np.asarray(get_host(sl[m])),
+                         np.asarray(get_host(sg[m])),
+                         float(fit_values[m]) if m < len(fit_values)
+                         else np.nan))
+    if not rows:
+        print("QX_SAVE_POLE_STATES: no allocated pole/source state to save",
+              flush=True)
+        return
+    qdim = max((len(q) for q, *_ in rows), default=0)
+    q_index = np.array([q + (0,) * (qdim - len(q)) for q, *_ in rows],
+                       dtype=np.int64)
+    pole_offsets = [0]
+    source_offsets = [0]
+    poles, us, vs, src_l, src_g, labels, fits = [], [], [], [], [], [], []
+    for _q, cl, sl, sg, fit in rows:
+        z = np.asarray(get_host(cl.z), dtype=complex).reshape(-1)
+        poles.append(z)
+        us.append(np.asarray(get_host(cl.u), dtype=complex))
+        vs.append(np.asarray(get_host(cl.v), dtype=complex))
+        sl = np.asarray(sl, dtype=complex)
+        sg = np.asarray(sg, dtype=complex)
+        expected = (len(ph.local_frequencies), z.size, z.size)
+        if sl.shape != expected or sg.shape != expected:
+            raise ValueError(
+                f"pole source has shapes {sl.shape}/{sg.shape}, expected "
+                f"{expected}; refusing an ambiguous auxiliary-state export")
+        src_l.append(sl.reshape(-1))
+        src_g.append(sg.reshape(-1))
+        pole_offsets.append(pole_offsets[-1] + z.size)
+        source_offsets.append(source_offsets[-1] + sl.size)
+        labels.append(str(getattr(cl, "label", "")))
+        fits.append(fit)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        target,
+        q_index=q_index,
+        q_shape=np.array([int(k) for k in cfg.device.kpoint_grid if k > 1],
+                         dtype=np.int64),
+        pole_offsets=np.asarray(pole_offsets, dtype=np.int64),
+        source_offsets=np.asarray(source_offsets, dtype=np.int64),
+        poles=np.concatenate(poles),
+        coupling_u=np.concatenate(us, axis=1),
+        coupling_v=np.concatenate(vs, axis=1),
+        source_lesser=np.concatenate(src_l),
+        source_greater=np.concatenate(src_g),
+        source_fit=np.asarray(fits, dtype=float),
+        labels=np.asarray(labels),
+        block_sizes=np.asarray(get_host(ph.block_sizes), dtype=np.int64),
+        local_frequencies=np.asarray(ph.local_frequencies, dtype=float),
+        local_frequency_weights=np.asarray(
+            ph.local_frequency_weights, dtype=float),
+    )
+    print(f"SAVED POLE STATES {target} ({len(rows)} clusters, "
+          f"{pole_offsets[-1]} poles)", flush=True)
+
+
+if os.environ.get("QX_SAVE_POLE_STATES") and err is None:
+    _save_pole_states(os.environ["QX_SAVE_POLE_STATES"])
+
 # --- per-omega current spectrum (for transmission plots), gathered over the
 # stack (energy) partition. Runs on ALL ranks (collective all_reduce). ---
 spec_full = None

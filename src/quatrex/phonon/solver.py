@@ -196,6 +196,13 @@ class PhononSolver(SubsystemSolver):
             int(getattr(config.phonon, "sse_g_band", 1) or 1),
             len(self.block_sizes) - 1,
         )
+        # Experimental rational-state sidecar.  It is installed explicitly by
+        # a fixed-basis SCBA representation (or a frozen-state validation),
+        # never inferred from the sampled Sigma buffers.  Keeping the default
+        # ``None`` makes the established RGF path bit-identical.
+        self._auxiliary_channel = None
+        self._auxiliary_rgf = None
+        self._solver_max_batch_size = int(config.phonon.solver.max_batch_size)
 
         # GW-style self-consistent contacts: compute the OBC AFTER Sigma^R
         # is folded into the system matrix, dressing the periodic lead
@@ -498,6 +505,33 @@ class PhononSolver(SubsystemSolver):
         out: tuple[DSDBSparse, ...]
     ) -> None:
         """Perform selected solve for the phonon Green's function."""
+        if self._auxiliary_channel is not None:
+            if comm.block.size > 1:
+                raise NotImplementedError(
+                    "the local auxiliary RGF requires block_comm_size == 1; "
+                    "the distributed augmented recurrence is not implemented")
+            if self._auxiliary_rgf is None:
+                from quatrex.phonon.auxiliary_scba import (
+                    GlobalAuxiliaryWoodbury,
+                    LocalAuxiliaryChannel,
+                    LocalAuxiliaryRGF,
+                )
+
+                cls = (LocalAuxiliaryRGF
+                       if isinstance(self._auxiliary_channel,
+                                     LocalAuxiliaryChannel)
+                       else GlobalAuxiliaryWoodbury)
+                self._auxiliary_rgf = cls(
+                    self._auxiliary_channel if cls is LocalAuxiliaryRGF
+                    else self._auxiliary_channel,
+                    self.local_frequencies,
+                    max_batch_size=self._solver_max_batch_size,
+                    n_offdiagonals=self._gf_band)
+            self.meir_wingreen_current = self._auxiliary_rgf.selected_solve(
+                self.system_matrix, sse_lesser, sse_greater, out,
+                obc_blocks=self.obc_blocks, return_retarded=True,
+                return_current=self.compute_meir_wingreen_current)
+            return
         extra_kw = (
             {"n_offdiagonals": self._gf_band} if self._gf_band >= 2 else {}
         )
@@ -529,6 +563,38 @@ class PhononSolver(SubsystemSolver):
                 return_current=self.compute_meir_wingreen_current,
                 **extra_kw,
             )
+
+    def set_auxiliary_channel(self, channel) -> None:
+        r"""Install a fixed-basis rational self-energy for the next solves.
+
+        ``channel`` must be a
+        :class:`quatrex.phonon.auxiliary_scba.LocalAuxiliaryChannel`, or
+        ``None`` to restore the ordinary RGF.  This method deliberately does
+        not project a sampled self-energy or mix two changing pole sets.  A
+        self-consistent caller must hold the basis fixed over an SCBA epoch and
+        pass the rational coefficients through the same mixer as the smooth
+        grid component.  Installing an independently updated sidecar would be
+        a non-conserving change of the fixed-point map.
+        """
+        if channel is not None:
+            from quatrex.phonon.auxiliary_scba import (
+                LocalAuxiliaryChannel, RationalKeldyshChannel)
+
+            if not isinstance(channel, (LocalAuxiliaryChannel,
+                                        RationalKeldyshChannel)):
+                raise TypeError(
+                    "channel must be a LocalAuxiliaryChannel, a global "
+                    "RationalKeldyshChannel, or None")
+            if isinstance(channel, LocalAuxiliaryChannel) and not np.array_equal(
+                    channel.block_sizes, self.block_sizes):
+                raise ValueError(
+                    "auxiliary channel block sizes do not match the solver")
+            if isinstance(channel, RationalKeldyshChannel) and \
+                    channel.n_dof != int(np.sum(self.block_sizes)):
+                raise ValueError(
+                    "global auxiliary channel does not span the solver DOFs")
+        self._auxiliary_channel = channel
+        self._auxiliary_rgf = None
 
     def _probe_indices(self, sse_lesser: DSDBSparse):
         """Lazily cache the diagonal nnz positions and their device-DOF index
