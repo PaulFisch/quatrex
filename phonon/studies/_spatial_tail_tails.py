@@ -871,7 +871,7 @@ def main(argv=None) -> int:
     out = a.out or (OUT.parent / "spatial_tail" / f"{bed.name}_tails.npz")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
-        out, name=bed.name,
+        out, name=bed.name, n_dof=bed.n_dof, n_slabs=bed.n_slabs,
         eps=np.array(repr(res["eps"])), lin=np.array(repr(res["lin"])),
         interaction=res["interaction"],
         profile=np.array(repr(res["profile"])),

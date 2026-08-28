@@ -899,3 +899,49 @@ the rank does not manufacture negative weight. Arm F sits 0.12 BELOW the
 reference, which is not an improvement but a departure -- the congruence
 imposes a positivity the reference does not have, and a route that disagrees
 with the exact answer in the safe direction is still disagreeing with it.
+
+## 20. `r_Sigma` against the DOF count, which is what the cost turns on
+
+Sec. 18 left the verdict on one number: whether the semiseparable rank is a
+property of the physical RANGE of `Sigma`, in which case the augmented block
+`d + 2r` grows slower than the reblock's `m d` and a large enough cell wins, or
+of the DOF COUNT, in which case the ratio is constant and no device is large
+enough.
+
+Three converged 16-cell beds, `d = 1, 2, 4`, all arms on each. The row that
+matters is the cost of the cheapest `S` arm that MATCHES a 2-cell reblock's
+error, since that is the like-for-like comparison:
+
+| `d` | R2 `eps` | cost | matching `S` | its width | its cost | break-even `d` |
+|---|---|---|---|---|---|---|
+| 1 | 8.96e-04 | `4x` | S6 | 13 | `2197x` | 20 |
+| 2 | 5.74e-03 | `4x` | S8 | 18 | `729x` | 27 |
+| 4 | 4.67e-03 | `4x` | S4 | 12 | **`27x`** | 14 |
+
+**The rank needed does not grow with `d`** -- 6, 8, 4 -- so the cost of
+matching a reblock falls by two orders of magnitude over two doublings of the
+DOF count: `2197x`, `729x`, `27x`. That is the favourable branch of Sec. 18's
+alternative. The rank is counting range, not degrees of freedom, and the
+augmented block therefore grows like `d + const` against the reblock's `m d`.
+
+**It has not crossed yet.** At `d = 4` reblocking still wins on every row: R3
+costs `9x` for 1.65e-03 where S4 costs `27x` for 1.17e-03, and R4 costs `16x`
+for 4.66e-04 where the nearest `S` is S8 at `125x` for 5.04e-04. What has
+changed is the size of the gap -- roughly `500x` at `d = 1`, roughly `3x` at
+`d = 4`. One more doubling would put the matching arm near parity, and a real
+Si or CNT transport cell carries `d = 24` to `96`.
+
+So the honest verdict is neither of the two the plan anticipated. The
+programme is not dead on cost arithmetic, and it is not demonstrated either:
+the trend over the only three DOF counts measured points at a crossing
+somewhere around `d ~ 8-16`, below a physical cell, and no bed has been run
+there. That is the measurement this now rests on, and it is one bed away.
+
+Two caveats that belong beside the table. All three beds are 16 cells, and
+Sec. 16 measured `r_Sigma` growing like `N^0.75` in device LENGTH, which works
+against this at exactly the sizes a real device has -- the DOF trend and the
+length trend push opposite ways and only the product matters. And arms E and F
+both return `eps = 1.00` at `d = 4`: the modal decompression and the
+congruence, which were the original programme, degrade to worthless on a
+multi-DOF bed while the semiseparable arm improves. That contrast is the
+clearest single statement of what changed between Part I and Part II.

@@ -33,6 +33,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import re
+
 import numpy as np
 
 OUT = Path(__file__).resolve().parents[1] / "cluster"
@@ -72,7 +74,16 @@ def load_arms(paths) -> list[dict]:
         meta = eval(str(z["meta"]))                      # noqa: S307 -- our repr
         eps = eval(str(z["eps"]))                        # noqa: S307
         names = [str(t) for t in z["arm_names"]]
-        d = int(meta.get("n_dof", 1))
+        # bed.meta carries no n_dof, so an artifact without the explicit field
+        # has to be read from the bed NAME ("multi4_L16"). Defaulting to 1
+        # silently mis-sized every width and cost on the multi-DOF beds --
+        # the cost is (width/d)^3, so a wrong d is a wrong answer, not a
+        # cosmetic one.
+        if "n_dof" in z.files:
+            d = int(z["n_dof"])
+        else:
+            m = re.match(r"multi(\d+)_", str(z["name"]))
+            d = int(m.group(1)) if m else 1
         rows = []
         for t in names:
             if t == "D":
