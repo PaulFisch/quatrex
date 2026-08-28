@@ -863,3 +863,39 @@ rank is counting DOF rather than range -- the ratio is constant and no device
 is large enough. That measurement is running; Sec. 16's `r_Sigma` growing like
 `N^0.75` in device LENGTH is a separate and less favourable fact, and it is the
 one that bounds how long a device this can be used on.
+
+### Positivity and causality, measured rather than argued
+
+`Sigma^R` is never fitted in arm S: `solve_arm` rebuilds it with
+`build_retarded` from the compressed `Sigma^{<,>}`, so it is Kramers-Kronig by
+construction. Combined with the symmetry result above, both of the properties
+arm F needed a congruence for come free. Measured on the 16-cell bed, negative
+spectral weight of `i Sigma^<` over positive frequencies, and the `Gamma_Sigma`
+causality diagnostic:
+
+| arm | `eps(J_L)` | neg. weight | causality violations |
+|---|---|---|---|
+| D (reference) | -- | 0.6859 | 240 pts, max 5.8e-02 |
+| R2 | 8.96e-04 | 0.6792 | 240 pts, max 6.1e-02 |
+| R3 | 1.61e-03 | 0.6795 | 240 pts, max 5.3e-02 |
+| R4 | 2.88e-03 | 0.6794 | 240 pts, max 5.9e-02 |
+| S2 | 8.14e-03 | 0.6894 | 240 pts, max 4.2e-02 |
+| S4 | 5.32e-03 | 0.6858 | 240 pts, max 5.7e-02 |
+| S6 | 2.03e-04 | 0.6859 | 240 pts, max 5.8e-02 |
+| S8 | 5.70e-15 | 0.6859 | 240 pts, max 5.8e-02 |
+| F | 7.34e-04 | 0.5641 | 240 pts, max 5.6e-02 |
+
+**The diagnostics do not discriminate, and the reason is the bed.** The
+untruncated reference itself carries 0.686 of negative weight and violates the
+`Gamma_Sigma` condition at 240 of 241 grid points. That is the same
+`Gamma sign viol` the SCBA logs report throughout, and it is a property of a
+frozen toy bed at `eta = 0`, not of any compression. No arm can be scored
+against a reference that fails the test.
+
+What the column does support is the negative statement, which is the one that
+matters here: **no arm makes it worse**. Arm S tracks the reference to within
+0.004 at rank 2 and reproduces it to four decimals from rank 6, so truncating
+the rank does not manufacture negative weight. Arm F sits 0.12 BELOW the
+reference, which is not an improvement but a departure -- the congruence
+imposes a positivity the reference does not have, and a route that disagrees
+with the exact answer in the safe direction is still disagreeing with it.
