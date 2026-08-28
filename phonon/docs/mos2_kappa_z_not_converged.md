@@ -274,11 +274,8 @@ interlayer constants are noise-limited.**
 
 Not a bigger supercell. The remaining candidates, in order:
 
-1. **The exchange-correlation treatment.** The same 40 statics with
-   **vdW-DF-CX** (self-consistent nonlocal), matching the reference's protocol,
-   against our additive analytic D3 pair term whose third derivative at the
-   3.528 A S-S contact is fixed by the damping-function form with no density
-   response. ~20 node-hours, the same cost as the run above. Not yet run.
+1. **The exchange-correlation treatment.** ~~The same 40 statics with
+   vdW-DF-CX.~~ **Run 2026-08-27; refuted. See section 7.**
 2. **A regulariser that does not put noise in the cross-gap channel.** The
    regressor sweep (`phonon/studies/_fc_regressor_sweep.py`) is the tool; ARD
    returns cross_frob = 0.0000 and LASSO 20.28 on the 4x4x1 set, so the
@@ -292,3 +289,88 @@ NEGF kappa_z ladder as much as this Boltzmann cross-check -- should be reported
 as an order-of-magnitude statement at best, and the in-plane numbers, which are
 reproducible across both cells and essentially exact against experiment, carry
 the MoS2 story.
+
+## 7. vdW-DF-CX: the leading hypothesis, tested and refuted
+
+The 40 statics were repeated with **vdW-DF-CX** (`GGA = CX`, `LUSE_VDW`,
+`AGGAC = 0`, `LASPH`), the self-consistent nonlocal functional the 5.1 W/mK
+reference used, replacing PBE + D3 zero-damping. Everything else is held fixed
+-- experimental cell, 4x4x1 supercell, 3x3x2 k-mesh, mc rattle 0.03 A **seed
+42**, cutoffs, and the least-squares refit used for every number below. Same
+seed means the same displacements, so the two campaigns share an identical
+design matrix and therefore an identical interlayer noise floor: any difference
+is the functional. Cost 5 h 23 m, 490 s per static against D3's 460 s.
+
+Geometry is not a confound and this was measured, not assumed. With the cell
+pinned to experiment, CX relaxes the internal S parameter to z = 0.122688
+against D3's 0.122789 -- 0.0012 A -- and the interlayer S-S contact moves
+3.528 -> 3.525 A.
+
+### 7.1 The functional barely moves the cross-gap channel
+
+Fitted weight at [6.0, 4.0], normalised per primitive cell:
+
+| | PBE+D3 | vdW-DF-CX | change |
+|---|---|---|---|
+| fit rmse (eV/A) | 0.02000 | 0.02004 | +0.2 % |
+| FC2 intra-layer | 88.8807 | 89.0070 | +0.14 % |
+| FC2 interlayer | 0.9139 | **0.8364** | **-8.5 %** |
+| FC3 intra-layer | 353.5362 | 352.7880 | -0.21 % |
+| **FC3 cross-gap** | **5.4667** | **6.1215** | **+12.0 %** |
+| FC3 cross-gap max (eV/A^3) | 0.4465 | 0.5125 | +14.8 % |
+| Gamma shear (cm^-1), meas. 32.5 | 36.65 | 39.12 | worse |
+| Gamma breathing (cm^-1), meas. 55.7 | 52.65 | 48.16 | worse |
+| Gamma E1g (cm^-1), meas. 286.0 | 281.38 | 281.18 | same |
+
+The cross-gap cubic weight moves in the predicted direction and by **12 %**.
+Section 5b estimated that closing the gap needs ~1.8x in |Phi3|. Twelve per
+cent is not that, and it is smaller than the 23 % the supercell moved the same
+quantity in section 6.3.
+
+Note also that CX is *worse* against the interlayer Raman pair: its harmonic
+interlayer coupling is 8.5 % weaker than D3's, its breathing mode softens
+52.65 -> 48.16 cm^-1 away from the measured 55.7, and its shear stiffens
+36.65 -> 39.12 away from 32.5. The intra-layer E1g line, which is insensitive
+to the gap, is unchanged. So the self-consistent nonlocal functional is not
+simply a better description of this interlayer than the additive pair term.
+
+### 7.2 kappa is essentially unchanged
+
+Cubic ladder at c2 = 6.0 A, RTA, 300 K, 11^3, no isotopes:
+
+| c3 (A) | D3 kappa_xx | kappa_zz | CX kappa_xx | kappa_zz |
+|---|---|---|---|---|
+| 4.0 | 123.8 | **20.88** | 126.5 | **23.52** |
+| 4.5 | 110.5 | 65.44 | 114.1 | 74.28 |
+| 5.0 | 101.3 | 19.88 | 106.9 | 28.05 |
+| 5.5 | 94.4 | 23.93 | 98.5 | 20.56 |
+
+At production cutoffs kappa_zz goes 20.9 -> 23.5 W/mK, i.e. **the wrong way**
+by 13 %, and stays 4-5x the reference. The cutoff-to-cutoff swing is
+undiminished: 20.6-74.3 under CX (factor 3.6) against 19.9-65.4 under D3
+(factor 3.3). kappa_xx rises 2-5 % and both functionals stay inside the
+measured 80-110 band at the finer cutoffs.
+
+The pair-cutoff ladder behaves identically too -- the A-point acoustic mode
+still goes imaginary at c2 = 5.0 A (-0.174 THz under CX, -0.317 under D3),
+confirming section 6.1's reading that this is a truncation artefact and not
+something a better description of the dispersion interaction fixes.
+
+### 7.3 Where this leaves the diagnosis
+
+Every structural and physical candidate is now measured and excluded:
+supercell thickness (section 6.1), cutoff reach (6.1), q_z sampling (6.1),
+geometry, harmonic velocities, FC3 cutoff, BTE solver and isotopes (5b), and
+now the exchange-correlation treatment. None of them moves kappa_zz by more
+than tens of per cent, and none removes the factor-3 cutoff swing.
+
+What has not been tested is the **regulariser**, and it is by far the largest
+lever on record. On the same D3 force set the cross-gap FC3 Frobenius norm is
+0.0000 under ARD, 5.4667 under least squares and 20.28 under LASSO
+(`mos2_cross_gap_reality_check.md`) -- a range of the fitted quantity that
+dwarfs the 12 % the functional moved it and the 23 % the supercell moved it.
+That is the next test, and it needs no DFT: both force sets are on disk and
+`phonon/studies/_fc_regressor_sweep.py` is the tool.
+
+The honest statement for the draft is that the MoS2 cross-plane number is set
+by the regression choice rather than by any physical input we have varied.
