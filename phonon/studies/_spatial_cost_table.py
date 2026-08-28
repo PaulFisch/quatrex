@@ -56,6 +56,76 @@ def break_even_dof(r_per_side: float, m: int = 2) -> float:
     return 2.0 * r_per_side / (m ** (2.0 / 3.0) - 1.0)
 
 
+def load_arms(paths) -> list[dict]:
+    """Read ``_spatial_tail_tails.py`` artifacts: one accuracy ladder per bed.
+
+    The augmented width of an ``S<r>`` arm is ``d + 2r`` and is recovered from
+    the arm name rather than stored, so ladders taken before the field existed
+    still read. A reblock ``R<m>`` has width ``m d`` and costs ``m^2`` times
+    the pin; arm ``D`` is the untruncated reference and has no error.
+    """
+    out = []
+    for p in paths:
+        z = np.load(p, allow_pickle=True)
+        if "arm_names" not in z.files:
+            continue
+        meta = eval(str(z["meta"]))                      # noqa: S307 -- our repr
+        eps = eval(str(z["eps"]))                        # noqa: S307
+        names = [str(t) for t in z["arm_names"]]
+        d = int(meta.get("n_dof", 1))
+        rows = []
+        for t in names:
+            if t == "D":
+                continue
+            e = eps.get(t, {})
+            e = e.get("J_L", e) if isinstance(e, dict) else e
+            if not isinstance(e, float):
+                continue
+            if t.startswith("S") and t[1:].isdigit():
+                w, cost = d + 2 * int(t[1:]), None
+            elif t.startswith("R") and t[1:].isdigit():
+                w, cost = int(t[1:]) * d, float(int(t[1:]) ** 2)
+            elif t in ("A", "B", "C"):
+                w, cost = d, 1.0
+            else:
+                w, cost = None, None
+            if w is not None and cost is None:
+                cost = (w / d) ** 3
+            rows.append((t, e, w, cost))
+        out.append(dict(name=str(z["name"]), d=d, meta=meta,
+                        rows=sorted(rows, key=lambda r: r[1])))
+    return out
+
+
+def ladder(beds) -> None:
+    """Accuracy against cost, and the iso-accuracy break-even in ``d``."""
+    for b in beds:
+        conv = b["meta"].get("converged")
+        print(f"\n  {b['name']}  (d={b['d']}, converged={conv}, "
+              f"resid={b['meta'].get('scba_residual', float('nan')):.1e})")
+        print("    arm    eps(J_L)   width   RGF cost vs pin")
+        for t, e, w, c in b["rows"]:
+            print(f"    {t:5s} {e:10.2e} {w if w else '--':>7} "
+                  f"{c if c else float('nan'):15.1f}x")
+        # Pair each reblock with the cheapest S arm that matches its accuracy.
+        rb = [(t, e, int(t[1:])) for t, e, w, c in b["rows"]
+              if t.startswith("R") and t[1:].isdigit()]
+        ss = sorted((int(t[1:]), e) for t, e, w, c in b["rows"]
+                    if t.startswith("S") and t[1:].isdigit())
+        if not rb or not ss:
+            continue
+        print("    iso-accuracy break-even: the d at which the augmented RGF "
+              "first undercuts")
+        for t, e_r, m in sorted(rb, key=lambda x: x[2]):
+            match = next((r for r, e_s in ss if e_s <= e_r), None)
+            if match is None:
+                print(f"      vs {t} (eps {e_r:.2e}): no measured rank reaches "
+                      "it; extend the ladder")
+                continue
+            print(f"      vs {t} (eps {e_r:.2e}, cost {m ** 2}x): rank {match} "
+                  f"suffices -> d >= {break_even_dof(match, m):.0f}")
+
+
 def load(paths) -> list[dict]:
     rows = []
     for p in paths:
@@ -85,6 +155,7 @@ def table(rows, tol: float = 1e-2, key: str = "Sigma^<|b1") -> None:
               f"{'--':>6s} {'--':>4s} | {f'{m}d':>10s} | {m ** 2:>8.2f}")
     print("  " + "-" * 76)
     for r in rows:
+        has = key in r["offdiag"]
         rs = r["offdiag"].get(key, r["offdiag"].get("Sigma^<", {})).get(tol, -1)
         if rs < 0:
             print(f"  {r['name']:<14s} {r['n']:3d} {r['d']:3d} | "
@@ -94,6 +165,8 @@ def table(rows, tol: float = 1e-2, key: str = "Sigma^<|b1") -> None:
         w = r["d"] + 2 * rs
         cost = rgf_cost(1.0, w) / rgf_cost(1.0, r["d"])
         flag = "  <-- CAPPED" if rs >= cap else ""
+        if not has:
+            flag += "  (b0 fallback: artifact predates the banded measure)"
         print(f"  {r['name']:<14s} {r['n']:3d} {r['d']:3d} | {rs:6d} "
               f"{cap:4d} | {w:10d} | {cost:8.2f}{flag}")
 
@@ -132,14 +205,20 @@ def scaling(rows, key: str = "Sigma^<|b1") -> None:
 def main(argv=None) -> int:
     paths = [Path(p) for p in (argv or sys.argv[1:])]
     if not paths:
-        paths = sorted((OUT).rglob("*_rank.npz")) + sorted(OUT.rglob("*_fine.npz"))
+        paths = (sorted(OUT.rglob("*_rank.npz")) + sorted(OUT.rglob("*_fine.npz"))
+                 + sorted(OUT.rglob("*_tails.npz")))
     if not paths:
         print("no rank npz files found; pass paths explicitly")
         return 1
+    beds = load_arms(paths)
+    if beds:
+        print("\nACCURACY LADDERS (from _spatial_tail_tails.py artifacts)")
+        ladder(beds)
     rows = [r for r in load(paths) if r is not None]
-    for key in ("Sigma^<", "Sigma^<|b1"):
-        table(rows, key=key)
-        scaling(rows, key=key)
+    if rows:
+        for key in ("Sigma^<", "Sigma^<|b1"):
+            table(rows, key=key)
+            scaling(rows, key=key)
     print("\n  eps(J_L) on the 20-cell chain (Sec. 11), for the accuracy axis:")
     for k, v in EPS_J.items():
         print(f"    {k:<14s} {v:.2e}")
