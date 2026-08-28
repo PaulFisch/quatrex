@@ -406,7 +406,21 @@ def _sigma_file(base: str) -> str:
 
 
 if os.environ.get("QX_SIGMA_INIT"):
-    _sd = np.load(_sigma_file(os.environ["QX_SIGMA_INIT"]))
+    _nparts = int(os.environ.get("QX_SIGMA_INIT_PARTS", "0") or 0)
+    if _nparts:
+        if ranks.size != 1:
+            raise SystemExit(
+                "QX_SIGMA_INIT_PARTS reconstructs a single-rank frozen state; "
+                "launch with --ranks 1")
+        _base = os.environ["QX_SIGMA_INIT"]
+        _stem = _base[:-4] if _base.endswith(".npz") else _base
+        _pieces = [np.load(f"{_stem}.rank{ir}.npz") for ir in range(_nparts)]
+        _sd = {
+            key: np.concatenate([part[key] for part in _pieces], axis=0)
+            for key in ("sigma_lesser", "sigma_greater", "sigma_retarded")
+        }
+    else:
+        _sd = np.load(_sigma_file(os.environ["QX_SIGMA_INIT"]))
     _scale = float(os.environ.get("QX_SIGMA_SCALE", "1.0"))
     for _key, _buf in (("sigma_lesser", scba.data.sigma_lesser),
                        ("sigma_greater", scba.data.sigma_greater),
@@ -417,8 +431,10 @@ if os.environ.get("QX_SIGMA_INIT"):
                 f"{_sd[_key].shape} vs local {_buf.data.shape} -- restart "
                 "with the same rank grid as the saving run.")
         _buf.data[:] = _scale * xp.asarray(_sd[_key])
-    print(f"WARM START from {_sigma_file(os.environ['QX_SIGMA_INIT'])} "
-          f"(scale {_scale})", flush=True)
+    _warm_label = (f"{os.environ['QX_SIGMA_INIT']} ({_nparts} gathered parts)"
+                   if _nparts else
+                   _sigma_file(os.environ["QX_SIGMA_INIT"]))
+    print(f"WARM START from {_warm_label} (scale {_scale})", flush=True)
 
 err = None
 try:
@@ -441,6 +457,12 @@ def _save_pole_states(path: str) -> None:
     qstates = list(getattr(ph, "pole_q_states", []) or [])
     if not qstates and getattr(ph, "pole_state", None) is not None:
         qstates = [((), ph.pole_state)]
+    if ranks.stack.size != 1:
+        raise NotImplementedError(
+            "QX_SAVE_POLE_STATES requires an undistributed frequency axis. "
+            "The promoted cluster count/rank can differ between stack ranks, "
+            "so gathering sources by list position is not defined; use "
+            "QX_SIGMA_INIT_PARTS with a one-rank frozen run.")
     rows = []
     for qidx, state in qstates:
         if state is None:
@@ -452,23 +474,13 @@ def _save_pole_states(path: str) -> None:
         for m, cl in enumerate(legs):
             if m >= len(sl) or m >= len(sg):
                 continue
-            # The energy axis may be stack-distributed.  Pole locations and
-            # vectors are replicated by the distributed corrector, but the
-            # projected source is local in frequency; gather it before rank 0
-            # serializes the state or high-frequency Si poles would be paired
-            # with the low-frequency rank's source slice.
-            sl_full = ranks.stack.all_gather_v(
-                np.asarray(get_host(sl[m])), axis=0)
-            sg_full = ranks.stack.all_gather_v(
-                np.asarray(get_host(sg[m])), axis=0)
             rows.append((tuple(int(i) for i in qidx), cl,
-                         np.asarray(sl_full), np.asarray(sg_full),
+                         np.asarray(get_host(sl[m])),
+                         np.asarray(get_host(sg[m])),
                          float(fit_values[m]) if m < len(fit_values)
                          else np.nan))
-    full_frequencies = ranks.stack.all_gather_v(
-        np.asarray(get_host(ph.local_frequencies)), axis=0)
-    full_widths = ranks.stack.all_gather_v(
-        np.asarray(get_host(ph.local_frequency_weights)), axis=0)
+    full_frequencies = np.asarray(get_host(ph.local_frequencies))
+    full_widths = np.asarray(get_host(ph.local_frequency_weights))
     if ranks.rank != 0:
         return
     if not rows:
