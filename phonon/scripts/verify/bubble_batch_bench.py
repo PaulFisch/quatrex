@@ -39,16 +39,34 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_BUBBLE = Path(__file__).resolve().parents[2] / "solver" / "bubble.py"
+
+
+def _load_kernel():
+    """``_bubble_contract_chunk`` without importing the ``solver`` package.
+
+    ``solver/__init__`` re-exports the whole SCBA driver, which pulls in
+    phonopy; the daint venv has no phonopy and does not need one to time three
+    matmuls. Loading the module by path keeps the kernel a single source of
+    truth -- this is the tree's contraction, not a copy of it -- while making
+    the benchmark runnable anywhere numpy is.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_bubble_bench", _BUBBLE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod._bubble_contract_chunk
+
+
+_contract_chunk = _load_kernel()
 
 
 def contract_per_task(pl, pr, ga, gb, xp, n_fft):
     """The incumbent: one call per task, exactly as ``se_finite`` issues it."""
-    from solver.bubble import _bubble_contract_chunk
-
     out = xp.empty((pl.shape[0], n_fft, pl.shape[1], pr.shape[1]), dtype=complex)
     for t in range(pl.shape[0]):
-        s = _bubble_contract_chunk(pl[t], pr[t], ga[t], gb[t])
+        s = _contract_chunk(pl[t], pr[t], ga[t], gb[t])
         out[t] = xp.fft.ifft(s, axis=0)
     return out
 
@@ -167,7 +185,6 @@ def thread_scan(dofs, n_fft: int, n_task: int, pools) -> None:
     bandwidth to give, so it has to be measured there rather than inferred.
     """
     from concurrent.futures import ThreadPoolExecutor
-    from solver.bubble import _bubble_contract_chunk
 
     rng = np.random.default_rng(0)
     print(f"\n  per-task loop through a thread pool, {n_task} tasks, "
@@ -181,7 +198,7 @@ def thread_scan(dofs, n_fft: int, n_task: int, pools) -> None:
 
         def one(t):
             return np.fft.ifft(
-                _bubble_contract_chunk(pl[t], pr[t], ga[t], gb[t]), axis=0)
+                _contract_chunk(pl[t], pr[t], ga[t], gb[t]), axis=0)
 
         row = []
         for nthr in pools:
