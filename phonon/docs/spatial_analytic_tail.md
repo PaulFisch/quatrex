@@ -749,8 +749,14 @@ This is the useful reading of the arithmetic, and it is not the dismissal it
 first looks like. `r ~ 7` is what the 20-cell chain gives, and `d ~ 24` is
 inside the range of a real transport cell -- a Si or CNT cell carrying eight to
 thirty-two atoms has `d = 24` to `96`. The comparison is not settled by
-counting; it turns entirely on whether `r_Sigma` is flat in `d` or grows with
-it, which is the measurement in Sec. 19.
+counting; it turns on whether `r_Sigma` is flat in `d` or grows with it.
+
+One qualification, and it moves the break-even a long way. The `r` in this
+table is the rank at which the representation is EXACT, so the table asks the
+structured operator to be exact and the reblock only to be a reblock. That is
+not the comparison; both are approximations and the question is cost at matched
+accuracy. Sec. 19 measures the accuracy ladder and redoes the break-even
+properly, and it comes out at roughly `d ~ 8-10` rather than 24.
 
 ### The near field does not account for the rank
 
@@ -773,3 +779,70 @@ corner rank is long-range structure, not near-field bookkeeping. That closes
 the refinement rather than motivating a search for a better one, and it means
 the `r` in the break-even table can be read off the `b0` measurement to within
 one.
+
+## 19. Arm S: carrying `Sigma` itself semiseparably, and the accuracy ladder
+
+Arms E and F fit the Green function and rebuild `Sigma` from it. Neither
+compresses `Sigma`, which is the object an augmented Dyson carries and the only
+one whose block width enters the RGF cost. Arm S does: `SemiSepOperator` at a
+stated rank per direction, per frequency, decompressed, re-solved.
+
+One structural point. `Sigma^<` is anti-Hermitian, `Sigma^< = -(Sigma^<)^H` --
+that is what makes `i Sigma^<` Hermitian and lets positivity be a statement
+about a spectrum. The two triangles are realised by separate truncated SVDs,
+which does not preserve the relation, so the result is projected back with
+`(M - M^H)/2`. The projection is onto a subspace containing the exact answer,
+so it can only reduce the error; without it a rank truncation becomes a
+positivity violation.
+
+On a converged 14-cell chain (`d = 1`, `resid = 9.9e-09`), against the
+untruncated reference:
+
+| arm | `eps(J_L)` | augmented width | RGF cost vs pin |
+|---|---|---|---|
+| R2 | 1.08e-02 | 2 | 4x |
+| R3 | 4.37e-04 | 3 | 9x |
+| S2 | 1.80e-02 | 5 | 125x |
+| S4 | 8.22e-04 | 9 | 729x |
+| S6 | 3.21e-05 | 13 | 2197x |
+| S8 | 1.90e-14 | 15 | 3375x |
+
+At `d = 1` the semiseparable loses on every row. That is what the width
+arithmetic of Sec. 18 predicts and it is not interesting on its own: at `d = 1`
+the block is all rank and none of it is amortised over the DOF.
+
+**What is interesting is the shape of the two ladders.** Arm S converges
+monotonically in its rank and reaches machine precision at the quasiseparable
+rank -- `1.8e-02, 8.2e-04, 3.2e-05, 1.9e-14`, four orders per two rank units,
+then exact. Reblocking does not converge in its block size at all. On the
+20-cell bed it went `2.74e-03, 1.18e-02, 1.12e-02` for `m = 2, 3, 4`; on this
+14-cell bed it goes `1.08e-02, 4.37e-04` for `m = 2, 3`. The two beds do not
+even order the same way. Reblocking discards whichever part of `Sigma` the
+block boundaries happen to fall on, and a coarser blocking is not a smaller
+perturbation -- it is a different one.
+
+So the block size is not a convergence knob and the rank is. Above the accuracy
+a reblock happens to land on, there is nothing to compare: reblocking cannot be
+asked for another digit.
+
+### The break-even, at matched accuracy
+
+Pairing the ladders rather than asking the structured operator to be exact:
+
+| target `eps(J_L)` | reblock | rank `r` needed | break-even `d` |
+|---|---|---|---|
+| ~1e-02 | `m = 2`, cost `4x` | ~3 | 10 |
+| ~5e-04 | `m = 3`, cost `9x` | ~4.5 | 8 |
+
+`d >= 2r / (m^(2/3) - 1)` as before, but with `r` the rank that MATCHES that
+reblock rather than the rank that is exact. The break-even lands near `d ~ 8-10`
+instead of 24, and a real Si or CNT transport cell carries `d = 24` to `96`.
+
+This is a bed of one degree of freedom, and the whole result turns on whether
+`r` is flat in `d`. If `r` is a property of the physical range of `Sigma` it
+should be, and the augmented block `d + 2r` then grows only linearly while the
+reblock's `m d` grows in proportion. If instead `r` grows like `d` -- if the
+rank is counting DOF rather than range -- the ratio is constant and no device
+is large enough. That measurement is running; Sec. 16's `r_Sigma` growing like
+`N^0.75` in device LENGTH is a separate and less favourable fact, and it is the
+one that bounds how long a device this can be used on.
