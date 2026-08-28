@@ -366,6 +366,48 @@ def block_mask(bed: FrozenBed, sigma, cells_per_block: int):
     return out
 
 
+def sigma_semiseparable(bed: FrozenBed, sigma_l, sigma_g, rank: int):
+    r"""Arm S: the reference ``Sigma`` carried as a bidirectional semiseparable
+    operator of state size ``rank`` per direction, then decompressed.
+
+    This is the cost table's missing accuracy cell. Arms E and F fit the GREEN
+    function and rebuild ``Sigma`` from it; this one compresses ``Sigma``
+    itself, which is what an augmented Dyson would actually carry, and it is
+    the only arm whose block width ``d + r+ + r-`` is a number the RGF cost
+    depends on.
+
+    The compression is applied per frequency and then projected back onto the
+    anti-Hermitian subspace. ``Sigma^<`` obeys ``Sigma^< = -(Sigma^<)^H`` --
+    that is what makes ``i Sigma^<`` Hermitian and lets positivity be a
+    statement about its spectrum -- and the two triangles are realised by
+    separate truncated SVDs, which does not preserve the relation. The
+    projection ``(M - M^H)/2`` is onto a subspace that contains the exact
+    answer, so it can only reduce the error; leaving it out is what turns a
+    rank-truncation into a positivity violation.
+    """
+    from quatrex.phonon.spatial_operator import SemiSepOperator
+
+    nd, nw = bed.n_dof, sigma_l.shape[0]
+    out = []
+    widths = []
+    for mat in (sigma_l, sigma_g):
+        acc = np.empty_like(mat)
+        for iw in range(nw):
+            op = SemiSepOperator.from_dense(mat[iw], nd, rank=rank)
+            widths.append(op.augmented_block)
+            d = op.to_dense()
+            acc[iw] = 0.5 * (d - d.conj().T)
+        out.append(acc)
+    anti = max(float(np.abs(m + m.conj().transpose(0, 2, 1)).max()
+                     / max(np.abs(m).max(), 1e-300))
+               for m in (sigma_l, sigma_g))
+    err = max(float(np.abs(a - m).max() / max(np.abs(m).max(), 1e-300))
+              for a, m in zip(out, (sigma_l, sigma_g)))
+    return out[0], out[1], {"rank": rank, "sigma_err": err,
+                            "aug_width": int(max(widths)),
+                            "ref_antiherm": anti}
+
+
 def solve_arm(bed: FrozenBed, sigma_l, sigma_g):
     """One frozen Dyson/Keldysh solve and its observables."""
     from phonon_inputs.constants import THZ_TO_RAD
@@ -636,6 +678,25 @@ def run(bed: FrozenBed, *, m_edge: int = 2, n_threads=None, verbose=True):
                   f"{arm['discarded'] * 100:.1f} % of |Sigma| discarded): "
                   f"J_L={arm['J_L']:.6e}", flush=True)
 
+    # Arm S: Sigma itself carried semiseparably. Ranks chosen to bracket the
+    # measured quasiseparable rank of Sigma on this bed, so the table shows
+    # what the accuracy costs rather than one point of it.
+    for rk in (2, 4, 6, 8):
+        try:
+            sl_s, sg_s, info_s = sigma_semiseparable(
+                bed, ref["sigma_lesser"], ref["sigma_greater"], rk)
+            arm = solve_arm(bed, sl_s, sg_s)
+            arm.update(sigma_lesser=sl_s, sigma_greater=sg_s,
+                       sigma_cutoff=f"sss{rk}", g_cutoff=None, **info_s)
+            arms[f"S{rk}"] = arm
+            if verbose:
+                print(f"  arm S{rk} (semiseparable Sigma, rank {rk}/direction, "
+                      f"augmented block {info_s['aug_width']} vs 2-cell "
+                      f"reblock {2 * bed.n_dof}): J_L={arm['J_L']:.6e}  "
+                      f"|dSigma|/|Sigma|={info_s['sigma_err']:.2e}", flush=True)
+        except Exception as exc:                   # pragma: no cover
+            print(f"  arm S{rk} failed: {type(exc).__name__}: {exc}", flush=True)
+
     scale = abs(ref["J_L"]) + 1e-300
     others = [t for t in arms if t != "D"]
     eps = {t: {k: abs(arms[t][k] - ref[k]) / scale
@@ -758,6 +819,13 @@ def main(argv=None) -> int:
                     help="frozen bed npz from _spatial_bed.py")
     ap.add_argument("--chain", action="store_true",
                     help="build the analytic gapped chain instead")
+    ap.add_argument("--dof", type=int, default=1,
+                    help="DOF per cell; >1 routes through the multi-DOF "
+                         "builder, which is the axis the cost of an augmented "
+                         "block turns on (see spatial_analytic_tail.md Sec. 18)")
+    ap.add_argument("--max-iter", type=int, default=300)
+    ap.add_argument("--mixing", type=float, default=0.2)
+    ap.add_argument("--save", type=Path, default=None)
     ap.add_argument("--cells", type=int, default=16)
     ap.add_argument("--cubic", type=float, default=3e17,
                     help="toy vertex scale; the bubble prefactor carries the "
@@ -768,19 +836,32 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=None)
     a = ap.parse_args(argv)
 
-    if a.chain:
+    if a.chain and a.dof > 1:
+        from studies._spatial_rank_scaling import build
+        bed = build("multi", a.dof, a.cells, a.cubic, nfreq_pos=a.nfreq_pos,
+                    max_scba_iter=a.max_iter, solver="linear",
+                    anderson_mixing=False, mixing=a.mixing, scba_tol=1e-8,
+                    divergence_guard=False, n_threads=a.threads, verbose=True,
+                    name=f"multi{a.dof}_L{a.cells}")
+    elif a.chain:
         from studies._spatial_bed import build_frozen_chain
         from solver.toy_models import gapped_chain
         bed = build_frozen_chain(gapped_chain(), a.cells, cubic=a.cubic,
-                                 nfreq_pos=a.nfreq_pos, max_scba_iter=300,
+                                 nfreq_pos=a.nfreq_pos,
+                                 max_scba_iter=a.max_iter,
                                  solver="linear", anderson_mixing=False,
-                                 mixing=0.2, scba_tol=1e-8,
+                                 mixing=a.mixing, scba_tol=1e-8,
                                  divergence_guard=False, verbose=False,
                                  name=f"chain_L{a.cells}")
     elif a.bed is not None:
         bed = FrozenBed.load(a.bed)
     else:
         ap.error("give --bed or --chain")
+
+    if a.save is not None:
+        Path(a.save).parent.mkdir(parents=True, exist_ok=True)
+        bed.save(a.save)
+        print(f"  saved bed to {a.save}", flush=True)
 
     res = run(bed, m_edge=a.m_edge, n_threads=a.threads)
     report(bed, res)
