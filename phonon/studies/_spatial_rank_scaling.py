@@ -59,6 +59,8 @@ except (AttributeError, ValueError):        # pragma: no cover
 from studies._spatial_bed import FrozenBed, OUT                  # noqa: E402
 
 TOLS = (1e-2, 1e-3, 1e-4)
+# Block diagonals held explicitly before the generators take over (Sec. 15).
+BANDS = (0, 1, 2, 3)
 
 
 def numerical_rank(mat, tol: float) -> int:
@@ -121,19 +123,31 @@ def joint_rank(mat, bed: FrozenBed, cols=None, tail_only: bool = False,
     return {t: numerical_rank(x, t) for t in TOLS}, sv, x.shape
 
 
-def offdiag_rank(mat, bed: FrozenBed, iws, m_edge: int = 2):
-    r"""Quasiseparable rank: ``max_k rank(M[i >= k, j < k])`` over interior
-    splits, median over the given frequencies. Returns ``(ladder, cap)``."""
+def offdiag_rank(mat, bed: FrozenBed, iws, m_edge: int = 2, band: int = 0):
+    r"""Quasiseparable rank: ``max_k rank(M[i >= k + band, j < k])`` over
+    interior splits, median over the given frequencies.
+
+    ``band`` is the number of block diagonals held EXPLICITLY, which is what
+    the proposal's Sec. 15 operator actually does -- "plus the explicit
+    diagonal/near-field blocks". At ``band = 0`` this is the textbook
+    quasiseparable rank and it charges the generators for the near field they
+    would never be asked to carry; each further diagonal shifts the corner one
+    block down and can only lower the rank. The augmented Dyson width of
+    Sec. 39 should be read off the banded number, and the storage of the
+    explicit band added separately.
+
+    Returns ``(ladder, cap)``.
+    """
     nd, n, p = bed.n_dof, bed.n_slabs, bed.p
     lo, hi = p + m_edge, n - p - m_edge
-    if hi - lo < 2:
+    if hi - lo < 2 or hi + band >= n:
         return None, 0
-    cap = min(hi, n - lo) * nd
+    cap = min(hi, n - lo - band) * nd
     out = {t: [] for t in TOLS}
     for iw in iws:
         a = mat[iw]
         for t in TOLS:
-            out[t].append(max(numerical_rank(a[k * nd:, :k * nd], t)
+            out[t].append(max(numerical_rank(a[(k + band) * nd:, :k * nd], t)
                               for k in range(lo, hi)))
     return {t: int(np.median(v)) for t, v in out.items()}, cap
 
@@ -194,7 +208,9 @@ def measure(bed: FrozenBed, *, m_edge: int = 2, n_threads=None,
     od = {}
     for name, mat in (("G^R", bed.g_retarded), ("G^<", bed.g_lesser),
                       ("Sigma^<", sl), ("Delta", d_sigma)):
-        od[name] = offdiag_rank(mat, bed, iws, m_edge=m_edge)
+        for band in BANDS:
+            key = name if band == 0 else f"{name}|b{band}"
+            od[key] = offdiag_rank(mat, bed, iws, m_edge=m_edge, band=band)
     return {
         "live": live, "n_freq": int(bed.freqs_thz.size),
         "joint_all": jr_all, "joint_tail": jr_tail,
@@ -238,17 +254,24 @@ def report(bed: FrozenBed, res: dict) -> None:
               + (f"   (one basis: {one}; rising means the fallback is a "
                  "repackaging)" if one else ""))
 
-    print("\n  OFF-DIAGONAL (semiseparable) rank, median over frequency")
-    print("    object    r@1e-2 r@1e-3 r@1e-4 | cap | augmented block d+2r@1e-2 "
-          "| 2-cell reblock")
+    print("\n  OFF-DIAGONAL (semiseparable) rank, median over frequency.")
+    print("  `|bN` = N block diagonals held EXPLICITLY, so the generators are")
+    print("  charged only for what is beyond them; b1 is the production BTD.")
+    print("    object       r@1e-2 r@1e-3 r@1e-4 | cap | aug d+2r | RGF vs pin")
+    d = bed.n_dof
     for name, (lad, cap) in res["offdiag"].items():
         if lad is None:
-            print(f"    {name}: device too short for an interior split")
+            print(f"    {name:12s} device too short for an interior split")
             continue
-        aug = (f"{bed.n_dof + 2 * lad[1e-2]:24d} | {2 * bed.n_dof:14d}"
-               if name == "Sigma^<" else " " * 24 + " | " + " " * 14)
-        print(f"    {name:9s} " + " ".join(f"{lad[t]:6d}" for t in TOLS)
-              + f" | {cap:3d} | {aug}")
+        tail = ""
+        if name.startswith("Sigma^<"):
+            w = d + 2 * lad[1e-2]
+            tail = f" | {w:7d} | {(w / d) ** 3:10.1f}x"
+        print(f"    {name:12s} " + " ".join(f"{lad[t]:6d}" for t in TOLS)
+              + f" | {cap:3d}{tail}")
+    print(f"\n    for reference, an m-cell reblock costs m^2 x the pin at the "
+          f"same N d^3:\n      2-cell 4.0x   3-cell 9.0x   4-cell 16.0x   "
+          f"(block count halves, width doubles)")
     print()
 
 
