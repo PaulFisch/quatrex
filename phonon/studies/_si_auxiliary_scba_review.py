@@ -39,8 +39,6 @@ from pathlib import Path
 import numpy as np
 
 from quatrex.phonon.auxiliary_scba import lyapunov_gramian
-from quatrex.phonon.pole_bridge import source_at_poles, source_variation
-from quatrex.phonon.pole_keldysh import PoleCluster
 from quatrex.phonon.vertex_factors import load_decomposed
 
 
@@ -53,6 +51,7 @@ class FrozenCluster:
     source_lesser: np.ndarray
     source_greater: np.ndarray
     label: str
+    archived_source_fit: float = np.nan
 
     @property
     def rank(self) -> int:
@@ -109,6 +108,8 @@ def load_case(spec: str) -> FrozenCase:
             source_greater=np.asarray(
                 data["source_greater"][ss], dtype=complex).reshape(w.size, r, r),
             label=str(labels[i]),
+            archived_source_fit=(float(data["source_fit"][i])
+                                 if "source_fit" in data else np.nan),
         ))
     return FrozenCase(
         name=name, frequencies=w,
@@ -116,20 +117,57 @@ def load_case(spec: str) -> FrozenCase:
         q_shape=tuple(int(k) for k in data["q_shape"]), clusters=clusters)
 
 
-def _relative_floor(q: np.ndarray) -> float:
+def _passive_source_fit(source: np.ndarray, case: FrozenCase,
+                        cluster: FrozenCluster):
+    """Fit one constant passive source on the *real* frequency axis.
+
+    ``source_at_poles`` is the correct analytic continuation for the existing
+    partial-fraction correction, but its value at a complex pole is not a
+    covariance and need not be PSD.  Using it as ``Q`` therefore made the first
+    version of this gate reject every real Si cluster.  An auxiliary-state
+    realization instead needs a real-axis PSD source.  We take a positive
+    response-weighted average over the pole window, which is PSD whenever the
+    sampled source is PSD, and measure the resulting error after the complete
+    ``U D(.) [.] D(.)^H U^H`` congruence.
+    """
+    w = np.asarray(case.frequencies, dtype=float)
+    src = np.asarray(source, dtype=complex)
+    carrier = -1j * src
+    herm = 0.5 * (carrier + carrier.conj().swapaxes(-1, -2))
+    scale = max(float(np.linalg.norm(
+        herm.reshape(herm.shape[0], -1), axis=1).max()), 1e-300)
+    anti = float(np.linalg.norm(carrier - carrier.conj().swapaxes(-1, -2))
+                 / max(np.linalg.norm(carrier), 1e-300))
+    floor = min(float(np.linalg.eigvalsh(h)[0]) for h in herm) / scale
+
+    centres = np.abs(np.real(np.asarray(cluster.z, dtype=complex)))
+    dw = float(np.median(np.diff(w))) if w.size > 1 else 1.0
+    margin = max(2.0 * dw, 4.0 * float(np.max(np.abs(np.imag(cluster.z)))))
+    keep = ((w >= max(0.0, float(centres.min()) - margin))
+            & (w <= float(centres.max()) + margin))
+    if not np.any(keep):
+        keep[int(np.argmin(abs(w - float(np.mean(centres)))))] = True
+    wk = w[keep]
+    ck = herm[keep]
+    widths = np.ones_like(wk) * dw
+    d = 1.0 / (wk[:, None] - np.asarray(cluster.z)[None, :])
+    # A scalar sensitivity weight preserves passivity of the average.  The
+    # actual error below is evaluated with the full, generally non-orthogonal
+    # physical coupling U.
+    weight = widths * np.sum(np.abs(d) ** 2, axis=1) ** 2
+    q = np.einsum("w,wab->ab", weight, ck) / max(float(weight.sum()), 1e-300)
     q = 0.5 * (q + q.conj().T)
-    ev = np.linalg.eigvalsh(q)
-    return float(ev[0] / max(float(ev[-1]), 1e-300))
 
-
-def _carrier(source: np.ndarray, case: FrozenCase,
-             cluster: FrozenCluster) -> np.ndarray:
-    cl = PoleCluster(z=cluster.z, u=cluster.u, v=cluster.v,
-                     label=cluster.label)
-    # Quatrex stores Sigma^x = +i C^x, hence C^x = -i Sigma^x.
-    q = -1j * np.asarray(source_at_poles(
-        source, case.frequencies, cl), dtype=complex)
-    return 0.5 * (q + q.conj().T)
+    num = den = 0.0
+    for wi, ci, di, hi in zip(wk, ck, d, widths):
+        del wi
+        r = cluster.u * di[None, :]
+        exact = r @ ci @ r.conj().T
+        fitted = r @ q @ r.conj().T
+        num += float(hi) * float(np.linalg.norm(fitted - exact) ** 2)
+        den += float(hi) * float(np.linalg.norm(exact) ** 2)
+    error = float(np.sqrt(num / max(den, 1e-300)))
+    return q, floor, anti, error
 
 
 def _rank_for_frobenius(eigenvalues: np.ndarray, tol: float) -> int:
@@ -210,21 +248,20 @@ def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4)):
     nq = int(np.prod(case.q_shape)) if case.q_shape else 1
     by_q: dict[int, list[tuple[FrozenCluster, np.ndarray, np.ndarray]]] = {
         q: [] for q in range(nq)}
-    floors, variations, effective = [], [], []
+    floors, anti_errors, fit_errors, archived_fits, effective = [], [], [], [], []
     invalid = 0
+    all_input_ranks = [0 for _ in range(nq)]
     for cl in case.clusters:
         qflat = (int(np.ravel_multi_index(cl.q, case.q_shape))
                  if case.q_shape else 0)
-        ql = _carrier(cl.source_lesser, case, cl)
-        qg = _carrier(cl.source_greater, case, cl)
-        floor = min(_relative_floor(ql), _relative_floor(qg))
+        all_input_ranks[qflat] += cl.rank
+        ql, fl, al, el = _passive_source_fit(cl.source_lesser, case, cl)
+        qg, fg, ag, eg = _passive_source_fit(cl.source_greater, case, cl)
+        floor = min(fl, fg)
         floors.append(floor)
-        pc = PoleCluster(cl.z, cl.u, cl.v, cl.label)
-        variations.append(max(
-            float(source_variation(
-                cl.source_lesser, case.frequencies, pc)),
-            float(source_variation(
-                cl.source_greater, case.frequencies, pc))))
+        anti_errors.append(max(al, ag))
+        fit_errors.append(max(el, eg))
+        archived_fits.append(float(cl.archived_source_fit))
         effective.extend(_effective_cells(cl.u, case.block_sizes).tolist())
         if floor < -1e-8:
             invalid += 1
@@ -236,23 +273,33 @@ def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4)):
             return (vec * np.maximum(ev, 0.0)[None, :]) @ vec.conj().T
         by_q[qflat].append((cl, clean(ql), clean(qg)))
 
-    input_ranks = [sum(cl.rank for cl, _ql, _qg in by_q[q]) for q in range(nq)]
+    archived_finite = [x for x in archived_fits if np.isfinite(x)]
     result = {
         "n_cells": case.n_cells,
         "cell_dof": case.cell_dof,
         "n_q": nq,
         "n_clusters": len(case.clusters),
         "n_invalid_passive_clusters": invalid,
+        "passivity_test": "real-axis projected source over the full sampled grid",
         "source_psd_floor_min": float(min(floors, default=0.0)),
-        "source_variation": {
-            "median": float(np.median(variations)) if variations else 0.0,
-            "p90": float(np.percentile(variations, 90)) if variations else 0.0,
-            "max": float(max(variations, default=0.0)),
+        "source_antihermiticity_error_max": float(max(anti_errors, default=0.0)),
+        "passive_constant_source_congruence_error": {
+            "median": float(np.median(fit_errors)) if fit_errors else 0.0,
+            "p90": float(np.percentile(fit_errors, 90)) if fit_errors else 0.0,
+            "max": float(max(fit_errors, default=0.0)),
+        },
+        "legacy_complex_continuation_source_fit": {
+            "median": (float(np.median(archived_finite))
+                       if archived_finite else None),
+            "p90": (float(np.percentile(archived_finite, 90))
+                    if archived_finite else None),
+            "max": (float(max(archived_finite))
+                    if archived_finite else None),
         },
         "input_poles_per_q": {
-            "median": float(np.median(input_ranks)),
-            "max": int(max(input_ranks, default=0)),
-            "total": int(sum(input_ranks)),
+            "median": float(np.median(all_input_ranks)),
+            "max": int(max(all_input_ranks, default=0)),
+            "total": int(sum(all_input_ranks)),
         },
         "input_mode_effective_cells": {
             "median": float(np.median(effective)) if effective else 0.0,
@@ -263,7 +310,7 @@ def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4)):
     if vf is None or invalid:
         result["qfold_status"] = (
             "not run" if vf is None else
-            "refused because at least one source is materially non-passive")
+            "refused because at least one real-axis source is materially non-passive")
         return result
     if int(vf.n_kpts) != nq or int(vf.D.shape[0]) != case.cell_dof:
         raise ValueError("vertex factors do not match this Si case")
