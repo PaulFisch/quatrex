@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from quatrex.phonon.btd_linalg import BTDFactorization, btd_matvec
+from quatrex.phonon.btd_linalg import (
+    BTDFactorization,
+    btd_matvec,
+    remap_full_block_snapshot,
+)
 
 
 def _h(a):
@@ -65,6 +69,23 @@ def test_matvec_matches_dense():
     got = _h(btd_matvec(a_ii, a_ij, a_ji, x))
     ref = _h(fac.to_dense()) @ x
     assert np.abs(got - ref).max() / np.abs(ref).max() < 1e-12
+
+
+def test_full_snapshot_remaps_between_block_orderings():
+    rng = np.random.default_rng(22)
+    nc, d = 8, 2
+    dense = rng.normal(size=(3, nc * d, nc * d))
+    values = dense.reshape(3, nc, d, nc, d).transpose(
+        0, 1, 3, 2, 4).reshape(3, -1)
+    rows = np.array([0, 3, 7, 10, 15, 4])
+    cols = np.array([2, 3, 1, 15, 0, 9])
+    got = remap_full_block_snapshot(values, d, rows, cols)
+    np.testing.assert_array_equal(got, dense[:, rows, cols])
+
+
+def test_snapshot_remap_refuses_a_banded_source():
+    with pytest.raises(ValueError, match="full square"):
+        remap_full_block_snapshot(np.zeros((4, 17)), 2, [0], [0])
 
 
 def test_solve_round_trips_through_matvec():

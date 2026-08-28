@@ -191,6 +191,11 @@ def main() -> None:
     ap.add_argument("--per-block", type=int, required=True,
                     help="primitive cells per BTD block")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--decomposed-path", default=None,
+                    help="optional primitive VertexFactors archive to lift "
+                    "exactly into the new blocking")
+    ap.add_argument("--skip-qfold", action="store_true",
+                    help="do not materialise the dense q-folded vertex")
     ap.add_argument("--tdir", default=None, help="transport axis (default: "
                     "read from the source config)")
     a = ap.parse_args()
@@ -266,7 +271,7 @@ def main() -> None:
 
     # ---- q-folded vertices ---------------------------------------------
     qf = src / "qfold_vertices.npz"
-    if qf.exists():
+    if qf.exists() and not a.skip_qfold:
         from quatrex.phonon.qfold import load_qfold, save_qfold  # noqa: E402
 
         V, q_diff_map, nk_shape = load_qfold(qf)
@@ -281,6 +286,20 @@ def main() -> None:
         save_qfold(out / "qfold_vertices.npz", newV, q_diff_map, nk_shape)
         print(f"qfold_vertices.npz: {len(newV)} q-pairs x "
               f"{len(next(iter(newV.values())))} blocks of {ndn}^3")
+
+    if a.decomposed_path:
+        from quatrex.phonon.vertex_factors import (
+            load_decomposed, reblock_decomposed, save_decomposed,
+        )
+
+        source_factors = Path(a.decomposed_path)
+        if not source_factors.is_absolute():
+            source_factors = ROOT / source_factors
+        lifted = reblock_decomposed(load_decomposed(source_factors), c)
+        save_decomposed(out / "decomposed_vertices.npz", lifted)
+        print(f"decomposed_vertices.npz: exact factor lift rank "
+              f"{lifted.meta['primitive_rank']} -> {lifted.rank}, "
+              f"dof {lifted.meta['primitive_n_dof']} -> {lifted.D.shape[0]}")
 
     # ---- structure, grids, config ---------------------------------------
     lines = (src / "structure.xyz").read_text().splitlines()
@@ -312,6 +331,17 @@ def main() -> None:
     cfg = cfg.replace(f"/cluster/{src.name}", f"/cluster/{out.name}")
     cfg = re.sub(r"num_transport_cells\s*=\s*\d+",
                  f"num_transport_cells = {nb}", cfg)
+    if a.decomposed_path:
+        factor_line = (f'decomposed_vertices_path = "{out.resolve()}/'
+                       'decomposed_vertices.npz"')
+        if re.search(r"^decomposed_vertices_path\s*=.*$", cfg,
+                     flags=re.MULTILINE):
+            cfg = re.sub(r"^decomposed_vertices_path\s*=.*$", factor_line,
+                         cfg, flags=re.MULTILINE)
+        else:
+            cfg = cfg.replace("[phonon]\n", "[phonon]\n" + factor_line + "\n")
+        cfg = re.sub(r"^qfold_path\s*=.*\n?", "", cfg,
+                     flags=re.MULTILINE)
     (out / "quatrex_config.toml").write_text(cfg)
     print(f"quatrex_config.toml: num_transport_cells = {nb} "
           f"({nb} blocks x {ndn} dof = {nb * ndn}, {n_cells} primitive cells)")

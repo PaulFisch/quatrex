@@ -12,6 +12,7 @@ from quatrex.phonon.vertex_factors import (
     FORMAT_VERSION,
     VertexFactors,
     load_decomposed,
+    reblock_decomposed,
     save_decomposed,
 )
 
@@ -78,6 +79,40 @@ def test_reconstruct_block_matches_einsum() -> None:
     ref = np.einsum("r,ar,br,cr->abc", vf.lambdas, vf.D,
                     vf.UB[pos[-1], 1], vf.UC[pos[1], 2])
     np.testing.assert_allclose(blk, ref, rtol=1e-13)
+
+
+def test_reblock_factor_lift_matches_every_primitive_subblock() -> None:
+    rng = np.random.default_rng(51)
+    primitive = _mk_vf(rng, n_dof=2, R=3, nq=4, ansatz="CP")
+    c = 2
+    lifted = reblock_decomposed(primitive, c)
+    assert lifted.rank == c * primitive.rank
+    assert lifted.D.shape[0] == c * primitive.D.shape[0]
+    assert lifted.meta["reblock_exact_relative_to_primitive_factors"]
+
+    d = primitive.D.shape[0]
+    ppos = primitive.offset_index()
+    for q1, q2 in ((0, 0), (1, 3)):
+        for delta1 in lifted.offsets:
+            for delta2 in lifted.offsets:
+                block = lifted.reconstruct_block(q1, q2, delta1, delta2)
+                for u in range(c):
+                    for v in range(c):
+                        for w in range(c):
+                            p1 = c * int(delta1) + v - u
+                            p2 = c * int(delta2) + w - u
+                            got = block[
+                                u * d:(u + 1) * d,
+                                v * d:(v + 1) * d,
+                                w * d:(w + 1) * d,
+                            ]
+                            if p1 in ppos and p2 in ppos:
+                                ref = primitive.reconstruct_block(
+                                    q1, q2, p1, p2)
+                            else:
+                                ref = np.zeros((d, d, d), complex)
+                            np.testing.assert_allclose(got, ref, rtol=1e-13,
+                                                       atol=1e-13)
 
 
 def test_format_version_gate(tmp_path) -> None:

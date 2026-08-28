@@ -31,7 +31,10 @@ import numpy as np
 from qttools import NDArray, xp
 from qttools.kernels import linalg
 
-__all__ = ["BTDFactorization", "btd_matvec", "btd_norm2"]
+__all__ = [
+    "BTDFactorization", "btd_matvec", "btd_norm2",
+    "remap_full_block_snapshot",
+]
 
 
 _OFFSET_CACHE: dict[tuple[int, ...], np.ndarray] = {}
@@ -44,6 +47,42 @@ def _offsets(block_sizes) -> np.ndarray:
         off = np.concatenate(([0], np.cumsum(np.asarray(key, dtype=int))))
         _OFFSET_CACHE[key] = off
     return off
+
+
+def remap_full_block_snapshot(values, primitive_dof: int, rows, cols):
+    """Map a full primitive-block DSDB value axis to another block ordering.
+
+    Frozen study restarts store values in deterministic block-COO order:
+    ``(I, J, a, b)``.  Reblocking leaves the physical dense matrix unchanged
+    but changes that order.  Decode the full primitive archive once and gather
+    it at the target DSDB ``rows, cols``.  Leading frequency/q axes are kept.
+
+    This helper deliberately accepts only a *full* source pattern; inferring
+    missing entries from a banded archive would turn a warm start into a new
+    spatial approximation.
+    """
+    a = np.asarray(values)
+    d = int(primitive_dof)
+    if d <= 0:
+        raise ValueError("primitive_dof must be positive")
+    n2 = int(a.shape[-1])
+    n = int(round(np.sqrt(n2)))
+    if n * n != n2 or n % d:
+        raise ValueError(
+            f"source value axis {n2} is not a full square matrix compatible "
+            f"with primitive_dof={d}")
+    nc = n // d
+    prefix = a.shape[:-1]
+    blocks = a.reshape(prefix + (nc, nc, d, d))
+    p = len(prefix)
+    dense = blocks.transpose(tuple(range(p)) + (p, p + 2, p + 1, p + 3))
+    dense = dense.reshape(prefix + (n, n))
+    r = np.asarray(rows, dtype=int).reshape(-1)
+    c = np.asarray(cols, dtype=int).reshape(-1)
+    if r.size != c.size or np.any(r < 0) or np.any(c < 0) \
+            or np.any(r >= n) or np.any(c >= n):
+        raise ValueError("target rows/cols are incompatible with the source")
+    return dense[..., r, c]
 
 
 def btd_matvec(

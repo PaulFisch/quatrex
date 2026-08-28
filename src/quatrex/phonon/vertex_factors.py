@@ -132,3 +132,80 @@ def load_decomposed(path: str | Path, rank: int = 0) -> VertexFactors:
         meta=dict(npz["meta"].item()) if "meta" in npz.files else {},
     )
     return vf.truncate(rank) if rank else vf
+
+
+def reblock_decomposed(vf: VertexFactors, cells_per_block: int) -> VertexFactors:
+    r"""Lift primitive-cell factors into an exact supercell factorisation.
+
+    If a supercell contains ``c`` primitive cells, primitive offset
+    ``delta`` becomes ``c*Delta + v - u`` for external subcell ``u`` and
+    internal subcell ``v``.  Replicating every CP component once per external
+    subcell therefore represents every reblocked dense vertex block exactly
+    relative to ``vf``.  The rank grows from ``R`` to ``c*R``; there is no
+    refit and no new FC3 approximation.
+
+    ``support_pairs`` cannot in general be lifted by independent per-leg
+    factors because its admissibility may couple the two internal offsets.
+    Current production Si factors have no such mask.  Refuse that uncommon
+    case rather than manufacture unsupported blocks.
+    """
+    c = int(cells_per_block)
+    if c < 1:
+        raise ValueError("cells_per_block must be positive")
+    if c == 1:
+        return vf
+    if vf.meta.get("support_pairs") is not None:
+        raise NotImplementedError(
+            "reblocking factors with a coupled support_pairs mask requires "
+            "component-wise pair support")
+
+    primitive_offsets = [int(x) for x in vf.offsets]
+    offset_pos = vf.offset_index()
+    # All supercell offsets for which at least one (u,v) maps to a stored
+    # primitive offset.
+    super_offsets = sorted({
+        delta
+        for u in range(c)
+        for v in range(c)
+        for delta in range(
+            int(np.floor((min(primitive_offsets) - (v - u)) / c)),
+            int(np.ceil((max(primitive_offsets) - (v - u)) / c)) + 1)
+        if c * delta + v - u in offset_pos
+    })
+    d, rank = int(vf.D.shape[0]), int(vf.rank)
+    nq = int(vf.n_kpts)
+    lifted_rank = c * rank
+    D = np.zeros((c * d, lifted_rank), dtype=np.asarray(vf.D).dtype)
+    lambdas = np.tile(np.asarray(vf.lambdas), c)
+    UB = np.zeros((len(super_offsets), nq, c * d, lifted_rank),
+                  dtype=np.asarray(vf.UB).dtype)
+    UC = np.zeros_like(UB, dtype=np.asarray(vf.UC).dtype)
+
+    for u in range(c):
+        rr = slice(u * rank, (u + 1) * rank)
+        D[u * d:(u + 1) * d, rr] = np.asarray(vf.D)
+        for ids, delta in enumerate(super_offsets):
+            for v in range(c):
+                primitive_delta = c * delta + v - u
+                ip = offset_pos.get(primitive_delta)
+                if ip is None:
+                    continue
+                rows = slice(v * d, (v + 1) * d)
+                UB[ids, :, rows, rr] = np.asarray(vf.UB)[ip]
+                UC[ids, :, rows, rr] = np.asarray(vf.UC)[ip]
+
+    return VertexFactors(
+        D=D, lambdas=lambdas,
+        offsets=np.asarray(super_offsets, dtype=np.int64),
+        UB=UB, UC=UC, q_diff_map=np.asarray(vf.q_diff_map),
+        nk_shape=tuple(vf.nk_shape), ansatz=f"{vf.ansatz}-reblock{c}",
+        meta={
+            **vf.meta,
+            "primitive_rank": rank,
+            "primitive_n_dof": d,
+            "cells_per_block": c,
+            "rank": lifted_rank,
+            "n_dof": c * d,
+            "reblock_exact_relative_to_primitive_factors": True,
+        },
+    )

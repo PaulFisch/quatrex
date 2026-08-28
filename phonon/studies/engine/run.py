@@ -425,12 +425,20 @@ if os.environ.get("QX_SIGMA_INIT"):
     for _key, _buf in (("sigma_lesser", scba.data.sigma_lesser),
                        ("sigma_greater", scba.data.sigma_greater),
                        ("sigma_retarded", scba.data.sigma_retarded_hermitian)):
-        if _sd[_key].shape != _buf.data.shape:
+        _loaded = _sd[_key]
+        if os.environ.get("QX_SIGMA_INIT_PRIMITIVE_DOF"):
+            from quatrex.phonon.btd_linalg import remap_full_block_snapshot
+
+            _loaded = remap_full_block_snapshot(
+                _loaded,
+                int(os.environ["QX_SIGMA_INIT_PRIMITIVE_DOF"]),
+                get_host(_buf.rows), get_host(_buf.cols))
+        if _loaded.shape != _buf.data.shape:
             raise SystemExit(
                 f"QX_SIGMA_INIT slice mismatch for {_key}: snapshot "
-                f"{_sd[_key].shape} vs local {_buf.data.shape} -- restart "
+                f"{_loaded.shape} vs local {_buf.data.shape} -- restart "
                 "with the same rank grid as the saving run.")
-        _buf.data[:] = _scale * xp.asarray(_sd[_key])
+        _buf.data[:] = _scale * xp.asarray(_loaded)
     _warm_label = (f"{os.environ['QX_SIGMA_INIT']} ({_nparts} gathered parts)"
                    if _nparts else
                    _sigma_file(os.environ["QX_SIGMA_INIT"]))
