@@ -33,6 +33,12 @@ if os.environ.get("QX_NE"):       cfg.electron.energy_window_num = int(os.enviro
 if os.environ.get("QX_WMAX"):     cfg.electron.energy_window_max = float(os.environ["QX_WMAX"])
 if os.environ.get("QX_RETARDED"): cfg.phonon.retarded_method = os.environ["QX_RETARDED"]
 if os.environ.get("QX_FC3"):      cfg.phonon.fc3_path = os.environ["QX_FC3"]
+if os.environ.get("QX_DECOMPOSED"):
+    # Study-only switch from a legacy dense q-fold artifact to the equivalent
+    # production tensor factors.  The two inputs are mutually exclusive in
+    # SigmaPhononPhonon, so clear the inherited dense path explicitly.
+    cfg.phonon.decomposed_vertices_path = os.environ["QX_DECOMPOSED"]
+    cfg.phonon.qfold_path = None
 if os.environ.get("QX_ETAOBC"):   cfg.phonon.eta_obc = float(os.environ["QX_ETAOBC"])
 if os.environ.get("QX_ETA_RAMP_ITERS"): cfg.phonon.eta_ramp_iterations = int(os.environ["QX_ETA_RAMP_ITERS"])
 if os.environ.get("QX_ETA_FINAL"):      cfg.phonon.eta_final = float(os.environ["QX_ETA_FINAL"])
@@ -416,8 +422,6 @@ def _save_pole_states(path: str) -> None:
     than a fine frequency grid.  ``QX_SAVE_POLE_STATES`` is study-only and has
     no effect on the solver or fixed point.
     """
-    if ranks.rank != 0:
-        return
     qstates = list(getattr(ph, "pole_q_states", []) or [])
     if not qstates and getattr(ph, "pole_state", None) is not None:
         qstates = [((), ph.pole_state)]
@@ -432,11 +436,25 @@ def _save_pole_states(path: str) -> None:
         for m, cl in enumerate(legs):
             if m >= len(sl) or m >= len(sg):
                 continue
+            # The energy axis may be stack-distributed.  Pole locations and
+            # vectors are replicated by the distributed corrector, but the
+            # projected source is local in frequency; gather it before rank 0
+            # serializes the state or high-frequency Si poles would be paired
+            # with the low-frequency rank's source slice.
+            sl_full = ranks.stack.all_gather_v(
+                np.asarray(get_host(sl[m])), axis=0)
+            sg_full = ranks.stack.all_gather_v(
+                np.asarray(get_host(sg[m])), axis=0)
             rows.append((tuple(int(i) for i in qidx), cl,
-                         np.asarray(get_host(sl[m])),
-                         np.asarray(get_host(sg[m])),
+                         np.asarray(sl_full), np.asarray(sg_full),
                          float(fit_values[m]) if m < len(fit_values)
                          else np.nan))
+    full_frequencies = ranks.stack.all_gather_v(
+        np.asarray(get_host(ph.local_frequencies)), axis=0)
+    full_widths = ranks.stack.all_gather_v(
+        np.asarray(get_host(ph.local_frequency_weights)), axis=0)
+    if ranks.rank != 0:
+        return
     if not rows:
         print("QX_SAVE_POLE_STATES: no allocated pole/source state to save",
               flush=True)
@@ -454,7 +472,7 @@ def _save_pole_states(path: str) -> None:
         vs.append(np.asarray(get_host(cl.v), dtype=complex))
         sl = np.asarray(sl, dtype=complex)
         sg = np.asarray(sg, dtype=complex)
-        expected = (len(ph.local_frequencies), z.size, z.size)
+        expected = (len(full_frequencies), z.size, z.size)
         if sl.shape != expected or sg.shape != expected:
             raise ValueError(
                 f"pole source has shapes {sl.shape}/{sg.shape}, expected "
@@ -482,9 +500,8 @@ def _save_pole_states(path: str) -> None:
         source_fit=np.asarray(fits, dtype=float),
         labels=np.asarray(labels),
         block_sizes=np.asarray(get_host(ph.block_sizes), dtype=np.int64),
-        local_frequencies=np.asarray(ph.local_frequencies, dtype=float),
-        local_frequency_weights=np.asarray(
-            ph.local_frequency_weights, dtype=float),
+        local_frequencies=np.asarray(full_frequencies, dtype=float),
+        local_frequency_weights=np.asarray(full_widths, dtype=float),
     )
     print(f"SAVED POLE STATES {target} ({len(rows)} clusters, "
           f"{pole_offsets[-1]} poles)", flush=True)
