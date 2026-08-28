@@ -336,19 +336,33 @@ def _run_bubble_tasks_task_batched(
     per_task = bubble_task_batch_bytes(
         n_fft=n_fft, nI=n_dof, nJ=n_dof, bK1=n_dof, bK1p=n_dof,
         bK2=n_dof, bK2p=n_dof)
-    budget = int(0.7 * _available_memory_bytes()) - fixed_bytes
+    # The chunk has to be sized against the memory it will actually live in.
+    # On a GPU that is the DEVICE, and the host figure is both wrong and much
+    # larger: at d = 6 the full task set is ~278 GiB of transients, so a host
+    # budget picks a chunk that OOMs the card immediately.
+    if xp is not np:
+        free, _total = xp.cuda.Device().mem_info
+        budget = int(0.6 * free) - int(gl_s.nbytes + gg_s.nbytes)
+        where = "device"
+    else:
+        budget = int(0.7 * _available_memory_bytes()) - fixed_bytes
+        where = "host"
     if budget < per_task:
         raise MemoryError(
             f"[{label}] task-batched bubble needs "
             f"{per_task / (1 << 20):.1f} MiB for a single task but only "
-            f"{budget / (1 << 20):.1f} MiB is free after the resident G and "
-            "vertex storage. Reduce n_slabs / g_cutoff, or raise "
-            "QUATREX_PHPH_MEMORY_GB.")
+            f"{budget / (1 << 20):.1f} MiB is free in {where} memory after "
+            "the resident G and vertex storage. Reduce n_slabs / g_cutoff, "
+            "or raise QUATREX_PHPH_MEMORY_GB.")
     chunk = max(1, min(len(kind_tasks), int(budget // per_task)))
+    cap = os.environ.get("QX_PHPH_CHUNK")
+    if cap:
+        chunk = max(1, min(chunk, int(cap)))
     if verbose:
         print(f"  [{label}] task-batched: {len(kind_tasks)} tasks in "
-              f"{-(-len(kind_tasks) // chunk)} chunk(s) of <= {chunk}",
-              flush=True)
+              f"{-(-len(kind_tasks) // chunk)} chunk(s) of <= {chunk} "
+              f"({per_task * chunk / (1 << 30):.2f} GiB transient, "
+              f"{where} budget {budget / (1 << 30):.1f} GiB)", flush=True)
 
     for c0 in range(0, len(kind_tasks), chunk):
         sub = kind_tasks[c0:c0 + chunk]
