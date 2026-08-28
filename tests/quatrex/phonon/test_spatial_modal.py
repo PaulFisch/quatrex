@@ -220,7 +220,7 @@ def test_an_undressed_in_band_mode_has_no_range_at_all():
     from quatrex.phonon.spatial_modes import band_range_cells, bloch_modes
 
     modes = bloch_modes(*_blocks(0.5 * BAND_TOP))
-    assert modes.propagating.all()
+    assert modes.propagating().all()
     assert np.isinf(modes.xi).all()
     assert np.isinf(band_range_cells(*_blocks(0.5 * BAND_TOP)))
 
@@ -233,7 +233,7 @@ def test_dressing_gives_a_propagating_mode_a_finite_mean_free_path(gamma_s):
     blocks = _blocks(0.5 * BAND_TOP, sigma=-1j * gamma_s)
     modes = bloch_modes(*blocks)
 
-    assert not modes.propagating.any(), "damping left a mode on the unit circle"
+    assert not modes.propagating().any(), "damping left a mode on the unit circle"
     assert modes.decaying.sum() == 1
     xi = band_range_cells(*blocks)
     assert np.isfinite(xi) and xi > 0.0

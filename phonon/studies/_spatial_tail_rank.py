@@ -184,13 +184,16 @@ def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
             m_sig = d
     m_pencil = max(1, m_sig)
 
+    # The homogeneous recurrence at row I is sum_j M[I,j] u_j = 0; with
+    # j = I + n and u_j = v lambda^j that is sum_n M[I, I+n] lambda^n v = 0, so
+    # the coefficient a_n is the anchor ROW at offset n for BOTH signs of n.
+    # Reading a_{-n} from the column instead would be the transpose, which is a
+    # different operator once Sigma^R is not symmetric.
     a_blocks = []
     for n in range(-m_pencil, m_pencil + 1):
-        i, j = (anchor, anchor + n) if n >= 0 else (anchor - n, anchor)
-        block = -sblk(anchor, anchor + n) if n >= 0 else -sblk(anchor + (-n) * 0,
-                                                               anchor)
-        # Sigma^R at separation n, taken from the anchor row.
-        block = -sblk(anchor, anchor + n) if 0 <= anchor + n < bed.n_slabs             else np.zeros((nd, nd), complex)
+        block = (-sblk(anchor, anchor + n)
+                 if 0 <= anchor + n < bed.n_slabs
+                 else np.zeros((nd, nd), complex))
         if n == 0:
             block = block + (w * w) * np.eye(nd) - bed.d00
         elif n == 1:

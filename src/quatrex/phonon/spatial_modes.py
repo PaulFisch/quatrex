@@ -109,10 +109,14 @@ class ModeSet:
         """Mask of modes that decay in the ``+`` direction (``|lambda| < 1``)."""
         return np.abs(np.asarray(_host(self.lam))) < 1.0
 
-    @property
     def propagating(self, tol: float = 1e-10) -> NDArray:
-        """Mask of modes on the unit circle -- undamped, so unbounded range."""
-        return np.abs(np.abs(np.asarray(_host(self.lam))) - 1.0) < 1e-10
+        """Mask of modes on the unit circle -- undamped, so unbounded range.
+
+        A method and not a property: it was declared as a property WITH a
+        ``tol`` argument, which meant the argument could never be supplied and
+        the body silently used a hard-coded value.
+        """
+        return np.abs(np.abs(np.asarray(_host(self.lam))) - 1.0) < tol
 
     def converged(self, tol: float = 1e-3) -> NDArray:
         """Mask of modes whose NEVP residual is below ``tol``.
@@ -207,6 +211,21 @@ def bloch_modes_poly(a_blocks, nevp=None, *, residual: bool = False) -> ModeSet:
 
     batched = arrs[0].ndim > 2
     blocks = arrs if batched else tuple(a[xp.newaxis, :, :] for a in arrs)
+
+    # Full() linearises by inverting sum(a_xx), which is the pencil evaluated
+    # at lambda = 1. An exact unit root -- an undamped zone-centre mode, the
+    # case this module's docstring is entirely about -- makes that singular,
+    # and the failure surfaces inside a numba eig kernel rather than here.
+    total = np.asarray(_host(sum(arrs)))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cond = np.linalg.cond(total.reshape(-1, *total.shape[-2:]))
+    if not np.all(np.isfinite(cond)) or np.any(cond > 1.0 / np.finfo(float).eps):
+        raise np.linalg.LinAlgError(
+            "bloch_modes_poly: the pencil is singular at lambda = 1 "
+            f"(cond(sum a_n) = {np.max(cond):.3e}), which the dense "
+            "linearisation inverts. That is an exact unit root -- dress the "
+            "operator, or perturb it by an infinitesimal retarded damping "
+            "(see quatrex.phonon.spatial_operator.directional_modes).")
 
     ws, vs = nevp(blocks)
     lam = np.asarray(_host(ws))

@@ -620,7 +620,7 @@ def test_the_analytic_contraction_is_exact_in_the_pure_tail_region():
     p = 1
     tail, info = analytic_tail(bed_["psi"], bed_["series"], bed_["series"],
                                range(0, 9), freqs_thz=bed_["w"],
-                               dw_thz=bed_["dw"], prefactor=bed_["pref"],
+                               prefactor=bed_["pref"],
                                n_cells=bed_["n_cell"])
     assert info["pairs"] == 1 and info["kept"] == 1
 

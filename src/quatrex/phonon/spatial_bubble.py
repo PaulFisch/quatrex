@@ -12,10 +12,12 @@ Sec. 20 asks and the only one that needs answering before any algebra is
 designed. Two routes to the far blocks, both provided because they fail
 differently:
 
-* :func:`decompress_direct` fits the :math:`G^{<,>}` block sequence itself
+* ``_spatial_tail_tails.sigma_decompressed`` fits the :math:`G^{<,>}`
+  block sequence itself
   (block-ESPRIT, :mod:`quatrex.phonon.spatial_hankel`). Cheapest, and it does
   not preserve the matrix sign structure.
-* :func:`decompress_congruence` continues :math:`G^R` modally and rebuilds
+* ``_spatial_tail_tails.sigma_congruence`` continues :math:`G^R` modally and
+  rebuilds
   :math:`\tilde G^{<,>} = \tilde G^R \Sigma_{\rm tot}^{<,>}\tilde G^{A}` with
   :math:`\tilde G^A = (\tilde G^R)^\dagger` exactly, so positivity is
   structural rather than checked afterwards.
@@ -138,7 +140,7 @@ def pair_importance(v_left, v_right, zeta, r0: int, n_cells: int | None = None):
     return amp * float(np.sum([z ** r for r in range(int(r0), int(n_cells))]))
 
 
-def analytic_tail(psi, series_a, series_b, r_values, *, freqs_thz, dw_thz,
+def analytic_tail(psi, series_a, series_b, r_values, *, freqs_thz,
                   prefactor, pairs=None, n_fft=None, out_slice=None,
                   importance_floor: float = 0.0, n_cells=None):
     r"""``{R: Sigma_R(Omega)}`` in the pure-tail region, by the modal-pair sum.
@@ -220,6 +222,26 @@ def analytic_tail(psi, series_a, series_b, r_values, *, freqs_thz, dw_thz,
             if not np.isfinite(weights[pq]) or weights[pq] > importance_floor * peak]
     n_pairs, n_kept = len(todo), len(kept)
 
+    # Each leg depends on the two offset pairs only through ONE separation --
+    # a through r + delta - alpha, b through r + gamma - beta -- and the two
+    # take one index from each loop crosswise. Distinct differences are far
+    # fewer than the |offsets|^2 iterations, so memoise on the separation and
+    # the double loop stops re-FFTing the same leg. Not a change of exponents.
+    fft_cache: dict = {}
+
+    def leg_fft(side, idx, expo):
+        key = (side, idx, expo)
+        hit = fft_cache.get(key)
+        if hit is not None:
+            return hit
+        lam, vec, cof = ((lam_a, vec_a, cof_a) if side == "a"
+                         else (lam_b, vec_b, cof_b))
+        leg = ((vec[:, :, idx] * (lam[:, idx] ** expo)[:, None])[:, :, None]
+               * cof[:, idx][:, None, :])
+        fft_cache[key] = out_ = precompute_g_fft(
+            leg, n_fft=n_fft, zero_freq_idx=mid, dc_handling="interpolate")
+        return out_
+
     for (p, q) in kept:
         for r in r_values:
             r = int(r)
@@ -227,19 +249,11 @@ def analytic_tail(psi, series_a, series_b, r_values, *, freqs_thz, dw_thz,
                 phi_l = np.conj(np.asarray(_host(psi[(al, be)])))
                 for (ga, de) in offsets:
                     phi_r = np.asarray(_host(psi[(ga, de)]))
-                    # rank-one legs at the separations this offset pair needs
-                    ga_leg = (vec_a[:, :, p] * (lam_a[:, p] ** (r + de - al))
-                              [:, None])[:, :, None] * cof_a[:, p][:, None, :]
-                    gb_leg = (vec_b[:, :, q] * (lam_b[:, q] ** (r + ga - be))
-                              [:, None])[:, :, None] * cof_b[:, q][:, None, :]
-                    fa = precompute_g_fft(ga_leg, n_fft=n_fft,
-                                          zero_freq_idx=mid,
-                                          dc_handling="interpolate")
-                    fb = precompute_g_fft(gb_leg, n_fft=n_fft,
-                                          zero_freq_idx=mid,
-                                          dc_handling="interpolate")
+                    fa = leg_fft("a", p, r + de - al)
+                    fb = leg_fft("b", q, r + ga - be)
                     out[r] += bubble_dense_from_fft(
                         phi_left=phi_l, phi_right=phi_r,
                         G_a_fft=fa, G_b_fft=fb, ne=ne,
                         prefactor=prefactor, out_slice=out_slice)
+        fft_cache.clear()   # the exponents do not carry across (p, q)
     return out, {"pairs": n_pairs, "kept": n_kept, "weights": weights}
