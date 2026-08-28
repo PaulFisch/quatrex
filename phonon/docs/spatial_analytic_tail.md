@@ -819,31 +819,41 @@ arithmetic of Sec. 18 predicts and it is not interesting on its own: at `d = 1`
 the block is all rank and none of it is amortised over the DOF.
 
 **What is interesting is the shape of the two ladders.** Arm S converges
-monotonically in its rank and reaches machine precision at the quasiseparable
-rank -- `1.8e-02, 8.2e-04, 3.2e-05, 1.9e-14`, four orders per two rank units,
-then exact. Reblocking does not converge in its block size at all. On the
-20-cell bed it went `2.74e-03, 1.18e-02, 1.12e-02` for `m = 2, 3, 4`; on this
-14-cell bed it goes `1.08e-02, 4.37e-04` for `m = 2, 3`. The two beds do not
-even order the same way. Reblocking discards whichever part of `Sigma` the
-block boundaries happen to fall on, and a coarser blocking is not a smaller
-perturbation -- it is a different one.
+monotonically in its rank on every bed measured and reaches machine precision
+at the quasiseparable rank. Reblocking does not converge in its block size.
+Three beds, `eps(J_L)` for `m = 2, 3, 4`:
 
-So the block size is not a convergence knob and the rank is. Above the accuracy
-a reblock happens to land on, there is nothing to compare: reblocking cannot be
-asked for another digit.
+| bed | `m = 2` | `m = 3` | `m = 4` | `\|Sigma\|` discarded |
+|---|---|---|---|---|
+| chain L14 | 1.08e-02 | 4.37e-04 | -- | -- |
+| chain L16 | 8.96e-04 | 1.61e-03 | 2.88e-03 | 51.8 / 38.7 / 27.9 % |
+| chain L20 | 2.74e-03 | 1.18e-02 | 1.12e-02 | 58.8 / 47.4 / 37.8 % |
+
+A coarser blocking discards strictly LESS of `Sigma` -- 51.8 % down to 27.9 %
+on L16 -- and on two of the three beds it is nonetheless less accurate, while
+on the third it is more. The direction is not even fixed across beds.
+Reblocking removes whichever part of `Sigma` the block boundaries happen to
+fall on, so a coarser blocking is not a smaller perturbation, it is a different
+one, and the block size is not a knob that can be turned for another digit.
+The rank is.
 
 ### The break-even, at matched accuracy
 
-Pairing the ladders rather than asking the structured operator to be exact:
+Pairing each reblock with the cheapest rank that reaches its error, rather than
+asking the structured operator to be exact:
 
-| target `eps(J_L)` | reblock | rank `r` needed | break-even `d` |
-|---|---|---|---|
-| ~1e-02 | `m = 2`, cost `4x` | ~3 | 10 |
-| ~5e-04 | `m = 3`, cost `9x` | ~4.5 | 8 |
+| bed | reblock | its `eps` | cost | rank needed | break-even `d` |
+|---|---|---|---|---|---|
+| L16 | `m = 2` | 8.96e-04 | `4x` | 6 | 20 |
+| L16 | `m = 3` | 1.61e-03 | `9x` | 6 | 11 |
+| L16 | `m = 4` | 2.88e-03 | `16x` | 6 | 8 |
 
 `d >= 2r / (m^(2/3) - 1)` as before, but with `r` the rank that MATCHES that
-reblock rather than the rank that is exact. The break-even lands near `d ~ 8-10`
-instead of 24, and a real Si or CNT transport cell carries `d = 24` to `96`.
+reblock rather than the rank that is exact. The break-even lands between 8 and
+20 depending on which reblock is the incumbent, against 24 for the exact-rank
+reading of Sec. 18, and a real Si or CNT transport cell carries `d = 24` to
+`96`. The honest form of this is a range, not a number, and it is a range
+whose top is at the bottom of the physical one.
 
 This is a bed of one degree of freedom, and the whole result turns on whether
 `r` is flat in `d`. If `r` is a property of the physical range of `Sigma` it
