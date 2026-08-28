@@ -15,7 +15,9 @@ the conserving auxiliary-state follow-up
 the measured CNT follow-up
 [`cnt_reblock_acceleration.md`](cnt_reblock_acceleration.md) and its GH200
 kernel benchmark
-[`_cnt_sparse_ring_gpu_bench.py`](../studies/_cnt_sparse_ring_gpu_bench.py)
+[`_cnt_sparse_ring_gpu_bench.py`](../studies/_cnt_sparse_ring_gpu_bench.py),
+and the cross-structure mixed-basis synthesis
+[`mixed_representation_strategy.md`](mixed_representation_strategy.md)
 
 ## 1. Executive verdict
 
@@ -683,8 +685,10 @@ auxiliary FFT padding, q axes, or auxiliary sparse-factor fill.
    frozen post-hoc `d=1,2,4` fits are already noncompetitive.
 2. The converged L8x2 Si gate now rejects post-hoc HODLR for the generated
    distance-2/3 near field.  Generate the support-law distance-4/5 shells with
-   a three-cell/variable-block or explicit-band-five reference before asking
-   whether anything beyond that exact band is compressible.
+   a five-cell reblock, a coverage-proven overlapping/variable-band reference,
+   or an explicit block-band-five selected solve before asking whether anything
+   beyond that exact band is compressible.  A three-cell non-overlapping BTD
+   reblock reaches distance five but does not contain the complete band.
 3. Measure streaming direct-sum reduction, a specialised SSS/ULV solve and
    selected blocks.  Compare against the exact-sparse, four-ring 8 x 2 target
    at the same current tolerance.

@@ -1,0 +1,269 @@
+{
+  "CNT-L16x2": {
+    "spec": {
+      "name": "CNT-L16x2",
+      "run": "cluster/c16x2h/run.npz",
+      "spectral_run": "cluster/c16x2h/run.npz",
+      "fc3": "cluster/cnt_cal/fc3_blocks.hdf5",
+      "green_band": 3,
+      "certified_exact_band": 2,
+      "pole_states": null,
+      "pole_evidence": null,
+      "auxiliary_gate": null,
+      "auxiliary_label": null,
+      "known_min_gamma_over_h": 1.57,
+      "flat_factor_error": 0.0452,
+      "sparse_kernel_time_ratio": 0.5207,
+      "tensor_factor_validated": false,
+      "far_compression_gate": "fail_near_shells_high_rank"
+    },
+    "reference": {
+      "certified": true,
+      "reasons": [],
+      "converged": true,
+      "diverged": false,
+      "n_iter": 101,
+      "eta": 0.0,
+      "lead_current": 34.155897657650456,
+      "internal_spread": 0.0005039552511571153,
+      "current_profile_finite_fraction": 0.2222222222222222,
+      "bubble_balance_defect": null
+    },
+    "spectral_pilot": {
+      "fine_points": 161,
+      "channels": 3,
+      "uniform_grid": true,
+      "min_cell_width": 0.34375,
+      "max_cell_width": 0.34375,
+      "comparison": {
+        "0.01": {
+          "adaptive_points": 22,
+          "uniform_points": 144,
+          "adaptive_fraction": 0.13664596273291926,
+          "adaptive_over_uniform": 0.1527777777777778
+        },
+        "0.001": {
+          "adaptive_points": 67,
+          "uniform_points": 154,
+          "adaptive_fraction": 0.4161490683229814,
+          "adaptive_over_uniform": 0.43506493506493504
+        }
+      }
+    },
+    "fc3": {
+      "n_device_blocks": 4,
+      "block_dof_min": 36,
+      "block_dof_max": 36,
+      "vertex_blocks": 22,
+      "transport_reach": 1,
+      "stored_density": 0.02226937585733882,
+      "stored_nnz": 22858,
+      "stored_entries": 1026432
+    },
+    "poles": {
+      "gamma_over_h": {
+        "min": 1.57
+      },
+      "source": "documented production census"
+    },
+    "auxiliary": null,
+    "decision": {
+      "reference_first": false,
+      "frequency": "adaptive polynomial cells; no rational promotion",
+      "spatial": "retain the current exact/reblocked near pattern; expand only if a shell-current certificate fails",
+      "vertex": "exact atom-sparse FC3 action",
+      "support_radius_upper_bound": 5,
+      "minimum_single_reblock_for_full_band": 5,
+      "multiresolution_points_at_1e3": 67,
+      "far_compression_gate": "fail_near_shells_high_rank"
+    }
+  },
+  "Si-L8x2": {
+    "spec": {
+      "name": "Si-L8x2",
+      "run": "cluster/si-l8x2-final/run.npz",
+      "spectral_run": "cluster/si-l8x2-final/run.npz",
+      "fc3": "cluster/sifilm_nk9r/fc3_blocks.hdf5",
+      "green_band": 3,
+      "certified_exact_band": 2,
+      "pole_states": "cluster/si-aux-l8b/poles.npz",
+      "pole_evidence": "frozen converged interacting state",
+      "auxiliary_gate": "phonon/studies/out/si_auxiliary_scba_L8_worstq.json",
+      "auxiliary_label": "L8",
+      "known_min_gamma_over_h": null,
+      "flat_factor_error": null,
+      "sparse_kernel_time_ratio": null,
+      "tensor_factor_validated": true,
+      "far_compression_gate": "fail_l8x2_hodlr"
+    },
+    "reference": {
+      "certified": true,
+      "reasons": [],
+      "converged": true,
+      "diverged": false,
+      "n_iter": 17,
+      "eta": 0.0,
+      "lead_current": 989.8948239178529,
+      "internal_spread": 0.0028288313759339606,
+      "current_profile_finite_fraction": 1.0,
+      "bubble_balance_defect": 1.309831191489804e-07
+    },
+    "spectral_pilot": {
+      "fine_points": 121,
+      "channels": 486,
+      "uniform_grid": true,
+      "min_cell_width": 0.125,
+      "max_cell_width": 0.125,
+      "comparison": {
+        "0.01": {
+          "adaptive_points": 101,
+          "uniform_points": 120,
+          "adaptive_fraction": 0.8347107438016529,
+          "adaptive_over_uniform": 0.8416666666666667
+        },
+        "0.001": {
+          "adaptive_points": 113,
+          "uniform_points": 120,
+          "adaptive_fraction": 0.9338842975206612,
+          "adaptive_over_uniform": 0.9416666666666667
+        }
+      }
+    },
+    "fc3": {
+      "n_device_blocks": 3,
+      "block_dof_min": 6,
+      "block_dof_max": 6,
+      "vertex_blocks": 15,
+      "transport_reach": 1,
+      "stored_density": 0.3,
+      "stored_nnz": 972,
+      "stored_entries": 3240
+    },
+    "poles": {
+      "clusters": 365,
+      "poles": 1184,
+      "cell_width": 0.125,
+      "gamma_over_h": {
+        "min": 0.017767895009107894,
+        "p10": 0.09344940597780023,
+        "median": 0.35287372251000027,
+        "p90": 0.5188113618474579
+      },
+      "source_variation": {
+        "median": 13.794516573906533,
+        "p90": 280.53338866871803,
+        "max": 642.2971733963449,
+        "fraction_at_or_below_0.1": 0.0
+      },
+      "source": "frozen converged interacting state"
+    },
+    "auxiliary": {
+      "constant_source_error_median": 0.158806676731826,
+      "output_rank_at_1e3": 48,
+      "woodbury_over_reblock_at_1e3": 44.5
+    },
+    "decision": {
+      "reference_first": false,
+      "frequency": "reject wholesale promotion; select FC3-important passive clusters and locally refine every rejected cluster",
+      "spatial": "complete exact shells 3..5 with a block-banded selected solve; test a tail only beyond",
+      "vertex": "validated tensor-factor FC3 action",
+      "support_radius_upper_bound": 5,
+      "minimum_single_reblock_for_full_band": 5,
+      "multiresolution_points_at_1e3": 113,
+      "far_compression_gate": "fail_l8x2_hodlr"
+    }
+  },
+  "MoS2-L3": {
+    "spec": {
+      "name": "MoS2-L3",
+      "run": "cluster/mos2f3nu/run.npz",
+      "spectral_run": "cluster/mos2f3nu/run_ballistic.npz",
+      "fc3": "cluster/mos2f3nu/fc3_blocks.hdf5",
+      "green_band": 1,
+      "certified_exact_band": 1,
+      "pole_states": "cluster/mos2-aux-l3-uniform/poles.npz",
+      "pole_evidence": "two-iteration interacting uniform-grid proxy; the production nonuniform-grid state is uncertified",
+      "auxiliary_gate": null,
+      "auxiliary_label": null,
+      "known_min_gamma_over_h": null,
+      "flat_factor_error": null,
+      "sparse_kernel_time_ratio": null,
+      "tensor_factor_validated": false,
+      "far_compression_gate": "not_needed_for_onsite_fc3_at_b1"
+    },
+    "reference": {
+      "certified": false,
+      "reasons": [
+        "SCBA fixed point is not converged"
+      ],
+      "converged": false,
+      "diverged": false,
+      "n_iter": 20,
+      "eta": 0.0,
+      "lead_current": 49.945231185346195,
+      "internal_spread": 2.3220540789174633,
+      "current_profile_finite_fraction": 1.0,
+      "bubble_balance_defect": 0.0003639135325412389
+    },
+    "spectral_pilot": {
+      "fine_points": 262,
+      "channels": 125,
+      "uniform_grid": false,
+      "min_cell_width": 0.02003122282671188,
+      "max_cell_width": 0.13279042805464947,
+      "comparison": {
+        "0.01": {
+          "adaptive_points": 51,
+          "uniform_points": 257,
+          "adaptive_fraction": 0.1946564885496183,
+          "adaptive_over_uniform": 0.19844357976653695
+        },
+        "0.001": {
+          "adaptive_points": 66,
+          "uniform_points": 257,
+          "adaptive_fraction": 0.25190839694656486,
+          "adaptive_over_uniform": 0.25680933852140075
+        }
+      }
+    },
+    "fc3": {
+      "n_device_blocks": 3,
+      "block_dof_min": 18,
+      "block_dof_max": 18,
+      "vertex_blocks": 3,
+      "transport_reach": 0,
+      "stored_density": 0.12551440329218108,
+      "stored_nnz": 2196,
+      "stored_entries": 17496
+    },
+    "poles": {
+      "clusters": 255,
+      "poles": 600,
+      "cell_width": 0.10000000000000003,
+      "gamma_over_h": {
+        "min": 2.3363152309744234e-13,
+        "p10": 8.110098070530275e-05,
+        "median": 0.003341579881527965,
+        "p90": 0.13670985202982844
+      },
+      "source_variation": {
+        "median": 3.762981380419166,
+        "p90": 172.62387436537904,
+        "max": 816.4808596800228,
+        "fraction_at_or_below_0.1": 0.058823529411764705
+      },
+      "source": "two-iteration interacting uniform-grid proxy; the production nonuniform-grid state is uncertified"
+    },
+    "auxiliary": null,
+    "decision": {
+      "reference_first": true,
+      "frequency": "pilot only; do not train an SCBA representation",
+      "spatial": "certify the uncompressed SCBA fixed point first",
+      "vertex": "benchmark exact sparse FC3; keep dense as oracle",
+      "support_radius_upper_bound": 1,
+      "minimum_single_reblock_for_full_band": 1,
+      "multiresolution_points_at_1e3": 66,
+      "far_compression_gate": "not_needed_for_onsite_fc3_at_b1"
+    }
+  }
+}

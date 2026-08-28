@@ -203,9 +203,12 @@ this real Si gate.
 
 The two-cell state is still pinned to zero at primitive distances four and
 beyond.  The support law permits distance five for `p=1,b=3`, and the residual
-internal-current error makes those shells the next reference question.  Use a
-three-cell/variable-block reference or an explicit band-five solver to generate
-them exactly before testing compression only outside that band.
+internal-current error makes those shells the next reference question.  A
+non-overlapping three-cell BTD reblock only *reaches* distance five; it misses
+some pairs in the complete primitive band (for example pairs straddling a
+supercell boundary).  Use a five-cell reblock, an overlapping/variable-band
+reference proven to cover every pair, or an explicit block-band-five solver to
+generate the complete band exactly before testing compression only outside it.
 
 For films longer than L8, the lifted FC3 archive remains 6.8 MB because the
 vertex is local and length-independent.  At fixed q/frequency distribution,
