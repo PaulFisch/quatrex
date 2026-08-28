@@ -210,16 +210,27 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--n-cells", type=int, default=8)
     parser.add_argument("--cell-dof", type=int, default=6)
+    parser.add_argument("--stored-n-cells", type=int,
+                        help="snapshot block count; defaults to --n-cells")
+    parser.add_argument("--stored-cell-dof", type=int,
+                        help="snapshot block DOF; defaults to --cell-dof")
     parser.add_argument("--wmax", type=float, default=15.0)
     args = parser.parse_args()
     archive = np.load(args.sigma, allow_pickle=False)
     lesser = np.asarray(archive["sigma_lesser"])
     frequencies = np.linspace(0.0, args.wmax, lesser.shape[0])
-    report = {"shape": list(lesser.shape), "cases": {}}
+    stored_n = args.stored_n_cells or args.n_cells
+    stored_d = args.stored_cell_dof or args.cell_dof
+    report = {
+        "shape": list(lesser.shape),
+        "stored_blocking": [stored_n, stored_d],
+        "analysis_blocking": [args.n_cells, args.cell_dof],
+        "cases": {},
+    }
     for label, iw, q0, q1 in choose_cases(
             lesser, frequencies, args.pole_states):
         sigma = decode_full_blocks(
-            lesser[iw, q0, q1], args.n_cells, args.cell_dof)
+            lesser[iw, q0, q1], stored_n, stored_d)
         row = analyse_matrix(sigma, args.n_cells, args.cell_dof)
         row.update({"frequency_index": iw, "frequency_thz": frequencies[iw],
                     "q_index": [q0, q1]})

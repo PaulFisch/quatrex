@@ -42,3 +42,26 @@ def test_si_gate_refuses_a_materially_nonpassive_source():
     out = S.analyse_case(_case(source_sign=-1.0), vf=_vertex())
     assert out["n_invalid_passive_clusters"] == 1
     assert "refused" in out["qfold_status"]
+
+
+def test_si_gate_can_screen_a_conservative_external_q_subset():
+    base = _case()
+    clusters = []
+    for q in range(2):
+        cl = base.clusters[0]
+        clusters.append(S.FrozenCluster(
+            q=(q,), z=cl.z, u=cl.u, v=cl.v,
+            source_lesser=cl.source_lesser,
+            source_greater=cl.source_greater, label=f"q{q}"))
+    case = S.FrozenCase(
+        name="qproxy", frequencies=base.frequencies,
+        block_sizes=base.block_sizes, q_shape=(2,), clusters=clusters)
+    vf = _vertex()
+    vf.UB = np.repeat(vf.UB, 2, axis=1)
+    vf.UC = np.repeat(vf.UC, 2, axis=1)
+    vf.q_diff_map = np.array([[0, 1], [1, 0]])
+    vf.nk_shape = (2,)
+    out = S.analyse_case(case, vf=vf, external_q_count=1)
+    assert out["qfold_status"] == "complete"
+    assert out["full_external_q_axis"] is False
+    assert len(out["external_q_indices"]) == 1

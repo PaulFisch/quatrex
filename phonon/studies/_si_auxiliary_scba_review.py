@@ -211,8 +211,7 @@ def _modal_coupling(vf, q1: int, q2: int, ua: np.ndarray,
             if not 0 <= k1 < n_cells:
                 continue
             u1 = ua[k1 * cell_dof:(k1 + 1) * cell_dof]
-            bproj = np.einsum(
-                "ir,ia->ra", vf.UB[pos[d1], q1], u1, optimize=True)
+            bproj = np.asarray(vf.UB[pos[d1], q1]).T @ u1
             for d2 in (int(x) for x in vf.offsets):
                 if support is not None and (d1, d2) not in support:
                     continue
@@ -220,10 +219,14 @@ def _modal_coupling(vf, q1: int, q2: int, ua: np.ndarray,
                 if not 0 <= k2 < n_cells:
                     continue
                 u2 = ub[k2 * cell_dof:(k2 + 1) * cell_dof]
-                cproj = np.einsum(
-                    "ir,ib->rb", vf.UC[pos[d2], q2], u2, optimize=True)
-                acc += np.einsum(
-                    "mr,ra,rb->mab", dt, bproj, cproj, optimize=True)
+                cproj = np.asarray(vf.UC[pos[d2], q2]).T @ u2
+                # The old three-operand einsum recomputed a contraction path
+                # for every cell/offset/cluster tuple.  Flatten the two modal
+                # legs and use one GEMM; this is the same contraction and is
+                # the form a production tensor kernel would use.
+                modal_outer = (bproj[:, :, None] * cproj[:, None, :]).reshape(
+                    dt.shape[1], -1)
+                acc += (dt @ modal_outer).reshape(cell_dof, ra, rb)
         out[i * cell_dof:(i + 1) * cell_dof] = acc.reshape(cell_dof, -1)
     return out
 
@@ -244,7 +247,8 @@ def _cluster_combination_count(poles: list[complex], factor: float = 1.0) -> int
     return len(groups)
 
 
-def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4)):
+def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4),
+                 external_q_count: int = 0):
     nq = int(np.prod(case.q_shape)) if case.q_shape else 1
     by_q: dict[int, list[tuple[FrozenCluster, np.ndarray, np.ndarray]]] = {
         q: [] for q in range(nq)}
@@ -315,10 +319,29 @@ def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4)):
     if int(vf.n_kpts) != nq or int(vf.D.shape[0]) != case.cell_dof:
         raise ValueError("vertex factors do not match this Si case")
 
+    if 0 < int(external_q_count) < nq:
+        count = int(external_q_count)
+        # Cover the mesh while deliberately including the q points with the
+        # largest input state count.  This is a conservative long-film rank
+        # screen, not a replacement for the full q fold.
+        spread = np.linspace(0, nq - 1, count, dtype=int).tolist()
+        ranked = sorted(range(nq), key=lambda q: (-all_input_ranks[q], q))
+        external_q = []
+        for pair in zip(ranked, spread):
+            for q in pair:
+                if q not in external_q:
+                    external_q.append(q)
+                if len(external_q) == count:
+                    break
+            if len(external_q) == count:
+                break
+    else:
+        external_q = list(range(nq))
+
     raw_ranks, merged_counts = [], []
     ranks = {str(t): [] for t in tolerances}
     eig_spectra = []
-    for qe in range(nq):
+    for qe in external_q:
         cov = np.zeros((case.n_cells * case.cell_dof,) * 2, dtype=complex)
         raw = 0
         combination_poles: list[complex] = []
@@ -365,6 +388,8 @@ def analyse_case(case: FrozenCase, vf=None, tolerances=(1e-2, 1e-3, 1e-4)):
         return float(aux / reblock)
     result.update({
         "qfold_status": "complete",
+        "external_q_indices": external_q,
+        "full_external_q_axis": len(external_q) == nq,
         "raw_output_states_per_q": {
             "median": float(np.median(raw_ranks)), "max": int(max(raw_ranks))},
         "linewidth_merged_output_poles_per_q": {
@@ -388,13 +413,16 @@ def main() -> None:
                         help="NAME=QX_SAVE_POLE_STATES.npz")
     parser.add_argument("--vertices",
                         help="production decomposed_vertices.npz; omit for the input gate")
+    parser.add_argument("--external-q-count", type=int, default=0,
+                        help="conservative sampled external-q screen; 0 means all")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     vf = load_decomposed(args.vertices) if args.vertices else None
     report = {}
     for spec in args.case:
         case = load_case(spec)
-        report[case.name] = analyse_case(case, vf=vf)
+        report[case.name] = analyse_case(
+            case, vf=vf, external_q_count=args.external_q_count)
         print(case.name, json.dumps(report[case.name], indent=2)[:5000], flush=True)
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)
