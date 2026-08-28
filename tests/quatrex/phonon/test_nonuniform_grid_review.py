@@ -52,3 +52,25 @@ def test_coarse_auxiliary_fails_for_subcell_lines():
     coarse = result["summary"]["background"]
     assert coarse["0.001"]["max_bubble_relative_l2"] > 0.5
     assert coarse["0.001"]["max_peak_area_error"] > 0.5
+
+
+def test_nonuniform_p1_product_integration_is_exact_for_hat():
+    grid = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])
+    values = np.array([0.0, 0.0, 1.0, 0.0, 0.0])
+    output = np.linspace(-2.0, 2.0, 17)
+    got = N.p1_product_integration(grid, values, output)
+    # Independent high-resolution rectangle oracle for the triangular hat.
+    x = np.linspace(-2.0, 2.0, 200001)
+    hat = np.maximum(1.0 - np.abs(x), 0.0)
+    want = np.array([np.trapezoid(
+        hat * np.maximum(1.0 - np.abs(z - x), 0.0), x) for z in output])
+    assert np.allclose(got, want, rtol=2e-9, atol=2e-9)
+
+
+def test_direct_nonuniform_bubble_stays_accurate_as_line_narrows():
+    result = N.run_sweep()
+    direct = result["direct_nonuniform_summary"]
+    assert max(v["max_bubble_relative_l2"] for v in direct.values()) < 2e-2
+    assert max(v["max_peak_area_error"] for v in direct.values()) < 3e-2
+    assert direct["0.001"]["primary_points"] < 3.5 * direct["1.0"][
+        "primary_points"]

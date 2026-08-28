@@ -132,6 +132,23 @@ def adaptive_grid(model: LorentzianMixture, fmax: float, background_h: float,
     return np.unique(np.concatenate(([-fmax], grid, [fmax])))
 
 
+def adaptive_output_grid(model: LorentzianMixture, fmax: float,
+                         background_h: float,
+                         points_per_hwhm: int = 8) -> np.ndarray:
+    """Graded grid for the full ``[-2*fmax, 2*fmax]`` bubble support."""
+    limit = 2.0 * fmax
+    pieces = [np.arange(-limit, limit + 0.5 * background_h, background_h)]
+    dt = 1.0 / float(points_per_hwhm)
+    for centre, width in zip(model.output_centres, model.output_widths):
+        reach = max(limit + centre, limit - centre)
+        t = np.arange(0.0, np.arcsinh(reach / width) + dt, dt)
+        x = width * np.sinh(t)
+        pieces.extend((centre + x, centre - x))
+    grid = np.unique(np.concatenate(pieces))
+    grid = grid[(grid >= -limit) & (grid <= limit)]
+    return np.unique(np.concatenate(([-limit], grid, [limit])))
+
+
 def uniform_grid(fmax: float, spacing: float) -> np.ndarray:
     n = int(np.ceil(2.0 * fmax / float(spacing))) + 1
     return np.linspace(-fmax, fmax, n)
@@ -148,6 +165,46 @@ def fft_bubble(auxiliary: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, n
     h = float(auxiliary[1] - auxiliary[0])
     omega = auxiliary[0] + auxiliary[0] + np.arange(2 * auxiliary.size - 1) * h
     return omega, h * fftconvolve(values, values, mode="full")
+
+
+def p1_product_integration(primary: np.ndarray, values: np.ndarray,
+                           output: np.ndarray) -> np.ndarray:
+    """Convolve one compactly supported nonuniform P1 interpolant exactly.
+
+    For fixed output ``z``, the breakpoints of
+    ``g_h(x) g_h(z-x)`` are the primary knots and their reflections about
+    ``z``.  Both factors are linear between consecutive breakpoints, hence
+    their product is quadratic and the interval integral below is exact.
+
+    This is the reference nonuniform collision discretisation, not a proposed
+    production algorithm: evaluating all output knots costs ``O(N_p**2)``.
+    It cleanly separates the accuracy of a nonuniform basis from the accuracy
+    and inverse-linewidth cost of uniform auxiliary gridding.
+    """
+    p = np.asarray(primary, float)
+    v = np.asarray(values)
+    z_values = np.asarray(output, float)
+    if p.ndim != 1 or v.shape != p.shape or np.any(np.diff(p) <= 0.0):
+        raise ValueError("primary must be increasing and values must match it")
+    result = np.zeros(z_values.shape, dtype=np.result_type(v, float))
+    left, right = float(p[0]), float(p[-1])
+    for k, z in np.ndenumerate(z_values):
+        lo = max(left, float(z) - right)
+        hi = min(right, float(z) - left)
+        if hi <= lo:
+            continue
+        direct = p[(p > lo) & (p < hi)]
+        reflected = float(z) - p
+        reflected = reflected[(reflected > lo) & (reflected < hi)]
+        knots = np.unique(np.concatenate(([lo], direct, reflected, [hi])))
+        x0, x1 = knots[:-1], knots[1:]
+        f0 = np.interp(x0, p, v)
+        f1 = np.interp(x1, p, v)
+        g0 = np.interp(float(z) - x0, p, v)
+        g1 = np.interp(float(z) - x1, p, v)
+        result[k] = np.sum((x1 - x0) * (
+            2.0 * f0 * g0 + f0 * g1 + f1 * g0 + 2.0 * f1 * g1) / 6.0)
+    return result
 
 
 def interpolation_plan(primary: np.ndarray, auxiliary: np.ndarray):
@@ -204,6 +261,40 @@ def _relative_l2(got: np.ndarray, want: np.ndarray, spacing: float) -> float:
     return float(num / max(den, 1e-300))
 
 
+def _p1_relative_l2(grid: np.ndarray, values: np.ndarray,
+                    exact, interval: tuple[float, float]) -> float:
+    """Gauss-integrated L2 error of a P1 output reconstruction."""
+    nodes, weights = np.polynomial.legendre.leggauss(8)
+    lo_limit, hi_limit = interval
+    numerator = 0.0
+    denominator = 0.0
+    for x0, x1, y0, y1 in zip(grid[:-1], grid[1:], values[:-1], values[1:]):
+        lo, hi = max(float(x0), lo_limit), min(float(x1), hi_limit)
+        if hi <= lo:
+            continue
+        x = 0.5 * ((hi - lo) * nodes + hi + lo)
+        t = (x - x0) / (x1 - x0)
+        got = (1.0 - t) * y0 + t * y1
+        want = exact(x)
+        scale = 0.5 * (hi - lo)
+        numerator += scale * float(np.sum(weights * np.abs(got - want) ** 2))
+        denominator += scale * float(np.sum(weights * np.abs(want) ** 2))
+    return float(np.sqrt(numerator / max(denominator, 1e-300)))
+
+
+def _p1_peak_area_error(grid: np.ndarray, values: np.ndarray,
+                        model: LorentzianMixture) -> float:
+    """Peak-window integral error of the nonuniform P1 output."""
+    errs = []
+    for centre, width in zip(model.output_centres, model.output_widths):
+        probe = np.linspace(centre - 8.0 * width,
+                            centre + 8.0 * width, 2001)
+        got_area = float(np.trapezoid(np.interp(probe, grid, values), probe))
+        ref_area = float(np.trapezoid(model.bubble(probe), probe))
+        errs.append(abs(got_area - ref_area) / max(abs(ref_area), 1e-300))
+    return float(max(errs))
+
+
 def _peak_area_error(omega: np.ndarray, got: np.ndarray,
                      model: LorentzianMixture) -> float:
     errs = []
@@ -237,6 +328,7 @@ def run_sweep() -> dict:
         "eight_per_hwhm": lambda gamma: gamma / 8.0,
     }
     rows = []
+    direct_rows = []
     for ratio in ratios:
         gamma = ratio * background_h
         for offset in offsets:
@@ -248,6 +340,21 @@ def run_sweep() -> dict:
             )
             primary = adaptive_grid(model, fmax, background_h)
             primary_values = model.eval(primary)
+            direct_grid = adaptive_output_grid(model, fmax, background_h)
+            direct = p1_product_integration(
+                primary, primary_values, direct_grid)
+            direct_rows.append({
+                "gamma_over_background_h": ratio,
+                "offset_over_background_h": offset,
+                "primary_points": int(primary.size),
+                "output_points": int(direct_grid.size),
+                "bubble_relative_l2": _p1_relative_l2(
+                    direct_grid, direct, model.bubble, (-3.5, 3.5)),
+                "max_peak_area_error": _p1_peak_area_error(
+                    direct_grid, direct, model),
+                "pair_intervals_upper_bound": int(
+                    primary.size * direct_grid.size),
+            })
             for name, spacing_fn in aux_rules.items():
                 requested_h = float(spacing_fn(gamma))
                 auxiliary = uniform_grid(fmax, requested_h)
@@ -288,6 +395,21 @@ def run_sweep() -> dict:
                 "max_auxiliary_points": max(r["auxiliary_points"] for r in group),
             }
 
+    direct_summary = {}
+    for ratio in ratios:
+        group = [r for r in direct_rows if
+                 r["gamma_over_background_h"] == ratio]
+        direct_summary[str(ratio)] = {
+            "max_bubble_relative_l2": max(
+                r["bubble_relative_l2"] for r in group),
+            "max_peak_area_error": max(
+                r["max_peak_area_error"] for r in group),
+            "primary_points": max(r["primary_points"] for r in group),
+            "output_points": max(r["output_points"] for r in group),
+            "pair_intervals_upper_bound": max(
+                r["pair_intervals_upper_bound"] for r in group),
+        }
+
     # Independently pin the production energy-pairing distinction.
     positive_primary = np.unique(np.concatenate((
         np.linspace(0.0, 4.0, 25), np.linspace(0.8, 1.2, 31),
@@ -302,11 +424,14 @@ def run_sweep() -> dict:
         "cases": len(rows),
         "rows": rows,
         "summary": by_rule_gamma,
+        "direct_nonuniform_rows": direct_rows,
+        "direct_nonuniform_summary": direct_summary,
         "energy_pairing_adjoint_defect": adj_defect,
         "energy_pairing_sample_defect": sample_defect,
         "interpretation": {
             "primary_complexity": "logarithmic under linewidth refinement",
             "fine_auxiliary_complexity": "proportional to inverse linewidth",
+            "direct_nonuniform_p1_complexity": "quadratic in primary points",
             "rational_cluster_complexity": "bounded by promoted cluster rank",
         },
     }
@@ -325,6 +450,11 @@ def main(argv=None) -> int:
                   f"{row['max_leg_relative_l2']:.3e} "
                   f"{row['max_bubble_relative_l2']:.3e} "
                   f"{row['max_peak_area_error']:.3e}")
+    print("direct nonuniform P1 gamma/h | Nprimary | bubble-L2 peak-area")
+    for gamma, row in result["direct_nonuniform_summary"].items():
+        print(f"{gamma:>7s} | {row['primary_points']:8d} | "
+              f"{row['max_bubble_relative_l2']:.3e} "
+              f"{row['max_peak_area_error']:.3e}")
     print("pairing defects: adjoint="
           f"{result['energy_pairing_adjoint_defect']:.3e}, sample="
           f"{result['energy_pairing_sample_defect']:.3e}")

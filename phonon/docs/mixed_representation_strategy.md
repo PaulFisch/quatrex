@@ -27,6 +27,16 @@ an adaptive frequency-cell pilot.  Selective passive pole promotion comes
 after those two baselines.  Spatial hierarchical compression is optional and
 should be attempted only beyond the certified exact pattern.
 
+The adaptive-frequency pilot now has a decisive follow-up in
+[`nonuniform_grid_review.md`](nonuniform_grid_review.md).  Exact direct P1
+product integration establishes that a nonuniform collision basis can work,
+but its reference contraction is quadratic.  Quatrex's present
+energy-adjoint primary/auxiliary bridge cannot eliminate the fine uniform SCBA
+grid and is not automatically conserving: two CNT grids fail the converged
+lead-balance gate, while mild long-Si coarsening passes with little speedup.
+This is why the mixed basis below needs conservative adaptive cells and
+selective rational clusters rather than choosing between them.
+
 ## Reproducible cross-structure gate
 
 The private selector is

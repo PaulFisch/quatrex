@@ -612,11 +612,186 @@
       }
     }
   },
+  "direct_nonuniform_rows": [
+    {
+      "gamma_over_background_h": 1.0,
+      "offset_over_background_h": 0.0,
+      "primary_points": 262,
+      "output_points": 224,
+      "bubble_relative_l2": 0.00547946197468947,
+      "max_peak_area_error": 0.024725743713677417,
+      "pair_intervals_upper_bound": 58688
+    },
+    {
+      "gamma_over_background_h": 1.0,
+      "offset_over_background_h": 0.25,
+      "primary_points": 263,
+      "output_points": 228,
+      "bubble_relative_l2": 0.00574017321089255,
+      "max_peak_area_error": 0.02568799227376391,
+      "pair_intervals_upper_bound": 59964
+    },
+    {
+      "gamma_over_background_h": 1.0,
+      "offset_over_background_h": 0.49,
+      "primary_points": 261,
+      "output_points": 227,
+      "bubble_relative_l2": 0.006023169090795638,
+      "max_peak_area_error": 0.02689303812918636,
+      "pair_intervals_upper_bound": 59247
+    },
+    {
+      "gamma_over_background_h": 0.2,
+      "offset_over_background_h": 0.0,
+      "primary_points": 391,
+      "output_points": 302,
+      "bubble_relative_l2": 0.0019467118318948955,
+      "max_peak_area_error": 0.001922076668127508,
+      "pair_intervals_upper_bound": 118082
+    },
+    {
+      "gamma_over_background_h": 0.2,
+      "offset_over_background_h": 0.25,
+      "primary_points": 391,
+      "output_points": 303,
+      "bubble_relative_l2": 0.0019644793301076204,
+      "max_peak_area_error": 0.0019043820342226603,
+      "pair_intervals_upper_bound": 118473
+    },
+    {
+      "gamma_over_background_h": 0.2,
+      "offset_over_background_h": 0.49,
+      "primary_points": 390,
+      "output_points": 304,
+      "bubble_relative_l2": 0.001907205002672647,
+      "max_peak_area_error": 0.0018256349170194782,
+      "pair_intervals_upper_bound": 118560
+    },
+    {
+      "gamma_over_background_h": 0.04,
+      "offset_over_background_h": 0.0,
+      "primary_points": 522,
+      "output_points": 381,
+      "bubble_relative_l2": 0.0022149720555767133,
+      "max_peak_area_error": 0.002498472041063142,
+      "pair_intervals_upper_bound": 198882
+    },
+    {
+      "gamma_over_background_h": 0.04,
+      "offset_over_background_h": 0.25,
+      "primary_points": 520,
+      "output_points": 381,
+      "bubble_relative_l2": 0.0022544073384077557,
+      "max_peak_area_error": 0.002573277857404307,
+      "pair_intervals_upper_bound": 198120
+    },
+    {
+      "gamma_over_background_h": 0.04,
+      "offset_over_background_h": 0.49,
+      "primary_points": 518,
+      "output_points": 380,
+      "bubble_relative_l2": 0.0022408567778088393,
+      "max_peak_area_error": 0.0025301498152597124,
+      "pair_intervals_upper_bound": 196840
+    },
+    {
+      "gamma_over_background_h": 0.008,
+      "offset_over_background_h": 0.0,
+      "primary_points": 650,
+      "output_points": 458,
+      "bubble_relative_l2": 0.002276687183352217,
+      "max_peak_area_error": 0.0026054780391323007,
+      "pair_intervals_upper_bound": 297700
+    },
+    {
+      "gamma_over_background_h": 0.008,
+      "offset_over_background_h": 0.25,
+      "primary_points": 649,
+      "output_points": 458,
+      "bubble_relative_l2": 0.00227623615110639,
+      "max_peak_area_error": 0.00259949309970513,
+      "pair_intervals_upper_bound": 297242
+    },
+    {
+      "gamma_over_background_h": 0.008,
+      "offset_over_background_h": 0.49,
+      "primary_points": 648,
+      "output_points": 458,
+      "bubble_relative_l2": 0.0022394840976486417,
+      "max_peak_area_error": 0.002547155190698079,
+      "pair_intervals_upper_bound": 296784
+    },
+    {
+      "gamma_over_background_h": 0.001,
+      "offset_over_background_h": 0.0,
+      "primary_points": 814,
+      "output_points": 557,
+      "bubble_relative_l2": 0.0022787836526592838,
+      "max_peak_area_error": 0.0026070535181768285,
+      "pair_intervals_upper_bound": 453398
+    },
+    {
+      "gamma_over_background_h": 0.001,
+      "offset_over_background_h": 0.25,
+      "primary_points": 814,
+      "output_points": 557,
+      "bubble_relative_l2": 0.00228124723744333,
+      "max_peak_area_error": 0.002611400494582134,
+      "pair_intervals_upper_bound": 453398
+    },
+    {
+      "gamma_over_background_h": 0.001,
+      "offset_over_background_h": 0.49,
+      "primary_points": 813,
+      "output_points": 557,
+      "bubble_relative_l2": 0.0022812456172888007,
+      "max_peak_area_error": 0.002611132963974316,
+      "pair_intervals_upper_bound": 452841
+    }
+  ],
+  "direct_nonuniform_summary": {
+    "1.0": {
+      "max_bubble_relative_l2": 0.006023169090795638,
+      "max_peak_area_error": 0.02689303812918636,
+      "primary_points": 263,
+      "output_points": 228,
+      "pair_intervals_upper_bound": 59964
+    },
+    "0.2": {
+      "max_bubble_relative_l2": 0.0019644793301076204,
+      "max_peak_area_error": 0.001922076668127508,
+      "primary_points": 391,
+      "output_points": 304,
+      "pair_intervals_upper_bound": 118560
+    },
+    "0.04": {
+      "max_bubble_relative_l2": 0.0022544073384077557,
+      "max_peak_area_error": 0.002573277857404307,
+      "primary_points": 522,
+      "output_points": 381,
+      "pair_intervals_upper_bound": 198882
+    },
+    "0.008": {
+      "max_bubble_relative_l2": 0.002276687183352217,
+      "max_peak_area_error": 0.0026054780391323007,
+      "primary_points": 650,
+      "output_points": 458,
+      "pair_intervals_upper_bound": 297700
+    },
+    "0.001": {
+      "max_bubble_relative_l2": 0.00228124723744333,
+      "max_peak_area_error": 0.002611400494582134,
+      "primary_points": 814,
+      "output_points": 557,
+      "pair_intervals_upper_bound": 453398
+    }
+  },
   "energy_pairing_adjoint_defect": 2.438382818843281e-16,
   "energy_pairing_sample_defect": 3.7172047832256676,
   "interpretation": {
     "primary_complexity": "logarithmic under linewidth refinement",
     "fine_auxiliary_complexity": "proportional to inverse linewidth",
+    "direct_nonuniform_p1_complexity": "quadratic in primary points",
     "rational_cluster_complexity": "bounded by promoted cluster rank"
   }
 }

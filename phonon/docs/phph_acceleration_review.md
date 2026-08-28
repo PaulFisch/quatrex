@@ -17,7 +17,9 @@ the measured CNT follow-up
 kernel benchmark
 [`_cnt_sparse_ring_gpu_bench.py`](../studies/_cnt_sparse_ring_gpu_bench.py),
 and the cross-structure mixed-basis synthesis
-[`mixed_representation_strategy.md`](mixed_representation_strategy.md)
+[`mixed_representation_strategy.md`](mixed_representation_strategy.md), plus
+the decisive dual-grid follow-up
+[`nonuniform_grid_review.md`](nonuniform_grid_review.md)
 
 ## 1. Executive verdict
 
@@ -27,6 +29,17 @@ has to be discretised once in an **enriched basis**: smooth frequency cells plus
 coherent passive rational clusters.  All four bubble sectors then belong to one
 bilinear discretisation, and a narrow output line remains rational instead of
 being sampled back onto the coarse grid.
+
+The separate nonuniform-grid follow-up shows that a genuinely nonuniform P1
+collision basis can resolve the reduced analytic bubble with logarithmic point
+growth, but the direct reference contraction is quadratic.  The existing
+file-grid bridge is only a **conditional primary-solve/memory compression**:
+its unchanged uniform auxiliary bubble still grows as the inverse linewidth,
+and two CNT grids fail converged conservation even though the weighted-adjoint
+transfer identity is exact.  Mild nonuniformity passes on long Si but saves
+only 2.82%.  The two mechanisms are therefore complementary: conservative
+adaptive cells decide where Dyson and smooth collision sectors are sampled;
+passive rational clusters remove subcell lines from the uniform convolution.
 
 The reduced study passes the quadrature gates:
 
