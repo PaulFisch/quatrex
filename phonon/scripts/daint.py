@@ -106,7 +106,11 @@ def cmd_setup(_):
         f"MPI4PY_BUILD_MPICC=\"mpicc -shared\" "
         f"pip install -q --no-binary=mpi4py mpi4py && "
         f"pip install -q cupy-cuda{cuda_major}x numpy scipy h5py pydantic "
-        f"toml numba ase matplotlib pytest pytest-mpi'", 1800))
+        f"toml numba ase matplotlib pytest pytest-mpi "
+        # phonon/solver/__init__ -> dense -> phonon_inputs.convention imports
+        # Phonopy at module scope, so the whole studies tree needs it even
+        # for a toy chain that never reads a force-constant file.
+        f"phonopy'", 1800))
     print(ssh(
         f"uenv run {UENV} --view=default -- bash -c '"
         f"source {VENV}/bin/activate && python -c \""
