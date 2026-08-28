@@ -2301,6 +2301,10 @@ class QuatrexConfig(BaseModel):
                 raise ValueError(
                     "Either `fermi_level` or `mid_gap_energy` must be set."
                 )
+            if contact.mid_gap_energy is None and self.formalism == "wf":
+                raise ValueError(
+                    "In the 'wf' formalism, `mid_gap_energy` must be set for each contact."
+                )
 
         return self
 
