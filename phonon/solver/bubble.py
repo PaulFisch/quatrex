@@ -184,7 +184,11 @@ def bubble_task_batch_bytes(*, n_fft, nI, nJ, bK1, bK1p, bK2, bK2p,
     """
     big = n_fft * nI * max(bK1, bK2p) * max(bK1p, bK2p) * itemsize
     io = n_fft * (bK1 * bK1p + bK2 * bK2p + nI * nJ) * itemsize
-    return int(2 * big + io)
+    # FIVE d^3-sized transients live at once, not two: T1, the copy the
+    # transpose+reshape forces before the second matmul, T2, and the two the
+    # `prefactor * ifft(...)` expression makes. Counting two of them sized a
+    # chunk that asked a GH200 for 24-40 GB in one allocation.
+    return int(5 * big + 2 * io)
 
 
 def bubble_dense_from_fft_task_batched(
@@ -230,7 +234,15 @@ def bubble_dense_from_fft_task_batched(
         s_hat = _bubble_contract_task_batched(
             phi_left[t0:t1], phi_right[t0:t1],
             G_a_fft[t0:t1], G_b_fft[t0:t1])
-        out[t0:t1] = prefactor * xp.fft.ifft(s_hat, axis=1)[:, out_slice]
+        spec = xp.fft.ifft(s_hat, axis=1)
+        del s_hat
+        out[t0:t1] = prefactor * spec[:, out_slice]
+        del spec
+        if xp is not np:
+            # cupy caches freed blocks; without this the pool grows to the
+            # high-water mark of every chunk at once and the next allocation
+            # fails with memory that is free but not returned.
+            xp.get_default_memory_pool().free_all_blocks()
     return out
 
 

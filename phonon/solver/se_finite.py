@@ -342,7 +342,7 @@ def _run_bubble_tasks_task_batched(
     # budget picks a chunk that OOMs the card immediately.
     if xp is not np:
         free, _total = xp.cuda.Device().mem_info
-        budget = int(0.6 * free) - int(gl_s.nbytes + gg_s.nbytes)
+        budget = int(0.5 * free) - int(gl_s.nbytes + gg_s.nbytes)
         where = "device"
     else:
         budget = int(0.7 * _available_memory_bytes()) - fixed_bytes
