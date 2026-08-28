@@ -563,7 +563,14 @@ digits at every in-band frequency.
 `SemiSepOperator` also supplies the `O(N r^2)` matvec that
 `spatial_hankel.Semiseparable`'s docstring advertises and never had.
 
-## 14. Gate G5 fails: no compact common spatial basis
+## 14. Gate G5 -- **the first reading was a grid artefact; corrected below**
+
+> **Correction (2026-08-28).** The verdict in this section was taken on a grid
+> that barely resolves the bed, and it does not survive a matched comparison.
+> The numbers below stand as measured; the conclusion drawn from them does not.
+> See Sec. 17.
+
+## 14a. As first measured, on a coarse grid
 
 `DeltaSigma(omega)` as a (spatial-operator element x frequency) matrix, on three
 converged chains that differ only in coupling:
@@ -664,3 +671,47 @@ matrix has quasiseparable rank at most its bandwidth, so its rank is bounded by
 construction and needs no modal machinery. The representation is being asked to
 compress the one object that is not already compressible, and it grows with the
 device.
+
+## 17. Correction: the common basis is compact on a resolving grid
+
+Paul's objection to Sec. 14 was that the bed carried no long-range or sharp-peak
+physics. Testing it turned up a larger effect than the one being looked for.
+
+At **matched size and matched grid** -- 12 cells, `nfreq_pos = 600`, both
+converged to `resid ~ 9.5e-09`:
+
+| bed | live `omega` | `r@1e-2` | `r@1e-3` | `N_w / r` | singular values | subspace turn |
+|---|---|---|---|---|---|---|
+| dispersive chain | 600 | 33 | 51 | **11.8x** | 1.00 0.90 0.67 0.61 0.52 0.44 | 17.7 deg |
+| flat band (sharp line) | 579 | 24 | 44 | **13.2x** | 1.00 0.81 0.65 0.47 0.33 0.26 | 16.2 deg |
+
+Two things follow, and the second is the important one.
+
+**The sharp line helps, but only a little**: 44 against 51, and a visibly faster
+singular decay. The hypothesis was right in direction and is not the dominant
+term.
+
+**The dominant term is the frequency grid.** Sec. 14 measured 78 operators for
+140 frequencies -- 56 %, "not compact". The same kind of bed on a grid four
+times finer needs 51 for 600. The rank is a property of the FUNCTION
+`DeltaSigma(omega)` and saturates once the grid resolves it; the compression
+factor is `N_w / r_s`, so a coarse grid has little redundancy to exploit and a
+fine one has an order of magnitude. Production runs the fine grid, because that
+is what a sharp line requires.
+
+So **gate G5 is far more favourable than Sec. 14 concluded**: a common spatial
+basis of ~50 operators serves ~600 frequencies, and the Hilbert transform would
+act on 50 coefficient functions instead of on the full operator at every
+frequency.
+
+Two caveats that are mine to own. The "subspace turns 64 degrees in three
+samples" diagnostic of Sec. 14 is normalised by sample COUNT, not by frequency
+interval, so it necessarily improves on a finer grid -- it measures the grid as
+much as the physics and should be read per unit frequency. And the windowed
+fallback still rises with the window count on every bed (`44 -> 168` here), so
+one global basis remains the right construction; that part of Sec. 14 stands.
+
+What this does **not** change: Sec. 15, that the causal action route costs
+`N_D N_w` structured applications whatever the basis does, and Sec. 16, that the
+wide `Sigma`'s own semiseparable rank grows with device length. Whether `r_s`
+also grows with `N` on a resolving grid is being measured.
