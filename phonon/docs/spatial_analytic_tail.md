@@ -658,7 +658,8 @@ rank growing with length (§48.2-3); this is between them and on the wrong side
 for an augmented Dyson, whose whole point is a local block of fixed size.
 
 At `N = 32` the augmented block would be `d + 2 r = 21` against a 2-cell
-reblock's `2d = 2`.
+reblock's `2d = 2`. That ratio is of block WIDTHS and understates the gap; the
+cost accounting is in Sec. 18.
 
 The joint spatial-frequency rank degrades with length too: `78/140` (56 %) at
 `N = 20` becomes `108/140` (77 %) at `N = 32`, and the subspace turn rises from
@@ -715,3 +716,60 @@ What this does **not** change: Sec. 15, that the causal action route costs
 `N_D N_w` structured applications whatever the basis does, and Sec. 16, that the
 wide `Sigma`'s own semiseparable rank grows with device length. Whether `r_s`
 also grows with `N` on a resolving grid is being measured.
+
+## 18. What the structured operator has to beat, in flops rather than widths
+
+Sec. 16 and the proposal's Sec. 39 both set the augmented block `d + r+ + r-`
+against reblocking's `2d` and read off a factor. That comparison is of block
+widths, and it is not the cost. A block solve is cubic in the width and linear
+in the block count, and an `m`-cell reblock divides the count by `m` while
+multiplying the width by `m`:
+
+| structure | blocks | width | leading RGF cost |
+|---|---|---|---|
+| production pin | `N` | `d` | `N d^3` |
+| `m`-cell reblock | `N/m` | `m d` | `m^2 N d^3` |
+| augmented RGF | `N` | `d + r+ + r-` | `N (d + 2r)^3` |
+
+A 2-cell reblock therefore costs four times the pin, not twice, and the
+augmented block has to come in under `4^(1/3) d ~ 1.587 d` to beat it -- that
+is `r < 0.293 d` per side, nearly six times harder than the width comparison
+implies. Storage is the gentler axis: at the same block count it is quadratic,
+so the reblock costs `2x` the pin in memory where it costs `4x` in flops.
+
+The break-even is `d >= 2r / (m^(2/3) - 1)`:
+
+| `r` per side | vs 2-cell | vs 3-cell | vs 4-cell |
+|---|---|---|---|
+| 4 | 14 | 7 | 5 |
+| 7 | 24 | 13 | 9 |
+| 10 | 34 | 19 | 13 |
+
+This is the useful reading of the arithmetic, and it is not the dismissal it
+first looks like. `r ~ 7` is what the 20-cell chain gives, and `d ~ 24` is
+inside the range of a real transport cell -- a Si or CNT cell carrying eight to
+thirty-two atoms has `d = 24` to `96`. The comparison is not settled by
+counting; it turns entirely on whether `r_Sigma` is flat in `d` or grows with
+it, which is the measurement in Sec. 19.
+
+### The near field does not account for the rank
+
+The quasiseparable rank as measured in Sec. 16 charges the generators for the
+near-field blocks, which the proposal's Sec. 15 operator holds explicitly
+("plus the explicit diagonal/near-field blocks"). Excluding them can only lower
+the rank, and if the corner were dominated by the near field it would lower it
+a lot. `offdiag_rank` now takes a `band` argument -- the number of block
+diagonals kept explicit, so `band = 1` is exactly the production BTD structure
+-- and on a 14-cell chain:
+
+| object | `b0` | `b1` | `b2` |
+|---|---|---|---|
+| `G^R` | 2 | 3 | 3 |
+| `G^<` | 4 | 4 | 4 |
+| `Sigma^<` | 6 | 5 | 5 |
+
+Banding out the near field buys one rank unit on `Sigma` and then stalls. The
+corner rank is long-range structure, not near-field bookkeeping. That closes
+the refinement rather than motivating a search for a better one, and it means
+the `r` in the break-even table can be read off the `b0` measurement to within
+one.
