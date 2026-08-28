@@ -33,7 +33,8 @@ except ModuleNotFoundError:  # direct ``python phonon/studies/...py`` execution
 REPO = Path(__file__).resolve().parents[2]
 
 
-def selected_knots(run: Path, tolerance: float) -> np.ndarray:
+def selected_knots(run: Path, tolerance: float,
+                   max_index_gap: int | None = None) -> np.ndarray:
     """Greedy common P1 grid used by the cross-structure pilot."""
     x, weights, values = _frequency_channels(str(run))
     selected = [0, x.size - 1]
@@ -41,11 +42,20 @@ def selected_knots(run: Path, tolerance: float) -> np.ndarray:
         ids = np.asarray(sorted(selected), dtype=int)
         approx = linear_reconstruction(x, values, ids)
         if weighted_error(values, approx, weights) <= tolerance:
-            return ids
+            break
         row_error = weights * np.sum(np.abs(values - approx) ** 2, axis=1)
         row_error[ids] = -1.0
         selected.append(int(np.argmax(row_error)))
-    return np.arange(x.size)
+    else:
+        ids = np.arange(x.size)
+    if max_index_gap is not None:
+        if max_index_gap < 1:
+            raise ValueError("max_index_gap must be positive")
+        extra = []
+        for left, right in zip(ids[:-1], ids[1:]):
+            extra.extend(range(int(left), int(right) + 1, max_index_gap))
+        ids = np.unique(np.concatenate((ids, np.asarray(extra, int))))
+    return ids
 
 
 def _replace_or_insert(cfg: str, key: str, value: str,
@@ -57,11 +67,12 @@ def _replace_or_insert(cfg: str, key: str, value: str,
 
 
 def prepare_case(base: Path, reference: Path, target: Path, tolerance: float,
-                 warm_parts: int = 0, warm_base: Path | None = None) -> dict:
+                 warm_parts: int = 0, warm_base: Path | None = None,
+                 max_index_gap: int | None = None) -> dict:
     target.mkdir(parents=True, exist_ok=True)
     ref = np.load(reference)
     old_grid = np.asarray(ref["energies"], float)
-    ids = selected_knots(reference, tolerance)
+    ids = selected_knots(reference, tolerance, max_index_gap=max_index_gap)
     new_grid = old_grid[ids]
     if not np.allclose(np.diff(old_grid), np.diff(old_grid)[0],
                        rtol=1e-10, atol=1e-12):
@@ -119,6 +130,7 @@ def prepare_case(base: Path, reference: Path, target: Path, tolerance: float,
         "aux_dw_thz": aux_dw, "aux_points": int(old_grid.size),
         "min_primary_spacing_thz": float(np.min(np.diff(new_grid))),
         "max_primary_spacing_thz": float(np.max(np.diff(new_grid))),
+        "max_index_gap": max_index_gap,
         "warm_parts": warm_written,
     }
 
@@ -127,7 +139,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=REPO)
     ap.add_argument("--tolerance", type=float, default=1e-3)
-    ap.add_argument("--case", choices=("all", "cnt", "si"), default="all")
+    ap.add_argument("--case", choices=("all", "cnt", "cnt-safe", "si"),
+                    default="all")
     args = ap.parse_args(argv)
     root = args.repo.resolve()
     rows = []
@@ -135,6 +148,11 @@ def main(argv=None) -> int:
         rows.append(prepare_case(
             root / "cluster/c16x2h", root / "cluster/c16x2h/run.npz",
             root / "cluster/c16x2-nu", args.tolerance))
+    if args.case == "cnt-safe":
+        rows.append(prepare_case(
+            root / "cluster/c16x2h", root / "cluster/c16x2h/run.npz",
+            root / "cluster/c16x2-nu-safe", args.tolerance,
+            max_index_gap=2))
     if args.case in ("all", "si"):
         rows.append(prepare_case(
             root / "cluster/sifilm8x2",

@@ -22,6 +22,9 @@ def test_selected_grid_contains_endpoints_and_beats_uniform_count(tmp_path):
     assert ids[0] == 0 and ids[-1] == 128
     assert np.all(np.diff(ids) > 0)
     assert ids.size < 60
+    safe = P.selected_knots(run, 1e-2, max_index_gap=3)
+    assert np.max(np.diff(safe)) <= 3
+    assert ids.size < safe.size < 129
 
 
 def test_prepare_preserves_aux_spacing_and_regrids_q_rank_snapshot(tmp_path):
