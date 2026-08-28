@@ -167,6 +167,22 @@ from quatrex.core.scba import SCBA  # noqa: E402  (after setup_context)
 scba = SCBA(cfg)
 ph = scba.subsystems["phonon"]
 
+# Frozen auxiliary-state census: solve/project the q-resolved pole clusters in
+# the production phonon solver, but do not pass the old additive pole channel
+# into the FFT ring.  The latter is precisely the representation under review
+# and, for a tensor-factorized q ring, its full-device nnz layout does not even
+# match the pair-local leg layout.  The extracted state is serialized after the
+# run and contracted by _si_auxiliary_scba_review.py in one enriched basis.
+if os.environ.get("QX_POLE_STATE_ONLY") == "1":
+    n_disabled = 0
+    for inter in getattr(scba, "interactions", []):
+        if hasattr(inter, "_inject_pole_sector"):
+            inter._inject_pole_sector = lambda _scba: None
+            n_disabled += 1
+    if ranks.rank == 0:
+        print(f"QX_POLE_STATE_ONLY: disabled {n_disabled} additive pole-ring "
+              "injector(s); solver extraction remains enabled", flush=True)
+
 # Ballistic reference: zero the 3-phonon vertex (Sigma_phph == 0) while
 # keeping the SCBA machinery (leads/OBC/MW current) identical -> the clean,
 # same-normalization baseline for G_anh/G_ball.
