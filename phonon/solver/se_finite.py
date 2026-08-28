@@ -191,13 +191,35 @@ class _NoThreadLimit:
         return False
 
 
-def _blas_thread_limit():
-    """Limit BLAS to one thread inside the parallel region, if possible."""
+def _blas_thread_limit(limits: int = 1):
+    """Limit BLAS threads, if possible.
+
+    ``limits=1`` inside a Python parallel region, where BLAS threads would
+    only fight the pool. The task-batched path wants the opposite -- one large
+    matmul is exactly what BLAS should parallelise -- but not unboundedly: on
+    a 256-core node OpenBLAS exhausts its own buffer table
+    ("tried to allocate too many memory regions", then SIGSEGV), so the
+    batched caller passes a cap rather than no limit at all.
+    """
     try:
         from threadpoolctl import threadpool_limits
-        return threadpool_limits(limits=1, user_api="blas")
+        return threadpool_limits(limits=limits, user_api="blas")
     except ImportError:
         return _NoThreadLimit()
+
+
+def _batched_blas_threads() -> int:
+    """BLAS width for the task-batched contraction.
+
+    Capped at 32 by default: OpenBLAS is built for at most 256 threads and
+    allocates per-thread buffers per active matmul, which a 256-core node
+    overruns outright. The batched matmuls are also memory-bound at these
+    block sizes, so the wide end buys little. QX_PHPH_BLAS overrides.
+    """
+    env = os.environ.get("QX_PHPH_BLAS")
+    if env:
+        return max(1, int(env))
+    return max(1, min(32, os.cpu_count() or 1))
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +386,21 @@ def _run_bubble_tasks_task_batched(
               f"({per_task * chunk / (1 << 30):.2f} GiB transient, "
               f"{where} budget {budget / (1 << 30):.1f} GiB)", flush=True)
 
+    blas = _batched_blas_threads()
+    if verbose:
+        print(f"  [{label}] BLAS width {blas} for the batched matmuls",
+              flush=True)
+    limiter = _blas_thread_limit(blas) if xp is np else _NoThreadLimit()
+    with limiter:
+        _batched_chunks(kind_tasks, chunk, out, key_of=key_of, xp=xp,
+                        gl_s=gl_s, gg_s=gg_s, gl_i=gl_i, gg_i=gg_i,
+                        n_freq=n_freq, n_dof=n_dof, prefactor=prefactor,
+                        freq_sl=freq_sl)
+    return out
+
+
+def _batched_chunks(kind_tasks, chunk, out, *, key_of, xp, gl_s, gg_s,
+                    gl_i, gg_i, n_freq, n_dof, prefactor, freq_sl):
     for c0 in range(0, len(kind_tasks), chunk):
         sub = kind_tasks[c0:c0 + chunk]
         pl = xp.asarray(np.stack([t[9] for _k, t in sub]))
@@ -380,7 +417,7 @@ def _run_bubble_tasks_task_batched(
             lesser[n] = kind == "lesser"
 
         blocks = xp.empty((len(sub), n_freq, n_dof, n_dof), dtype=complex)
-        for src, stack, mask in ((gl_s, gl_s, lesser), (gg_s, gg_s, ~lesser)):
+        for stack, mask in ((gl_s, lesser), (gg_s, ~lesser)):
             if not mask.any():
                 continue
             sel = np.flatnonzero(mask)
@@ -397,7 +434,6 @@ def _run_bubble_tasks_task_batched(
             key = key_of(kind, t)
             prev = out.get(key)
             out[key] = host[n] if prev is None else prev + host[n]
-    return out
 
 
 # ---------------------------------------------------------------------------
