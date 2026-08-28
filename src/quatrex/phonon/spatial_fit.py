@@ -13,7 +13,7 @@ split is deliberate -- ``spatial_modes`` is diagnostic and touches nothing the
 solver uses, while what is here is a representation the bubble can be fed from,
 so it does not belong under that docstring.
 
-The one rule that is not obvious, measured in ``phonon/docs/spatial_band_range.md``
+The one rule that is not obvious, measured in ``phonon/docs/spatial_representation.md`` Sec. 0.5
 and re-derived here as an API constraint: **the rank and the fit anchor are one
 choice, not two.** Fitting a truncated mode set at ``n = 1, 2`` pushes the
 dropped modes' weight onto the survivors -- 1.2e-02 against 6.0e-05 on CNT at

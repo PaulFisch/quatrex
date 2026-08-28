@@ -1,7 +1,7 @@
 """The cost table of task T5: structured `Sigma` against reblocking.
 
 The competitor is fixed by the measurement in
-``phonon/docs/spatial_analytic_tail.md`` Sec. 11: reblocking the device at two
+``phonon/docs/spatial_representation.md`` Sec. 11: reblocking the device at two
 transport cells per BTD block is MORE accurate on the lead current than the
 production pin (2.74e-03 against 6.31e-03) while discarding 58.8 % of
 ``|Sigma|``. Anything structured has to beat that, not the pin.

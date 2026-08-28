@@ -427,7 +427,9 @@ a nearest-neighbour vertex the reachable leg distance is `2p + 1 = 3` and
 the ring's band.
 
 The live spatial approximation is the hard-coded pin of `Sigma` to
-`|I-J| <= 1`, worth about 11 % and insensitive to the range of `G`. It is
+`|I-J| <= 1`, worth about 30 % on a device long enough to have settled (the
+11 % quoted here previously was a seven-cell figure and finite-size limited),
+and insensitive to the range of `G`. It is
 repaired by a non-tridiagonal `Sigma` -- the proposal's Sec. 32 Schur complement
 -- and not by the low-rank `G` of Secs. 33-34. Derivation and numbers:
-`spatial_truncation_derivation.md`.
+`spatial_representation.md` Sec. 0.3.

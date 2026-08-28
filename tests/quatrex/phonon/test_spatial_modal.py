@@ -753,7 +753,7 @@ def test_a_truncated_geometric_mask_is_psd_only_once_the_band_exceeds_the_range(
 # --- what the ring's spatial truncations actually are ----------------------- #
 #
 # Three tests pinning the derivation in
-# ``phonon/docs/spatial_truncation_derivation.md``. They exist because reasoning
+# ``phonon/docs/spatial_representation.md`` Secs. 0.1-0.3. They exist because reasoning
 # in prose about "which blocks matter" produced two opposite wrong answers in a
 # row; the index algebra is short and the numbers settle it.
 

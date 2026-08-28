@@ -412,7 +412,7 @@ def neighbour_cubic_vertex(n_cell: int, seed: int = 5) -> np.ndarray:
 
     The draw happens INSIDE the bounds check, so the random sequence depends on
     ``n_cell``. That is not incidental: the measured pin-versus-length numbers
-    in ``phonon/docs/spatial_truncation_derivation.md`` were taken with this
+    in ``phonon/docs/spatial_representation.md`` Sec. 0.3 were taken with this
     ordering, and reordering the draws moves them. Preserved deliberately.
     """
     rng = np.random.default_rng(seed)

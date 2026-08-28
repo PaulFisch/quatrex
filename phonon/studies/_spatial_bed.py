@@ -202,7 +202,7 @@ def transport_blocks(bed_dir: Path, tdir: int, q=(0.0, 0.0)):
 
     The stored keys are real-space cell offsets on ALL three axes, so the
     transverse ones are Fourier-summed with ``exp(i q.n)`` -- reading them as
-    momentum indices is the error recorded in ``spatial_band_range.md``. At
+    momentum indices is the error recorded in ``spatial_representation.md`` Sec. 0.4. At
     ``q = 0`` this reduces to the plain sum that ``_bubble_positivity`` and
     ``cm_channel`` both take.
 

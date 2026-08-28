@@ -20,7 +20,7 @@ which still satisfy them from the ones that do not. This is that separation.
 
 | # | gate | established in |
 |---|---|---|
-| a | >= 2 transport cells per BTD block | `bubble_positivity.md` Sec. 8, `spatial_truncation_derivation.md` |
+| a | >= 2 transport cells per BTD block | `bubble_positivity.md` Sec. 8, `spatial_representation.md` Sec. 0.3 |
 | b | `sse_g_band = 3` | `report_rerun_backlog.md` Sec. 6 |
 | c | grid resolves the line, extent reaches ~2 omega_max | `grid_audit.md` |
 | d | the DC channel subtracted, not smeared | `ir_residue_derivation.md` |

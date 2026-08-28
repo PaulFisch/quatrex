@@ -1,16 +1,441 @@
-# The spatially analytic Green-function tail
+# The spatial structure of the phonon self-energy
 
-Working record of the programme in
-`~/Downloads/spatially_analytic_G_bubble_experiment_plan.md` (2026-08-27): can
-the long-range spatial part of `G` be carried by complex-band modes, and does
-that recover a transport-relevant part of the cubic self-energy more cheaply
-than a wider explicit band or reblocking.
+Can the spatial structure of `Sigma` be represented cheaply enough to replace a
+truncation? This is the whole record: the index algebra, the range
+measurements, and the two investigations that answer it.
 
-**Status: gates not yet decided.** What is below is what the machinery has
-established, including three corrections to the proposal's own statements and
-one result that constrains which beds can be used at all. Read
-`spatial_truncation_derivation.md` first; it derives the support law and records
-the prior verdict this programme is designed against.
+It consolidates three documents, two of which are now in `attic/`
+(`spatial_truncation_derivation.md`, `spatial_band_range.md`); Part 0 carries
+their content. The proposals it is written against are
+`~/Downloads/spatially_analytic_G_bubble_experiment_plan.md` and
+`~/Downloads/matrix_free_spatial_modal_scba_plan.md` (both 2026-08-27),
+untracked.
+
+## Verdict
+
+**The analytic / modal route is dead.** Supplying `G`'s far blocks from an
+exponential fit and rebuilding `Sigma` from them (arms E and F) loses to plain
+reblocking by 12x on a 1-DOF chain, and at 4 DOF per cell it does not merely
+lose -- it collapses, driving the lead current to `-4e-23` and `-6e-12` against
+a reference `1.7e-09`. The mechanism is in Sec. 20: the modal fit's median
+far-block error rises from 9.0e-02 to 9.3e-01 between `d = 1` and `d = 4`, and
+it refuses 124 of 241 frequencies. More degrees of freedom mean more
+near-degenerate modes in the pencil, so the route gets worse exactly where a
+real device lives.
+
+**The bidirectional semiseparable route is a correct representation whose cost
+is undecided.** It is exact at its rank, converges monotonically where
+reblocking does not converge at all, and preserves the positivity structure for
+free. It has never been cheaper than the incumbent on any bed measured: at
+`d = 4` a 4-cell reblock costs `16x` the pin for `eps(J_L) = 4.66e-04` where the
+nearest semiseparable arm costs `125x` for `5.04e-04`.
+
+**What would settle it.** Two trends compete and only their product matters.
+The rank needed at matched accuracy is FLAT in the DOF count -- 6, 8, 4 at
+`d = 1, 2, 4` -- so the cost of matching a reblock falls `2197x -> 729x -> 27x`,
+pointing at a crossing near `d ~ 8-16`, below a real Si or CNT cell at
+`d = 24-96`. Against that, `r_Sigma` grows like `N^0.75` in device LENGTH. The
+product has not been measured because **no bed survives long enough**: the
+16-cell chains converge, `N = 24` diverges outright, and no real device admits
+a frozen state at `eta = 0` at all. One `d = 8` bed at fixed `N` is the cheapest
+decisive step.
+
+Nothing here should be implemented in `src/quatrex/` until that measurement
+exists.
+
+---
+
+# Part 0 — the foundation
+
+The index algebra and the range measurements, from the two documents now in
+`attic/`. Everything in Parts I and II is measured against this.
+
+## 0.1 The support law
+
+The cubic self-energy is
+
+    Sigma(I,J) = sum_{K1,K2,K1',K2'} Phi_{I,K1,K2} G(K1,K1') G(K2,K2')
+                 Phi_{J,K2',K1'}
+
+over transport-cell block indices, convolved in frequency (the frequency
+structure plays no part in any of this). Two supports enter. The **vertex reach
+`p`**: `Phi_{I,K,L}` is nonzero only for `|I-K|, |I-L|, |K-L| <= p`, and
+production has `p = 1` (`fc3_loader.py` keeps one nearest-neighbour shell). The
+**leg band `b`**: `G(K,K')` is retained only for `|K-K'| <= b`, which is
+`sse_g_band`, default 3, capped at 3. Chaining them,
+
+    |I - J| <= |I - K1| + |K1 - K1'| + |K1' - J| <= p + b + p,
+
+so
+
+    supp(Sigma) = { |I - J| <= 2p + b }.                          (*)
+
+Measured on a 1-DOF chain at `p = 1`, largest distance at which `Sigma` exceeds
+1e-13 of its peak:
+
+| leg band `b` | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| measured reach | 2 | 3 | 4 | 5 |
+| `2p + b` | 2 | 3 | 4 | 5 |
+
+Test: `test_the_sigma_support_law_is_two_p_plus_band`. **`Sigma` is not
+tridiagonal**, and its reach grows with the leg band.
+
+## 0.2 The three truncations, and which are exact
+
+| # | truncation | where | status |
+|---|---|---|---|
+| 1 | `Phi` to `p = 1` | `fc3_loader.py:5-9` | **exact** on every bed here |
+| 2 | legs to `\|K-K'\| <= b` | `sse_g_band` | **exact** for the retained output once `b >= 3` |
+| 3 | output to `\|I-J\| <= 1` | `sse_phonon_phonon.py:474`, `for J in range(max(0, I-1), min(n, I+2))` | approximate; discards `2 <= \|I-J\| <= 2p+b` |
+
+Truncation 3 is hard-coded. It does not follow from `p`, it does not follow from
+`b`, and by (*) it is not a property of `Sigma`.
+
+**Why 2 is exact and 3 is not**, which is the trap: truncation 2 is exact
+*given* truncation 3. With the output pinned at `|I-J| <= 1` the reachable leg
+distance is `|K-K'| <= 2p + 1 = 3`, so `b = 3` discards only links that could
+not have contributed -- which is why the field is capped at 3. Split by output
+distance on the same bed:
+
+| `b` | rel. err on `\|I-J\| <= 1` | rel. err on `\|I-J\| > 1` |
+|---|---|---|
+| 1 | 3.18e-01 | large |
+| 2 | 1.04e-01 | large |
+| 3 | **0.000e+00** | large |
+
+Test: `test_band_three_is_exact_on_the_output_band_and_lossy_off_it`. Reporting
+a whole-array error overstates the leg band's cost; reporting only the retained
+band hides the output pin's. Both mistakes were made, in that order (Sec. 0.6).
+
+**Truncation 1 is exact on every bed in the tree.** Across 45 stored
+`fc3_blocks.hdf5` spanning CNT, Si and MoS2 the maximum block-index offset is 1
+and the dropped fraction is 0.000 % without exception. That is not the builder
+truncating: `build_device_fc3_blocks` takes `vertex_cutoff=None` by default and
+`build_inputs.py:153` passes no cutoff. The force constants contain no such
+triplet. Three atoms with all pairwise distances within the FC3 cutoff `r_c`
+span at most `r_c` along transport, so they occupy at most `ceil(r_c/L) + 1`
+cells of length `L`, and
+
+    r_c < L  =>  max block offset 1  =>  the nearest-neighbour shell is EXACT.
+
+MoS2: `r_c = 4.0 Ang` against a primitive `c = 12.294 Ang`. Two honest limits --
+the film's `[4,4,3]` fitting supercell independently bounds the offset at 1, so
+the two explanations cannot be separated from the stored data (the cutoff
+argument alone is sufficient and does not need the supercell); and the
+force-constant metadata for CNT, SiNW and SrTiO3 is not in this repository, so
+`r_c` and `L` have not been compared there.
+
+## 0.3 What the output pin costs, and why the lever is the blocking
+
+An earlier version reported **10.8 %** from a seven-cell device. That is
+finite-size limited and should not be quoted. The tridiagonal band is `3N-2` of
+`N^2` entries, so the share outside it grows with the device until `Sigma`'s
+decay takes over:
+
+| device [cells] | 7 | 10 | 14 |
+|---|---|---|---|
+| discarded, range 2.1 cells | 10.5 % | 29.3 % | 30.3 % |
+| discarded, range 20 cells | 13.2 % | 34.2 % | 35.7 % |
+
+**About 30 % on a device long enough to have settled**, not 11 %. Range
+dependence is real but secondary -- five points between ranges of 2 and 20
+cells, against thirty points from the device length -- so the pin is not
+principally a long-range effect. The original seven-cell breakdown, by output
+distance: 46.7 %, 42.5 %, 8.1 %, 2.0 %, 0.7 %, 0.02 % for `|I-J| = 0,1,2,3,4,>=5`.
+
+The pin does not care how far `G` reaches. Varying the Green-function range over
+a factor 3.5:
+
+| range `xi` [cells] | 2.06 | 2.65 | 3.35 | 4.60 | 7.15 |
+|---|---|---|---|---|---|
+| discarded | 10.5 % | 10.4 % | 10.5 % | 10.9 % | 11.4 % |
+
+Flat, where a long-range effect would grow. Index algebra again: for `|I-J| = 2`
+take `K = I+1` and `K' = J-1 = I+1`, giving `|K-K'| = 0`. **The near tail of
+`Sigma` is fed by the diagonal of `G` through the vertex's reach**, not by
+long-range `G`; long-range `G` appears only in blocks the pin has already thrown
+away. Test:
+`test_the_discarded_output_weight_does_not_track_the_green_range`.
+
+**The lever is the blocking.** `supp(Sigma)` is in CELLS; group `m` cells into a
+block and it becomes `ceil((2p+b)/m)` in BLOCKS, so a wide enough block makes
+the tridiagonal restriction discard nothing. On a 12-cell device:
+
+| cells per block | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| discarded | 32.1 % | 5.4 % | 2.5 % | 0.30 % |
+
+Two cells per block already removes six sevenths. The tool exists
+(`phonon/studies/engine/reblock_device.py`). This is also the first statement of
+the answer Part I confirms: the discarded weight moves five points with the
+range and thirty with the blocking, so **the modal route addresses the smaller
+term.**
+
+Why the pin is there at all: `omega^2 I - D - Sigma` is solved by RGF, which
+needs block-tridiagonal structure. Removing the pin is a change of solver
+structure, not of a parameter.
+
+The pin is an ACCURACY defect and not a stability one. `si4x1` diverges and
+`si4x2` converges, and it is tempting to read that as the pin; it was tested and
+it is wrong. `bubble_positivity.md` Sec. 6.7 ran the MoS2 film at six blocks
+(maximal truncation, 71 % discarded) and at two (no mask at all): both abort at
+iteration 28, the untruncated run carries MORE gain (13.2 % against 0.41 %), and
+the `Sigma^R` residual sequences agree to five significant figures for eight
+iterations. Sec. 8 reaches the same conclusion for the Si pair directly.
+
+Block structure of the production beds, for reference:
+
+| bed | blocks | DOF/block | cells/block |
+|---|---|---|---|
+| `sichk_base` | 3 | 6 | 1 |
+| `si4x1` | 4 | 6 | 1 |
+| `si4x2` | **2** | 12 | **2** |
+| `cnt_cal`, `l4gpu` | 4 | 36 | 1 |
+| `sifilm_nk9r` | 3 | 6 | 1 |
+
+Every production bed except `si4x2` runs at one primitive cell per block.
+Against the CNT ladder, discarded weight at one cell per block runs about 2 % at
+L4, 11 % at L7 and 35 % at L16 -- the reported series stops at seven cells and
+brackets from sixteen, which is where this crosses from a few percent to a
+third. A correspondence and not a proof: the bed is a 1-DOF chain with a random
+vertex, so the percentages are not the device's. What transfers is the shape.
+
+**Caveat on all of these percentages.** They come from a 1-DOF chain with a
+random dense nearest-neighbour vertex. The support law (*) and the flatness
+argument are structural; the percentages are not. They also depend on the draw
+order inside `toy_models.neighbour_cubic_vertex`, which is preserved
+deliberately for that reason.
+
+## 0.4 How far a damped mode actually travels
+
+A damped propagating mode has range
+
+    xi = v_g / gamma          [cells]
+
+with `v_g` in cells*THz and `gamma` the half width in THz. Verified against the
+complex bands in `tests/quatrex/phonon/test_spatial_modal.py` to 1e-4 in weak
+damping: solving `[-H_10/lambda + (z^2 I - H_00 - Sigma^R) - H_01 lambda] v = 0`
+and reading `xi = -1/ln|lambda|` off the decaying root gives the same number.
+Undressed, an in-band mode sits on the unit circle and `xi` is infinite -- the
+scattering self-energy is what makes a spatial truncation meaningful at all.
+
+Si (`sichk_base`, 81 transverse q, 6 branches, 486 pairs; omega spans 0 to
+15.153 THz against a bulk band top near 15.5):
+
+| branch-max abs(v_g) [cells*THz] | min | p25 | med | p75 | max |
+|---|---|---|---|---|---|
+| | 0.0245 | 0.488 | 0.967 | 1.52 | 4.61 |
+
+At the converged census median `gamma = 0.16 THz`:
+
+| range xi [cells] | min | p25 | med | p75 | max |
+|---|---|---|---|---|---|
+| | 0.153 | 3.05 | 6.05 | 9.48 | 28.8 |
+
+CNT (3,3) at Gamma, 36 DOF per cell, group velocities five times Si's (median
+5.16 cells*THz). At the converged `cnt33_L4_linear` widths, `gamma = 0.481` to
+`1.97 THz`:
+
+| gamma [THz] | range xi [cells], min/med/max | band 3: branches past the band | median branch keeps |
+|---|---|---|---|
+| 0.481 (narrowest) | 5.9 / 10.7 / 25.5 | 100 % | 75.6 % |
+| 1.97 (median) | 1.5 / 2.6 / 6.2 | 36 % | 31.8 % |
+
+The typical CNT mode has a range near 2.6 cells and a band of 3 is roughly
+adequate; the long-lived narrow modes reach 6 to 25 cells and no band between 1
+and 3 touches them.
+
+**The inference originally drawn from this is withdrawn.** These numbers were
+read as evidence that `sse_g_band` truncates modes that carry heat, and
+therefore as the explanation of the CNT band-ladder bracket. Sec. 0.2 settles
+that `b = 3` is exact for the retained output band, so the leg band cannot be
+what the ladder's arms differ by. The ranges, the reconstruction (Sec. 0.5) and
+the mask-PSD bound (Sec. 0.6) are correct and general; the inference is not.
+
+Four limits on the ranges themselves: `gamma` is a census MEDIAN applied
+uniformly, so this is not a per-mode range; the dispersion is harmonic, and
+under SCBA the bands shift; `xi = v_g/gamma` is a weak-damping statement that
+loosens to about a percent once a mode decays within a few cells; and the CNT
+numbers pair one bed's harmonic dispersion with another run's linewidth
+distribution (same material and cell -- 144 = 4 x 36 -- but not the same job).
+
+**A correction worth recording.** The first version of this measurement read the
+stored keys `[nx, ny, nz]` as a transport offset plus two transverse MOMENTUM
+indices. They are real-space cell offsets on all three axes, which
+`cm_channel.py` settles by reading the same file and summing over transverse
+offsets to reach Gamma; a transverse momentum needs a Fourier sum over `ny, nz`
+first. Compounding it, the key regex required the second and third indices to be
+non-negative and silently dropped every negative transverse offset -- a third of
+the file. The result was 25 "q points", three reporting zero transport coupling,
+and a claimed median range of 0.57 cells: the opposite conclusion, from a third
+of the data under the wrong convention. The tell was in the output and was
+missed: that dispersion had no acoustic branch reaching zero at Gamma, which no
+translationally invariant crystal can lack.
+
+## 0.5 The distant blocks are generated, not stored
+
+Fitting `G(n) = V diag(lambda^n) C` from `n = 1, 2` ONLY on a 2-DOF cell with an
+invertible inter-cell coupling, then predicting out to `n = 12`:
+
+| n | 1 | 2 | 4 | 8 | 12 |
+|---|---|---|---|---|---|
+| rel. error | 1e-15 | 5e-15 | 2e-14 | 4e-14 | 6e-14 |
+
+Roundoff over nine distances never fitted, across which the blocks fall by more
+than two orders. Ten numbers reproduce what would otherwise be one dense block
+per distance. A range of blocks also sums in closed form, so a long-range sum
+costs `r` geometric series and never materialises what it runs over -- checked
+to `n = 200`.
+
+On real device cells, at 1.05x the band top so the quadrature reference is
+regular:
+
+| bed | DOF | decaying modes | abs(lambda) range | rel. err n=1 / 3 / 8 |
+|---|---|---|---|---|
+| CNT (3,3), Gamma | 36 | 36 | 7.6e-05 .. 0.145 | 1.8e-15 / 5.5e-14 / 2.5e-10 |
+| Si film, transverse Gamma | 6 | 6 | 9.2e-03 .. 0.319 | 9.2e-16 / 1.3e-14 / 1.2e-12 |
+
+The growth with `n` is the REFERENCE, not the reconstruction: the CNT quadrature
+self-converges to 6.5e-10 at `n=8` and only 1.2e-06 at `n=12`, because
+`|G(12)|` is 6.8e-13 and the integral is chasing its own floor. Checked rather
+than assumed.
+
+Two traps, recorded because both produce plausible output: a rank-deficient
+inter-cell coupling makes the pencil degenerate (a `D_01` with one nonzero entry
+gave roots collapsing to 0 and 173 and the wrong mode count); and the quadrature
+reference must be a PERIODIC trapezoid, since `linspace` with both endpoints
+double counts and the reference then stops decaying at 5e-6, which looks like a
+Green function reaching a floor and is arithmetic.
+
+**The rank and the fit anchor are one choice, not two.** This is the one
+non-obvious rule the fitting API encodes. Modes with `|lambda| = 1e-3`
+contribute `1e-9` by three cells, yet dropping them costs `1e-4` -- because the
+fit was anchored at `n = 1, 2` where they are still in the data, so their weight
+is pushed onto the survivors. On CNT at rank 22 of 36:
+
+| fit anchor | rel. err at n = 5 | at n = 8 |
+|---|---|---|
+| n = 1, 2 | 1.2e-02 | 1.1e-02 |
+| n = 3, 4 | 6.0e-05 | 3.0e-05 |
+| n = 5, 6 | 2.1e-07 | 1.4e-07 |
+
+It cuts the other way too: a fit anchored far out cannot determine the
+coefficient of a mode that has already decayed there -- at `n = 7` a mode with
+`|lambda| = 1e-3` contributes `1e-21`, so SHORT-range blocks degrade even at
+full rank. The anchor is not a stability knob; it selects the window of
+distances the representation is valid on, and the rank follows from it. Hence
+`spatial_fit.modal_fit` always solves for the FULL coefficient set at the anchor
+and `prune_by_amplitude` drops modes afterwards **without refitting the
+survivors**. The pole sector reached the same conclusion for its own local model,
+where `_fit_anchor` had to be pinned per candidate.
+
+## 0.6 Why reweighting the mask cannot substitute for a modal sector
+
+Three rings differing ONLY in the spatial legs, on a 7-cell gapped chain with a
+dense nearest-neighbour cubic vertex. The grid forces the bed: a ring is a
+convolution, so `Sigma(Omega)` needs `G` at `omega` and `Omega - omega` and the
+grid must start at zero, while an exact `eta = 0` reference needs the grid to
+avoid the band. A gapped chain satisfies both; an ungapped one cannot.
+
+| `g_band` | boxcar error | modal completion | ratio |
+|---|---|---|---|
+| 1 | 3.18e-01 | 1.8e-16 | 1.8e+15 |
+| 2 | 1.40e-01 | 1.1e-16 | 1.3e+15 |
+| 3 | 7.14e-02 | 6.8e-17 | 1.1e+15 |
+
+The boxcar is wrong by 32 % at band 1 and 7 % at band 3 **over all `Sigma`
+blocks** -- but on the `|I-J| <= 1` band production actually outputs, band 3 is
+exact to 0.000e+00 and the 7 % lives entirely in discarded blocks. The
+whole-array figure is the right measure of a hard band in general and the wrong
+measure of this kernel. The completion is exact to roundoff at every band and
+beats WIDENING the boxcar by a block.
+
+The cheap alternative to a modal representation is to keep the boxcar and
+re-weight it. Two independent bounds close that route.
+
+**At the output.** The output band is pinned at `|I-J| <= 1` whatever `g_band`
+is, so the output mask is the tridiagonal Toeplitz `[w_1, 1, w_1]` with symbol
+`1 + 2 w_1 cos(theta)`, non-negative only for `w_1 <= 1/2`. A weighting faithful
+to a Green function of range `xi` has `w_1 = exp(-1/xi)`, so PSD-ness demands
+
+    xi <= 1 / ln 2 = 1.4427 cells,
+
+and every range in Sec. 0.4 is far past it. This derives the existing empirical
+result rather than restating it: Bartlett has `w_1 = b/(b+1) <= 1/2` only at
+`b = 1`, exactly where `test_taper_is_psd_only_at_band_one` finds it.
+
+**On the legs.** The untruncated geometric weight is the Poisson kernel and is
+strictly positive, so a geometric taper looks like the natural PSD choice.
+Truncated it is not -- cutting a slowly decaying tail leaves a discontinuity. At
+`lambda = 0.91` and band 4 the leg symbol reaches `-1.11`. First band at which
+it turns positive:
+
+| lambda | xi [cells] | first PSD band | band / xi |
+|---|---|---|---|
+| 0.30 | 0.83 | 1 | 1.20 |
+| 0.50 | 1.44 | 2 | 1.39 |
+| 0.68 | 2.59 | 4 | 1.54 |
+| 0.80 | 4.48 | 10 | 2.23 |
+| 0.91 | 10.60 | 32 | 3.02 |
+
+The band must exceed the range by a factor that itself grows with the range --
+the regime in which no truncation was needed in the first place. So the mask has
+to go rather than be reshaped. It also explains, from the symbol rather than a
+measurement, why `bubble_positivity.md` Sec. 6.10b found the PSD taper fixed
+positivity exactly and the run still diverged: the taper repaired the legs while
+the output mask stayed indefinite.
+
+## 0.7 Error trail
+
+Recorded because Part 0 exists on account of it. Each step was a claim about
+which blocks matter, argued from a number without its mechanism.
+
+1. Measured a boxcar leg band as costing 32 % at `b = 1` and 7 % at `b = 3` and
+   reported it as evidence that the kernel truncates modes carrying heat. The
+   7 % was entirely in `|I-J| >= 2` blocks production never outputs.
+2. Correcting that, concluded `b = 3` is exact and therefore no spatial
+   truncation is live. Exact for the legs -- but the output pin is a separate
+   hard-coded truncation, and stopping at the leg band missed it.
+3. The pin costs ~30 % on a settled device and is insensitive to the range of
+   `G`, so the long-range modal machinery does not repair it either. The
+   conclusion in (2) was right; the reason given for it was not.
+4. Reported truncation 1's size as unrecorded and its guard as structurally
+   dead, on the strength of every stored file showing 0.000 % dropped. The
+   builder does not truncate -- `vertex_cutoff` defaults to `None` -- so the zero
+   means the force constants have no triplet beyond the shell, and the guard
+   reads zero because zero is the right answer.
+
+The algebra is four lines and settles the first three; the fourth needed one
+line of the builder's signature.
+
+## 0.8 What Part 0 predicted
+
+A low-rank modal representation of `G` answers "how do I carry `G(K,K')` at
+large `|K-K'|` cheaply". Nothing in the shipped kernel asks that: truncation 2
+makes long-range `G` unreachable, and truncation 3 discards the blocks where it
+would have shown up. The representation is correct -- `G(n) = V diag(lambda^n) C`
+reproduces real CNT and Si cells to roundoff -- and it is aimed at a question
+this ring does not pose.
+
+The live approximation is truncation 3, and repairing it means carrying a
+`Sigma` that is not block-tridiagonal: a Schur complement that keeps the
+tridiagonal part in the BTD solver and couples a small non-local sector to it,
+rather than compressing distant `G`.
+
+Parts I and II are that prediction tested. It holds: Sec. 11 measures the modal
+arm losing to reblocking by 12x, and Sec. 20 measures it collapsing entirely at
+4 DOF per cell.
+
+---
+
+# Part I — the analytic tail
+
+Working record of `~/Downloads/spatially_analytic_G_bubble_experiment_plan.md`:
+can the long-range spatial part of `G` be carried by complex-band modes, and
+does that recover a transport-relevant part of the cubic self-energy more
+cheaply than a wider explicit band or reblocking. Sections 1-12 are that
+programme; the verdict is Sec. 11.
 
 ## 1. What the proposal got right, and three things it did not
 
@@ -85,7 +510,7 @@ answer the question it is asked.
 - `supp Sigma^(b) = 2p + b`, so beyond `R > 2p+3` the band-3 reference is
   identically zero and the "long-propagation share" is 1 for free. The sweep is
   informative only on `2 <= R <= 2p+3`, which is the window
-  `spatial_truncation_derivation.md` already measured as vertex-dominated.
+  Sec. 0.3 already measured as vertex-dominated.
 - The partial sums are cumulative. `Sigma` is bilinear in `G`, so raising the
   band changes blocks that already existed, through interference; a difference
   of two bands is not the contribution of a shell.
@@ -208,7 +633,7 @@ On a converged 8-cell chain, the four-arm factorial
 
 A and B agree to every printed digit. Widening `G` while the output stays pinned
 at `|I-J| <= 1` changes nothing, which is
-`spatial_truncation_derivation.md`'s "the pin does not care how far `G` reaches"
+Sec. 0.3's "the pin does not care how far `G` reaches"
 reproduced on a different bed, through different code, and at the level of a
 current rather than a block norm. `b = 3` is exact for the retained band, so
 this is the expected answer and it is a check on the machinery.
@@ -299,7 +724,7 @@ from its own conservation error is `4.06e-03`.
 
 **A and B agree to every printed digit**, on this bed as on the 8-cell one.
 Widening `G` while the output stays pinned at `|I-J| <= 1` changes no current at
-all -- `spatial_truncation_derivation.md`'s "the pin does not care how far `G`
+all -- Sec. 0.3's "the pin does not care how far `G`
 reaches", reproduced at the level of a current rather than a block norm, on a
 different bed, through different code.
 
@@ -423,7 +848,7 @@ So the proposal's fifth go/no-go criterion -- "a reduced modal-pair
 representation is cheaper than reblocking or direct wider-band recursion at the
 same accuracy" -- is not met on this bed. It is not at the same accuracy. And
 this is the criterion the tree already expected to fail:
-`spatial_truncation_derivation.md` measured the discarded weight moving five
+Sec. 0.3 measured the discarded weight moving five
 points with the range of `G` and thirty with the blocking, and concluded "the
 modal route addresses the smaller term". That was an argument from block
 weights; this is the same conclusion at the level of a current, with the modal
@@ -563,17 +988,15 @@ digits at every in-band frequency.
 `SemiSepOperator` also supplies the `O(N r^2)` matvec that
 `spatial_hankel.Semiseparable`'s docstring advertises and never had.
 
-## 14. Gate G5 -- **the first reading was a grid artefact; corrected below**
+## 14. Gate G5, as first measured on a coarse grid -- **superseded by Sec. 17**
 
-> **Correction (2026-08-28).** The verdict in this section was taken on a grid
-> that barely resolves the bed, and it does not survive a matched comparison.
-> The numbers below stand as measured; the conclusion drawn from them does not.
-> See Sec. 17.
-
-## 14a. As first measured, on a coarse grid
+The verdict in this section was taken on a grid that barely resolves the bed and
+does not survive a matched comparison. The numbers stand as measured; the
+conclusion drawn from them does not. Kept because Sec. 17 is a correction and a
+correction needs its antecedent.
 
 `DeltaSigma(omega)` as a (spatial-operator element x frequency) matrix, on three
-converged chains that differ only in coupling:
+converged chains differing only in coupling:
 
 | bed | cubic | `xi` med / max (cells) | live `omega` | `r@1e-3` | fraction |
 |---|---|---|---|---|---|
@@ -583,16 +1006,13 @@ converged chains that differ only in coupling:
 
 The singular spectrum is flat and essentially **unchanged** across a factor 3 in
 coupling and 14 in modal range: `0.87, 0.72, 0.67, 0.58` against
-`0.91, 0.71, 0.66, 0.59`. The windowed fallback is a repackaging -- splitting
-140 frequencies into 1/2/4/8/16/32 windows gives total state counts
+`0.91, 0.71, 0.66, 0.59`. The windowed fallback is a repackaging -- 140
+frequencies split into 1/2/4/8/16/32 windows give total state counts
 `78, 85, 97, 110, 127, 140`, rising monotonically to exactly the frequency
-count. The mechanism: the dominant 3-dimensional spatial subspace turns
-**64 degrees (max 90) between frequencies three grid steps apart**.
-
-Weaker damping moves the fraction the right way (58 % -> 46 %), so the effect is
-real but nowhere near enough. Not yet tested on a bed with a sharp resonance
-INSIDE the band, which is where one basis is most likely to serve many
-frequencies; that measurement is running.
+count. The stated mechanism was that the dominant 3-dimensional spatial subspace
+turns **64 degrees (max 90) between frequencies three grid steps apart** -- a
+diagnostic normalised by sample COUNT rather than frequency interval, which is
+the flaw Sec. 17 identifies.
 
 ## 15. A causal `Sigma^R` action needs no common basis -- and costs the same
 
@@ -945,3 +1365,195 @@ both return `eps = 1.00` at `d = 4`: the modal decompression and the
 congruence, which were the original programme, degrade to worthless on a
 multi-DOF bed while the semiseparable arm improves. That contrast is the
 clearest single statement of what changed between Part I and Part II.
+
+## 21. Where the analytic route actually fails: arms E and F at 4 DOF
+
+Sections 11 and 19 measure the modal arms losing on a 1-DOF chain. On a
+converged 16-cell bed at 4 DOF per cell they do not lose, they collapse:
+
+| bed | arm E (`eps J_L`) | arm F | far-block err, median | frequencies refused |
+|---|---|---|---|---|
+| `d = 1` | 4.43e-02 | 7.34e-04 | 9.0e-02 | 151 / 241 |
+| `d = 2` | 1.27e-02 | 4.10e-03 | -- | -- |
+| `d = 4` | **1.00e+00** | **1.00e+00** | **9.3e-01** | 124 / 241 |
+
+The `eps = 1.00` is not a crash. Both arms ran and returned a lead current of
+`-3.9e-23` (E) and `-5.7e-12` (F) against a reference `1.7e-09` -- the sign is
+wrong and the magnitude is gone. Arm F's diagnostics at `d = 4` read
+`far-block err 9.30e-01 median / 1.02e+02 max`, `G^< err 7.27e+02`.
+
+The mechanism is the pencil. More degrees of freedom per cell mean more modes at
+similar `|lambda|`, so the fit is closer to degenerate: the median far-block
+error rises an order of magnitude between `d = 1` and `d = 4`, and the fit
+refuses half the frequency grid outright. **The analytic route degrades with
+exactly the quantity a real device has more of.** Sec. 0.8 predicted the modal
+route addressed the smaller term; this is stronger than that -- at realistic DOF
+it addresses nothing.
+
+## 22. The converged rank at 4 DOF
+
+The `d = 4` bed converged (`resid = 8.79e-09`, `conservation = 8.35e-05`):
+
+| object | `r@1e-2` | `r@1e-3` | `r@1e-4` | cap |
+|---|---|---|---|---|
+| `Sigma^<` | 19 | 25 | 29 | 52 |
+| `Sigma^<` band 1 | 17 | 24 | 27 | 48 |
+| `Sigma^<` band 2 | 17 | 22 | 25 | 44 |
+
+Augmented width `d + 2r = 38` at band 1, i.e. `857x` the pin for an EXACT
+representation. That is the Sec. 18 reading and it is the wrong comparison; the
+iso-accuracy reading is Sec. 20, where rank 4 suffices to match a 2-cell reblock
+at `27x`. The two numbers answer different questions and both are reported
+because quoting either alone misleads.
+
+The rank is robust to convergence: a 6-iteration probe of the same bed gave the
+same `17`.
+
+## 23. The length axis is blocked
+
+Sec. 16 measured `r_Sigma` growing like `N^0.75` over `N = 16 -> 32`, and
+Sec. 20 measured the DOF trend running the other way. Their product is what
+decides the programme, and it has not been measured because the beds do not
+exist.
+
+Attempting `N = 24` and `N = 48` at the settings that converge at `N = 16-20`:
+the run reached `resid ~ 7e-3` around iteration 43, then diverged --
+`J = -5.59e-01 W`, `conservation = 1.0000`, `max|Sigma^R| = 7.6e+06` by
+iteration 107, and it never recovered -- still at `conservation = 1.0000` and
+`max|Sigma^R| = 6.2e+06` at iteration 432, when it was killed rather than run
+out to its 800-iteration cap. A separate attempt at `N = 20` on a four-times finer grid
+(`nfreq_pos = 600`) diverged the same way, `J = 1.1e-01 W` with
+`max|Sigma^R| = 9.2e+04`, where the same bed converges at 140 points.
+
+This is the same wall Sec. 4 hits on the real beds and that the tree has hit
+before: no toy chain holds a frozen state much past `N ~ 20` at a coupling
+strong enough to have a self-energy, and no real device holds one at `eta = 0`
+at all. **Every number in Parts I and II is therefore on 12-to-20-cell synthetic
+chains**, and the length extrapolation is one measured decade with no
+confirmation available.
+
+Still pending at the time of writing: the `d = 6` bed, which would add a fourth
+point to Sec. 20's DOF ladder. It is stated as pending rather than guessed.
+
+---
+
+# Part III — verdict
+
+## 24. What is settled
+
+**The analytic / modal route is dead.** It loses to reblocking by 12x at
+`d = 1` (Sec. 11) and collapses entirely at `d = 4` (Sec. 21). Part 0 predicted
+it would address the smaller term; the measurement is worse than the prediction.
+
+**The bidirectional repair is real.** Gate G1 passes -- the two-sided form is
+exact at rank (1,1) where the one-sided continuation is 40-98 % wrong
+(Sec. 13) -- which confirms the diagnosis that 26-30 % of the residue weight
+sits in the far-contact branch `|xi| > 1`.
+
+**Arm S is a correct representation.** It converges monotonically in rank to
+machine precision, and reblocking does not converge in block size at all: across
+three beds a coarser blocking discards strictly less of `Sigma` and is
+nonetheless less accurate on two of them and more on the third (Sec. 19). And
+the realisation preserves `Sigma^< = -(Sigma^<)^H` under truncation to 4e-14 --
+positivity survives compression for free, which is what arm F had to build a
+congruence to obtain.
+
+**The common basis is compact on a resolving grid** -- ~50 operators for ~600
+frequencies (Sec. 17), after correcting the coarse-grid artefact of Sec. 14.
+
+**The causal action route works and does not pay.** The identity holds to
+3.7e-16 for real probes and fails at 0.74 for complex ones (Sec. 15), but the
+Krylov basis reaches `N_D` exactly, so a solve costs `N_D` matvecs and the
+compression buys nothing at solve time.
+
+## 25. What is not settled, and the one measurement that would settle it
+
+Arm S has never been cheaper than the incumbent on any bed. At `d = 4`:
+
+| arm | `eps(J_L)` | RGF cost vs pin |
+|---|---|---|
+| 2-cell reblock | 4.67e-03 | `4x` |
+| 3-cell reblock | 1.65e-03 | `9x` |
+| 4-cell reblock | 4.66e-04 | `16x` |
+| S4 | 1.17e-03 | `27x` |
+| S8 | 5.04e-04 | `125x` |
+
+Reblocking wins every row. What has changed is the size of the gap: roughly
+`500x` at `d = 1`, roughly `3x` at `d = 4`, because the rank needed at matched
+accuracy is flat in `d` (6, 8, 4) while the reblock's width is not.
+
+So the decisive quantity is `r_Sigma(d, N)` jointly, and the cheapest step is
+**one `d = 8` bed at fixed `N = 16`**. If the matching rank stays near 4, the
+augmented block undercuts a 2-cell reblock somewhere near `d ~ 8-16` and a real
+Si or CNT cell at `d = 24-96` is past it, and an implementation has a case. If
+it flattens at the `d = 4` gap, the programme is finished and this document is
+the deliverable.
+
+Until then nothing here should be ported into `src/quatrex/`: it would be a
+representation that is correct, positivity-preserving, and about three times too
+expensive in the only regime measured, with an unquantified length penalty on
+top.
+
+---
+
+# Appendix — how the campaign was run
+
+Not about the physics; about the four days of compute behind it, and three
+things that cost more than they should have.
+
+**The reference kernel is the whole cost.** `phonon/solver/se_finite.py` -- the
+dense reference the studies need, because production returns at most three
+off-diagonals and a question about long-range `G` cannot be asked of it -- is
+98 % of an SCBA iteration: 0.83 s against 0.01 s for the Kramers-Kronig
+transform and 0.01 s for the Dyson solve on a 16-cell 1-DOF bed. It issues one
+`bubble_dense_from_fft` call per `(I, J, iq, kind, K1, K1', K2, K2')` tuple:
+251384 calls for six iterations at `d = 4`.
+
+**The thread pool was subtracting.** Scanned on a 256-core tortin node, the
+per-task loop is fastest at ONE worker for `d = 1, 2, 4` and at two for `d = 6`:
+
+| `d` | 1 thr | 2 | 4 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|---|---|
+| 1 | 1.00x | 0.84 | 0.90 | 0.84 | 0.80 | 0.53 | 0.41 |
+| 2 | 1.00x | 0.52 | 0.21 | 0.16 | **0.15** | 0.17 | 0.17 |
+| 4 | 1.00x | 0.64 | 0.36 | 0.27 | **0.26** | 0.30 | 0.30 |
+| 6 | 1.00x | **1.30** | 0.77 | 0.67 | 0.55 | 0.59 | 0.58 |
+
+Every study before 2026-08-28 ran at `--threads 16`, i.e. at a quarter of serial
+speed at `d = 4`. Fixing it took a `d = 4` bed from iteration 17 in four hours to
+iteration 115 in three.
+
+**OpenBLAS dies at import on those nodes.** The conda build supports at most 256
+threads and sizes its pool from the core count, so on a 256-core node it
+exhausts its own per-thread buffer table -- "Program is Terminated. Because you
+tried to allocate too many memory regions", repeated, then SIGSEGV, before a
+line of the run's own output. It must be capped in the ENVIRONMENT, because
+OpenBLAS reads the variable at load time and the in-process `threadpoolctl`
+limit the bubble runner already applies is too late. `tortin.py` now exports 32.
+
+**Batching is not a CPU optimisation; it is what makes a GPU usable.** Carrying
+the task axis as a batch measures 2.5x at `d = 1`, where the per-task arrays are
+`(n_fft, 1, 1)` and Python overhead is everything, and 0.68-0.90x at `d = 4-6`,
+where numpy is already at its FLOP/memory bound. On a GH200, complex128
+throughout:
+
+| `d` | CPU per-task | GPU batched | GPU per-task |
+|---|---|---|---|
+| 1 | 1.49 GF/s | 19.5 (13.0x) | **0.09x** |
+| 2 | 1.84 | 10.2 (5.5x) | **0.47x** |
+| 4 | 7.92 | 573.7 (**72.5x**) | 1.32x |
+| 6 | 11.34 | 1263.0 (**111.4x**) | 4.15x |
+
+A port WITHOUT batching would be slower than the CPU at `d = 1, 2`: 21000
+launches of a few microseconds' work each. Batched and verified end to end, a
+`d = 6` bed ran 389 SCBA iterations in 21 minutes on a GH200 against ~270 s per
+iteration on tortin, ~84x, matching the kernel figure. Enabled by
+`QX_PHPH_BATCHED=1` / `QX_PHPH_XP=cupy`, both opt-in, bit-identical to the
+per-task path on numpy and 6e-16 on the GPU.
+
+**None of this applies to production.** `src/quatrex/phonon/sse_phonon_phonon.py`
+already flattens the `(q', quad)` task axis into strided-batched GEMMs with
+resident stacking and a cupy scatter-add (`_contract_tau_q_batched`), on by
+default via `sse_dense_q_batched`. The slow path was only ever the dense
+reference, and the dense reference exists because it is the only thing that can
+answer the question Part 0 poses.

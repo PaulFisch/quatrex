@@ -12,7 +12,7 @@ device needs and that module throws away. In a finite device the field at an
 interior cell carries waves injected from BOTH contacts, and relative to one
 anchor the far-contact contribution appears with :math:`|\lambda| > 1`.
 Measured on the converged chain, that branch is **26-30 % of the fitted residue
-weight** (``phonon/docs/spatial_analytic_tail.md`` §11): dropping it loses a
+weight** (``phonon/docs/spatial_representation.md`` §11): dropping it loses a
 quarter of the amplitude, and continuing it outward diverges.
 
 The repair is not a better fit. It is to stop writing the interior as one

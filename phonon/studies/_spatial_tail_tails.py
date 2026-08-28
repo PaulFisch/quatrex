@@ -824,7 +824,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dof", type=int, default=1,
                     help="DOF per cell; >1 routes through the multi-DOF "
                          "builder, which is the axis the cost of an augmented "
-                         "block turns on (see spatial_analytic_tail.md Sec. 18)")
+                         "block turns on (see spatial_representation.md Sec. 18)")
     ap.add_argument("--max-iter", type=int, default=300)
     ap.add_argument("--mixing", type=float, default=0.2)
     ap.add_argument("--save", type=Path, default=None)

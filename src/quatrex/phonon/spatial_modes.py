@@ -39,7 +39,7 @@ it must return the lead's own bands, which is the regression that pins the
 convention.
 
 Two generalisations beyond the quadratic case, both needed by the spatially
-analytic tail programme (``phonon/docs/spatial_analytic_tail.md``):
+analytic tail programme (``phonon/docs/spatial_representation.md``):
 
 * **Arbitrary pencil degree.** Once the output pin is removed, :math:`\Sigma^R`
   has range :math:`M = 2p+b > 1` and the spatial recurrence is

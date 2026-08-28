@@ -103,99 +103,20 @@ scalar occupations degrade 2.7e-02 -> 29 % and saturate.
 
 ---
 
-## 2. The spatial half
+## 2-3. The spatial half, and the three spatial truncations
 
-### 2.1 What was built
+Both sections are superseded and have been folded into
+`spatial_representation.md`, which is the single record of that programme: the
+support law `supp(Sigma) = {|I-J| <= 2p+b}` and the three truncations are its
+Secs. 0.1-0.2, the output pin's cost its Sec. 0.3, and the mode-range
+measurements (`xi = v_g/gamma`, Si and CNT) its Sec. 0.4.
 
-`src/quatrex/phonon/spatial_modes.py` -- device complex bands from the pencil
-the lead OBC already solves, with the SCBA substitution
-`H_00 -> H_00 + Sigma^R_00`. Undressed, an in-band mode sits on the unit circle
-and its range `xi = -1/ln|lambda|` is infinite; dressed, the reciprocal pair
-splits and it acquires a finite one. On a chain at `Sigma = -i Gamma` that is
-554 cells at `Gamma = 0.05`, 55.4 at 0.5, 5.6 at 5.0.
-
-`xi = v_g/gamma` to 1e-4 in weak damping, which is the bridge between the two
-halves: the pole census already measures `gamma` per mode, so a required
-spatial range follows from a measurement already taken.
-
-Measured on the stored dynamical matrices (`spatial_band_range.md`):
-
-| bed | branch-max abs(v_g) med [cells*THz] | range at the bed's gamma [cells] |
-|---|---|---|
-| Si, 81 q, 486 branches | 0.967 | 3.05 to 28.8, median 6.05 |
-| CNT (3,3), 36 branches | 5.16 | 2.6 median, 10.7 at the narrowest mode |
-
-And the reconstruction of the proposal's Eq. (158): fitting
-`G(n) = V diag(lambda^n) C` from `n = 1, 2` alone predicts every block out to
-`n = 12` at roundoff on real CNT (36 DOF) and Si (6 DOF) cells.
-
-### 2.2 The rank and the fit anchor are one choice
-
-Truncating the mode set looked free and is not. Modes with `|lambda| = 1e-3`
-contribute `1e-9` by three cells, yet dropping them costs `1e-4` -- the fit was
-anchored where they are still in the data, so their weight lands on the
-survivors. On CNT at rank 22 of 36, the error at `n = 5` is 1.2e-02 anchored at
-`n = 1,2` and 2.1e-07 anchored at `n = 5,6`.
-
-It cuts both ways: a fit anchored far out cannot determine a fast mode's
-coefficient at all, so SHORT-range blocks degrade even at full rank. The anchor
-selects the window of distances the representation is valid on, and the rank
-follows from it. The pole sector reached the same conclusion for its own local
-model with `_fit_anchor`.
-
-### 2.3 Reweighting the mask cannot replace a modal sector
-
-Two bounds, both structural.
-
-At the output the band is pinned at `|I-J| <= 1`, so the mask is the
-tridiagonal Toeplitz `[w_1, 1, w_1]` with symbol `1 + 2 w_1 cos(theta)`,
-non-negative only for `w_1 <= 1/2`. A weighting faithful to a range `xi` has
-`w_1 = exp(-1/xi)`, so PSD-ness demands `xi <= 1/ln 2 = 1.44 cells` -- against
-every range measured. This derives the existing empirical result rather than
-restating it: Bartlett has `w_1 = b/(b+1) <= 1/2` only at `b = 1`.
-
-On the legs, a truncated geometric weight is PSD only once the band exceeds the
-range, by a factor that itself grows with the range (1.2x at `lambda = 0.3`,
-3.0x at 0.91) -- the regime in which no truncation was needed.
-
----
-
-## 3. The three spatial truncations
-
-Derived in `spatial_truncation_derivation.md`. With vertex reach `p` and leg
-band `b`,
-
-    supp(Sigma) = { |I - J| <= 2p + b },
-
-confirmed exactly: leg band 0,1,2,3 gives reach 2,3,4,5. So `Sigma` is NOT
-tridiagonal and its reach grows with the leg band.
-
-| # | truncation | status |
-|---|---|---|
-| 1 | `Phi` to the nearest-neighbour shell | **exact** -- the FC3 cutoff (4 Ang on MoS2) is shorter than the transport cell (12.294 Ang), so nothing beyond the shell exists |
-| 2 | legs to `\|K-K'\| <= b` (`sse_g_band`) | **exact** for the retained output once `b >= 3`, which is the default and the cap |
-| 3 | output pinned to `\|I-J\| <= 1` | **the live one** |
-
-Truncation 3 discards about 30 % of the `Sigma` weight on a device long enough
-to have settled (10.5 % at seven cells, 29.3 % at ten, 30.3 % at fourteen --
-the short bed is not a conservative proxy). Its dependence on the
-Green-function range is secondary: five points between ranges of 2 and 20 cells
-against thirty from the device length.
-
-The lever is the blocking, since `2p + b` is in CELLS. On twelve cells:
-
-| cells per block | 1 | 2 | 3 | 4 |
-|---|---|---|---|---|
-| discarded | 32.1 % | 5.4 % | 2.5 % | 0.30 % |
-
-`reblock_device.py` already exists, and its docstring already states the
-mechanism.
-
-**But the pin is an accuracy defect, not a stability one.** That was tested
-before this session: `bubble_positivity.md` Sec. 6.7 ran the same MoS2 film at
-six blocks (maximal truncation) and at two (no mask at all), and both diverged
-at the same iteration with the untruncated run carrying MORE gain. Re-blocking
-is worth doing for accuracy; it does not fix a divergence.
+Two things stated here at the time have since been settled, and the merged
+document carries both: the pin is worth about 30 % on a settled device rather
+than the 11 % quoted from a seven-cell bed, and the modal route it was written
+to motivate has been measured and fails -- it loses to reblocking by 12x at one
+DOF per cell and collapses entirely at four (`spatial_representation.md`
+Secs. 11 and 21).
 
 ---
 

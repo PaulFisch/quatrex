@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""The spatially analytic Green-function tail: the invariants, not the numbers.
 
-Companion to ``phonon/docs/spatial_analytic_tail.md``. The programme asks
+Companion to ``phonon/docs/spatial_representation.md``. The programme asks
 whether the long-range spatial part of ``G`` can be carried by complex-band
 modes and whether that recovers a transport-relevant part of the cubic
 self-energy. What belongs HERE is the half of that with an analytic or
