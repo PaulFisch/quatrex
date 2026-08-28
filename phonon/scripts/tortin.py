@@ -34,6 +34,10 @@ from pathlib import Path
 
 REPO = "/usr/scratch/mont-fort11/pfischill/quatrex"
 CONDA_ENV = "/usr/scratch/mont-fort11/pfischill/conda/envs/quatrex-dev"
+# Below the 256-core count and below OpenBLAS's own build limit; the
+# phonon kernels are memory-bound at these block sizes, so the wide end
+# buys nothing and costs a crash.
+BLAS_THREADS = 32
 LOCAL_REPO = Path(__file__).resolve().parents[2]
 MAX_NODES = 4
 MIN_FREE_LEFT = 2
@@ -187,7 +191,17 @@ def cmd_launch(args):
     if ssh(node, f"tmux has-session -t {shlex.quote(session)} 2>/dev/null").returncode == 0:
         sys.exit(f"session {session} already exists on {node}")
 
-    exports = [f"PATH={CONDA_ENV}/bin:$PATH", f"PYTHONPATH={REPO}/src"]
+    # The tortin nodes have 256 cores and the conda OpenBLAS is built for at
+    # most 256 threads. Left to itself it sizes its pool by core count, then
+    # dies allocating per-thread buffers -- "Program is Terminated. Because
+    # you tried to allocate too many memory regions", repeated, then SIGSEGV,
+    # before a single line of the run's own output. It has to be capped in the
+    # ENVIRONMENT because OpenBLAS reads it at load time, so an in-process
+    # threadpoolctl limit is already too late. Override with --env.
+    exports = [f"PATH={CONDA_ENV}/bin:$PATH", f"PYTHONPATH={REPO}/src",
+               f"OPENBLAS_NUM_THREADS={BLAS_THREADS}",
+               f"OMP_NUM_THREADS={BLAS_THREADS}",
+               f"MKL_NUM_THREADS={BLAS_THREADS}"]
     exports += args.env or []
     if args.config:
         exports.append(f"QX_CONFIG={args.config}")
