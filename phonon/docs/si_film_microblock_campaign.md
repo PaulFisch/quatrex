@@ -324,3 +324,21 @@ spread was \(1.42\times10^{-6}\), and its normalised bubble imbalance was
 \(3.23\times10^{-8}\).  These checkpoints establish a reproducible route
 through three quarters of the physical cubic vertex without artificial
 broadening or any frequency or spatial correction.
+
+Two further certified steps reached \(s=0.8125\) and \(s=0.875\).  Their
+relative residuals were \(8.92\times10^{-5}\) and \(9.43\times10^{-5}\), and
+their currents were 130.651094 and 126.799991.  The corresponding internal
+spreads were \(1.30\times10^{-6}\) and \(2.96\times10^{-6}\).  A direct
+restart of the physical vertex from \(s=0.875\) reached only
+\(7.01\times10^{-2}\) before its residual grew.  Likewise, a trial at
+\(s=0.96875\) started from the same checkpoint reached
+\(1.96\times10^{-2}\) and then rose to \(2.81\times10^{-2}\).  Both were
+stopped and retained as divergent continuation evidence.
+
+The smaller step from \(s=0.8125\) to \(s=0.9375\) converged in 37 map
+evaluations.  It attained a residual of \(9.17\times10^{-5}\), a current of
+122.205341, an internal spread of \(3.36\times10^{-6}\), and a normalised
+bubble imbalance of \(2.49\times10^{-8}\).  Its complete distributed state
+is the certified restart for the full-strength calculation.  A separate
+\(s=0.96875\) branch is being formed from this closer state so that a failure
+of the direct \(0.9375\)-to-one step does not require repeating the ladder.
