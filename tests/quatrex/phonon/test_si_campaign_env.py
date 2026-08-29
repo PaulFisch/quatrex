@@ -57,3 +57,17 @@ def test_restartable_campaign_requires_final_and_live_checkpoints() -> None:
         "QX_SIGMA_BEST_LIVE": "1",
     }
     module.validate_restartable_env(env)
+
+
+@pytest.mark.parametrize("raw, expected", [(None, 1), ("1", 1), ("5", 5)])
+def test_live_best_checkpoint_stride(raw, expected) -> None:
+    module = _module()
+    env = {} if raw is None else {"QX_SIGMA_BEST_LIVE_STRIDE": raw}
+    assert module.best_checkpoint_stride(env) == expected
+
+
+@pytest.mark.parametrize("raw", ["0", "-2", "1.5", "many"])
+def test_live_best_checkpoint_stride_rejects_invalid_values(raw) -> None:
+    module = _module()
+    with pytest.raises(ValueError, match="positive integer"):
+        module.best_checkpoint_stride({"QX_SIGMA_BEST_LIVE_STRIDE": raw})

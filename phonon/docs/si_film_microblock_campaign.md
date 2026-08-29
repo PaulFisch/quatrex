@@ -296,3 +296,13 @@ Its relative retarded residual was \(7.87\times10^{-5}\), the lead current was
 both preserved.  This is the first continuation point for which the scalar
 record, spectral current and restart state all survive together.  It remains
 classified as superseded because \(s=0.5\) is not the physical vertex.
+
+Writing every improved live-best state is inexpensive on L5 but scales poorly
+with length.  The distributed L5 final and best states together occupy about
+1.1 GB; the same selected-block layout grows approximately linearly with the
+number of groups.  `QX_SIGMA_BEST_LIVE_STRIDE` therefore controls only the
+filesystem write cadence.  Its default value one preserves the earlier
+behaviour.  A larger value still writes the first best state, every selected
+iteration and the converged state, while the exact best state is retained in
+memory and written at normal shutdown.  This changes no SCBA arithmetic and
+will be used for the longer films.

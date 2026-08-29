@@ -50,3 +50,17 @@ def validate_restartable_env(environ: MutableMapping[str, str]) -> None:
     if missing:
         raise ValueError(
             "restartable campaign run is missing " + ", ".join(missing))
+
+
+def best_checkpoint_stride(environ: MutableMapping[str, str]) -> int:
+    """Return the positive live-best write stride (one preserves legacy)."""
+    raw = environ.get("QX_SIGMA_BEST_LIVE_STRIDE", "1")
+    try:
+        stride = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "QX_SIGMA_BEST_LIVE_STRIDE must be a positive integer") from exc
+    if stride < 1:
+        raise ValueError(
+            "QX_SIGMA_BEST_LIVE_STRIDE must be a positive integer")
+    return stride

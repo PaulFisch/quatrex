@@ -9,7 +9,11 @@ from pathlib import Path
 
 import numpy as np
 
-from env_aliases import normalise_env, validate_restartable_env
+from env_aliases import (
+    best_checkpoint_stride,
+    normalise_env,
+    validate_restartable_env,
+)
 
 from quatrex.core.config import parse_config, setup_context
 from qttools import xp
@@ -19,6 +23,7 @@ from qttools.utils.gpu_utils import get_host
 
 normalise_env(os.environ)
 validate_restartable_env(os.environ)
+_BEST_LIVE_STRIDE = best_checkpoint_stride(os.environ)
 
 CFG = os.environ["QX_CONFIG"]
 cfg = parse_config(CFG)
@@ -439,7 +444,13 @@ def _logged(self):
             # QX_SIGMA_BEST_LIVE=1: also write the snapshot NOW (same
             # format as the end-of-run save, which stays the default
             # when unset and loses the state on a walltime kill).
-            if os.environ.get("QX_SIGMA_BEST_LIVE") == "1":
+            # Long films have multi-gigabyte distributed Sigma states. Save
+            # the first best state, every requested stride thereafter, and a
+            # converged state. The in-memory best is still updated at every
+            # iteration and is written unconditionally at normal shutdown.
+            _live_due = (_it["n"] == 1 or
+                         _it["n"] % _BEST_LIVE_STRIDE == 0 or _done)
+            if (os.environ.get("QX_SIGMA_BEST_LIVE") == "1" and _live_due):
                 _sl_b, _sg_b, _sr_b = _best["sig"]
                 np.savez(_sigma_file(os.environ["QX_SAVE_SIGMA_BEST"]),
                          sigma_lesser=_sl_b, sigma_greater=_sg_b,
