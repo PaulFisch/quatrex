@@ -101,3 +101,12 @@ def test_log_environment_overrides_toml() -> None:
         cfg, env, "electron", "energy_window_max") == 40
     assert module._cfg_value(
         cfg, env, "phonon", "left_temperature") == 305
+
+
+def test_failed_si_job_without_result_is_in_census_candidates(tmp_path) -> None:
+    module = _module()
+    run = tmp_path / "si-l5-failed"
+    run.mkdir()
+    (run / "job.sh").write_text("export QX_WMAX=40\n")
+
+    assert module._candidate_dirs([tmp_path]) == [run]

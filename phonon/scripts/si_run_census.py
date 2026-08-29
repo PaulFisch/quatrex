@@ -325,6 +325,10 @@ def _candidate_dirs(roots: list[Path]) -> list[Path]:
                     r"(?:^|/)si(?:chk|res|4x|film|-l\d)", low
                 ):
                     out.add(artifact.parent)
+        for script in root.rglob("job.sh"):
+            low = script.parent.as_posix().lower()
+            if re.search(r"(?:^|/)si(?:film|fix|4x|-l\d|mic)", low):
+                out.add(script.parent)
     return sorted(out)
 
 
