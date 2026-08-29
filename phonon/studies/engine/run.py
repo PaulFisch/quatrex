@@ -669,6 +669,58 @@ if _mw is not None:
         _full = _recv
     spec_full = _full
 
+# Optional harmonic identity audit.  This is intentionally evaluated after
+# the production solve and only for a one-block grouped device, where G^R is
+# the complete finite-device matrix and the two contact self-energies retained
+# by PhononSolver are unambiguous.  It never feeds anything back into SCBA.
+caroli_full = caroli_current_full = caroli_error = None
+if os.environ.get("QX_DIAG_CAROLI") == "1":
+    try:
+        contacts = getattr(ph, "_single_block_contacts", None)
+        if contacts is None or int(ph.block_sizes.shape[0]) != 1:
+            raise ValueError(
+                "QX_DIAG_CAROLI requires one grouped Dyson block with two "
+                "separately retained contacts"
+            )
+        from quatrex.phonon.ballistic_audit import (
+            caroli_number_current,
+            caroli_transmission,
+            spectrum_error,
+        )
+        _gr = scba.data.g_retarded.blocks[0, 0]
+        _tc = caroli_transmission(_gr, contacts[0][0], contacts[1][0])
+        _jc = caroli_number_current(
+            _tc, ph.left_occupancies, ph.right_occupancies)
+
+        def _gather_caroli(_local):
+            _local = np.asarray(get_host(_local), dtype=np.float64)
+            _eg = np.abs(np.asarray(get_host(scba.energies)).real)
+            _lf = np.abs(np.asarray(get_host(ph.local_frequencies)))
+            _full = np.zeros((_eg.size,) + _local.shape[1:], dtype=np.float64)
+            _i0 = int(np.argmin(np.abs(_eg - float(_lf.flat[0]))))
+            _full[_i0:_i0 + _local.shape[0]] = _local
+            if ranks.stack.size > 1:
+                _recv = np.empty_like(_full)
+                ranks.stack.all_reduce(
+                    np.ascontiguousarray(_full), _recv, op="sum")
+                _full = _recv
+            return _full
+
+        caroli_full = _gather_caroli(_tc)
+        caroli_current_full = _gather_caroli(_jc)
+        if ranks.rank == 0 and spec_full is not None:
+            caroli_error = spectrum_error(
+                caroli_current_full, np.asarray(spec_full)[..., 0])
+            print(
+                "CAROLI AUDIT "
+                f"rel_l2={caroli_error['relative_l2']:.3e} "
+                f"active_max={caroli_error['active_max_relative']:.3e}",
+                flush=True,
+            )
+    except Exception as exc:  # noqa: BLE001 -- optional diagnostic
+        if ranks.rank == 0:
+            print(f"Caroli audit failed: {exc!r}", flush=True)
+
 # --- snapshot (rank 0; last_heat is the stack/q-reduced fixed-point current) ---
 if cfg.outputs.save_profiling_results:
     Profiler().dump_stats()
@@ -893,6 +945,12 @@ if ranks.rank == 0:
         out["current_spectrum"] = spec_full
         out["t_left"] = float(cfg.phonon.left_temperature)
         out["t_right"] = float(cfg.phonon.right_temperature)
+    if caroli_full is not None:
+        out["caroli_transmission"] = np.asarray(caroli_full)
+        out["caroli_current_spectrum"] = np.asarray(caroli_current_full)
+        if caroli_error is not None:
+            for _key, _value in caroli_error.items():
+                out[f"caroli_mw_{_key}"] = float(_value)
     if err:
         out["error"] = err
     np.savez(npz, **out)
