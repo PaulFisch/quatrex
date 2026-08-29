@@ -126,6 +126,13 @@ if os.environ.get("QX_JFNK_KRYLOV"):
 if os.environ.get("QX_JFNK_INNER"):
     cfg.scba.experimental_mixer.jfnk_inner_tol = float(
         os.environ["QX_JFNK_INNER"])
+if os.environ.get("QX_JFNK_FORCING"):
+    cfg.scba.experimental_mixer.jfnk_forcing = os.environ["QX_JFNK_FORCING"]
+if os.environ.get("QX_JFNK_MAX_NEWTON"):
+    cfg.scba.experimental_mixer.jfnk_max_newton = int(
+        os.environ["QX_JFNK_MAX_NEWTON"])
+if os.environ.get("QX_JFNK_EPS"):
+    cfg.scba.experimental_mixer.jfnk_eps = float(os.environ["QX_JFNK_EPS"])
 if os.environ.get("QX_JFNK_TRUST"):
     cfg.scba.experimental_mixer.jfnk_trust = float(
         os.environ["QX_JFNK_TRUST"])

@@ -176,3 +176,26 @@ def test_jfnk_rejects_a_non_descent_trial_before_relinearising():
     # x=0 trial.
     assert abs(retry_probe[0] - base[0]) < 1e-4
     assert abs(retry_probe[0] - trial[0]) > 0.5
+
+
+def test_jfnk_rejection_does_not_enlarge_a_small_requested_trust_radius():
+    """A near-root continuation may need a radius below the old 1e-3 floor."""
+    def fixed_point_map(z):
+        return z + z**3 - 2.0 * z + 2.0
+
+    mixer = JFNKMixer(
+        warmup=0,
+        max_krylov=1,
+        inner_tol=0.0,
+        forcing="fixed",
+        eps=1e-7,
+        trust=1e-4,
+        trust_max=1e-4,
+        verbose=False,
+    )
+    base = np.array([1.0 + 0.0j])
+    probe = mixer.step(base, fixed_point_map(base))
+    trial = mixer.step(probe, fixed_point_map(probe))
+    mixer.step(trial, fixed_point_map(trial))
+
+    assert mixer._trust_k == pytest.approx(5e-5)

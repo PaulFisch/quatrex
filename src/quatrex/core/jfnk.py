@@ -114,6 +114,12 @@ class JFNKMixer:
         self.max_newton = int(max_newton)
         self.eps = float(eps)
         self.trust = float(trust)
+        # A fixed 1e-3 lower bound used to *increase* a deliberately smaller
+        # requested trust radius after the first rejected trial.  Scale the
+        # floor from the requested radius instead: ordinary/default runs keep
+        # an effectively identical safeguard, while near-root continuation
+        # can legitimately ask for 1e-4 or smaller Newton steps.
+        self._trust_floor = min(1e-3, max(1e-12, 1e-3 * self.trust))
         # The radius is allowed to GROW from the (small, safe) initial
         # ``trust`` up to ``trust_max`` as the residual descends.
         # ``trust_max <= trust`` => no growth.
@@ -227,7 +233,7 @@ class JFNKMixer:
                 (not np.isfinite(trial_merit)) or trial_merit >= base_merit
             ):
                 shrink = 0.25 if not np.isfinite(trial_merit) else 0.5
-                self._trust_k = max(self._trust_k * shrink, 1e-3)
+                self._trust_k = max(self._trust_k * shrink, self._trust_floor)
                 self._trial_rejections += 1
                 self._log(
                     f"  JFNK reject: ||R||_inf {base_merit:.3e} -> "
@@ -275,7 +281,7 @@ class JFNKMixer:
         # disabled one (trust = 0) would silently switch it back on.
         if self.trust > 0.0 and self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
-                self._trust_k = max(self._trust_k * 0.5, 1e-3)
+                self._trust_k = max(self._trust_k * 0.5, self._trust_floor)
             elif rk < 0.95 * self._Rprev_norm:   # strong progress -> grow quickly
                 self._trust_k = min(self._trust_k * 1.3, self.trust_max)
             elif rk < 0.999 * self._Rprev_norm:  # accepted descent -> recover gently
