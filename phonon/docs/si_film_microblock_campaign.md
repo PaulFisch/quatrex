@@ -271,6 +271,13 @@ Each run is reduced independently with
 post-processing only and is enabled with `QX_DIAG_CAROLI=1` on a ballistic
 production solve.
 
+Focused source tests cover the batched Caroli oracle, inactive spectral bins,
+the modular q-difference map and exact resampling of a planted finite-support
+Fourier polynomial.  All four passed on a GH200 in Alps job 4556216.  Job
+4556213 is retained in the submission ledger as a harness-only failure: its
+relative test paths were evaluated from the job output directory, so pytest
+found no files and no test was run.
+
 ## Certification order
 
 The active order is fixed to avoid a favourable but under-resolved long run.

@@ -440,3 +440,5 @@ least-squares ladder rebuild.
 | 2026-08-29 | 4555926 | si-l5-q7-ballistic-input-build | 1 | 00:10:00 | 0.17 | 423.33 | debug |
 | 2026-08-29 | 4555936 | si-l5-ballistic-q7-w20-dw003125-caroli | 1 | 00:20:00 | 0.33 | 423.66 | debug |
 | 2026-08-29 | 4555940 | si-l5-b3-v096875-aux025f80-lin01-from953125aux-q9 | 1 | 01:00:00 | 1.00 | 424.66 | normal |
+| 2026-08-29 | 4556213 | si-ballistic-validation-tests-ecc64fad | 1 | 00:10:00 | 0.17 | 424.83 | debug |
+| 2026-08-29 | 4556216 | si-ballistic-validation-tests2-ecc64fad | 1 | 00:10:00 | 0.17 | 425.00 | debug |

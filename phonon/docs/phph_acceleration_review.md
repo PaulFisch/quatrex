@@ -890,6 +890,8 @@ PYTHONPATH=src:phonon python -m pytest -q \
 The canonical test command was run in the `quatrex-dev` environment with
 `QTX_ARRAY_MODULE=numpy`: all 75 tests passed.  The reduced CPU studies
 reproduced the tables above.  The
+focused ballistic audit and q-resampling tests passed four of four on a GH200
+as Alps job 4556216.  The
 restart-rich fits used the same code and seeds on Tortin; their pulled logs are
 under the gitignored `cluster/cntfc3-r*-r2/` directories.  The CUDA study ran
 on a GH200 as Alps job 4552618; its pulled log is
