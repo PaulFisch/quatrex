@@ -411,7 +411,9 @@ def _logged(self):
     # residual n-1 with F[Sigma_n].  A nominal minimum-residual snapshot could
     # consequently restart at a much larger residual.  Evaluate first and
     # preserve ``prev`` so the archived residual and state are the same point.
-    if os.environ.get("QX_SAVE_SIGMA_BEST"):
+    _mixer = getattr(self, "_anderson_mixer", None)
+    _is_probe = bool(_mixer is not None and _mixer.probing)
+    if os.environ.get("QX_SAVE_SIGMA_BEST") and not _is_probe:
         _res = float(getattr(self, "_last_rel_sigma", np.inf))
         if np.isfinite(_res) and _res < _best["res"]:
             _best["res"] = _res
