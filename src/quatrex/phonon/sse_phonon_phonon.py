@@ -2418,7 +2418,161 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 result[(I, J)] = (out_l, out_g)
             return result
 
-        result = _run(0, n_tau)
+        def _run_batched(lo, hi):
+            """GPU/NumPy task-batched form of the same primitive ring.
+
+            The original microblock reference loop launched six sets of three
+            tiny matrix multiplications for every q/quad task.  At q9 L5 that
+            is more than five million Python iterations.  Flattening the task
+            axis into strided batched GEMMs changes only the final reduction
+            order and is the same optimisation used by the grouped dense
+            kernel below.
+            """
+            w = hi - lo
+
+            def _stack(family, keys):
+                if set(family) != set(keys):
+                    return None
+                return xp.stack([
+                    xp.ascontiguousarray(family[key]) for key in keys
+                ])
+
+            a_keys = sorted(gl_a)
+            b_keys = sorted(gl_b)
+            a_index = {key: i for i, key in enumerate(a_keys)}
+            b_index = {key: i for i, key in enumerate(b_keys)}
+            GL = _stack(gl_a, a_keys)
+            GG = _stack(gg_a, a_keys)
+            GGR = _stack(ggr_a, a_keys)
+            GLR = _stack(glr_a, a_keys)
+            GLb = _stack(gl_b, b_keys)
+            GGb = _stack(gg_b, b_keys)
+            GGRb = _stack(ggr_b, b_keys)
+            GLRb = _stack(glr_b, b_keys)
+            if any(value is None for value in
+                   (GL, GG, GGR, GLR, GLb, GGb, GGRb, GLRb)):
+                return _run(lo, hi)
+
+            def _scatter_micro(out, iqe, oi, oj, values, bs_i, bs_j):
+                # values: (C, wt, d, d).  Flatten (q,row,col) into one
+                # target index and retain tau as the contiguous value axis.
+                d = values.shape[-1]
+                rr = xp.arange(d, dtype=xp.int64)[None, :, None]
+                cc = xp.arange(d, dtype=xp.int64)[None, None, :]
+                target = (
+                    iqe[:, None, None] * (bs_i * bs_j)
+                    + (oi[:, None, None] + rr) * bs_j
+                    + (oj[:, None, None] + cc)
+                ).reshape(-1)
+                vals = values.transpose(0, 2, 3, 1).reshape(-1, values.shape[1])
+                out_flat = out.reshape(out.shape[0], -1).T
+                if xp is np:
+                    np.add.at(out_flat, target, vals)
+                else:
+                    import cupyx
+                    cupyx.scatter_add(out_flat.real, target, vals.real)
+                    cupyx.scatter_add(out_flat.imag, target, vals.imag)
+
+            result = {}
+            for I, J in owned:
+                tasks = qtasks.get((I, J), ())
+                bs_i = int(self.block_sizes[I])
+                bs_j = int(self.block_sizes[J])
+                out_l = xp.zeros((w, nq, bs_i, bs_j), dtype=dtype)
+                out_g = xp.zeros_like(out_l)
+                if not tasks:
+                    result[(I, J)] = (out_l, out_g)
+                    continue
+
+                groups: dict[tuple, list] = {}
+                for task in tasks:
+                    PL, PR, nI, bK2, nJ = task[9:14]
+                    groups.setdefault(
+                        (PL.shape, PR.shape, nI, bK2, nJ), []
+                    ).append(task)
+                for (shape_l, shape_r, nI, bK2, nJ), ts in groups.items():
+                    n_tasks = len(ts)
+                    bK1 = shape_l[1]
+                    bK1p = shape_r[1] // nJ
+                    per_task_tau = 16 * (
+                        2 * bK1 * bK1p + shape_l[0] * bK1p
+                        + bK2 * shape_r[1] + 2 * nI * nJ
+                    )
+                    preferred_tasks = min(n_tasks, 256)
+                    tau_width = int(max(1, min(
+                        w, self._tau_chunk_bytes
+                        // max(per_task_tau * preferred_tasks, 1)
+                    )))
+                    task_width = max(1, min(
+                        n_tasks, self._tau_chunk_bytes
+                        // max(per_task_tau * tau_width, 1)
+                    ))
+                    iqe_all = xp.asarray([t[0] for t in ts], dtype=xp.int64)
+                    qa_all = xp.asarray([t[1] for t in ts], dtype=xp.int64) - a_off
+                    qb_all = xp.asarray([t[2] for t in ts], dtype=xp.int64) - b_off
+                    oi_all = xp.asarray([t[3] for t in ts], dtype=xp.int64)
+                    oj_all = xp.asarray([t[4] for t in ts], dtype=xp.int64)
+                    ai_all = xp.asarray([
+                        a_index[(t[5], t[6])] for t in ts
+                    ], dtype=xp.int64)
+                    bi_all = xp.asarray([
+                        b_index[(t[7], t[8])] for t in ts
+                    ], dtype=xp.int64)
+
+                    for c0 in range(0, n_tasks, task_width):
+                        c1 = min(c0 + task_width, n_tasks)
+                        PLc = xp.stack([t[9] for t in ts[c0:c1]])[:, None]
+                        PRc = xp.stack([t[10] for t in ts[c0:c1]])[:, None]
+                        ai, bi = ai_all[c0:c1], bi_all[c0:c1]
+                        qa, qb = qa_all[c0:c1], qb_all[c0:c1]
+
+                        for w0 in range(0, w, tau_width):
+                            w1 = min(w0 + tau_width, w)
+                            tau = xp.arange(lo + w0, lo + w1)[None, :]
+
+                            def _legs(A, B):
+                                return (
+                                    A[ai[:, None], tau, qa[:, None]],
+                                    B[bi[:, None], tau, qb[:, None]],
+                                )
+
+                            def _ring(Ga, Gb):
+                                left = PLc @ Ga
+                                right = Gb @ PRc
+                                return (
+                                    left.reshape(c1 - c0, w1 - w0,
+                                                 nI, bK2 * bK1p)
+                                    @ right.reshape(c1 - c0, w1 - w0,
+                                                    bK2 * bK1p, nJ)
+                                )
+
+                            sl = None
+                            for A, B in ((GL, GLb), (GL, GGRb), (GGR, GLb)):
+                                Ga, Gb = _legs(A, B)
+                                term = _ring(Ga, Gb)
+                                sl = term if sl is None else sl + term
+                            sg = None
+                            for A, B in ((GG, GGb), (GG, GLRb), (GLR, GGb)):
+                                Ga, Gb = _legs(A, B)
+                                term = _ring(Ga, Gb)
+                                sg = term if sg is None else sg + term
+                            _scatter_micro(
+                                out_l[w0:w1], iqe_all[c0:c1],
+                                oi_all[c0:c1], oj_all[c0:c1],
+                                sl.astype(dtype, copy=False), bs_i, bs_j,
+                            )
+                            _scatter_micro(
+                                out_g[w0:w1], iqe_all[c0:c1],
+                                oi_all[c0:c1], oj_all[c0:c1],
+                                sg.astype(dtype, copy=False), bs_i, bs_j,
+                            )
+                result[(I, J)] = (out_l, out_g)
+            return result
+
+        result = (
+            _run_batched(0, n_tau) if self._dense_q_batched
+            else _run(0, n_tau)
+        )
         for (I, J), (out_l, out_g) in result.items():
             shape = ((n_tau,) + tuple(nk) +
                      (int(self.block_sizes[I]), int(self.block_sizes[J])))

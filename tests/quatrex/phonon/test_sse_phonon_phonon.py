@@ -1501,7 +1501,7 @@ def test_microblock_factored_matches_dense_vertex(kernel) -> None:
     gg = rng.standard_normal((ne, 2*d, 2*d)) + 1j * rng.standard_normal(
         (ne, 2*d, 2*d))
 
-    def run(**source):
+    def run(*, dense_batched=True, **source):
         g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(grouped, ne)
         for view, arr in ((g_l.stack[...], gl), (g_g.stack[...], gg)):
             view.blocks[0, 0] = xp.asarray(arr)
@@ -1512,6 +1512,7 @@ def test_microblock_factored_matches_dense_vertex(kernel) -> None:
         cfg.phonon.sse_microblock_dof = d
         cfg.phonon.sse_microblock_g_band = 2
         cfg.phonon.decomposed_kernel = kernel
+        cfg.phonon.sse_dense_q_batched = dense_batched
         ssp = SigmaPhononPhonon(
             cfg, np.linspace(0.0, 6.0, ne), grouped, **source)
         ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
@@ -1571,7 +1572,7 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
     gg = (rng.standard_normal((ne, nq, 2*d, 2*d))
           + 1j * rng.standard_normal((ne, nq, 2*d, 2*d)))
 
-    def run(**source):
+    def run(*, dense_batched=True, **source):
         g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(grouped, ne, nq)
         for view, arr in ((g_l.stack[...], gl), (g_g.stack[...], gg)):
             view.blocks[0, 0] = xp.asarray(arr)
@@ -1582,13 +1583,21 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
         cfg.phonon.sse_microblock_dof = d
         cfg.phonon.sse_microblock_g_band = 2
         cfg.phonon.decomposed_kernel = kernel
+        cfg.phonon.sse_dense_q_batched = dense_batched
         ssp = SigmaPhononPhonon(
             cfg, np.linspace(0.0, 6.0, ne), grouped, **source)
         ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
         return s_l, s_g
 
     dense_l, dense_g = run(qfold=qfold)
+    serial_l, serial_g = run(qfold=qfold, dense_batched=False)
     fact_l, fact_g = run(vfactors=vf)
+    np.testing.assert_allclose(
+        np.asarray(get_host(dense_l.data)), np.asarray(get_host(serial_l.data)),
+        atol=1e-38, rtol=2e-12)
+    np.testing.assert_allclose(
+        np.asarray(get_host(dense_g.data)), np.asarray(get_host(serial_g.data)),
+        atol=1e-38, rtol=2e-12)
     np.testing.assert_allclose(
         np.asarray(get_host(fact_l.data)), np.asarray(get_host(dense_l.data)),
         atol=1e-38, rtol=2e-10)
