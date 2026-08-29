@@ -1605,6 +1605,88 @@ def _load_matrix_from_unit_cell(
     return _create_matrix_from_unit_cells_full(config, trimmed_unit_cells)
 
 
+def load_periodic_transport_couplings(
+    config: QuatrexConfig,
+    matrix_name: str,
+) -> tuple[NDArray, NDArray]:
+    """Load the two bare couplings of one repeated transport block.
+
+    A finite device with at least two blocks carries these matrices in its
+    first off-diagonal blocks.  A one-block device has no finite-device
+    off-diagonal, although the same couplings are still present at transport
+    shifts ``-1`` and ``+1`` in the unit-cell input.  The contact solver needs
+    them to construct the two semi-infinite reservoirs.
+
+    The returned arrays have the active transverse q axes followed by the two
+    matrix axes.  Their Fourier convention is identical to
+    :func:`_assemble_kpoint_full`.
+
+    This helper deliberately accepts only unit-cell construction.  A full
+    finite matrix does not contain enough information to recover a periodic
+    lead coupling once it has only one block.
+    """
+    if not config.device.construct_from_unit_cell:
+        raise ValueError(
+            "periodic transport couplings require "
+            "device.construct_from_unit_cell=true"
+        )
+
+    matrices = distributed_load(config.input_dir / f"{matrix_name}.mat")
+    unit_cells = trim_tight_binding_matrix(
+        tight_binding_matrix=_mat_to_unit_cells(matrices),
+        neighbor_cell_cutoff=config.device.neighbor_cell_cutoff,
+    )
+    transport_ind = "xyz".index(config.device.transport_direction)
+
+    transverse_repetitions = list(unit_cells.shape[:3])
+    transverse_repetitions.pop(transport_ind)
+    transverse_repetitions = tuple(transverse_repetitions)
+
+    sub_blocks: dict[tuple, sparse.csr_matrix] = {}
+    super_blocks: dict[tuple, sparse.csr_matrix] = {}
+    for periodic_shift_raw in xp.ndindex(transverse_repetitions):
+        periodic_shift = tuple(
+            int(ps - (size // 2))
+            for ps, size in zip(periodic_shift_raw, transverse_repetitions)
+        )
+        sub, __, sup = _extract_btd_blocks(
+            unit_cells, transport_ind, periodic_shift
+        )
+        sub_blocks[periodic_shift] = sparse.csr_matrix(sub)
+        super_blocks[periodic_shift] = sparse.csr_matrix(sup)
+
+    kpoint_grid = list(copy(config.device.kpoint_grid))
+    kpoint_grid.pop(transport_ind)
+    kpoint_grid = np.asarray(kpoint_grid, dtype=int)
+    kpoint_shift = list(copy(config.device.kpoint_shift))
+    kpoint_shift.pop(transport_ind)
+    kpoint_shift = np.asarray(kpoint_shift, dtype=float)
+    active_shape = tuple(int(k) for k in kpoint_grid if k > 1)
+    block_size = next(iter(sub_blocks.values())).shape[0]
+
+    out_sub = xp.zeros(active_shape + (block_size, block_size),
+                       dtype=xp.complex128)
+    out_sup = xp.zeros_like(out_sub)
+    kpoints = monkhorst_pack(kpoint_grid, kpoint_shift).reshape(
+        tuple(kpoint_grid) + (-1,)
+    )
+    active_axes = np.argwhere(kpoint_grid > 1).flatten()
+    cells = list(sub_blocks)
+    for full_index in np.ndindex(kpoints.shape[:-1]):
+        kpoint = kpoints[full_index]
+        active_index = tuple(np.asarray(full_index)[active_axes])
+        phases = {
+            cell: xp.exp(2j * np.pi * (np.asarray(cell) @ kpoint))
+            for cell in cells
+        }
+        sub_q = sum(phases[cell] * sub_blocks[cell] for cell in cells)
+        sup_q = sum(phases[cell] * super_blocks[cell] for cell in cells)
+        out_sub[active_index] = sub_q.toarray()
+        out_sup[active_index] = sup_q.toarray()
+
+    return out_sub, out_sup
+
+
 def load_matrix(
     config: QuatrexConfig,
     matrix_name: str,

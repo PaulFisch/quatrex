@@ -3099,7 +3099,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # GB. Bound it by splitting tau, whether or not there is a pool to
         # parallelise over (on the GPU there is none).
         pool, n_threads = ring_pool()
-        bytes_per_tau = nq * Dt.shape[1] ** 2 * xp.dtype(dtype).itemsize
+        bytes_per_table_tau = (
+            nq * Dt.shape[1] ** 2 * xp.dtype(dtype).itemsize
+        )
+        # GramTables caches four variants for every distinct contracted link
+        # while one output pair is evaluated.  The old budget counted only
+        # ONE such table, so R=64 q9 already exceeded a 6 GB GPU although the
+        # configured temporary budget was 256 MB.  Add the exact cache count
+        # (roles share it for INDSCAL) and space for the live sums/FFT plans.
+        table_multiplier = 1
+        for quads in quads_by_pair.values():
+            a_links = {(q[0], q[2]) for q in quads}
+            b_links = {(q[1], q[3]) for q in quads}
+            n_links = (len(a_links | b_links) if shared
+                       else len(a_links) + len(b_links))
+            table_multiplier = max(table_multiplier, 4 * n_links + 16)
+        bytes_per_tau = bytes_per_table_tau * table_multiplier
         cap = max(1, self._tau_chunk_bytes // max(bytes_per_tau, 1))
         n_chunks = max(1, -(n_tau // -int(cap)))                 # ceil
         if pool is not None and xp is np:

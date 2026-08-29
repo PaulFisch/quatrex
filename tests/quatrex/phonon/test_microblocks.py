@@ -82,17 +82,26 @@ def test_grouped_band_indices_are_complete_and_arrow_owned() -> None:
     assert got == want
 
 
-def test_factored_gram_rejects_noncartesian_vertex_support() -> None:
-    """A coupled support mask must not manufacture its missing cross terms."""
+def test_factored_gram_decomposes_noncartesian_support_without_cross_terms() -> None:
+    """Coupled support equals the sum of its admissible singleton quads."""
     from quatrex.phonon.bubble_factored import contract_tau_q_factored
 
     quads = {(0, 0): [(0, 0, 0, 0), (1, 1, 1, 1)]}
-    z = xp.zeros((1, 1, 1, 1), dtype=complex)
-    g = {(0, 0): z, (1, 1): z}
-    with pytest.raises(ValueError, match="Cartesian FC3 offset support"):
-        contract_tau_q_factored(
-            quads, np.array([1, 1]), (), 0, 1, 1,
-            {name: g for name in ("l", "g", "lr", "gr")},
-            xp.ones((1, 1)), xp.ones((1, 1, 1, 1)),
-            xp.ones((1, 1, 1, 1)), {0: 0}, 0, 1, xp, True, complex,
-        )
+    g = {
+        (0, 0): xp.asarray([[[[1.0 + 0.2j]]], [[[0.7 - 0.1j]]]]),
+        (1, 1): xp.asarray([[[[0.3 + 0.4j]]], [[[1.1 + 0.2j]]]]),
+    }
+    gs = {name: g for name in ("l", "g", "lr", "gr")}
+    Dt = xp.asarray([[0.8, 1.3]])
+    UB = xp.asarray([[[[1.0, 0.4]]], [[[0.2, 1.1]]]])
+    UC = xp.asarray([[[[0.7, 0.3]]], [[[1.2, 0.5]]]])
+    args = (np.array([1, 1]), (), 0, 1, 1, gs, Dt, UB, UC,
+            {0: 0, 1: 1}, 0, 2, xp, True, complex)
+    got = contract_tau_q_factored(quads, *args)[(0, 0)]
+    ref_parts = [
+        contract_tau_q_factored({(0, 0): [quad]}, *args)[(0, 0)]
+        for quad in quads[(0, 0)]
+    ]
+    for component in (0, 1):
+        ref = ref_parts[0][component] + ref_parts[1][component]
+        assert xp.allclose(got[component], ref, rtol=1e-13, atol=1e-13)

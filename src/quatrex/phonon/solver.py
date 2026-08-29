@@ -16,7 +16,7 @@ from qttools.utils.stack_utils import scale_stack
 from quatrex.core.config import QuatrexConfig
 from quatrex.core.statistics import bose_einstein
 from quatrex.core.subsystem import SubsystemSolver
-from quatrex.device.inputs import load_matrix
+from quatrex.device.inputs import load_matrix, load_periodic_transport_couplings
 from quatrex.phonon.units import thz_to_ev
 
 profiler = Profiler()
@@ -158,6 +158,22 @@ class PhononSolver(SubsystemSolver):
 
         del dynamical_matrix_sparsity_pattern
         self.block_sizes = self.dynamical_matrix.block_sizes
+
+        # With one finite Dyson block the two periodic FC2 couplings are not
+        # present in the finite matrix, but remain available in the unit-cell
+        # input.  Retain them for the exact two-contact OBC.  The minus sign is
+        # the Dyson convention A = omega^2 I - D - Sigma^R.
+        self._single_block_periodic = None
+        self._single_block_contacts = None
+        if len(self.block_sizes) == 1:
+            d_10, d_01 = load_periodic_transport_couplings(
+                config, "dynamical_matrix"
+            )
+            stack_shape = (len(self.local_frequencies),) + d_10.shape
+            self._single_block_periodic = (
+                xp.broadcast_to(-d_10[None, ...], stack_shape),
+                xp.broadcast_to(-d_01[None, ...], stack_shape),
+            )
 
         # TODO(paul) For phonons we never have non-I overlap?
         self.overlap_sparray = sparse.eye(
@@ -301,13 +317,19 @@ class PhononSolver(SubsystemSolver):
     @profiler.profile(label="PhononSolver: OBC", level="default", comm=comm)
     def _compute_obc(self) -> None:
         """Computes open boundary conditions."""
+        one_block = self.system_matrix.num_blocks == 1
+        left_contact = None
         if comm.block.rank == 0:
-            m_10, m_00, m_01 = get_periodic_superblocks(
-                a_ii=self.system_matrix.blocks[0, 0],
-                a_ji=self.system_matrix.blocks[1, 0],
-                a_ij=self.system_matrix.blocks[0, 1],
-                block_sections=self.block_sections,
-            )
+            if one_block:
+                m_10, m_01 = self._single_block_periodic
+                m_00 = self.system_matrix.blocks[0, 0]
+            else:
+                m_10, m_00, m_01 = get_periodic_superblocks(
+                    a_ii=self.system_matrix.blocks[0, 0],
+                    a_ji=self.system_matrix.blocks[1, 0],
+                    a_ij=self.system_matrix.blocks[0, 1],
+                    block_sections=self.block_sections,
+                )
             s_00 = 1j * self.eta_obc * xp.eye(
                 m_00.shape[-1], dtype=self.dynamical_matrix.dtype)
             if self._ir_floor_diag is not None:
@@ -341,21 +363,34 @@ class PhononSolver(SubsystemSolver):
             self.obc_blocks.greater[0] = 1j * scale_stack(
                 gamma_00.copy(), self.left_occupancies + 1
             )
+            left_contact = (
+                self.obc_blocks.retarded[0],
+                self.obc_blocks.lesser[0],
+                self.obc_blocks.greater[0],
+            )
         if comm.block.rank == comm.block.size - 1:
             n = self.system_matrix.num_local_blocks - 1
             m = n - 1
 
-            m_mn, m_nn, m_nm = get_periodic_superblocks(
-                # Twist it, flip it, ...
-                a_ii=xp.flip(self.system_matrix.blocks[n, n], axis=(-2, -1)),
-                a_ji=xp.flip(self.system_matrix.blocks[m, n], axis=(-2, -1)),
-                a_ij=xp.flip(self.system_matrix.blocks[n, m], axis=(-2, -1)),
-                block_sections=self.block_sections,
-            )
-            # ... bop it.
-            m_nn = xp.flip(m_nn, axis=(-2, -1))
-            m_nm = xp.flip(m_nm, axis=(-2, -1))
-            m_mn = xp.flip(m_mn, axis=(-2, -1))
+            if one_block:
+                # This is exactly the result of the established flip/get/flip
+                # construction with a_ji=m_01 and a_ij=m_10 at
+                # block_sections=1.
+                m_mn = self._single_block_periodic[1]
+                m_nn = self.system_matrix.blocks[0, 0]
+                m_nm = self._single_block_periodic[0]
+            else:
+                m_mn, m_nn, m_nm = get_periodic_superblocks(
+                    # Twist it, flip it, ...
+                    a_ii=xp.flip(self.system_matrix.blocks[n, n], axis=(-2, -1)),
+                    a_ji=xp.flip(self.system_matrix.blocks[m, n], axis=(-2, -1)),
+                    a_ij=xp.flip(self.system_matrix.blocks[n, m], axis=(-2, -1)),
+                    block_sections=self.block_sections,
+                )
+                # ... bop it.
+                m_nn = xp.flip(m_nn, axis=(-2, -1))
+                m_nm = xp.flip(m_nm, axis=(-2, -1))
+                m_mn = xp.flip(m_mn, axis=(-2, -1))
             s_nn = 1j * self.eta_obc * xp.eye(
                 m_nn.shape[-1], dtype=self.dynamical_matrix.dtype)
             if self._ir_floor_diag is not None:
@@ -393,6 +428,30 @@ class PhononSolver(SubsystemSolver):
             self.obc_blocks.greater[-1] = 1j * scale_stack(
                 gamma_nn.copy(), self.right_occupancies + 1
             )
+
+            if one_block:
+                right_contact = (
+                    self.obc_blocks.retarded[-1],
+                    self.obc_blocks.lesser[-1],
+                    self.obc_blocks.greater[-1],
+                )
+                if left_contact is None:
+                    raise RuntimeError(
+                        "one-block OBC requires block_comm_size=1"
+                    )
+                self._single_block_contacts = (left_contact, right_contact)
+                # The Green function sees the sum of both reservoirs on the
+                # same device block.  Keep the individual triples above for
+                # the two separate Meir-Wingreen lead currents.
+                self.obc_blocks.retarded[0] = (
+                    left_contact[0] + right_contact[0]
+                )
+                self.obc_blocks.lesser[0] = (
+                    left_contact[1] + right_contact[1]
+                )
+                self.obc_blocks.greater[0] = (
+                    left_contact[2] + right_contact[2]
+                )
 
     def _apply_eta_ramp(self) -> None:
         """In-SCBA broadening anneal (no-op unless ``eta_ramp_iterations>0``).
@@ -538,6 +597,11 @@ class PhononSolver(SubsystemSolver):
         extra_kw = (
             {"n_offdiagonals": self._gf_band} if self._gf_band >= 2 else {}
         )
+        one_block_contacts = self._single_block_contacts
+        solver_current = (
+            self.compute_meir_wingreen_current
+            and one_block_contacts is None
+        )
         if comm.block.size > 1:
             # NOTE: mirror the single-block branch -- the distributed RGF
             # also returns the (block-all-reduced) lead heat current when
@@ -552,7 +616,7 @@ class PhononSolver(SubsystemSolver):
                 obc_blocks=self.obc_blocks,
                 out=out,
                 return_retarded=True,
-                return_current=self.compute_meir_wingreen_current,
+                return_current=solver_current,
                 **extra_kw,
             )
         else:
@@ -563,9 +627,40 @@ class PhononSolver(SubsystemSolver):
                 obc_blocks=self.obc_blocks,
                 out=out,
                 return_retarded=True,
-                return_current=self.compute_meir_wingreen_current,
+                return_current=solver_current,
                 **extra_kw,
             )
+        if self.compute_meir_wingreen_current and one_block_contacts is not None:
+            self.meir_wingreen_current = self._one_block_lead_current(
+                out[0].blocks[0, 0], out[1].blocks[0, 0],
+                one_block_contacts,
+            )
+
+    @staticmethod
+    def _one_block_lead_current(
+        g_lesser: NDArray,
+        g_greater: NDArray,
+        contacts: tuple[tuple[NDArray, NDArray, NDArray],
+                        tuple[NDArray, NDArray, NDArray]],
+    ) -> NDArray:
+        """Two separate lead currents when both reservoirs touch one block.
+
+        The selected solve uses the sum of the two contact self-energies.  A
+        lead current must instead use the injection of that lead alone.  The
+        signs and ordering are the same as the two end-point expressions in
+        :class:`qttools.greens_function_solver.rgf.RGF`.
+        """
+        left, right = contacts
+        current = xp.zeros(g_lesser.shape[:-2] + (2,), dtype=g_lesser.dtype)
+        current[..., 0] = xp.trace(
+            left[2] @ g_lesser - g_greater @ left[1],
+            axis1=-2, axis2=-1,
+        )
+        current[..., 1] = -xp.trace(
+            right[2] @ g_lesser - g_greater @ right[1],
+            axis1=-2, axis2=-1,
+        )
+        return current
 
     def set_auxiliary_channel(self, channel) -> None:
         r"""Install a fixed-basis rational self-energy for the next solves.

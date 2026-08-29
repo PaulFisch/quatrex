@@ -384,7 +384,17 @@ def main() -> None:
             shutil.copy2(src / f, out / f)
 
     cfg = cfg_txt
-    cfg = cfg.replace(f"/cluster/{src.name}", f"/cluster/{out.name}")
+    out_abs = out.resolve()
+    for field, value in (
+        ("simulation_dir", out_abs),
+        ("input_dir", out_abs),
+        ("output_dir", out_abs / "out"),
+    ):
+        cfg = re.sub(rf'^{field}\s*=\s*"[^"]*"$',
+                     f'{field} = "{value}"', cfg, flags=re.MULTILINE)
+    cfg = re.sub(r'^fc3_path\s*=\s*"[^"]*"$',
+                 f'fc3_path = "{out_abs}/fc3_blocks.hdf5"', cfg,
+                 flags=re.MULTILINE)
     cfg = re.sub(r"num_transport_cells\s*=\s*\d+",
                  f"num_transport_cells = {nb}", cfg)
     if a.decomposed_path:

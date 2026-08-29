@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from qttools.utils.mpi_utils import get_section_sizes
 
-from quatrex.phonon.solver import validate_obc_block_sections
+from quatrex.phonon.solver import PhononSolver, validate_obc_block_sections
 
 
 @pytest.mark.parametrize("block_comm_size", [1])
@@ -90,3 +90,24 @@ def test_num_blocks_may_be_numpy_integer() -> None:
     validate_obc_block_sections(np.int64(6), 2)
     with pytest.raises(ValueError):
         validate_obc_block_sections(np.int64(2), 2)
+
+
+def test_one_block_lead_currents_keep_the_two_reservoirs_separate() -> None:
+    """The solve uses Sigma_L+Sigma_R, but the two currents must not."""
+    rng = np.random.default_rng(18)
+    shape = (4, 3, 3)
+    gl = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+    gg = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+
+    def contact(scale):
+        retarded = scale * np.broadcast_to(np.eye(3), shape).astype(complex)
+        lesser = 1j * scale * np.broadcast_to(np.diag([1., 2., 3.]), shape)
+        greater = 1j * scale * np.broadcast_to(np.diag([4., 5., 6.]), shape)
+        return retarded, lesser, greater
+
+    left, right = contact(0.7), contact(1.9)
+    current = PhononSolver._one_block_lead_current(gl, gg, (left, right))
+    ref_left = np.trace(left[2] @ gl - gg @ left[1], axis1=-2, axis2=-1)
+    ref_right = -np.trace(right[2] @ gl - gg @ right[1], axis1=-2, axis2=-1)
+    np.testing.assert_allclose(current[..., 0], ref_left, rtol=0, atol=0)
+    np.testing.assert_allclose(current[..., 1], ref_right, rtol=0, atol=0)

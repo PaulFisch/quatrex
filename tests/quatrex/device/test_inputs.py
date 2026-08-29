@@ -2,12 +2,14 @@
 
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
 from qttools import NDArray, xp
 from quatrex.device.inputs import (
     _construct_transport_cell,
     _expand_tight_binding_matrix,
     create_coordinate_grid,
+    load_periodic_transport_couplings,
 )
 
 
@@ -89,6 +91,51 @@ def test_create_coordinate_grid(
         ref = unit_cell_coords.copy()
         ref[:, :] += i * lat_vecs[transport_ind][None, :]
         assert xp.allclose(grid[i * num_coords : (i + 1) * num_coords], ref)
+
+
+def test_one_block_periodic_couplings_keep_the_transverse_fourier_phase(
+    monkeypatch, tmp_path
+) -> None:
+    """The contact-only loader must reproduce the q-folded +/-1 blocks.
+
+    Those blocks disappear from a one-cell finite matrix, which is precisely
+    why the dedicated loader exists.
+    """
+    import quatrex.device.inputs as inputs
+
+    mats = {}
+    for tx in (-1, 0, 1):
+        for ty in (-1, 0, 1):
+            value = (10 * tx + ty) + 1j * (2 * ty - tx)
+            mats[(tx, ty, 0)] = np.eye(2, dtype=complex) * value
+    monkeypatch.setattr(inputs, "distributed_load", lambda __: mats)
+    device = SimpleNamespace(
+        construct_from_unit_cell=True,
+        neighbor_cell_cutoff=[1, 1, 0],
+        transport_direction="x",
+        kpoint_grid=[1, 3, 1],
+        kpoint_shift=[0.0, 0.0, 0.0],
+    )
+    config = SimpleNamespace(device=device, input_dir=tmp_path)
+
+    sub, sup = load_periodic_transport_couplings(config, "dynamical_matrix")
+    assert sub.shape == sup.shape == (3, 2, 2)
+
+    from quatrex.grid.kpoints import monkhorst_pack
+    qpoints = monkhorst_pack(np.array([3, 1]), np.zeros(2)).reshape(3, 1, 2)
+    for iq, qpoint in enumerate(qpoints[:, 0]):
+        phase_sum_sub = sum(
+            np.exp(2j * np.pi * np.dot((ty, 0), qpoint))
+            * mats[(-1, ty, 0)]
+            for ty in (-1, 0, 1)
+        )
+        phase_sum_sup = sum(
+            np.exp(2j * np.pi * np.dot((ty, 0), qpoint))
+            * mats[(1, ty, 0)]
+            for ty in (-1, 0, 1)
+        )
+        assert xp.allclose(sub[iq], phase_sum_sub)
+        assert xp.allclose(sup[iq], phase_sum_sup)
 
 
 @pytest.mark.parametrize(

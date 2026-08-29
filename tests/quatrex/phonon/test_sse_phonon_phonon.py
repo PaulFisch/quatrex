@@ -1256,6 +1256,10 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
     block_sizes = np.array([nbs] * n_blocks)
     N = int(block_sizes.sum())
     offsets = np.array([-1, 0, 1], dtype=np.int64)
+    support = {
+        (-1, -1), (-1, 0), (0, -1), (0, 0),
+        (0, 1), (1, 0), (1, 1),
+    }
     q_diff_map = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
 
     def _tr_pair_factors():
@@ -1275,7 +1279,8 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
     UC = UB if ansatz == "INDSCAL" else _tr_pair_factors()
     vf = VertexFactors(
         D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UC,
-        q_diff_map=q_diff_map, nk_shape=(nq,), ansatz=ansatz, meta={},
+        q_diff_map=q_diff_map, nk_shape=(nq,), ansatz=ansatz,
+        meta={"support_pairs": sorted(support)},
     )
 
     # Dense q-folded dict FROM the factors.
@@ -1291,6 +1296,8 @@ def test_compute_coupled_q_factored_matches_dense(ansatz, kernel) -> None:
                     for d2 in offsets:
                         K2 = I + int(d2)
                         if not 0 <= K2 < n_blocks:
+                            continue
+                        if (int(d1), int(d2)) not in support:
                             continue
                         blocks[(I, K1, K2)] = vf.reconstruct_block(
                             iq1, iq2, int(d1), int(d2))

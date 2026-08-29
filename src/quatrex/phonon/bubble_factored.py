@@ -130,34 +130,88 @@ def contract_tau_q_factored(
             (K1, K2, K1p, K2p)
             for K1, K1p in a_links for K2, K2p in b_links
         }
-        if actual != product:
-            raise ValueError(
-                "The factored Gram collapse requires Cartesian FC3 offset "
-                f"support for output pair {(I, J)}; got {len(actual)} quads "
-                f"but its independent link product contains {len(product)}. "
-                "Use decomposed_kernel='reconstruct' or a Cartesian support "
-                "mask."
-            )
 
         grams = GramTables(g_dicts, UB, UC, off_pos, lo, hi, xp, shared_legs)
-        sa, sb = {}, {}
-        for variant in _VARIANTS:
-            sa[variant] = sum(
-                grams.get(variant, (K, Kp), K - I, Kp - J, role="a")
-                for (K, Kp) in a_links
-            )
-            sb[variant] = sum(
-                grams.get(variant, (K, Kp), K - I, Kp - J, role="b")
-                for (K, Kp) in b_links
-            )
-        del grams
+        if actual == product:
+            sa, sb = {}, {}
+            for variant in _VARIANTS:
+                sa[variant] = sum(
+                    grams.get(variant, (K, Kp), K - I, Kp - J, role="a")
+                    for (K, Kp) in a_links
+                )
+                sb[variant] = sum(
+                    grams.get(variant, (K, Kp), K - I, Kp - J, role="b")
+                    for (K, Kp) in b_links
+                )
 
-        # The 3-term bosonic fold, merged 6 -> 4 products on the shared a-line
-        # factor. One Hadamard (one convolution) per term, not one per quad.
-        h_lesser = _convolve_q(sa["l"], sb["l"] + sb["gr"], nk_shape, xp)
-        h_lesser += _convolve_q(sa["gr"], sb["l"], nk_shape, xp)
-        h_greater = _convolve_q(sa["g"], sb["g"] + sb["lr"], nk_shape, xp)
-        h_greater += _convolve_q(sa["lr"], sb["g"], nk_shape, xp)
+            # The 3-term bosonic fold, merged 6 -> 4 products on the shared
+            # a-line factor. One convolution per term, not one per quad.
+            h_lesser = _convolve_q(
+                sa["l"], sb["l"] + sb["gr"], nk_shape, xp)
+            h_lesser += _convolve_q(
+                sa["gr"], sb["l"], nk_shape, xp)
+            h_greater = _convolve_q(
+                sa["g"], sb["g"] + sb["lr"], nk_shape, xp)
+            h_greater += _convolve_q(
+                sa["lr"], sb["g"], nk_shape, xp)
+        else:
+            # A real-space FC3 cutoff can couple the two contracted offsets.
+            # The admissible quad set then is not A x B, so independently
+            # summing all a- and b-links would manufacture the missing cross
+            # terms.  Decompose the Boolean support exactly into one row per
+            # a-link:
+            #
+            #   sum_(a,b in S) P_a * Q_b
+            #       = sum_a P_a * (sum_(b:(a,b) in S) Q_b).
+            #
+            # This retains the skinny-Gram/q-FFT scaling.  For nearest-
+            # neighbour Si the row count is at most nine, compared with the
+            # millions of dense q/quad contractions in reconstruction mode.
+            h_lesser = None
+            h_greater = None
+            # Rows with the same Boolean support are one exact rectangle.
+            # Summing their a-links first reduces both FFT count and live
+            # temporaries without filling any zero in the support mask.
+            rectangles: dict[tuple, list[tuple]] = {}
+            for a_link in a_links:
+                allowed_b = tuple(sorted({
+                    (K2, K2p)
+                    for K1, K2, K1p, K2p in actual
+                    if (K1, K1p) == a_link
+                }))
+                rectangles.setdefault(allowed_b, []).append(a_link)
+            for allowed_b, allowed_a in rectangles.items():
+                sb = {
+                    variant: sum(
+                        grams.get(
+                            variant, link, link[0] - I, link[1] - J,
+                            role="b",
+                        )
+                        for link in allowed_b
+                    )
+                    for variant in _VARIANTS
+                }
+                pa = {
+                    variant: sum(
+                        grams.get(
+                            variant, link, link[0] - I, link[1] - J,
+                            role="a",
+                        )
+                        for link in allowed_a
+                    )
+                    for variant in _VARIANTS
+                }
+                part_l = _convolve_q(
+                    pa["l"], sb["l"] + sb["gr"], nk_shape, xp)
+                part_l += _convolve_q(
+                    pa["gr"], sb["l"], nk_shape, xp)
+                part_g = _convolve_q(
+                    pa["g"], sb["g"] + sb["lr"], nk_shape, xp)
+                part_g += _convolve_q(
+                    pa["lr"], sb["g"], nk_shape, xp)
+                h_lesser = part_l if h_lesser is None else h_lesser + part_l
+                h_greater = part_g if h_greater is None else h_greater + part_g
+        del grams
 
         bs_i = int(block_sizes[I])
         bs_j = int(block_sizes[J])
