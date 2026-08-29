@@ -28,6 +28,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "phonon/scripts/data/si_film_run_census.csv"
+RESULT_GLOBS = ("run*.npz", "probe*.npz", "conv*.npz")
 
 FIELDS = [
     "run_id", "directory", "aliases", "artifact", "artifact_sha256",
@@ -37,10 +38,17 @@ FIELDS = [
     "frequency_min_thz", "frequency_max_thz", "frequency_spacing_thz",
     "frequency_points", "aux_dw_thz", "aux_fmax_thz", "q_mesh",
     "vertex_representation", "factor_rank", "factor_fit_source",
-    "left_temperature_k", "right_temperature_k", "max_iterations",
-    "sigma_tolerance", "retarded_method", "eta_thz", "eta_obc_thz2",
-    "ir_floor_cells", "low_frequency_mask_thz", "cutoff_angstrom",
-    "cutoff_taper", "pole_sector", "cm_subtraction", "scba_iterations",
+    "decomposed_kernel", "left_temperature_k", "right_temperature_k",
+    "max_iterations", "min_iterations", "mixing_method", "mixing_factor",
+    "sigma_tolerance", "heat_tolerance", "retarded_method", "eta_thz",
+    "eta_obc_thz2", "eta_ramp_iterations", "eta_final_thz",
+    "eta_obc_ramp_iterations", "eta_obc_final_thz2", "ir_floor_cells",
+    "ir_floor_final_cells", "ir_floor_ramp_iterations",
+    "low_frequency_mask_thz", "g_band_taper", "sse_ramp_iterations",
+    "greater_from_lesser", "cutoff_angstrom", "cutoff_taper",
+    "pole_sector", "cm_subtraction", "scp_tadpole", "scp_loop",
+    "obc_algorithm", "nevp_solver", "obc_scattering_contacts",
+    "block_comm_size", "q_comm_size", "nranks", "scba_iterations",
     "residual", "current", "conductance", "lead_balance", "internal_spread",
     "bubble_balance", "runtime_s", "kernel_time_s", "peak_memory_gb",
     "converged", "diverged", "ballistic", "classification", "reasons",
@@ -52,13 +60,30 @@ ENV_MAP = {
     "QX_MICRO_GBAND": ("phonon", "sse_microblock_g_band"),
     "QX_VERTEX_RANK": ("phonon", "sse_vertex_rank"),
     "QX_MAXIT": ("scba", "max_iterations"),
-    "QX_SIGMA_TOL": ("phonon", "sigma_convergence_tol"),
+    "QX_MINIT": ("scba", "min_iterations"),
+    "QX_MIXMETHOD": ("scba", "mixing_method"),
+    "QX_MIX": ("scba", "mixing_factor"),
+    "QX_NE": ("electron", "energy_window_num"),
+    "QX_WMAX": ("electron", "energy_window_max"),
+    "QX_SIGMATOL": ("phonon", "sigma_convergence_tol"),
+    "QX_HEATTOL": ("phonon", "heat_flow_conservation_tol"),
     "QX_RETARDED": ("phonon", "retarded_method"),
+    "QX_DECOMPOSED_KERNEL": ("phonon", "decomposed_kernel"),
     "QX_ETA": ("phonon", "eta"),
-    "QX_ETA_OBC": ("phonon", "eta_obc"),
-    "QX_IR_FLOOR": ("phonon", "eta_ir_floor_cells"),
-    "QX_LOWMASK": ("phonon", "sse_low_freq_mask_thz"),
+    "QX_ETAOBC": ("phonon", "eta_obc"),
+    "QX_ETA_RAMP_ITERS": ("phonon", "eta_ramp_iterations"),
+    "QX_ETA_FINAL": ("phonon", "eta_final"),
+    "QX_ETA_IR_FLOOR": ("phonon", "eta_ir_floor_cells"),
+    "QX_ETA_IR_FLOOR_FINAL": ("phonon", "eta_ir_floor_final_cells"),
+    "QX_ETA_IR_FLOOR_RAMP": ("phonon", "eta_ir_floor_ramp_iterations"),
+    "QX_SSE_LOWMASK": ("phonon", "sse_low_freq_mask_thz"),
     "QX_SSE_CMSUB": ("phonon", "sse_cm_subtraction"),
+    "QX_GBAND_TAPER": ("phonon", "sse_g_band_taper"),
+    "QX_RAMP": ("phonon", "sse_ramp_iterations"),
+    "QX_G_FROM_L": ("phonon", "sse_greater_from_lesser"),
+    "QX_SCP_TADPOLE": ("phonon", "scp_tadpole"),
+    "QX_TLEFT": ("phonon", "left_temperature"),
+    "QX_TRIGHT": ("phonon", "right_temperature"),
 }
 
 
@@ -198,13 +223,26 @@ def _artifact_values(path: Path | None) -> dict:
     out = {}
     try:
         for key in (
-            "eta", "retarded", "nblocks", "n_iter", "lead_current",
+            "source_commit", "eta", "retarded", "nblocks", "n_iter", "lead_current",
             "internal_spread", "final_bubble_balance", "t_left", "t_right",
             "converged", "diverged", "ballistic", "sse_g_band",
             "sse_microblock_dof", "sse_microblock_g_band",
             "sse_generated_sigma_band", "sse_vertex_span", "sse_vertex_rank",
             "vertex_representation", "frequency_grid", "sse_aux_grid_dw_thz",
             "sse_aux_grid_fmax_thz", "sigma_convergence_tol",
+            "decomposed_kernel", "heat_flow_conservation_tol",
+            "scba_max_iterations", "scba_min_iterations",
+            "scba_mixing_method", "scba_mixing_factor",
+            "left_temperature", "right_temperature", "eta_ramp_iterations",
+            "eta_final", "eta_obc", "eta_obc_ramp_iterations", "eta_obc_final",
+            "eta_ir_floor_cells", "eta_ir_floor_final_cells",
+            "eta_ir_floor_ramp_iterations", "sse_low_freq_mask_thz",
+            "sse_cm_subtraction", "sse_g_band_taper", "sse_ramp_iterations",
+            "sse_greater_from_lesser", "scp_tadpole", "scp_loop",
+            "pole_sector_enabled", "interaction_cutoff",
+            "interaction_cutoff_taper", "obc_algorithm", "nevp_solver",
+            "obc_scattering_contacts",
+            "block_comm_size", "q_comm_size", "nranks",
         ):
             if key in data.files:
                 out[key] = _scalar(data[key])
@@ -280,10 +318,13 @@ def _candidate_dirs(roots: list[Path]) -> list[Path]:
                 r"(?:^|/)si(?:chk|res|4x|film)", low)))
             if (named or ("\nSi = 3" in text and transverse)) and "sinw" not in low:
                 out.add(cfg.parent)
-        for artifact in root.rglob("run*.npz"):
-            low = artifact.parent.as_posix().lower()
-            if "sifilm" in low or re.search(r"(?:^|/)si(?:chk|res|4x|film)", low):
-                out.add(artifact.parent)
+        for pattern in RESULT_GLOBS:
+            for artifact in root.rglob(pattern):
+                low = artifact.parent.as_posix().lower()
+                if "sifilm" in low or re.search(
+                    r"(?:^|/)si(?:chk|res|4x|film|-l\d)", low
+                ):
+                    out.add(artifact.parent)
     return sorted(out)
 
 
@@ -294,9 +335,10 @@ def _records(roots: list[Path]) -> list[dict]:
         env = _env(text, directory)
         cfg_path = _find_config(directory, text)
         cfg = _toml(cfg_path) if cfg_path else {}
-        artifacts = sorted(
-            p for p in directory.glob("run*.npz")
-            if not p.name.startswith(("qfold", "decomposed"))) or [None]
+        artifacts = sorted({
+            p for pattern in RESULT_GLOBS for p in directory.glob(pattern)
+            if not p.name.startswith(("qfold", "decomposed", "sigma_"))
+        }) or [None]
         job_ids = sorted(set(re.findall(r"slurm-(\d+)", " ".join(
             p.name for p in logs))))
         commit = ""
@@ -309,7 +351,7 @@ def _records(roots: list[Path]) -> list[dict]:
             rec["directory"] = directory.relative_to(ROOT).as_posix()
             rec["artifact"] = artifact.name if artifact else ""
             rec["artifact_sha256"] = _sha256(artifact) if artifact else ""
-            rec["source_commit"] = commit
+            rec["source_commit"] = av.get("source_commit") or commit
             newest = max(
                 [p.stat().st_mtime for p in logs]
                 + ([artifact.stat().st_mtime] if artifact else [])
@@ -362,8 +404,10 @@ def _records(roots: list[Path]) -> list[dict]:
             energies = av.get("energies")
             if energies is None:
                 e0 = float(_dig(cfg, "electron", "energy_window_min", default=0) or 0)
-                e1 = float(_dig(cfg, "electron", "energy_window_max", default=0) or 0)
-                ne = int(_dig(cfg, "electron", "energy_window_num", default=0) or 0)
+                e1 = float(_cfg_value(
+                    cfg, env, "electron", "energy_window_max", 0) or 0)
+                ne = int(_cfg_value(
+                    cfg, env, "electron", "energy_window_num", 0) or 0)
                 energies = np.linspace(e0, e1, ne) if ne else np.empty(0)
             rec["frequency_grid"] = av.get("frequency_grid") or _dig(
                 cfg, "phonon", "frequency_grid", default="window")
@@ -392,29 +436,68 @@ def _records(roots: list[Path]) -> list[dict]:
             rec["factor_rank"] = av.get("sse_vertex_rank") or _cfg_value(
                 cfg, env, "phonon", "sse_vertex_rank", rank) or rank
             rec["factor_fit_source"] = source
-            rec["left_temperature_k"] = av.get("t_left") or _dig(
-                cfg, "phonon", "left_temperature", default="")
-            rec["right_temperature_k"] = av.get("t_right") or _dig(
-                cfg, "phonon", "right_temperature", default="")
-            rec["max_iterations"] = _cfg_value(
+            rec["decomposed_kernel"] = av.get("decomposed_kernel") or _cfg_value(
+                cfg, env, "phonon", "decomposed_kernel", "")
+            rec["left_temperature_k"] = (
+                av.get("left_temperature") or av.get("t_left") or
+                _cfg_value(cfg, env, "phonon", "left_temperature", ""))
+            rec["right_temperature_k"] = (
+                av.get("right_temperature") or av.get("t_right") or
+                _cfg_value(cfg, env, "phonon", "right_temperature", ""))
+            rec["max_iterations"] = av.get("scba_max_iterations") or _cfg_value(
                 cfg, env, "scba", "max_iterations", "")
+            rec["min_iterations"] = av.get("scba_min_iterations") or _cfg_value(
+                cfg, env, "scba", "min_iterations", "")
+            rec["mixing_method"] = av.get("scba_mixing_method") or _cfg_value(
+                cfg, env, "scba", "mixing_method", "")
+            rec["mixing_factor"] = av.get("scba_mixing_factor") or _cfg_value(
+                cfg, env, "scba", "mixing_factor", "")
             rec["sigma_tolerance"] = av.get("sigma_convergence_tol") or _cfg_value(
                 cfg, env, "phonon", "sigma_convergence_tol", "")
+            rec["heat_tolerance"] = (
+                av.get("heat_flow_conservation_tol") or _cfg_value(
+                    cfg, env, "phonon", "heat_flow_conservation_tol", ""))
             rec["retarded_method"] = av.get("retarded") or _cfg_value(
                 cfg, env, "phonon", "retarded_method", "")
             rec["eta_thz"] = av.get("eta") if "eta" in av else _cfg_value(
                 cfg, env, "phonon", "eta", "")
             for out_key, cfg_key, default in (
                 ("eta_obc_thz2", "eta_obc", 0),
+                ("eta_ramp_iterations", "eta_ramp_iterations", 0),
+                ("eta_final_thz", "eta_final", 0),
+                ("eta_obc_ramp_iterations", "eta_obc_ramp_iterations", 0),
+                ("eta_obc_final_thz2", "eta_obc_final", 0),
                 ("ir_floor_cells", "eta_ir_floor_cells", 0),
+                ("ir_floor_final_cells", "eta_ir_floor_final_cells", 0),
+                ("ir_floor_ramp_iterations", "eta_ir_floor_ramp_iterations", 0),
                 ("low_frequency_mask_thz", "sse_low_freq_mask_thz", 0),
+                ("g_band_taper", "sse_g_band_taper", "none"),
+                ("sse_ramp_iterations", "sse_ramp_iterations", 0),
+                ("greater_from_lesser", "sse_greater_from_lesser", False),
                 ("cutoff_angstrom", "interaction_cutoff", 10),
                 ("cutoff_taper", "interaction_cutoff_taper", "none"),
                 ("cm_subtraction", "sse_cm_subtraction", False),
+                ("scp_tadpole", "scp_tadpole", False),
+                ("scp_loop", "scp_loop", False),
             ):
-                rec[out_key] = _cfg_value(cfg, env, "phonon", cfg_key, default)
-            rec["pole_sector"] = bool(_dig(
-                cfg, "phonon", "pole_sector", "enabled", default=False))
+                rec[out_key] = av.get(cfg_key, _cfg_value(
+                    cfg, env, "phonon", cfg_key, default))
+            rec["pole_sector"] = av.get("pole_sector_enabled", (
+                bool(int(env["QX_POLE"])) if "QX_POLE" in env else bool(
+                    _dig(cfg, "phonon", "pole_sector", "enabled", default=False))))
+            rec["obc_algorithm"] = av.get("obc_algorithm") or env.get("QX_OBC_ALG") or _dig(
+                cfg, "phonon", "obc", "algorithm", default="")
+            rec["nevp_solver"] = av.get("nevp_solver") or env.get("QX_NEVP") or _dig(
+                cfg, "phonon", "obc", "nevp_solver", default="")
+            rec["obc_scattering_contacts"] = av.get(
+                "obc_scattering_contacts", bool(int(env.get(
+                    "QX_SCATCONTACTS", int(_dig(
+                        cfg, "phonon", "obc_scattering_contacts", default=False))))))
+            rec["block_comm_size"] = av.get("block_comm_size") or env.get(
+                "QX_BCS") or _dig(cfg, "compute", "comm", "block_comm_size", default=1)
+            rec["q_comm_size"] = av.get("q_comm_size") or env.get(
+                "QX_QCS") or _dig(cfg, "compute", "comm", "q_comm_size", default=1)
+            rec["nranks"] = av.get("nranks", "")
             rec["scba_iterations"] = int(av.get("n_iter") or max(
                 [int(x) for x in re.findall(r"^Iteration (\d+)", text, re.M)] or [0]))
             residuals = re.findall(r"rel Sigma\^R residual ([0-9.eE+-]+)", text)

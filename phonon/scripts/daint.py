@@ -45,6 +45,7 @@ VENV = f"{SCRATCH}/quatrex-venv"
 UENV = "prgenv-gnu/26.3:v1"
 ORIGIN = "git@github.com:PaulFisch/quatrex.git"
 BRANCH = "phonon-phonon"
+LOCAL_REPO = Path(__file__).resolve().parents[2]
 
 
 def ssh(cmd: str, timeout: int = 60, check: bool = False) -> str:
@@ -224,6 +225,11 @@ def cmd_launch(args):
     _guard(args)
     run_dir = f"{REPO}/cluster/{args.name}"
     env_lines = "\n".join(f"export {shlex.quote(e)}" for e in args.env or [])
+    if not any(e.startswith("QX_SOURCE_COMMIT=") for e in (args.env or [])):
+        source_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=LOCAL_REPO, text=True
+        ).strip()
+        env_lines += f"\nexport QX_SOURCE_COMMIT={source_commit}"
     if args.command:
         payload = " ".join(args.command)
     else:

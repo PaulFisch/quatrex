@@ -638,6 +638,7 @@ if ranks.rank == 0:
     from quatrex.grid.energies import frequency_cell_widths
     out = dict(
         energies=np.asarray(get_host(scba.energies)).real,
+        source_commit=str(os.environ.get("QX_SOURCE_COMMIT", "")),
         # Current integrals use the frequency-cell measure on every grid.
         # Keep the grid marker so historical raw-sum artifacts can still be
         # distinguished by the run census.
@@ -693,6 +694,9 @@ if ranks.rank == 0:
         scba_mixing_factor=float(cfg.scba.mixing_factor),
         left_temperature=float(cfg.phonon.left_temperature),
         right_temperature=float(cfg.phonon.right_temperature),
+        obc_algorithm=str(cfg.phonon.obc.algorithm),
+        nevp_solver=str(cfg.phonon.obc.nevp_solver),
+        obc_scattering_contacts=bool(cfg.phonon.obc_scattering_contacts),
         vertex_input_path=str(
             cfg.phonon.decomposed_vertices_path
             or cfg.phonon.qfold_path
