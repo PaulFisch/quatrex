@@ -150,6 +150,12 @@ class JFNKMixer:
         self._beta_g = 1.0
         self._inner_tol_k = float(inner_tol)
         self._pending_v = None
+        # The iterate emitted after a completed GMRES solve is a TRIAL.  Its
+        # actual map residual arrives on the next mixer call.  Keep the base
+        # state so a non-descent trial can be rejected without accepting a
+        # bad point into the next Krylov linearisation.
+        self._trial_pending = False
+        self._trial_rejections = 0
         self._comm, self._SUM = get_comm()
 
     # ---- MPI-correct distributed primitives (row-partitioned real vectors) ---
@@ -184,6 +190,34 @@ class JFNKMixer:
                           f" -> engaging Newton-Krylov")
             return x + self.beta * (gx - x)
 
+        # Globalise Newton with the same residual-merit test used by the
+        # synchronous exact-JVP solver.  Previously a worsening trial was
+        # accepted and only shrank the radius at the *next* base point.  On a
+        # strongly unstable fixed point that loses the basin the trust region
+        # was intended to preserve.  A rejected trial is discarded; reopen
+        # GMRES at the stored base with a smaller radius.
+        if self._trial_pending:
+            trial_norm = self._gnorm(_c2r(gx - x))
+            base_norm = float(self._Rk_norm)
+            self._trial_pending = False
+            if self.trust > 0.0 and (
+                (not np.isfinite(trial_norm)) or trial_norm >= base_norm
+            ):
+                shrink = 0.25 if not np.isfinite(trial_norm) else 0.5
+                self._trust_k = max(self._trust_k * shrink, 1e-3)
+                self._trial_rejections += 1
+                self._log(
+                    f"  JFNK reject: ||R|| {base_norm:.3e} -> "
+                    f"{trial_norm:.3e}; trust -> {self._trust_k:.2g}"
+                )
+                # The exact base map value is already stored.  Emit the first
+                # finite-difference probe of the retry directly, avoiding a
+                # redundant evaluation of F(x_k).
+                return self._open_newton_step(
+                    _r2c(self._xk_r), _r2c(self._Fxk_r)
+                )
+            self._trial_rejections = 0
+
         # Out of Newton budget -> gentle Picard (the best-conserved iterate is
         # already captured by the SCBA driver).
         if self._newton_it >= self.max_newton:
@@ -217,7 +251,7 @@ class JFNKMixer:
         if self.trust > 0.0 and self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
                 self._trust_k = max(self._trust_k * 0.5, 1e-3)
-            elif rk < 0.95 * self._Rprev_norm:   # solid progress -> grow radius
+            elif rk < 0.99 * self._Rprev_norm:   # monotone progress -> grow radius
                 self._trust_k = min(self._trust_k * 1.3, self.trust_max)
 
         # Eisenstat-Walker forcing: tighten the inner solve as R falls.
@@ -322,4 +356,5 @@ class JFNKMixer:
                   f"||R||={self._Rk_norm:.3e} ||delta||={self._gnorm(step):.3e} "
                   f"trust={self._trust_k:.2g} mu={self._mu:.2e}")
         self._phase = "newton_base"
+        self._trial_pending = True
         return _r2c(x_new_r)

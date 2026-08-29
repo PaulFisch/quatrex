@@ -138,3 +138,41 @@ def test_real_embedding_round_trip():
     z = np.arange(N, dtype=complex) + 1j * np.arange(N)
 
     np.testing.assert_array_equal(real_to_complex(complex_to_real(z)), z)
+
+
+def test_jfnk_rejects_a_non_descent_trial_before_relinearising():
+    """A Newton overshoot must retry from its base, not become the next base.
+
+    For ``R(x)=x**3-2*x+2`` the Newton step from x=1 lands at x=0,
+    increasing ``|R|`` from one to two.  The state-machine JFNK sees that
+    residual on the call after emitting the trial.
+    """
+    def fixed_point_map(z):
+        return z + z**3 - 2.0 * z + 2.0
+
+    mixer = JFNKMixer(
+        warmup=0,
+        max_krylov=1,
+        inner_tol=0.0,
+        forcing="fixed",
+        eps=1e-7,
+        trust=2.0,
+        trust_max=2.0,
+        verbose=False,
+    )
+    base = np.array([1.0 + 0.0j])
+
+    probe = mixer.step(base, fixed_point_map(base))
+    assert mixer.probing
+    trial = mixer.step(probe, fixed_point_map(probe))
+    assert not mixer.probing
+    assert np.linalg.norm(fixed_point_map(trial) - trial) > 1.5
+
+    retry_probe = mixer.step(trial, fixed_point_map(trial))
+
+    assert mixer.probing
+    assert mixer._trust_k == pytest.approx(1.0)
+    # The retry is a finite-difference probe about x=1, not about the rejected
+    # x=0 trial.
+    assert abs(retry_probe[0] - base[0]) < 1e-4
+    assert abs(retry_probe[0] - trial[0]) > 0.5
