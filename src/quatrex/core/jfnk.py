@@ -251,8 +251,10 @@ class JFNKMixer:
         if self.trust > 0.0 and self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
                 self._trust_k = max(self._trust_k * 0.5, 1e-3)
-            elif rk < 0.99 * self._Rprev_norm:   # monotone progress -> grow radius
+            elif rk < 0.95 * self._Rprev_norm:   # strong progress -> grow quickly
                 self._trust_k = min(self._trust_k * 1.3, self.trust_max)
+            elif rk < 0.999 * self._Rprev_norm:  # accepted descent -> recover gently
+                self._trust_k = min(self._trust_k * 1.05, self.trust_max)
 
         # Eisenstat-Walker forcing: tighten the inner solve as R falls.
         if self.forcing == "ew" and self._Rprev_norm:
