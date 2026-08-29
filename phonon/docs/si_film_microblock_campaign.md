@@ -5,7 +5,7 @@
 `02cd9402`, `a2e007fc`, `efc8e3aa`, `c77f589c`, `2862fff0`,
 `43680ba3`, `81179d75`, `f6c5f493`, `2f3286a7`, `4f5b96f8`,
 `c636a2b7`, `fc55a202`, `612c249b`, `a7244e6d`, `3d1b6e2f`,
-`13a53415`  
+`13a53415`, `b29429a8`, `2231fac6`, `e00c15b8`
 **Historical census:** [`si_film_run_census.md`](si_film_run_census.md)
 
 ## Physical and numerical reference
@@ -266,3 +266,15 @@ interaction is not used in the length curve. Continuation through
 \(s=0.5\), \(0.75\) and \(1\) is the active certification path. Run metadata
 records the vertex scale so that no intermediate state can be mistaken for a
 physical result.
+
+The first submitted continuation jobs after the quarter-strength point used
+descriptive environment names for the retarded method, mixer and vertex
+scale. The study driver still recognised only its older compact names. Jobs
+4555513, 4555533, 4555542 and 4555546 therefore inherited the TOML values:
+full vertex strength, half-retarded reconstruction and linear mixing 0.1.
+They are superseded solver diagnostics and none of their currents or residuals
+enters a continuation result. Commit `e00c15b8` normalises the readable names
+at the driver boundary and raises on a conflicting pair. Focused tests cover
+the aliases used by the campaign. Subsequent jobs also pass the compact names
+directly and their startup log and saved metadata are checked before their
+first state is accepted.
