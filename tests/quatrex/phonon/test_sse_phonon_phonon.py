@@ -100,7 +100,10 @@ def _full_pattern_dsdb(block_sizes, ne, nq=1):
     rr, cc = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
     pattern = _dev_pattern(csr_matrix(
         (np.ones(n * n, complex), (rr.ravel(), cc.ravel())), shape=(n, n)))
-    shape = (ne,) if nq == 1 else (ne, nq)
+    if np.isscalar(nq):
+        shape = (ne,) if int(nq) == 1 else (ne, int(nq))
+    else:
+        shape = (ne,) + tuple(int(k) for k in nq)
     matrices = tuple(
         DSDBCOO.from_sparray(pattern, np.asarray(block_sizes),
                              global_stack_shape=shape)
@@ -1535,21 +1538,33 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
     from quatrex.phonon.vertex_factors import VertexFactors
 
     rng = np.random.default_rng(944)
-    n_primitive, d, rank, ne, nq = 4, 2, 3, 7, 3
-    grouped = np.array([2 * d, 2 * d])
+    n_primitive, d, rank, ne = 3, 1, 2, 3
+    nk_shape = (2, 2)
+    nq = int(np.prod(nk_shape))
+    grouped = np.array([2 * d, d])
     offsets = np.array([-1, 0, 1])
-    qdm = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+    support = {
+        (-1, -1), (-1, 0), (0, -1), (0, 0),
+        (0, 1), (1, 0), (1, 1),
+    }
+    qdm = np.empty((nq, nq), dtype=int)
+    for a in range(nq):
+        ax, ay = divmod(a, nk_shape[1])
+        for b in range(nq):
+            bx, by = divmod(b, nk_shape[1])
+            qdm[a, b] = (
+                (ax - bx) % nk_shape[0] * nk_shape[1]
+                + (ay - by) % nk_shape[1]
+            )
     D = rng.standard_normal((d, rank))
     lambdas = np.abs(rng.standard_normal(rank)) + 0.1
-    UB = np.empty((3, nq, d, rank), complex)
-    UB[:, 0] = rng.standard_normal((3, d, rank))
-    z = (rng.standard_normal((3, d, rank))
-         + 1j * rng.standard_normal((3, d, rank)))
-    UB[:, 1], UB[:, 2] = z, z.conj()
+    UB = (rng.standard_normal((3, nq, d, rank))
+          + 1j * rng.standard_normal((3, nq, d, rank)))
     vf = VertexFactors(
         D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UB,
-        q_diff_map=qdm, nk_shape=(nq,), ansatz="INDSCAL",
-        meta={"source": "microblock-q-test"})
+        q_diff_map=qdm, nk_shape=nk_shape, ansatz="INDSCAL",
+        meta={"source": "microblock-q-test",
+              "support_pairs": sorted(support)})
     qvertices = {}
     for q1 in range(nq):
         for q2 in range(nq):
@@ -1561,19 +1576,23 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
                         continue
                     for dk2 in offsets:
                         k2 = i + int(dk2)
+                        if (int(dk1), int(dk2)) not in support:
+                            continue
                         if 0 <= k2 < n_primitive:
                             blocks[(i, k1, k2)] = vf.reconstruct_block(
                                 q1, q2, int(dk1), int(dk2))
             qvertices[(q1, q2)] = blocks
     qfold = (qvertices, qdm, nq)
 
-    gl = (rng.standard_normal((ne, nq, 2*d, 2*d))
-          + 1j * rng.standard_normal((ne, nq, 2*d, 2*d)))
-    gg = (rng.standard_normal((ne, nq, 2*d, 2*d))
-          + 1j * rng.standard_normal((ne, nq, 2*d, 2*d)))
+    n = n_primitive * d
+    gl = (rng.standard_normal((ne,) + nk_shape + (n, n))
+          + 1j * rng.standard_normal((ne,) + nk_shape + (n, n)))
+    gg = (rng.standard_normal((ne,) + nk_shape + (n, n))
+          + 1j * rng.standard_normal((ne,) + nk_shape + (n, n)))
 
     def run(*, dense_batched=True, **source):
-        g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(grouped, ne, nq)
+        g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(
+            grouped, ne, nk_shape)
         for view, arr in ((g_l.stack[...], gl), (g_g.stack[...], gg)):
             view.blocks[0, 0] = xp.asarray(arr)
             view.blocks[0, 1] = xp.asarray(arr)

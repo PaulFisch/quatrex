@@ -2332,7 +2332,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if fast_now or verify_now:
             raise NotImplementedError(
                 "primitive microblocks use the plain six-ring coupled-q path")
-        del qdm, stxv, release
+        del stxv, release
         a_lo, a_hi = (0, nq) if a_slice is None else a_slice
         b_lo, b_hi = (0, nq) if b_slice is None else b_slice
         gl_a, gg_a, glr_a, ggr_a = gl_q, gg_q, glr_q, ggr_q
@@ -2342,12 +2342,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         cache = getattr(self, "_micro_qtasks_cache", {})
         qtasks = cache.get(cache_key)
         if qtasks is None:
+            # qdm[Q, q1] = q2 is the authoritative mesh arithmetic.  Its
+            # inverse gives Q for each (q1, q2).  Flat-index addition is only
+            # valid for a one-dimensional mesh; on a film mesh such as 9x9 it
+            # carries from the second transverse coordinate into the first
+            # and changes roughly half the momentum-conserving triples.
+            qsum = np.empty((nq, nq), dtype=np.int64)
+            qprime = np.arange(nq, dtype=np.int64)
+            for iq_ext in range(nq):
+                qsum[qprime, np.asarray(qdm[iq_ext], dtype=np.int64)] = iq_ext
             perm_cache = {}
             qtasks = {}
             bulk_vertex = self._vfactors is not None
             for iqp in range(a_lo, a_hi):
                 for iq2 in range(b_lo, b_hi):
-                    iq_ext = (iqp + iq2) % nq
+                    iq_ext = int(qsum[iqp, iq2])
                     if not q_lo <= iq_ext < q_hi:
                         continue
                     phi_l = qv.get((iqp, iq2))
