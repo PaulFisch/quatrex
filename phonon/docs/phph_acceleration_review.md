@@ -11,6 +11,8 @@ behaviour is unchanged.
 **Reference studies:**
 [`_hybrid_frequency_review.py`](../studies/_hybrid_frequency_review.py) and
 [`_spatial_hierarchy_review.py`](../studies/_spatial_hierarchy_review.py), plus
+the independent Si retarded-assembly audit
+[`_si_kk_audit.py`](../studies/_si_kk_audit.py), plus
 the real-Si/production follow-up
 [`auxiliary_scba_production.md`](auxiliary_scba_production.md), plus
 the conserving auxiliary-state follow-up
@@ -390,6 +392,48 @@ adjoint pair under the frequency weights, use the same enriched leg in both
 internal lines, and measure the pre-mixing energy balance.  Until then the
 frequency result is an accuracy/structure pass and a conservation gate left
 open.
+
+### 5.4 Retarded-assembly audit on the Si checkpoint
+
+The causal reconstruction was checked separately from the pole-enrichment
+proposal.  Four stack-distributed self-energy slices from the converged L5
+(s=0.953125) state were concatenated and passed through an independent
+NumPy implementation of the exact cell-integrated transform.  The raw
+textbook spectral difference is
+
+\[
+ \Delta_{\rm raw}=\Sigma^<_{\rm stored}-\Sigma^>_{\rm stored},
+ \qquad
+ \Sigma^R={1\over2}\Delta_{\rm raw}
+       +{i\over2}H[\Delta_{\rm raw}].
+\]
+
+After applying the production zero-frequency output mask, the reconstructed
+array agrees with the saved retarded array to (4.80\times10^{-16}) in the
+maximum relative norm.  The check includes both transverse axes and the
+(q\mapsto-q) bosonic mirror.  The configured transverse shift (4/9) is not
+an offset from this index convention.  In the repository's Monkhorst--Pack
+formula it gives (q_i=i/9), which is the Gamma-centred mesh assumed by the
+fold.  The SSE constructor validates this ordered equivalence and refuses a
+different shifted mesh.
+
+The largest spectral-difference entry at 40 THz is
+(1.262\times10^{-3}) of the global peak.  The 40 THz window is therefore
+not grossly truncated for this checkpoint, although an auxiliary bubble grid
+to 80 THz remains part of the extent convergence test.  The dispersive and
+instantaneous terms are both material: their maximum norms are respectively
+0.598 and 0.917 times the maximum norm of the complete retarded array.  The
+half rule is consequently not a small perturbation.
+
+The same audit separates an implementation error from a representation
+error.  For analytic bosonic pole pairs sampled at (h=0.25) THz, the
+cell-constant transform has relative (L^2) errors of 0.991, 0.513 and 0.109
+at (gamma/h=0.008,0.4,2), for a pole at 23 THz on the 0--40 THz window.
+An exact piecewise-linear hat-function convolution gives 0.990, 0.467 and
+0.092.  Extending the last case to 80 THz lowers these errors to 0.074 and
+0.043.  Linear interpolation improves a resolved line but cannot recover a
+pole much narrower than a cell.  This supports selective rational enrichment
+rather than a replacement of the audited KK sign or q fold.
 
 ## 6. Why the spatial modal idea failed
 
@@ -798,6 +842,19 @@ PYTHONPATH=src:phonon python phonon/studies/_cnt_fc3_compression_review.py \
 QTX_ARRAY_MODULE=numpy PYTHONPATH=src:phonon \
     python phonon/studies/_conserving_spatial_tail_review.py
 
+python phonon/studies/_si_kk_audit.py \
+    --checkpoint \
+    cluster/si-l5-b3-v0953125save-from9375-q9-w40-dw025-t1e4 \
+    --ne 161 --wmax 40 --q-shape 9 9 \
+    --output phonon/studies/out/si_kk_audit.json
+
+python phonon/studies/_si_kk_audit.py \
+    --checkpoint cluster/si-l5-equilibrium-kms-map-q9-aux025f80 \
+    --run cluster/si-l5-equilibrium-kms-map-q9-aux025f80/run.npz \
+    --ne 161 --wmax 40 --q-shape 9 9 --temperature 300 \
+    --current-reference 120.20623282509771 --skip-analytic \
+    --output phonon/studies/out/si_equilibrium_invariants.json
+
 QTX_ARRAY_MODULE=numpy PYTHONPATH=src:phonon \
     python phonon/studies/_si_auxiliary_scba_review.py \
     --case L3=cluster/si-aux-l3c/poles.npz \
@@ -813,6 +870,7 @@ QTX_ARRAY_MODULE=numpy PYTHONPATH=src:phonon \
 
 PYTHONPATH=src:phonon python -m pytest -q \
     tests/quatrex/phonon/test_hybrid_frequency_review.py \
+    tests/quatrex/phonon/test_si_kk_audit.py \
     tests/quatrex/phonon/test_spatial_hierarchy_review.py \
     tests/quatrex/phonon/test_conserving_spatial_tail_review.py \
     tests/quatrex/phonon/test_cnt_reblock_acceleration.py \
@@ -826,7 +884,7 @@ PYTHONPATH=src:phonon python -m pytest -q \
 ```
 
 The canonical test command was run in the `quatrex-dev` environment with
-`QTX_ARRAY_MODULE=numpy`: all 69 tests passed.  The reduced CPU studies
+`QTX_ARRAY_MODULE=numpy`: all 75 tests passed.  The reduced CPU studies
 reproduced the tables above.  The
 restart-rich fits used the same code and seeds on Tortin; their pulled logs are
 under the gitignored `cluster/cntfc3-r*-r2/` directories.  The CUDA study ran
@@ -849,6 +907,10 @@ Alps job 4552671; its pulled log and arrays are under
 | real-Si auxiliary cost beats two-cell reblock | 9.5 x (L3), 44.5 x (worst-q L8) | **fail for wholesale promotion** |
 | conserving closed auxiliary-state SCBA | fixed-basis state mixer not implemented | **open; selective path only** |
 | real-Si L8x2 retarded residual <= `1e-3` | `9.511e-4` after the final continuation | pass |
+| equilibrium Si KMS, global max / L2 | `6.21e-12` / `4.06e-11` | pass |
+| equilibrium Si independent retarded assembly | `3.74e-16` | pass |
+| equilibrium Si zero current / 305--295 K current scale | `6.19e-16` | pass |
+| equilibrium Si bubble energy balance | `4.01e-16` | pass |
 | real-Si L8x2 internal current spread <= `1e-3` | `2.829e-3` versus primitive `4.371e-3` | **fail; wider exact near field needed** |
 | real-Si L8x2 cost beats matched primitive | 32.35 versus 34.66 s; 37.58 versus 66.82 GB mempool | pass |
 | spatial operator/current error <= `1e-3` | max HODLR current `4.283e-5` | pass |

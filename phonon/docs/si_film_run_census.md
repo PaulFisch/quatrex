@@ -65,6 +65,17 @@ The apparent availability of rank-8 through rank-128 L10 variants is a factor
 study on this truncated legacy problem, not a dense-vertex accuracy gate for
 the new calculation.
 
+The L8 reblocking result is nevertheless a genuine algebraic convergence
+record.  Job 4553056 used four two-cell groups, q=9, zero broadening, the
+half-retarded rule and a 0--15 THz grid with 0.125 THz spacing.  It converged
+after 17 evaluations to a retarded residual of (9.5112\times10^{-4}), lead
+balance (5.85\times10^{-6}) and internal spread
+(2.829\times10^{-3}).  Its current was written before the frequency-cell
+measure correction and must be multiplied by 0.125 for comparison with new
+outputs.  The row establishes that two-cell reblocking helped the historical
+functional.  Its short window, half rule, legacy output support and failed
+(10^{-3}) internal-spread gate prevent its use as the new length baseline.
+
 ## Consequence for the new campaign
 
 No old row is used as a converged baseline.  Historical results remain useful

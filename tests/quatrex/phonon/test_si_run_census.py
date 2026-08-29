@@ -122,3 +122,24 @@ def test_failed_si_job_without_result_is_in_census_candidates(tmp_path) -> None:
     (run / "job.sh").write_text("export QX_WMAX=40\n")
 
     assert module._candidate_dirs([tmp_path]) == [run]
+
+
+def test_failed_shell_diagnostic_does_not_poison_numeric_environment(
+    tmp_path,
+) -> None:
+    module = _module()
+    run = tmp_path / "si-l5-malformed"
+    run.mkdir()
+    (run / "job.sh").write_text(
+        "export QX_NE=161\nexport QX_AUXDW=0.25\nexport QX_AUXFMAX=80\n"
+    )
+    text = "/usr/bin/bash: line 0: exec: QX_WMAX=40: not found\n"
+    env = module._env(text, run)
+
+    assert env["QX_WMAX"] == "40"
+    assert module._cfg_value(
+        {}, env, "electron", "energy_window_max", 0) == 40
+    assert module._cfg_value(
+        {}, env, "phonon", "sse_aux_grid_dw_thz", 0) == 0.25
+    assert module._cfg_value(
+        {}, env, "phonon", "sse_aux_grid_fmax_thz", 0) == 80

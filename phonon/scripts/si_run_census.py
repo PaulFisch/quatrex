@@ -66,6 +66,8 @@ ENV_MAP = {
     "QX_MIX": ("scba", "mixing_factor"),
     "QX_NE": ("electron", "energy_window_num"),
     "QX_WMAX": ("electron", "energy_window_max"),
+    "QX_AUXDW": ("phonon", "sse_aux_grid_dw_thz"),
+    "QX_AUXFMAX": ("phonon", "sse_aux_grid_fmax_thz"),
     "QX_SIGMATOL": ("phonon", "sigma_convergence_tol"),
     "QX_HEATTOL": ("phonon", "heat_flow_conservation_tol"),
     "QX_RETARDED": ("phonon", "retarded_method"),
@@ -147,7 +149,11 @@ def _logs(directory: Path) -> tuple[str, list[Path]]:
 def _env(text: str, directory: Path) -> dict[str, str]:
     out = {}
     for key, value in re.findall(r"(QX_[A-Z0-9_]+)=(\S+)", text):
-        out[key] = value.rstrip("'\"")
+        # A failed ``exec QX_FOO=...`` command is printed by bash as
+        # ``QX_FOO=value: not found``.  The colon is diagnostic punctuation,
+        # not part of the intended value.  Keeping it made one failed job
+        # abort the complete historical census during numeric conversion.
+        out[key] = value.rstrip("'\";,:")
     for script in directory.glob("*.sh"):
         for key, value in re.findall(
             r"(?:export\s+)?(QX_[A-Z0-9_]+)=([^\s;]+)", _read_text(script)
@@ -157,6 +163,7 @@ def _env(text: str, directory: Path) -> dict[str, str]:
 
 
 def _cfg_value(cfg: dict, env: dict, section: str, field: str, default=""):
+    fallback = _dig(cfg, section, field, default=default)
     for key, route in ENV_MAP.items():
         if route == (section, field) and key in env:
             raw = env[key]
@@ -165,8 +172,13 @@ def _cfg_value(cfg: dict, env: dict, section: str, field: str, default=""):
             try:
                 return float(raw) if any(c in raw for c in ".eE") else int(raw)
             except ValueError:
+                # Preserve genuine string-valued overrides, but a malformed
+                # numeric value in a failed job is evidence to ignore rather
+                # than a reason to lose every other census row.
+                if isinstance(fallback, (bool, int, float, np.number)):
+                    return fallback
                 return raw
-    return _dig(cfg, section, field, default=default)
+    return fallback
 
 
 def _find_config(directory: Path, text: str) -> Path | None:
@@ -427,10 +439,10 @@ def _records(roots: list[Path]) -> list[dict]:
             rec["frequency_points"] = int(energies.size)
             if energies.size > 1:
                 rec["frequency_spacing_thz"] = float(np.median(np.diff(energies)))
-            rec["aux_dw_thz"] = av.get("sse_aux_grid_dw_thz") or _dig(
-                cfg, "phonon", "sse_aux_grid_dw_thz", default=0)
-            rec["aux_fmax_thz"] = av.get("sse_aux_grid_fmax_thz") or _dig(
-                cfg, "phonon", "sse_aux_grid_fmax_thz", default=0)
+            rec["aux_dw_thz"] = av.get("sse_aux_grid_dw_thz") or _cfg_value(
+                cfg, env, "phonon", "sse_aux_grid_dw_thz", 0)
+            rec["aux_fmax_thz"] = av.get("sse_aux_grid_fmax_thz") or _cfg_value(
+                cfg, env, "phonon", "sse_aux_grid_fmax_thz", 0)
             qmesh = av.get("q_mesh")
             if qmesh is None:
                 qmesh = _dig(cfg, "device", "kpoint_grid", default=[])

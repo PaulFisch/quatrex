@@ -247,9 +247,20 @@ combination-frequency sector of the cubic bubble. Refining the grid moves the
 largest component but does not by itself establish a fixed point.
 
 Fixed-coupling continuation supplies a better-conditioned route to the same
-physical equation. If the primitive cubic vertex is multiplied by \(s\), the
-bubble self-energy scales initially as \(s^2\). A converged state at \(s_a\)
-therefore provides the initial estimate
+physical equation.  The continuation parameter is defined by
+
+\[
+  \Phi^{(3)} \longmapsto s\,\Phi^{(3)}.
+\]
+
+The bubble contains two cubic vertices, so at a fixed Green function
+\(\Sigma_{\mathrm{ph-ph}}[G;s]=s^2
+\Sigma_{\mathrm{ph-ph}}[G;1]\).  The production kernel implements this
+identity by multiplying the common bubble prefactor by \(s^2\), after the
+frequency-grid normalisation and before either the dense or factorised FC3
+contraction.  FC2, the contacts, temperatures, quadrature weights and the
+Dyson operator are not scaled.  A converged state at \(s_a\) therefore
+provides the initial estimate
 
 \[
   \Sigma_{s_b}^{(0)} = (s_b/s_a)^2\Sigma_{s_a}.
@@ -342,3 +353,132 @@ bubble imbalance of \(2.49\times10^{-8}\).  Its complete distributed state
 is the certified restart for the full-strength calculation.  A separate
 \(s=0.96875\) branch is being formed from this closer state so that a failure
 of the direct \(0.9375\)-to-one step does not require repeating the ladder.
+
+The next halved step reached \(s=0.953125\) in 74 map evaluations.  Job
+4555657 converged to a relative retarded residual of
+\(9.62\times10^{-5}\), a current of 120.214090, an internal spread below
+\(8.3\times10^{-8}\), and a normalised bubble imbalance of
+\(2.07\times10^{-8}\).  All four frequency-distributed self-energy slices
+and the scalar result were retained.  This point is the nearest certified
+restart presently available, but it remains an unphysical continuation
+state because its cubic vertex is weaker than the supplied model.
+
+The fixed-point stability boundary lies above this point.  Scaling the
+certified state by \((62/61)^2\) for \(s=0.96875\) and using linear damping
+0.1 reduced the residual to \(2.0302\times10^{-2}\) at iteration 13 before
+it rose to \(3.4472\times10^{-2}\) at iteration 52.  The run was stopped and
+retained.  An affine predictor in
+\(s^2\),
+
+\[
+ \Sigma_{62/64}^{(0)} = {244\over121}\Sigma_{61/64}
+                         - {123\over121}\Sigma_{60/64},
+\]
+
+was less accurate: its residual bottomed at \(2.73\times10^{-2}\) and then
+grew monotonically.  The curvature of the solution branch is therefore
+large enough that a two-point secant does not replace a nonlinear solve.
+Neither observation changes the SCBA functional or indicates a spatial
+support error.
+
+Recursive projection was also tested at full vertex strength from the two
+nearby certified states.  The increment fit reported a restricted-Jacobian
+spectral radius of 9.12 at iteration 40 and applied a projected step that
+raised the relative residual from roughly \(0.1\) to \(0.98\).  This is a
+polluted secant model rather than evidence for a physical eigenvalue of that
+magnitude.  The run was stopped and retained.  Subsequent root-finder trials
+therefore use explicit finite-difference Jacobian actions, an absolute
+residual merit test and a trust radius that is permitted to shrink below
+\(10^{-3}\).
+
+## Causal retarded reconstruction
+
+The historical L8 calculation with four two-cell groups did converge with
+linear damping 0.1 and the half-retarded rule.  It used only 0--15 THz,
+retained the legacy self-energy output pattern and stopped at a relative
+residual of (9.51\times10^{-4}).  It is valid evidence that reblocking
+improved the old calculation, but it does not isolate retarded
+reconstruction and is not a converged reference for the present functional.
+
+Job 4555785 supplies the controlled half-rule comparison.  It used the L5
+microblock layout, the 0--40 THz grid, q=9, the complete generated spatial
+support, zero broadening and the (s=0.953125) state scaled to the physical
+vertex.  Its residual fell from 0.339 to 0.194 at iteration 4, then remained
+between about 0.20 and 0.25 through iteration 20.  It was stopped.  Dropping
+the dispersive term is therefore not sufficient to reproduce the old
+convergence.
+
+The causal implementation itself passes an end-to-end checkpoint identity.
+An independent NumPy transform reconstructs the saved L5 retarded array from
+the saved lesser and greater arrays to (4.80\times10^{-16}) after the
+intentional zero-frequency mask.  This tests the sign convention, the global
+half term, both transverse (q\mapsto-q) permutations and the four-rank
+frequency assembly.  The declared transverse shift (4/9) produces the
+ordered Gamma-centred mesh (q_i=i/9), so the modular negation is also the
+physical momentum negation.  No KK sign, factor-of-two, double-counting,
+momentum-mirror or distributed-assembly defect was found.
+
+The remaining retarded error is spectral.  The saved spectral difference at
+40 THz is (1.262\times10^{-3}) of its global peak, which excludes a grossly
+truncated tail but not the requested extent refinement.  An analytic pole
+audit shows that exact cell integration remains inaccurate when the sampled
+line is narrower than a cell.  Piecewise-linear projected convolution
+improves resolved poles but has essentially unit relative error at
+(gamma/h=0.008), as does the cell-constant rule.  A subcell sector must be
+refined locally or retained as a passive rational auxiliary term.
+
+The production auxiliary-grid test therefore leaves the Dyson grid at
+0--40 THz with 0.25 THz spacing and extends only the bubble and Hilbert grid
+to 80 THz.  Starting from the converged (s=0.953125) checkpoint, its first
+map residual is (5.63\times10^{-4}), with the maximum at the 40 THz primary
+boundary, and linear damping reduces it monotonically.  This quantifies the
+finite-support correction without doubling the number of Green-function
+solves.  It does not resolve a subcell pole because its auxiliary spacing is
+still 0.25 THz.  The run converged after 28 maps to a residual of
+(9.53\times10^{-5}), a current of 120.206233, an internal spread of
+(1.18\times10^{-6}), and a bubble imbalance of (2.07\times10^{-8}).
+The current is only (6.54\times10^{-5}) relatively below the primary-grid
+result at the same continuation strength.  Extending the convolution support
+therefore changes this observable by much less than the 0.2 per cent gate, but
+does not cure the loss of fixed-point stability closer to full cubic strength.
+
+## Equilibrium physical invariant
+
+A cheap end-to-end physical test is available before any further
+self-consistent campaign.  At a common lead temperature (T), equilibrium
+requires the positive-frequency bosonic KMS relation
+
+\[
+  \Sigma^<(\nu)=\exp\!\left[-{h\nu\over k_{\rm B}T}\right]\Sigma^>(\nu).
+\]
+
+This condition is stronger than current conservation alone.  One production
+bubble evaluation tests the contact Bose functions, lesser and greater signs,
+both frequency folds, transverse momentum convolution, FC3 normalisation and
+the assembled output support.  It does not require a converged interacting
+fixed point.
+
+Job 4555821 ran the L5, q=9, rank-128 microblock bed at 300/300 K.  It used the
+0--40 THz Dyson grid and the 0--80 THz auxiliary bubble grid, both with
+0.25 THz spacing, zero broadening, full cubic strength and all optional masks,
+tapers, pole terms and centre-of-mass terms disabled.  The saved production
+self-energy satisfies KMS with a global maximum relative defect
+(6.21\times10^{-12}) and an L2 relative defect
+(4.06\times10^{-11}).  Independently reconstructing its retarded component
+from the same lesser and greater arrays gives a relative discrepancy
+(3.74\times10^{-16}).  The bubble energy-balance defect is
+(4.01\times10^{-16}).
+
+The two integrated equilibrium lead currents are
+(1.35\times10^{-14}) and (-7.44\times10^{-14}) in the driver's units.
+The larger is (6.19\times10^{-16}) of the 120.206 current scale of the
+nearby 305/295 K L5 calculation.  The standard relative lead-balance report is
+ill-conditioned when both currents are at roundoff and prints a sign-inversion
+warning for this map.  The absolute values and the KMS test show that this is
+division by an equilibrium zero, not physical emission.  The run is a
+one-map invariant test and is deliberately marked non-converged; it is not a
+length-campaign data point.
+
+The durable diagnostic is `phonon/studies/_si_kk_audit.py`, its result is
+`phonon/studies/out/si_equilibrium_invariants.json`, and planted controls cover
+the KMS temperature factor and the frequency-weighted current integral.

@@ -1,0 +1,45 @@
+{
+  "checkpoint": {
+    "assembly_max_relative": 3.7358333396502543e-16,
+    "edge_over_peak": 2.1350395109793616e-16,
+    "half_over_retarded": 0.9294919379155057,
+    "kk_over_retarded": 0.564871767397449,
+    "kms": {
+      "active_entries": 8557584,
+      "active_fraction": 1e-08,
+      "active_pointwise_max_relative": 1.3932163172071357e-09,
+      "global_max_relative": 6.208182659340773e-12,
+      "l2_relative": 4.061070262159992e-11,
+      "temperature_K": 300.0,
+      "worst_frequency_index": 36,
+      "worst_frequency_thz": 9.0
+    },
+    "ne": 161,
+    "q_shape": [
+      9,
+      9
+    ],
+    "wmax_thz": 40.0
+  },
+  "equilibrium_run": {
+    "absolute_spectral_budget": [
+      1.7928072486456583e-12,
+      1.77852220162639e-12
+    ],
+    "current_spectrum_max_absolute": 1.0516032489249483e-12,
+    "integrated_current": [
+      1.3541644529701931e-14,
+      -7.440791863033657e-14
+    ],
+    "left_temperature_K": 300.0,
+    "right_temperature_K": 300.0,
+    "saved_current": [
+      1.3541644529701923e-14,
+      -7.440791863033657e-14
+    ],
+    "spectrum_integral_vs_saved_max_absolute": 7.888609052210118e-30,
+    "transport_reference_current": 120.20623282509771,
+    "zero_current_over_absolute_spectral_budget": 0.041503579755462615,
+    "zero_current_over_transport_reference": 6.190021672054349e-16
+  }
+}
