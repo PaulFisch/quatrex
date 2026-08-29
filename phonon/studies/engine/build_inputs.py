@@ -269,6 +269,13 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
         agg = float(np.sqrt(num2 / max(den2, 1e-300)))
         per_off = {k: float(np.sqrt(e2 / max(d2, 1e-300)))
                    for k, (e2, d2) in sorted(off_cls.items())}
+        vf.meta = {
+            **vf.meta,
+            "qfold_sample_aggregate_rel_err": agg,
+            "qfold_sample_per_offset_rel_err": {
+                f"{a},{b}": value for (a, b), value in per_off.items()
+            },
+        }
         print(f"[decompose r{rank}] fit rel_err={rel_err:.4f}; sample "
               f"aggregate rel err={agg:.4f}; per-offset "
               f"{ {k: round(v, 3) for k, v in per_off.items()} }", flush=True)

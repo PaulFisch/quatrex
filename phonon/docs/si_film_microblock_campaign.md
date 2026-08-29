@@ -400,6 +400,62 @@ therefore cannot certify this implementation.  The decisive harmonic code
 oracle remains the pointwise Caroli equality; the literature comparison only
 tests whether the independent FC2 model produces a credible silicon scale.
 
+### Joint-refit SCBA branch
+
+The joint FC2/FC3/FC4 potential is nevertheless a useful, explicitly labelled
+sensitivity branch because its harmonic [100] conductance is close to the
+value of Guo et al.  The cubic-bubble calculation consumes only its FC2 and
+FC3 datasets.  FC4 does not enter the Hamiltonian, the self-energy or the
+factor fit.  The source hash above and the `orders = [2, 3]` conventional
+rematerialisation make this exclusion reproducible.
+
+Before starting SCBA, the branch is subjected to a dense factor gate.  A
+five-cell device is grouped into one 120-DOF Dyson block while the vertex and
+Green-function slicing remain on five 24-DOF conventional microblocks.  The
+primitive Green range is complete, \(b=4\), and the generated self-energy
+range is consequently complete at four cells.  The frozen map uses a
+\(3\times3\) transverse mesh, 41 primary points from 0 to 40 THz and a uniform
+0 to 80 THz auxiliary grid at 1 THz spacing.  It uses 305/295 K contacts,
+zero broadening, spectral open boundaries and causal FFT retarded
+reconstruction.  The exact dense q-folded vertex and each factor candidate
+act on the same ballistic Green functions.  This tests q folding, frequency
+normalisation, grouped-to-primitive assembly and the retarded functional, not
+only the real-space factor residual.
+
+An independent harmonic range check precedes that map.  Repeating the
+longitudinal Fourier extraction with 5 and 7 samples gives transport
+coefficients at distances two and three between
+\(3.1\times10^{-16}\) and \(1.3\times10^{-15}\) of
+\(\lVert H_{01}\rVert\) on representative q=13 points.  The conventional
+FC2 is therefore nearest-cell exact.  The three-block lead and device input
+does not hide an FC2 range truncation.
+
+The dense reference is Alps job 4556598.  One map takes 51.09 s on four GH200
+GPUs, including 30.56 s in the dense cubic contraction, and peaks at 33.80 GB.
+The normalized anti-Hermiticity defects of its lesser and greater
+self-energies are \(4.39\times10^{-15}\) and \(1.18\times10^{-15}\).  Their
+negative source weights are \(1.02\times10^{-15}\) and
+\(2.59\times10^{-16}\).  A factor candidate is admitted to interacting q=13
+SCBA only if every frozen self-energy differs by no more than one per cent,
+its symmetry defect remains below \(10^{-10}\), and it adds no material
+negative source weight.  The full q=13 builder additionally checks three
+independently folded q pairs against the stored factors.  Reduced-restart
+fits use a distinct cache label in their metadata and cannot overwrite or be
+reported as the default restart-rich fit.
+
+The optimizer is not used to decide whether a failed rank deserves more
+restarts.  `_si_fc3_rank_oracle.py` unfolds the exact
+\(24\times648\times648\) conventional tensor along one contracted leg and
+computes its full singular spectrum.  Any rank-\(R\) INDSCAL tensor has
+unfolding rank at most \(R\), so the truncated-SVD tail is an optimizer-free
+lower bound on its error.  The bounds are 2.060 per cent at rank 64 and 0.744
+per cent at rank 128; the numerical unfolding rank is 231.  Rank 64 is
+therefore rejected before a frozen map, while rank 128 has only a narrow
+margin below the one per cent gate.  Rank 256 is included as the first rank
+without this algebraic obstruction.  The singular values, bounds and
+conventional FC3 hash are stored in
+`phonon/studies/out/si_conventional_100_fc4_refit_rank_oracle.json`.
+
 The raw production runs are Alps jobs 4555840, 4555851, 4555856, 4555883,
 4555891 and 4555902 for the q=9 frequency sequence, and jobs 4555936,
 4555891, 4555914 and 4555919 for the q=7, 9, 13 and 17 mesh sequence.

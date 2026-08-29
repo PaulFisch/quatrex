@@ -87,6 +87,11 @@ def fit_film_fc3_factors(
         z = np.load(cache, allow_pickle=True)
         exp = {k: z[k] for k in z.files if k != "meta"}
         exp["meta"] = z["meta"].item()
+        exp["meta"] = {
+            **exp["meta"],
+            "fit_cache_label": cache_label or "production_defaults",
+            "fit_control_overrides": dict(fit_kwargs),
+        }
         print(f"[fc3-factors] cache hit {cache.name} "
               f"(rel_err={exp['meta']['rel_err']:.4f})", flush=True)
         return exp
@@ -94,8 +99,11 @@ def fit_film_fc3_factors(
     target = target_from_dense(T, n_super, asr_weights=asr_w)
     res = fit_production(target, rank=rank, ansatz=ansatz, **fit_kwargs)
     exp = export_production_factors(res, target)
-    if cache_label:
-        exp["meta"] = {**exp["meta"], "fit_cache_label": cache_label}
+    exp["meta"] = {
+        **exp["meta"],
+        "fit_cache_label": cache_label or "production_defaults",
+        "fit_control_overrides": dict(fit_kwargs),
+    }
     asr = res.info["asr"]
     print(f"[fc3-factors] {ansatz} R={rank}: rel_err={res.rel_err:.4f} "
           f"asr_j/norm={asr['leg_j'] / (asr['norm'] or 1.0):.2e}", flush=True)
