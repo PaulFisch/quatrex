@@ -126,6 +126,10 @@ if os.environ.get("QX_POLE"):
     # an inconsistent combination must fail here rather than at iteration 40.
     cfg.phonon = type(cfg.phonon).model_validate(cfg.phonon.model_dump())
 if os.environ.get("QX_RING_DTYPE"): cfg.phonon.sse_ring_dtype = os.environ["QX_RING_DTYPE"]
+if os.environ.get("QX_G_FROM_L"):
+    cfg.phonon.sse_greater_from_lesser = bool(int(os.environ["QX_G_FROM_L"]))
+if os.environ.get("QX_FOLDVERIFY"):
+    cfg.phonon.sse_fold_verify_iterations = int(os.environ["QX_FOLDVERIFY"])
 if os.environ.get("QX_QBATCH"):   cfg.phonon.sse_dense_q_batched = bool(int(os.environ["QX_QBATCH"]))
 if os.environ.get("QX_SCP_TADPOLE"): cfg.phonon.scp_tadpole = bool(int(os.environ["QX_SCP_TADPOLE"]))
 if os.environ.get("QX_SCP_LOOP"): cfg.phonon.scp_loop = bool(int(os.environ["QX_SCP_LOOP"]))
