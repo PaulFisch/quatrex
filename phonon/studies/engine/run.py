@@ -255,10 +255,10 @@ if os.environ.get("QX_BALLISTIC") == "1":
               flush=True)
 
 w = np.abs(np.asarray(get_host(ph.local_frequencies)))
-if not getattr(ph, "uniform_frequency_grid", True):
-    # Non-uniform grid: fold the per-bin quadrature cell widths into the
-    # heat integral (uniform grids keep the legacy unweighted sum).
-    w = w * np.asarray(get_host(ph.local_frequency_weights))
+# The cell measure belongs to the frequency integral on every grid.  On a
+# uniform grid it is constant, so omitting it leaves balance ratios unchanged
+# while making the reported current scale as 1/delta_omega under refinement.
+w = w * np.asarray(get_host(ph.local_frequency_weights))
 
 
 def _heat(mw):
