@@ -553,6 +553,19 @@ the same conclusion: completing the high-frequency convolution support is
 physically benign and considerably cheaper than doubling the Dyson grid, but
 it is not by itself the missing fixed-point stabilisation.
 
+The next auxiliary continuation step, \(s=0.96875\), makes that limitation
+decisive.  Job 4555940 started from the converged auxiliary
+\(s=0.953125\) state with the exact \((62/61)^2\) self-energy scale.  Its
+relative residual fell from 0.072128 to 0.020332 at iteration 13, then rose
+monotonically to 0.023453 at iteration 28.  The largest frequency-resolved
+component moved from the 23.5 THz combination-frequency sector to 5.0 THz as
+the second mode grew.  Current spread remained below
+\(5.0\times10^{-5}\) and bubble balance remained near
+\(2.0\times10^{-8}\), illustrating again that a conserved transient is not
+a fixed point.  The job was stopped once the monotonic growth was established.
+The extended auxiliary grid therefore changes neither the stability boundary
+nor the need for a root finder or a still smaller continuation step.
+
 ## Equilibrium physical invariant
 
 A cheap end-to-end physical test is available before any further
