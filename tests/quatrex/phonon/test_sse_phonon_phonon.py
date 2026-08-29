@@ -1538,11 +1538,15 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
     from quatrex.phonon.vertex_factors import VertexFactors
 
     rng = np.random.default_rng(944)
-    n_primitive, d, rank, ne = 3, 1, 2, 3
+    n_primitive, d, rank, ne = 5, 2, 3, 3
     nk_shape = (2, 2)
     nq = int(np.prod(nk_shape))
-    grouped = np.array([2 * d, d])
-    offsets = np.array([-1, 0, 1])
+    grouped = np.array([4 * d, d])
+    # The Si factor files retain a wider per-leg offset table than the
+    # coupled seven-pair vertex support.  Keep that distinction in this
+    # regression: the unused +/-2 columns must not manufacture vertices in
+    # the Gram collapse.
+    offsets = np.array([-2, -1, 0, 1, 2])
     support = {
         (-1, -1), (-1, 0), (0, -1), (0, 0),
         (0, 1), (1, 0), (1, 1),
@@ -1558,8 +1562,8 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
             )
     D = rng.standard_normal((d, rank))
     lambdas = np.abs(rng.standard_normal(rank)) + 0.1
-    UB = (rng.standard_normal((3, nq, d, rank))
-          + 1j * rng.standard_normal((3, nq, d, rank)))
+    UB = (rng.standard_normal((len(offsets), nq, d, rank))
+          + 1j * rng.standard_normal((len(offsets), nq, d, rank)))
     vf = VertexFactors(
         D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UB,
         q_diff_map=qdm, nk_shape=nk_shape, ansatz="INDSCAL",
@@ -1594,10 +1598,9 @@ def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
         g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(
             grouped, ne, nk_shape)
         for view, arr in ((g_l.stack[...], gl), (g_g.stack[...], gg)):
-            view.blocks[0, 0] = xp.asarray(arr)
-            view.blocks[0, 1] = xp.asarray(arr)
-            view.blocks[1, 0] = xp.asarray(arr)
-            view.blocks[1, 1] = xp.asarray(arr)
+            for I in range(len(grouped)):
+                for J in range(len(grouped)):
+                    view.blocks[I, J] = xp.asarray(arr)
         cfg = _make_cfg("half")
         cfg.phonon.sse_microblock_dof = d
         cfg.phonon.sse_microblock_g_band = 2
