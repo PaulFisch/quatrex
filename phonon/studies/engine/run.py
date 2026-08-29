@@ -718,6 +718,7 @@ if ranks.rank == 0:
             else ("qfold" if cfg.phonon.qfold_path is not None else "gamma")),
         sse_vertex_rank=int(
             getattr(getattr(_sse_diag, "_vfactors", None), "rank", 0)),
+        sse_vertex_scale=float(cfg.phonon.sse_vertex_scale),
         decomposed_kernel=str(cfg.phonon.decomposed_kernel),
         q_mesh=np.asarray(cfg.device.kpoint_grid, dtype=np.int64),
         frequency_grid=str(cfg.phonon.frequency_grid),

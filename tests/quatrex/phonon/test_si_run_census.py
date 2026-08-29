@@ -29,6 +29,7 @@ def test_artifact_scalar_and_conservation_extraction(tmp_path) -> None:
         final_bubble_balance=np.array([10.0, 10.0 + 1e-11]),
         converged=True, diverged=False, ballistic=False,
         sse_microblock_dof=6, sse_microblock_g_band=3,
+        sse_vertex_scale=0.75,
         heat_flow_conservation_tol=1e-3, sse_g_band_taper="none",
         obc_algorithm="spectral", nevp_solver="full",
         obc_scattering_contacts=False, block_comm_size=1,
@@ -40,6 +41,7 @@ def test_artifact_scalar_and_conservation_extraction(tmp_path) -> None:
     assert got["block_sizes"].tolist() == [30, 12]
     assert got["source_commit"] == "0123456789abcdef"
     assert got["decomposed_kernel"] == "gram"
+    assert got["sse_vertex_scale"] == 0.75
     assert got["heat_flow_conservation_tol"] == 1e-3
     assert got["nranks"] == 4
     assert got["lead_balance"] < 1e-12
@@ -85,6 +87,7 @@ def test_log_environment_overrides_toml() -> None:
         "QX_HEATTOL": "1e-3",
         "QX_WMAX": "40",
         "QX_TLEFT": "305",
+        "QX_VSCALE": "0.5",
     }
     assert module._cfg_value(
         cfg, env, "phonon", "sse_microblock_g_band") == 5
@@ -101,6 +104,8 @@ def test_log_environment_overrides_toml() -> None:
         cfg, env, "electron", "energy_window_max") == 40
     assert module._cfg_value(
         cfg, env, "phonon", "left_temperature") == 305
+    assert module._cfg_value(
+        cfg, env, "phonon", "sse_vertex_scale") == 0.5
 
 
 def test_failed_si_job_without_result_is_in_census_candidates(tmp_path) -> None:

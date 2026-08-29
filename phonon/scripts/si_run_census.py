@@ -37,7 +37,7 @@ FIELDS = [
     "solver_g_band", "fc3_span", "generated_sigma_band", "frequency_grid",
     "frequency_min_thz", "frequency_max_thz", "frequency_spacing_thz",
     "frequency_points", "aux_dw_thz", "aux_fmax_thz", "q_mesh",
-    "vertex_representation", "factor_rank", "factor_fit_source",
+    "vertex_representation", "factor_rank", "vertex_scale", "factor_fit_source",
     "decomposed_kernel", "left_temperature_k", "right_temperature_k",
     "max_iterations", "min_iterations", "mixing_method", "mixing_factor",
     "sigma_tolerance", "heat_tolerance", "retarded_method", "eta_thz",
@@ -59,6 +59,7 @@ ENV_MAP = {
     "QX_MICRO_DOF": ("phonon", "sse_microblock_dof"),
     "QX_MICRO_GBAND": ("phonon", "sse_microblock_g_band"),
     "QX_VERTEX_RANK": ("phonon", "sse_vertex_rank"),
+    "QX_VSCALE": ("phonon", "sse_vertex_scale"),
     "QX_MAXIT": ("scba", "max_iterations"),
     "QX_MINIT": ("scba", "min_iterations"),
     "QX_MIXMETHOD": ("scba", "mixing_method"),
@@ -228,6 +229,7 @@ def _artifact_values(path: Path | None) -> dict:
             "converged", "diverged", "ballistic", "sse_g_band",
             "sse_microblock_dof", "sse_microblock_g_band",
             "sse_generated_sigma_band", "sse_vertex_span", "sse_vertex_rank",
+            "sse_vertex_scale",
             "vertex_representation", "frequency_grid", "sse_aux_grid_dw_thz",
             "sse_aux_grid_fmax_thz", "sigma_convergence_tol",
             "decomposed_kernel", "heat_flow_conservation_tol",
@@ -439,6 +441,8 @@ def _records(roots: list[Path]) -> list[dict]:
             rank, source = _factor_meta(factor_path)
             rec["factor_rank"] = av.get("sse_vertex_rank") or _cfg_value(
                 cfg, env, "phonon", "sse_vertex_rank", rank) or rank
+            rec["vertex_scale"] = av.get("sse_vertex_scale") or _cfg_value(
+                cfg, env, "phonon", "sse_vertex_scale", 1.0)
             rec["factor_fit_source"] = source
             rec["decomposed_kernel"] = av.get("decomposed_kernel") or _cfg_value(
                 cfg, env, "phonon", "decomposed_kernel", "")
