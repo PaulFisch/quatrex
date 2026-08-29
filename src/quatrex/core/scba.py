@@ -1003,17 +1003,18 @@ class SCBA(TransportSolver):
 
     @staticmethod
     def _phonon_hw_weights(solver) -> NDArray:
-        """``|omega|`` weights of the phonon energy integrals, multiplied
-        by the per-bin quadrature cell widths when the frequency grid is
-        NON-UNIFORM. On a uniform grid the legacy unweighted sum is kept
-        bit-for-bit (the constant ``dw`` cancels in every conservation
-        ratio); on a non-uniform grid the unweighted sum is not an
-        integral and the conservation gates would compare misweighted
-        quantities."""
+        """``|omega| d omega`` weights of the phonon energy integrals.
+
+        The constant cell width cancels from a conservation *ratio* on a
+        uniform grid, but not from the reported current or conductance.  The
+        old unweighted sum consequently scaled as ``1/dw`` under frequency
+        refinement.  Applying the stored cell measure on every grid makes the
+        absolute observable a quadrature while leaving all same-grid balance
+        ratios unchanged.
+        """
         w = xp.abs(xp.asarray(solver.local_frequencies, dtype=float).real)
-        if not getattr(solver, "uniform_frequency_grid", True):
-            w = w * xp.asarray(solver.local_frequency_weights, dtype=float)
-        return w
+        widths = xp.asarray(solver.local_frequency_weights, dtype=float)
+        return w * widths
 
     def _phonon_bubble_energy_balance(self):
         """Bubble energy-balance diagnostic: the in- and out-scattering

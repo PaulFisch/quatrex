@@ -133,10 +133,9 @@ class PhononSolver(SubsystemSolver):
                 "in the SSE, not by the grid)."
             )
         self.local_frequencies = get_local_slice(frequencies, comm.stack)
-        # Per-bin quadrature cell widths + uniformity flag: the heat/energy
-        # integrals (SCBA conservation gates, engine snapshots) weight by
-        # these on a NON-UNIFORM grid; on a uniform grid they are the
-        # constant dw and the legacy unweighted sums are kept.
+        # Per-bin quadrature cell widths + uniformity flag: every heat/energy
+        # integral uses these.  A uniform grid supplies the constant dw; it
+        # cancels from balance ratios but is required for an absolute current.
         from quatrex.grid.energies import (
             frequency_cell_widths, is_uniform_grid)
         self.local_frequency_weights = get_local_slice(
