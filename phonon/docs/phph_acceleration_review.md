@@ -855,6 +855,10 @@ python phonon/studies/_si_kk_audit.py \
     --current-reference 120.20623282509771 --skip-analytic \
     --output phonon/studies/out/si_equilibrium_invariants.json
 
+python phonon/studies/_si_ballistic_validation.py \
+    --run cluster/si-l5-ballistic-q17-w20-dw003125-caroli/run.npz \
+    --output phonon/studies/out/si_ballistic_q17_w20_dw003125.json
+
 QTX_ARRAY_MODULE=numpy PYTHONPATH=src:phonon \
     python phonon/studies/_si_auxiliary_scba_review.py \
     --case L3=cluster/si-aux-l3c/poles.npz \
@@ -911,6 +915,10 @@ Alps job 4552671; its pulled log and arrays are under
 | equilibrium Si independent retarded assembly | `3.74e-16` | pass |
 | equilibrium Si zero current / 305--295 K current scale | `6.19e-16` | pass |
 | equilibrium Si bubble energy balance | `4.01e-16` | pass |
+| ballistic Si Meir--Wingreen vs independent Caroli, spectral / integrated | `2.20e-12` / `0` at q=17 | pass |
+| ballistic Si frequency refinement, last two changes | `0.118 %`, `0.010 %` | pass |
+| ballistic Si transverse q refinement, q9--q13 / q13--q17 | `0.125 %`, `0.005 %` | pass |
+| ballistic Si conductance vs Guo et al. different-FC-input scale | `1000.85` vs `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-6.10 %` | scale check only |
 | real-Si L8x2 internal current spread <= `1e-3` | `2.829e-3` versus primitive `4.371e-3` | **fail; wider exact near field needed** |
 | real-Si L8x2 cost beats matched primitive | 32.35 versus 34.66 s; 37.58 versus 66.82 GB mempool | pass |
 | spatial operator/current error <= `1e-3` | max HODLR current `4.283e-5` | pass |

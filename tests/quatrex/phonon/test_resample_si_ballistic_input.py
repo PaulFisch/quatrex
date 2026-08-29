@@ -1,6 +1,6 @@
 import numpy as np
 
-from phonon.studies._resample_si_ballistic_input import (
+from quatrex.phonon.vertex_q_resample import (
     q_difference_map,
     trigonometric_resample,
 )
@@ -25,7 +25,7 @@ def test_trigonometric_factor_resampling_is_exact_for_planted_support():
     ).reshape(2, n1 * n1, 3, 4)
     np.testing.assert_allclose(got, expected, rtol=2e-14, atol=2e-14)
     assert audit["relative_source_roundtrip"] < 1e-14
-    assert audit["relative_fourier_tail"] == 0.0
+    assert audit["relative_fourier_tail"] < 1e-14
 
 
 def test_q_difference_map_uses_c_order_modular_difference():

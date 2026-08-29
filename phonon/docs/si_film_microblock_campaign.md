@@ -5,7 +5,8 @@
 `02cd9402`, `a2e007fc`, `efc8e3aa`, `c77f589c`, `2862fff0`,
 `43680ba3`, `81179d75`, `f6c5f493`, `2f3286a7`, `4f5b96f8`,
 `c636a2b7`, `fc55a202`, `612c249b`, `a7244e6d`, `3d1b6e2f`,
-`13a53415`, `b29429a8`, `2231fac6`, `e00c15b8`, `8f4b288c`
+`13a53415`, `b29429a8`, `2231fac6`, `e00c15b8`, `8f4b288c`,
+`b0ba289d`, `75d4ef33`, `630838a8`
 **Historical census:** [`si_film_run_census.md`](si_film_run_census.md)
 
 ## Physical and numerical reference
@@ -177,6 +178,98 @@ while lead balance, internal spread and bubble balance retain their numerical
 values on a fixed uniform grid.  All production conductance convergence tests
 start after this correction.  Older absolute current values in this document
 are diagnostic raw sums and are not part of the length curve.
+
+## Ballistic physical gate
+
+The harmonic film provides a physical test before the interacting campaign.
+For a one-block grouped L5 device, the production solver retains the left and
+right contact self-energies separately.  The number-current spectrum produced
+by the Meir-Wingreen expression can therefore be compared point by point with
+the independent Caroli identity
+
+\[
+ I_L(\nu,q)=\bigl[n_L(\nu)-n_R(\nu)\bigr]
+ \operatorname{Tr}\!\left[
+   \Gamma_LG^R\Gamma_RG^A
+ \right],
+ \qquad
+ \Gamma_\alpha=i(\Sigma^R_\alpha-\Sigma^{R\dagger}_\alpha).
+\]
+
+The diagnostic is evaluated after the production solve and does not enter the
+Dyson equation.  At q=9 and zero broadening, its spectral relative error is
+between \(8.4\times10^{-14}\) and \(1.5\times10^{-12}\) over the tested
+frequency grids.  The physically integrated currents agree between
+\(2.3\times10^{-16}\) and \(8.0\times10^{-16}\) relatively.  The largest
+transmission is 3.0000000000003, the three acoustic channels sampled just
+above zero frequency, and the most negative value is
+\(-5.1\times10^{-14}\), at roundoff.  This checks the contact signs, Bose
+occupations, q normalisation and selected Green function independently of the
+three-phonon kernel.
+
+The conductance conversion uses the primitive transverse area
+\(A_\perp=1.294665716618031\times10^{-19}\ {\rm m^2}\), the exact
+frequency-cell weights and \(T_L-T_R=10\) K.  The q=9 frequency sequence is
+
+| upper frequency (THz) | spacing (THz) | conductance (MW m\(^{-2}\) K\(^{-1}\)) | change from previous |
+|---:|---:|---:|---:|
+| 40 | 0.25 | 998.432 | |
+| 40 | 0.125 | 996.264 | -0.217 % |
+| 20 | 0.125 | 996.264 | below printed precision |
+| 20 | 0.0625 | 1000.728 | +0.448 % |
+| 20 | 0.03125 | 999.547 | -0.118 % |
+| 20 | 0.015625 | 999.648 | +0.010 % |
+
+The 20 and 40 THz results at matched spacing are identical because the
+harmonic spectrum has ended.  The non-monotone spacing sequence instead
+comes from sampling sharp channel openings at zero broadening.  It is not a
+failure of the Keldysh current.  The final two refinements change the result
+by 0.118 and 0.010 per cent, so the frequency integral passes the two-step
+0.2 per cent gate.  This behaviour also
+identifies a legitimate use for local frequency refinement in a ballistic
+integral.  It does not establish that a nonuniform shared grid resolves the
+anharmonic convolution, whose q-dependent combination frequencies remain the
+harder problem.
+
+The same 20 THz, 0.03125 THz grid gives the transverse-mesh sequence
+
+| shifted transverse mesh | conductance (MW m\(^{-2}\) K\(^{-1}\)) | change from previous |
+|---:|---:|---:|
+| 7 by 7 | 1003.867 | |
+| 9 by 9 | 999.547 | -0.430 % |
+| 13 by 13 | 1000.798 | +0.125 % |
+| 17 by 17 | 1000.848 | +0.005 % |
+
+The q=9 to q=13 and q=13 to q=17 changes are two successive refinements
+below 0.2 per cent.  The q=13 mesh therefore passes the selected gate and the
+q=17 calculation certifies it.  These meshes were generated from the q=9
+input by exact trigonometric evaluation of its finite transverse Fourier
+polynomial.  The relative q=9 round-trip error is
+\(3.06\times10^{-16}\), and the Fourier norm outside the supplied
+real-space support radius two is \(3.18\times10^{-16}\).  The procedure
+therefore changes the sampling mesh without fitting or smoothing the force
+constants.
+
+[Guo et al.](https://doi.org/10.1103/PhysRevB.102.195412) report
+1065.81 MW m\(^{-2}\) K\(^{-1}\) at 121 frequency points
+and an 8 by 8 transverse mesh for a five-conventional-cell film.  Their own
+mesh table ranges from 1040.03 to 1069.35 MW m\(^{-2}\) K\(^{-1}\) over the
+denser 101 and 121 point, 6 by 6 and 8 by 8 entries.  The present q=17 value
+is 6.10 per cent lower.  This is agreement in physical scale, not an
+algebraic oracle: their calculation uses LDA force constants and a 5.4018
+Angstrom lattice constant, while the supplied Quatrex model uses VASP-PBE
+force constants at 5.468 Angstrom.  The decisive code oracle is the
+pointwise Caroli equality; the literature comparison tests whether the
+independent FC2 model produces a credible silicon conductance.
+
+The raw production runs are Alps jobs 4555840, 4555851, 4555856, 4555883,
+4555891 and 4555902 for the q=9 frequency sequence, and jobs 4555936,
+4555891, 4555914 and 4555919 for the q=7, 9, 13 and 17 mesh sequence.
+Each run is reduced independently with
+`phonon/studies/_si_ballistic_validation.py`; the resulting JSON records are
+`phonon/studies/out/si_ballistic_q*_w*_dw*.json`.  The Caroli diagnostic is
+post-processing only and is enabled with `QX_DIAG_CAROLI=1` on a ballistic
+production solve.
 
 ## Certification order
 
@@ -441,6 +534,17 @@ The current is only (6.54\times10^{-5}) relatively below the primary-grid
 result at the same continuation strength.  Extending the convolution support
 therefore changes this observable by much less than the 0.2 per cent gate, but
 does not cure the loss of fixed-point stability closer to full cubic strength.
+
+The same auxiliary representation also converged independently at
+\(s=0.9375\), starting from the primary-grid checkpoint at that strength.
+Job 4555817 required 39 maps and reached a residual of
+\(9.77\times10^{-5}\), a current of 122.199421, an internal spread of
+\(1.43\times10^{-6}\), and a bubble imbalance of
+\(2.48\times10^{-8}\).  Its current is \(4.84\times10^{-5}\) relatively
+below the primary-grid value 122.205341.  The two continuation strengths give
+the same conclusion: completing the high-frequency convolution support is
+physically benign and considerably cheaper than doubling the Dyson grid, but
+it is not by itself the missing fixed-point stabilisation.
 
 ## Equilibrium physical invariant
 

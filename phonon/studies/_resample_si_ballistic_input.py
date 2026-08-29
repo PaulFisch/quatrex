@@ -25,67 +25,10 @@ import shutil
 
 import numpy as np
 
-
-def q_difference_map(nk: int) -> np.ndarray:
-    index = np.arange(nk * nk)
-    x, y = np.divmod(index, nk)
-    dx = (x[:, None] - x[None, :]) % nk
-    dy = (y[:, None] - y[None, :]) % nk
-    return (dx * nk + dy).astype(np.int64)
-
-
-def trigonometric_resample(values: np.ndarray, target_nk: int,
-                           support_radius: int = 2) -> tuple[np.ndarray, dict]:
-    """Resample ``(offset, nq, dof, rank)`` q values on a square mesh."""
-    values = np.asarray(values, dtype=np.complex128)
-    source_nk = int(round(np.sqrt(values.shape[1])))
-    if source_nk * source_nk != values.shape[1] or source_nk % 2 != 1:
-        raise ValueError("source factor mesh must be an odd square")
-    if target_nk % 2 != 1:
-        raise ValueError("target factor mesh must be odd")
-    if source_nk < 2 * support_radius + 1:
-        raise ValueError(
-            f"source nk={source_nk} cannot resolve support radius "
-            f"{support_radius}")
-
-    sampled = values.reshape(
-        values.shape[0], source_nk, source_nk, *values.shape[2:])
-    coefficients = np.fft.ifft2(sampled, axes=(1, 2))
-    translations = np.rint(np.fft.fftfreq(source_nk) * source_nk).astype(int)
-    outside = ((np.abs(translations)[:, None] > support_radius)
-               | (np.abs(translations)[None, :] > support_radius))
-    total_norm = float(np.linalg.norm(coefficients.ravel()))
-    tail_norm = float(np.linalg.norm(coefficients[:, outside].ravel()))
-
-    q = np.arange(target_nk, dtype=float) / target_nk
-    phase = np.exp(-2j * np.pi * q[:, None] * translations[None, :])
-    resampled = np.einsum(
-        "ar,orsdk,bs->oabdk", phase, coefficients, phase,
-        optimize=True,
-    )
-    # Evaluate the same polynomial back on the source mesh.  This pins the
-    # Fourier sign, flattening order and normalisation independently of nk.
-    q0 = np.arange(source_nk, dtype=float) / source_nk
-    phase0 = np.exp(-2j * np.pi * q0[:, None] * translations[None, :])
-    reconstructed = np.einsum(
-        "ar,orsdk,bs->oabdk", phase0, coefficients, phase0,
-        optimize=True,
-    )
-    roundtrip = float(
-        np.linalg.norm(reconstructed - sampled)
-        / max(np.linalg.norm(sampled), np.finfo(float).tiny))
-    return (
-        np.ascontiguousarray(resampled.reshape(
-            values.shape[0], target_nk * target_nk, *values.shape[2:])),
-        {
-            "source_nk": source_nk,
-            "target_nk": int(target_nk),
-            "support_radius": int(support_radius),
-            "relative_fourier_tail": tail_norm / max(
-                total_norm, np.finfo(float).tiny),
-            "relative_source_roundtrip": roundtrip,
-        },
-    )
+from quatrex.phonon.vertex_q_resample import (
+    q_difference_map,
+    trigonometric_resample,
+)
 
 
 def build_input(source: Path, output: Path, target_nk: int) -> dict:

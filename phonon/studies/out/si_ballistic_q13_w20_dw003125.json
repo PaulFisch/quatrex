@@ -1,0 +1,47 @@
+{
+  "run": "cluster/si-l5-ballistic-q13-w20-dw003125-caroli/run.npz",
+  "source_commit": "630838a8df7579dd6939820d86b24f81d8f676a5",
+  "q_mesh": [
+    1,
+    13,
+    13
+  ],
+  "frequency_points": 641,
+  "frequency_max_thz": 20.0,
+  "frequency_spacing_thz": 0.03125,
+  "temperatures_k": [
+    305.0,
+    295.0
+  ],
+  "area_m2": 1.294665716618031e-19,
+  "mw_current_w": [
+    1.2956988759008893e-09,
+    1.295698875900889e-09
+  ],
+  "caroli_current_w": 1.2956988759008886e-09,
+  "mw_conductance_mw_m2k": 1000.7980123900684,
+  "caroli_conductance_mw_m2k": 1000.7980123900682,
+  "integrated_caroli_mw_relative": 2.271923731145576e-16,
+  "spectral_caroli_mw_relative_l2": 1.6376297811471429e-12,
+  "spectral_caroli_mw_active_max_relative": 7.665316749048226e-12,
+  "transmission_min": -3.1865697528720673e-14,
+  "transmission_max": 4.000000000000153,
+  "relative_to_historical_q9_L5": 0.0048638798234483804,
+  "relative_to_guo_121_q8": -0.060997727183955464,
+  "historical_quatrex_mw_m2k": {
+    "q9_L3": 995.95381273521,
+    "q9_L5": 995.953812735219,
+    "q9_L8": 995.953812735228,
+    "q13_L3": 1002.752845954465
+  },
+  "guo_table_iii_mw_m2k": {
+    "61_q4": 1130.18,
+    "81_q4": 1090.59,
+    "81_q6": 1069.35,
+    "101_q4": 1074.6,
+    "101_q6": 1040.03,
+    "101_q8": 1053.53,
+    "121_q6": 1061.24,
+    "121_q8": 1065.81
+  }
+}
