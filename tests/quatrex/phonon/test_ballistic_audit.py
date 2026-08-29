@@ -7,6 +7,10 @@ from quatrex.phonon.ballistic_audit import (
 )
 
 
+def _host(value):
+    return np.asarray(value.get() if hasattr(value, "get") else value)
+
+
 def test_caroli_scalar_and_batched_matrix_oracles():
     frequency = 4
     qpoint = 3
@@ -18,7 +22,7 @@ def test_caroli_scalar_and_batched_matrix_oracles():
     sigma_l = -0.5j * gamma_l
     sigma_r = -0.5j * gamma_r
 
-    got = caroli_transmission(g, sigma_l, sigma_r)
+    got = _host(caroli_transmission(g, sigma_l, sigma_r))
     expected = np.empty((frequency, qpoint))
     for iw in range(frequency):
         for iq in range(qpoint):
@@ -31,7 +35,7 @@ def test_caroli_scalar_and_batched_matrix_oracles():
     nl = np.array([3.0, 2.0, 1.0, 0.5])
     nr = np.array([2.5, 1.8, 0.9, 0.4])
     np.testing.assert_allclose(
-        caroli_number_current(got, nl, nr),
+        _host(caroli_number_current(got, nl, nr)),
         expected * (nl - nr)[:, None],
     )
 

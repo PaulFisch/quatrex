@@ -12,8 +12,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[2]
+for _path in (ROOT, ROOT / "phonon"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from phonon.postproc.units import heat_current_watts
 
