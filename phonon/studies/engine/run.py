@@ -9,11 +9,15 @@ from pathlib import Path
 
 import numpy as np
 
+from env_aliases import normalise_env
+
 from quatrex.core.config import parse_config, setup_context
 from qttools import xp
 from qttools.comm import comm as ranks
 from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
+
+normalise_env(os.environ)
 
 CFG = os.environ["QX_CONFIG"]
 cfg = parse_config(CFG)
