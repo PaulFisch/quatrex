@@ -24,6 +24,15 @@ if os.environ.get("QX_MIX"):      cfg.scba.mixing_factor = float(os.environ["QX_
 if os.environ.get("QX_MIXMETHOD"):cfg.scba.mixing_method = os.environ["QX_MIXMETHOD"]
 if os.environ.get("QX_ADEPTH"):   cfg.scba.anderson_depth = int(os.environ["QX_ADEPTH"])
 if os.environ.get("QX_ADPERIOD"): cfg.scba.anderson_period = int(os.environ["QX_ADPERIOD"])
+if os.environ.get("QX_ADWARMUP"): cfg.scba.anderson_warmup_iters = int(os.environ["QX_ADWARMUP"])
+if os.environ.get("QX_ADRESTART"):cfg.scba.anderson_restart = int(os.environ["QX_ADRESTART"])
+if os.environ.get("QX_ADRIDGE"):  cfg.scba.anderson_ridge = float(os.environ["QX_ADRIDGE"])
+if os.environ.get("QX_ADSTEPCAP"):cfg.scba.anderson_step_cap = float(os.environ["QX_ADSTEPCAP"])
+if os.environ.get("QX_ADREVERT"): cfg.scba.anderson_revert_factor = float(os.environ["QX_ADREVERT"])
+if os.environ.get("QX_ADSTAG"):
+    cfg.scba.anderson_stagnation_restart = int(os.environ["QX_ADSTAG"])
+if os.environ.get("QX_MIXDIAG"):
+    cfg.scba.mixer_diagnostics = bool(int(os.environ["QX_MIXDIAG"]))
 if os.environ.get("QX_MAXIT"):    cfg.scba.max_iterations = int(os.environ["QX_MAXIT"])
 if os.environ.get("QX_MINIT"):    cfg.scba.min_iterations = int(os.environ["QX_MINIT"])
 if os.environ.get("QX_NE"):       cfg.electron.energy_window_num = int(os.environ["QX_NE"])
