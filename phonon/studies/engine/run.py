@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from env_aliases import normalise_env
+from env_aliases import normalise_env, validate_restartable_env
 
 from quatrex.core.config import parse_config, setup_context
 from qttools import xp
@@ -18,6 +18,7 @@ from qttools.profiling import Profiler
 from qttools.utils.gpu_utils import get_host
 
 normalise_env(os.environ)
+validate_restartable_env(os.environ)
 
 CFG = os.environ["QX_CONFIG"]
 cfg = parse_config(CFG)

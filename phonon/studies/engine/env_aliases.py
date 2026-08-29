@@ -37,3 +37,16 @@ def normalise_env(environ: MutableMapping[str, str]) -> None:
                 f"conflicting environment overrides: {alias}={value!r} and "
                 f"{canonical}={environ[canonical]!r}")
         environ[canonical] = value
+
+
+def validate_restartable_env(environ: MutableMapping[str, str]) -> None:
+    """Fail before a campaign run that promises, but cannot save, a restart."""
+    if environ.get("QX_REQUIRE_RESTARTABLE") != "1":
+        return
+    required = ("QX_SAVE_SIGMA", "QX_SAVE_SIGMA_BEST")
+    missing = [name for name in required if not environ.get(name)]
+    if environ.get("QX_SIGMA_BEST_LIVE") != "1":
+        missing.append("QX_SIGMA_BEST_LIVE=1")
+    if missing:
+        raise ValueError(
+            "restartable campaign run is missing " + ", ".join(missing))

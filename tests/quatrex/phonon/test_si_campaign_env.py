@@ -43,3 +43,17 @@ def test_campaign_alias_conflict_is_fatal() -> None:
     env = {"QX_RETARDED_METHOD": "fft", "QX_RETARDED": "half"}
     with pytest.raises(ValueError, match="conflicting environment overrides"):
         module.normalise_env(env)
+
+
+def test_restartable_campaign_requires_final_and_live_checkpoints() -> None:
+    module = _module()
+    with pytest.raises(ValueError, match="QX_SAVE_SIGMA"):
+        module.validate_restartable_env({"QX_REQUIRE_RESTARTABLE": "1"})
+
+    env = {
+        "QX_REQUIRE_RESTARTABLE": "1",
+        "QX_SAVE_SIGMA": "/tmp/sigma.npz",
+        "QX_SAVE_SIGMA_BEST": "/tmp/sigma_best.npz",
+        "QX_SIGMA_BEST_LIVE": "1",
+    }
+    module.validate_restartable_env(env)
