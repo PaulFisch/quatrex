@@ -446,3 +446,7 @@ least-squares ladder rebuild.
 | 2026-08-29 | 4556266 | si-l5-ballistic-q13-w20-dw003125-dt5-caroli | 1 | 00:20:00 | 0.33 | 426.33 | debug |
 | 2026-08-29 | 4556343 | si-big-reap-audit | 1 | 00:10:00 | 0.17 | 426.50 | debug |
 | 2026-08-29 | 4556350 | si-big-reap-audit2 | 1 | 00:10:00 | 0.17 | 426.67 | debug |
+| 2026-08-30 | 4556515 | si-conventional-100-l5-q17-ballistic-caroli | 1 | 00:30:00 | 0.50 | 427.17 | debug |
+| 2026-08-30 | 4556523 | si-conventional-100-l5-q17-ballistic-caroli-q4 | 1 | 00:30:00 | 0.50 | 427.67 | debug |
+| 2026-08-30 | 4556528 | si-conventional-100-l5-q17-ballistic-caroli-s4 | 1 | 00:30:00 | 0.50 | 428.17 | debug |
+| 2026-08-30 | 4556539 | si-conventional-100-l5-q13-ballistic-s4 | 1 | 00:30:00 | 0.50 | 428.67 | debug |

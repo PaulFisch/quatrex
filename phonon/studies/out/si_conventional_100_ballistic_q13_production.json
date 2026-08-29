@@ -1,0 +1,39 @@
+{
+  "matrix": "cluster/si-conventional-100-l5-q13-ballistic-in/dynamical_matrix.mat",
+  "run": "cluster/si-conventional-100-l5-q13-ballistic-s4/run.npz",
+  "source_commit": "c7294e892aec1f1be0ef546aa5d71ae31cc6919d",
+  "q_mesh": [
+    1,
+    13,
+    13
+  ],
+  "area_m2": 2.9899024e-19,
+  "temperatures_k": [
+    305.0,
+    295.0
+  ],
+  "refinements": [
+    {
+      "nk": 1025,
+      "conductance_mw_m2k": 1027.184241070755
+    },
+    {
+      "nk": 2049,
+      "conductance_mw_m2k": 1027.7644283026818
+    },
+    {
+      "nk": 4097,
+      "conductance_mw_m2k": 1028.0337033125888
+    }
+  ],
+  "production_current_w": [
+    3.0746803485213304e-09,
+    3.074680348521105e-09,
+    3.0746803485211997e-09,
+    3.0746803485214214e-09,
+    3.074680348521221e-09,
+    3.074680348521231e-09
+  ],
+  "production_conductance_mw_m2k": 1028.3547544967623,
+  "finest_mode_to_production_conductance_relative": -0.00031219886208488923
+}

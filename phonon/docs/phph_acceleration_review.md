@@ -881,6 +881,12 @@ OPENBLAS_NUM_THREADS=8 python phonon/studies/_si_ballistic_mode_count.py \
     --nk 1025,2049,4097 \
     --output phonon/studies/out/si_conventional_100_ballistic_q17_mode_count.json
 
+OPENBLAS_NUM_THREADS=8 python phonon/studies/_si_ballistic_mode_count.py \
+    --matrix cluster/si-conventional-100-l5-q13-ballistic-in/dynamical_matrix.mat \
+    --run cluster/si-conventional-100-l5-q13-ballistic-s4/run.npz \
+    --nk 1025,2049,4097 --area 2.9899024e-19 \
+    --output phonon/studies/out/si_conventional_100_ballistic_q13_production.json
+
 QTX_ARRAY_MODULE=numpy PYTHONPATH=src:phonon \
     python phonon/studies/_si_auxiliary_scba_review.py \
     --case L3=cluster/si-aux-l3c/poles.npz \
@@ -947,6 +953,8 @@ Alps job 4552671; its pulled log and arrays are under
 | production FC2 vs recovered original fit | maximum sampled relative difference `4.52e-15` | pass |
 | primitive-to-conventional hiPhive Gamma folding | maximum frequency difference `5.57e-7` THz | pass |
 | conventional [100] q13--q17 / q17--q21 mode-integral refinement | `0.0846 %` / `0.0103 %` | pass at q=17 |
+| conventional [100] production MW vs independent q13 mode integral | `1028.3548` / `1028.0337` MW m\(^{-2}\) K\(^{-1}\), `3.12e-4` relative | pass |
+| conventional q17 production memory | 101.25 GB before a failed 0.43 GB spectral-OBC batch; q13 peak 79.25 GB | q13 accepted; tiled q-frequency storage needed for q17 |
 | conventional [100] vs primitive-orientation conductance | `1027.1643` / `1000.8480` MW m\(^{-2}\) K\(^{-1}\), `+2.63 %` | orientation isolated |
 | conventional [100] vs Guo et al. different-FC-input conductance | `1027.1643` / `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-3.63 %` | same-orientation scale check |
 | ballistic Si conductance vs Guo et al. different-FC-input and orientation scale | `1000.85` vs `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-6.10 %` | scale check only |

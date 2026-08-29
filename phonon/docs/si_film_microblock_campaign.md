@@ -347,6 +347,49 @@ DFT calculation is needed.  The interacting calculation can use the likewise
 rematerialised FC3, but it remains a comparison of spatial SCBA functionals
 unless the self-energy support is also matched.
 
+The recovered archive is the project-specific 250-atom, 24-structure VASP-PBE
+fit, not a generic force-constant file copied from an upstream hiPhive
+example.  Public examples supply the fitting and rematerialisation workflow,
+but substituting their training structures or calculator would change the
+physical model.  Recovering `fcp.fcp` is stronger: it preserves the exact
+103-parameter potential used for the existing Si calculations and permits a
+change of cell without a new DFT calculation or regression.
+
+The conventional input was also passed through the finite-device production
+solver on Alps.  A q=13, five-cell calculation has five 24-DOF Dyson blocks,
+641 frequencies from 0 to 20 THz, 305/295 K contacts, zero broadening and the
+spectral OBC construction.  Job 4556539 used four frequency-stack ranks and
+converged ballistically after two update maps.  Its six interface currents
+agree to \(1.03\times10^{-13}\) relatively and its GPU memory-pool peak is
+79.25 GB.  Direct reduction of the saved Meir--Wingreen spectrum gives
+1028.3548 MW m\(^{-2}\) K\(^{-1}\).  The independent q=13 Bloch-mode integral
+gives 1028.0337 MW m\(^{-2}\) K\(^{-1}\), a relative difference of
+\(3.12\times10^{-4}\).  This passes the 0.2 per cent gate without sharing a
+surface Green function, contact self-energy or finite-device Green function.
+
+The independently certified q=17 mesh is presently too large for the
+production data layout on one GH200.  Jobs 4556515 and 4556523 failed while
+requesting a 39.27 GB Green-function buffer after 79.07 and 80.54 GB had
+already been allocated.  Splitting the transverse q communicator does not
+partition those core arrays.  Four frequency-stack ranks in job 4556528
+passed initialisation, but the spectral OBC solve reached 101.25 GB and could
+not allocate its next 0.43 GB batch.  The q=13 to q=17 mode-integral change is
+only 0.0846 per cent, so the successful q=13 run is an accepted production
+validation.  A production q=17 run would require tiled q-frequency storage or
+streamed OBC batches, not altered physics.
+
+A later joint FC2/FC3/FC4 hiPhive refit supplies a useful sensitivity check,
+but not a replacement baseline.  Its dense source has SHA-256
+`e34db454c980a6699bf65d4b7a7bf88e4baadfa08f21fc157f149463a82424be`.
+Relative to the original production FC2, sampled primitive \(H_{00}\) and
+\(H_{01}\) blocks change by as much as 0.88 and 3.82 per cent.  The same
+conventional transformation then gives 1068.0992 MW m\(^{-2}\) K\(^{-1}\)
+at q=17 and 4097 longitudinal points, 3.99 per cent above the original-fit
+result and 0.215 per cent above Guo et al.  The numerical proximity to the LDA
+literature value is therefore evidence of FC2 sensitivity, not a more accurate
+transport solution.  All production comparisons retain the original
+FC2/FC3-only fit.
+
 The distinction becomes still more important for the interacting results.
 Guo et al. retain selected dominant terms in diagonal scattering-self-energy
 blocks, and report that the still more local 3 by 3 diagonal approximation

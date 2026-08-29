@@ -134,6 +134,38 @@ def positive_variation_current(
     )
 
 
+def production_spectrum_conductance(
+    frequencies: np.ndarray,
+    widths: np.ndarray,
+    current_spectrum: np.ndarray,
+    area_m2: float,
+    left_temperature: float,
+    right_temperature: float,
+) -> tuple[np.ndarray, float]:
+    """Reduce a saved production MW spectrum to SI conductance.
+
+    The solver stores a q-resolved number-current spectrum.  The transverse
+    axes are averaged, as in ``phonon.postproc.units``, before multiplying by
+    ``h nu dnu``.  Keeping this small reducer here avoids importing any
+    production Green-function or contact implementation into the mode oracle.
+    """
+    spectrum = np.real(np.asarray(current_spectrum))
+    while spectrum.ndim > 2:
+        spectrum = spectrum.mean(axis=1)
+    currents = PLANCK * THZ**2 * np.sum(
+        np.asarray(widths)[:, None]
+        * np.asarray(frequencies)[:, None]
+        * spectrum,
+        axis=0,
+    )
+    delta_temperature = left_temperature - right_temperature
+    if delta_temperature == 0.0:
+        raise ValueError("a nonzero temperature difference is required")
+    lead_current = 0.5 * (abs(currents[0]) + abs(currents[-1]))
+    conductance = lead_current / (area_m2 * delta_temperature) / 1.0e6
+    return currents, float(conductance)
+
+
 def mode_integral_audit(
     matrix_path: Path,
     q_mesh: tuple[int, int],
@@ -194,13 +226,24 @@ def audit(
     blocks = load_real_space_blocks(matrix_path)
     with np.load(run_path) as run:
         frequencies = np.asarray(run["energies"], float)
-        caroli = np.asarray(run["caroli_transmission"], float)
+        caroli = (
+            np.asarray(run["caroli_transmission"], float)
+            if "caroli_transmission" in run else None
+        )
+        current_spectrum = (
+            np.asarray(run["current_spectrum"])
+            if "current_spectrum" in run else None
+        )
         q_mesh = tuple(int(i) for i in run["q_mesh"])
         left_temperature = float(run["left_temperature"])
         right_temperature = float(run["right_temperature"])
         source_commit = str(run["source_commit"])
         widths = np.asarray(run["frequency_cell_widths"], float)
-    if q_mesh[0] != 1 or caroli.shape[1:] != q_mesh[1:]:
+    if caroli is None and current_spectrum is None:
+        raise ValueError("run has neither a Caroli nor a production spectrum")
+    if q_mesh[0] != 1 or (
+        caroli is not None and caroli.shape[1:] != q_mesh[1:]
+    ):
         raise ValueError("run is not a two-dimensional transverse-q film")
 
     # The production shift 1/2 - 1/(2n) makes the mesh i/n.  Evaluating the
@@ -225,12 +268,13 @@ def audit(
 
     reduced_k = np.linspace(-0.5, 0.5, finest_nk)
     currents = {nk: 0.0 for nk in nk_values}
-    finest_modes = np.zeros_like(caroli)
+    finest_modes = np.zeros_like(caroli) if caroli is not None else None
     for index, q_blocks in transformed.items():
         bands = bloch_bands(q_blocks, reduced_k)
-        finest_modes[(slice(None),) + index] = positive_mode_count(
-            bands, frequencies
-        )
+        if finest_modes is not None:
+            finest_modes[(slice(None),) + index] = positive_mode_count(
+                bands, frequencies
+            )
         for nk in nk_values:
             currents[nk] += positive_variation_current(
                 bands[:: strides[nk]], left_temperature, right_temperature
@@ -248,29 +292,6 @@ def audit(
                 "conductance_mw_m2k": conductance / 1.0e6,
             }
         )
-    difference = finest_modes - caroli
-    caroli_norm = float(np.linalg.norm(caroli))
-    exact_bin_fraction = float(np.mean(np.abs(difference) <= 1.0e-6))
-
-    # Integrate the stored production spectrum with the same physical-unit
-    # reducer used by the ballistic audit.  Keeping this local makes the mode
-    # oracle independent of the production current implementation.
-    weighted_occupation = frequency_weighted_occupation_difference(
-        frequencies, left_temperature, right_temperature
-    )
-    # The stored production current omits the exactly-zero bin.  Its Caroli
-    # transmission is ill-conditioned at the acoustic threshold, whereas the
-    # continuum mode integral below includes the well-defined nu -> 0 limit
-    # through the neighbouring transport-wavevector intervals.
-    weighted_occupation[frequencies == 0.0] = 0.0
-    caroli_current = PLANCK * THZ**2 * np.sum(
-        widths[:, None, None]
-        * weighted_occupation[:, None, None]
-        * caroli
-    ) / (q_mesh[1] * q_mesh[2])
-    caroli_conductance = caroli_current / (
-        area_m2 * (left_temperature - right_temperature)
-    )
     finest_conductance = float(refinements[-1]["conductance_mw_m2k"])
     result: dict[str, object] = {
         "matrix": str(matrix_path),
@@ -280,21 +301,61 @@ def audit(
         "area_m2": area_m2,
         "temperatures_k": [left_temperature, right_temperature],
         "refinements": refinements,
-        "caroli_grid_dc_dropped_conductance_mw_m2k": (
-            caroli_conductance / 1.0e6
-        ),
-        "finest_mode_to_caroli_conductance_relative": (
-            finest_conductance / (caroli_conductance / 1.0e6) - 1.0
-        ),
-        "mode_to_caroli_spectral_relative_l2": (
-            float(np.linalg.norm(difference)) / caroli_norm
-        ),
-        "mode_to_caroli_exact_bin_fraction": exact_bin_fraction,
-        "mode_count_min": float(np.min(finest_modes)),
-        "mode_count_max": float(np.max(finest_modes)),
-        "caroli_transmission_min": float(np.min(caroli)),
-        "caroli_transmission_max": float(np.max(caroli)),
     }
+    if current_spectrum is not None:
+        production_current, production_conductance = (
+            production_spectrum_conductance(
+                frequencies,
+                widths,
+                current_spectrum,
+                area_m2,
+                left_temperature,
+                right_temperature,
+            )
+        )
+        result.update({
+            "production_current_w": production_current.tolist(),
+            "production_conductance_mw_m2k": production_conductance,
+            "finest_mode_to_production_conductance_relative": (
+                finest_conductance / production_conductance - 1.0
+            ),
+        })
+    if caroli is not None and finest_modes is not None:
+        difference = finest_modes - caroli
+        caroli_norm = float(np.linalg.norm(caroli))
+        weighted_occupation = frequency_weighted_occupation_difference(
+            frequencies, left_temperature, right_temperature
+        )
+        # The stored production current omits the exactly-zero bin.  Its
+        # Caroli transmission is ill-conditioned at the acoustic threshold,
+        # whereas the continuum mode integral includes its analytic limit.
+        weighted_occupation[frequencies == 0.0] = 0.0
+        caroli_current = PLANCK * THZ**2 * np.sum(
+            widths[:, None, None]
+            * weighted_occupation[:, None, None]
+            * caroli
+        ) / (q_mesh[1] * q_mesh[2])
+        caroli_conductance = caroli_current / (
+            area_m2 * (left_temperature - right_temperature)
+        )
+        result.update({
+            "caroli_grid_dc_dropped_conductance_mw_m2k": (
+                caroli_conductance / 1.0e6
+            ),
+            "finest_mode_to_caroli_conductance_relative": (
+                finest_conductance / (caroli_conductance / 1.0e6) - 1.0
+            ),
+            "mode_to_caroli_spectral_relative_l2": (
+                float(np.linalg.norm(difference)) / caroli_norm
+            ),
+            "mode_to_caroli_exact_bin_fraction": float(
+                np.mean(np.abs(difference) <= 1.0e-6)
+            ),
+            "mode_count_min": float(np.min(finest_modes)),
+            "mode_count_max": float(np.max(finest_modes)),
+            "caroli_transmission_min": float(np.min(caroli)),
+            "caroli_transmission_max": float(np.max(caroli)),
+        })
     return result
 
 

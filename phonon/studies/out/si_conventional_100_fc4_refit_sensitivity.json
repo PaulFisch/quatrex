@@ -1,0 +1,13 @@
+{
+  "source_force_constants": "cluster/tortin3-tmp/si_big_fc4/fc3.hdf5",
+  "source_force_constants_sha256": "e34db454c980a6699bf65d4b7a7bf88e4baadfa08f21fc157f149463a82424be",
+  "fit_description": "later joint FC2/FC3/FC4 5x5x5 hiPhive refit",
+  "maximum_sampled_h00_relative_difference_from_production": 0.008759298442996992,
+  "maximum_sampled_h01_relative_difference_from_production": 0.03821708510584552,
+  "q13_nk4097_conductance_mw_m2k": 1068.4547126235555,
+  "q17_nk4097_conductance_mw_m2k": 1068.0991536077024,
+  "q13_to_q17_relative_change": -0.0003327815016270772,
+  "relative_change_from_original_fit_q17": 0.03985231384232013,
+  "relative_change_from_guo_1065_81": 0.0021478064642876937,
+  "classification": "force-constant sensitivity only"
+}

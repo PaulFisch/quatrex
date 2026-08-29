@@ -56,3 +56,16 @@ def test_frequency_weighted_bose_difference_has_finite_zero_limit() -> None:
     )
     assert np.all(np.isfinite(weighted))
     assert abs(weighted[0] / weighted[1] - 1.0) < 1.0e-8
+
+
+def test_production_spectrum_reducer_averages_transverse_mesh() -> None:
+    frequencies = np.array([0.0, 1.0, 2.0])
+    widths = np.array([0.5, 1.0, 0.5])
+    base = np.array([[0.0, 0.0], [2.0, 4.0], [6.0, 8.0]])
+    spectrum = np.broadcast_to(base[:, None, None, :], (3, 2, 3, 2))
+    currents, conductance = MODULE.production_spectrum_conductance(
+        frequencies, widths, spectrum, 2.0, 305.0, 295.0
+    )
+    expected = MODULE.PLANCK * MODULE.THZ**2 * np.array([8.0, 12.0])
+    np.testing.assert_allclose(currents, expected, rtol=1.0e-15)
+    assert conductance == 0.5 * (expected[0] + expected[1]) / 20.0 / 1.0e6
