@@ -47,6 +47,7 @@ if os.environ.get("QX_ETA_IR_FLOOR"):   cfg.phonon.eta_ir_floor_cells = float(os
 if os.environ.get("QX_ETA_IR_FLOOR_FINAL"): cfg.phonon.eta_ir_floor_final_cells = float(os.environ["QX_ETA_IR_FLOOR_FINAL"])
 if os.environ.get("QX_ETA_IR_FLOOR_RAMP"):  cfg.phonon.eta_ir_floor_ramp_iterations = int(os.environ["QX_ETA_IR_FLOOR_RAMP"])
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
+if os.environ.get("QX_HEATTOL"):  cfg.phonon.heat_flow_conservation_tol = float(os.environ["QX_HEATTOL"])
 if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
 if os.environ.get("QX_XSCALE"):   cfg.phonon.sse_cross_slab_scale = float(os.environ["QX_XSCALE"])
 if os.environ.get("QX_OBC_MEMO"): cfg.phonon.obc.memoizer.mode = os.environ["QX_OBC_MEMO"]
@@ -637,9 +638,9 @@ if ranks.rank == 0:
     from quatrex.grid.energies import frequency_cell_widths
     out = dict(
         energies=np.asarray(get_host(scba.energies)).real,
-        # Heat-key convention marker: on a UNIFORM grid the heat keys are
-        # the legacy unweighted sums (integral / dw); on a non-uniform
-        # grid the cell widths are folded in and the keys ARE integrals.
+        # Current integrals use the frequency-cell measure on every grid.
+        # Keep the grid marker so historical raw-sum artifacts can still be
+        # distinguished by the run census.
         uniform_frequency_grid=bool(
             getattr(ph, "uniform_frequency_grid", True)),
         frequency_cell_widths=np.asarray(get_host(
@@ -665,13 +666,37 @@ if ranks.rank == 0:
         sse_aux_grid_dw_thz=float(cfg.phonon.sse_aux_grid_dw_thz),
         sse_aux_grid_fmax_thz=float(cfg.phonon.sse_aux_grid_fmax_thz),
         eta_obc=float(cfg.phonon.eta_obc),
+        eta_ramp_iterations=int(cfg.phonon.eta_ramp_iterations),
+        eta_final=float(cfg.phonon.eta_final),
+        eta_obc_ramp_iterations=int(cfg.phonon.eta_obc_ramp_iterations),
+        eta_obc_final=float(cfg.phonon.eta_obc_final),
         eta_ir_floor_cells=float(cfg.phonon.eta_ir_floor_cells),
+        eta_ir_floor_final_cells=float(cfg.phonon.eta_ir_floor_final_cells),
+        eta_ir_floor_ramp_iterations=int(
+            cfg.phonon.eta_ir_floor_ramp_iterations),
         sse_low_freq_mask_thz=float(cfg.phonon.sse_low_freq_mask_thz),
         sse_cm_subtraction=bool(cfg.phonon.sse_cm_subtraction),
+        sse_g_band_taper=str(cfg.phonon.sse_g_band_taper),
+        sse_ramp_iterations=int(cfg.phonon.sse_ramp_iterations),
+        sse_greater_from_lesser=bool(cfg.phonon.sse_greater_from_lesser),
+        scp_tadpole=bool(cfg.phonon.scp_tadpole),
+        scp_loop=bool(cfg.phonon.scp_loop),
         pole_sector_enabled=bool(cfg.phonon.pole_sector.enabled),
         interaction_cutoff=float(cfg.phonon.interaction_cutoff),
         interaction_cutoff_taper=str(cfg.phonon.interaction_cutoff_taper),
         sigma_convergence_tol=float(cfg.phonon.sigma_convergence_tol),
+        heat_flow_conservation_tol=float(
+            cfg.phonon.heat_flow_conservation_tol),
+        scba_max_iterations=int(cfg.scba.max_iterations),
+        scba_min_iterations=int(cfg.scba.min_iterations),
+        scba_mixing_method=str(cfg.scba.mixing_method),
+        scba_mixing_factor=float(cfg.scba.mixing_factor),
+        left_temperature=float(cfg.phonon.left_temperature),
+        right_temperature=float(cfg.phonon.right_temperature),
+        vertex_input_path=str(
+            cfg.phonon.decomposed_vertices_path
+            or cfg.phonon.qfold_path
+            or cfg.phonon.fc3_path),
         ballistic=bool(os.environ.get("QX_BALLISTIC") == "1"),
         n_iter=_it["n"],
         block_comm_size=int(cfg.compute.comm.block_comm_size),
