@@ -78,6 +78,25 @@ if os.environ.get("QX_COMM_BACKEND"):
             setattr(cfg.compute.comm, _f, _cb)
 if os.environ.get("QX_TLEFT"):    cfg.phonon.left_temperature = float(os.environ["QX_TLEFT"])
 if os.environ.get("QX_TRIGHT"):   cfg.phonon.right_temperature = float(os.environ["QX_TRIGHT"])
+# Experimental fixed-functional root-finder controls.  These are study-driver
+# overrides, analogous to QX_ADEPTH, and make trust/ridge sweeps attributable
+# in the printed QX_* provenance instead of requiring edited input TOMLs.
+if os.environ.get("QX_RRE_CYCLE"):
+    cfg.scba.experimental_mixer.rre_cycle = int(os.environ["QX_RRE_CYCLE"])
+if os.environ.get("QX_RRE_RIDGE"):
+    cfg.scba.experimental_mixer.rre_ridge = float(os.environ["QX_RRE_RIDGE"])
+if os.environ.get("QX_BROYDEN_WARMUP"):
+    cfg.scba.experimental_mixer.broyden_warmup_iters = int(
+        os.environ["QX_BROYDEN_WARMUP"])
+if os.environ.get("QX_BROYDEN_RIDGE"):
+    cfg.scba.experimental_mixer.broyden_ridge = float(
+        os.environ["QX_BROYDEN_RIDGE"])
+if os.environ.get("QX_BROYDEN_TRUST"):
+    cfg.scba.experimental_mixer.broyden_trust = float(
+        os.environ["QX_BROYDEN_TRUST"])
+if os.environ.get("QX_RPM_SUBSPACE"):
+    cfg.scba.experimental_mixer.rpm_max_subspace = int(
+        os.environ["QX_RPM_SUBSPACE"])
 # Exact-Jacobian Newton-Krylov (mixing_method = "newton") knobs.
 if os.environ.get("QX_NEWTON_WARMUP"):  cfg.scba.experimental_mixer.newton_warmup_iters = int(os.environ["QX_NEWTON_WARMUP"])
 if os.environ.get("QX_NEWTON_SWITCH"):  cfg.scba.experimental_mixer.newton_switch_tol = float(os.environ["QX_NEWTON_SWITCH"])
