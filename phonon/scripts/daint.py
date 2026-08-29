@@ -285,7 +285,11 @@ def cmd_list(_):
 
 def cmd_tail(args):
     run_dir = f"{REPO}/cluster/{args.name}"
-    latest = ssh(f"ls -t {run_dir}/slurm-*.out 2>/dev/null | head -1").strip()
+    candidates = ssh(f"ls -t {run_dir}/slurm-*.out 2>/dev/null").splitlines()
+    latest = next(
+        (path for path in candidates if "_quatrex_times" not in Path(path).name),
+        "",
+    )
     if not latest:
         sys.exit(f"no slurm output yet in {run_dir}")
     flag = "-f" if args.follow else f"-n {args.lines}"
