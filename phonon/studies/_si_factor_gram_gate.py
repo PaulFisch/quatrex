@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from qttools import xp
+from qttools.utils.gpu_utils import get_host
 from quatrex.phonon.bubble_factored import contract_tau_q_factored
 from quatrex.phonon.vertex_factors import VertexFactors, load_decomposed
 from phonon.studies._bench_factored_sse import contract_dense
@@ -98,6 +100,10 @@ def run(path: Path, seed: int = 20260829) -> dict[str, float]:
     dense, _ = contract_dense(
         quads, vf, vf.q_diff_map, nq, nq, d, nt, variants
     )
+    device_variants = {
+        name: {link: xp.asarray(value) for link, value in family.items()}
+        for name, family in variants.items()
+    }
     gram = contract_tau_q_factored(
         quads,
         np.full(ncell, d),
@@ -105,14 +111,14 @@ def run(path: Path, seed: int = 20260829) -> dict[str, float]:
         0,
         nq,
         nq,
-        variants,
-        vf.D * vf.lambdas[None, :],
-        vf.UB,
-        vf.UC,
+        device_variants,
+        xp.asarray(vf.D * vf.lambdas[None, :]),
+        xp.asarray(vf.UB),
+        xp.asarray(vf.UC),
         vf.offset_index(),
         0,
         nt,
-        np,
+        xp,
         bool(np.array_equal(vf.UB, vf.UC)),
         np.complex128,
     )
@@ -120,7 +126,7 @@ def run(path: Path, seed: int = 20260829) -> dict[str, float]:
     for pair in pairs:
         for side, label in ((0, "lesser"), (1, "greater")):
             reference = dense[pair][side]
-            candidate = gram[pair][side]
+            candidate = np.asarray(get_host(gram[pair][side]))
             errors[f"{pair}_{label}"] = float(
                 np.linalg.norm(candidate - reference)
                 / max(np.linalg.norm(reference), np.finfo(float).tiny)
