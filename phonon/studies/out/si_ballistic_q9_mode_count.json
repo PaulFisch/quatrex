@@ -1,0 +1,37 @@
+{
+  "matrix": "cluster/si-l5-q9-r128-in/dynamical_matrix.mat",
+  "run": "cluster/si-l5-ballistic-q9-w20-dw003125-caroli/run.npz",
+  "source_commit": "630838a8df7579dd6939820d86b24f81d8f676a5",
+  "q_mesh": [
+    1,
+    9,
+    9
+  ],
+  "area_m2": 1.294665716618031e-19,
+  "temperatures_k": [
+    305.0,
+    295.0
+  ],
+  "refinements": [
+    {
+      "nk": 1025,
+      "conductance_mw_m2k": 998.6099179251496
+    },
+    {
+      "nk": 2049,
+      "conductance_mw_m2k": 999.294334270717
+    },
+    {
+      "nk": 4097,
+      "conductance_mw_m2k": 999.631934662754
+    }
+  ],
+  "caroli_grid_dc_dropped_conductance_mw_m2k": 999.547426460654,
+  "finest_mode_to_caroli_conductance_relative": 8.454646559319379e-05,
+  "mode_to_caroli_spectral_relative_l2": 0.014801410383488962,
+  "mode_to_caroli_exact_bin_fraction": 0.9998651797923769,
+  "mode_count_min": 0.0,
+  "mode_count_max": 3.0,
+  "caroli_transmission_min": -5.084547940433797e-14,
+  "caroli_transmission_max": 3.000000000000295
+}

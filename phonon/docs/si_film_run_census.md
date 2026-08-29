@@ -22,15 +22,14 @@ new `probe*` and `conv*` campaign artifacts as they are pulled from Daint, so
 its total grows during certification.  The missing commit is retained as an
 empty field rather than inferred from file dates.
 
-The ledger regenerated after the first auxiliary stability test contains 130
-unique records: 39 `analysis-only`, 43 `frequency-truncated`, 43 `superseded`
-and five
-`divergent`.  The nine new zero-broadening ballistic frequency and q-mesh
-records are intentionally `analysis-only`, because they validate the harmonic
-solver and contain no interacting SCBA fixed point.  The two converged
-converged auxiliary-grid continuation points and the stopped
-\(s=0.96875\) stability probe are `superseded`, because their vertex scales
-remain below the physical value one.  These labels prevent either
+The ledger regenerated after the ballistic linear-response test contains 132
+unique records: 40 `analysis-only`, 43 `frequency-truncated`, 44 `superseded`
+and five `divergent`.  The ten new zero-broadening ballistic frequency,
+q-mesh and temperature-drop records are intentionally `analysis-only`,
+because they validate the harmonic solver and contain no interacting SCBA
+fixed point.  The two converged auxiliary-grid continuation points and the
+stopped \(s=0.9609375\) and \(s=0.96875\) stability probes are `superseded`,
+because their vertex scales remain below the physical value one.  These labels prevent either
 class from entering the final interacting length curve while retaining both
 as numerical evidence.
 

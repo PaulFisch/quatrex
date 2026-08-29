@@ -22,6 +22,7 @@ Usage:
   tortin.py tail --name X [-f]      # tail the run log
   tortin.py kill --name X           # kill session qx-X
   tortin.py pull --name X           # rsync cluster/<X> back to the laptop
+  tortin.py pull-si-big-reap         # recover selected production-Si fit files
 """
 
 import argparse
@@ -259,6 +260,54 @@ def cmd_pull(args):
     print(f"pulled to {dst}")
 
 
+def cmd_pull_si_big_reap(_args):
+    """Recover only the compact products of the archived 5x5x5 Si fit.
+
+    The work directory also contains the large DFT displacement campaign.
+    Pulling an explicit allow-list avoids copying those raw outputs merely to
+    recover the fitted potential and force constants.
+    """
+    files = {
+        "fit": [
+            "phonon/configs/si_primitive/fc3_hiphive_si_big/fcp.fcp",
+            "phonon/configs/si_primitive/fc3_hiphive_si_big/hiphive_meta.json",
+            "phonon/configs/si_primitive/fc3_hiphive_si_big/fc3.hdf5",
+        ],
+        "reap": [
+            "phonon/reaps/si_big_hiphive/phono3py.yaml",
+            "phonon/reaps/si_big_hiphive/fc2.hdf5",
+            "phonon/reaps/si_big_hiphive/fc3.hdf5",
+        ],
+    }
+    destination = LOCAL_REPO / "cluster" / "tortin-si-big-reap"
+    copied = []
+    node = gateway()
+    for group, paths in files.items():
+        target = destination / group
+        target.mkdir(parents=True, exist_ok=True)
+        for relative in paths:
+            result = subprocess.run(
+                [
+                    "rsync", "-a", "--ignore-missing-args", "-e",
+                    "ssh " + " ".join(SSH_OPTS),
+                    f"{node}:{REPO}/{relative}", str(target) + "/",
+                ],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                sys.exit(
+                    f"rsync failed for {relative}: "
+                    f"{result.stderr.strip() or result.stdout.strip()}"
+                )
+            local = target / Path(relative).name
+            if local.exists():
+                copied.append(local)
+    if not copied:
+        sys.exit("none of the archived Si fit products was found")
+    for path in copied:
+        print(f"pulled {path.relative_to(LOCAL_REPO)} ({path.stat().st_size} B)")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -287,6 +336,7 @@ def main():
     q = sub.add_parser("pull")
     q.add_argument("--name", required=True)
     q.set_defaults(fn=cmd_pull)
+    sub.add_parser("pull-si-big-reap").set_defaults(fn=cmd_pull_si_big_reap)
     args = p.parse_args()
     args.fn(args)
 

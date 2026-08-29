@@ -1,0 +1,20 @@
+{
+  "source_force_constants": "cluster/tortin-si-big-reap/fit/fc3.hdf5",
+  "source_force_constants_sha256": "9e881ab5c7ec18d1ff2cb461ec7dd507e47b643c328731bf8f7cbc24657c6995",
+  "source_fcp": "cluster/tortin-si-big-reap/fit/fcp.fcp",
+  "source_fcp_sha256": "5cbee2f52ba2392b951a9bf9d74557f5e735f8db34662160ca2c2aa95cedd279",
+  "source_supercell": [5, 5, 5],
+  "source_cutoffs_angstrom": [7.0, 5.0],
+  "target_supercell": [3, 3, 3],
+  "target_atoms": 216,
+  "primitive_to_conventional_transform": [
+    [-1, 1, 1],
+    [1, -1, 1],
+    [1, 1, -1]
+  ],
+  "production_fc2_sample_relative_error": 4.520365601294577e-15,
+  "fc2_asr_maximum_ev_a2": 1.0658144573085025e-14,
+  "fc3_asr_maximum_ev_a3": 4.440892098500626e-14,
+  "gamma_folding_maximum_frequency_difference_thz": 5.570364612734658e-7,
+  "gamma_folding_rms_frequency_difference_thz": 1.5913273795346036e-7
+}

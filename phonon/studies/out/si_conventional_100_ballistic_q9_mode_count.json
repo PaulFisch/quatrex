@@ -1,0 +1,24 @@
+{
+  "matrix": "cluster/si-conventional-100-l5-q13-ballistic-in/dynamical_matrix.mat",
+  "q_mesh": [
+    1,
+    9,
+    9
+  ],
+  "area_m2": 2.9899024e-19,
+  "temperatures_k": [
+    305.0,
+    295.0
+  ],
+  "refinements": [
+    {
+      "nk": 1025,
+      "conductance_mw_m2k": 1029.5298121848107
+    },
+    {
+      "nk": 2049,
+      "conductance_mw_m2k": 1030.0493735935959
+    }
+  ],
+  "method": "positive Bloch-band variation"
+}

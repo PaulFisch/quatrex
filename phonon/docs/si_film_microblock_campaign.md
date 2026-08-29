@@ -250,6 +250,41 @@ real-space support radius two is \(3.18\times10^{-16}\).  The procedure
 therefore changes the sampling mesh without fitting or smoothing the force
 constants.
 
+The temperature-drop gate was repeated at q=13 on the same 20 THz,
+0.03125 THz grid.  The 305/295 K and 302.5/297.5 K calculations give
+1000.7980 and 1000.8231 MW m\(^{-2}\) K\(^{-1}\), respectively.  Halving
+the applied temperature difference changes the inferred conductance by
+0.00251 per cent.  The smaller-bias production spectrum agrees with the
+independent Caroli spectrum to \(9.07\times10^{-13}\) in relative \(L^2\)
+norm and its integrated current agrees to \(5.68\times10^{-16}\).  The
+transport calculation is therefore in the linear-response regime by a margin
+well beyond the 0.2 per cent campaign gate.
+
+An independent lead-mode calculation supplies a stronger physical test of the
+open-boundary construction.  It Fourier transforms the stored real-space FC2
+blocks directly, diagonalises the infinite lead at 4097 longitudinal wave
+vectors, counts the branches with positive group velocity, and evaluates the
+Landauer integral from their positive frequency variation.  It does not use a
+surface Green function, contact self-energy, device Green function or the
+production current reducer.  The 1025, 2049 and 4097 point results are
+998.6099, 999.2943 and 999.6319 MW m\(^{-2}\) K\(^{-1}\).  The finest result
+differs from the q=9 production Caroli integral, with the deliberately omitted
+zero-frequency bin treated identically, by \(8.45\times10^{-5}\).  The
+integer mode count and Caroli transmission agree within \(10^{-6}\) in
+99.9865 per cent of all frequency and transverse-q bins.  Their raw spectral
+\(L^2\) difference is 1.48 per cent because placing a discontinuous band edge
+in adjacent bins is an order-one pointwise difference.  The converged integral
+is the appropriate gate.  This agreement tests the FC2 offset phases, lead
+periodicity, transverse folding, propagating-channel multiplicity and
+open-boundary contacts independently of the production NEGF path.
+
+This threshold is consistent with an independent atomistic Green-function
+study of pure silicon.  The supplementary convergence test of
+[Ju et al.](https://doi.org/10.1103/PhysRevX.7.021024) reports convergence
+above a 10 by 10 transverse mesh and uses 20 by 20 in production.  Its
+different force-constant model prevents an absolute-value oracle, but its
+mesh test independently supports the q=13 selection.
+
 [Guo et al.](https://doi.org/10.1103/PhysRevB.102.195412) report
 1065.81 MW m\(^{-2}\) K\(^{-1}\) at 121 frequency points
 and an 8 by 8 transverse mesh for a five-conventional-cell film.  Their own
@@ -258,13 +293,74 @@ denser 101 and 121 point, 6 by 6 and 8 by 8 entries.  The present q=17 value
 is 6.10 per cent lower.  This is agreement in physical scale, not an
 algebraic oracle: their calculation uses LDA force constants and a 5.4018
 Angstrom lattice constant, while the supplied Quatrex model uses VASP-PBE
-force constants at 5.468 Angstrom.  The decisive code oracle is the
-pointwise Caroli equality; the literature comparison tests whether the
-independent FC2 model produces a credible silicon conductance.
+force constants at 5.468 Angstrom.  The geometries also differ.  Their film
+advances along a Cartesian axis of the eight-atom conventional cubic cell.
+The supplied primitive vectors span an fcc cell whose transport-plane normal
+is \([\bar 1 1 1]\), with area \(\sqrt{3}a^2/4\) and a normal advance
+\(a/\sqrt{3}\) per primitive cell.  The two values consequently compare
+different crystallographic directions as well as different FC2 models.
+
+The orientation can be isolated without performing another DFT fit.  A
+hiPhive force-constant potential represents the infinite crystal and may be
+evaluated in an equivalent cell basis.  Applying
+
+\[
+ S=\begin{pmatrix}-1&1&1\\1&-1&1\\1&1&-1\end{pmatrix}
+\]
+
+to the two-atom fcc primitive vectors gives the eight-atom conventional cubic
+cell, with determinant four and Cartesian cell vectors of length \(a\).  Its
+first axis is a [100] transport direction of the kind used by Guo et al.  The
+new `_si_conventional_fcp.py` study evaluates the same fitted potential on a
+phonopy-ordered conventional supercell and records the source-potential hash,
+cell transform, sum-rule residuals and atom ordering.  On the local small Si
+potential, the 24 conventional-cell Gamma frequencies agree with the union of
+the four folded primitive spectra to \(1.01\times10^{-7}\) THz.  This verifies
+that the transformation changes only the cell and band folding.
+
+The production Si fit used by the present film has FC2 and FC3 cutoffs of 7
+and 5 Angstrom.  A 3 by 3 by 3 conventional supercell contains 216 atoms and
+has an 8.2 Angstrom half-width, so it can materialise both orders without
+minimum-image aliasing.  The original Tortin fit and reap have now been
+recovered.  Their dense FC file has SHA-256
+`9e881ab5c7ec18d1ff2cb461ec7dd507e47b643c328731bf8f7cbc24657c6995`.
+Its FC2 reproduces the harmonic matrices of the existing primitive production
+input to \(4.52\times10^{-15}\).  Streaming translational relabelling produces
+the full conventional FC2 and FC3 without holding the 216-cubed FC3 tensor in
+memory.  The conventional Gamma spectrum folds back to the source primitive
+spectrum within \(5.57\times10^{-7}\) THz, while the FC2 and FC3 acoustic
+sum-rule residuals are \(1.07\times10^{-14}\) and
+\(4.44\times10^{-14}\) eV in their respective Angstrom units.
+
+The independent [100] mode integral was converged on q=9, 13, 17 and 21
+meshes.  At 2049 longitudinal points the conductances are 1030.0494,
+1027.7644, 1026.9257 and 1026.8067 MW m\(^{-2}\) K\(^{-1}\).  The last
+three q changes are 0.222, 0.0816 and 0.0116 per cent, so q=17 is certified by
+two successive refinements below 0.2 per cent.  At 4097 longitudinal points,
+q=13, 17 and 21 give 1028.0337, 1027.1643 and
+1027.0589 MW m\(^{-2}\) K\(^{-1}\); the last two changes are 0.0846 and
+0.0103 per cent.  Changing only the orientation therefore raises the original
+q=17 primitive result by 2.63 per cent.  The same-orientation value remains
+3.63 per cent below Guo et al., which isolates the remaining difference to the
+FC2 model and lattice constant rather than the transport direction.  No new
+DFT calculation is needed.  The interacting calculation can use the likewise
+rematerialised FC3, but it remains a comparison of spatial SCBA functionals
+unless the self-energy support is also matched.
+
+The distinction becomes still more important for the interacting results.
+Guo et al. retain selected dominant terms in diagonal scattering-self-energy
+blocks, and report that the still more local 3 by 3 diagonal approximation
+underestimates their film conductance and can make the SCBA iteration
+diverge.  The support-complete microblock functional studied here is not that
+spatial approximation.  Their iteration count and anharmonic conductance
+therefore cannot certify this implementation.  The decisive harmonic code
+oracle remains the pointwise Caroli equality; the literature comparison only
+tests whether the independent FC2 model produces a credible silicon scale.
 
 The raw production runs are Alps jobs 4555840, 4555851, 4555856, 4555883,
 4555891 and 4555902 for the q=9 frequency sequence, and jobs 4555936,
 4555891, 4555914 and 4555919 for the q=7, 9, 13 and 17 mesh sequence.
+Job 4556266 is the q=13, 302.5/297.5 K linear-response check.
 Each run is reduced independently with
 `phonon/studies/_si_ballistic_validation.py`; the resulting JSON records are
 `phonon/studies/out/si_ballistic_q*_w*_dw*.json`.  The Caroli diagnostic is
@@ -565,6 +661,17 @@ the second mode grew.  Current spread remained below
 a fixed point.  The job was stopped once the monotonic growth was established.
 The extended auxiliary grid therefore changes neither the stability boundary
 nor the need for a root finder or a still smaller continuation step.
+
+That smaller step was tested at \(s=0.9609375\), halfway between the certified
+\(s=0.953125\) state and \(s=0.96875\).  Job 4556248 reduced the residual to
+\(7.8766\times10^{-3}\) at iteration 43, then drifted back to
+\(9.7575\times10^{-3}\) at iteration 94 and reached its one-hour limit before
+iteration 95.  The internal spread remained below \(5.0\times10^{-5}\), and
+the best-iterate lead current was 119.0087.  Halving the continuation step
+therefore approaches the marginal branch more closely but still does not
+produce a fixed point.  The nearest converged state remains \(s=0.953125\),
+and the observed stability boundary is now bracketed between 0.953125 and
+0.9609375 for this linear mixer and auxiliary grid.
 
 ## Equilibrium physical invariant
 

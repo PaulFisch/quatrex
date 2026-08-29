@@ -859,6 +859,28 @@ python phonon/studies/_si_ballistic_validation.py \
     --run cluster/si-l5-ballistic-q17-w20-dw003125-caroli/run.npz \
     --output phonon/studies/out/si_ballistic_q17_w20_dw003125.json
 
+python phonon/studies/_si_ballistic_validation.py \
+    --run cluster/si-l5-ballistic-q13-w20-dw003125-dt5-caroli/run.npz \
+    --output phonon/studies/out/si_ballistic_q13_w20_dw003125_dt5.json
+
+OPENBLAS_NUM_THREADS=8 python phonon/studies/_si_ballistic_mode_count.py \
+    --matrix cluster/si-l5-q9-r128-in/dynamical_matrix.mat \
+    --run cluster/si-l5-ballistic-q9-w20-dw003125-caroli/run.npz \
+    --nk 1025,2049,4097 \
+    --output phonon/studies/out/si_ballistic_q9_mode_count.json
+
+python phonon/studies/_si_conventional_fcp.py \
+    --fc-hdf5 cluster/tortin-si-big-reap/fit/fc3.hdf5 \
+    --source-repeat 5 --lattice-constant 5.468 \
+    --output cluster/si-big-conventional-100-reap \
+    --repeat 3 --orders 2,3 --validate-folding
+
+OPENBLAS_NUM_THREADS=8 python phonon/studies/_si_ballistic_mode_count.py \
+    --matrix cluster/si-conventional-100-l5-q13-ballistic-in/dynamical_matrix.mat \
+    --q-mesh 17 --area 2.9899024e-19 --temperatures 305,295 \
+    --nk 1025,2049,4097 \
+    --output phonon/studies/out/si_conventional_100_ballistic_q17_mode_count.json
+
 QTX_ARRAY_MODULE=numpy PYTHONPATH=src:phonon \
     python phonon/studies/_si_auxiliary_scba_review.py \
     --case L3=cluster/si-aux-l3c/poles.npz \
@@ -920,7 +942,14 @@ Alps job 4552671; its pulled log and arrays are under
 | ballistic Si Meir--Wingreen vs independent Caroli, spectral / integrated | `2.20e-12` / `0` at q=17 | pass |
 | ballistic Si frequency refinement, last two changes | `0.118 %`, `0.010 %` | pass |
 | ballistic Si transverse q refinement, q9--q13 / q13--q17 | `0.125 %`, `0.005 %` | pass |
-| ballistic Si conductance vs Guo et al. different-FC-input scale | `1000.85` vs `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-6.10 %` | scale check only |
+| ballistic Si temperature linearity, 10 K / 5 K bias | `1000.7980` / `1000.8231` MW m\(^{-2}\) K\(^{-1}\), `0.00251 %` | pass |
+| independent Bloch mode count vs production Caroli | `999.6319` / `999.5474` MW m\(^{-2}\) K\(^{-1}\), `8.45e-5` relative | pass |
+| production FC2 vs recovered original fit | maximum sampled relative difference `4.52e-15` | pass |
+| primitive-to-conventional hiPhive Gamma folding | maximum frequency difference `5.57e-7` THz | pass |
+| conventional [100] q13--q17 / q17--q21 mode-integral refinement | `0.0846 %` / `0.0103 %` | pass at q=17 |
+| conventional [100] vs primitive-orientation conductance | `1027.1643` / `1000.8480` MW m\(^{-2}\) K\(^{-1}\), `+2.63 %` | orientation isolated |
+| conventional [100] vs Guo et al. different-FC-input conductance | `1027.1643` / `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-3.63 %` | same-orientation scale check |
+| ballistic Si conductance vs Guo et al. different-FC-input and orientation scale | `1000.85` vs `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-6.10 %` | scale check only |
 | real-Si L8x2 internal current spread <= `1e-3` | `2.829e-3` versus primitive `4.371e-3` | **fail; wider exact near field needed** |
 | real-Si L8x2 cost beats matched primitive | 32.35 versus 34.66 s; 37.58 versus 66.82 GB mempool | pass |
 | spatial operator/current error <= `1e-3` | max HODLR current `4.283e-5` | pass |

@@ -293,13 +293,9 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
 def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
                  decompose_ranks=(), decompose_ansatz="INDSCAL",
                  decompose_support="full",
-                 decompose_only=False, factorised_only=False):
+                 decompose_only=False, factorised_only=False,
+                 harmonic_only=False):
     """Transversely-periodic (k>1) Si film. Port of /tmp/build_sifilm_inputs.py."""
-    from phonon.solver.se_q import (
-        _build_folded_vertices, _qfold_device_blocks,
-    )
-    from quatrex.phonon.qfold import save_qfold
-
     assert nk % 2 == 1, "use ODD nk (clean Gamma-centered IDFT)"
     phonon, fc3_path = _load_bulk_film(fc3_subdir)
     nat = len(phonon.primitive.masses)
@@ -388,6 +384,55 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
             {_key_str(k): v for k, v in mats.items()})
     print(f"dynamical_matrix.mat: {len(mats)} blocks "
           f"({len(cells)} transverse cells x 3 transport)", flush=True)
+
+    if harmonic_only:
+        # The production driver constructs the phonon-phonon object before
+        # QX_BALLISTIC removes it. Supply a shape-correct zero vertex so a
+        # genuinely harmonic geometry does not need an expensive FC3 fold or
+        # factorisation merely to pass that initialisation boundary.
+        zero_blocks = {
+            (cell, cell, cell): np.zeros((nd, nd, nd), dtype=complex)
+            for cell in range(nslabs)
+        }
+        write_fc3_blocks(
+            zero_blocks,
+            np.array([nd] * nslabs),
+            out / "fc3_blocks.hdf5",
+            units="THz^2",
+        )
+        np.savez_compressed(
+            out / "decomposed_vertices.npz",
+            format_version=np.int64(1),
+            D=np.zeros((nd, 1), dtype=float),
+            lambdas=np.zeros(1, dtype=float),
+            offsets=np.zeros(1, dtype=np.int64),
+            UB=np.zeros((1, n_kpts, nd, 1), dtype=complex),
+            UC=np.zeros((1, n_kpts, nd, 1), dtype=complex),
+            q_diff_map=np.asarray(q_diff_map, dtype=np.int64),
+            nk_shape=np.asarray((nk, nk), dtype=np.int64),
+            ansatz="INDSCAL",
+            meta=np.array(
+                {"harmonic_placeholder": True, "n_dof": nd}, dtype=object
+            ),
+        )
+        write_structure_xyz(phonon.primitive, out / "structure.xyz")
+        np.save(
+            out / "phonon_energies.npy",
+            np.linspace(emin, fmax, nfreq).astype(float),
+        )
+        shift = round(0.5 - 0.5 / nk, 10)
+        np.save(out / "kshift.npy", np.array(shift))
+        print(
+            "harmonic-only input: wrote shape-correct zero FC3 placeholders; "
+            "run only with QX_BALLISTIC=1",
+            flush=True,
+        )
+        return
+
+    from phonon.solver.se_q import (
+        _build_folded_vertices, _qfold_device_blocks,
+    )
+    from quatrex.phonon.qfold import save_qfold
 
     prim_idx, cell_frac, slab_idx, ref_sc = build_supercell_mapping(phonon, tdir)
     with h5py.File(fc3_path, "r") as f:
@@ -484,9 +529,17 @@ def main():
                    help="build a new film geometry and independently fitted "
                         "factors without materialising the dense O(nk^4) "
                         "q-folded vertex; retain a Gamma FC3 oracle")
+    p.add_argument("--harmonic-only", action="store_true",
+                   help="write the FC2 geometry plus shape-correct zero FC3 "
+                        "placeholders for QX_BALLISTIC=1; skip every real "
+                        "FC3 contraction and factorisation")
     a = p.parse_args()
     if a.decompose_only and a.factorised_only:
         p.error("--decompose-only and --factorised-only are mutually exclusive")
+    if a.harmonic_only and (
+        a.decompose_only or a.factorised_only or a.decompose_ranks
+    ):
+        p.error("--harmonic-only cannot be combined with decomposition options")
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -527,7 +580,8 @@ def main():
                      decompose_ansatz=a.decompose_ansatz,
                      decompose_support=a.decompose_support,
                      decompose_only=a.decompose_only,
-                     factorised_only=a.factorised_only)
+                     factorised_only=a.factorised_only,
+                     harmonic_only=a.harmonic_only)
     print(f"inputs -> {out}", flush=True)
 
 

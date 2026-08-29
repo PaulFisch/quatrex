@@ -18,6 +18,7 @@ Policy (Paul, 2026-07-31 -- hard-coded, do not work around):
 
 One-time:  python phonon/scripts/daint.py setup
 Code sync: commit+push locally, then python phonon/scripts/daint.py sync
+Input sync: python phonon/scripts/daint.py push --name X
 Launch:    python phonon/scripts/daint.py launch --name X \\
                --config cluster/X/quatrex_config.toml [--ranks 4] \\
                [--env QX_MAXIT=3 ...]
@@ -313,6 +314,25 @@ def cmd_pull(args):
     )
 
 
+def cmd_push(args):
+    """Copy one local cluster input directory to the matching Alps path."""
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", args.name):
+        sys.exit("--name must be [A-Za-z0-9._-]+")
+    source = LOCAL_REPO / "cluster" / args.name
+    if not source.is_dir():
+        sys.exit(f"local input directory does not exist: {source}")
+    ssh(f"mkdir -p {REPO}/cluster/{args.name}", check=True)
+    subprocess.run(
+        [
+            "rsync", "-avz", str(source) + "/",
+            f"{HOST}:{REPO}/cluster/{args.name}/",
+        ],
+        check=True,
+    )
+
+
 def main():
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -346,6 +366,9 @@ def main():
     q = sub.add_parser("pull")
     q.add_argument("--name", required=True)
     q.set_defaults(fn=cmd_pull)
+    q = sub.add_parser("push")
+    q.add_argument("--name", required=True)
+    q.set_defaults(fn=cmd_push)
     args = p.parse_args()
     args.fn(args)
 
