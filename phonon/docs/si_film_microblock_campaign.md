@@ -306,3 +306,21 @@ behaviour.  A larger value still writes the first best state, every selected
 iteration and the converged state, while the exact best state is retained in
 memory and written at normal shutdown.  This changes no SCBA arithmetic and
 will be used for the longer films.
+
+Continuation remains solver path finding, not a physical approximation.  The
+next certified points were \(s=0.625\) and \(s=0.6875\).  They reached residuals
+of \(8.68\times10^{-5}\) and \(8.30\times10^{-5}\), with currents 142.198660
+and 138.379611 respectively.  Their internal-current spreads were
+\(4.71\times10^{-6}\) and \(3.13\times10^{-7}\).  A direct jump from 0.5 to
+0.75 entered an orbit after reaching \(6.53\times10^{-2}\), whereas the branch
+started from the certified 0.625 point continued to contract.  This isolates
+the earlier failure as a basin-of-attraction problem caused by too large a
+continuation step.  It does not indicate a loss of spatial or spectral
+representability.
+
+The restarted \(s=0.75\) branch subsequently converged in 40 evaluations to
+\(8.33\times10^{-5}\).  Its current was 134.766755, its internal-current
+spread was \(1.42\times10^{-6}\), and its normalised bubble imbalance was
+\(3.23\times10^{-8}\).  These checkpoints establish a reproducible route
+through three quarters of the physical cubic vertex without artificial
+broadening or any frequency or spatial correction.
