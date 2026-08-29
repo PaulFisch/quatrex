@@ -135,7 +135,7 @@ class JFNKMixer:
         self._xk_r = None       # accepted iterate, real (2n,)
         self._Fxk_r = None      # F(xk), real (2n,)
         self._Rk_norm = None
-        self._Rk_merit = None   # relative infinity norm used by SCBA gate
+        self._Rk_merit = None   # absolute infinity norm of the root residual
         self._R0_norm = None
         self._Rprev_norm = None
         self._newton_it = 0
@@ -168,18 +168,25 @@ class JFNKMixer:
     def _gnorm(self, v: np.ndarray) -> float:
         return global_norm(self._comm, self._SUM, v)
 
-    def _relative_inf_residual(self, x: np.ndarray, gx: np.ndarray) -> float:
-        """Global relative infinity residual used by the SCBA stopping gate."""
+    def _inf_residual(self, x: np.ndarray, gx: np.ndarray) -> float:
+        """Global infinity norm of the fixed-point root residual.
+
+        The production stopping test divides this numerator by the current
+        self-energy scale.  That moving denominator is unsuitable for a line
+        search: a trial can reduce every absolute residual while the ratio
+        rises because ``||F(x)||_inf`` fell faster.  Descent of the numerator
+        is the actual root-merit condition; the unchanged driver still applies
+        its relative tolerance when deciding convergence.
+        """
         local = np.array([
             float(np.max(np.abs(gx - x), initial=0.0)),
-            float(np.max(np.abs(gx), initial=0.0)),
         ], dtype=np.float64)
         if self._comm is not None and self._comm.size > 1:
             from mpi4py import MPI
             reduced = np.empty_like(local)
             self._comm.Allreduce(local, reduced, op=MPI.MAX)
             local = reduced
-        return float(local[0] / (local[1] + 1e-300))
+        return float(local[0])
 
     def _cap(self, step: np.ndarray, x: np.ndarray, radius: float) -> np.ndarray:
         return trust_cap(self._comm, self._SUM, step, x, radius)
@@ -213,7 +220,7 @@ class JFNKMixer:
         if self._trial_pending:
             trial_norm = self._gnorm(_c2r(gx - x))
             base_norm = float(self._Rk_norm)
-            trial_merit = self._relative_inf_residual(x, gx)
+            trial_merit = self._inf_residual(x, gx)
             base_merit = float(self._Rk_merit)
             self._trial_pending = False
             if self.trust > 0.0 and (
@@ -223,7 +230,7 @@ class JFNKMixer:
                 self._trust_k = max(self._trust_k * shrink, 1e-3)
                 self._trial_rejections += 1
                 self._log(
-                    f"  JFNK reject: rel_inf {base_merit:.3e} -> "
+                    f"  JFNK reject: ||R||_inf {base_merit:.3e} -> "
                     f"{trial_merit:.3e}; ||R|| {base_norm:.3e} -> "
                     f"{trial_norm:.3e}; trust -> {self._trust_k:.2g}"
                 )
@@ -257,7 +264,7 @@ class JFNKMixer:
         rk = self._gnorm(R)
         self._Rprev_norm = self._Rk_norm
         self._Rk_norm = rk
-        self._Rk_merit = self._relative_inf_residual(x, gx)
+        self._Rk_merit = self._inf_residual(x, gx)
         if self._R0_norm is None:
             self._R0_norm = rk
 
