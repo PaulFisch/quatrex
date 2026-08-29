@@ -73,6 +73,8 @@ def test_known_historical_and_certified_classifications() -> None:
     assert status == "superseded"
     assert "nonphysical vertex scale" in reason
 
+    assert module.classify(dict(certified, vertex_scale=0.0))[0] == "superseded"
+
 
 def test_log_environment_overrides_toml() -> None:
     module = _module()

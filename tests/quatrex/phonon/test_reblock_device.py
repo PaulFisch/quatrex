@@ -110,3 +110,14 @@ def test_replication_gate_rejects_inequivalent_slabs() -> None:
     bad[(1, 1, 1)] = rng.standard_normal((nd, nd, nd))
     with pytest.raises(SystemExit, match="NOT translationally equivalent"):
         m._assert_slab_replicas(bad, 3, "bad")
+
+
+def test_reblock_source_must_use_primitive_harmonic_blocks() -> None:
+    """A grouped FC2 archive cannot be grouped again around primitive FC3."""
+    m = _mod()
+    primitive = {(0, 0): {0: np.eye(6), 1: np.eye(6)}}
+    m._validate_primitive_source(primitive, 6)
+
+    grouped = {(0, 0): {0: np.eye(30), 1: np.eye(30)}}
+    with pytest.raises(SystemExit, match="already be reblocked"):
+        m._validate_primitive_source(grouped, 6)

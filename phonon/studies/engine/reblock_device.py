@@ -50,6 +50,25 @@ def _read_fc3(path: Path):
     return blocks, sizes
 
 
+def _validate_primitive_source(mats: dict, nd: int) -> None:
+    """Require the FC2 and FC3 archives to use the same primitive block.
+
+    A microblock output deliberately has grouped harmonic blocks and
+    primitive FC3 blocks.  It is a valid production input, but it is not a
+    valid *source* for a second reblocking pass.  Without this gate the shape
+    mismatch appears later as an opaque broadcasting error in ``_superblock``.
+    """
+    shapes = {tuple(np.asarray(block).shape)
+              for shifts in mats.values() for block in shifts.values()}
+    expected = (int(nd), int(nd))
+    if shapes != {expected}:
+        got = ", ".join(map(str, sorted(shapes))) or "no FC2 blocks"
+        raise SystemExit(
+            "source harmonic blocks must use the same primitive DOF as FC3: "
+            f"expected {expected}, found {got}. The source may already be "
+            "reblocked; rebuild from the primitive-cell input instead.")
+
+
 def _assert_slab_replicas(blocks: dict, n_src: int, tag: str) -> None:
     """Every vertex block must depend only on the slab OFFSETS, not on
     the absolute slab index -- otherwise replication along transport is
@@ -227,6 +246,7 @@ def main() -> None:
     mats = _read_mat(src / "dynamical_matrix.mat", tidx)
     fc3, sizes = _read_fc3(src / "fc3_blocks.hdf5")
     n_src, nd = len(sizes), int(sizes[0])
+    _validate_primitive_source(mats, nd)
     shifts = sorted({s for m in mats.values() for s in m})
     print(f"source {src.name}: {n_src} slabs x {nd} dof, transport {tdir}, "
           f"{len(mats)} transverse keys, transport shifts {shifts}")
