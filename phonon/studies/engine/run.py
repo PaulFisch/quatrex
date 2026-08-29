@@ -12,6 +12,7 @@ import numpy as np
 from env_aliases import (
     best_checkpoint_stride,
     normalise_env,
+    sigma_restart_terms,
     validate_restartable_env,
 )
 
@@ -494,44 +495,53 @@ def _sigma_file(base: str) -> str:
     return f"{stem}.rank{ranks.rank}.npz"
 
 
-if os.environ.get("QX_SIGMA_INIT"):
+_restart_terms = sigma_restart_terms(os.environ)
+if _restart_terms:
     _nparts = int(os.environ.get("QX_SIGMA_INIT_PARTS", "0") or 0)
+    if _nparts and len(_restart_terms) != 1:
+        raise SystemExit(
+            "QX_SIGMA_INIT_PARTS cannot be combined with an affine two-state "
+            "restart; use matching distributed snapshots")
     if _nparts:
         if ranks.size != 1:
             raise SystemExit(
                 "QX_SIGMA_INIT_PARTS reconstructs a single-rank frozen state; "
                 "launch with --ranks 1")
-        _base = os.environ["QX_SIGMA_INIT"]
+        _base = _restart_terms[0][0]
         _stem = _base[:-4] if _base.endswith(".npz") else _base
         _pieces = [np.load(f"{_stem}.rank{ir}.npz") for ir in range(_nparts)]
-        _sd = {
+        _states = [{
             key: np.concatenate([part[key] for part in _pieces], axis=0)
             for key in ("sigma_lesser", "sigma_greater", "sigma_retarded")
-        }
+        }]
     else:
-        _sd = np.load(_sigma_file(os.environ["QX_SIGMA_INIT"]))
-    _scale = float(os.environ.get("QX_SIGMA_SCALE", "1.0"))
+        _states = [np.load(_sigma_file(path))
+                   for path, _coefficient in _restart_terms]
     for _key, _buf in (("sigma_lesser", scba.data.sigma_lesser),
                        ("sigma_greater", scba.data.sigma_greater),
                        ("sigma_retarded", scba.data.sigma_retarded_hermitian)):
-        _loaded = _sd[_key]
-        if os.environ.get("QX_SIGMA_INIT_PRIMITIVE_DOF"):
-            from quatrex.phonon.btd_linalg import remap_full_block_snapshot
+        _buf.data[:] = 0.0
+        for (_path, _coefficient), _state in zip(_restart_terms, _states):
+            _loaded = _state[_key]
+            if os.environ.get("QX_SIGMA_INIT_PRIMITIVE_DOF"):
+                from quatrex.phonon.btd_linalg import remap_full_block_snapshot
 
-            _loaded = remap_full_block_snapshot(
-                _loaded,
-                int(os.environ["QX_SIGMA_INIT_PRIMITIVE_DOF"]),
-                get_host(_buf.rows), get_host(_buf.cols))
-        if _loaded.shape != _buf.data.shape:
-            raise SystemExit(
-                f"QX_SIGMA_INIT slice mismatch for {_key}: snapshot "
-                f"{_loaded.shape} vs local {_buf.data.shape} -- restart "
-                "with the same rank grid as the saving run.")
-        _buf.data[:] = _scale * xp.asarray(_loaded)
-    _warm_label = (f"{os.environ['QX_SIGMA_INIT']} ({_nparts} gathered parts)"
-                   if _nparts else
-                   _sigma_file(os.environ["QX_SIGMA_INIT"]))
-    print(f"WARM START from {_warm_label} (scale {_scale})", flush=True)
+                _loaded = remap_full_block_snapshot(
+                    _loaded,
+                    int(os.environ["QX_SIGMA_INIT_PRIMITIVE_DOF"]),
+                    get_host(_buf.rows), get_host(_buf.cols))
+            if _loaded.shape != _buf.data.shape:
+                raise SystemExit(
+                    f"QX_SIGMA_INIT slice mismatch for {_key}: snapshot "
+                    f"{_loaded.shape} vs local {_buf.data.shape} -- restart "
+                    "with the same rank grid as the saving run.")
+            _buf.data[:] += _coefficient * xp.asarray(_loaded)
+    _labels = []
+    for _path, _coefficient in _restart_terms:
+        _label = (f"{_path} ({_nparts} gathered parts)" if _nparts else
+                  _sigma_file(_path))
+        _labels.append(f"{_coefficient:+g} * {_label}")
+    print("WARM START from affine " + " ".join(_labels), flush=True)
 
 err = None
 try:

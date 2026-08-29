@@ -71,3 +71,25 @@ def test_live_best_checkpoint_stride_rejects_invalid_values(raw) -> None:
     module = _module()
     with pytest.raises(ValueError, match="positive integer"):
         module.best_checkpoint_stride({"QX_SIGMA_BEST_LIVE_STRIDE": raw})
+
+
+def test_affine_sigma_restart_terms_preserve_legacy_and_add_secant() -> None:
+    module = _module()
+    assert module.sigma_restart_terms({
+        "QX_SIGMA_INIT": "b.npz", "QX_SIGMA_SCALE": "1.25",
+    }) == [("b.npz", 1.25)]
+    assert module.sigma_restart_terms({
+        "QX_SIGMA_INIT": "b.npz", "QX_SIGMA_SCALE": "2",
+        "QX_SIGMA_INIT_SECOND": "a.npz",
+        "QX_SIGMA_SCALE_SECOND": "-1",
+    }) == [("b.npz", 2.0), ("a.npz", -1.0)]
+
+
+@pytest.mark.parametrize("env", [
+    {"QX_SIGMA_INIT_SECOND": "a.npz"},
+    {"QX_SIGMA_INIT": "b.npz", "QX_SIGMA_SCALE_SECOND": "-1"},
+])
+def test_affine_sigma_restart_rejects_incomplete_pairs(env) -> None:
+    module = _module()
+    with pytest.raises(ValueError, match="requires"):
+        module.sigma_restart_terms(env)

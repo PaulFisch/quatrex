@@ -64,3 +64,31 @@ def best_checkpoint_stride(environ: MutableMapping[str, str]) -> int:
         raise ValueError(
             "QX_SIGMA_BEST_LIVE_STRIDE must be a positive integer")
     return stride
+
+
+def sigma_restart_terms(
+        environ: MutableMapping[str, str]) -> list[tuple[str, float]]:
+    """Return the one- or two-state affine restart predictor.
+
+    ``QX_SIGMA_SCALE`` remains the coefficient of the legacy primary state.
+    Supplying ``QX_SIGMA_INIT_SECOND`` adds a second distributed snapshot with
+    coefficient ``QX_SIGMA_SCALE_SECOND``.  This is useful for a secant
+    continuation predictor, for example ``2 Sigma(s_b) - Sigma(s_a)``.  It
+    affects only the initial iterate and is deliberately kept out of the
+    production configuration surface.
+    """
+    primary = environ.get("QX_SIGMA_INIT")
+    secondary = environ.get("QX_SIGMA_INIT_SECOND")
+    if not primary:
+        if secondary or "QX_SIGMA_SCALE_SECOND" in environ:
+            raise ValueError(
+                "QX_SIGMA_INIT_SECOND requires QX_SIGMA_INIT")
+        return []
+    terms = [(primary, float(environ.get("QX_SIGMA_SCALE", "1.0")))]
+    if secondary:
+        terms.append((secondary, float(
+            environ.get("QX_SIGMA_SCALE_SECOND", "1.0"))))
+    elif "QX_SIGMA_SCALE_SECOND" in environ:
+        raise ValueError(
+            "QX_SIGMA_SCALE_SECOND requires QX_SIGMA_INIT_SECOND")
+    return terms
