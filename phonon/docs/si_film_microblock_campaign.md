@@ -5,7 +5,7 @@
 `02cd9402`, `a2e007fc`, `efc8e3aa`, `c77f589c`, `2862fff0`,
 `43680ba3`, `81179d75`, `f6c5f493`, `2f3286a7`, `4f5b96f8`,
 `c636a2b7`, `fc55a202`, `612c249b`, `a7244e6d`, `3d1b6e2f`,
-`13a53415`, `b29429a8`, `2231fac6`, `e00c15b8`
+`13a53415`, `b29429a8`, `2231fac6`, `e00c15b8`, `8f4b288c`
 **Historical census:** [`si_film_run_census.md`](si_film_run_census.md)
 
 ## Physical and numerical reference
@@ -278,3 +278,21 @@ at the driver boundary and raises on a conflicting pair. Focused tests cover
 the aliases used by the campaign. Subsequent jobs also pass the compact names
 directly and their startup log and saved metadata are checked before their
 first state is accepted.
+
+The first corrected runs at scales 0.375 and 0.5 converged and saved their
+scalar and spectral observables, but their launch commands omitted the
+separate distributed self-energy output paths. The resulting measurements
+remain valid continuation diagnostics, while jobs 4555585 and 4555586 failed
+before their first iteration because no restart arrays existed. Commit
+`8f4b288c` adds an opt-in restartability assertion. A campaign launch marked
+`QX_REQUIRE_RESTARTABLE=1` now fails before constructing the solver unless it
+specifies the final self-energy, best self-energy and live-best checkpoint.
+
+The guarded half-strength repeat, job 4555593, converged in 17 evaluations.
+Its relative retarded residual was \(7.87\times10^{-5}\), the lead current was
+148.011503 in the driver's current units, the internal-current spread was
+\(8.03\times10^{-8}\), and the normalised bubble imbalance was
+\(5.17\times10^{-8}\).  The final and best four-rank self-energy slices were
+both preserved.  This is the first continuation point for which the scalar
+record, spectral current and restart state all survive together.  It remains
+classified as superseded because \(s=0.5\) is not the physical vertex.
