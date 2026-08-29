@@ -37,6 +37,16 @@ lead-balance gate, while mild long-Si coarsening passes with little speedup.
 This is why the mixed basis below needs conservative adaptive cells and
 selective rational clusters rather than choosing between them.
 
+The exact follow-up in
+[`adaptive_collision_followup.md`](adaptive_collision_followup.md) implements
+the missing fast dyadic P1 product, including noncommutative FC3 callbacks and
+exact zeroth/first collision moments.  It succeeds on isolated subcell lines,
+but one shared Si mesh is not economical: moving q-resolved resonances turn a
+373-cell mesh into about 4.03 million transformed modes.  The spectral part of
+the mixed representation must therefore be a pole-informed, block-sparse
+joint `(q, frequency)` hierarchy with q-local patches; taking the union as a
+single global nonuniform grid is now a measured no-go.
+
 ## Reproducible cross-structure gate
 
 The private selector is

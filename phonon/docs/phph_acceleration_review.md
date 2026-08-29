@@ -19,7 +19,9 @@ kernel benchmark
 and the cross-structure mixed-basis synthesis
 [`mixed_representation_strategy.md`](mixed_representation_strategy.md), plus
 the decisive dual-grid follow-up
-[`nonuniform_grid_review.md`](nonuniform_grid_review.md)
+[`nonuniform_grid_review.md`](nonuniform_grid_review.md), and the exact
+adaptive-convolution/real-Si follow-up
+[`adaptive_collision_followup.md`](adaptive_collision_followup.md)
 
 ## 1. Executive verdict
 
@@ -40,6 +42,19 @@ transfer identity is exact.  Mild nonuniformity passes on long Si but saves
 only 2.82%.  The two mechanisms are therefore complementary: conservative
 adaptive cells decide where Dyson and smooth collision sectors are sampled;
 passive rational clusters remove subcell lines from the uniform convolution.
+
+The exact fast nonuniform arm has now also been implemented.  Hackbusch's
+dyadic P1 projected convolution, with Quatrex's FC3 ring as its bilinear
+product, passes independent A/B/C projection, noncommutative ordering,
+zeroth/first collision moments and Keldysh symmetry.  On the two-line proxy it
+keeps subcell bubble error below `1.25e-3` while the equivalent uniform grid
+grows to 2.1 million cells.  A real 15,001-point, 81-q Si oracle nevertheless
+rejects a shared-grid production port: a reliable 373-cell mesh still causes
+about 4.03 million transformed modes because moving q-resolved resonances
+fragment the multilevel support; a blind five-point detector can miss a line
+and gives 9.1% error on a typical channel.  The remaining spectral path is a
+pole-informed, block-sparse joint q-frequency auxiliary basis, not one global
+nonuniform grid.
 
 The reduced study passes the quadrature gates:
 
@@ -176,17 +191,24 @@ The verdict is therefore:
 1. **Now:** retain the conserving 8 x 2 spatial support.  The known CNT
    `g_band=1` path is a no-go and is not a recommendation.  First enable the
    exact four-ring identity, then keep the grouped Dyson layout while evaluating
-   the bubble on primitive/atomic sparse blocks.
+   the bubble on primitive/atomic sparse blocks.  A same-checkpoint,
+   ten-iteration Daint A/B measures 11.9631 -> 7.9904 s for the ring and
+   12.2132 -> 8.2379 s for the steady iteration (1.50 x / 1.48 x), while the
+   final lead current agrees to `1.08e-13` relatively and the
+   current-conservation spread is identical.  This is an exact production
+   speedup, not an approximate SCBA path.
 2. **FC3 execution:** first implement the now-measured exact atom-sparse
    primitive vertex actions.  If further reduction is needed, factor the
    primitive cluster/orbit representation, preserve full S3 and the global ASR
    by construction, and lift it exactly into the two-cell layout.  Fit every
    candidate rank independently; do not fit the merged 72-DOF tensor or slice
    one high-rank CP file and call that a rank sweep.
-3. **Next frequency research:** use the implemented enriched rational
-   bubble/Dyson algebra only for a small FC3/current-weighted cluster subset.
-   Add a positive multi-anchor source realization and a fixed-basis SCBA mixer;
-   do not promote the complete Si detector output.
+3. **Next frequency research:** combine pole-informed q-local dyadic patches
+   with the implemented enriched rational bubble/Dyson algebra for only a
+   small FC3/current-weighted cluster subset.  Store patches as a block-sparse
+   joint q-frequency hierarchy, add a positive multi-anchor source realization
+   and use a fixed-basis SCBA mixer; do not take the union as one shared Si grid
+   and do not promote the complete detector output.
 4. **Next spatial research:** generate a bidirectional SSS self-energy directly
    from Green-function states, retain the near band exactly, and solve its
    sparse extension with a specialised SSS/ULV factorisation.  HSS remains the
@@ -811,6 +833,8 @@ Alps job 4552671; its pulled log and arrays are under
 | mixed bubble <= `2e-3`, bounded as `gamma/h -> 0` | max `3.671e-4` | pass |
 | new positivity / anti-Hermiticity defect <= `1e-10` | PSD proxy; `2.27e-16` anti-Hermitian residual | pass on proxy |
 | frequency cost independent of inverse linewidth | 1.81--1.93 ms | pass |
+| exact adaptive P1 bubble bounded as `gamma/h -> 0` | max subcell error `1.25e-3`; equivalent uniform grid up to 2.1 million cells | pass on isolated-line proxy |
+| shared adaptive real-Si cost beats fine uniform FFT | 373 cells but 4.03 million transformed modes versus 60,001 | **fail; q-local joint hierarchy required** |
 | passive auxiliary RGF/Woodbury vs dense oracle | approximately `1e-12` or below | pass |
 | real-Si source passivity | floors `-4.04e-9` (L3), `-9.16e-9` (L8) | pass within frozen-reference defect |
 | real-Si constant-source error <= `2e-3` | medians 10.5 % / 15.9 % | **fail** |
@@ -831,6 +855,7 @@ Alps job 4552671; its pulled log and arrays are under
 | finite-CNT flat vertex factor <= 1 % | restart-rich rank 256: 4.52 % | fail |
 | exact atom-sparse vertex storage | 13.56 % onsite, 4.52 % cross; zero approximation | pass |
 | fused atom-sparse ring beats dense primitive ring | task-weighted GH200 ratio `0.5207`, exact parity | pass on isolated kernel; frozen production contraction open |
+| exact four-ring production A/B on conserving CNT | 1.48 x iteration; final current differs by `1.08e-13` relatively | **pass** |
 | exact FC3 factor lift under 2-cell reblocking | dense subblock parity, rank `128 -> 256`, 6.8 MB | pass |
 | long-Si primitive archive contains a measurable far field | shells `|I-J|>1` exactly zero in all three samples | **fail: output pin** |
 

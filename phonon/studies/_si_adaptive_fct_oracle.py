@@ -55,6 +55,35 @@ class UniformOracle:
         return out.reshape(x.shape + self.values.shape[1:])
 
 
+def certified_mesh(oracle: UniformOracle, base_h: float, first: int, stop: int,
+                   tolerance: float, max_level: int) -> F.DyadicMesh:
+    """Dyadic mesh whose P1 defect is checked at every stored oracle point.
+
+    This is an offline reference for a pole-informed detector.  It deliberately
+    avoids the five-point indicator's aliasing failure when a very narrow line
+    falls between all probes of a coarse cell.
+    """
+    scale = max(float(np.max(np.abs(oracle.values))), 1e-300)
+
+    def target(left: float, right: float) -> int:
+        level = int(round(np.log2(base_h / (right - left))))
+        lo = int(np.searchsorted(oracle.axis, left, side="left"))
+        hi = int(np.searchsorted(oracle.axis, right, side="right"))
+        x = oracle.axis[lo:hi]
+        if x.size:
+            yl, yr = oracle(np.array([left, right]))
+            shape = (x.size,) + (1,) * (oracle.values.ndim - 1)
+            t = ((x - left) / (right - left)).reshape(shape)
+            linear = (1.0 - t) * yl + t * yr
+            defect = float(np.max(np.abs(oracle.values[lo:hi] - linear)))
+        else:
+            defect = 0.0
+        return (level + 1 if defect > tolerance * scale
+                and level < max_level else level)
+
+    return F.DyadicMesh.refined(base_h, first, stop, target)
+
+
 def _full_keldysh(run: Path) -> tuple[np.ndarray, np.ndarray, dict]:
     z = np.load(run)
     omega = np.asarray(z["energies"], float)
@@ -98,7 +127,8 @@ def run_study(run_path: Path, tolerances: tuple[float, ...],
               normalisation: str = "global",
               mesh_only: bool = False,
               channels: tuple[str, ...] | None = None,
-              input_scope: str = "shared") -> dict:
+              input_scope: str = "shared",
+              detector: str = "oracle") -> dict:
     full_w, full_l, meta = _full_keldysh(run_path)
     fine_h = float(full_w[1] - full_w[0])
     wmax = float(full_w[-1])
@@ -129,11 +159,12 @@ def run_study(run_path: Path, tolerances: tuple[float, ...],
         reps = {name: reps[name] for name in channels}
 
     rows = []
+    mesh_builder = certified_mesh if detector == "oracle" else adaptive_mesh
     for tolerance in tolerances:
         t_mesh = time.perf_counter()
-        input_mesh = adaptive_mesh(
+        input_mesh = mesh_builder(
             shared_oracle, base_h, first, stop, tolerance, max_level)
-        output_mesh = adaptive_mesh(
+        output_mesh = mesh_builder(
             output_oracle, base_h, 2 * first, 2 * stop,
             tolerance, max_level)
         mesh_seconds = time.perf_counter() - t_mesh
@@ -147,7 +178,7 @@ def run_study(run_path: Path, tolerances: tuple[float, ...],
             channel_scale = max(float(scales[channel]), 1e-300)
             channel_oracle = UniformOracle(
                 full_w, full_l[:, channel] / channel_scale)
-            local = adaptive_mesh(
+            local = mesh_builder(
                 channel_oracle, base_h, first, stop, tolerance, max_level)
             local_meshes[label] = local
         if mesh_only:
@@ -223,6 +254,7 @@ def run_study(run_path: Path, tolerances: tuple[float, ...],
         "max_level": max_level,
         "normalisation": normalisation,
         "input_scope": input_scope,
+        "detector": detector,
         "active_channels": int(np.count_nonzero(active)),
         **meta,
         "rows": rows,
@@ -241,12 +273,15 @@ def main(argv=None) -> int:
     ap.add_argument("--channels", default="sharpest,largest_weight,typical_weight")
     ap.add_argument("--input-scope", choices=("shared", "local"),
                     default="shared")
+    ap.add_argument("--detector", choices=("oracle", "five-point"),
+                    default="oracle")
     ap.add_argument("--json", type=Path)
     args = ap.parse_args(argv)
     result = run_study(
         args.run, tuple(float(x) for x in args.tolerances.split(",")),
         args.base_h, args.max_level, args.normalisation, args.mesh_only,
-        tuple(x for x in args.channels.split(",") if x), args.input_scope)
+        tuple(x for x in args.channels.split(",") if x), args.input_scope,
+        args.detector)
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(result, indent=2) + "\n")

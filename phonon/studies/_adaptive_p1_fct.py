@@ -674,9 +674,23 @@ def _case_c(f: Sequence, g: Sequence, lf: int, lg: int, lo: int,
         return None
     delta, plus, minus = _point_convolutions(
         f_at, (gz, gp, gm), bilinear)
+    if target is not None:
+        scale = 2**(lo - lg)
+        point_window = (int(np.floor(target[0] / scale)) - 2,
+                        int(np.ceil(target[1] / scale)) + 3)
+        delta = _crop(delta, *point_window)
+        plus = _crop(plus, *point_window)
+        minus = _crop(minus, *point_window)
     for level in range(lg, lo):
         delta, plus, minus = _refine_cubic(
             delta, plus, minus, base_h / 2**level)
+        if target is not None:
+            scale = 2**(lo - level - 1)
+            point_window = (int(np.floor(target[0] / scale)) - 2,
+                            int(np.ceil(target[1] / scale)) + 3)
+            delta = _crop(delta, *point_window)
+            plus = _crop(plus, *point_window)
+            minus = _crop(minus, *point_window)
     out = _project_cubic(delta, plus, minus, base_h / 2**lo)
     return out if target is None else _crop(out, *target)
 
@@ -888,15 +902,25 @@ def _case_c_combined(first: P1Field, second: P1Field,
                         first, lg, source_levels, f_window)
                     if fhat is None:
                         continue
-                    tasks.append((fhat, point_gammas, lg))
+                    tasks.append((fhat, point_gammas, lg,
+                                  (coarse_start - 1, coarse_stop + 1)))
             point_tasks = [(fhat, gammas)
-                           for fhat, gammas, _ in tasks]
-            for (_, _, lg), (delta, plus, minus) in zip(
+                           for fhat, gammas, _, _ in tasks]
+            for (_, _, lg, point_window), (delta, plus, minus) in zip(
                     tasks, _point_convolutions_many(point_tasks, bilinear)):
+                delta = _crop(delta, *point_window)
+                plus = _crop(plus, *point_window)
+                minus = _crop(minus, *point_window)
                 for level in range(lg, lo):
                     delta, plus, minus = _refine_cubic(
                         delta, plus, minus,
                         output_mesh.base_h / 2**level)
+                    scale = 2**(lo - level - 1)
+                    needed = (int(np.floor(target[0] / scale)) - 2,
+                              int(np.ceil(target[1] / scale)) + 3)
+                    delta = _crop(delta, *needed)
+                    plus = _crop(plus, *needed)
+                    minus = _crop(minus, *needed)
                 term = _project_cubic(
                     delta, plus, minus, output_mesh.base_h / 2**lo)
                 _add_output_part(parts, lo, term, target)
