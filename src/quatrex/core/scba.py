@@ -982,7 +982,9 @@ class SCBA(TransportSolver):
         per_frequency = get_host(
             xp.abs(diff).reshape(diff.shape[0], -1).max(axis=1)
         )
-        frequencies = np.abs(np.asarray(solver.local_frequencies, dtype=float))
+        frequencies = np.abs(np.asarray(
+            get_host(solver.local_frequencies), dtype=float
+        ))
         if comm.stack.size > 1:
             per_frequency = comm.stack.all_gather_v(
                 np.ascontiguousarray(per_frequency), 0
