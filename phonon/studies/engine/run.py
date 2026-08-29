@@ -97,6 +97,27 @@ if os.environ.get("QX_BROYDEN_TRUST"):
 if os.environ.get("QX_RPM_SUBSPACE"):
     cfg.scba.experimental_mixer.rpm_max_subspace = int(
         os.environ["QX_RPM_SUBSPACE"])
+if os.environ.get("QX_JFNK_WARMUP"):
+    cfg.scba.experimental_mixer.jfnk_warmup_iters = int(
+        os.environ["QX_JFNK_WARMUP"])
+if os.environ.get("QX_JFNK_KRYLOV"):
+    cfg.scba.experimental_mixer.jfnk_max_krylov = int(
+        os.environ["QX_JFNK_KRYLOV"])
+if os.environ.get("QX_JFNK_INNER"):
+    cfg.scba.experimental_mixer.jfnk_inner_tol = float(
+        os.environ["QX_JFNK_INNER"])
+if os.environ.get("QX_JFNK_TRUST"):
+    cfg.scba.experimental_mixer.jfnk_trust = float(
+        os.environ["QX_JFNK_TRUST"])
+if os.environ.get("QX_JFNK_TRUSTMAX"):
+    cfg.scba.experimental_mixer.jfnk_trust_max = float(
+        os.environ["QX_JFNK_TRUSTMAX"])
+if os.environ.get("QX_JFNK_DAMP"):
+    cfg.scba.experimental_mixer.jfnk_newton_damp = float(
+        os.environ["QX_JFNK_DAMP"])
+if os.environ.get("QX_JFNK_PTC"):
+    cfg.scba.experimental_mixer.jfnk_ptc = float(
+        os.environ["QX_JFNK_PTC"])
 # Exact-Jacobian Newton-Krylov (mixing_method = "newton") knobs.
 if os.environ.get("QX_NEWTON_WARMUP"):  cfg.scba.experimental_mixer.newton_warmup_iters = int(os.environ["QX_NEWTON_WARMUP"])
 if os.environ.get("QX_NEWTON_SWITCH"):  cfg.scba.experimental_mixer.newton_switch_tol = float(os.environ["QX_NEWTON_SWITCH"])
