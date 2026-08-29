@@ -91,6 +91,39 @@ def _make_cfg(retarded_method: str = "fft", g_band: int = 1):
     return _Cfg()
 
 
+def _full_pattern_dsdb(block_sizes, ne, nq=1):
+    """Five zeroed full-pattern DSDB matrices for grouped-oracle tests."""
+    from scipy.sparse import csr_matrix
+    from qttools.datastructures import DSDBCOO
+
+    n = int(np.sum(block_sizes))
+    rr, cc = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    pattern = _dev_pattern(csr_matrix(
+        (np.ones(n * n, complex), (rr.ravel(), cc.ravel())), shape=(n, n)))
+    shape = (ne,) if nq == 1 else (ne, nq)
+    matrices = tuple(
+        DSDBCOO.from_sparray(pattern, np.asarray(block_sizes),
+                             global_stack_shape=shape)
+        for _ in range(5)
+    )
+    for matrix in matrices:
+        matrix.data[:] = 0.0
+    return matrices
+
+
+def _dense_from_blocks(view, block_sizes):
+    """Assemble one stack of grouped blocks into a dense matrix stack."""
+    offsets = np.concatenate(([0], np.cumsum(block_sizes)))
+    sample = np.asarray(get_host(view.blocks[0, 0]))
+    out = np.zeros(sample.shape[:-2] + (offsets[-1], offsets[-1]), complex)
+    for i in range(len(block_sizes)):
+        for j in range(len(block_sizes)):
+            out[..., offsets[i]:offsets[i + 1],
+                offsets[j]:offsets[j + 1]] = np.asarray(
+                    get_host(view.blocks[i, j]))
+    return out
+
+
 @pytest.mark.parametrize("nd", [2, 4])
 @pytest.mark.parametrize("ne", [21, 41])
 def test_bubble_block_matches_reference(nd: int, ne: int) -> None:
@@ -212,6 +245,7 @@ def _ref_compute_multiblock(
     dw_thz: float,
     g_band: int = 1,
     taper_w: list[float] | None = None,
+    output_band: int = 1,
 ) -> tuple[
     dict[tuple[int, int], np.ndarray],
     dict[tuple[int, int], np.ndarray],
@@ -237,7 +271,9 @@ def _ref_compute_multiblock(
         list[tuple[int, int, int, int, np.ndarray, np.ndarray]],
     ] = {}
     for (I, K1, K2), phi_left in phi_blocks.items():
-        for J in range(max(0, I - 1), min(n_blocks, I + 2)):
+        for J in range(
+            max(0, I - output_band), min(n_blocks, I + output_band + 1)
+        ):
             for K1p in range(max(0, K1 - g_band), min(n_blocks, K1 + g_band + 1)):
                 for K2p in range(max(0, K2 - g_band), min(n_blocks, K2 + g_band + 1)):
                     phi_right = phi_blocks.get((J, K2p, K1p))
@@ -1353,6 +1389,205 @@ def test_q_convolution_matches_explicit_q_diff_map_sum() -> None:
             _convolve_q(xp.asarray(pa), xp.asarray(pb), (nkx, nky), xp))),
         expected, rtol=1e-12,
     )
+
+
+def test_microblock_dense_gamma_matches_full_device_oracle() -> None:
+    """Grouped SSE retains every generated primitive output shell."""
+    rng = np.random.default_rng(20260829)
+    n_primitive, d, ne = 4, 2, 9
+    grouped = np.array([2 * d, 2 * d])
+    band = 2
+    freqs = np.linspace(0.0, 8.0, ne)
+    dw = float(freqs[1] - freqs[0])
+
+    phi_blocks = {}
+    for i in range(n_primitive):
+        for k1 in range(max(0, i - 1), min(n_primitive, i + 2)):
+            for k2 in range(max(0, i - 1), min(n_primitive, i + 2)):
+                block = rng.standard_normal((d, d, d))
+                phi_blocks[(i, k1, k2)] = block
+
+    n = n_primitive * d
+    gl = np.zeros((ne, n, n), complex)
+    gg = np.zeros_like(gl)
+    for i in range(n_primitive):
+        for j in range(max(0, i - band), min(n_primitive, i + band + 1)):
+            gl[:, i*d:(i+1)*d, j*d:(j+1)*d] = (
+                rng.standard_normal((ne, d, d))
+                + 1j * rng.standard_normal((ne, d, d)))
+            gg[:, i*d:(i+1)*d, j*d:(j+1)*d] = (
+                rng.standard_normal((ne, d, d))
+                + 1j * rng.standard_normal((ne, d, d)))
+    gl[0] = 0.0
+    gg[0] = 0.0
+
+    g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(grouped, ne)
+    glv, ggv = g_l.stack[...], g_g.stack[...]
+    glv.blocks[0, 0] = xp.asarray(gl[:, :2*d, :2*d])
+    glv.blocks[0, 1] = xp.asarray(gl[:, :2*d, 2*d:])
+    glv.blocks[1, 0] = xp.asarray(gl[:, 2*d:, :2*d])
+    glv.blocks[1, 1] = xp.asarray(gl[:, 2*d:, 2*d:])
+    ggv.blocks[0, 0] = xp.asarray(gg[:, :2*d, :2*d])
+    ggv.blocks[0, 1] = xp.asarray(gg[:, :2*d, 2*d:])
+    ggv.blocks[1, 0] = xp.asarray(gg[:, 2*d:, :2*d])
+    ggv.blocks[1, 1] = xp.asarray(gg[:, 2*d:, 2*d:])
+
+    cfg = _make_cfg("half", g_band=1)
+    cfg.phonon.sse_microblock_dof = d
+    cfg.phonon.sse_microblock_g_band = band
+    ssp = SigmaPhononPhonon(
+        cfg, phonon_frequencies=freqs, block_sizes=grouped,
+        phi_blocks=phi_blocks)
+    assert ssp._vertex_span == 1
+    assert ssp._sigma_micro_span == 3
+    ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+
+    gl_band = {}
+    gg_band = {}
+    for i in range(n_primitive):
+        for j in range(max(0, i - band), min(n_primitive, i + band + 1)):
+            gl_band[(i, j)] = gl[:, i*d:(i+1)*d, j*d:(j+1)*d]
+            gg_band[(i, j)] = gg[:, i*d:(i+1)*d, j*d:(j+1)*d]
+    raw_l_blocks, raw_g_blocks, _ = _ref_compute_multiblock(
+        phi_blocks, gl_band, gg_band, np.full(n_primitive, d), dw,
+        g_band=band, output_band=n_primitive - 1)
+    raw_l = np.zeros_like(gl)
+    raw_g = np.zeros_like(gg)
+    for (i, j), value in raw_l_blocks.items():
+        raw_l[:, i*d:(i+1)*d, j*d:(j+1)*d] = value
+    for (i, j), value in raw_g_blocks.items():
+        raw_g[:, i*d:(i+1)*d, j*d:(j+1)*d] = value
+    got_l = _dense_from_blocks(s_l.stack[...], grouped)
+    got_g = _dense_from_blocks(s_g.stack[...], grouped)
+    np.testing.assert_allclose(got_l, raw_l, atol=1e-38, rtol=2e-11)
+    np.testing.assert_allclose(got_g, raw_g, atol=1e-38, rtol=2e-11)
+
+
+@pytest.mark.parametrize("kernel", ["gram", "reconstruct"])
+def test_microblock_factored_matches_dense_vertex(kernel) -> None:
+    """Primitive factors stay at rank R when Dyson blocks contain two cells."""
+    from quatrex.phonon.vertex_factors import VertexFactors
+
+    rng = np.random.default_rng(832)
+    n_primitive, d, rank, ne, nq = 4, 2, 3, 7, 1
+    grouped = np.array([2 * d, 2 * d])
+    offsets = np.array([-1, 0, 1])
+    D = rng.standard_normal((d, rank))
+    lambdas = np.abs(rng.standard_normal(rank))
+    UB = rng.standard_normal((3, nq, d, rank)).astype(complex)
+    vf = VertexFactors(
+        D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UB,
+        q_diff_map=np.zeros((1, 1), int), nk_shape=(), ansatz="INDSCAL",
+        meta={"source": "microblock-test"})
+    blocks = {}
+    for i in range(n_primitive):
+        for dk1 in offsets:
+            for dk2 in offsets:
+                k1, k2 = i + int(dk1), i + int(dk2)
+                if 0 <= k1 < n_primitive and 0 <= k2 < n_primitive:
+                    blocks[(i, k1, k2)] = vf.reconstruct_block(
+                        0, 0, int(dk1), int(dk2))
+    qfold = ({(0, 0): blocks}, np.zeros((1, 1), int), 1)
+
+    gl = rng.standard_normal((ne, 2*d, 2*d)) + 1j * rng.standard_normal(
+        (ne, 2*d, 2*d))
+    gg = rng.standard_normal((ne, 2*d, 2*d)) + 1j * rng.standard_normal(
+        (ne, 2*d, 2*d))
+
+    def run(**source):
+        g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(grouped, ne)
+        for view, arr in ((g_l.stack[...], gl), (g_g.stack[...], gg)):
+            view.blocks[0, 0] = xp.asarray(arr)
+            view.blocks[0, 1] = xp.asarray(arr)
+            view.blocks[1, 0] = xp.asarray(arr)
+            view.blocks[1, 1] = xp.asarray(arr)
+        cfg = _make_cfg("half")
+        cfg.phonon.sse_microblock_dof = d
+        cfg.phonon.sse_microblock_g_band = 2
+        cfg.phonon.decomposed_kernel = kernel
+        ssp = SigmaPhononPhonon(
+            cfg, np.linspace(0.0, 6.0, ne), grouped, **source)
+        ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+        return s_l, s_g, ssp
+
+    dense_l, dense_g, _ = run(qfold=qfold)
+    fact_l, fact_g, fact = run(vfactors=vf)
+    assert fact._vfactors.rank == rank
+    np.testing.assert_allclose(
+        np.asarray(get_host(fact_l.data)), np.asarray(get_host(dense_l.data)),
+        atol=1e-38, rtol=2e-10)
+    np.testing.assert_allclose(
+        np.asarray(get_host(fact_g.data)), np.asarray(get_host(dense_g.data)),
+        atol=1e-38, rtol=2e-10)
+
+
+@pytest.mark.parametrize("kernel", ["gram", "reconstruct"])
+def test_microblock_coupled_q_factored_matches_dense_vertex(kernel) -> None:
+    """Primitive-rank and dense microblock paths have identical q folding."""
+    from quatrex.phonon.vertex_factors import VertexFactors
+
+    rng = np.random.default_rng(944)
+    n_primitive, d, rank, ne, nq = 4, 2, 3, 7, 3
+    grouped = np.array([2 * d, 2 * d])
+    offsets = np.array([-1, 0, 1])
+    qdm = np.array([[(a - b) % nq for b in range(nq)] for a in range(nq)])
+    D = rng.standard_normal((d, rank))
+    lambdas = np.abs(rng.standard_normal(rank)) + 0.1
+    UB = np.empty((3, nq, d, rank), complex)
+    UB[:, 0] = rng.standard_normal((3, d, rank))
+    z = (rng.standard_normal((3, d, rank))
+         + 1j * rng.standard_normal((3, d, rank)))
+    UB[:, 1], UB[:, 2] = z, z.conj()
+    vf = VertexFactors(
+        D=D, lambdas=lambdas, offsets=offsets, UB=UB, UC=UB,
+        q_diff_map=qdm, nk_shape=(nq,), ansatz="INDSCAL",
+        meta={"source": "microblock-q-test"})
+    qvertices = {}
+    for q1 in range(nq):
+        for q2 in range(nq):
+            blocks = {}
+            for i in range(n_primitive):
+                for dk1 in offsets:
+                    k1 = i + int(dk1)
+                    if not 0 <= k1 < n_primitive:
+                        continue
+                    for dk2 in offsets:
+                        k2 = i + int(dk2)
+                        if 0 <= k2 < n_primitive:
+                            blocks[(i, k1, k2)] = vf.reconstruct_block(
+                                q1, q2, int(dk1), int(dk2))
+            qvertices[(q1, q2)] = blocks
+    qfold = (qvertices, qdm, nq)
+
+    gl = (rng.standard_normal((ne, nq, 2*d, 2*d))
+          + 1j * rng.standard_normal((ne, nq, 2*d, 2*d)))
+    gg = (rng.standard_normal((ne, nq, 2*d, 2*d))
+          + 1j * rng.standard_normal((ne, nq, 2*d, 2*d)))
+
+    def run(**source):
+        g_l, g_g, s_l, s_g, s_r = _full_pattern_dsdb(grouped, ne, nq)
+        for view, arr in ((g_l.stack[...], gl), (g_g.stack[...], gg)):
+            view.blocks[0, 0] = xp.asarray(arr)
+            view.blocks[0, 1] = xp.asarray(arr)
+            view.blocks[1, 0] = xp.asarray(arr)
+            view.blocks[1, 1] = xp.asarray(arr)
+        cfg = _make_cfg("half")
+        cfg.phonon.sse_microblock_dof = d
+        cfg.phonon.sse_microblock_g_band = 2
+        cfg.phonon.decomposed_kernel = kernel
+        ssp = SigmaPhononPhonon(
+            cfg, np.linspace(0.0, 6.0, ne), grouped, **source)
+        ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+        return s_l, s_g
+
+    dense_l, dense_g = run(qfold=qfold)
+    fact_l, fact_g = run(vfactors=vf)
+    np.testing.assert_allclose(
+        np.asarray(get_host(fact_l.data)), np.asarray(get_host(dense_l.data)),
+        atol=1e-38, rtol=2e-10)
+    np.testing.assert_allclose(
+        np.asarray(get_host(fact_g.data)), np.asarray(get_host(dense_g.data)),
+        atol=1e-38, rtol=2e-10)
 
 
 @pytest.mark.parametrize("ansatz", ["INDSCAL", "CP"])

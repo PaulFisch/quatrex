@@ -192,8 +192,11 @@ class PhononSolver(SubsystemSolver):
         # RGF takes this as an integer off-diagonal band (1 = block-tridiagonal
         # only, 2 = + second off-diagonal, 3 = + third). Clamped to the
         # widest off-diagonal the device has.
+        micro_dof = int(
+            getattr(config.phonon, "sse_microblock_dof", 0) or 0)
         self._gf_band = min(
-            int(getattr(config.phonon, "sse_g_band", 1) or 1),
+            (1 if micro_dof else
+             int(getattr(config.phonon, "sse_g_band", 1) or 1)),
             len(self.block_sizes) - 1,
         )
         # Experimental rational-state sidecar.  It is installed explicitly by

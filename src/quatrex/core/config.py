@@ -1719,6 +1719,19 @@ class PhononConfig(BaseModel):
     blocks, and is clamped at use to ``n_blocks - 1``. Distributed use
     needs every block rank to own at least ``sse_g_band + 1`` blocks."""
 
+    sse_microblock_dof: NonNegativeInt = 0
+    """Primitive FC3 block size inside a grouped Dyson block.  Zero keeps the
+    established one-FC3-block-per-Dyson-block path.  A positive value enables
+    the exact primitive-microblock contraction; every Dyson block size must be
+    divisible by it.  Bulk Si uses six displacement DOFs per primitive cell."""
+
+    sse_microblock_g_band: NonNegativeInt = 0
+    """Green-function range in primitive microblocks for the microblock SSE.
+    It is independent of ``sse_g_band``, which is measured in grouped Dyson
+    blocks.  The generated primitive self-energy range is determined from the
+    actual FC3 support and must fit inside the same/adjacent grouped blocks;
+    otherwise construction fails rather than dropping an output shell."""
+
     sse_g_band_taper: Literal["none", "bartlett"] = "none"
     """Positive semi-definite taper of the inner-G band mask, against the
     boxcar's non-causal gain. ``"bartlett"`` weights each inner G link by
@@ -1944,6 +1957,13 @@ class PhononConfig(BaseModel):
             )
         if self.sse_vertex_rank < 0:
             raise ValueError("sse_vertex_rank must be >= 0.")
+        micro_dof = int(self.sse_microblock_dof)
+        micro_band = int(self.sse_microblock_g_band)
+        if bool(micro_dof) != bool(micro_band):
+            raise ValueError(
+                "sse_microblock_dof and sse_microblock_g_band must either "
+                "both be zero (disabled) or both be positive."
+            )
         return self
 
 

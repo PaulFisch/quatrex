@@ -293,9 +293,11 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
 def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
                  decompose_ranks=(), decompose_ansatz="INDSCAL",
                  decompose_support="full",
-                 decompose_only=False):
+                 decompose_only=False, factorised_only=False):
     """Transversely-periodic (k>1) Si film. Port of /tmp/build_sifilm_inputs.py."""
-    from phonon.solver.se_q import _build_folded_vertices
+    from phonon.solver.se_q import (
+        _build_folded_vertices, _qfold_device_blocks,
+    )
     from quatrex.phonon.qfold import save_qfold
 
     assert nk % 2 == 1, "use ODD nk (clean Gamma-centered IDFT)"
@@ -391,12 +393,21 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
     with h5py.File(fc3_path, "r") as f:
         fc3 = f["fc3"][:]
     M_stacked = build_realspace_fc3_matrices(fc3, nat, phonon.supercell.masses, ref_sc)
-    print(f"building {n_kpts}^2-pair folded vertices (n_slabs={nslabs}, nproc={nproc})...", flush=True)
-    vertices = _build_folded_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
-                                      nslabs, n_kpts, q_points, q_diff_map, tdir,
-                                      nproc=nproc)
-    print(f"  folded vertex pairs: {len(vertices)}", flush=True)
-    save_qfold(out / "qfold_vertices.npz", vertices, q_diff_map, (nk, nk))
+    vertices = None
+    if factorised_only:
+        if not decompose_ranks:
+            raise ValueError(
+                "factorised_only requires at least one decomposition rank")
+        print("skipping the dense q-folded vertex; writing primitive factors "
+              "and the Gamma FC3 oracle only", flush=True)
+    else:
+        print(f"building {n_kpts}^2-pair folded vertices "
+              f"(n_slabs={nslabs}, nproc={nproc})...", flush=True)
+        vertices = _build_folded_vertices(
+            M_stacked, prim_idx, cell_frac, slab_idx, nat,
+            nslabs, n_kpts, q_points, q_diff_map, tdir, nproc=nproc)
+        print(f"  folded vertex pairs: {len(vertices)}", flush=True)
+        save_qfold(out / "qfold_vertices.npz", vertices, q_diff_map, (nk, nk))
 
     if decompose_ranks:
         _decompose_film_vertices(
@@ -406,7 +417,14 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
             masses_super=np.asarray(phonon.supercell.masses, dtype=float),
             support=decompose_support)
 
-    gamma = {k: np.ascontiguousarray(v.astype(complex)) for k, v in vertices[(0, 0)].items()}
+    gamma_blocks = (
+        vertices[(0, 0)] if vertices is not None
+        else _qfold_device_blocks(
+            M_stacked, prim_idx, cell_frac, slab_idx, nat, nslabs,
+            q_points[0], q_points[0], tdir)
+    )
+    gamma = {k: np.ascontiguousarray(v.astype(complex))
+             for k, v in gamma_blocks.items()}
     write_fc3_blocks(gamma, np.array([nd] * nslabs), out / "fc3_blocks.hdf5", units="THz^2")
     print(f"fc3_blocks.hdf5: {len(gamma)} Gamma device blocks", flush=True)
     write_structure_xyz(phonon.primitive, out / "structure.xyz")
@@ -461,7 +479,14 @@ def main():
                    help="only add the factor file(s) to an already-built "
                         "geometry dir (skips the dense O(nk^2) fold and all "
                         "other input files)")
+    p.add_argument("--factorised-only", "--factorized-only",
+                   action="store_true",
+                   help="build a new film geometry and independently fitted "
+                        "factors without materialising the dense O(nk^4) "
+                        "q-folded vertex; retain a Gamma FC3 oracle")
     a = p.parse_args()
+    if a.decompose_only and a.factorised_only:
+        p.error("--decompose-only and --factorised-only are mutually exclusive")
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -501,7 +526,8 @@ def main():
                      out, a.nproc, decompose_ranks=ranks,
                      decompose_ansatz=a.decompose_ansatz,
                      decompose_support=a.decompose_support,
-                     decompose_only=a.decompose_only)
+                     decompose_only=a.decompose_only,
+                     factorised_only=a.factorised_only)
     print(f"inputs -> {out}", flush=True)
 
 

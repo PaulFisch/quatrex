@@ -53,6 +53,14 @@ if os.environ.get("QX_OBC_MEMO"): cfg.phonon.obc.memoizer.mode = os.environ["QX_
 if os.environ.get("QX_OBC_ALG"): cfg.phonon.obc.algorithm = os.environ["QX_OBC_ALG"]
 if os.environ.get("QX_NEVP"): cfg.phonon.obc.nevp_solver = os.environ["QX_NEVP"]
 if os.environ.get("QX_GBAND"):    cfg.phonon.sse_g_band = int(os.environ["QX_GBAND"])
+if os.environ.get("QX_MICRO_DOF"):
+    cfg.phonon.sse_microblock_dof = int(os.environ["QX_MICRO_DOF"])
+if os.environ.get("QX_MICRO_GBAND"):
+    cfg.phonon.sse_microblock_g_band = int(os.environ["QX_MICRO_GBAND"])
+if os.environ.get("QX_VERTEX_RANK"):
+    cfg.phonon.sse_vertex_rank = int(os.environ["QX_VERTEX_RANK"])
+if os.environ.get("QX_DECOMPOSED_KERNEL"):
+    cfg.phonon.decomposed_kernel = os.environ["QX_DECOMPOSED_KERNEL"]
 if os.environ.get("QX_GBAND_TAPER"): cfg.phonon.sse_g_band_taper = os.environ["QX_GBAND_TAPER"]
 if os.environ.get("QX_RAMP"):     cfg.phonon.sse_ramp_iterations = int(os.environ["QX_RAMP"])
 if os.environ.get("QX_SCATCONTACTS"): cfg.phonon.obc_scattering_contacts = bool(int(os.environ["QX_SCATCONTACTS"]))
@@ -385,6 +393,8 @@ if ranks.rank == 0:
           f"retarded={cfg.phonon.retarded_method} nblk={ph.block_sizes.shape[0]} "
           f"ne={int(scba.energies.shape[0])} "
           f"fgrid={cfg.phonon.frequency_grid} "
+          f"micro={cfg.phonon.sse_microblock_dof}/"
+          f"{cfg.phonon.sse_microblock_g_band} "
           f"bcs={cfg.compute.comm.block_comm_size} qcs={cfg.compute.comm.q_comm_size} "
           f"nranks={ranks.size}", flush=True)
     # Provenance: every QX_* override in the log, always. The 2026-08-01
@@ -636,6 +646,32 @@ if ranks.rank == 0:
             frequency_cell_widths(xp.asarray(scba.energies).real))),
         eta=float(cfg.phonon.eta), retarded=str(cfg.phonon.retarded_method),
         nblocks=int(ph.block_sizes.shape[0]), phonon=bool(cfg.scba.phonon),
+        block_sizes=np.asarray(get_host(ph.block_sizes), dtype=np.int64),
+        sse_g_band=int(cfg.phonon.sse_g_band),
+        sse_microblock_dof=int(cfg.phonon.sse_microblock_dof),
+        sse_microblock_g_band=int(cfg.phonon.sse_microblock_g_band),
+        sse_generated_sigma_band=int(
+            getattr(_sse_diag, "_sigma_micro_span", 1)),
+        sse_vertex_span=int(getattr(_sse_diag, "_vertex_span", 1)),
+        vertex_representation=(
+            "decomposed" if cfg.phonon.decomposed_vertices_path is not None
+            else ("qfold" if cfg.phonon.qfold_path is not None else "gamma")),
+        sse_vertex_rank=int(
+            getattr(getattr(_sse_diag, "_vfactors", None), "rank", 0)),
+        decomposed_kernel=str(cfg.phonon.decomposed_kernel),
+        q_mesh=np.asarray(cfg.device.kpoint_grid, dtype=np.int64),
+        frequency_grid=str(cfg.phonon.frequency_grid),
+        frequency_max_thz=float(np.asarray(get_host(scba.energies)).real[-1]),
+        sse_aux_grid_dw_thz=float(cfg.phonon.sse_aux_grid_dw_thz),
+        sse_aux_grid_fmax_thz=float(cfg.phonon.sse_aux_grid_fmax_thz),
+        eta_obc=float(cfg.phonon.eta_obc),
+        eta_ir_floor_cells=float(cfg.phonon.eta_ir_floor_cells),
+        sse_low_freq_mask_thz=float(cfg.phonon.sse_low_freq_mask_thz),
+        sse_cm_subtraction=bool(cfg.phonon.sse_cm_subtraction),
+        pole_sector_enabled=bool(cfg.phonon.pole_sector.enabled),
+        interaction_cutoff=float(cfg.phonon.interaction_cutoff),
+        interaction_cutoff_taper=str(cfg.phonon.interaction_cutoff_taper),
+        sigma_convergence_tol=float(cfg.phonon.sigma_convergence_tol),
         ballistic=bool(os.environ.get("QX_BALLISTIC") == "1"),
         n_iter=_it["n"],
         block_comm_size=int(cfg.compute.comm.block_comm_size),

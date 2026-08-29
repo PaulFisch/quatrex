@@ -126,6 +126,8 @@ retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
+sse_microblock_dof = {a.microblock_dof}
+sse_microblock_g_band = {a.microblock_g_band}
 eta_ramp_iterations = {a.eta_ramp_iters}
 eta_final = {a.eta_final}
 eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
@@ -235,6 +237,8 @@ retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
+sse_microblock_dof = {a.microblock_dof}
+sse_microblock_g_band = {a.microblock_g_band}
 eta_ramp_iterations = {a.eta_ramp_iters}
 eta_final = {a.eta_final}
 eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
@@ -278,6 +282,12 @@ def main():
     p.add_argument("--vertex-rank", type=int, default=0,
                    help="sse_vertex_rank truncation (0 = full stored rank); "
                         "only with --decomposed-vertices")
+    p.add_argument("--microblock-dof", type=int, default=0,
+                   help="primitive FC3 DOFs inside each grouped Dyson block "
+                        "(Si: 6; 0 disables the microblock path)")
+    p.add_argument("--microblock-g-band", type=int, default=0,
+                   help="retained Green range in primitive microblocks; must "
+                        "be positive together with --microblock-dof")
     p.add_argument("--temperature", type=float, default=300.0,
                    help="mean device temperature T (K); leads at T +/- dt/2")
     p.add_argument("--dt", type=float, default=10.0, help="lead temperature drop (K)")
@@ -375,7 +385,7 @@ def main():
     p.add_argument("--max-iter", type=int, default=50,
                    help="SCBA cap; the conductance (best-iterate) converges well "
                         "before the Sigma residual (F30), so 50 bounds wall-time")
-    p.add_argument("--retarded", default="half", choices=["half", "fft"])
+    p.add_argument("--retarded", default="fft", choices=["half", "fft"])
     p.add_argument("--eta-ir-floor-cells", dest="eta_ir_floor_cells", type=float,
                    default=0.0,
                    help="sub-grid soft-mode broadening floor (grid cells); a "
@@ -437,6 +447,9 @@ def main():
     p.add_argument("--max-batch", dest="max_batch", type=int, default=512)
     p.add_argument("--profile", action="store_true", help="enable per-phase profiler JSON dump")
     a = p.parse_args()
+    if bool(a.microblock_dof) != bool(a.microblock_g_band):
+        raise SystemExit("--microblock-dof and --microblock-g-band must both "
+                         "be zero or both be positive")
     a.tL = a.temperature + a.dt / 2.0
     a.tR = a.temperature - a.dt / 2.0
 

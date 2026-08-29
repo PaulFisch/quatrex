@@ -194,6 +194,18 @@ def main() -> None:
     ap.add_argument("--decomposed-path", default=None,
                     help="optional primitive VertexFactors archive to lift "
                     "exactly into the new blocking")
+    ap.add_argument("--preserve-primitive-vertices", action="store_true",
+                    help="keep Gamma/q-folded FC3 and optional factors in "
+                    "primitive-cell blocking; emit an SSE microblock config "
+                    "instead of merging/lifting the vertices")
+    ap.add_argument("--micro-g-band", type=int, default=3,
+                    help="primitive Green band written with "
+                    "--preserve-primitive-vertices (default: 3)")
+    ap.add_argument("--factor-support", choices=["dense", "stored"],
+                    default="dense",
+                    help="with preserved primitive factors, restrict their "
+                    "transport-offset pairs to the support present in the "
+                    "dense FC3 (default), or retain the archive metadata")
     ap.add_argument("--skip-qfold", action="store_true",
                     help="do not materialise the dense q-folded vertex")
     ap.add_argument("--tdir", default=None, help="transport axis (default: "
@@ -257,17 +269,25 @@ def main() -> None:
 
     # ---- Gamma fc3 ------------------------------------------------------
     prim = _replicate(fc3, n_src, n_cells)
-    merged = _merge(prim, n_cells, c, nd)
-    ref = _dense_vertex(prim, n_cells, nd)
-    got = _dense_vertex(merged, nb, ndn)
-    err = np.abs(got - ref).max() / (np.abs(ref).max() + 1e-300)
-    if err > 1e-14:
-        raise SystemExit(f"fc3 merge changed the dense vertex: {err:.2e}")
-    print(f"  fc3 merge exact (dense {n_cells}-cell vertex unchanged, "
-          f"{len(prim)} primitive -> {len(merged)} merged blocks)")
-    _write_fc3_blocks({k: np.ascontiguousarray(v.astype(complex))
-                       for k, v in merged.items()},
-                      np.array([ndn] * nb), out / "fc3_blocks.hdf5")
+    if a.preserve_primitive_vertices:
+        _write_fc3_blocks(
+            {k: np.ascontiguousarray(v.astype(complex))
+             for k, v in prim.items()},
+            np.array([nd] * n_cells), out / "fc3_blocks.hdf5")
+        print(f"  fc3 kept primitive: {len(prim)} blocks of {nd}^3 "
+              f"for {nb} grouped Dyson blocks")
+    else:
+        merged = _merge(prim, n_cells, c, nd)
+        ref = _dense_vertex(prim, n_cells, nd)
+        got = _dense_vertex(merged, nb, ndn)
+        err = np.abs(got - ref).max() / (np.abs(ref).max() + 1e-300)
+        if err > 1e-14:
+            raise SystemExit(f"fc3 merge changed the dense vertex: {err:.2e}")
+        print(f"  fc3 merge exact (dense {n_cells}-cell vertex unchanged, "
+              f"{len(prim)} primitive -> {len(merged)} merged blocks)")
+        _write_fc3_blocks({k: np.ascontiguousarray(v.astype(complex))
+                           for k, v in merged.items()},
+                          np.array([ndn] * nb), out / "fc3_blocks.hdf5")
 
     # ---- q-folded vertices ---------------------------------------------
     qf = src / "qfold_vertices.npz"
@@ -281,12 +301,16 @@ def main() -> None:
             if first:
                 _assert_slab_replicas(blocks, n_src, f"qfold {(q1, q2)}")
                 first = False
-            newV[(q1, q2)] = _merge(_replicate(blocks, n_src, n_cells),
-                                    n_cells, c, nd)
+            replicated = _replicate(blocks, n_src, n_cells)
+            newV[(q1, q2)] = (
+                replicated if a.preserve_primitive_vertices
+                else _merge(replicated, n_cells, c, nd))
         save_qfold(out / "qfold_vertices.npz", newV, q_diff_map, nk_shape)
         print(f"qfold_vertices.npz: {len(newV)} q-pairs x "
-              f"{len(next(iter(newV.values())))} blocks of {ndn}^3")
+              f"{len(next(iter(newV.values())))} blocks of "
+              f"{nd if a.preserve_primitive_vertices else ndn}^3")
 
+    factor_requires_reconstruct = False
     if a.decomposed_path:
         from quatrex.phonon.vertex_factors import (
             load_decomposed, reblock_decomposed, save_decomposed,
@@ -295,11 +319,43 @@ def main() -> None:
         source_factors = Path(a.decomposed_path)
         if not source_factors.is_absolute():
             source_factors = ROOT / source_factors
-        lifted = reblock_decomposed(load_decomposed(source_factors), c)
-        save_decomposed(out / "decomposed_vertices.npz", lifted)
-        print(f"decomposed_vertices.npz: exact factor lift rank "
-              f"{lifted.meta['primitive_rank']} -> {lifted.rank}, "
-              f"dof {lifted.meta['primitive_n_dof']} -> {lifted.D.shape[0]}")
+        primitive_factors = load_decomposed(source_factors)
+        if a.preserve_primitive_vertices:
+            if a.factor_support == "dense":
+                support = sorted({
+                    (int(k1 - i), int(k2 - i))
+                    for i, k1, k2 in prim
+                })
+                available = set(map(int, primitive_factors.offsets))
+                missing = sorted({x for pair in support for x in pair}
+                                 - available)
+                if missing:
+                    raise SystemExit(
+                        "dense FC3 support contains offsets absent from the "
+                        f"factor archive: {missing}")
+                primitive_factors.meta = {
+                    **primitive_factors.meta,
+                    "support_pairs": support,
+                    "support_source": "dense FC3 transport offsets",
+                }
+                axis_a = {x for x, _ in support}
+                axis_b = {y for _, y in support}
+                factor_requires_reconstruct = set(support) != {
+                    (x, y) for x in axis_a for y in axis_b
+                }
+            save_decomposed(out / "decomposed_vertices.npz",
+                            primitive_factors)
+            print(f"decomposed_vertices.npz: primitive factors preserved "
+                  f"at rank {primitive_factors.rank}, "
+                  f"dof {primitive_factors.D.shape[0]}, support "
+                  f"{primitive_factors.meta.get('support_pairs', 'stored')}")
+        else:
+            lifted = reblock_decomposed(primitive_factors, c)
+            save_decomposed(out / "decomposed_vertices.npz", lifted)
+            print(f"decomposed_vertices.npz: exact factor lift rank "
+                  f"{lifted.meta['primitive_rank']} -> {lifted.rank}, "
+                  f"dof {lifted.meta['primitive_n_dof']} -> "
+                  f"{lifted.D.shape[0]}")
 
     # ---- structure, grids, config ---------------------------------------
     lines = (src / "structure.xyz").read_text().splitlines()
@@ -342,6 +398,37 @@ def main() -> None:
             cfg = cfg.replace("[phonon]\n", "[phonon]\n" + factor_line + "\n")
         cfg = re.sub(r"^qfold_path\s*=.*\n?", "", cfg,
                      flags=re.MULTILINE)
+        if factor_requires_reconstruct:
+            line = 'decomposed_kernel = "reconstruct"'
+            if re.search(r"^decomposed_kernel\s*=.*$", cfg,
+                         flags=re.MULTILINE):
+                cfg = re.sub(r"^decomposed_kernel\s*=.*$", line, cfg,
+                             flags=re.MULTILINE)
+            else:
+                cfg = cfg.replace("[phonon]\n", "[phonon]\n" + line + "\n")
+    elif qf.exists() and not a.skip_qfold:
+        qfold_line = f'qfold_path = "{out.resolve()}/qfold_vertices.npz"'
+        cfg = re.sub(r"^decomposed_vertices_path\s*=.*\n?", "", cfg,
+                     flags=re.MULTILINE)
+        if re.search(r"^qfold_path\s*=.*$", cfg, flags=re.MULTILINE):
+            cfg = re.sub(r"^qfold_path\s*=.*$", qfold_line, cfg,
+                         flags=re.MULTILINE)
+        else:
+            cfg = cfg.replace("[phonon]\n", "[phonon]\n" + qfold_line + "\n")
+    else:
+        # Gamma-only output: do not inherit a source representation whose
+        # archive was deliberately not copied.
+        cfg = re.sub(
+            r"^(?:qfold_path|decomposed_vertices_path)\s*=.*\n?", "", cfg,
+            flags=re.MULTILINE)
+    if a.preserve_primitive_vertices:
+        micro_lines = (
+            f"sse_microblock_dof = {nd}\n"
+            f"sse_microblock_g_band = {a.micro_g_band}\n")
+        for field in ("sse_microblock_dof", "sse_microblock_g_band"):
+            cfg = re.sub(rf"^{field}\s*=.*\n?", "", cfg,
+                         flags=re.MULTILINE)
+        cfg = cfg.replace("[phonon]\n", "[phonon]\n" + micro_lines)
     (out / "quatrex_config.toml").write_text(cfg)
     print(f"quatrex_config.toml: num_transport_cells = {nb} "
           f"({nb} blocks x {ndn} dof = {nb * ndn}, {n_cells} primitive cells)")

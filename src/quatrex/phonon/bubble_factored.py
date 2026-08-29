@@ -125,6 +125,19 @@ def contract_tau_q_factored(
         # Grams are summed over each line separately (see the module docstring).
         a_links = sorted({(K1, K1p) for (K1, _K2, K1p, _K2p) in quads})
         b_links = sorted({(K2, K2p) for (_K1, K2, _K1p, K2p) in quads})
+        actual = set(quads)
+        product = {
+            (K1, K2, K1p, K2p)
+            for K1, K1p in a_links for K2, K2p in b_links
+        }
+        if actual != product:
+            raise ValueError(
+                "The factored Gram collapse requires Cartesian FC3 offset "
+                f"support for output pair {(I, J)}; got {len(actual)} quads "
+                f"but its independent link product contains {len(product)}. "
+                "Use decomposed_kernel='reconstruct' or a Cartesian support "
+                "mask."
+            )
 
         grams = GramTables(g_dicts, UB, UC, off_pos, lo, hi, xp, shared_legs)
         sa, sb = {}, {}

@@ -45,6 +45,11 @@ from quatrex.phonon.fc3_loader import (
     PhiBlocks,
     load_device_fc3,
 )
+from quatrex.phonon.microblocks import (
+    MicroblockLayout,
+    build_micro_pair_index,
+    micro_link_views,
+)
 from quatrex.phonon.units import bubble_prefactor_thz
 
 profiler = Profiler()
@@ -91,6 +96,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self.block_sizes = np.asarray(block_sizes, dtype=int)
         self.n_blocks = int(self.block_sizes.shape[0])
         self.block_offsets = np.concatenate(([0], np.cumsum(self.block_sizes)))
+        micro_dof = int(
+            getattr(config.phonon, "sse_microblock_dof", 0) or 0)
+        micro_band = int(
+            getattr(config.phonon, "sse_microblock_g_band", 0) or 0)
+        if bool(micro_dof) != bool(micro_band):
+            raise ValueError(
+                "sse_microblock_dof and sse_microblock_g_band must either "
+                "both be zero or both be positive."
+            )
+        self._micro_layout = (
+            MicroblockLayout.from_block_sizes(self.block_sizes, micro_dof)
+            if micro_dof else None
+        )
+        self._vertex_n_blocks = (
+            self._micro_layout.n_microblocks
+            if self._micro_layout is not None else self.n_blocks
+        )
 
         self._ramp_n = int(getattr(config.phonon, "sse_ramp_iterations", 0))
         self._ramp_it = 0
@@ -255,16 +277,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     "mutually exclusive -- pick the dense or the factored "
                     "coupled-q vertex."
                 )
-            if np.unique(self.block_sizes).size != 1:
+            if (self._micro_layout is None
+                    and np.unique(self.block_sizes).size != 1):
                 raise ValueError(
                     "The factored coupled-q SSE requires uniform block "
                     f"sizes; got {np.unique(self.block_sizes)}."
                 )
-            if int(self.block_sizes[0]) != int(vfactors.D.shape[0]):
+            vertex_dof = (
+                self._micro_layout.micro_dof
+                if self._micro_layout is not None
+                else int(self.block_sizes[0])
+            )
+            if vertex_dof != int(vfactors.D.shape[0]):
                 raise ValueError(
                     f"Factored vertex n_dof={int(vfactors.D.shape[0])} does "
-                    f"not match the device block size "
-                    f"{int(self.block_sizes[0])}."
+                    f"not match the SSE vertex block size {vertex_dof}."
                 )
             if np.iscomplexobj(vfactors.D) or np.iscomplexobj(vfactors.lambdas):
                 # The kernel conjugates only the contracted-leg row factor; the
@@ -338,7 +365,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 )
             phi_blocks = load_device_fc3(
                 Path(fc3_path),
-                block_sizes=self.block_sizes,
+                block_sizes=(
+                    np.full(self._vertex_n_blocks,
+                            self._micro_layout.micro_dof, dtype=int)
+                    if self._micro_layout is not None else self.block_sizes
+                ),
                 truncation_warn=config.phonon.phonon_phonon_truncation_warn,
             )
 
@@ -391,15 +422,25 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # off-diagonal G^{<,>} blocks and the kernel is complete for the
         # nearest-neighbour vertex span (diagonal Sigma blocks exact).
         self.g_band = min(
-            int(getattr(config.phonon, "sse_g_band", 1) or 1),
-            self.n_blocks - 1,
+            (micro_band if self._micro_layout is not None else
+             int(getattr(config.phonon, "sse_g_band", 1) or 1)),
+            self._vertex_n_blocks - 1,
+        )
+        # The selected solve is expressed in grouped Dyson blocks.  A valid
+        # microblock grouping is required below to place every retained
+        # primitive G link in the same or an adjacent grouped block, so the
+        # grouped solve remains block tridiagonal even when the primitive band
+        # is much wider.
+        self._solver_g_band = (
+            min(1, self.n_blocks - 1)
+            if self._micro_layout is not None else self.g_band
         )
         # Coupled-q dense ring: strided-batched GEMMs over the (q', quad)
         # task axis instead of one Python task at a time (the per-task
         # dispatch cost ~200 us dominated the film ring at 4-10% of peak).
         self._dense_q_batched = bool(
             getattr(config.phonon, "sse_dense_q_batched", True))
-        if self.g_band > 1 and ranks.block.size > 1:
+        if self._solver_g_band > 1 and ranks.block.size > 1:
             # The band halo exchange and the bosonic-fold plan only span
             # the IMMEDIATE comm.block neighbours; with every rank owning
             # at least g_band + 1 blocks all band links land there (the
@@ -411,7 +452,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             )
             if min_local < self.g_band + 1:
                 raise ValueError(
-                    f"sse_g_band={self.g_band} with block_comm_size="
+                    f"sse_g_band={self._solver_g_band} with block_comm_size="
                     f"{ranks.block.size} leaves a comm.block rank with only "
                     f"{min_local} blocks (need >= {self.g_band + 1} so the "
                     "band halo spans only immediate neighbours); reduce "
@@ -460,6 +501,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "weights do not factor through the Gram collapse "
                 "(decomposed_kernel='gram')."
             )
+        if self._micro_layout is not None:
+            unsupported = []
+            if self._taper_w is not None:
+                unsupported.append("sse_g_band_taper")
+            if self._g_from_l:
+                unsupported.append("sse_greater_from_lesser")
+            if self._herm_pairs:
+                unsupported.append("sse_hermitian_pairs")
+            if self._ring_c64:
+                unsupported.append("sse_ring_dtype=complex64")
+            if unsupported:
+                raise NotImplementedError(
+                    "The primitive-microblock SSE currently requires the "
+                    "plain complex128 six-ring path; disable "
+                    + ", ".join(unsupported)
+                )
 
         # Precompute the full off-diagonal pair index: for each output
         # block pair (I, J) with |I-J| <= 1, collect the ring quads
@@ -470,30 +527,57 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             tuple[int, int],
             list[tuple[int, int, int, int, NDArray, NDArray]],
         ] = {}
-        for (I, K1, K2), phi_left in self.phi_blocks.items():
-            for J in range(max(0, I - 1), min(self.n_blocks, I + 2)):
-                for K1p in range(
-                    max(0, K1 - self.g_band),
-                    min(self.n_blocks, K1 + self.g_band + 1),
-                ):
-                    for K2p in range(
-                        max(0, K2 - self.g_band),
-                        min(self.n_blocks, K2 + self.g_band + 1),
+        self._micro_pair_index = None
+        if self._micro_layout is not None:
+            (self._micro_pair_index, self._vertex_span,
+             self._sigma_micro_span) = build_micro_pair_index(
+                self.phi_blocks, self._micro_layout, self.g_band)
+            if ranks.rank == 0:
+                print(
+                    "[SigmaPhononPhonon] primitive microblocks: "
+                    f"groups={self._micro_layout.cells_per_block}, "
+                    f"d={self._micro_layout.micro_dof}, G band={self.g_band}, "
+                    f"FC3 span={self._vertex_span}, generated Sigma "
+                    f"span={self._sigma_micro_span}, factor rank="
+                    f"{getattr(self._vfactors, 'rank', 0) or 'dense'}",
+                    flush=True,
+                )
+        else:
+            for (I, K1, K2), phi_left in self.phi_blocks.items():
+                for J in range(max(0, I - 1), min(self.n_blocks, I + 2)):
+                    for K1p in range(
+                        max(0, K1 - self.g_band),
+                        min(self.n_blocks, K1 + self.g_band + 1),
                     ):
-                        phi_right = self.phi_blocks.get((J, K2p, K1p))
-                        if phi_right is None:
-                            continue
-                        self._phi_pair_index.setdefault((I, J), []).append(
-                            (K1, K2, K1p, K2p, phi_left, phi_right)
-                        )
+                        for K2p in range(
+                            max(0, K2 - self.g_band),
+                            min(self.n_blocks, K2 + self.g_band + 1),
+                        ):
+                            phi_right = self.phi_blocks.get((J, K2p, K1p))
+                            if phi_right is None:
+                                continue
+                            self._phi_pair_index.setdefault((I, J), []).append(
+                                (K1, K2, K1p, K2p, phi_left, phi_right)
+                            )
 
         # Distinct inner G band blocks (K, K') referenced by any quad,
         # that must be gathered to full omega.
         self._g_band_keys: set[tuple[int, int]] = set()
-        for quads in self._phi_pair_index.values():
-            for K1, K2, K1p, K2p, _pl, _pr in quads:
-                self._g_band_keys.add((K1, K1p))
-                self._g_band_keys.add((K2, K2p))
+        if self._micro_pair_index is not None:
+            for pairs in self._micro_pair_index.values():
+                for quads in pairs.values():
+                    for quad in quads:
+                        self._g_band_keys.add(
+                            self._micro_layout.grouped_pair(
+                                quad.k1, quad.k1p))
+                        self._g_band_keys.add(
+                            self._micro_layout.grouped_pair(
+                                quad.k2, quad.k2p))
+        else:
+            for quads in self._phi_pair_index.values():
+                for K1, K2, K1p, K2p, _pl, _pr in quads:
+                    self._g_band_keys.add((K1, K1p))
+                    self._g_band_keys.add((K2, K2p))
 
         # Cached intermediate tau-domain buffers (length
         # n_fft) for FFTd G
@@ -528,14 +612,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if support is not None:
             support = {(int(a), int(b)) for a, b in support}
         blocks: dict[tuple[int, int, int], np.ndarray] = {}
-        for I in range(self.n_blocks):
+        for I in range(self._vertex_n_blocks):
             for d1 in offs:
                 K1 = I + d1
-                if not 0 <= K1 < self.n_blocks:
+                if not 0 <= K1 < self._vertex_n_blocks:
                     continue
                 for d2 in offs:
                     K2 = I + d2
-                    if not 0 <= K2 < self.n_blocks:
+                    if not 0 <= K2 < self._vertex_n_blocks:
                         continue
                     if support is not None and (d1, d2) not in support:
                         continue
@@ -577,14 +661,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "ar,dbr,ecr->deabc", lam_D,
                 vf.UB[:, iq1], vf.UC[:, iq2], optimize=True)
             blocks = {}
-            for I in range(self.n_blocks):
+            for I in range(self._vertex_n_blocks):
                 for d1 in offs:
                     K1 = I + d1
-                    if not 0 <= K1 < self.n_blocks:
+                    if not 0 <= K1 < self._vertex_n_blocks:
                         continue
                     for d2 in offs:
                         K2 = I + d2
-                        if not 0 <= K2 < self.n_blocks:
+                        if not 0 <= K2 < self._vertex_n_blocks:
                             continue
                         if support is not None and (d1, d2) not in support:
                             continue
@@ -1348,7 +1432,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             use_factored = (
                 self._vfactors is not None and self._vf_kernel == "gram"
             )
-            if self._phi_pre is None and not use_factored:
+            if (self._phi_pre is None and not use_factored
+                    and self._micro_pair_index is None):
                 # The Bartlett taper weight (1.0 when off) is folded into
                 # the left vertex factor once here; every downstream ring
                 # (legacy, lin, fast, verify, hermitian mirror) is linear
@@ -1403,6 +1488,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         + ring_contract_pre(PL, PR, nI, bK2, nJ, gga, glrb, xp)
                         + ring_contract_pre(PL, PR, nI, bK2, nJ, glra, ggb, xp))
 
+            if self._micro_pair_index is not None:
+                micro_links = self._micro_links_for_outputs(owned)
+                mgl_blk = micro_link_views(
+                    gl_blk, self._micro_layout, micro_links)
+                mgg_blk = micro_link_views(
+                    gg_blk, self._micro_layout, micro_links)
+                mglr_blk = micro_link_views(
+                    glr_blk, self._micro_layout, micro_links)
+                mggr_blk = micro_link_views(
+                    ggr_blk, self._micro_layout, micro_links)
+            else:
+                mgl_blk, mgg_blk = gl_blk, gg_blk
+                mglr_blk, mggr_blk = glr_blk, ggr_blk
+
             if use_factored:
                 # The factored kernel serves the Gamma-only device too: at
                 # nq == 1 the momentum convolution is the identity and what
@@ -1413,16 +1512,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         for kk, v in d.items()
                     }
 
-                gl_q = _qflat_f(gl_blk)
+                gl_q = _qflat_f(mgl_blk)
                 n_tau = next(iter(gl_q.values())).shape[0]
                 dtype = next(iter(gl_q.values())).dtype
                 q_lo = ranks.q.rank * nq // ranks.q.size
                 q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
                 self._contract_factored_q(
                     owned, q_lo, q_hi, nq, nk, n_tau, dtype,
-                    gl_q, _qflat_f(gg_blk),
-                    _qflat_f(glr_blk), _qflat_f(ggr_blk),
+                    gl_q, _qflat_f(mgg_blk),
+                    _qflat_f(mglr_blk), _qflat_f(mggr_blk),
                     stlv, stgv, start, xp,
+                )
+            elif self._micro_pair_index is not None and nq == 1:
+                self._contract_micro_dense_gamma(
+                    owned, n_tau=next(iter(mgl_blk.values())).shape[0],
+                    dtype=stl.data.dtype, gl=mgl_blk, gg=mgg_blk,
+                    glr=mglr_blk, ggr=mggr_blk, stlv=stlv, stgv=stgv,
+                    start=start, xp=xp,
                 )
             elif nq == 1:
                 _pair_debug = os.environ.get("QTX_PROFILE_LEVEL") == "debug"
@@ -1679,10 +1785,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         for kk, v in d.items()
                     }
 
-                gl_q = _qflat(gl_blk)
-                gg_q = _qflat(gg_blk)
-                glr_q = _qflat(glr_blk)
-                ggr_q = _qflat(ggr_blk)
+                gl_q = _qflat(mgl_blk)
+                gg_q = _qflat(mgg_blk)
+                glr_q = _qflat(mglr_blk)
+                ggr_q = _qflat(mggr_blk)
 
                 def _release_leg_blocks():
                     """Drop every reference to the densified leg blocks.
@@ -2098,9 +2204,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         See ``phonon/docs/bubble_positivity.md`` Sec. 7.
         """
         bounds = [r * nq // ranks.q.size for r in range(ranks.q.size + 1)]
+        contract = (
+            self._contract_micro_dense_q
+            if self._micro_pair_index is not None else self._contract_dense_q
+        )
         if not q_split:
             # Whole axis local: one pass, offsets zero, plain assignment.
-            self._contract_dense_q(
+            contract(
                 owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
                 *legs, _fold_l, _fold_g, stlv, stgv, start, xp, **kw)
             return
@@ -2119,7 +2229,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # Here every rank produces partial sums at every external
             # momentum -- its own slice paired with whatever it currently
             # holds -- and the all_reduce over comm.q completes them.
-            self._contract_dense_q(
+            contract(
                 owned, qdm, qv, 0, nq, nq, nk, n_tau, dtype,
                 *legs, _fold_l, _fold_g, stlv, stgv, start, xp,
                 a_slice=(a_lo, a_hi), b_slice=(b_lo, b_hi),
@@ -2128,6 +2238,198 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if step == size - 1:
                 break
             buf = self._rotate_q_buffers(buf, bounds, rank, size, step, xp)
+
+    def _micro_links_for_outputs(
+        self, outputs: list[tuple[int, int]]
+    ) -> set[tuple[int, int]]:
+        """Primitive Green links consumed by grouped output pairs."""
+        links: set[tuple[int, int]] = set()
+        for pair in outputs:
+            for quads in self._micro_pair_index.get(pair, {}).values():
+                for quad in quads:
+                    links.add((quad.k1, quad.k1p))
+                    links.add((quad.k2, quad.k2p))
+        return links
+
+    def _contract_micro_dense_gamma(
+        self, owned, *, n_tau, dtype, gl, gg, glr, ggr,
+        stlv, stgv, start, xp,
+    ) -> None:
+        """Dense Gamma bubble on primitive FC3 and grouped Dyson blocks."""
+        if getattr(self, "_micro_gamma_pre", None) is None:
+            pre = {}
+            for group_pair, primitive_pairs in self._micro_pair_index.items():
+                tasks = []
+                for (i, j), quads in primitive_pairs.items():
+                    _bi, si = self._micro_layout.locate(i)
+                    _bj, sj = self._micro_layout.locate(j)
+                    for quad in quads:
+                        tasks.append((
+                            si.start, sj.start, quad.k1, quad.k1p,
+                            quad.k2, quad.k2p,
+                        ) + phi_perms(
+                            xp.asarray(quad.phi_left),
+                            xp.asarray(quad.phi_right), xp,
+                        ))
+                pre[group_pair] = tasks
+            self._micro_gamma_pre = pre
+
+        def _run(lo, hi):
+            result = {}
+            for I, J in owned:
+                out_l = xp.zeros(
+                    (hi - lo, int(self.block_sizes[I]),
+                     int(self.block_sizes[J])), dtype=dtype)
+                out_g = xp.zeros_like(out_l)
+                for (oi, oj, k1, k1p, k2, k2p, *p) in (
+                    self._micro_gamma_pre.get((I, J), ())
+                ):
+                    PL, PR, nI, bK2, nJ = p
+                    gla, glb = gl[(k1, k1p)][lo:hi], gl[(k2, k2p)][lo:hi]
+                    gga, ggb = gg[(k1, k1p)][lo:hi], gg[(k2, k2p)][lo:hi]
+                    ggra, ggrb = ggr[(k1, k1p)][lo:hi], ggr[(k2, k2p)][lo:hi]
+                    glra, glrb = glr[(k1, k1p)][lo:hi], glr[(k2, k2p)][lo:hi]
+
+                    def ring(a, b):
+                        return ring_contract_pre(
+                            PL, PR, nI, bK2, nJ, a, b, xp)
+
+                    sl = ring(gla, glb) + ring(gla, ggrb) + ring(ggra, glb)
+                    sg = ring(gga, ggb) + ring(gga, glrb) + ring(glra, ggb)
+                    d = self._micro_layout.micro_dof
+                    out_l[:, oi:oi + d, oj:oj + d] += sl
+                    out_g[:, oi:oi + d, oj:oj + d] += sg
+                result[(I, J)] = (out_l, out_g)
+            return result
+
+        pool, n_threads = ring_pool()
+        nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))
+        if pool is not None and xp is np and nt > 1:
+            bounds = [(i * n_tau // nt, (i + 1) * n_tau // nt)
+                      for i in range(nt)]
+            chunks = list(pool.map(lambda bound: _run(*bound), bounds))
+            result = {
+                pair: tuple(xp.concatenate([c[pair][side] for c in chunks],
+                                           axis=0)
+                            for side in (0, 1))
+                for pair in owned
+            }
+        else:
+            result = _run(0, n_tau)
+        for (I, J), (out_l, out_g) in result.items():
+            stlv.blocks[I - start, J - start] = out_l
+            stgv.blocks[I - start, J - start] = out_g
+
+    def _contract_micro_dense_q(
+        self, owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
+        gl_q, gg_q, glr_q, ggr_q, _fold_l, _fold_g,
+        stlv, stgv, start, xp,
+        fast_now=False, verify_now=False, stxv=None, release=None,
+        a_slice=None, b_slice=None, a_off=0, b_off=0, legs_b=None,
+        accumulate=False,
+    ) -> None:
+        """Dense coupled-q reference contraction on primitive microblocks."""
+        if fast_now or verify_now:
+            raise NotImplementedError(
+                "primitive microblocks use the plain six-ring coupled-q path")
+        del qdm, stxv, release
+        a_lo, a_hi = (0, nq) if a_slice is None else a_slice
+        b_lo, b_hi = (0, nq) if b_slice is None else b_slice
+        gl_a, gg_a, glr_a, ggr_a = gl_q, gg_q, glr_q, ggr_q
+        gl_b, gg_b, glr_b, ggr_b = (
+            (gl_q, gg_q, glr_q, ggr_q) if legs_b is None else legs_b)
+        cache_key = (q_lo, q_hi, nq, a_lo, a_hi, b_lo, b_hi, tuple(owned))
+        cache = getattr(self, "_micro_qtasks_cache", {})
+        qtasks = cache.get(cache_key)
+        if qtasks is None:
+            perm_cache = {}
+            qtasks = {}
+            bulk_vertex = self._vfactors is not None
+            for iqp in range(a_lo, a_hi):
+                for iq2 in range(b_lo, b_hi):
+                    iq_ext = (iqp + iq2) % nq
+                    if not q_lo <= iq_ext < q_hi:
+                        continue
+                    phi_l = qv.get((iqp, iq2))
+                    phi_r = qv.get((iq2, iqp))
+                    if phi_l is None or phi_r is None:
+                        continue
+                    for group_pair in owned:
+                        for (i, j), quads in self._micro_pair_index.get(
+                            group_pair, {}
+                        ).items():
+                            _bi, si = self._micro_layout.locate(i)
+                            _bj, sj = self._micro_layout.locate(j)
+                            for quad in quads:
+                                pl = phi_l.get((i, quad.k1, quad.k2))
+                                pr = phi_r.get((j, quad.k2p, quad.k1p))
+                                if pl is None or pr is None:
+                                    continue
+                                pkey = (
+                                    (iqp, iq2, quad.k1 - i, quad.k2 - i,
+                                     quad.k2p - j, quad.k1p - j)
+                                    if bulk_vertex else
+                                    (iqp, iq2, i, quad.k1, quad.k2,
+                                     j, quad.k2p, quad.k1p)
+                                )
+                                p = perm_cache.get(pkey)
+                                if p is None:
+                                    p = phi_perms(
+                                        xp.conj(xp.asarray(pl)),
+                                        xp.asarray(pr), xp)
+                                    perm_cache[pkey] = p
+                                qtasks.setdefault(group_pair, []).append((
+                                    iq_ext, iqp, iq2, si.start, sj.start,
+                                    quad.k1, quad.k1p, quad.k2, quad.k2p,
+                                ) + p)
+            cache[cache_key] = qtasks
+            self._micro_qtasks_cache = cache
+
+        if not getattr(self, "_ring_stats_printed", False) and ranks.rank == 0:
+            self._ring_stats_printed = True
+            ntasks = sum(len(v) for v in qtasks.values())
+            print(
+                "PhPh SSE ring (microblock dense coupled-q): "
+                f"group_pairs={len(qtasks)} qtasks={ntasks} nq={nq} "
+                f"q_local={q_hi - q_lo} n_tau={n_tau}", flush=True)
+
+        def _run(lo, hi):
+            result = {}
+            d = self._micro_layout.micro_dof
+            for I, J in owned:
+                out_l = xp.zeros(
+                    (hi - lo, nq, int(self.block_sizes[I]),
+                     int(self.block_sizes[J])), dtype=dtype)
+                out_g = xp.zeros_like(out_l)
+                for (iqe, iqp, iq2, oi, oj, k1, k1p, k2, k2p,
+                     *p) in qtasks.get((I, J), ()):
+                    gla = gl_a[(k1, k1p)][lo:hi, iqp - a_off]
+                    glb = gl_b[(k2, k2p)][lo:hi, iq2 - b_off]
+                    gga = gg_a[(k1, k1p)][lo:hi, iqp - a_off]
+                    ggb = gg_b[(k2, k2p)][lo:hi, iq2 - b_off]
+                    ggra = ggr_a[(k1, k1p)][lo:hi, iqp - a_off]
+                    ggrb = ggr_b[(k2, k2p)][lo:hi, iq2 - b_off]
+                    glra = glr_a[(k1, k1p)][lo:hi, iqp - a_off]
+                    glrb = glr_b[(k2, k2p)][lo:hi, iq2 - b_off]
+                    sl = _fold_l(p, gla, glb, ggra, ggrb)
+                    sg = _fold_g(p, gga, ggb, glra, glrb)
+                    out_l[:, iqe, oi:oi + d, oj:oj + d] += sl
+                    out_g[:, iqe, oi:oi + d, oj:oj + d] += sg
+                result[(I, J)] = (out_l, out_g)
+            return result
+
+        result = _run(0, n_tau)
+        for (I, J), (out_l, out_g) in result.items():
+            shape = ((n_tau,) + tuple(nk) +
+                     (int(self.block_sizes[I]), int(self.block_sizes[J])))
+            if accumulate:
+                stlv.blocks[I - start, J - start] = (
+                    stlv.blocks[I - start, J - start] + out_l.reshape(shape))
+                stgv.blocks[I - start, J - start] = (
+                    stgv.blocks[I - start, J - start] + out_g.reshape(shape))
+            else:
+                stlv.blocks[I - start, J - start] = out_l.reshape(shape)
+                stgv.blocks[I - start, J - start] = out_g.reshape(shape)
 
     @staticmethod
     def _negate_q_across_comm(x, nq, lo, hi, xp):
@@ -2721,14 +3023,29 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         from quatrex.phonon.bubble_factored import contract_tau_q_factored
 
         vf = self._vfactors
-        quads_by_pair = {
-            (I, J): [
-                (K1, K2, K1p, K2p)
-                for (K1, K2, K1p, K2p, _pl, _pr) in self._phi_pair_index[(I, J)]
-            ]
-            for (I, J) in owned
-            if (I, J) in self._phi_pair_index
-        }
+        if self._micro_pair_index is not None:
+            quads_by_pair = {
+                pair: [
+                    (q.k1, q.k2, q.k1p, q.k2p) for q in quads
+                ]
+                for group_pair in owned
+                for pair, quads in self._micro_pair_index.get(
+                    group_pair, {}).items()
+            }
+            factor_block_sizes = np.full(
+                self._micro_layout.n_microblocks,
+                self._micro_layout.micro_dof, dtype=int)
+        else:
+            quads_by_pair = {
+                (I, J): [
+                    (K1, K2, K1p, K2p)
+                    for (K1, K2, K1p, K2p, _pl, _pr)
+                    in self._phi_pair_index[(I, J)]
+                ]
+                for (I, J) in owned
+                if (I, J) in self._phi_pair_index
+            }
+            factor_block_sizes = self.block_sizes
         off_pos = vf.offset_index()
         # lambda folded into the external leg ONCE per vertex: the sandwich
         # is Dt @ H @ Dt^T with Dt = D diag(lambda) (D, lambda real).
@@ -2743,16 +3060,39 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         def _run(lo, hi):
             return contract_tau_q_factored(
-                quads_by_pair, self.block_sizes, tuple(nk), q_lo, q_hi, nq,
+                quads_by_pair, factor_block_sizes, tuple(nk), q_lo, q_hi, nq,
                 g_dicts, Dt, UB, UC, off_pos, lo, hi, xp, shared, dtype,
             )
 
-        def _write(I, J, out_l, out_g):
-            bs_I = int(self.block_sizes[I])
-            bs_J = int(self.block_sizes[J])
-            blk_shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
-            stlv.blocks[I - start, J - start] = out_l.reshape(blk_shape)
-            stgv.blocks[I - start, J - start] = out_g.reshape(blk_shape)
+        def _write_grouped(result):
+            if self._micro_pair_index is None:
+                for (I, J), (out_l, out_g) in result.items():
+                    bs_I = int(self.block_sizes[I])
+                    bs_J = int(self.block_sizes[J])
+                    shape = (n_tau,) + tuple(nk) + (bs_I, bs_J)
+                    stlv.blocks[I - start, J - start] = out_l.reshape(shape)
+                    stgv.blocks[I - start, J - start] = out_g.reshape(shape)
+                return
+
+            grouped = {}
+            d = self._micro_layout.micro_dof
+            for I, J in owned:
+                grouped[(I, J)] = (
+                    xp.zeros((n_tau, nq, int(self.block_sizes[I]),
+                              int(self.block_sizes[J])), dtype=dtype),
+                    xp.zeros((n_tau, nq, int(self.block_sizes[I]),
+                              int(self.block_sizes[J])), dtype=dtype),
+                )
+            for (i, j), (out_l, out_g) in result.items():
+                I, si = self._micro_layout.locate(i)
+                J, sj = self._micro_layout.locate(j)
+                grouped[(I, J)][0][..., si, sj] += out_l
+                grouped[(I, J)][1][..., si, sj] += out_g
+            for (I, J), (out_l, out_g) in grouped.items():
+                shape = ((n_tau,) + tuple(nk) +
+                         (int(self.block_sizes[I]), int(self.block_sizes[J])))
+                stlv.blocks[I - start, J - start] = out_l.reshape(shape)
+                stgv.blocks[I - start, J - start] = out_g.reshape(shape)
 
         # The Gram tables are (nq, n_tau, R, R), so the working set grows with the
         # tau slice AND with R^2 -- at R=128 the full local tau axis is tens of
@@ -2772,20 +3112,21 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         bnds = [(lo, hi) for lo, hi in bnds if hi > lo]
 
         if len(bnds) == 1:
-            for (I, J), (out_l, out_g) in _run(*bnds[0]).items():
-                _write(I, J, out_l, out_g)
+            _write_grouped(_run(*bnds[0]))
             return
 
         if pool is not None and xp is np and n_threads > 1:
             chunks = list(pool.map(lambda b: _run(*b), bnds))
         else:
             chunks = [_run(lo, hi) for lo, hi in bnds]
-        for (I, J) in quads_by_pair:
-            _write(
-                I, J,
-                xp.concatenate([c[(I, J)][0] for c in chunks], axis=0),
-                xp.concatenate([c[(I, J)][1] for c in chunks], axis=0),
+        joined = {
+            pair: (
+                xp.concatenate([c[pair][0] for c in chunks], axis=0),
+                xp.concatenate([c[pair][1] for c in chunks], axis=0),
             )
+            for pair in quads_by_pair
+        }
+        _write_grouped(joined)
 
     def _fold_reversed_legs(self, legs: tuple, g: DSDBSparse) -> None:
         """Apply the exact bosonic ji-transpose ``X_ij -> X_ji`` to the given
@@ -2944,12 +3285,23 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if (a, b) in cache:
             return cache[(a, b)]
         links: set[tuple[int, int]] = set()
-        for (I, J), quads in self._phi_pair_index.items():
-            if not (a <= min(I, J) < b):
-                continue
-            for K1, K2, K1p, K2p, _pl, _pr in quads:
-                links.add((K1, K1p))
-                links.add((K2, K2p))
+        if self._micro_pair_index is not None:
+            for (I, J), pairs in self._micro_pair_index.items():
+                if not (a <= min(I, J) < b):
+                    continue
+                for quads in pairs.values():
+                    for quad in quads:
+                        links.add(self._micro_layout.grouped_pair(
+                            quad.k1, quad.k1p))
+                        links.add(self._micro_layout.grouped_pair(
+                            quad.k2, quad.k2p))
+        else:
+            for (I, J), quads in self._phi_pair_index.items():
+                if not (a <= min(I, J) < b):
+                    continue
+                for K1, K2, K1p, K2p, _pl, _pr in quads:
+                    links.add((K1, K1p))
+                    links.add((K2, K2p))
         cache[(a, b)] = links
         return links
 
@@ -2961,7 +3313,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             cache = self._owned_cache = {}
         if (start, end) not in cache:
             cache[(start, end)] = [
-                ij for ij in self._phi_pair_index
+                ij for ij in (self._micro_pair_index
+                              if self._micro_pair_index is not None
+                              else self._phi_pair_index)
                 if start <= min(ij) < end
             ]
         return cache[(start, end)]

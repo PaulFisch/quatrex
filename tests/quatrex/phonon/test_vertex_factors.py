@@ -149,3 +149,20 @@ def test_config_vertex_source_exclusivity(tmp_path) -> None:
     with pytest.raises(ValueError, match=">= 0"):
         PhononConfig(**base, decomposed_vertices_path=str(dv),
                      sse_vertex_rank=-1)
+
+
+def test_microblock_config_is_explicit_and_backward_compatible(tmp_path) -> None:
+    from quatrex.core.config import PhononConfig
+
+    base = dict(model="negf", fc3_path=str(tmp_path / "fc3.hdf5"))
+    legacy = PhononConfig(**base)
+    assert legacy.sse_microblock_dof == 0
+    assert legacy.sse_microblock_g_band == 0
+    micro = PhononConfig(
+        **base, sse_microblock_dof=6, sse_microblock_g_band=3)
+    assert micro.sse_microblock_dof == 6
+    assert micro.sse_microblock_g_band == 3
+    with pytest.raises(ValueError, match="both be zero.*both be positive"):
+        PhononConfig(**base, sse_microblock_dof=6)
+    with pytest.raises(ValueError, match="both be zero.*both be positive"):
+        PhononConfig(**base, sse_microblock_g_band=3)

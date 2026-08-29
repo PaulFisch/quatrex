@@ -7,7 +7,7 @@ import numpy as np
 from mpi4py import MPI
 from mpi4py.MPI import COMM_WORLD as global_comm
 
-from qttools import NDArray, xp
+from qttools import NDArray, sparse, xp
 from qttools.comm import comm
 from qttools.datastructures import DSDBSparse
 from qttools.profiling import Profiler
@@ -109,13 +109,35 @@ class SCBAData:
             start_idx = block_offsets[section_offsets[comm.block.rank]]
             end_idx = block_offsets[section_offsets[comm.block.rank + 1]]
 
-            self.sparsity_pattern = compute_sparsity_pattern(
-                grid,
-                max_interaction_cutoff,
-                transport_direction=config.device.transport_direction,
-                start_idx=start_idx,
-                end_idx=end_idx,
-            )
+            micro_dof = int(getattr(
+                config.phonon, "sse_microblock_dof", 0) or 0)
+            if (getattr(config, "simulation_type", "") == "phonon"
+                    and micro_dof):
+                # The microblock bubble generates exact primitive shells and
+                # assembles them into same/adjacent grouped Dyson blocks.  A
+                # Cartesian atom-distance cutoff can remove entries inside
+                # those blocks, and is not a transport coordinate for an
+                # oblique Si primitive lattice.  Store the complete grouped
+                # BTD band explicitly, with the same arrow ownership as the
+                # ordinary sparsity builder.
+                from quatrex.phonon.microblocks import grouped_band_indices
+
+                rows_, cols_ = grouped_band_indices(
+                    block_sizes, band=1,
+                    start_block=int(section_offsets[comm.block.rank]),
+                    end_block=int(section_offsets[comm.block.rank + 1]))
+                self.sparsity_pattern = sparse.coo_matrix(
+                    (xp.ones(rows_.size, dtype=xp.float32),
+                     (xp.asarray(rows_), xp.asarray(cols_))),
+                    shape=(int(np.sum(block_sizes)),) * 2)
+            else:
+                self.sparsity_pattern = compute_sparsity_pattern(
+                    grid,
+                    max_interaction_cutoff,
+                    transport_direction=config.device.transport_direction,
+                    start_idx=start_idx,
+                    end_idx=end_idx,
+                )
 
             # sse_g_band > 1: the bubble contraction keeps inner G links
             # beyond the tridiagonal band, so the solver must produce (and
@@ -125,7 +147,9 @@ class SCBAData:
             g_band = 1
             if getattr(config, "simulation_type", "") == "phonon":
                 g_band = min(
-                    int(getattr(config.phonon, "sse_g_band", 1) or 1),
+                    (1 if micro_dof
+                     else int(getattr(config.phonon,
+                                      "sse_g_band", 1) or 1)),
                     len(block_sizes) - 1,
                 )
             if g_band > 1:
