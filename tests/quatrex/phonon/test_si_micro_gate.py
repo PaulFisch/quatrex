@@ -14,6 +14,7 @@ SPEC.loader.exec_module(MODULE)
 
 antihermiticity_defect = MODULE.antihermiticity_defect
 compare = MODULE.compare
+load_sigma = MODULE.load_sigma
 negativity_fraction = MODULE.negativity_fraction
 relative_error = MODULE.relative_error
 relative_l1 = MODULE.relative_l1
@@ -83,3 +84,18 @@ def test_current_gate_requires_two_converged_fixed_points(tmp_path):
     assert result["current_gate_applicable"] is False
     assert result["lead_current_relative_error"] is None
     assert result["spectral_current_l1_error"] is None
+
+
+def test_load_sigma_concatenates_stack_rank_slices(tmp_path):
+    for rank, start in enumerate((0.0, 2.0)):
+        arrays = {
+            key: np.full((2, 1, 4), start + offset, complex)
+            for offset, key in enumerate(MODULE.SIGMA_KEYS)
+        }
+        np.savez(tmp_path / f"sigma.rank{rank}.npz", **arrays)
+
+    got = load_sigma(tmp_path / "sigma")
+    assert got["sigma_lesser"].shape == (4, 1, 4)
+    np.testing.assert_array_equal(
+        got["sigma_lesser"][:, 0, 0], [0.0, 0.0, 2.0, 2.0]
+    )

@@ -188,7 +188,8 @@ def _load_bulk_film(fc3_subdir):
 def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
                              q_points, q_diff_map, nk, tdir, ranks, ansatz,
                              cache_dir, out, dense_vertices=None,
-                             masses_super=None, support="full"):
+                             masses_super=None, support="full",
+                             fit_kwargs=None, cache_label=None):
     """Fit the bulk FC3 (cached per (ansatz, rank, tensor-hash)), gather the
     per-(offset, q) device factor arrays and write
     ``decomposed_vertices[_r{R}].npz``. Self-check: reconstruct sample folded
@@ -217,7 +218,8 @@ def _decompose_film_vertices(M_stacked, prim_idx, cell_frac, slab_idx, nat,
     for rank in ranks:
         export = fit_film_fc3_factors(
             M_stacked, nat, n_super, rank, ansatz=ansatz, cache_dir=cache_dir,
-            masses_super=masses_super)
+            masses_super=masses_super,
+            cache_label=cache_label, **(fit_kwargs or {}))
         arrays = build_device_factor_arrays(
             export, prim_idx, cell_frac, slab_idx, nat, q_points, tdir)
         vf = VertexFactors(
@@ -294,7 +296,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
                  decompose_ranks=(), decompose_ansatz="INDSCAL",
                  decompose_support="full",
                  decompose_only=False, factorised_only=False,
-                 harmonic_only=False):
+                 harmonic_only=False, decompose_fit_kwargs=None,
+                 decompose_cache_label=None):
     """Transversely-periodic (k>1) Si film. Port of /tmp/build_sifilm_inputs.py."""
     assert nk % 2 == 1, "use ODD nk (clean Gamma-centered IDFT)"
     phonon, fc3_path = _load_bulk_film(fc3_subdir)
@@ -324,7 +327,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
             q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
             Path(fc3_path).parent, out, dense_vertices=None,
             masses_super=np.asarray(phonon.supercell.masses, dtype=float),
-            support=decompose_support)
+            support=decompose_support, fit_kwargs=decompose_fit_kwargs,
+            cache_label=decompose_cache_label)
         return
 
     H00 = np.zeros((n_kpts, nd, nd), complex)
@@ -460,7 +464,8 @@ def build_sifilm(nslabs, nk, tdir, nfreq, fmax, emin, fc3_subdir, out, nproc=1,
             q_diff_map, nk, tdir, decompose_ranks, decompose_ansatz,
             Path(fc3_path).parent, out, dense_vertices=vertices,
             masses_super=np.asarray(phonon.supercell.masses, dtype=float),
-            support=decompose_support)
+            support=decompose_support, fit_kwargs=decompose_fit_kwargs,
+            cache_label=decompose_cache_label)
 
     gamma_blocks = (
         vertices[(0, 0)] if vertices is not None
@@ -520,6 +525,19 @@ def main():
                    choices=["INDSCAL", "CP"],
                    help="factorisation ansatz (INDSCAL = shared contracted "
                         "legs, the production default)")
+    p.add_argument("--decompose-restarts", type=int, default=None,
+                   help="override the production factor-fit restart count; "
+                        "requires --decompose-cache-label so a reduced study "
+                        "fit cannot masquerade as the default fit")
+    p.add_argument("--decompose-max-iter", type=int, default=None,
+                   help="override INDSCAL ALS iterations per restart; requires "
+                        "--decompose-cache-label")
+    p.add_argument("--decompose-lbfgs-iters", type=int, default=None,
+                   help="override INDSCAL L-BFGS iterations; requires "
+                        "--decompose-cache-label")
+    p.add_argument("--decompose-cache-label", default=None,
+                   help="cache namespace recorded in factor metadata for a "
+                        "non-default fit schedule")
     p.add_argument("--decompose-only", action="store_true",
                    help="only add the factor file(s) to an already-built "
                         "geometry dir (skips the dense O(nk^2) fold and all "
@@ -540,6 +558,20 @@ def main():
         a.decompose_only or a.factorised_only or a.decompose_ranks
     ):
         p.error("--harmonic-only cannot be combined with decomposition options")
+    fit_kwargs = {
+        key: value for key, value in (
+            ("n_restarts", a.decompose_restarts),
+            ("max_iter", a.decompose_max_iter),
+            ("lbfgs_iters", a.decompose_lbfgs_iters),
+        ) if value is not None
+    }
+    if fit_kwargs and not a.decompose_cache_label:
+        p.error("non-default factor-fit controls require "
+                "--decompose-cache-label")
+    if (a.decompose_ansatz != "INDSCAL"
+            and any(key in fit_kwargs for key in ("max_iter", "lbfgs_iters"))):
+        p.error("--decompose-max-iter/--decompose-lbfgs-iters currently "
+                "apply only to INDSCAL")
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -581,7 +613,9 @@ def main():
                      decompose_support=a.decompose_support,
                      decompose_only=a.decompose_only,
                      factorised_only=a.factorised_only,
-                     harmonic_only=a.harmonic_only)
+                     harmonic_only=a.harmonic_only,
+                     decompose_fit_kwargs=fit_kwargs,
+                     decompose_cache_label=a.decompose_cache_label)
     print(f"inputs -> {out}", flush=True)
 
 

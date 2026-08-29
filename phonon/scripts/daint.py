@@ -108,7 +108,10 @@ def cmd_setup(_):
         f"MPI4PY_BUILD_MPICC=\"mpicc -shared\" "
         f"pip install -q --no-binary=mpi4py mpi4py && "
         f"pip install -q cupy-cuda{cuda_major}x numpy scipy h5py pydantic "
-        f"toml numba ase matplotlib pytest pytest-mpi "
+        # FC3 factor construction uses the PyTorch optimiser.  Keep it in the
+        # project venv so factorised-only Si inputs can be built on the GH200
+        # instead of first materialising the dense q-folded tensor elsewhere.
+        f"toml numba ase matplotlib pytest pytest-mpi torch "
         # phonon/solver/__init__ -> dense -> phonon_inputs.convention imports
         # Phonopy at module scope, so the whole studies tree needs it even
         # for a toy chain that never reads a force-constant file.
@@ -224,6 +227,11 @@ def _guard(args):
 
 def cmd_launch(args):
     _guard(args)
+    if args.config and args.command:
+        sys.exit(
+            "config launch has unexpected trailing arguments: "
+            f"{args.command}; repeat --env for every QX_NAME=value override"
+        )
     run_dir = f"{REPO}/cluster/{args.name}"
     env_lines = "\n".join(f"export {shlex.quote(e)}" for e in args.env or [])
     if not any(e.startswith("QX_SOURCE_COMMIT=") for e in (args.env or [])):

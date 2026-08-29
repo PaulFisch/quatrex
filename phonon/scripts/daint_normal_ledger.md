@@ -450,3 +450,8 @@ least-squares ladder rebuild.
 | 2026-08-30 | 4556523 | si-conventional-100-l5-q17-ballistic-caroli-q4 | 1 | 00:30:00 | 0.50 | 427.67 | debug |
 | 2026-08-30 | 4556528 | si-conventional-100-l5-q17-ballistic-caroli-s4 | 1 | 00:30:00 | 0.50 | 428.17 | debug |
 | 2026-08-30 | 4556539 | si-conventional-100-l5-q13-ballistic-s4 | 1 | 00:30:00 | 0.50 | 428.67 | debug |
+| 2026-08-30 | 4556566 | si-conventional-100-fc4refit-l5-q13-in | 1 | 02:00:00 | 2.00 | 430.67 | normal |
+| 2026-08-30 | 4556582 | si-conventional-100-fc4refit-l5-q13-in-v2 | 1 | 02:00:00 | 2.00 | 432.67 | normal |
+| 2026-08-30 | 4556590 | si-conventional-100-fc4refit-l5-q3-dense-gate-in | 1 | 00:30:00 | 0.50 | 433.17 | debug |
+| 2026-08-30 | 4556596 | si-conventional-100-fc4refit-l5-q3-dense-map | 1 | 00:30:00 | 0.50 | 433.67 | debug |
+| 2026-08-30 | 4556598 | si-conventional-100-fc4refit-l5-q3-dense-map-v2 | 1 | 00:30:00 | 0.50 | 434.17 | debug |

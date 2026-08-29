@@ -29,6 +29,46 @@ import numpy as np
 SIGMA_KEYS = ("sigma_lesser", "sigma_greater", "sigma_retarded")
 
 
+def load_sigma(path: Path) -> dict[str, np.ndarray]:
+    """Load a serial or deterministic stack-distributed Sigma snapshot.
+
+    A multi-GPU production run writes ``<stem>.rankN.npz`` files.  Accepting
+    either that stem or their directory keeps the frozen gate independent of
+    the stack decomposition used to make the reference.  Rank slices are
+    concatenated along the distributed frequency axis, exactly as the engine
+    reconstructs a serial restart with ``QX_SIGMA_INIT_PARTS``.
+    """
+    path = Path(path)
+    if path.is_file():
+        with np.load(path) as data:
+            return {key: np.asarray(data[key]) for key in SIGMA_KEYS}
+
+    if path.is_dir():
+        files = list(path.glob("sigma.rank*.npz"))
+    else:
+        stem = path.with_suffix("") if path.suffix == ".npz" else path
+        files = list(stem.parent.glob(stem.name + ".rank*.npz"))
+
+    def rank(file: Path) -> int:
+        return int(file.stem.rsplit("rank", 1)[1])
+
+    files = sorted(files, key=rank)
+    if not files:
+        raise FileNotFoundError(
+            f"no serial or distributed Sigma snapshot found for {path}"
+        )
+    pieces = [np.load(file) for file in files]
+    try:
+        return {
+            key: np.concatenate([np.asarray(piece[key]) for piece in pieces],
+                                axis=0)
+            for key in SIGMA_KEYS
+        }
+    finally:
+        for piece in pieces:
+            piece.close()
+
+
 def relative_error(reference: np.ndarray, candidate: np.ndarray) -> float:
     """Return the Frobenius error relative to the dense reference."""
     reference = np.asarray(reference)
@@ -127,11 +167,11 @@ def compare(
     candidate_sigma: Path,
 ) -> dict:
     """Return all certification metrics for one factor candidate."""
+    ref_sigma = load_sigma(reference_sigma)
+    cand_sigma = load_sigma(candidate_sigma)
     with (
         np.load(reference_run, allow_pickle=True) as ref_run,
         np.load(candidate_run, allow_pickle=True) as cand_run,
-        np.load(reference_sigma) as ref_sigma,
-        np.load(candidate_sigma) as cand_sigma,
     ):
         metrics: dict[str, object] = {
             "reference_run": str(reference_run),

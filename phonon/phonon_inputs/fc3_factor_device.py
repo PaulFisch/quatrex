@@ -49,6 +49,7 @@ def fit_film_fc3_factors(
     rank: int,
     ansatz: str = "INDSCAL",
     cache_dir: str | Path | None = None,
+    cache_label: str | None = None,
     masses_super: np.ndarray | None = None,
     **fit_kwargs,
 ) -> dict:
@@ -74,6 +75,13 @@ def fit_film_fc3_factors(
     if asr_w is not None:
         import hashlib
         tag += "_mw" + hashlib.sha256(asr_w.tobytes()).hexdigest()[:8]
+    if cache_label:
+        if not cache_label.replace("-", "").replace("_", "").isalnum():
+            raise ValueError(
+                "factor cache_label may contain only letters, digits, '-' "
+                "and '_'"
+            )
+        tag += f"_{cache_label}"
     cache = None if cache_dir is None else Path(cache_dir) / f"{tag}.npz"
     if cache is not None and cache.exists():
         z = np.load(cache, allow_pickle=True)
@@ -86,6 +94,8 @@ def fit_film_fc3_factors(
     target = target_from_dense(T, n_super, asr_weights=asr_w)
     res = fit_production(target, rank=rank, ansatz=ansatz, **fit_kwargs)
     exp = export_production_factors(res, target)
+    if cache_label:
+        exp["meta"] = {**exp["meta"], "fit_cache_label": cache_label}
     asr = res.info["asr"]
     print(f"[fc3-factors] {ansatz} R={rank}: rel_err={res.rel_err:.4f} "
           f"asr_j/norm={asr['leg_j'] / (asr['norm'] or 1.0):.2e}", flush=True)

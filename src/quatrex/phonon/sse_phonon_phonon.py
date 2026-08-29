@@ -303,7 +303,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._q_diff_map = np.asarray(vfactors.q_diff_map, dtype=int)
             self._n_kpts = int(vfactors.n_kpts)
             # Kernel choice for consuming the factors:
-            #   "gram" (the config default): materialise the RANK-LOCAL slice of
+            #   "reconstruct": materialise the RANK-LOCAL slice of
             #     the dense q-folded dict from the factors once at first
             #     compute (the vertex is fixed) and run the dense path; the
             #     factored win is MEMORY + build time, not flops.

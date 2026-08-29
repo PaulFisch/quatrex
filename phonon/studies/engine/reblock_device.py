@@ -330,7 +330,6 @@ def main() -> None:
               f"{len(next(iter(newV.values())))} blocks of "
               f"{nd if a.preserve_primitive_vertices else ndn}^3")
 
-    factor_requires_reconstruct = False
     if a.decomposed_path:
         from quatrex.phonon.vertex_factors import (
             load_decomposed, reblock_decomposed, save_decomposed,
@@ -357,11 +356,6 @@ def main() -> None:
                     **primitive_factors.meta,
                     "support_pairs": support,
                     "support_source": "dense FC3 transport offsets",
-                }
-                axis_a = {x for x, _ in support}
-                axis_b = {y for _, y in support}
-                factor_requires_reconstruct = set(support) != {
-                    (x, y) for x in axis_a for y in axis_b
                 }
             save_decomposed(out / "decomposed_vertices.npz",
                             primitive_factors)
@@ -428,14 +422,18 @@ def main() -> None:
             cfg = cfg.replace("[phonon]\n", "[phonon]\n" + factor_line + "\n")
         cfg = re.sub(r"^qfold_path\s*=.*\n?", "", cfg,
                      flags=re.MULTILINE)
-        if factor_requires_reconstruct:
-            line = 'decomposed_kernel = "reconstruct"'
-            if re.search(r"^decomposed_kernel\s*=.*$", cfg,
-                         flags=re.MULTILINE):
-                cfg = re.sub(r"^decomposed_kernel\s*=.*$", line, cfg,
-                             flags=re.MULTILINE)
-            else:
-                cfg = cfg.replace("[phonon]\n", "[phonon]\n" + line + "\n")
+        # The skinny-Gram kernel decomposes a coupled, non-Cartesian
+        # support_pairs mask into exact rectangles.  It therefore preserves
+        # the dense FC3 support without manufacturing the two missing Si
+        # cross-offsets, and no longer needs the old dense reconstruction
+        # fallback merely because the mask is not A x B.
+        line = 'decomposed_kernel = "gram"'
+        if re.search(r"^decomposed_kernel\s*=.*$", cfg,
+                     flags=re.MULTILINE):
+            cfg = re.sub(r"^decomposed_kernel\s*=.*$", line, cfg,
+                         flags=re.MULTILINE)
+        else:
+            cfg = cfg.replace("[phonon]\n", "[phonon]\n" + line + "\n")
     elif qf.exists() and not a.skip_qfold:
         qfold_line = f'qfold_path = "{out.resolve()}/qfold_vertices.npz"'
         cfg = re.sub(r"^decomposed_vertices_path\s*=.*\n?", "", cfg,
