@@ -280,6 +280,9 @@ def classify(record: dict) -> tuple[str, str]:
     eta = float(record.get("eta_thz") or 0.0)
     if eta != 0.0:
         reasons.append(f"eta={eta:g}")
+    vertex_scale = float(record.get("vertex_scale") or 1.0)
+    if vertex_scale != 1.0:
+        reasons.append(f"nonphysical vertex scale {vertex_scale:g}")
     top = float(record.get("frequency_max_thz") or 0.0)
     if top < 30.6:
         reasons.append(f"frequency top {top:g} THz < 30.6 THz")

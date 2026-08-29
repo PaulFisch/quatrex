@@ -1,9 +1,12 @@
 # Phonon--phonon NEGF without a huge frequency grid or a dense spatial tail
 
-**Status:** code and reduced numerical review, 2026-08-28
+**Status:** code, reduced numerical review and Si production certification,
+2026-08-29
 
-**Production changes:** private passive auxiliary RGF/Woodbury hooks and exact
-FC3-factor reblocking; default solver and public configuration unchanged
+**Production changes:** private passive auxiliary RGF/Woodbury hooks, exact
+FC3-factor reblocking and an opt-in primitive-microblock contraction.  The two
+microblock configuration fields are disabled by default, so legacy solver
+behaviour is unchanged.
 
 **Reference studies:**
 [`_hybrid_frequency_review.py`](../studies/_hybrid_frequency_review.py) and
@@ -22,6 +25,8 @@ the decisive dual-grid follow-up
 [`nonuniform_grid_review.md`](nonuniform_grid_review.md), and the exact
 adaptive-convolution/real-Si follow-up
 [`adaptive_collision_followup.md`](adaptive_collision_followup.md)
+and the support-complete Si certification
+[`si_film_microblock_campaign.md`](si_film_microblock_campaign.md).
 
 ## 1. Executive verdict
 
@@ -598,8 +603,11 @@ fallback remains useful.
 
 ## 10. Recommended representation and interfaces
 
-No public interfaces are added by this review.  If the next gates pass, the
-production design should expose concepts equivalent to:
+The production solver now exposes only the two bounded spatial controls
+`sse_microblock_dof` and `sse_microblock_g_band`.  Both default to zero.  The
+frequency and hierarchical representations remain research interfaces.  If
+their next gates pass, the production design should expose concepts equivalent
+to:
 
 ```text
 HybridSpectrum

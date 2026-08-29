@@ -64,9 +64,14 @@ def test_known_historical_and_certified_classifications() -> None:
         "scba_iterations": 18, "frequency_max_thz": 35.0,
         "eta_thz": 0.0, "microblock_dof": 6, "group_layout": "5,5",
         "retarded_method": "fft", "converged": True,
-        "internal_spread": 8e-4,
+        "internal_spread": 8e-4, "vertex_scale": 1.0,
     }
     assert module.classify(certified)[0] == "trustworthy"
+
+    continuation = dict(certified, vertex_scale=0.25)
+    status, reason = module.classify(continuation)
+    assert status == "superseded"
+    assert "nonphysical vertex scale" in reason
 
 
 def test_log_environment_overrides_toml() -> None:
