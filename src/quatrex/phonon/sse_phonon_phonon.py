@@ -2339,8 +2339,19 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         gl_b, gg_b, glr_b, ggr_b = (
             (gl_q, gg_q, glr_q, ggr_q) if legs_b is None else legs_b)
         cache_key = (q_lo, q_hi, nq, a_lo, a_hi, b_lo, b_hi, tuple(owned))
+        # A q-sectioned calculation visits one (q_a, q_b) tile at a time as
+        # leg B rotates around comm.q.  Keeping the GPU phi permutations for
+        # every visited tile defeats that decomposition: after a full ring the
+        # cache contains the complete O(nq**2) dense vertex and q5 Si fills a
+        # 96-GiB GPU before the first SCBA map.  A tile is never reused within
+        # or between rotations (the Green legs change at every SCBA map), so
+        # retain only the unsliced, replicated-axis task list.  The sliced
+        # path releases its permutations on return and CuPy can reuse the pool
+        # blocks for the next tile.  This is an exact scheduling change; the
+        # same q pairs and ring contractions are accumulated below.
+        transient_tile = a_slice is not None or b_slice is not None
         cache = getattr(self, "_micro_qtasks_cache", {})
-        qtasks = cache.get(cache_key)
+        qtasks = None if transient_tile else cache.get(cache_key)
         if qtasks is None:
             # qdm[Q, q1] = q2 is the authoritative mesh arithmetic.  Its
             # inverse gives Q for each (q1, q2).  Flat-index addition is only
@@ -2391,8 +2402,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                     iq_ext, iqp, iq2, si.start, sj.start,
                                     quad.k1, quad.k1p, quad.k2, quad.k2p,
                                 ) + p)
-            cache[cache_key] = qtasks
-            self._micro_qtasks_cache = cache
+            if not transient_tile:
+                cache[cache_key] = qtasks
+                self._micro_qtasks_cache = cache
 
         if not getattr(self, "_ring_stats_printed", False) and ranks.rank == 0:
             self._ring_stats_printed = True

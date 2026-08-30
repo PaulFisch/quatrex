@@ -203,3 +203,67 @@ def test_internal_q_rotation_reproduces_the_replicated_result() -> None:
                 err_msg=f"{name} block {key}: the q rotation does not "
                         f"reproduce the replicated result",
             )
+
+
+def _run_micro(q_distributed: bool):
+    """One grouped block containing the primitive coupled-q fixture."""
+    comm.configure(
+        block_comm_size=1,
+        block_comm_config=_BACKEND,
+        stack_comm_config=_BACKEND,
+        q_comm_size=global_comm.size,
+        q_comm_config=_BACKEND,
+        override=True,
+    )
+    primitive_sizes, qv, q_diff, gl, gg, _ = _bed()
+    n = int(primitive_sizes.sum())
+    grouped = np.array([n])
+    pattern = _dev_pattern(csr_matrix(np.ones((n, n), np.complex128)))
+
+    def mk():
+        return DSDBCOO.from_sparray(
+            pattern, grouped, global_stack_shape=(NE, NQ),
+            q_distributed=q_distributed)
+
+    g_l, g_g, s_l, s_g, s_r = mk(), mk(), mk(), mk(), mk()
+    for matrix in (g_l, g_g, s_l, s_g, s_r):
+        matrix.data[:] = 0.0
+    qs = g_l.local_q_slice
+    gl_dense = np.zeros((NE, NQ, n, n), dtype=np.complex128)
+    gg_dense = np.zeros_like(gl_dense)
+    for (i, j), value in gl.items():
+        gl_dense[:, :, i*NBS:(i+1)*NBS, j*NBS:(j+1)*NBS] = value
+        gg_dense[:, :, i*NBS:(i+1)*NBS, j*NBS:(j+1)*NBS] = gg[(i, j)]
+    g_l.stack[...].blocks[0, 0] = xp.asarray(gl_dense[:, qs])
+    g_g.stack[...].blocks[0, 0] = xp.asarray(gg_dense[:, qs])
+
+    cfg = _make_cfg("half")
+    cfg.phonon.sse_microblock_dof = NBS
+    cfg.phonon.sse_microblock_g_band = G_BAND
+    ssp = SigmaPhononPhonon(
+        cfg, phonon_frequencies=np.linspace(0.0, 16.0, NE),
+        block_sizes=grouped, qfold=(qv, q_diff, NQ))
+    ssp.compute(g_l, g_g, out=(s_l, s_g, s_r))
+    cache = getattr(ssp, "_micro_qtasks_cache", {})
+    return (np.asarray(get_host(s_l.data)).copy(),
+            np.asarray(get_host(s_g.data)).copy(), cache)
+
+
+@pytest.mark.mpi(min_size=2)
+def test_microblock_q_rotation_streams_exact_tiles() -> None:
+    """Microblock q tiles equal replication and do not accumulate on GPU."""
+    whole_l, whole_g, whole_cache = _run_micro(False)
+    split_l, split_g, split_cache = _run_micro(True)
+    size, rank = global_comm.size, global_comm.rank
+    qs = slice(rank * NQ // size, (rank + 1) * NQ // size)
+    # Replication deliberately retains its one reusable task list.  Rotation
+    # must retain none of its one-use tiles, otherwise memory returns to
+    # O(nq**2) after one pass.
+    assert whole_cache
+    assert split_cache == {}
+    for name, split, whole in (("Sigma^<", split_l, whole_l[:, qs]),
+                               ("Sigma^>", split_g, whole_g[:, qs])):
+        scale = max(float(np.abs(whole).max()), 1e-300)
+        np.testing.assert_allclose(
+            split, whole, rtol=1e-10, atol=1e-10 * scale,
+            err_msg=f"microblock streamed {name} differs from replication")
