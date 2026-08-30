@@ -180,9 +180,6 @@ def test_jfnk_rejects_a_non_descent_trial_before_relinearising():
 
 def test_jfnk_rejection_does_not_enlarge_a_small_requested_trust_radius():
     """A near-root continuation may need a radius below the old 1e-3 floor."""
-    def fixed_point_map(z):
-        return z + z**3 - 2.0 * z + 2.0
-
     mixer = JFNKMixer(
         warmup=0,
         max_krylov=1,
@@ -193,9 +190,18 @@ def test_jfnk_rejection_does_not_enlarge_a_small_requested_trust_radius():
         trust_max=1e-4,
         verbose=False,
     )
-    base = np.array([1.0 + 0.0j])
-    probe = mixer.step(base, fixed_point_map(base))
-    trial = mixer.step(probe, fixed_point_map(probe))
-    mixer.step(trial, fixed_point_map(trial))
+
+    # Seed the state immediately before a rejected trial.  A smooth Newton
+    # direction with a 1e-4 cap is locally descending, so manufacturing the
+    # rejection through a scalar polynomial does not actually exercise this
+    # branch.  Here the trial residual is explicitly twice the stored base
+    # residual, while the stored real vectors let the retry reopen GMRES at
+    # the base point exactly as it does in production.
+    mixer._trial_pending = True
+    mixer._Rk_norm = 1.0
+    mixer._Rk_merit = 1.0
+    mixer._xk_r = np.array([1.0, 0.0])
+    mixer._Fxk_r = np.array([2.0, 0.0])
+    mixer.step(np.array([1.0 + 0.0j]), np.array([3.0 + 0.0j]))
 
     assert mixer._trust_k == pytest.approx(5e-5)
