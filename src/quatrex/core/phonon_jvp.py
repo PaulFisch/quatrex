@@ -39,9 +39,12 @@ where the plain dense identities coincide with the implemented map
 (verified in ``phonon/studies/_jvp_validate.py``).
 
 The frozen ``G^R, G^{<,>}`` are reconstructed densely per rank-local
-frequency once per Newton step (the systems this targets are small,
-N <= a few hundred DOF); each JVP's Dyson part is then a handful of
-dense GEMMs per frequency, negligible against the two bubble calls.
+frequency and transverse momentum once per Newton step (the systems this
+targets are small, N <= a few hundred DOF); each JVP's Dyson part is then a
+handful of host dense GEMMs per stack element.  On a GPU the two perturbed
+Green-function legs are copied back to the device for the ordinary production
+bubble.  This makes the coupled-q route a correctness and convergence tool;
+moving the dense Dyson derivative to the device is a separate optimisation.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ import numpy as np
 
 from qttools import xp
 from qttools.comm import comm
+from qttools.utils.gpu_utils import get_any_location
 
 __all__ = ["PhononJVP"]
 
@@ -91,10 +95,7 @@ class PhononJVP:
 
         _forbid(config.simulation_type != "phonon",
                 "simulation_type == 'phonon'")
-        _forbid(xp.__name__ != "numpy", "the numpy backend")
         _forbid(comm.block.size > 1, "block_comm_size == 1")
-        _forbid(int(np.prod([k for k in config.device.kpoint_grid
-                             if k > 1])) > 1, "a Gamma-only device (nq == 1)")
         _forbid(int(getattr(ph, "sse_ramp_iterations", 0)) > 0,
                 "sse_ramp_iterations == 0 (the ramp counter advances per "
                 "kernel call and would desynchronise the polarisation "
@@ -125,24 +126,46 @@ class PhononJVP:
         self._data = scba.data
         self.recon_check_tol = float(recon_check_tol)
 
+        g = self._data.g_lesser
+        _forbid(getattr(g, "q_section_offsets", None) is not None,
+                "replicated transverse-q storage (q_comm_size == 1 or "
+                "q_distributed == false)")
+        self._stack_shape = tuple(int(n) for n in g.data.shape[:-1])
+        self._n_batch = int(np.prod(self._stack_shape, dtype=np.int64))
+        self._nq = int(np.prod(g.global_stack_shape[1:], dtype=np.int64))
+
         if jvp_form not in ("bilinear", "polarization"):
             raise ValueError(f"Unknown jvp_form={jvp_form!r}.")
-        if jvp_form == "bilinear" and (
-            bool(getattr(ph, "sse_greater_from_lesser", False))
-            or bool(getattr(ph, "sse_hermitian_pairs", False))
-        ):
-            # compute_linearized forces the plain 6-ring path; with a fast
-            # path enabled the driver's map differs from the plain form, so
-            # the mixed-leg cross would linearise the wrong map.
+        self._bilinear_supported = (
+            self._nq == 1
+            and getattr(self._sse, "_vfactors", None) is None
+            and not bool(getattr(ph, "sse_greater_from_lesser", False))
+            and not bool(getattr(ph, "sse_hermitian_pairs", False))
+        )
+        if jvp_form == "bilinear" and not self._bilinear_supported:
+            # compute_linearized deliberately implements only the plain dense
+            # Gamma path.  The polarisation identity calls the unmodified
+            # production kernel, so it already covers coupled q, factored
+            # vertices and the symmetry fast paths without duplicating their
+            # product rules here.
+            reasons = []
+            if self._nq != 1:
+                reasons.append(f"coupled q (nq={self._nq})")
+            if getattr(self._sse, "_vfactors", None) is not None:
+                reasons.append("factored vertices")
+            if bool(getattr(ph, "sse_greater_from_lesser", False)):
+                reasons.append("greater-from-lesser")
+            if bool(getattr(ph, "sse_hermitian_pairs", False)):
+                reasons.append("Hermitian-pair fast path")
             if comm.rank == 0:
                 print(
-                    "PhononJVP: symmetry fast paths enabled -> falling back "
-                    "to the polarization JVP route.", flush=True,
+                    "PhononJVP: " + ", ".join(reasons)
+                    + " -> falling back to the polarization JVP route.",
+                    flush=True,
                 )
             jvp_form = "polarization"
         self.jvp_form = jvp_form
 
-        g = self._data.g_lesser
         rows = getattr(g, "rows", None)
         cols = getattr(g, "cols", None)
         if rows is None or cols is None:
@@ -150,8 +173,8 @@ class PhononJVP:
                 "mixing_method='newton' needs the sparsity rows/cols "
                 "(DSDBCOO-style) to gather/scatter banded blocks."
             )
-        self._rows = np.asarray(rows)
-        self._cols = np.asarray(cols)
+        self._rows = self._host(rows)
+        self._cols = self._host(cols)
 
         self._block_sizes = np.asarray(self._solver.block_sizes, dtype=int)
         self._block_offsets = np.hstack(([0], np.cumsum(self._block_sizes)))
@@ -174,17 +197,6 @@ class PhononJVP:
         out_band = int(getattr(self._solver, "_gf_band", 1))
         self._g_mask = np.abs(blk_r - blk_c) <= out_band
 
-        # Dense block-tridiagonal dynamical matrix (what _btd_subtract
-        # actually subtracts), assembled once.
-        D = self._solver.dynamical_matrix
-        Dd = np.zeros((self._N, self._N), dtype=np.complex128)
-        for i in range(self._nb):
-            for j in range(max(0, i - 1), min(self._nb, i + 2)):
-                blk = np.asarray(D.blocks[i, j])
-                blk = blk.reshape((-1,) + blk.shape[-2:])[0]
-                Dd[self._sl(i), self._sl(j)] = blk
-        self._D_dense = Dd
-
         # Scratch buffers: two kernel inputs (G pattern) and three kernel
         # outputs (Sigma pattern) -- reused across all JVPs.
         dsdbsparse_type = config.compute.dsdbsparse_type
@@ -206,7 +218,9 @@ class PhononJVP:
         self._s_base = None      # (S_l, S_g, S_r_kk) flat complex
         self._g_l_flat = None
         self._g_g_flat = None
-        self._n_local = 0
+        # Backwards-compatible name used by the validation harness.  It now
+        # counts every local stack element, not frequencies alone.
+        self._n_local = self._n_batch
         self._nnz = int(self._rows.size)
 
     # ------------------------------------------------------------------
@@ -216,8 +230,39 @@ class PhononJVP:
         return slice(int(self._block_offsets[i]),
                      int(self._block_offsets[i + 1]))
 
+    @staticmethod
+    def _host(a) -> np.ndarray:
+        """Return a host view/copy of a NumPy or CuPy array."""
+        return np.asarray(get_any_location(
+            a, "numpy", use_pinned_memory=(xp.__name__ == "cupy")))
+
+    def _stack_block(self, block) -> np.ndarray:
+        """Broadcast a block's leading axes over this rank-local stack."""
+        a = self._host(block)
+        shape = self._stack_shape + a.shape[-2:]
+        try:
+            return np.broadcast_to(a, shape).reshape(
+                (self._n_batch,) + a.shape[-2:])
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Cannot broadcast block shape {a.shape} over local JVP "
+                f"stack {self._stack_shape}."
+            ) from exc
+
+    def _dynamical_matrix_dense(self) -> np.ndarray:
+        """Dense q-resolved BTD dynamical matrix over the local stack."""
+        out = np.zeros((self._n_batch, self._N, self._N),
+                       dtype=np.complex128)
+        D = self._solver.dynamical_matrix
+        for i in range(self._nb):
+            for j in range(max(0, i - 1), min(self._nb, i + 2)):
+                out[:, self._sl(i), self._sl(j)] = self._stack_block(
+                    D.blocks[i, j])
+        return out
+
     def _to_dense(self, flat: np.ndarray, bt_only: bool) -> np.ndarray:
-        """(n_local, nnz) pattern data -> dense (n_local, N, N)."""
+        """(*stack, nnz) pattern data -> dense (n_batch, N, N)."""
+        flat = np.asarray(flat).reshape((-1, self._nnz))
         out = np.zeros((flat.shape[0], self._N, self._N),
                        dtype=np.complex128)
         if bt_only:
@@ -267,19 +312,34 @@ class PhononJVP:
         """
         data = self._data
         solver = self._solver
-        n_local = int(np.asarray(data.sigma_lesser.data).shape[0])
+        stack_shape = tuple(int(n) for n in data.sigma_lesser.data.shape[:-1])
+        if stack_shape != self._stack_shape:
+            raise RuntimeError(
+                "PhononJVP stack shape changed after construction: "
+                f"{self._stack_shape} -> {stack_shape}."
+            )
+        n_local = self._n_batch
         self._n_local = n_local
         N = self._N
 
-        w = np.asarray(solver.local_frequencies, dtype=float)
+        w = self._host(solver.local_frequencies).astype(float, copy=False)
         z2 = w**2 + 2j * float(solver.eta) * np.abs(w)
         if getattr(solver, "_ir_floor_diag", None) is not None:
-            z2 = z2 + np.asarray(solver._ir_floor_diag)
+            z2 = z2 + self._host(solver._ir_floor_diag)
+        if not self._stack_shape or self._stack_shape[0] != w.size:
+            raise RuntimeError(
+                f"Local frequency count {w.size} is incompatible with JVP "
+                f"stack shape {self._stack_shape}."
+            )
+        z2 = np.broadcast_to(
+            z2.reshape((w.size,) + (1,) * (len(self._stack_shape) - 1)),
+            self._stack_shape,
+        ).reshape(n_local)
 
-        sr = self._to_dense(np.asarray(data.sigma_retarded_hermitian_prev
-                                       .data), bt_only=True)
+        sr = self._to_dense(self._host(
+            data.sigma_retarded_hermitian_prev.data), bt_only=True)
         A = -sr
-        A -= self._D_dense[None]
+        A -= self._dynamical_matrix_dense()
         idx = np.arange(N)
         A[:, idx, idx] += z2[:, None]
 
@@ -287,22 +347,25 @@ class PhononJVP:
         b0 = self._sl(0)
         bN = self._sl(self._nb - 1)
         if obc.retarded[0] is not None:
-            A[:, b0, b0] -= np.asarray(obc.retarded[0])
-        if obc.retarded[-1] is not None:
-            A[:, bN, bN] -= np.asarray(obc.retarded[-1])
+            A[:, b0, b0] -= self._stack_block(obc.retarded[0])
+        # A one-block device stores the SUM of the two reservoir self-energies
+        # in the sole OBC slot (PhononSolver._compute_obc).  Index 0 and -1
+        # then alias and must not be applied twice.
+        if self._nb > 1 and obc.retarded[-1] is not None:
+            A[:, bN, bN] -= self._stack_block(obc.retarded[-1])
 
         GR = np.linalg.inv(A) if n_local else A.copy()
         GA = GR.conj().swapaxes(-2, -1)
 
         def _source(buf, key):
-            S = self._sub_lower(self._to_dense(np.asarray(buf.data),
+            S = self._sub_lower(self._to_dense(self._host(buf.data),
                                                bt_only=True))
             corner0 = getattr(obc, key)[0]
             cornerN = getattr(obc, key)[-1]
             if corner0 is not None:
-                S[:, b0, b0] += np.asarray(corner0)
-            if cornerN is not None:
-                S[:, bN, bN] += np.asarray(cornerN)
+                S[:, b0, b0] += self._stack_block(corner0)
+            if self._nb > 1 and cornerN is not None:
+                S[:, bN, bN] += self._stack_block(cornerN)
             return S
 
         GL = GR @ _source(data.sigma_lesser_prev, "lesser") @ GA
@@ -312,8 +375,10 @@ class PhononJVP:
 
         # Reconstruction self-check against the solver's actual output
         # (catches any forgotten A-term before it corrupts a Newton step).
-        self._g_l_flat = np.asarray(data.g_lesser.data).copy()
-        self._g_g_flat = np.asarray(data.g_greater.data).copy()
+        self._g_l_flat = self._host(data.g_lesser.data).reshape(
+            n_local, self._nnz).copy()
+        self._g_g_flat = self._host(data.g_greater.data).reshape(
+            n_local, self._nnz).copy()
         num2 = den2 = 0.0
         gm = self._g_mask
         for dense, flat in ((GL, self._g_l_flat), (GG, self._g_g_flat)):
@@ -338,9 +403,9 @@ class PhononJVP:
         # S(G_frozen): the raw kernel output is exactly what sits in the
         # sigma buffers, except that the driver has already added the
         # skew part 0.5*(S_l - S_g) into sigma_retarded_hermitian.
-        s_l = np.asarray(data.sigma_lesser.data).ravel().copy()
-        s_g = np.asarray(data.sigma_greater.data).ravel().copy()
-        s_r = np.asarray(data.sigma_retarded_hermitian.data).ravel().copy()
+        s_l = self._host(data.sigma_lesser.data).ravel().copy()
+        s_g = self._host(data.sigma_greater.data).ravel().copy()
+        s_r = self._host(data.sigma_retarded_hermitian.data).ravel().copy()
         s_r -= 0.5 * (s_l - s_g)
         self._s_base = (s_l, s_g, s_r)
         return recon
@@ -357,6 +422,13 @@ class PhononJVP:
         if self._GR is None:
             raise RuntimeError("PhononJVP.apply() before prepare().")
         form = self.jvp_form if form is None else form
+        if form not in ("bilinear", "polarization"):
+            raise ValueError(f"Unknown JVP form {form!r}.")
+        if form == "bilinear" and not self._bilinear_supported:
+            raise NotImplementedError(
+                "The bilinear JVP is available only for Gamma-only dense "
+                "vertices without symmetry fast paths; use polarization."
+            )
         n_local, nnz = self._n_local, self._nnz
         size = n_local * nnz
         dl = dx[:size].reshape(n_local, nnz)
@@ -406,7 +478,7 @@ class PhononJVP:
         for m in self._out:
             m.data[:] = 0.0
         self._sse.compute(self._in_l, self._in_g, out=self._out)
-        return [np.asarray(m.data).ravel().copy() for m in self._out]
+        return [self._host(m.data).ravel().copy() for m in self._out]
 
     def _kernel_linearized(self, dgl_flat: np.ndarray,
                            dgg_flat: np.ndarray):
@@ -421,4 +493,4 @@ class PhononJVP:
             self._data.g_lesser, self._data.g_greater,
             self._in_l, self._in_g, out=self._out,
         )
-        return [np.asarray(m.data).ravel().copy() for m in self._out]
+        return [self._host(m.data).ravel().copy() for m in self._out]

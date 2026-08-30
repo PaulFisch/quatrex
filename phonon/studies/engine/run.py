@@ -149,8 +149,14 @@ if os.environ.get("QX_JFNK_PTC"):
 if os.environ.get("QX_NEWTON_WARMUP"):  cfg.scba.experimental_mixer.newton_warmup_iters = int(os.environ["QX_NEWTON_WARMUP"])
 if os.environ.get("QX_NEWTON_SWITCH"):  cfg.scba.experimental_mixer.newton_switch_tol = float(os.environ["QX_NEWTON_SWITCH"])
 if os.environ.get("QX_NEWTON_KRYLOV"):  cfg.scba.experimental_mixer.newton_max_krylov = int(os.environ["QX_NEWTON_KRYLOV"])
+if os.environ.get("QX_NEWTON_INNER"):   cfg.scba.experimental_mixer.newton_inner_tol = float(os.environ["QX_NEWTON_INNER"])
+if os.environ.get("QX_NEWTON_FORCING"): cfg.scba.experimental_mixer.newton_forcing = os.environ["QX_NEWTON_FORCING"]
+if os.environ.get("QX_NEWTON_MAX"):     cfg.scba.experimental_mixer.newton_max_newton = int(os.environ["QX_NEWTON_MAX"])
 if os.environ.get("QX_NEWTON_TRUST"):   cfg.scba.experimental_mixer.newton_trust = float(os.environ["QX_NEWTON_TRUST"])
 if os.environ.get("QX_NEWTON_TRUSTMAX"):cfg.scba.experimental_mixer.newton_trust_max = float(os.environ["QX_NEWTON_TRUSTMAX"])
+if os.environ.get("QX_NEWTON_DAMP"):    cfg.scba.experimental_mixer.newton_damp = float(os.environ["QX_NEWTON_DAMP"])
+if os.environ.get("QX_NEWTON_BACKTRACK"): cfg.scba.experimental_mixer.newton_backtrack = int(os.environ["QX_NEWTON_BACKTRACK"])
+if os.environ.get("QX_NEWTON_RECONTOL"): cfg.scba.experimental_mixer.newton_recon_check_tol = float(os.environ["QX_NEWTON_RECONTOL"])
 if os.environ.get("QX_JVP_FORM"):    cfg.scba.experimental_mixer.newton_jvp_form = os.environ["QX_JVP_FORM"]
 if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_precond = os.environ["QX_NEWTON_PRECOND"]
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])

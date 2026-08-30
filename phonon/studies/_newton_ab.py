@@ -21,20 +21,35 @@ if os.environ.get("QX_GBAND"):
     cfg.phonon.sse_g_band = int(os.environ["QX_GBAND"])
 if os.environ.get("QX_JVP_FORM"):
     cfg.scba.experimental_mixer.newton_jvp_form = os.environ["QX_JVP_FORM"]
+if os.environ.get("QX_RECON_TOL"):
+    cfg.scba.experimental_mixer.newton_recon_check_tol = float(
+        os.environ["QX_RECON_TOL"])
 cfg.scba.mixing_method = "newton"
 cfg.scba.max_iterations = 12
 cfg.scba.min_iterations = 12
 setup_context(cfg)
 
 from quatrex.core.scba import SCBA  # noqa: E402
+from qttools import xp  # noqa: E402
+from qttools.comm import comm  # noqa: E402
 
 scba = SCBA(cfg)
 
-snap = np.load(SNAP)
-scba.data.sigma_lesser.data[:] = snap["sigma_lesser"]
-scba.data.sigma_greater.data[:] = snap["sigma_greater"]
-scba.data.sigma_retarded_hermitian.data[:] = snap["sigma_retarded"]
-print(f"AB: loaded snapshot {SNAP}", flush=True)
+def _rank_file(base: str) -> str:
+    """Match the engine's deterministic distributed-snapshot convention."""
+    if comm.size == 1:
+        return base
+    stem = base[:-4] if base.endswith(".npz") else base
+    return f"{stem}.rank{comm.rank}.npz"
+
+
+snap_path = _rank_file(SNAP)
+snap = np.load(snap_path)
+scba.data.sigma_lesser.data[:] = xp.asarray(snap["sigma_lesser"])
+scba.data.sigma_greater.data[:] = xp.asarray(snap["sigma_greater"])
+scba.data.sigma_retarded_hermitian.data[:] = xp.asarray(
+    snap["sigma_retarded"])
+print(f"AB: loaded snapshot {snap_path}", flush=True)
 
 
 class ABMixer:
@@ -81,16 +96,24 @@ class ABMixer:
             t0 = time.time()
             self.Jv_an = jvp.apply(v)
             self.t_jvp = time.time() - t0
-            # Both evaluation routes on the same direction: exact identity
-            # up to rounding (the bilinear cross vs the polarisation form).
-            alt = ("polarization" if jvp.jvp_form == "bilinear"
-                   else "bilinear")
-            Jv_alt = jvp.apply(v, form=alt)
-            self.rel_forms = (self._norm(self.Jv_an - Jv_alt)
-                              / max(self._norm(self.Jv_an), 1e-300))
+            # Both evaluation routes on the same direction when the explicit
+            # mixed-leg implementation supports this kernel.  Coupled q and
+            # factored/symmetry paths deliberately use the production-kernel
+            # polarisation identity only; asking for the Gamma-only bilinear
+            # route there would test a different map.
+            if jvp._bilinear_supported:
+                alt = ("polarization" if jvp.jvp_form == "bilinear"
+                       else "bilinear")
+                Jv_alt = jvp.apply(v, form=alt)
+                self.rel_forms = (self._norm(self.Jv_an - Jv_alt)
+                                  / max(self._norm(self.Jv_an), 1e-300))
+                forms = f"|{jvp.jvp_form}-{alt}|/|Jv|={self.rel_forms:.3e}"
+            else:
+                self.rel_forms = None
+                forms = "bilinear cross unavailable for this production map"
             print(f"AB: recon={self.recon:.2e} t_prepare={t_prep:.1f}s "
                   f"t_jvp={self.t_jvp:.1f}s form={jvp.jvp_form} "
-                  f"|{jvp.jvp_form}-{alt}|/|Jv| = {self.rel_forms:.3e}",
+                  f"{forms}",
                   flush=True)
             self.stage = 1
             self.probing = True
@@ -121,6 +144,9 @@ class ABMixer:
                   f"(|Jv_an|={an_n:.3e})", flush=True)
         out = os.environ.get("QX_AB_OUT")
         if out:
+            if comm.size > 1:
+                stem = out[:-5] if out.endswith(".json") else out
+                out = f"{stem}.rank{comm.rank}.json"
             Path(out).write_text(json.dumps(results, indent=1))
         ok = min(results[f"rel_eps{e:g}"] for e in self.eps_rels) < 3e-5
         print(f"AB: {'PASS' if ok else 'FAIL'}", flush=True)
