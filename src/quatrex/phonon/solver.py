@@ -875,10 +875,23 @@ class PhononSolver(SubsystemSolver):
             sl, sg = self._psd_sigma
             targets = [("sigma_lesser", sl, -1.0),
                        ("sigma_greater", sg, -1.0)] + targets
+        # Match the positivity functional to the bubble functional.  The
+        # acoustic zero-frequency sample is a zero-measure convention and is
+        # explicitly removed from both bubble legs and outputs.  Testing it
+        # here pins the otherwise useful gate to the near-singular contact
+        # Green function at DC (typically a normalised floor of exactly -1),
+        # even though that sample never enters the SCBA map.  A configured
+        # low-frequency mask has the same status and must be skipped as well.
+        cutoff = max(
+            1e-6,
+            float(getattr(self.config.phonon,
+                          "sse_low_freq_mask_thz", 0.0) or 0.0),
+        )
+        skip = xp.abs(xp.asarray(self.local_frequencies).real) < cutoff
         for name, buf, sign in targets:
             rep = psd_residual(
                 buf.data.reshape(n_freq, -1), buf.rows, buf.cols,
-                self.block_sizes, sign=sign,
+                self.block_sizes, sign=sign, skip=skip,
             )
             self.psd_report[name] = rep
             if comm.rank == 0:

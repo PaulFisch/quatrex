@@ -317,7 +317,7 @@ class _StubSolver:
         self.config = types.SimpleNamespace(
             phonon=types.SimpleNamespace(pole_sector=cfg))
         self.block_sizes = block_sizes
-        self.local_frequencies = np.zeros(n_freq)
+        self.local_frequencies = np.arange(n_freq, dtype=float)
         self.psd_report = {}
         self._psd_tol = 1e-10
         self._psd_sigma = None
@@ -376,3 +376,17 @@ def test_positivity_gate_sees_an_indefinite_total():
     s = _StubSolver(cfg, out, sizes, ne)
     s._check_positivity(out)
     assert s.psd_report["g_lesser"]["worst"] < -1e-6
+
+
+def test_positivity_gate_skips_the_bubble_dc_bin():
+    """The acoustic DC sample is masked out of the production bubble."""
+    from quatrex.core.config import PoleSectorConfig
+
+    out, sizes, ne = _psd_bed(seed=4)
+    bad = out[1].data.copy()
+    bad[0, 0] -= 50.0j * np.abs(bad).max()
+    out = (out[0], _StubBuffer(bad, out[1].rows, out[1].cols))
+    cfg = PoleSectorConfig(enabled=True, psd_check=True)
+    s = _StubSolver(cfg, out, sizes, ne)
+    s._check_positivity(out)
+    assert s.psd_report["g_greater"]["worst"] > -1e-12
