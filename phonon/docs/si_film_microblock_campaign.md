@@ -518,10 +518,127 @@ roundoff and \(8.5\times10^{-16}\) throughout.  The best distributed state is
 retained.  This shows that the exact support-complete map preserves the
 conserving identities and that 30 direct linear maps are insufficient.  It
 does not provide a conductance value or a no-fixed-point result because the
-q=3, 1 THz grid is deliberately coarse.  A smaller-mixing restart from the
-best state is the next fixed-point test.  The full trajectory and its physical
+q=3, 1 THz grid is deliberately coarse.  The best state is retained for the
+fixed-point gates below.  The full trajectory and its physical
 switches are recorded in
 `phonon/scripts/data/si_conventional_100_fc4_refit_l5_q3_dense_scba.json`.
+
+Two conventional root-finder restarts do not improve that state.  Job
+4558446 applies linear damping 0.01.  Its nine completed maps increase the
+residual monotonically from 0.25858 to 0.29980.  Job 4558460 then builds a
+depth-five Broyden model with a 0.05 trust radius.  The first secant step
+reduces the preceding 0.30281 residual to 0.28479, but the trajectory ends at
+0.29092 and never improves the starting state.  Both runs retain internal
+current spreads near \(7.1\times10^{-5}\) and bubble balance at roundoff.
+
+The analytic Jacobian path was extended to the same coupled-q GPU map.  Its
+dense Dyson derivative treats frequency and both transverse momenta as batch
+axes, including the q-dependent dynamical matrix and contacts.  The
+production q-folded bubble remains on the GPU and is differentiated by the
+polarisation identity.  A single grouped Dyson block needs special handling:
+the sole open-boundary slot already contains the sum of both reservoirs and
+must enter the reconstructed matrix once, not once as index 0 and again as
+index -1.
+
+Alps job 4558536 validates the resulting action at the saved 0.25858 state.
+The dense reconstruction and the zero-broadening RGF result differ by
+\(6.09\times10^{-7}\).  This exceeds the original \(10^{-8}\) tripwire, so
+the A/B gate uses a \(10^{-5}\) reconstruction tolerance and tests the
+composed derivative against the actual RGF map.  On the four distributed
+frequency slices, relative central-difference errors are between
+\(6.34\times10^{-10}\) and \(9.81\times10^{-10}\) at a relative step of
+\(10^{-5}\), and between \(5.95\times10^{-9}\) and
+\(8.25\times10^{-9}\) at \(10^{-6}\).  The reconstruction difference is
+therefore a numerical ordering difference rather than an omitted term in the
+Jacobian at this state.  Preparation takes 0.4 s and one exact Jacobian action
+takes 31.3 s on four GH200s.  The machine-readable gate is
+`phonon/scripts/data/si_conventional_100_fc4_refit_l5_q3_jvp_gate.json`.
+
+The first accepted implementation performs the batched dense Dyson derivative
+on the host.  A production follow-up keeps its frozen matrices and all
+directional products on the GPU, so only the Newton vector and the final
+bubble output cross the host boundary.  Job 4558617 repeats the complete A/B
+gate.  Its two central-difference ranges are
+\(6.34\times10^{-10}\)--\(9.82\times10^{-10}\) and
+\(5.95\times10^{-9}\)--\(8.25\times10^{-9}\), respectively.  One action
+takes 30.32--30.34 s, 2.96 per cent below the previous maximum of 31.26 s.
+The modest reduction shows that the two dense production-bubble evaluations,
+not the Dyson products or transfers, dominate this L5 q=3 action.
+
+The accepted Jacobian changes the nonlinear conclusion.  Job 4558539 applies
+inexact Newton corrections with at most eight Krylov vectors and a trust
+fraction increasing from 0.1 to 0.2.  Starting from the same 0.25858 state,
+successive physical-map residuals are 0.21432, 0.15472, 0.077401, 0.014257
+and 0.0020498.  The required GMRES dimensions are 4, 4, 4, 3, 3 and 6.  The
+last correction is checkpointed before its physical map can be evaluated at
+the six-map limit.
+
+Job 4558585 evaluates that correction and obtains a residual of
+\(2.5800\times10^{-6}\).  Two further minimum-map checks reduce it to
+\(1.4789\times10^{-7}\) and \(2.7630\times10^{-10}\), at which point the
+production convergence path accepts the solution.  The two lead currents are
+both 33.926229 in the driver's units, their relative mismatch and the internal
+spread are \(6.95\times10^{-11}\), and the largest bubble-balance defect over
+both jobs is \(1.84\times10^{-16}\).  The GPU memory-pool peak is 34.30 GB.
+The first and continuation SCBA sections take 873.6 and 366.6 s,
+respectively.
+
+This establishes that a full-strength fixed point exists for the exact dense,
+support-complete functional and that its earlier apparent instability was a
+solver failure.  It does not establish a material conductance.  The
+\(3\times3\) transverse mesh and 1 THz spacing were chosen for a nonlinear
+gate, and both require independent refinement before the state can enter a
+length curve.  In particular, conservation at a discrete fixed point does not
+bound its frequency-quadrature error.
+
+The first spectral continuation halves the spacing to 0.5 THz while retaining
+the 0--40 THz Dyson window, the 0--80 THz bubble window, exact dense FC3 and
+the complete primitive spatial support.  Piecewise-linear interpolation of
+the converged 1 THz state gives a relative residual of 0.98334, a lead current
+of 34.17803 and an internal spread of 0.034545 on the refined functional.  It
+is a better physical initial state than a later Newton-generated checkpoint:
+the latter has the lower residual 0.50094 but the much larger spread 0.21079.
+
+Linear mixing is inexpensive on this bed.  One physical map takes about
+32--33 s on four GH200s.  Mixing factors 0.05 and 0.10 follow the same
+trajectory when compared at equal accumulated mixing \(n a\).  For example,
+the factor-0.10 run gives residual 0.34775 and spread 0.022699 at map 6, while
+the factor-0.05 run gives 0.34934 and 0.022316 at map 12.  The larger factor
+therefore halves the iteration count without exciting a new mode.  It does
+not make the map contractive.  The factor-0.10 residual reaches 0.24612 at
+map 14 and then rises to 0.42319 by map 24.  The factor-0.05 control reaches
+the matching minimum 0.24556 at map 27 and rises on the next two maps.  This
+is a bounded Picard oscillation rather than an explosion.  Reducing the factor
+changes its time scale but not the underlying slowly unstable direction.  The
+two complete trajectories are recorded in
+`phonon/scripts/data/si_conventional_100_fc4_refit_l5_q3_w05_mixer_gate.json`.
+
+An exact Newton control from the lower-residual checkpoint requires all eight
+Krylov vectors.  Its correction costs sixteen production-bubble contractions
+before the trial map, compared with one contraction for a linear update.  A
+relative-residual line search accepts a decrease from 0.50094 to 0.42423, but
+the accepted state emits into both leads and has the maximal normalised spread
+2.0.  Residual globalisation alone is therefore insufficient on the refined
+functional.  Linear mixing with \(0\le a\le1\) is a convex combination of two
+passive Keldysh sources and remains in the passive cone.  An unrestricted
+Newton correction does not.  A future Newton continuation must impose a
+Keldysh-cone and heat-flow branch condition, or start only after passive
+Picard continuation has entered its local basin.
+
+The positivity control also exposed a diagnostic error.  The old production
+gate included the acoustic zero-frequency sample even though the bubble masks
+that zero-measure bin.  It consequently reported a normalised greater-Green
+floor of exactly -1 at DC while every scattering-source test passed.  Commit
+`20c1fb77` passes the bubble mask to the existing positivity residual and adds
+a planted DC-only regression.  The physical bubble and the SCBA iteration are
+unchanged.
+
+Jobs 4558522 and 4558525 are harness-only failures before an SCBA map.  They
+respectively used a communicator alias absent from the older Alps checkout
+and omitted the explicit NumPy-to-CuPy checkpoint transfer.  Job 4558528
+evaluates one map and stops at the original reconstruction tripwire; it does
+not apply a Jacobian action.  These submissions remain in the node-hour
+ledger and are not numerical trials of the root finder.
 
 The submitted job predates the launcher provenance correction and writes the
 then-local commit to its result archive.  The independently queried Alps

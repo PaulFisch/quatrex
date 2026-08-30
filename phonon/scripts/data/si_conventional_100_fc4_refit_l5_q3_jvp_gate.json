@@ -1,0 +1,103 @@
+{
+  "schema": "quatrex.phonon.si_exact_jvp_gate.v1",
+  "date": "2026-08-30",
+  "structure": "conventional [100] Si, joint FC2/FC3/FC4 hiPhive refit, cubic SCBA uses FC2+FC3",
+  "device": {
+    "primitive_cells": 5,
+    "dyson_groups": [5],
+    "primitive_dof": 24,
+    "microblock_g_band": 4,
+    "generated_sigma_band": 4
+  },
+  "discretisation": {
+    "transverse_mesh": [3, 3],
+    "frequency_min_thz": 0.0,
+    "frequency_max_thz": 40.0,
+    "frequency_spacing_thz": 1.0,
+    "aux_frequency_max_thz": 80.0,
+    "aux_frequency_spacing_thz": 1.0,
+    "retarded_method": "fft",
+    "eta": 0.0
+  },
+  "vertex": {
+    "representation": "dense q-folded primitive FC3",
+    "vertex_scale": 1.0
+  },
+  "state": {
+    "source_job": 4558403,
+    "snapshot": "sigma_best.rank{0,1,2,3}.npz",
+    "relative_retarded_residual": 0.25858
+  },
+  "implementation": {
+    "production_checkout": "87945ef3d7fb286f64d919a0a8386370d9ebbc50",
+    "validated_local_commit": "9929d45d797d8ccc95a2a97fc8c25e3e45646954",
+    "run_local_jvp_sha256": "67bb9802d9faaa6c44f26c8139ff1b5230e7e53981d5b7fe1162175795cd2101",
+    "backend": "CuPy/GH200 bubble; initial host dense Dyson derivative followed by validated GPU-resident derivative",
+    "jvp_form": "polarization"
+  },
+  "jobs": [
+    {
+      "job_id": 4558522,
+      "classification": "harness-only failure",
+      "reason": "older production checkout does not export the newer qttools.comm.ranks alias; no SCBA map was evaluated"
+    },
+    {
+      "job_id": 4558525,
+      "classification": "harness-only failure",
+      "reason": "distributed NumPy checkpoint was assigned to a CuPy buffer without xp.asarray; no SCBA map was evaluated"
+    },
+    {
+      "job_id": 4558528,
+      "classification": "diagnostic tripwire",
+      "reason": "the complete map was evaluated and the dense/RGF reconstruction difference 6.0906455283e-7 exceeded the deliberately strict 1e-8 default before any JVP was applied"
+    },
+    {
+      "job_id": 4558536,
+      "classification": "accepted validation",
+      "reconstruction_relative_error": 6.090645528297907e-7,
+      "reconstruction_tolerance_for_gate": 1e-5,
+      "jvp_walltime_s": {
+        "min": 31.251386880874634,
+        "max": 31.261407613754272
+      },
+      "relative_error_vs_central_difference": {
+        "step_1e-5": {
+          "min": 6.342565293023675e-10,
+          "max": 9.81343629495733e-10
+        },
+        "step_1e-6": {
+          "min": 5.95001848684303e-9,
+          "max": 8.251753537958676e-9
+        }
+      }
+    },
+    {
+      "job_id": 4558617,
+      "classification": "accepted GPU-resident validation",
+      "validated_commit": "9a4f0350",
+      "run_local_jvp_sha256": "6ec542761c153636bbc7d952805ce0a0721374e03d94fa22a9930da3468764c7",
+      "reconstruction_relative_error": 6.090645528297907e-7,
+      "jvp_walltime_s": {
+        "min": 30.32457447052002,
+        "max": 30.335092544555664
+      },
+      "relative_error_vs_central_difference": {
+        "step_1e-5": {
+          "min": 6.341428761220125e-10,
+          "max": 9.815156271550987e-10
+        },
+        "step_1e-6": {
+          "min": 5.950359211441422e-9,
+          "max": 8.252302428807012e-9
+        }
+      },
+      "walltime_change_vs_host_max": -0.02962469653364441,
+      "interpretation": "Keeping the batched dense Dyson derivative on the GPU preserves the oracle and reduces this L5 q3 JVP wall time by 2.96%. The two production bubble evaluations remain the dominant cost."
+    }
+  ],
+  "decision": {
+    "accepted": true,
+    "reason": "the analytic action agrees with the actual distributed RGF production map to below 1e-8 on both finite-difference scales; the 6.09e-7 frozen-G reconstruction discrepancy is a numerical ordering difference and does not limit the composed derivative at the tested state",
+    "production_reconstruction_tolerance": 1e-5
+  }
+}

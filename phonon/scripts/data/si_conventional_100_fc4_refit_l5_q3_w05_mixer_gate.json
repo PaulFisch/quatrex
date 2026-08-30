@@ -1,0 +1,144 @@
+{
+  "schema": "quatrex.phonon.si_refined_mixer_gate.v1",
+  "date": "2026-08-30",
+  "structure": "conventional [100] Si, joint FC2/FC3/FC4 hiPhive refit, cubic SCBA uses FC2+FC3",
+  "device": {
+    "primitive_cells": 5,
+    "dyson_groups": [5],
+    "primitive_dof": 24,
+    "microblock_g_band": 4,
+    "generated_sigma_band": 4
+  },
+  "discretisation": {
+    "transverse_mesh": [3, 3],
+    "frequency_min_thz": 0.0,
+    "frequency_max_thz": 40.0,
+    "frequency_spacing_thz": 0.5,
+    "aux_frequency_max_thz": 80.0,
+    "aux_frequency_spacing_thz": 0.5,
+    "retarded_method": "causal_fft",
+    "eta": 0.0,
+    "temperatures_k": [305.0, 295.0],
+    "vertex": "exact dense q-folded primitive FC3",
+    "vertex_scale": 1.0
+  },
+  "clean_seed": {
+    "source": "piecewise-linear regrid of the converged q3, 1 THz exact-Newton state",
+    "path": "job 4558595 sigma_seed.rank{0,1,2,3}.npz",
+    "initial_relative_residual": 0.98334,
+    "initial_internal_spread": 0.034545,
+    "initial_lead_current_solver_units": 34.17803
+  },
+  "linear_runs": [
+    {
+      "job_id": 4558644,
+      "mixing_factor": 0.05,
+      "maps": 30,
+      "stopped_after_turning_point": true,
+      "median_map_walltime_s_excluding_jit": 33.2177,
+      "relative_residual": [
+        0.98334, 0.93031, 0.85961, 0.65741, 0.50780, 0.49205,
+        0.46982, 0.43820, 0.41063, 0.38644, 0.36807, 0.35812,
+        0.34934, 0.34142, 0.33412, 0.32722, 0.32058, 0.31405,
+        0.30755, 0.30102, 0.29441, 0.28771, 0.28089, 0.27398,
+        0.26697, 0.25989, 0.25274, 0.24556, 0.24713, 0.25085
+      ],
+      "internal_spread": [
+        0.034545, 0.026474, 0.018969, 0.012173, 0.0061978,
+        0.00099587, 0.0035513, 0.0075636, 0.011139, 0.014352,
+        0.017259, 0.019903, 0.022316, 0.024524, 0.026550,
+        0.028410, 0.030120, 0.031693, 0.033140, 0.034471,
+        0.035695, 0.036820, 0.037852, 0.038798, 0.039664,
+        0.040454, 0.041175, 0.041829, 0.042422, 0.042956
+      ],
+      "lead_current_solver_units": [
+        34.17803, 33.82155, 33.51171, 33.24877, 33.02741, 32.83956,
+        32.67755, 32.53542, 32.40886, 32.29474, 32.19075, 32.09515,
+        32.00660, 31.92404, 31.84659, 31.77356, 31.70435, 31.63846,
+        31.57545, 31.51494, 31.45661, 31.40016, 31.34534, 31.29192,
+        31.23969, 31.18846, 31.13806, 31.08834, 31.03916, 30.99038
+      ],
+      "best_residual": 0.24556,
+      "best_map_zero_based": 27,
+      "residual_after_best": [0.24713, 0.25085],
+      "maximum_bubble_energy_balance_defect": 4.003e-16
+    },
+    {
+      "job_id": 4558648,
+      "mixing_factor": 0.10,
+      "maps": 25,
+      "stopped_after_turning_point": true,
+      "median_map_walltime_s_excluding_jit": 31.9889,
+      "relative_residual": [
+        0.98334, 0.85228, 0.49366, 0.45988, 0.40095, 0.36519,
+        0.34775, 0.33362, 0.32082, 0.30817, 0.29507, 0.28133,
+        0.26700, 0.25224, 0.24612, 0.25540, 0.26224, 0.27341,
+        0.28790, 0.30703, 0.32632, 0.34556, 0.36452, 0.38983,
+        0.42319
+      ],
+      "internal_spread": [
+        0.034545, 0.018830, 0.0060222, 0.0037508, 0.011381,
+        0.017566, 0.022699, 0.027010, 0.030653, 0.033738,
+        0.036350, 0.038554, 0.040406, 0.041948, 0.043220,
+        0.044252, 0.045073, 0.045706, 0.046173, 0.046494,
+        0.046687, 0.046769, 0.046754, 0.046656, 0.046491
+      ],
+      "lead_current_solver_units": [
+        34.17803, 33.48802, 32.97858, 32.62046, 32.35209, 32.13723,
+        31.95722, 31.80149, 31.66341, 31.53843, 31.42323, 31.31532,
+        31.21274, 31.11392, 31.01757, 30.92263, 30.82818, 30.73341,
+        30.63761, 30.54012, 30.44035, 30.33778, 30.23190, 30.12229,
+        30.00853
+      ],
+      "best_residual": 0.24612,
+      "best_map_zero_based": 14,
+      "residual_after_best_final": 0.42319,
+      "maximum_bubble_energy_balance_defect": 4.003e-16,
+      "positivity_audit": {
+        "sigma_lesser": "pass at every completed map",
+        "sigma_greater": "pass at every completed map",
+        "old_green_report": "worst -1 at omega index 0 only",
+        "diagnostic_fix": "20c1fb77 excludes the zero-frequency bin already masked by the bubble"
+      }
+    }
+  ],
+  "equal_accumulated_mixing_checks": [
+    {
+      "na": 0.6,
+      "mix_0p05_map": 12,
+      "mix_0p05_residual": 0.34934,
+      "mix_0p10_map": 6,
+      "mix_0p10_residual": 0.34775
+    },
+    {
+      "na_approximately": 1.4,
+      "mix_0p05_best_map": 27,
+      "mix_0p05_best_residual": 0.24556,
+      "mix_0p10_best_map": 14,
+      "mix_0p10_best_residual": 0.24612
+    }
+  ],
+  "newton_control": {
+    "job_id": 4558636,
+    "source": "job 4558624 sigma_best, a prior Newton-generated fine-grid state",
+    "relative_residual": [0.50094, 0.42423],
+    "internal_spread": [0.21079, 2.0],
+    "lead_current_solver_units": [32.97253, 37.08455],
+    "accepted_trial": "sign inversion: emitting into both leads",
+    "gmres_dimension": 8,
+    "inner_residual_ratio": 0.266,
+    "requested_inner_tolerance": 0.1,
+    "trust_fraction": 0.1,
+    "production_bubble_contractions_per_correction": 16,
+    "maximum_bubble_energy_balance_defect": 1.242e-16,
+    "classification": "residual decrease but physical-branch failure; stopped after the first trial"
+  },
+  "decision": {
+    "linear_explodes": false,
+    "linear_converges": false,
+    "classification": "bounded slowly unstable Picard trajectory",
+    "mixing_factor_conclusion": "0.10 halves map count relative to 0.05 but both turn at the same accumulated mixing; smaller damping does not cure the mode",
+    "newton_conclusion": "unconstrained residual-only Newton is rejected on the refined grid; require Keldysh-cone and heat-flow branch globalisation",
+    "production_conclusion": "retain passive linear continuation as the cheap baseline, but do not publish a 0.5 THz conductance from this non-converged state"
+  }
+}

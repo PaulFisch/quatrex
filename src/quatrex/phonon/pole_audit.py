@@ -120,7 +120,10 @@ def psd_residual(
         values : NDArray
             ``(n_omega, nnz)`` ``G^<`` or ``G^>`` on the stored pattern.
         sign : float
-            ``-1`` for ``G^<`` (``-i G^< >= 0``), ``+1`` for ``G^>``.
+            ``-1`` for both ``G^<`` and ``G^>`` in Quatrex's
+            occupation-positive storage convention, where
+            ``-i G^{<,>} >= 0``.  The explicit argument remains useful for
+            auditing arrays stored in another convention.
         skip : NDArray, optional
             ``(n_omega,)`` boolean; ``True`` drops that bin from BOTH the search
             and the normalisation. Pass the bubble's own ``conv_mask``. Without it
