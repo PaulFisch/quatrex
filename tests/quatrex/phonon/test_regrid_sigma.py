@@ -69,3 +69,17 @@ def test_distributed_checkpoint_regrid_and_partition(tmp_path, monkeypatch):
         np.load(regrid_sigma._rank_path(target, rank))["sigma_lesser"].shape[0]
         for rank in range(4)
     ] == [2, 1, 1, 1]
+
+
+def test_nested_grid_extension_is_an_exact_zero_fill():
+    old = np.array([0.0, 0.125, 0.25])
+    new = np.arange(0.0, 0.625 + 0.0625, 0.125)
+    values = (
+        np.arange(old.size * 2 * 3).reshape(old.size, 2, 3)
+        * (1.0 + 2.0j)
+    )
+
+    result = regrid_sigma._interpolate_frequency(values, old, new)
+
+    np.testing.assert_array_equal(result[:old.size], values)
+    np.testing.assert_array_equal(result[old.size:], 0.0)

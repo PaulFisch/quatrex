@@ -63,6 +63,48 @@ def _save_sigma(base: Path, state: dict[str, np.ndarray], parts: int) -> None:
                     for key, values in split_state.items()})
 
 
+def _interpolate_frequency(
+        values: np.ndarray, old: np.ndarray, new: np.ndarray) -> np.ndarray:
+    """Piecewise-linearly regrid the leading frequency axis.
+
+    Refinement campaigns often extend a uniform grid without moving any of
+    its existing samples.  Detect that case and copy the complete matrix
+    slices directly.  Besides being exact, this avoids one ``np.interp`` call
+    per q/matrix element for multi-gigabyte distributed Si checkpoints.
+    Samples outside the source interval retain the established zero-fill
+    convention.
+    """
+    sig = np.asarray(values)
+    old = np.asarray(old, dtype=float).ravel()
+    new = np.asarray(new, dtype=float).ravel()
+    if sig.shape[0] != old.size:
+        raise ValueError(
+            f"frequency axis {sig.shape[0]} does not match the old grid "
+            f"({old.size} points)")
+
+    indices = np.searchsorted(new, old)
+    inside = (new >= old[0] - 1e-12) & (new <= old[-1] + 1e-12)
+    nested = (
+        np.all(indices < new.size)
+        and np.allclose(new[indices], old, rtol=0.0, atol=1e-12)
+        and np.count_nonzero(inside) == old.size
+    )
+    if nested:
+        out = np.zeros((new.size,) + sig.shape[1:], dtype=sig.dtype)
+        out[indices] = sig
+        return out
+
+    flat = sig.reshape(sig.shape[0], -1)
+    result = np.empty((new.size, flat.shape[1]), dtype=flat.dtype)
+    for j in range(flat.shape[1]):
+        result[:, j] = (
+            np.interp(new, old, flat[:, j].real, left=0.0, right=0.0)
+            + 1j * np.interp(
+                new, old, flat[:, j].imag, left=0.0, right=0.0)
+        )
+    return result.reshape((new.size,) + sig.shape[1:])
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--sigma", type=Path, required=True,
@@ -113,14 +155,7 @@ def main() -> None:
             raise SystemExit(
                 f"{key}: frequency axis {sig.shape[0]} does not match the "
                 f"old grid ({old.size} pts); wrong --old-grid?")
-        flat = sig.reshape(sig.shape[0], -1)
-        res = np.empty((new.size, flat.shape[1]), dtype=flat.dtype)
-        for j in range(flat.shape[1]):
-            res[:, j] = (np.interp(new, old, flat[:, j].real, left=0.0,
-                                   right=0.0)
-                         + 1j * np.interp(new, old, flat[:, j].imag,
-                                          left=0.0, right=0.0))
-        out[key] = a.scale * res.reshape((new.size,) + sig.shape[1:])
+        out[key] = a.scale * _interpolate_frequency(sig, old, new)
 
     _save_sigma(a.out, out, a.output_parts)
     print(f"wrote {a.out}: {old.size} -> {new.size} frequency points "
