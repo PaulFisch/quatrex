@@ -1,8 +1,9 @@
 # daint NORMAL-partition job ledger
 
-Hard cap 500 node-hours committed (nodes x walltime at submission; raised from
+Hard cap 525 node-hours committed (nodes x walltime at submission; raised from
 100 by Paul 2026-08-05, to 300 on 2026-08-10, to 400 on 2026-08-15 and to 500
-on 2026-08-29). Paul authorises any excess BEFORE launch.
+on 2026-08-29, then to 525 on 2026-08-30 for one 2-node, 12-hour Si
+continuation). Paul authorises any excess BEFORE launch.
 
 **Reading the totals.** The `nh` column charges *submitted* walltime x nodes,
 which is the only figure known before a run starts, so it overcounts every job
