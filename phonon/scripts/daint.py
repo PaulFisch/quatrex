@@ -225,6 +225,25 @@ def _guard(args):
         sys.exit(f"qx-{args.name} is already queued/running")
 
 
+def _source_commit_env() -> str:
+    """Return provenance exports using the checkout that will actually run."""
+    local_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=LOCAL_REPO, text=True
+    ).strip()
+    remote_commit = ssh(f"git -C {REPO} rev-parse HEAD", check=True).strip()
+    if not remote_commit:
+        sys.exit("cannot determine the Daint source commit")
+    lines = f"export QX_SOURCE_COMMIT={remote_commit}"
+    if local_commit != remote_commit:
+        lines += f"\nexport QX_LOCAL_SOURCE_COMMIT={local_commit}"
+        print(
+            "warning: local and Daint commits differ; recording remote "
+            f"QX_SOURCE_COMMIT={remote_commit} and local audit commit "
+            f"{local_commit}", file=sys.stderr,
+        )
+    return lines
+
+
 def cmd_launch(args):
     _guard(args)
     if args.config and args.command:
@@ -235,10 +254,7 @@ def cmd_launch(args):
     run_dir = f"{REPO}/cluster/{args.name}"
     env_lines = "\n".join(f"export {shlex.quote(e)}" for e in args.env or [])
     if not any(e.startswith("QX_SOURCE_COMMIT=") for e in (args.env or [])):
-        source_commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=LOCAL_REPO, text=True
-        ).strip()
-        env_lines += f"\nexport QX_SOURCE_COMMIT={source_commit}"
+        env_lines += "\n" + _source_commit_env()
     if args.command:
         payload = " ".join(args.command)
     else:
