@@ -40,11 +40,11 @@ where the plain dense identities coincide with the implemented map
 
 The frozen ``G^R, G^{<,>}`` are reconstructed densely per rank-local
 frequency and transverse momentum once per Newton step (the systems this
-targets are small, N <= a few hundred DOF); each JVP's Dyson part is then a
-handful of host dense GEMMs per stack element.  On a GPU the two perturbed
-Green-function legs are copied back to the device for the ordinary production
-bubble.  This makes the coupled-q route a correctness and convergence tool;
-moving the dense Dyson derivative to the device is a separate optimisation.
+targets are small, N <= a few hundred DOF).  The frozen reconstruction remains
+on the host because it is performed once per Newton step.  Its matrices are
+then copied once to the active array backend, so every JVP's dense Dyson
+products and the following production bubble remain on the GPU when CuPy is
+selected.
 """
 
 from __future__ import annotations
@@ -175,6 +175,8 @@ class PhononJVP:
             )
         self._rows = self._host(rows)
         self._cols = self._host(cols)
+        self._rows_device = xp.asarray(self._rows)
+        self._cols_device = xp.asarray(self._cols)
 
         self._block_sizes = np.asarray(self._solver.block_sizes, dtype=int)
         self._block_offsets = np.hstack(([0], np.cumsum(self._block_sizes)))
@@ -189,6 +191,7 @@ class PhononJVP:
         # (system-matrix subtraction and the RGF source reads); the d2
         # pattern slots (present when sse_g_band = 2) carry J == 0.
         self._bt_mask = np.abs(blk_r - blk_c) <= 1
+        self._bt_mask_device = xp.asarray(self._bt_mask)
         # The RGF writes G only on its output band (= sse_g_band: 1 =
         # block-tridiagonal, 2 = + second off-diagonal, 3 = + third); pattern
         # slots beyond it -- present when the cutoff makes the pattern
@@ -196,6 +199,7 @@ class PhononJVP:
         # zero in the JVP's dG too.
         out_band = int(getattr(self._solver, "_gf_band", 1))
         self._g_mask = np.abs(blk_r - blk_c) <= out_band
+        self._g_mask_device = xp.asarray(self._g_mask)
 
         # Scratch buffers: two kernel inputs (G pattern) and three kernel
         # outputs (Sigma pattern) -- reused across all JVPs.
@@ -215,9 +219,15 @@ class PhononJVP:
         self._GA = None
         self._GL = None
         self._GG = None
+        self._GR_device = None
+        self._GA_device = None
+        self._GL_device = None
+        self._GG_device = None
         self._s_base = None      # (S_l, S_g, S_r_kk) flat complex
         self._g_l_flat = None
         self._g_g_flat = None
+        self._g_l_flat_device = None
+        self._g_g_flat_device = None
         # Backwards-compatible name used by the validation harness.  It now
         # counts every local stack element, not frequencies alone.
         self._n_local = self._n_batch
@@ -260,21 +270,27 @@ class PhononJVP:
                     D.blocks[i, j])
         return out
 
-    def _to_dense(self, flat: np.ndarray, bt_only: bool) -> np.ndarray:
+    def _to_dense(self, flat: np.ndarray, bt_only: bool, *,
+                  device: bool = False) -> np.ndarray:
         """(*stack, nnz) pattern data -> dense (n_batch, N, N)."""
-        flat = np.asarray(flat).reshape((-1, self._nnz))
-        out = np.zeros((flat.shape[0], self._N, self._N),
-                       dtype=np.complex128)
+        lib = xp if device else np
+        rows = self._rows_device if device else self._rows
+        cols = self._cols_device if device else self._cols
+        flat = lib.asarray(flat).reshape((-1, self._nnz))
+        out = lib.zeros((flat.shape[0], self._N, self._N),
+                        dtype=lib.complex128)
         if bt_only:
-            m = self._bt_mask
-            out[:, self._rows[m], self._cols[m]] = flat[:, m]
+            m = self._bt_mask_device if device else self._bt_mask
+            out[:, rows[m], cols[m]] = flat[:, m]
         else:
-            out[:, self._rows, self._cols] = flat
+            out[:, rows, cols] = flat
         return out
 
-    def _to_flat(self, dense: np.ndarray) -> np.ndarray:
+    def _to_flat(self, dense: np.ndarray, *, device: bool = False) -> np.ndarray:
         """Dense (n_local, N, N) -> (n_local, nnz) pattern data."""
-        return dense[:, self._rows, self._cols]
+        rows = self._rows_device if device else self._rows
+        cols = self._cols_device if device else self._cols
+        return dense[:, rows, cols]
 
     def _sub_lower(self, dense: np.ndarray) -> np.ndarray:
         """RGF input substitution: lower blocks <- -(upper)^H, diag kept."""
@@ -372,6 +388,10 @@ class PhononJVP:
         GG = GR @ _source(data.sigma_greater_prev, "greater") @ GA
 
         self._GR, self._GA, self._GL, self._GG = GR, GA, GL, GG
+        self._GR_device = xp.asarray(GR)
+        self._GA_device = xp.asarray(GA)
+        self._GL_device = xp.asarray(GL)
+        self._GG_device = xp.asarray(GG)
 
         # Reconstruction self-check against the solver's actual output
         # (catches any forgotten A-term before it corrupts a Newton step).
@@ -379,6 +399,8 @@ class PhononJVP:
             n_local, self._nnz).copy()
         self._g_g_flat = self._host(data.g_greater.data).reshape(
             n_local, self._nnz).copy()
+        self._g_l_flat_device = xp.asarray(self._g_l_flat)
+        self._g_g_flat_device = xp.asarray(self._g_g_flat)
         num2 = den2 = 0.0
         gm = self._g_mask
         for dense, flat in ((GL, self._g_l_flat), (GG, self._g_g_flat)):
@@ -431,23 +453,39 @@ class PhononJVP:
             )
         n_local, nnz = self._n_local, self._nnz
         size = n_local * nnz
-        dl = dx[:size].reshape(n_local, nnz)
-        dg = dx[size:2 * size].reshape(n_local, nnz)
-        dr = dx[2 * size:].reshape(n_local, nnz)
+        device = xp.__name__ == "cupy"
+        work = xp.asarray(dx) if device else np.asarray(dx)
+        dl = work[:size].reshape(n_local, nnz)
+        dg = work[size:2 * size].reshape(n_local, nnz)
+        dr = work[2 * size:].reshape(n_local, nnz)
 
         # Dyson half: projected onto the invariant skew subspace, plain
         # dense identities, RGF output projections.
-        dl_d = self._skew_project(self._to_dense(dl, bt_only=True))
-        dg_d = self._skew_project(self._to_dense(dg, bt_only=True))
-        dr_d = self._to_dense(dr, bt_only=True)
+        dl_d = self._skew_project(self._to_dense(
+            dl, bt_only=True, device=device))
+        dg_d = self._skew_project(self._to_dense(
+            dg, bt_only=True, device=device))
+        dr_d = self._to_dense(dr, bt_only=True, device=device)
         dr_dH = dr_d.conj().swapaxes(-2, -1)
 
-        GR, GA, GL, GG = self._GR, self._GA, self._GL, self._GG
+        if device:
+            GR, GA = self._GR_device, self._GA_device
+            GL, GG = self._GL_device, self._GG_device
+            g_l_flat = self._g_l_flat_device
+            g_g_flat = self._g_g_flat_device
+            g_mask = self._g_mask_device
+        else:
+            GR, GA, GL, GG = self._GR, self._GA, self._GL, self._GG
+            g_l_flat = self._g_l_flat
+            g_g_flat = self._g_g_flat
+            g_mask = self._g_mask
         GRdr = GR @ dr_d
         dGl = GR @ dl_d @ GA + GRdr @ GL + GL @ dr_dH @ GA
         dGg = GR @ dg_d @ GA + GRdr @ GG + GG @ dr_dH @ GA
-        dGl_flat = self._to_flat(self._skew_project(dGl)) * self._g_mask
-        dGg_flat = self._to_flat(self._skew_project(dGg)) * self._g_mask
+        dGl_flat = self._to_flat(
+            self._skew_project(dGl), device=device) * g_mask
+        dGg_flat = self._to_flat(
+            self._skew_project(dGg), device=device) * g_mask
 
         # Bubble half.
         if form == "bilinear":
@@ -457,8 +495,8 @@ class PhononJVP:
         else:
             # Polarisation identity: two production-kernel calls plus the
             # cached S(G) from the driver's own SSE output.
-            s1 = self._kernel(self._g_l_flat + dGl_flat,
-                              self._g_g_flat + dGg_flat)
+            s1 = self._kernel(g_l_flat + dGl_flat,
+                              g_g_flat + dGg_flat)
             s2 = self._kernel(dGl_flat, dGg_flat)
             s_l0, s_g0, s_r0 = self._s_base
             dS_l = s1[0] - s_l0 - s2[0]
