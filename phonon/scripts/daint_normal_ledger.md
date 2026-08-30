@@ -485,3 +485,4 @@ least-squares ladder rebuild.
 | 2026-08-30 | 4558641 | si-conventional-100-fc4refit-l5-q3-dense-linear-w05-m05 | 1 | 01:00:00 | 1.00 | 458.84 | normal |
 | 2026-08-30 | 4558644 | si-conventional-100-fc4refit-l5-q3-dense-linear-w05-seed-m05 | 1 | 01:00:00 | 1.00 | 459.84 | normal |
 | 2026-08-30 | 4558648 | si-conventional-100-fc4refit-l5-q3-dense-linear-w05-seed-m10 | 1 | 00:30:00 | 0.50 | 460.34 | debug |
+| 2026-08-30 | 4558874 | si-conventional-100-fc4refit-l5-q3-dense-half-w05-seed | 1 | 00:30:00 | 0.50 | 460.84 | debug |

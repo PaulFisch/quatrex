@@ -893,6 +893,45 @@ between about 0.20 and 0.25 through iteration 20.  It was stopped.  Dropping
 the dispersive term is therefore not sufficient to reproduce the old
 convergence.
 
+The same conclusion holds for the joint FC2/FC3/FC4 refit whose harmonic
+conductance is close to Guo et al.  In this comparison the cubic SCBA uses
+the refitted FC2 and FC3 only.  Job 4558874 changed only the retarded method
+in the q=3, 0.5 THz exact-dense calculation.  Its five 24-DOF conventional
+cells formed one 120-DOF Dyson block, the FC3 contraction used the five
+primitive microblocks with the complete Green range (b=4), and the finite
+film generated the complete self-energy range four.  This is already a
+fully reblocked L5 Dyson problem.  Neither a selected-Green-function shell
+nor a generated self-energy shell is absent.
+
+The half rule retains the damping term
+
+\[
+  \Sigma^R_{\rm half}={1\over2}(\Sigma^< - \Sigma^>)
+\]
+
+in the solver convention and omits only its Hermitian Hilbert-transform
+partner.  It is consequently a useful fixed-point diagnostic, but not a
+causal material approximation.  Starting from the same clean interpolated
+state as the causal controls, damping 0.1 gave residuals 0.98334, 0.67555,
+0.65506, 0.50765, 0.43349 and 0.38249 through map five.  The next values were
+0.45501, 0.50298 and 0.53179.  The internal-current spread likewise reached
+a minimum of 0.001514 before increasing to 0.009603.  Bubble energy balance
+remained at roundoff.  By comparison the causal calculation reached 0.24612
+before it turned.  The unstable feedback is therefore already present in the
+lesser, greater and damping components.  The KK term is not its cause, and
+there is no converged half-rule state from which a direct causal restart can
+be made.
+
+A homotopy which multiplies the dispersive term by a parameter would be a
+legitimate path-finding device if the endpoint at zero were converged.  This
+gate rejects that premise for the present initial branch.  Continuing an
+unconverged half-rule orbit and switching to FFT would merely replace one
+transient by another.  The experiment does not prove that no other nonlinear
+solver can find the physical root.  It proves that further reblocking and
+omission of KK do not explain the observed linear-mixer failure on this L5
+bed.  The q=3 mesh and 0.5 THz spacing remain solver diagnostics rather than
+converged material settings.
+
 The causal implementation itself passes an end-to-end checkpoint identity.
 An independent NumPy transform reconstructs the saved L5 retarded array from
 the saved lesser and greater arrays to (4.80\times10^{-16}) after the

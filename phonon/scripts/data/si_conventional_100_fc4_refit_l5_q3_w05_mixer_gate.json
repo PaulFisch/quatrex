@@ -133,11 +133,37 @@
     "maximum_bubble_energy_balance_defect": 1.242e-16,
     "classification": "residual decrease but physical-branch failure; stopped after the first trial"
   },
+  "half_retarded_control": {
+    "job_id": 4558874,
+    "source": "the same clean piecewise-linear regrid used by the causal linear controls",
+    "changed_setting": "retarded_method=half; the Hermitian KK term is omitted while the damping half difference is retained",
+    "mixing_factor": 0.10,
+    "maps_completed": 9,
+    "relative_residual": [
+      0.98334, 0.67555, 0.65506, 0.50765, 0.43349,
+      0.38249, 0.45501, 0.50298, 0.53179
+    ],
+    "internal_spread": [
+      0.034545, 0.022765, 0.014429, 0.0078854, 0.0026532,
+      0.0015141, 0.0048378, 0.0074886, 0.0096031
+    ],
+    "lead_current_solver_units": [
+      34.17803, 33.92740, 33.75467, 33.62423, 33.52010,
+      33.43253, 33.35971, 33.30165, 33.25667
+    ],
+    "best_residual": 0.38249,
+    "best_map_zero_based": 5,
+    "residual_after_best": [0.45501, 0.50298, 0.53179],
+    "maximum_bubble_energy_balance_defect": 4.002e-16,
+    "stopped_after_turning_point": true,
+    "classification": "dropping the KK term worsens rather than removes the Picard instability; there is no converged half-rule state from which to restart causal FFT"
+  },
   "decision": {
     "linear_explodes": false,
     "linear_converges": false,
     "classification": "bounded slowly unstable Picard trajectory",
     "mixing_factor_conclusion": "0.10 halves map count relative to 0.05 but both turn at the same accumulated mixing; smaller damping does not cure the mode",
+    "kk_conclusion": "the matched half-retarded control turns at residual 0.38249, above the causal minimum 0.24612; the unstable feedback is present without the dispersive KK term",
     "newton_conclusion": "unconstrained residual-only Newton is rejected on the refined grid; require Keldysh-cone and heat-flow branch globalisation",
     "production_conclusion": "retain passive linear continuation as the cheap baseline, but do not publish a 0.5 THz conductance from this non-converged state"
   }

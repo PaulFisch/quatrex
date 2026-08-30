@@ -961,6 +961,7 @@ Alps job 4552671; its pulled log and arrays are under
 | coupled-q analytic JVP vs central difference | `6.34e-10`--`9.81e-10` at step `1e-5` | pass |
 | exact dense joint-refit q3, 1 THz SCBA root | residual `2.763e-10`, spread `6.948e-11`, bubble defect at most `1.84e-16` | pass as nonlinear gate; grid deliberately coarse |
 | exact dense joint-refit q3, 0.5 THz linear continuation | factor 0.10 reaches residual `0.24612` at map 14, then rebounds to `0.42319`; factor 0.05 reaches `0.24556` at map 27 and then rises | **bounded Picard instability; no convergence** |
+| matched joint-refit half-retarded control | one 120-DOF Dyson block, complete microblock band 4; residual reaches `0.38249` at map 5, then rises to `0.53179` | **KK omission does not stabilise the map; no half-to-FFT restart state** |
 | exact Newton on the q3, 0.5 THz continuation | one 8-vector correction costs 16 bubbles; residual `0.50094 -> 0.42423` but accepted state emits into both leads with spread 2.0 | **fail without a passivity and heat-flow branch constraint** |
 | ballistic Si conductance vs Guo et al. different-FC-input and orientation scale | `1000.85` vs `1065.81` MW m\(^{-2}\) K\(^{-1}\), `-6.10 %` | scale check only |
 | real-Si L8x2 internal current spread <= `1e-3` | `2.829e-3` versus primitive `4.371e-3` | **fail; wider exact near field needed** |
