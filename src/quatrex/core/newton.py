@@ -120,8 +120,8 @@ class NewtonKrylovMixer:
     newton_damp : float
         Fixed damping of the accepted Newton step.
     backtrack : int
-        Maximum step-halvings when a Newton step increased ``||R||``.
-        0 disables the accept/reject test.
+        Maximum step-halvings when a Newton step increased the scale-free
+        residual ``||R|| / ||F(x)||``. 0 disables the accept/reject test.
     precond : {"none", "recycle", "fresh"}
         Low-rank right preconditioner for the inner GMRES. ``recycle``
         harvests harmonic Ritz pairs (the near-singular directions) of
@@ -171,9 +171,12 @@ class NewtonKrylovMixer:
         self._newton_it = 0
         self._R_first = None
         self._trust_k = float(trust)
-        # Pending accept/reject bookkeeping: the iterate emitted by the
-        # last Newton step, its base point, base residual and step.
-        self._pending = None    # (xk, delta, Rk_norm, halvings)
+        # Pending accept/reject bookkeeping: the iterate emitted by the last
+        # Newton step, its base point, residual, relative merit and step.  The
+        # scale-free merit matches the production convergence gate; an
+        # absolute residual can fall merely because a trial collapses the
+        # self-energy scale.
+        self._pending = None
         # Low-rank deflation state.
         self._precond_op: _LowRankPrecond | None = None
         self._prev_deltas: list[np.ndarray] = []   # fresh-basis seeds
@@ -195,6 +198,8 @@ class NewtonKrylovMixer:
         self._it += 1
         R = gx - x
         rk = self._gnorm(_c2r(R))
+        gk = self._gnorm(_c2r(gx))
+        merit = rk / max(gk, 1e-300)
         if self._R_first is None:
             self._R_first = rk
 
@@ -202,17 +207,19 @@ class NewtonKrylovMixer:
         # A non-finite trial residual (diverged map evaluation) counts as
         # rejected -- NaN comparisons would otherwise silently accept it.
         if self._pending is not None:
-            xk, delta, Rk, rk_base, halvings = self._pending
-            worse = (not np.isfinite(rk)) or rk >= rk_base
+            xk, delta, Rk, rk_base, merit_base, halvings = self._pending
+            worse = (not np.isfinite(merit)) or merit >= merit_base
             if worse and self.backtrack > 0:
                 # Non-finite trials (diverged map) shrink the radius harder.
-                shrink = 0.25 if not np.isfinite(rk) else 0.5
+                shrink = 0.25 if not np.isfinite(merit) else 0.5
                 self._trust_k = max(self._trust_k * shrink, 1e-3)
                 if halvings < self.backtrack:
                     frac = 0.5 ** (halvings + 1)
-                    self._pending = (xk, delta, Rk, rk_base, halvings + 1)
-                    self._log(f"  newton: ||R|| {rk_base:.3e} -> {rk:.3e}, "
-                              f"backtrack to {frac:.3g}*delta")
+                    self._pending = (xk, delta, Rk, rk_base, merit_base,
+                                     halvings + 1)
+                    self._log(
+                        f"  newton: relative residual {merit_base:.3e} -> "
+                        f"{merit:.3e}, backtrack to {frac:.3g}*delta")
                     return xk + frac * delta
                 # Exhausted: damped Picard from the BASE point (whose
                 # residual we stored). The trust radius has been halved at
@@ -225,9 +232,9 @@ class NewtonKrylovMixer:
             # accepted step recovers the radius (else a collapsed radius
             # after a rejection burst never regrows and the iteration
             # flatlines); a marginal accept keeps it.
-            if rk < 0.95 * rk_base:
+            if merit < 0.95 * merit_base:
                 self._trust_k = min(self._trust_k * 1.3, self.trust_max)
-            elif rk < 0.999 * rk_base:
+            elif merit < 0.999 * merit_base:
                 self._trust_k = min(self._trust_k * 1.05, self.trust_max)
             self._pending = None
 
@@ -238,10 +245,10 @@ class NewtonKrylovMixer:
         if self._newton_it >= self.max_newton:
             return x + self.beta * R
 
-        return self._newton_step(x, gx, R, rk)
+        return self._newton_step(x, gx, R, rk, merit)
 
     # ---- one synchronous Newton step ---------------------------------------
-    def _newton_step(self, x, gx, R, rk):
+    def _newton_step(self, x, gx, R, rk, merit):
         if self._jvp is None:
             self._jvp = self._jvp_factory()
         recon = self._jvp.prepare()
@@ -365,7 +372,7 @@ class NewtonKrylovMixer:
 
         delta = _r2c(step_r)
         if self.backtrack > 0:
-            self._pending = (x, delta, R, rk, 0)
+            self._pending = (x, delta, R, rk, merit, 0)
         return x + delta
 
     # ---- low-rank deflation machinery ---------------------------------------

@@ -15,6 +15,7 @@ from quatrex.core.anderson import AndersonMixer, RREMixer
 from quatrex.core.broyden import BroydenMixer
 from quatrex.core.jfnk import JFNKMixer
 from quatrex.core.mpi_linalg import complex_to_real, real_to_complex
+from quatrex.core.newton import NewtonKrylovMixer
 from quatrex.core.rpm import RPMMixer
 
 N = 40
@@ -205,3 +206,31 @@ def test_jfnk_rejection_does_not_enlarge_a_small_requested_trust_radius():
     mixer.step(np.array([1.0 + 0.0j]), np.array([3.0 + 0.0j]))
 
     assert mixer._trust_k == pytest.approx(5e-5)
+
+
+def test_exact_newton_backtracks_on_relative_not_absolute_residual():
+    """A collapsed self-energy scale must not make a bad trial acceptable.
+
+    The trial has a smaller absolute residual than the base, but its residual
+    relative to the new map value is fifty times larger.  This is the case
+    that previously admitted emitting fine-grid Si transients.
+    """
+    mixer = NewtonKrylovMixer(
+        jvp_factory=lambda: None,
+        warmup=0,
+        trust=0.2,
+        trust_max=0.2,
+        backtrack=3,
+        verbose=False,
+    )
+    base = np.array([99.0 + 0.0j])
+    delta = np.array([-98.5 + 0.0j])
+    base_residual = np.array([1.0 + 0.0j])
+    mixer._pending = (base, delta, base_residual, 1.0, 0.01, 0)
+
+    trial = np.array([0.5 + 0.0j])
+    trial_map = np.array([1.0 + 0.0j])
+    retry = mixer.step(trial, trial_map)
+
+    np.testing.assert_allclose(retry, base + 0.5 * delta)
+    assert mixer._trust_k == pytest.approx(0.1)
