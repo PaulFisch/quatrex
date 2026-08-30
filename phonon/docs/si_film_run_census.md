@@ -22,9 +22,13 @@ new `probe*` and `conv*` campaign artifacts as they are pulled from Daint, so
 its total grows during certification.  The missing commit is retained as an
 empty field rather than inferred from file dates.
 
-The ledger regenerated after the conventional-cell ballistic test contains 134
-unique records: 42 `analysis-only`, 43 `frequency-truncated`, 44 `superseded`
-and five `divergent`.  The twelve new zero-broadening ballistic frequency,
+The ledger regenerated after the L8 one-change ablations contains 152 unique
+records: 51 `analysis-only`, 47 `frequency-truncated`, 46 `superseded`, five
+`divergent`, two `spatially-pinned` and one `trustworthy`.  The trustworthy
+row is the exact dense q=3, 1 THz L5 nonlinear solver gate.  Its coarse
+frequency and transverse
+meshes still exclude it from a material length curve.  The new
+zero-broadening ballistic frequency,
 q-mesh and temperature-drop records are intentionally `analysis-only`,
 because they validate the harmonic solver and contain no interacting SCBA
 fixed point.  The two converged auxiliary-grid continuation points and the
@@ -36,9 +40,15 @@ as numerical evidence.
 The classification is deliberately strict.  A trustworthy interacting run
 must have a causal FFT retarded reconstruction, zero artificial broadening, a
 frequency interval covering the supplied Si spectrum, complete self-energy
-support, a stored converged fixed point and an internal current spread no
-larger than (10^{-3}).  A run is not promoted because its log contains the
-word `converged` when one of these physical gates fails.
+support and a stored converged fixed point.  Its two lead currents and global
+bubble energy ledger must close.  The raw internal-current spread is retained
+as a diagnostic, not imposed as a universal gate.  With an off-diagonal
+anharmonic self-energy it contains redistribution through the interaction
+channel, and it depends on the blocking unless the current operator includes
+every term crossing each cut.  A local gate requires the cut-complete current
+or, equivalently, a telescoped continuity residual including the interaction
+power.  A run is not promoted merely because its log contains the word
+`converged` when one of the invariant physical gates fails.
 
 ## What survives
 
@@ -80,12 +90,15 @@ The L8 reblocking result is nevertheless a genuine algebraic convergence
 record.  Job 4553056 used four two-cell groups, q=9, zero broadening, the
 half-retarded rule and a 0--15 THz grid with 0.125 THz spacing.  It converged
 after 17 evaluations to a retarded residual of (9.5112\times10^{-4}), lead
-balance (5.85\times10^{-6}) and internal spread
+balance (5.85\times10^{-6}) and raw internal spread
 (2.829\times10^{-3}).  Its current was written before the frequency-cell
 measure correction and must be multiplied by 0.125 for comparison with new
 outputs.  The row establishes that two-cell reblocking helped the historical
-functional.  Its short window, half rule, legacy output support and failed
-(10^{-3}) internal-spread gate prevent its use as the new length baseline.
+functional.  The spread does not invalidate the fixed point: it is a
+blocking-dependent RGF diagnostic, and the archived row-binned absorption
+does not close a local ledger for this off-diagonal legacy self-energy.  The
+short window, half rule and legacy output support, rather than the raw spread,
+prevent this result from serving as the new length baseline.
 
 ## Consequence for the new campaign
 

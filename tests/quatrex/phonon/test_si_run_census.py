@@ -65,8 +65,23 @@ def test_known_historical_and_certified_classifications() -> None:
         "eta_thz": 0.0, "microblock_dof": 6, "group_layout": "5,5",
         "retarded_method": "fft", "converged": True,
         "internal_spread": 8e-4, "vertex_scale": 1.0,
+        "lead_balance": 2e-5, "bubble_balance": 3e-12,
+        "heat_tolerance": 1e-3,
     }
     assert module.classify(certified)[0] == "trustworthy"
+
+    # A non-local scattering self-energy can redistribute energy between the
+    # harmonic bond-current and interaction-current channels.  The raw RGF
+    # interface spread is blocking dependent and is not a global gate.
+    large_raw_spread = dict(certified, internal_spread=2e-2)
+    status, reason = module.classify(large_raw_spread)
+    assert status == "trustworthy"
+    assert "diagnostic" in reason
+
+    bad_lead = dict(certified, lead_balance=2e-3)
+    assert module.classify(bad_lead)[0] == "superseded"
+    bad_bubble = dict(certified, bubble_balance=2e-8)
+    assert module.classify(bad_bubble)[0] == "superseded"
 
     continuation = dict(certified, vertex_scale=0.25)
     status, reason = module.classify(continuation)

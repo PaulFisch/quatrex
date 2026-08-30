@@ -953,9 +953,12 @@ class SCBA(TransportSolver):
                 # Conservation gate = LEAD balance |J_L - J_R| / |J|: in
                 # steady state the in/out lead currents must match. The
                 # max-min spread over ALL interfaces additionally contains
-                # the eta-absorption dip of the internal interfaces (finite
-                # broadening soaks up flux inside the device), so it is
-                # reported as a diagnostic only, not gated on.
+                # physical redistribution between the harmonic and
+                # interaction-current channels, as well as finite-eta
+                # absorption. With non-local FC2/Sigma terms it is also
+                # partition dependent unless the current operator includes
+                # every term crossing the cut. It is therefore reported as
+                # a diagnostic only, not gated on.
                 # Optional additional gate on the Phi-derivable bubble
                 # balance; 0 disables.
                 bb_tol = self.config.phonon.bubble_balance_tol
@@ -1156,9 +1159,12 @@ class SCBA(TransportSolver):
         ``(None, inf, inf)`` if the current is unavailable; all-reduced over
         the energy (stack) partition. ``lead_balance`` is
         ``|J_lead0 - J_leadN| / |mean|`` -- the physical steady-state
-        criterion, insensitive to the eta-absorption dip of the internal
-        interfaces; ``rel_spread`` is the max-min spread over all interfaces
-        (contains the eta dip; diagnostic only)."""
+        criterion. ``rel_spread`` is the max-min spread over all RGF
+        interfaces. It can contain finite-eta absorption and physical
+        redistribution between the harmonic bond-current and interaction
+        channels. For a non-local self-energy it is also dependent on how
+        the device is partitioned unless every term crossing a cut is included.
+        It is consequently a diagnostic only, not a conservation criterion."""
         solver = self.subsystems.get("phonon")
         mw = getattr(solver, "meir_wingreen_current", None)
         if mw is None:

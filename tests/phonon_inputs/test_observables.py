@@ -95,6 +95,9 @@ def test_contact_bond_current_equals_meir_wingreen(neq_chain):
         c["G_l"], c["G_g"], c["obc"], c["freqs"], c["n_dof"], N_SLABS)
     bonds = obs.bond_currents(c["G_l"], c["H_D"], c["freqs"],
                               c["n_dof"], N_SLABS)
+    cuts = obs.harmonic_cut_currents(
+        c["G_l"], c["H_D"], c["freqs"], c["n_dof"], N_SLABS)
+    np.testing.assert_allclose(cuts, bonds, rtol=1e-13, atol=1e-30)
     pos = c["pos"]
     # Ballistic: every interior bond carries the lead current. Restrict to
     # in-band bins with real current (band edges carry eta artifacts).
@@ -105,6 +108,32 @@ def test_contact_bond_current_equals_meir_wingreen(neq_chain):
     # And the two lead spectra agree (ballistic conservation).
     assert np.max(np.abs(spec_L[sel] - spec_R[sel])
                   / np.abs(spec_L[sel])) < 5e-2
+
+
+def test_harmonic_cut_current_includes_long_range_fc2_pair():
+    freqs = np.array([1.0, 2.0])
+    H = np.zeros((3, 3), dtype=complex)
+    G_l = np.zeros((2, 3, 3), dtype=complex)
+    H[0, 2] = H[2, 0] = 3.0
+    G_l[:, 2, 0] = np.array([2.0, -0.5])
+
+    cuts = obs.harmonic_cut_currents(G_l, H, freqs, 1, 3)
+    expected = (-2.0 * HBAR_SI * freqs * THZ_TO_RAD
+                * np.array([6.0, -1.5]))
+    # The 0--2 pair crosses both cuts and therefore contributes to both.
+    np.testing.assert_allclose(cuts[:, 0], expected)
+    np.testing.assert_allclose(cuts[:, 1], expected)
+    # The nearest-slab expression omits this deliberately non-BTD pair.
+    assert np.all(obs.bond_currents(G_l, H, freqs, 1, 3) == 0.0)
+
+
+def test_telescoped_current_removes_interaction_redistribution():
+    # The bare channel current changes when the cubic interaction absorbs
+    # energy in one slab and returns it in another, although the leads agree.
+    p_int = np.array([-3.0, 0.0, 3.0])
+    bare = np.array([10.0, 7.0, 7.0, 10.0])
+    assert np.ptp(bare) == 3.0
+    assert obs.telescoped_spread(bare, p_int) == 0.0
 
 
 def test_sum_rule_D_vanishes_ballistically(neq_chain):

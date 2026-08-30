@@ -882,8 +882,11 @@ if ranks.rank == 0:
         lh = np.asarray(get_host(lh))
         out["last_heat"] = lh
         out["lead_current"] = 0.5 * (abs(float(np.real(lh[0]))) + abs(float(np.real(lh[-1]))))
-    # eta-absorption diagnostic: max-min spread over ALL interfaces (contains
-    # the physical internal dip from finite eta; NOT the convergence gate)
+    # Partition-dependent diagnostic: max-min spread over ALL RGF interfaces.
+    # Besides finite-eta absorption it can contain physical redistribution
+    # through the anharmonic interaction channel. For non-local FC2/Sigma a
+    # cut is meaningful only when every crossing term is included. This is
+    # NOT the convergence or global conservation gate.
     sp = getattr(scba, "_last_heat_spread", None)
     if sp is not None:
         out["internal_spread"] = float(sp)

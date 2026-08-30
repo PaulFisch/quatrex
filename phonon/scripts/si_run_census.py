@@ -313,10 +313,20 @@ def classify(record: dict) -> tuple[str, str]:
             return "spatially-pinned", "; ".join(reasons)
         return "superseded", "; ".join(reasons)
     if record.get("converged"):
-        spread = float(record.get("internal_spread") or 0.0)
-        if spread <= 1e-3:
-            return "trustworthy", "support-complete settings and passed stored gates"
-        return "superseded", f"internal current spread {spread:.3g} > 1e-3"
+        lead = record.get("lead_balance")
+        bubble = record.get("bubble_balance")
+        if lead in (None, "") or bubble in (None, ""):
+            return "superseded", "missing invariant lead or bubble balance"
+        heat_tol = float(record.get("heat_tolerance") or 1e-3)
+        if float(lead) > heat_tol:
+            return "superseded", (
+                f"lead imbalance {float(lead):.3g} > {heat_tol:.3g}")
+        if float(bubble) > 1e-10:
+            return "superseded", (
+                f"bubble imbalance {float(bubble):.3g} > 1e-10")
+        return "trustworthy", (
+            "support-complete settings and passed invariant stored gates; "
+            "raw internal spread is diagnostic")
     return "superseded", "not certified converged"
 
 
