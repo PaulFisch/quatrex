@@ -2343,10 +2343,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         # leg B rotates around comm.q.  Do not accumulate every tile's task
         # metadata on the instance: taken together they are the complete
         # O(nq**2) plan, whereas a rotation consumes them one at a time.  The
-        # batched path below also keeps its FC3 references on the host and
-        # materialises GPU permutations only for one GEMM chunk.  These are
-        # exact scheduling changes; the same q pairs and ring contractions are
-        # accumulated below.
+        # contraction below also caches left and right FC3 permutations
+        # independently, rather than caching their combinatorial pairing.
+        # These are exact scheduling changes; the same q pairs and ring
+        # contractions are accumulated below.
         transient_tile = a_slice is not None or b_slice is not None
         cache = getattr(self, "_micro_qtasks_cache", {})
         qtasks = None if transient_tile else cache.get(cache_key)
@@ -2360,13 +2360,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             qprime = np.arange(nq, dtype=np.int64)
             for iq_ext in range(nq):
                 qsum[qprime, np.asarray(qdm[iq_ext], dtype=np.int64)] = iq_ext
-            # The batched kernel keeps only the host vertex references in its
-            # reusable task plan.  Materialising every pre-permuted PL/PR on
-            # the GPU here scales as O(nq**2 * n_quads * d**3): the exact q5
-            # Si plan occupied a complete 96-GiB GH200 before map zero.  PL/PR
-            # are instead formed for one existing GEMM task chunk below.  The
-            # scalar reference path retains its old pre-permutation cache.
-            perm_cache = {} if not self._dense_q_batched else None
+            # Cache the two fixed vertex permutations INDEPENDENTLY.  A paired
+            # cache duplicates one PL for every PR it meets (and vice versa),
+            # so its memory follows the number of ring tasks; exact q5 Si
+            # filled a 96-GiB GH200 before map zero.  Separate caches contain
+            # at most one PL and one PR per q-folded FC3 block, hence follow
+            # the input vertex size instead of the combinatorial pairing.
+            perm_left: dict[tuple, NDArray] = {}
+            perm_right: dict[tuple, NDArray] = {}
             qtasks = {}
             bulk_vertex = self._vfactors is not None
             for iqp in range(a_lo, a_hi):
@@ -2389,28 +2390,38 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                 pr = phi_r.get((j, quad.k2p, quad.k1p))
                                 if pl is None or pr is None:
                                     continue
-                                pkey = (
+                                left_key = (
                                     (iqp, iq2, quad.k1 - i, quad.k2 - i,
-                                     quad.k2p - j, quad.k1p - j)
+                                     "left")
                                     if bulk_vertex else
-                                    (iqp, iq2, i, quad.k1, quad.k2,
-                                     j, quad.k2p, quad.k1p)
+                                    (iqp, iq2, i, quad.k1, quad.k2)
                                 )
-                                if self._dense_q_batched:
-                                    # Raw, host-resident FC3 blocks plus the
-                                    # reshape dimensions expected by the same
-                                    # five-field task ABI.  _run_batched turns
-                                    # these into PL/PR only for task_width
-                                    # entries at a time.
-                                    p = (pl, pr, int(pl.shape[0]),
-                                         int(pl.shape[2]), int(pr.shape[0]))
+                                right_key = (
+                                    (iq2, iqp, quad.k2p - j, quad.k1p - j,
+                                     "right")
+                                    if bulk_vertex else
+                                    (iq2, iqp, j, quad.k2p, quad.k1p)
+                                )
+                                PL = perm_left.get(left_key)
+                                if PL is None:
+                                    nI, bK1, bK2 = pl.shape
+                                    PL = xp.ascontiguousarray(
+                                        xp.conj(xp.asarray(pl)).transpose(
+                                            0, 2, 1)
+                                    ).reshape(nI * bK2, bK1)
+                                    perm_left[left_key] = PL
                                 else:
-                                    p = perm_cache.get(pkey)
-                                    if p is None:
-                                        p = phi_perms(
-                                            xp.conj(xp.asarray(pl)),
-                                            xp.asarray(pr), xp)
-                                        perm_cache[pkey] = p
+                                    nI, bK1, bK2 = pl.shape
+                                PR = perm_right.get(right_key)
+                                if PR is None:
+                                    nJ, bK2p, bK1p = pr.shape
+                                    PR = xp.ascontiguousarray(
+                                        xp.asarray(pr).transpose(1, 2, 0)
+                                    ).reshape(bK2p, bK1p * nJ)
+                                    perm_right[right_key] = PR
+                                else:
+                                    nJ = pr.shape[0]
+                                p = (PL, PR, nI, bK2, nJ)
                                 qtasks.setdefault(group_pair, []).append((
                                     iq_ext, iqp, iq2, si.start, sj.start,
                                     quad.k1, quad.k1p, quad.k2, quad.k2p,
@@ -2437,13 +2448,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 out_g = xp.zeros_like(out_l)
                 for (iqe, iqp, iq2, oi, oj, k1, k1p, k2, k2p,
                      *p) in qtasks.get((I, J), ()):
-                    if p[0].ndim == 3:
-                        # Defensive fallback when the family stacks below do
-                        # not share keys.  Production batched runs do; keeping
-                        # this exact path makes the task representation safe
-                        # for irregular planted fixtures as well.
-                        p = phi_perms(
-                            xp.conj(xp.asarray(p[0])), xp.asarray(p[1]), xp)
                     gla = gl_a[(k1, k1p)][lo:hi, iqp - a_off]
                     glb = gl_b[(k2, k2p)][lo:hi, iq2 - b_off]
                     gga = gg_a[(k1, k1p)][lo:hi, iqp - a_off]
@@ -2529,21 +2533,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 for task in tasks:
                     PL, PR, nI, bK2, nJ = task[9:14]
                     groups.setdefault(
-                        (PL.shape, PR.shape, nI, bK2, nJ, PL.ndim), []
+                        (PL.shape, PR.shape, nI, bK2, nJ), []
                     ).append(task)
-                for (shape_l, shape_r, nI, bK2, nJ,
-                     vertex_ndim), ts in groups.items():
+                for (shape_l, shape_r, nI, bK2, nJ), ts in groups.items():
                     n_tasks = len(ts)
-                    raw_vertex = vertex_ndim == 3
                     bK1 = shape_l[1]
-                    bK1p = shape_r[2] if raw_vertex else shape_r[1] // nJ
-                    shape_l_pre = ((nI * bK2, bK1)
-                                   if raw_vertex else shape_l)
-                    shape_r_pre = ((shape_r[1], bK1p * nJ)
-                                   if raw_vertex else shape_r)
+                    bK1p = shape_r[1] // nJ
                     per_task_tau = 16 * (
-                        2 * bK1 * bK1p + shape_l_pre[0] * bK1p
-                        + bK2 * shape_r_pre[1] + 2 * nI * nJ
+                        2 * bK1 * bK1p + shape_l[0] * bK1p
+                        + bK2 * shape_r[1] + 2 * nI * nJ
                     )
                     preferred_tasks = min(n_tasks, 256)
                     tau_width = int(max(1, min(
@@ -2568,30 +2566,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
                     for c0 in range(0, n_tasks, task_width):
                         c1 = min(c0 + task_width, n_tasks)
-                        if raw_vertex:
-                            # One bounded host->device transfer and
-                            # permutation per task chunk.  This is exactly
-                            # phi_perms vectorised over the chunk axis.
-                            phi_l = xp.asarray(np.stack([
-                                np.conj(np.asarray(get_host(t[9])))
-                                for t in ts[c0:c1]
-                            ]))
-                            phi_r = xp.asarray(np.stack([
-                                np.asarray(get_host(t[10]))
-                                for t in ts[c0:c1]
-                            ]))
-                            PLc = xp.ascontiguousarray(
-                                phi_l.transpose(0, 1, 3, 2)
-                            ).reshape(c1 - c0, *shape_l_pre)[:, None]
-                            PRc = xp.ascontiguousarray(
-                                phi_r.transpose(0, 2, 3, 1)
-                            ).reshape(c1 - c0, *shape_r_pre)[:, None]
-                            del phi_l, phi_r
-                        else:
-                            PLc = xp.stack(
-                                [t[9] for t in ts[c0:c1]])[:, None]
-                            PRc = xp.stack(
-                                [t[10] for t in ts[c0:c1]])[:, None]
+                        PLc = xp.stack([t[9] for t in ts[c0:c1]])[:, None]
+                        PRc = xp.stack([t[10] for t in ts[c0:c1]])[:, None]
                         ai, bi = ai_all[c0:c1], bi_all[c0:c1]
                         qa, qb = qa_all[c0:c1], qb_all[c0:c1]
 

@@ -257,12 +257,14 @@ def test_microblock_q_rotation_streams_exact_tiles() -> None:
     size, rank = global_comm.size, global_comm.rank
     qs = slice(rank * NQ // size, (rank + 1) * NQ // size)
     # Replication deliberately retains its one reusable task list.  Rotation
-    # must retain none of its one-use tiles.  The reusable plan contains raw
-    # host vertices, never the O(nq**2) GPU PL/PR permutations.
+    # must retain none of its one-use tiles.  In the reusable plan, repeated
+    # tasks share the independently cached PL and PR objects instead of
+    # materialising every PL/PR pairing.
     assert whole_cache
-    assert all(isinstance(task[9], np.ndarray)
-               for plan in whole_cache.values()
-               for tasks in plan.values() for task in tasks)
+    whole_tasks = [task for plan in whole_cache.values()
+                   for tasks in plan.values() for task in tasks]
+    assert len({id(task[9]) for task in whole_tasks}) < len(whole_tasks)
+    assert len({id(task[10]) for task in whole_tasks}) < len(whole_tasks)
     assert split_cache == {}
     for name, split, whole in (("Sigma^<", split_l, whole_l[:, qs]),
                                ("Sigma^>", split_g, whole_g[:, qs])):
