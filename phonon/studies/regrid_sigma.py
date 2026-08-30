@@ -11,6 +11,10 @@ run by adding ``--input-parts N --output-parts M``.  For example,
 ``--sigma sigma_best --input-parts 4 --out sigma_seed --output-parts 4``
 reads ``sigma_best.rank0.npz`` through ``rank3`` and writes the corresponding
 four ``sigma_seed.rank*.npz`` files.
+
+When every rank contains the complete frequency axis and instead distributes
+q or block work, use ``--replicated-parts N``.  Each rank file is then
+regridded independently and retains its original non-frequency axes.
 """
 
 from __future__ import annotations
@@ -105,6 +109,20 @@ def _interpolate_frequency(
     return result.reshape((new.size,) + sig.shape[1:])
 
 
+def _regrid_state(
+        state: dict[str, np.ndarray], old: np.ndarray, new: np.ndarray,
+        scale: float) -> dict[str, np.ndarray]:
+    out = {}
+    for key in _SIGMA_KEYS:
+        sig = state[key]
+        if sig.shape[0] != old.size:
+            raise SystemExit(
+                f"{key}: frequency axis {sig.shape[0]} does not match the "
+                f"old grid ({old.size} pts); wrong --old-grid?")
+        out[key] = scale * _interpolate_frequency(sig, old, new)
+    return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--sigma", type=Path, required=True,
@@ -128,10 +146,16 @@ def main() -> None:
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--output-parts", type=int, default=0,
                    help="split output into this many .rankN.npz slices [0]")
+    p.add_argument("--replicated-parts", type=int, default=0,
+                   help="independently regrid this many .rankN.npz files "
+                   "whose frequency axes are complete [0]")
     a = p.parse_args()
 
-    if a.input_parts < 0 or a.output_parts < 0:
-        p.error("--input-parts and --output-parts must be non-negative")
+    if min(a.input_parts, a.output_parts, a.replicated_parts) < 0:
+        p.error("part counts must be non-negative")
+    if a.replicated_parts and (a.input_parts or a.output_parts):
+        p.error("--replicated-parts cannot be combined with "
+                "--input-parts or --output-parts")
 
     old = _load_grid(a.old_grid)
     uniform_args = (a.new_min, a.new_max, a.new_points)
@@ -146,21 +170,21 @@ def main() -> None:
         new = np.linspace(a.new_min, a.new_max, a.new_points)
     else:
         p.error("provide --new-grid or all uniform target-grid arguments")
-    snap = _load_sigma(a.sigma, a.input_parts)
-
-    out = {}
-    for key in ("sigma_lesser", "sigma_greater", "sigma_retarded"):
-        sig = snap[key]
-        if sig.shape[0] != old.size:
-            raise SystemExit(
-                f"{key}: frequency axis {sig.shape[0]} does not match the "
-                f"old grid ({old.size} pts); wrong --old-grid?")
-        out[key] = a.scale * _interpolate_frequency(sig, old, new)
-
-    _save_sigma(a.out, out, a.output_parts)
+    if a.replicated_parts:
+        for rank in range(a.replicated_parts):
+            source = _rank_path(a.sigma, rank)
+            target = _rank_path(a.out, rank)
+            state = _load_sigma(source, parts=0)
+            _save_sigma(
+                target, _regrid_state(state, old, new, a.scale), parts=0)
+    else:
+        snap = _load_sigma(a.sigma, a.input_parts)
+        _save_sigma(
+            a.out, _regrid_state(snap, old, new, a.scale), a.output_parts)
     print(f"wrote {a.out}: {old.size} -> {new.size} frequency points "
-          f"(scale {a.scale}, input parts {a.input_parts or 1}, "
-          f"output parts {a.output_parts or 1}); use "
+          f"(scale {a.scale}, input parts "
+          f"{a.replicated_parts or a.input_parts or 1}, output parts "
+          f"{a.replicated_parts or a.output_parts or 1}); use "
           f"QX_SIGMA_INIT={a.out} on the new grid.")
 
 

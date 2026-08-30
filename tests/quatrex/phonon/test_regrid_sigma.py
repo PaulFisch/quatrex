@@ -83,3 +83,40 @@ def test_nested_grid_extension_is_an_exact_zero_fill():
 
     np.testing.assert_array_equal(result[:old.size], values)
     np.testing.assert_array_equal(result[old.size:], 0.0)
+
+
+def test_replicated_rank_files_keep_nonfrequency_axes(tmp_path, monkeypatch):
+    old = np.array([0.0, 0.125, 0.25])
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    np.save(tmp_path / "old.npy", old)
+    for rank, nq in enumerate((2, 3)):
+        values = np.full((old.size, nq, 4), rank + 1.0j)
+        np.savez(
+            regrid_sigma._rank_path(source, rank),
+            **{key: values for key in regrid_sigma._SIGMA_KEYS},
+        )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "regrid_sigma.py",
+            "--sigma", str(source),
+            "--replicated-parts", "2",
+            "--old-grid", str(tmp_path / "old.npy"),
+            "--new-min", "0.0",
+            "--new-max", "0.5",
+            "--new-points", "5",
+            "--out", str(target),
+        ],
+    )
+    regrid_sigma.main()
+
+    for rank, nq in enumerate((2, 3)):
+        result = np.load(regrid_sigma._rank_path(target, rank))
+        assert result["sigma_lesser"].shape == (5, nq, 4)
+        np.testing.assert_array_equal(
+            result["sigma_lesser"][:old.size], rank + 1.0j)
+        np.testing.assert_array_equal(
+            result["sigma_lesser"][old.size:], 0.0)
