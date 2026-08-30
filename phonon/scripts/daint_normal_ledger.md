@@ -514,3 +514,4 @@ least-squares ladder rebuild.
 | 2026-08-30 | 4559446 | si-l8x2-old-fullsupport-only2-0630327a | 1 | 00:30:00 | 0.50 | 496.62 | debug |
 | 2026-08-30 | 4559474 | si-l8x2-old-fullsupport-cont-0630327a | 1 | 02:00:00 | 2.00 | 498.62 | normal |
 | 2026-08-30 | 4559490 | si-l8x2-old-w40-cont-0630327a | 1 | 01:00:00 | 1.00 | 499.62 | normal |
+| 2026-08-30 | 4559546 | si-conventional-100-fc4refit-l5-q5-dense-w025-linear-m05-qleg-cont12h | 2 | 12:00:00 | 24.00 | 523.62 | normal |

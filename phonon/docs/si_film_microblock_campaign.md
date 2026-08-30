@@ -1198,3 +1198,40 @@ length-campaign data point.
 The durable diagnostic is `phonon/studies/_si_kk_audit.py`, its result is
 `phonon/studies/out/si_equilibrium_invariants.json`, and planted controls cover
 the KMS temperature factor and the frequency-weighted current integral.
+
+## Guo-length causal run
+
+The support-complete legacy half-rule calculation has a physical conductance
+of 778.9814 MW m\(^{-2}\) K\(^{-1}\).  This value follows from a lead-averaged
+heat current of \(1.0085206\times10^{-9}\) W, a 10 K temperature difference
+and the transverse primitive-cell area
+\(1.2946657\times10^{-19}\) m\(^2\).  It is a regression value for the
+0--15 THz half-rule functional, not a Guo-comparable material result.
+
+Guo et al. define one conventional Si cell as 5.4018 Angstrom and carry their
+room-temperature series to 24 cells, or 13 nm.  Their main 5-cell result uses
+101 frequencies and a 6 by 6 transverse mesh and gives
+890.97 MW m\(^{-2}\) K\(^{-1}\).  The denser 121-frequency, 8 by 8 entry in
+their mesh table is 893.08 MW m\(^{-2}\) K\(^{-1}\).  Their 3-cell value is
+941.72 MW m\(^{-2}\) K\(^{-1}\), while the reported 20- and 24-cell
+conductivities correspond to conductances of approximately 689.7 and
+646.3 MW m\(^{-2}\) K\(^{-1}\), respectively.
+
+The Quatrex ladder must first certify its five-cell causal fixed point.  Alps
+job 4559546 continues the exact-dense L5 calculation for twelve hours on two
+nodes from the best state of job 4559127.  It uses the refitted FC2 and FC3,
+zero broadening, 161 frequencies on 0--40 THz, q=5, causal FFT reconstruction,
+one 120-DOF Dyson block, five 24-DOF contraction microblocks, complete
+primitive Green range four and complete generated self-energy range four.
+The restart reproduced the saved state at map zero with residual 0.54140,
+then advanced to 0.52553 on map one.  Bubble-balance defects were
+\(1.04\times10^{-16}\) and \(1.05\times10^{-16}\), positivity checks passed,
+and peak device memory remained below 45 per cent.  The job was left running
+after map two began.  No conductance from this trajectory is released before
+the fixed-point, frequency and transverse-mesh gates pass.
+
+If L5 converges, the length campaign will retain the same physical settings
+and use 3, 5, 10, 15, 20 and 24 conventional cells.  The 20- and 24-cell
+points reproduce the long-film scale used by Guo et al.; intermediate points
+resolve the crossover without pretending that a transient L5 current is a
+validated seed for longer devices.
