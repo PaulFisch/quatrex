@@ -493,6 +493,42 @@ base rank 128 becomes final rank 256, so its SCBA cost is matched to the
 failed rank-256 INDSCAL run.  The candidate remains subject to the same
 frozen self-energy, symmetry, positivity and timing gates.
 
+The paired candidate does not pass.  Alps jobs 4558424 and 4558435 construct
+the same cached base-rank-128 CP fit on the q=13 and q=3 meshes.  Its
+real-space error is 2.41 per cent, which the exact symmetry projection lowers
+to 2.32 per cent.  The independent folded samples differ by 2.21 and 2.23 per
+cent.  Job 4558442 then applies the paired rank-256 vertex to the frozen q=3
+Green functions.  Relative errors in \(\Sigma^<\), \(\Sigma^>\) and
+\(\Sigma^R\) are 6.88, 3.78 and 3.05 per cent.  Anti-Hermiticity remains
+between \(6.75\times10^{-16}\) and \(1.41\times10^{-15}\), and no negative
+source weight is added.  The contraction takes 14.47 s and peaks at 3.81 GB,
+against 30.56 s and 33.80 GB for dense FC3.  Exact contracted-leg symmetry
+therefore retains a useful speed and memory advantage, but it does not repair
+the vertex accuracy.  Neither this factor nor the tested INDSCAL factors may
+be used for the joint-refit SCBA branch.  The exact gate record is
+`phonon/scripts/data/si_conventional_100_fc4_refit_l5_q3_s2cp256_gate.json`.
+
+An exact dense run tests the nonlinear equation independently of that factor
+work.  Alps job 4558403 uses the same q=3 frozen-gate discretisation, the full
+vertex at \(s=1\), linear mixing 0.05 and 30 maps.  It does not converge.  The
+residual follows a broad oscillation, reaching 0.25858 at map 24 and ending at
+0.32103.  Its final internal-current spread is
+\(7.22\times10^{-5}\), while the bubble energy balance remains between
+roundoff and \(8.5\times10^{-16}\) throughout.  The best distributed state is
+retained.  This shows that the exact support-complete map preserves the
+conserving identities and that 30 direct linear maps are insufficient.  It
+does not provide a conductance value or a no-fixed-point result because the
+q=3, 1 THz grid is deliberately coarse.  A smaller-mixing restart from the
+best state is the next fixed-point test.  The full trajectory and its physical
+switches are recorded in
+`phonon/scripts/data/si_conventional_100_fc4_refit_l5_q3_dense_scba.json`.
+
+The submitted job predates the launcher provenance correction and writes the
+then-local commit to its result archive.  The independently queried Alps
+checkout was `87945ef3`.  Later launchers record the remote checkout as
+`QX_SOURCE_COMMIT` and retain a differing local revision only as
+`QX_LOCAL_SOURCE_COMMIT`.
+
 The raw production runs are Alps jobs 4555840, 4555851, 4555856, 4555883,
 4555891 and 4555902 for the q=9 frequency sequence, and jobs 4555936,
 4555891, 4555914 and 4555919 for the q=7, 9, 13 and 17 mesh sequence.

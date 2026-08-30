@@ -463,3 +463,8 @@ least-squares ladder rebuild.
 | 2026-08-30 | 4556648 | si-conventional-100-fc4refit-l5-q13-r384-fastfit | 1 | 01:00:00 | 1.00 | 439.84 | normal |
 | 2026-08-30 | 4558401 | si-conventional-100-fc4refit-l5-q13-cp128-base | 1 | 02:00:00 | 2.00 | 441.84 | normal |
 | 2026-08-30 | 4558403 | si-conventional-100-fc4refit-l5-q3-dense-scba | 1 | 00:30:00 | 0.50 | 442.34 | debug |
+| 2026-08-30 | 4558418 | si-conventional-100-fc4refit-l5-q13-cp128-bounded | 1 | 00:30:00 | 0.50 | 442.84 | debug |
+| 2026-08-30 | 4558424 | si-conventional-100-fc4refit-l5-q13-cp128-bounded-v2 | 1 | 00:30:00 | 0.50 | 443.34 | debug |
+| 2026-08-30 | 4558435 | si-conventional-100-fc4refit-l5-q3-cp128-bounded | 1 | 00:30:00 | 0.50 | 443.84 | debug |
+| 2026-08-30 | 4558442 | si-conventional-100-fc4refit-l5-q3-s2cp256-map | 1 | 00:30:00 | 0.50 | 444.34 | debug |
+| 2026-08-30 | 4558446 | si-conventional-100-fc4refit-l5-q3-dense-scba-m001 | 1 | 01:00:00 | 1.00 | 445.34 | normal |
