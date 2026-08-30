@@ -529,18 +529,19 @@ def main():
                         "(highest rank gets the untagged name; truncate at "
                         "runtime via sse_vertex_rank)")
     p.add_argument("--decompose-ansatz", default="INDSCAL",
-                   choices=["INDSCAL", "CP"],
+                   choices=["INDSCAL", "CP", "S2CP"],
                    help="factorisation ansatz (INDSCAL = shared contracted "
-                        "legs, the production default)")
+                        "legs; S2CP = paired CP with exact contracted-leg "
+                        "symmetry)")
     p.add_argument("--decompose-restarts", type=int, default=None,
                    help="override the production factor-fit restart count; "
                         "requires --decompose-cache-label so a reduced study "
                         "fit cannot masquerade as the default fit")
     p.add_argument("--decompose-max-iter", type=int, default=None,
-                   help="override INDSCAL ALS iterations per restart; requires "
+                   help="override ALS iterations per restart; requires "
                         "--decompose-cache-label")
     p.add_argument("--decompose-lbfgs-iters", type=int, default=None,
-                   help="override INDSCAL L-BFGS iterations; requires "
+                   help="override CP/INDSCAL L-BFGS iterations; requires "
                         "--decompose-cache-label")
     p.add_argument("--decompose-cache-label", default=None,
                    help="cache namespace recorded in factor metadata for a "
@@ -575,10 +576,10 @@ def main():
     if fit_kwargs and not a.decompose_cache_label:
         p.error("non-default factor-fit controls require "
                 "--decompose-cache-label")
-    if (a.decompose_ansatz != "INDSCAL"
+    if (a.decompose_ansatz not in ("INDSCAL", "CP", "S2CP")
             and any(key in fit_kwargs for key in ("max_iter", "lbfgs_iters"))):
-        p.error("--decompose-max-iter/--decompose-lbfgs-iters currently "
-                "apply only to INDSCAL")
+        p.error("the selected factor ansatz does not accept ALS/L-BFGS "
+                "iteration controls")
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

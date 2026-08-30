@@ -731,6 +731,62 @@ def n_params_cp(R: int, n_dof: int, dim_sc: int) -> int:
 
 
 # =====================================================================
+# 3b. Contracted-leg-symmetric paired CP
+# =====================================================================
+
+
+def symmetrise_cp_result(
+    result: CompressionResult, target: FC3Target
+) -> CompressionResult:
+    """Pair a CP fit with its contracted-leg transpose.
+
+    The orthogonal projection ``(T_hat + T_hat.swapaxes(1, 2)) / 2`` is
+    represented without reconstructing the dense tensor by concatenating
+    every ``A*B*C`` component with ``A*C*B``.  The exported rank doubles,
+    while exact S2 symmetry and the ASR of both contracted factors are
+    retained.  Projection cannot increase the error for an S2-symmetric
+    target.
+    """
+    if result.name != "CP":
+        raise ValueError("only a CP result can be paired")
+    A, B, C = (np.asarray(result.factors[key]) for key in ("A", "B", "C"))
+    lam = np.asarray(result.factors.get("lambdas", np.ones(A.shape[1])))
+    paired = CompressionResult(
+        name="S2CP",
+        rank=2 * int(result.rank),
+        n_params=n_params_cp(2 * int(result.rank), target.n_dof, target.dim_sc),
+        rel_err=np.nan,
+        fit_time_s=result.fit_time_s,
+        factors={
+            "A": np.concatenate((A, A), axis=1),
+            "B": np.concatenate((B, C), axis=1),
+            "C": np.concatenate((C, B), axis=1),
+            "lambdas": 0.5 * np.concatenate((lam, lam)),
+        },
+        info={**result.info, "paired_base_rank": int(result.rank)},
+    )
+    approximation = reconstruct_cp(paired, target)
+    paired.rel_err = float(
+        np.linalg.norm(target.T - approximation)
+        / (target.target_norm or 1.0)
+    )
+    return paired
+
+
+def fit_s2cp(
+    target: FC3Target,
+    rank: int,
+    **kwargs,
+) -> CompressionResult:
+    """Fit CP at half rank and pair it to enforce contracted-leg symmetry."""
+    if rank < 2 or rank % 2:
+        raise ValueError("S2CP final rank must be a positive even integer")
+    return symmetrise_cp_result(
+        fit_cp(target, rank=rank // 2, **kwargs), target
+    )
+
+
+# =====================================================================
 # 4. INDSCAL (CP with internal-leg symmetry b_r = c_r)
 # =====================================================================
 
@@ -1448,6 +1504,7 @@ FITTERS: dict[str, Callable[..., CompressionResult]] = {
     "mSVD": fit_msvd,
     "HOSVD": fit_hosvd,
     "CP": fit_cp,
+    "S2CP": fit_s2cp,
     "INDSCAL": fit_indscal,
     "Waring": fit_waring,
     "PCP": fit_pcp_wrapped,
@@ -1553,8 +1610,8 @@ def fit_production(
     divided by w afterwards); the ASR projection is applied in the UNSCALED
     metric after rescaling, so conservation is unaffected.
     """
-    if ansatz not in ("INDSCAL", "CP"):
-        raise ValueError("production ansatz must be INDSCAL or CP")
+    if ansatz not in ("INDSCAL", "CP", "S2CP"):
+        raise ValueError("production ansatz must be INDSCAL, CP or S2CP")
     fitter = FITTERS[ansatz]
     enforce_asr = kwargs.pop("enforce_asr", True)
 
@@ -1616,13 +1673,15 @@ def export_production_factors(
         "n_dof": target.n_dof, "dim_sc": target.dim_sc,
         "n_super": target.n_super,
     }
+    if "paired_base_rank" in result.info:
+        meta["paired_base_rank"] = int(result.info["paired_base_rank"])
     if result.name == "INDSCAL":
         D, V = result.factors["D"], result.factors["V"]
         contrib = np.linalg.norm(D, axis=0) * np.linalg.norm(V, axis=0) ** 2
         order = np.argsort(-contrib)
         return {"D": D[:, order].copy(), "V": V[:, order].copy(),
                 "lambdas": np.ones(D.shape[1]), "meta": meta}
-    if result.name == "CP":
+    if result.name in ("CP", "S2CP"):
         A, B, C = (result.factors[k] for k in ("A", "B", "C"))
         lam = result.factors.get("lambdas", np.ones(A.shape[1]))
         contrib = (np.abs(lam) * np.linalg.norm(A, axis=0)
@@ -1647,7 +1706,7 @@ def reconstruct(
         return reconstruct_msvd(result, target)
     if result.name == "HOSVD":
         return reconstruct_hosvd(result, target)
-    if result.name == "CP":
+    if result.name in ("CP", "S2CP"):
         return reconstruct_cp(result, target)
     if result.name == "INDSCAL":
         return reconstruct_indscal(result, target)

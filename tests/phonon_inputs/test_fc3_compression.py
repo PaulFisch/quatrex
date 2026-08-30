@@ -166,6 +166,61 @@ def test_indscal_exact_rank(target):
     assert res.rel_err < 1e-6
 
 
+def test_s2cp_pairing_is_exact_orthogonal_projection(target):
+    rng = np.random.default_rng(15)
+    rank = 3
+    A = rng.normal(size=(target.n_dof, rank))
+    B = fcc.asr_project_factor(
+        rng.normal(size=(target.dim_sc, rank)), target.n_super
+    )
+    C = fcc.asr_project_factor(
+        rng.normal(size=(target.dim_sc, rank)), target.n_super
+    )
+    lam = rng.normal(size=rank)
+    cp = fcc.CompressionResult(
+        name="CP", rank=rank,
+        n_params=fcc.n_params_cp(rank, target.n_dof, target.dim_sc),
+        rel_err=np.nan, fit_time_s=0.0,
+        factors={"A": A, "B": B, "C": C, "lambdas": lam},
+    )
+
+    raw = fcc.reconstruct_cp(cp, target)
+    paired = fcc.symmetrise_cp_result(cp, target)
+    reconstructed = fcc.reconstruct(paired, target)
+
+    np.testing.assert_allclose(
+        reconstructed, 0.5 * (raw + raw.transpose(0, 2, 1)),
+        rtol=0, atol=2e-13 * np.abs(raw).max(),
+    )
+    np.testing.assert_allclose(
+        reconstructed, reconstructed.transpose(0, 2, 1),
+        rtol=0, atol=2e-13 * np.abs(raw).max(),
+    )
+    assert paired.rank == 2 * rank
+    assert paired.info["paired_base_rank"] == rank
+    asr = fcc.asr_residual(reconstructed, target.n_super)
+    assert asr["leg_j"] < 1e-12 * asr["norm"]
+    assert asr["leg_k"] < 1e-12 * asr["norm"]
+
+    fcc.annotate_result(paired, target)
+    exported = fcc.export_production_factors(paired, target)
+    assert exported["meta"]["method"] == "S2CP"
+    assert exported["meta"]["paired_base_rank"] == rank
+    np.testing.assert_allclose(
+        np.einsum(
+            "r,mr,jr,kr->mjk", exported["lambdas"], exported["A"],
+            exported["B"], exported["C"], optimize=True,
+        ),
+        reconstructed,
+        rtol=0, atol=2e-13 * np.abs(raw).max(),
+    )
+
+
+def test_s2cp_rejects_odd_final_rank(target):
+    with pytest.raises(ValueError, match="positive even"):
+        fcc.fit_s2cp(target, rank=3, n_restarts=1)
+
+
 def test_msvd_monotone(target):
     errs = [fcc.fit_msvd(target, rank=R, enforce_asr=False).rel_err
             for R in (2, 4, 8)]
@@ -177,7 +232,8 @@ def test_msvd_monotone(target):
 # ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("method,rank", [
-    ("mSVD", 4), ("CP", 4), ("INDSCAL", 4), ("HOSVD", (3, 6)), ("Waring", 4),
+    ("mSVD", 4), ("CP", 4), ("S2CP", 4), ("INDSCAL", 4),
+    ("HOSVD", (3, 6)), ("Waring", 4),
 ])
 def test_asr_preserved(target, phonon, method, rank):
     # break ASR on purpose in the input
@@ -192,7 +248,7 @@ def test_asr_preserved(target, phonon, method, rank):
     kwargs = {"enforce_asr": True}
     if method == "HOSVD":
         res = fitter(t, R1=rank[0], R2=rank[1], **kwargs)
-    elif method in ("CP", "INDSCAL"):
+    elif method in ("CP", "S2CP", "INDSCAL"):
         res = fitter(t, rank=rank, n_restarts=1, seed=0, **kwargs)
     elif method == "Waring":
         res = fitter(t, rank=rank, n_restarts=1, seed=0, **kwargs)
@@ -209,7 +265,7 @@ def test_asr_preserved(target, phonon, method, rank):
 # ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("method,rank", [
-    ("INDSCAL", 4), ("HOSVD", (3, 6)), ("Waring", 4),
+    ("INDSCAL", 4), ("S2CP", 4), ("HOSVD", (3, 6)), ("Waring", 4),
 ])
 def test_s2_structural(target, method, rank):
     fitter = fcc.FITTERS[method]
@@ -226,7 +282,9 @@ def test_s2_structural(target, method, rank):
 # Determinism (no global RNG leaks)
 # ---------------------------------------------------------------------
 
-@pytest.mark.parametrize("method,rank", [("CP", 3), ("INDSCAL", 3)])
+@pytest.mark.parametrize("method,rank", [
+    ("CP", 3), ("S2CP", 4), ("INDSCAL", 3),
+])
 def test_determinism(target, method, rank):
     fitter = fcc.FITTERS[method]
     np.random.seed(12345)
@@ -275,6 +333,25 @@ def test_fit_production_and_export(target):
     assert np.all(np.diff(contrib) <= 1e-12)
 
 
+def test_s2cp_production_gate_and_export(target):
+    res = fcc.fit_production(
+        target, rank=4, ansatz="S2CP", n_restarts=1, seed=0,
+        max_iter=30, lbfgs_iters=30,
+    )
+    assert res.info["s2_recon"] < 1e-12
+    exp = fcc.export_production_factors(res, target)
+    assert exp["meta"]["method"] == "S2CP"
+    assert exp["meta"]["paired_base_rank"] == 2
+    reconstructed = np.einsum(
+        "r,mr,jr,kr->mjk", exp["lambdas"], exp["A"], exp["B"], exp["C"],
+        optimize=True,
+    )
+    np.testing.assert_allclose(
+        reconstructed, reconstructed.transpose(0, 2, 1),
+        rtol=0, atol=1e-12 * np.abs(reconstructed).max(),
+    )
+
+
 def test_fit_production_gate(target):
     # sabotage: a fitter that ignores ASR must be caught by the gate
     rng = np.random.default_rng(2)
@@ -315,7 +392,7 @@ def test_weighted_projector_zeroes_weighted_sum_and_is_idempotent():
     np.testing.assert_allclose(P2, P, rtol=0, atol=1e-13)
 
 
-@pytest.mark.parametrize("method", ["INDSCAL", "CP"])
+@pytest.mark.parametrize("method", ["INDSCAL", "CP", "S2CP"])
 def test_weighted_asr_preserved_two_species(target, method):
     # Two-species weights (the mock has masses 28/70); a fit with
     # asr_weights must satisfy the PHYSICAL (weighted) sum rule, which

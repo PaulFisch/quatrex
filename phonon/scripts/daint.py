@@ -111,7 +111,7 @@ def cmd_setup(_):
         # FC3 factor construction uses the PyTorch optimiser.  Keep it in the
         # project venv so factorised-only Si inputs can be built on the GH200
         # instead of first materialising the dense q-folded tensor elsewhere.
-        f"toml numba ase matplotlib pytest pytest-mpi torch "
+        f"toml numba ase matplotlib pytest pytest-mpi torch tensorly "
         # phonon/solver/__init__ -> dense -> phonon_inputs.convention imports
         # Phonopy at module scope, so the whole studies tree needs it even
         # for a toy chain that never reads a force-constant file.

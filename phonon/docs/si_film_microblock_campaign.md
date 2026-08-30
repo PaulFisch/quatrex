@@ -456,6 +456,43 @@ without this algebraic obstruction.  The singular values, bounds and
 conventional FC3 hash are stored in
 `phonon/studies/out/si_conventional_100_fc4_refit_rank_oracle.json`.
 
+The first rank-256 candidate uses a deliberately short, separately cached
+two-restart fit.  Its real-space error is 2.09 per cent and the independent
+q=13 folded sample error is 1.86 per cent.  Alps job 4556641 applies this
+factor and the dense vertex to identical q=3 ballistic Green functions.  It
+fails the frozen gate: the relative errors in
+\(\Sigma^<\), \(\Sigma^>\) and \(\Sigma^R\) are 6.39, 3.35 and 2.66 per cent.
+This is not a symmetry failure.  The candidate anti-Hermiticity defects are
+\(1.51\times10^{-15}\) and \(6.45\times10^{-16}\), and it adds no negative
+source weight relative to the dense reference.  The measured benefit is
+substantial but presently uncertified: the ring falls from 30.56 to 11.55 s,
+the complete iteration from 51.09 to 17.22 s and peak device memory from
+33.80 to 3.46 GB.  The exact comparison is stored in
+`phonon/scripts/data/si_conventional_100_fc4_refit_l5_q3_r256_gate.json`.
+No interacting q=13 iteration uses this failed factor.  A restart-rich
+rank-256 refit and rank 384 are tested next; failure at a rank that can still
+beat the dense ring is a no-go for factorised production on this potential,
+not grounds for relaxing the one-per-cent self-energy gate.
+
+Those two INDSCAL refinements reach nearly the same minimum.  The
+restart-rich rank-256 fit has 1.66 per cent real-space error and 1.47 per cent
+q-folded sample error.  The rank-384 fit gives 1.67 and 1.48 per cent.  The
+shared contracted factor, rather than the ordinary unfolding rank, is now the
+active restriction.  The next candidate uses paired CP.  For every fitted
+term it stores
+
+\[
+ {1\over2}D_r\otimes B_r\otimes C_r
+ +{1\over2}D_r\otimes C_r\otimes B_r .
+\]
+
+This is the orthogonal contracted-leg symmetrisation of an unconstrained CP
+fit.  It cannot increase the error of the symmetric target, preserves the
+two factor ASRs, and is represented directly by the production CP kernel.  A
+base rank 128 becomes final rank 256, so its SCBA cost is matched to the
+failed rank-256 INDSCAL run.  The candidate remains subject to the same
+frozen self-energy, symmetry, positivity and timing gates.
+
 The raw production runs are Alps jobs 4555840, 4555851, 4555856, 4555883,
 4555891 and 4555902 for the q=9 frequency sequence, and jobs 4555936,
 4555891, 4555914 and 4555919 for the q=7, 9, 13 and 17 mesh sequence.
