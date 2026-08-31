@@ -67,6 +67,7 @@ class SCBAData:
         block_sizes = get_block_sizes(config, grid)
 
         kpoint_grid = config.device.kpoint_grid
+        phonon_transport = config.simulation_type == "phonon"
         # Find the maximum interaction cutoff.
         max_interaction_cutoff = 0.0
         if config.scba.coulomb_screening:
@@ -90,7 +91,7 @@ class SCBAData:
                 "Ballistic transport is not properly supported yet."
             )
 
-        if comm.rank == 0:
+        if comm.rank == 0 and not phonon_transport:
             print(f"Max Interaction Cutoff: {max_interaction_cutoff}", flush=True)
 
         with profiler.profile_range(
@@ -105,14 +106,16 @@ class SCBAData:
             start_idx = block_offsets[section_offsets[comm.block.rank]]
             end_idx = block_offsets[section_offsets[comm.block.rank + 1]]
 
-            micro_dof = int(getattr(
-                config.phonon, "sse_microblock_dof", 0) or 0)
-            if (getattr(config, "simulation_type", "") == "phonon"
-                    and micro_dof):
+            if phonon_transport:
                 from quatrex.phonon.microblocks import grouped_band_indices
 
+                micro_dof = int(config.phonon.sse_microblock_dof)
+                g_band = min(
+                    1 if micro_dof else int(config.phonon.sse_g_band),
+                    len(block_sizes) - 1,
+                )
                 rows_, cols_ = grouped_band_indices(
-                    block_sizes, band=1,
+                    block_sizes, band=g_band,
                     start_block=int(section_offsets[comm.block.rank]),
                     end_block=int(section_offsets[comm.block.rank + 1]))
                 self.sparsity_pattern = sparse.coo_matrix(
@@ -127,51 +130,6 @@ class SCBAData:
                     start_idx=start_idx,
                     end_idx=end_idx,
                 )
-
-            g_band = 1
-            if getattr(config, "simulation_type", "") == "phonon":
-                g_band = min(
-                    (1 if micro_dof
-                     else int(getattr(config.phonon,
-                                      "sse_g_band", 1) or 1)),
-                    len(block_sizes) - 1,
-                )
-            if g_band > 1:
-                from qttools import sparse as _sparse
-
-                sec_lo = int(section_offsets[comm.block.rank])
-                sec_hi = int(section_offsets[comm.block.rank + 1])
-                block_offsets_ = np.hstack(([0], np.cumsum(block_sizes)))
-                rows_, cols_ = [], []
-                for bi in range(len(block_sizes)):
-                    for bj in range(len(block_sizes)):
-                        if not (1 < abs(bi - bj) <= g_band):
-                            continue
-                        if not (sec_lo <= min(bi, bj) < sec_hi):
-                            continue
-                        r = np.arange(block_offsets_[bi],
-                                      block_offsets_[bi + 1])
-                        c = np.arange(block_offsets_[bj],
-                                      block_offsets_[bj + 1])
-                        rr, cc = np.meshgrid(r, c, indexing="ij")
-                        rows_.append(rr.ravel())
-                        cols_.append(cc.ravel())
-                if rows_:
-                    n_ = int(block_offsets_[-1])
-                    band_pattern = _sparse.coo_matrix(
-                        (
-                            xp.ones(sum(len(r) for r in rows_)),
-                            (xp.asarray(np.concatenate(rows_)),
-                             xp.asarray(np.concatenate(cols_))),
-                        ),
-                        shape=(n_, n_),
-                    )
-                    ext = (
-                        self.sparsity_pattern.astype(np.float64)
-                        + band_pattern
-                    ).tocoo()
-                    ext.data[:] = 1.0
-                    self.sparsity_pattern = ext
 
         dsdbsparse_type = config.compute.dsdbsparse_type
 

@@ -1,18 +1,17 @@
 # Phonon code catalogue
 
-Status: refactor baseline after merging `upstream/dev` at `9d957a9f`,
-2026-08-31.
+Status: implemented and regression-tested after merging `upstream/dev` at
+`9d957a9f`, 2026-08-31.
 
-This catalogue records the intended ownership of the branch-only code before
-it is simplified. The production target is the unmodified three-phonon SCBA
+This catalogue records the ownership of the branch-only code after the
+cleanup. The production target is the unmodified three-phonon SCBA
 interaction on a resolved frequency grid and with spatial support large enough
 to contain the interaction. Stabilising masks, artificial broadening and
 continuation schedules are not part of that target.
 
 ## Production core
 
-These pieces implement the physical path and should remain in `src/` after
-being shortened and tested.
+These pieces implement the retained physical path in `src/`.
 
 | Area | Files | Decision |
 |---|---|---|
@@ -37,17 +36,17 @@ Two support rules apply to every production layout:
    layout can request the wider Green-function support its FC3 offsets require.
    Unsupported self-energy output ranges must fail construction rather than be
    dropped silently.
-2. `phonon.interaction_cutoff` defaults to 10 Angstrom. The MoS2 runs show that
-   this box mask can break positivity before the self-energy is applied.
-   Production should consume the loaded FC3 support as-is; an analysis-only
-   cutoff belongs in study code.
+2. `phonon.interaction_cutoff` remains an electron-phonon compatibility
+   setting, but phonon transport no longer uses it to mask the Green-function
+   sparsity. The complete requested block band is built directly. The MoS2
+   runs showed that the old 10 Angstrom box mask could break positivity before
+   the self-energy was applied.
 
 ## Remove from production
 
-The following paths alter the physical map or were introduced as convergence
-workarounds. They should be deleted from the public configuration and runtime.
-Tests that merely preserve their old behavior should be removed with them;
-negative-result evidence stays in the docs and run manifests.
+The following paths altered the physical map or were introduced as convergence
+workarounds. They have been deleted from the public configuration and runtime.
+Negative-result evidence remains in the docs and run manifests.
 
 | Feature | Runtime/config surface | Evidence and action |
 |---|---|---|
@@ -66,9 +65,8 @@ masking feature.
 
 ## Experimental code
 
-Experimental modules should not be imported, configured or executed by the
-default solver. They will be moved under an explicit experimental namespace
-with focused oracle tests and a short result note.
+Experimental implementations live under explicit experimental namespaces and
+are loaded only when their disabled-by-default configuration is selected.
 
 | Programme | Current files | Verdict |
 |---|---|---|
@@ -89,9 +87,9 @@ with focused oracle tests and a short result note.
   and one-off campaign drivers. Retain reproducible oracles and current figure
   generators; move closed campaigns to an attic or delete them when the run
   manifest provides the durable record.
-- `phonon/scripts/data/run_manifest_*.csv` is the run catalogue. Its current
-  `no-cm-subtraction` failure reason is obsolete and must be removed when the
-  runtime subtraction is deleted.
+- `phonon/scripts/data/run_manifest_*.csv` is the historical run catalogue.
+  Its mask, broadening and CM-subtraction columns describe old runs, not
+  current production controls.
 - Long historical documents belong in `phonon/docs/attic/`. The active docs
   should describe only the retained production method, its convergence
   requirements and the experimental verdicts above.
@@ -112,3 +110,12 @@ deprecated option disabled. At minimum it must preserve:
 The last item is the acceptance test for the solver redesign. A faster result
 that changes when the same physical device is reblocked is not a valid
 refactor.
+
+## Verification result
+
+The final NumPy regression on 2026-08-31 passed 1,193 tests with 64 expected
+skips across phonon, configuration, SCBA and selected-solve modules. The
+distributed selected solver passed 45 tests on each of three MPI ranks. The
+coupled-q and experimental pole paths passed 10 tests on each of two MPI
+ranks. A focused regression also verifies that phonon transport ignores the
+legacy geometric cutoff and requests the complete selected block band.
