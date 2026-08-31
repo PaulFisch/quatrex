@@ -91,9 +91,15 @@ def test_reblocking_preserves_the_dense_operators(c: int) -> None:
     phi = rng.standard_normal((nd, nd, nd)) + 0j
     prim = {(I, I, I): phi for I in range(n_cells)}
     merged = m._merge(prim, n_cells, c, nd)
+    m._assert_merge_exact(prim, merged, n_cells, c, nd)
     np.testing.assert_array_equal(
         m._dense_vertex(merged, nb, ndn),
         m._dense_vertex(prim, n_cells, nd))
+
+    damaged = {key: value.copy() for key, value in merged.items()}
+    damaged[next(iter(damaged))].flat[0] += 1
+    with pytest.raises(SystemExit, match="fc3 merge changed"):
+        m._assert_merge_exact(prim, damaged, n_cells, c, nd)
 
 
 def test_replication_gate_rejects_inequivalent_slabs() -> None:
@@ -121,3 +127,23 @@ def test_reblock_source_must_use_primitive_harmonic_blocks() -> None:
     grouped = {(0, 0): {0: np.eye(30), 1: np.eye(30)}}
     with pytest.raises(SystemExit, match="already be reblocked"):
         m._validate_primitive_source(grouped, 6)
+
+
+def test_reblock_config_removes_only_retired_phonon_options() -> None:
+    config = """\
+[electron]
+eta_obc = 0.1
+[phonon]
+eta = 0.0
+sse_ramp_iterations = 0
+sse_g_band = 3
+[phonon.solver]
+max_batch_size = 512
+"""
+    cleaned = _mod()._remove_retired_phonon_options(config)
+
+    assert "[electron]\neta_obc = 0.1" in cleaned
+    assert "[phonon]\nsse_g_band = 3" in cleaned
+    assert "[phonon.solver]\nmax_batch_size = 512" in cleaned
+    assert "sse_ramp_iterations" not in cleaned
+    assert "\neta =" not in cleaned

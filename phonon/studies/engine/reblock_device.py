@@ -1,8 +1,10 @@
-"""Re-block a transversely-periodic film device: N primitive transport cells,
-C of them per BTD block.
+"""Group primitive transport cells into wider BTD blocks.
 
-``phonon/docs/bubble_positivity.md``. Putting C transport cells in one
-    python phonon/studies/engine/reblock_device.py         --src cluster/mos2f3 --cells 6 --per-block 2 --out cluster/mos2f6x2
+Usage:
+
+    python phonon/studies/engine/reblock_device.py \
+        --src cluster/mos2f3 --cells 6 --per-block 2 \
+        --out cluster/mos2f6x2
 """
 from __future__ import annotations
 
@@ -17,6 +19,38 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "phonon"))
+
+_RETIRED_PHONON_KEYS = {
+    "eta",
+    "eta_obc",
+    "eta_final",
+    "eta_ir_floor_cells",
+    "eta_ir_floor_final_cells",
+    "eta_ir_floor_ramp_iterations",
+    "eta_obc_final",
+    "eta_obc_ramp_iterations",
+    "eta_ramp_iterations",
+    "low_freq_mixing_factor",
+    "low_freq_mixing_thz",
+    "scp_tadpole",
+    "sse_ramp_iterations",
+    "sse_vertex_scale",
+}
+
+
+def _remove_retired_phonon_options(config: str) -> str:
+    """Remove options deleted from the production phonon schema."""
+    section = ""
+    kept = []
+    for line in config.splitlines(keepends=True):
+        header = re.match(r"\s*\[([^]]+)]", line)
+        if header:
+            section = header.group(1)
+        key = line.split("=", 1)[0].strip() if "=" in line else ""
+        if section == "phonon" and key in _RETIRED_PHONON_KEYS:
+            continue
+        kept.append(line)
+    return "".join(kept)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +170,35 @@ def _merge(blocks: dict, n_prim: int, c: int, nd: int) -> dict:
     return out
 
 
+def _assert_merge_exact(
+    primitive: dict, merged: dict, n_prim: int, c: int, nd: int
+) -> None:
+    """Verify every merged tensor slice against its primitive block."""
+    nb = n_prim // c
+    seen = set()
+    zero = np.zeros((nd, nd, nd), dtype=complex)
+    for (I, J, K), block in merged.items():
+        if not (0 <= I < nb and 0 <= J < nb and 0 <= K < nb):
+            raise SystemExit(f"merged FC3 key {(I, J, K)} is out of range")
+        for u in range(c):
+            for v in range(c):
+                for w in range(c):
+                    key = (c * I + u, c * J + v, c * K + w)
+                    expected = primitive.get(key, zero)
+                    actual = block[
+                        u * nd:(u + 1) * nd,
+                        v * nd:(v + 1) * nd,
+                        w * nd:(w + 1) * nd,
+                    ]
+                    if not np.array_equal(actual, expected):
+                        raise SystemExit(f"fc3 merge changed primitive block {key}")
+                    if key in primitive:
+                        seen.add(key)
+    if seen != set(primitive):
+        missing = sorted(set(primitive) - seen)[:3]
+        raise SystemExit(f"fc3 merge dropped primitive blocks {missing}")
+
+
 def _write_fc3_blocks(phi_blocks: dict, block_sizes, path: Path,
                       units: str = "THz^2") -> None:
     """Write fc3_blocks.hdf5 in the production schema.
@@ -205,6 +268,8 @@ def _dense_fc2(mats: dict, perp, n_cells: int, nd: int) -> np.ndarray:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--src", required=True, help="source device dir")
+    ap.add_argument("--config", default=None,
+                    help="config template when the source dir has none")
     ap.add_argument("--cells", type=int, required=True,
                     help="total primitive transport cells in the target")
     ap.add_argument("--per-block", type=int, required=True,
@@ -233,7 +298,10 @@ def main() -> None:
 
     src = ROOT / a.src if not Path(a.src).is_absolute() else Path(a.src)
     out = ROOT / a.out if not Path(a.out).is_absolute() else Path(a.out)
-    cfg_txt = (src / "quatrex_config.toml").read_text()
+    cfg_path = Path(a.config) if a.config else src / "quatrex_config.toml"
+    if not cfg_path.is_absolute():
+        cfg_path = ROOT / cfg_path
+    cfg_txt = _remove_retired_phonon_options(cfg_path.read_text())
     tdir = a.tdir or re.search(r'transport_direction\s*=\s*"(\w)"',
                                cfg_txt).group(1)
     tidx = "xyz".index(tdir)
@@ -298,11 +366,7 @@ def main() -> None:
               f"for {nb} grouped Dyson blocks")
     else:
         merged = _merge(prim, n_cells, c, nd)
-        ref = _dense_vertex(prim, n_cells, nd)
-        got = _dense_vertex(merged, nb, ndn)
-        err = np.abs(got - ref).max() / (np.abs(ref).max() + 1e-300)
-        if err > 1e-14:
-            raise SystemExit(f"fc3 merge changed the dense vertex: {err:.2e}")
+        _assert_merge_exact(prim, merged, n_cells, c, nd)
         print(f"  fc3 merge exact (dense {n_cells}-cell vertex unchanged, "
               f"{len(prim)} primitive -> {len(merged)} merged blocks)")
         _write_fc3_blocks({k: np.ascontiguousarray(v.astype(complex))

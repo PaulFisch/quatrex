@@ -126,7 +126,11 @@ def cmd_setup(_):
 
 
 def cmd_sync(_):
-    print(ssh(f"git -C {REPO} pull --ff-only", 120, check=True))
+    print(ssh(
+        f"GIT_LFS_SKIP_SMUDGE=1 git -C {REPO} pull --ff-only",
+        120,
+        check=True,
+    ))
 
 
 NORMAL_LEDGER = Path(__file__).resolve().parent / "daint_normal_ledger.md"
