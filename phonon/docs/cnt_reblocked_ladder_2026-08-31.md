@@ -1,10 +1,11 @@
 # Reblocked CNT length ladder
 
-**Status:** scaling and 16--128-cell ladder complete, 2026-08-31
+**Status:** scaling, the 16--128-cell ladder and the matched 96-cell support
+audit are complete, 2026-08-31.
 
-## Production definition
+## Recorded ladder definition
 
-The ladder keeps the conserving CNT support instead of reducing it:
+The ladder keeps the full stored CNT support instead of reducing it:
 
 * two primitive transport cells per 72-DOF solver block;
 * `sse_g_band = 3`;
@@ -13,6 +14,13 @@ The ladder keeps the conserving CNT support instead of reducing it:
 * zero broadening, half retarded reconstruction and the exact four-ring
   greater-from-lesser identity;
 * plain linear mixing with factor 0.1.
+
+This is a diagnostic of the archived half-retarded ladder, not the final
+physical recipe. The half reconstruction omits the real Kramers-Kronig part
+of the retarded self-energy. At zero broadening it is non-causal and the long
+matched-length runs below show broad residual recurrences. A causal `fft`
+retarded ladder is required before interpreting the current as a mean-free-
+path result.
 
 The auxiliary grid is disabled for this reference, not deleted. It remains an
 experimental representation that must reproduce this uniform-grid result
@@ -58,8 +66,8 @@ call setup.
 
 The final lead current after three forced iterations is
 `17.99784778298` in every run. The relative Sigma residual
-(`5.8149e-1`) and internal heat-current spread (`3.2498e-5`) also agree,
-so the distributed paths preserve the calculation.
+(`5.8149e-1`) and lead balance (`3.2498e-5`) also agree, so the distributed
+paths preserve the calculation.
 
 Scaling is close to ideal through two nodes and remains useful at eight. The
 ring dominates the steady iteration, but each stack rank has only 21 tau
@@ -73,7 +81,7 @@ node-hour choice for this small rung; eight nodes minimize elapsed time.
 The production gate is simultaneous convergence of the retarded self-energy
 and heat-current conservation. A short scaling run is not a physics result.
 
-| Primitive cells | Job | Nodes | Iterations | Steady iteration (s) | Relative Sigma residual | Internal spread | Lead current |
+| Primitive cells | Job | Nodes | Iterations | Steady iteration (s) | Relative Sigma residual | Lead balance | Lead current |
 |---:|---:|---:|---:|---:|---:|---:|---:|
 | 16 | 4566515 | 1 | 101 | 8.2267 | 9.9529e-4 | 5.0396e-4 | 11.74109 |
 | 24 | 4567378 | 1 | 108 | 12.9810 | 9.6155e-4 | 9.0888e-4 | 10.93254 |
@@ -83,12 +91,12 @@ and heat-current conservation. A short scaling run is not a physics result.
 | 128 | 4568041 | 16 | 112 | 8.9041 | 9.7601e-4 | 9.4711e-4 | 9.38597 |
 
 The 16-cell result reproduces the archived 101-iteration convergence and
-conservation quality with the cleaned current code. The 24-cell rung also
-converges without losing conservation, and the 32-cell spread is 0.128% rather
-than the 6.27% measured for the bad 16x1 blocking. The spread remains below
-0.2% through 128 cells. Current decreases monotonically by 20.1% from 16 to
-128 cells. The 48--64-cell change is only 0.88%, but the 64--128-cell change is
-6.01%. The apparent 64-cell plateau is therefore not length convergence.
+contact balance with the cleaned current code. The 24-cell rung also
+converges without losing contact balance, and the 32-cell balance is 0.128%
+rather than the 6.27% measured for the bad 16x1 blocking. The balance remains
+below 0.2% through 128 cells. Current decreases monotonically by 20.1% from 16
+to 128 cells. The 48--64-cell change is only 0.88%, but the 64--128-cell change
+is 6.01%. The apparent 64-cell plateau is therefore not length convergence.
 Distributed final and minimum-residual Sigma checkpoints remain on Daint for
 restart and audit.
 
@@ -99,12 +107,44 @@ The measured production allocation ladder is 1, 1, 2, 4, 8 and 16 nodes. The
 ranks. Restricting the cache to owned output pairs reduced the successful
 run's pool peak to 60.24 GB. A three-iteration 16-cell parity run, job
 `4568119`, reproduced the old lead current `17.99784778298`, residual
-`5.8149e-1` and spread `3.2498e-5`; its pool peak fell from 21.82 to 16.76 GB.
+`5.8149e-1` and lead balance `3.2498e-5`; its pool peak fell from 21.82 to
+16.76 GB.
 
 The first 32-cell attempt, job `4567821`, exposed a multi-rank race in shared
 output-directory creation before SCBA started. Commit `16f80537` makes that
 operation idempotent and adds a regression test. Job `4567827` passed the old
 failure point and produced the converged result above.
+
+## Current accounting audit
+
+The production convergence gate is the contact balance. It integrates the
+direct Meir-Wingreen current at the left and right contacts. Reblocking does
+not change this definition. A ballistic iteration gives the same current,
+`23.66164`, for two, three and four cells per block, with contact balances
+between `8.2e-14` and `9.4e-13`. Reintegrating the saved endpoint spectra
+reproduces the saved endpoint currents to `7e-15` or better.
+
+The distributed RGF path stores only the two contact currents and fills the
+interior interface slots with NaN. The former max-minus-min calculation
+ignored those NaNs and therefore reported the contact balance again under the
+name `internal_spread`. It did not measure current variation inside the
+device. Commit `915bc59d` reports NaN when the complete interface profile is
+unavailable and adds regression tests.
+
+The dense offline observable can combine bond current and slab absorption
+into a telescoped current. The distributed production path does not compute
+slab absorption when the block communicator has more than one rank, so no
+telescoped interior profile exists for these runs. This is a missing
+diagnostic, but it does not enter or invalidate the contact-current balance.
+The roughly 2% mismatch of the four-cell blocking is therefore a real mismatch
+between its two contact currents, not an internal-spread artifact.
+
+Converged checkpointing had a separate consistency bug. The loop exits before
+mixing when a state passes its gate, so the old `sigma_final` saved the raw map
+output while the logged observables belonged to the measured input iterate.
+Commit `c33748af` saves the measured iterate for converged or divergent runs.
+The `sigma_best` files used for the final comparisons already had the correct
+semantics.
 
 ## Separating length and support convergence
 
@@ -124,16 +164,69 @@ For `g_band = 3`, the primitive-cell coverage is:
 | 3 | 0--3 | 4--5 | 0--9 | 10--11 |
 | 4 | 0--4 | 5--7 | 0--12 | 13--15 |
 
-A matched 96-cell device is divisible by two, three and four. Keeping 32
-frequency-stack ranks and distributing the block axis gives the following
-feasible comparison, projected from job `4568041`:
+A matched 96-cell device is divisible by two, three and four. Jobs `4568155`,
+`4568156` and `4568158` built and checked all three representations from the
+same primitive archive. Every input has 3,456 device DOF, the same dense
+finite-device FC2 operator and all 666 primitive FC3 blocks.
 
-| Cells/block | Solver blocks | Block DOF | Block ranks | Nodes | Walltime request | Projected steady iteration |
-|---:|---:|---:|---:|---:|---:|---:|
-| 2 | 48 | 72 | 2 | 16 | 00:30 | 6--7 s |
-| 3 | 32 | 108 | 4 | 32 | 00:30 | 10--11 s |
-| 4 | 24 | 144 | 6 | 48 | 00:40 | 16--18 s |
+| Cells/block | Solver blocks | Block DOF | Merged FC3 blocks | Block ranks | Nodes |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 48 | 72 | 330 | 2 | 16 |
+| 3 | 32 | 108 | 218 | 4 | 32 |
+| 4 | 24 | 144 | 162 | 6 | 48 |
 
-The three reservations total 56 node-hours, plus about 0.5 node-hours for
-input construction. The widest case has the same projected per-rank
-permutation-cache load as the successful 128-cell, two-cell run.
+The measured production timings are substantially better than the projection.
+The medians exclude the first iteration.
+
+| Cells/block | Job | Iteration (s) | Ring (s) | Phonon solver (s) |
+|---:|---:|---:|---:|---:|
+| 2 | 4568160 | 6.6937 | 6.1063 | 0.3109 |
+| 3 | 4568197 | 7.3523 | 6.4774 | 0.1939 |
+| 4 | 4568162 | 9.0525 | 7.6161 | 0.1912 |
+
+At the original `1e-3` Sigma threshold, x2 and x3 pass both convergence
+gates. The x4 row is its first state below `1e-3`; it fails the 1% contact
+balance gate and therefore is not a converged result.
+
+| Cells/block | State | Sigma residual | Lead balance | Lead current |
+|---:|---:|---:|---:|---:|
+| 2 | iteration 109 | 9.7354e-4 | 1.8754e-3 | 10.431891 |
+| 3 | iteration 105 | 9.7046e-4 | 5.3512e-3 | 9.394144 |
+| 4 | iteration 112 | 9.9667e-4 | 1.3346e-2 | 9.451577 |
+
+The x3 and x4 currents differ by only 0.61% at this matched residual, while
+x2 is 10.4% higher than x3. Deeper continuations show that `1e-3` stops the
+slow fixed-point mode far too early, so this table must not be interpreted as
+the support-converged physics result.
+
+## Deep half-retarded trajectories
+
+Jobs `4568506` and `4568565` followed x2 and x3 for 300 states around and
+after their first local residual minima. Both residuals rise and then fall
+again. Neither run reaches the `1e-8` fixed-point threshold, and the lead
+current decreases at every recorded step.
+
+| Cells/block | State | Iteration | Sigma residual | Lead balance | Lead current |
+|---:|---|---:|---:|---:|---:|
+| 2 | first trough | 0 | 5.3421e-6 | 3.2513e-3 | 7.861726 |
+| 2 | crest | 59 | 7.9879e-6 | 3.8172e-3 | 7.590795 |
+| 2 | endpoint | 299 | 2.7273e-6 | 4.5414e-3 | 7.117351 |
+| 3 | first trough | 8 | 1.7406e-5 | 7.4193e-3 | 8.050669 |
+| 3 | crest | 85--86 | 5.8375e-5 | 8.1691e-3 | 7.619447 |
+| 3 | endpoint | 299 | 1.7698e-5 | 8.8593e-3 | 7.141144 |
+
+The x2 endpoint residual is 49% below its first trough, but its current is
+9.47% lower. The x3 endpoint residual is still 1.68% above its first trough,
+but its current is 11.30% lower. A local residual minimum is therefore not a
+fixed-point observable for this map.
+
+The first-trough x2 and x3 currents differ by 2.40%. At the endpoints they
+differ by only 0.334%, with x3 slightly higher. Increasing the slab from two
+to three primitive cells does not produce a resolved current decrease in
+this matched-length comparison. The earlier large difference at `1e-3` was
+mostly premature stopping, not evidence that x2 omitted important support.
+
+This agreement is useful for choosing the spatial representation, but the
+endpoint value is not a final transport result. Both states are still moving
+and use the non-causal half-retarded reconstruction. The next physics ladder
+must use the causal `fft` reconstruction and converge the actual fixed point.

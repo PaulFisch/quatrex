@@ -557,3 +557,23 @@ least-squares ladder rebuild.
 | 2026-08-31 | 4568359 | cnt-l96x3-support-tight | 32 | 00:10:00 | 5.33 | 686.15 | normal |
 | 2026-08-31 | 4568369 | cnt-l96x2-support-tight | 16 | 00:15:00 | 4.00 | 690.15 | normal |
 | 2026-08-31 | 4568371 | cnt-l96x3-support-tighter | 32 | 00:15:00 | 8.00 | 698.15 | normal |
+| 2026-08-31 | 4568426 | cnt-l96x2-support-deeper | 16 | 00:15:00 | 4.00 | 702.15 | normal |
+| 2026-08-31 | 4568427 | cnt-l96x3-support-mix005 | 32 | 00:15:00 | 8.00 | 710.15 | normal |
+| 2026-08-31 | 4568441 | cnt-l96x4-support-mix005 | 48 | 00:10:00 | 8.00 | 718.15 | normal |
+| 2026-08-31 | 4568451 | cnt-l96x4-support-mix005-r2 | 48 | 00:10:00 | 8.00 | 726.15 | normal |
+| 2026-08-31 | 4568452 | test-phonon-current-metrics | 1 | 00:10:00 | 0.17 | 726.32 | debug |
+| 2026-08-31 | 4568454 | cnt-l96x2-support-deepest | 16 | 00:15:00 | 4.00 | 730.32 | normal |
+| 2026-08-31 | 4568467 | test-phonon-checkpoint | 1 | 00:10:00 | 0.17 | 730.49 | debug |
+| 2026-08-31 | 4568468 | cnt-l96x2-support-deepest-r2 | 16 | 00:15:00 | 4.00 | 734.49 | normal |
+| 2026-08-31 | 4568474 | cnt-l96x3-support-proper | 32 | 00:25:00 | 13.33 | 747.82 | normal |
+| 2026-08-31 | 4568498 | cnt-l96x2-support-floor | 16 | 00:10:00 | 2.67 | 750.49 | normal |
+| 2026-08-31 | 4568506 | cnt-l96x2-orbit300 | 16 | 00:40:00 | 10.67 | 761.16 | normal |
+| 2026-08-31 | 4568555 | cnt-l96x3-orbit300 | 32 | 00:45:00 | 24.00 | 785.16 | normal |
+
+Running total from here: **463.80 nh**
+
+CSCS reported 458.73 nh consumed after job 4568555 failed during startup.
+The reset also reserves 5.07 nh for the remaining 19 minutes of the active
+16-node job 4568506. This replaces the deliberately conservative submitted
+walltime total above.
+| 2026-08-31 | 4568565 | cnt-l96x3-orbit300 | 32 | 00:45:00 | 24.00 | 487.80 | normal |
