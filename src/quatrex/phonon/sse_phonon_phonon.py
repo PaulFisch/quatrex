@@ -17,6 +17,7 @@ import os
 import warnings
 from pathlib import Path
 from time import perf_counter
+from typing import TYPE_CHECKING
 
 import numpy as np
 from mpi4py import MPI
@@ -45,10 +46,6 @@ from quatrex.phonon.fc3_loader import (
     PhiBlocks,
     load_device_fc3,
 )
-from quatrex.phonon.experimental.frequency_grid import (
-    AuxiliaryGrid,
-    make_auxiliary_grid,
-)
 from quatrex.phonon.microblocks import (
     MicroblockLayout,
     build_micro_pair_index,
@@ -57,6 +54,9 @@ from quatrex.phonon.microblocks import (
 from quatrex.phonon.contraction_support import ContractionSupportMixin
 from quatrex.phonon.q_contraction import QContractionMixin
 from quatrex.phonon.units import bubble_prefactor_thz
+
+if TYPE_CHECKING:
+    from quatrex.phonon.experimental.frequency_grid import AuxiliaryGrid
 
 profiler = Profiler()
 
@@ -1403,6 +1403,10 @@ class SigmaPhononPhonon(
         return freqs
 
     def _get_auxiliary_grid(self, frequencies: NDArray) -> AuxiliaryGrid:
+        from quatrex.phonon.experimental.frequency_grid import (
+            make_auxiliary_grid,
+        )
+
         if self._aux_grid is None:
             self._aux_grid = make_auxiliary_grid(
                 frequencies,
