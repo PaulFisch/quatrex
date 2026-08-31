@@ -9,6 +9,54 @@ from qttools.kernels import linalg
 from qttools.utils.solvers_utils import get_batches
 
 
+def _dag(x: NDArray) -> NDArray:
+    return x.conj().swapaxes(-2, -1)
+
+
+def _write_outer_bands(
+    a,
+    sigma_lesser,
+    sigma_greater,
+    xl,
+    xg,
+    glr: list[NDArray],
+    gll: list[NDArray],
+    glg: list[NDArray],
+    xr_lower: list[NDArray],
+    band: int,
+) -> None:
+    """Write exact Keldysh blocks beyond the first block band."""
+    n = a.num_blocks
+    xr_previous = xr_lower
+    for distance in range(2, min(band, n - 1) + 1):
+        xr_current = [
+            -xr_previous[i + 1] @ a.blocks[i + 1, i] @ glr[i]
+            for i in range(n - distance)
+        ]
+        for i in range(n - distance):
+            j = i + 1
+            a_down_dag = _dag(a.blocks[j, i])
+            xa = _dag(xr_previous[i + 1])
+            g_a = glr[i] @ a.blocks[i, j]
+            xl_value = (
+                -g_a @ xl.blocks[j, i + distance]
+                + (glr[i] @ sigma_lesser.blocks[i, j] - gll[i] @ a_down_dag)
+                @ xa
+            )
+            xg_value = (
+                -g_a @ xg.blocks[j, i + distance]
+                + (glr[i] @ sigma_greater.blocks[i, j] - glg[i] @ a_down_dag)
+                @ xa
+            )
+            xl.blocks[i, i + distance] = xl_value
+            xg.blocks[i, i + distance] = xg_value
+            if xl.symmetry is None:
+                xl.blocks[i + distance, i] = -_dag(xl_value)
+            if xg.symmetry is None:
+                xg.blocks[i + distance, i] = -_dag(xg_value)
+        xr_previous = xr_current
+
+
 class RGF(GFSolver):
     """Selected inversion solver based on the Schur complement.
 
@@ -145,12 +193,9 @@ class RGF(GFSolver):
             the Meir-Wingreen formula. By default False.
         n_offdiagonals : int, optional
             Highest off-diagonal block order of X^{<,>} to compute and
-            write (1 = block-tridiagonal only, the default; 2 also writes
-            X^{<,>}_{i,i+2}; 3 also writes X^{<,>}_{i,i+3}), together with
-            their skew-hermitian mirrors. The output pattern must contain
-            the requested off-diagonal blocks (writes to absent blocks drop
-            silently). The lower-order blocks are bit-identical to the
-            default path. Only 1, 2 or 3 are supported. By default 1.
+            write, including skew-hermitian mirrors. Values wider than the
+            matrix are clipped. The output pattern must contain the requested
+            blocks. By default 1.
 
         Returns
         -------
@@ -199,12 +244,8 @@ class RGF(GFSolver):
                 "Expected None or 'skew-hermitian'."
             )
 
-        if n_offdiagonals not in (1, 2, 3):
-            raise ValueError(
-                f"n_offdiagonals must be 1, 2, or 3 (got {n_offdiagonals}); "
-                "the RGF off-diagonal recursion is implemented up to the "
-                "third off-diagonal."
-            )
+        if n_offdiagonals < 1:
+            raise ValueError("n_offdiagonals must be positive.")
 
         # Perform the selected solve by batches.
         for b in range(len(batches_sizes)):
@@ -319,21 +360,12 @@ class RGF(GFSolver):
             if return_retarded:
                 xr_.blocks[a.num_blocks - 1, a.num_blocks - 1] = xr_diag_blocks[-1]
 
+            glr = xr_diag_blocks.copy()
+            gll = xl_diag_blocks.copy()
+            glg = xg_diag_blocks.copy()
+            xr_lower: list[NDArray | None] = [None] * (a.num_blocks - 1)
+
             # Backwards sweep.
-            compute_d2 = n_offdiagonals >= 2 and a.num_blocks >= 3
-            compute_d3 = n_offdiagonals >= 3 and a.num_blocks >= 4
-            # Rolling stashes carried from the previous backward step(s). For
-            # the second off-diagonal (k=2): the previous row's first
-            # off-diagonals X^{<,>}_{i+1,i+2} (prev_xl_up / prev_xg_up) and the
-            # fully-connected retarded first lower off-diagonal X^R_{i+2,i+1}
-            # (prev_xr_dn). For the third off-diagonal (k=3) we additionally
-            # need the previous row's SECOND off-diagonals X^{<,>}_{i+1,i+3}
-            # (prev_xl_up2 / prev_xg_up2), the left-connected g^L_{i+1}
-            # (prev_gL, captured before it is overwritten in-place with the
-            # fully-connected X^R diagonal), and the two-steps-back retarded
-            # first lower off-diagonal X^R_{i+3,i+2} (prev_prev_xr_dn).
-            prev_xl_up = prev_xg_up = prev_xr_dn = None
-            prev_xl_up2 = prev_xg_up2 = prev_prev_xr_dn = prev_gL = None
             for i in range(a.num_blocks - 2, -1, -1):
                 j = i + 1
 
@@ -407,84 +439,8 @@ class RGF(GFSolver):
                     xg_diag_blocks[i] - xg_diag_blocks[i].conj().swapaxes(-2, -1)
                 )
 
-                if compute_d2:
-                    a_ji_dag = a_ji.conj().swapaxes(-2, -1)
-                    # Fully-connected first lower off-diagonal of X^R at
-                    # this step (xr_ii is still the left-connected g^L_i):
-                    #   X^R_{i+1,i} = -X^R_{i+1,i+1} A_{i+1,i} g^L_i
-                    xr_dn_i = -xr_jj_a_ji @ xr_ii
-                    xl_id2 = xg_id2 = None
-                    if i + 2 < a.num_blocks:
-                        # Second off-diagonals by upward propagation with
-                        # the left-connected auxiliaries (g^L_i = xr_ii,
-                        # g^{L,x}_i = xl_ii / xg_ii); the general
-                        # fully-connected identity
-                        #   X^x_{i,m} = -g^L_i A_{i,i+1} X^x_{i+1,m}
-                        #     + (g^L_i Sigma^x_{i,i+1}
-                        #        - g^{L,x}_i A_{i+1,i}^dag) X^A_{i+1,m}
-                        # specialised to m = i+2, with X^A_{i+1,i+2} =
-                        # (X^R_{i+2,i+1})^dag = prev_xr_dn^dag.
-                        xa_d2 = prev_xr_dn.conj().swapaxes(-2, -1)
-                        xl_id2 = (
-                            -xr_ii_a_ij @ prev_xl_up
-                            + (xr_ii @ sigma_lesser_ij - xl_ii @ a_ji_dag)
-                            @ xa_d2
-                        )
-                        xl_.blocks[i, i + 2] = xl_id2
-                        if xl_.symmetry is None:
-                            xl_.blocks[i + 2, i] = -xl_id2.conj().swapaxes(
-                                -2, -1
-                            )
-                        xg_id2 = (
-                            -xr_ii_a_ij @ prev_xg_up
-                            + (xr_ii @ sigma_greater_ij - xg_ii @ a_ji_dag)
-                            @ xa_d2
-                        )
-                        xg_.blocks[i, i + 2] = xg_id2
-                        if xg_.symmetry is None:
-                            xg_.blocks[i + 2, i] = -xg_id2.conj().swapaxes(
-                                -2, -1
-                            )
-                    if compute_d3 and i + 3 < a.num_blocks:
-                        # Third off-diagonals: the SAME identity with m = i+3.
-                        # X^A_{i+1,i+3} = (X^R_{i+3,i+1})^dag, and the retarded
-                        # second lower off-diagonal follows the column
-                        # recursion X^R_{i+3,i+1} = -X^R_{i+3,i+2} A_{i+2,i+1}
-                        # g^L_{i+1}, i.e. prev_prev_xr_dn (= X^R_{i+3,i+2}),
-                        # A_{i+2,i+1} and prev_gL (= g^L_{i+1}).
-                        xr_d3_dn = (
-                            -prev_prev_xr_dn @ a_.blocks[i + 2, i + 1] @ prev_gL
-                        )
-                        xa_d3 = xr_d3_dn.conj().swapaxes(-2, -1)
-                        xl_id3 = (
-                            -xr_ii_a_ij @ prev_xl_up2
-                            + (xr_ii @ sigma_lesser_ij - xl_ii @ a_ji_dag)
-                            @ xa_d3
-                        )
-                        xl_.blocks[i, i + 3] = xl_id3
-                        if xl_.symmetry is None:
-                            xl_.blocks[i + 3, i] = -xl_id3.conj().swapaxes(
-                                -2, -1
-                            )
-                        xg_id3 = (
-                            -xr_ii_a_ij @ prev_xg_up2
-                            + (xr_ii @ sigma_greater_ij - xg_ii @ a_ji_dag)
-                            @ xa_d3
-                        )
-                        xg_.blocks[i, i + 3] = xg_id3
-                        if xg_.symmetry is None:
-                            xg_.blocks[i + 3, i] = -xg_id3.conj().swapaxes(
-                                -2, -1
-                            )
-                    # Roll the stashes for the next (lower-index) step. The
-                    # two-step retarded lag is shifted before the one-step one;
-                    # prev_gL captures g^L_i here because the fully-connected
-                    # X^R_{i,i} rebind below overwrites xr_diag_blocks[i].
-                    prev_prev_xr_dn = prev_xr_dn
-                    prev_xr_dn = xr_dn_i
-                    prev_xl_up2, prev_xg_up2 = xl_id2, xg_id2
-                    prev_xl_up, prev_xg_up = xl_ij, xg_ij
-                    prev_gL = xr_ii
+                if n_offdiagonals > 1:
+                    xr_lower[i] = -xr_jj_a_ji @ xr_ii
 
                 if return_current:
                     a_ji_dagger = a_ji.conj().swapaxes(-2, -1)
@@ -511,6 +467,12 @@ class RGF(GFSolver):
                 xr_diag_blocks[i] = xr_ii + xr_ii_a_ij_xr_jj_a_ji @ xr_ii
                 if return_retarded:
                     xr_.blocks[i, i] = xr_diag_blocks[i]
+
+            if n_offdiagonals > 1:
+                _write_outer_bands(
+                    a_, sigma_lesser_, sigma_greater_, xl_, xg_,
+                    glr, gll, glg, xr_lower, n_offdiagonals
+                )
 
             # The diagonal blocks are overwritten every batch, so the lead
             # currents must be taken inside the loop, against the OBC blocks

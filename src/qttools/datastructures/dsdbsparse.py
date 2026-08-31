@@ -1171,6 +1171,7 @@ class _DStackView(_StackView):
         "dtype",
         "num_blocks",
         "block_sizes",
+        "local_block_sizes",
         "num_local_blocks",
     )
 

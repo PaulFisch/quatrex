@@ -1,15 +1,5 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the qttools package.
-"""Parity of the RGF off-diagonal G^{<,>} blocks against the dense solution.
-
-The single-node RGF ``selected_solve`` can additionally produce the second
-(``n_offdiagonals=2``) and third (``n_offdiagonals=3``) off-diagonal blocks
-X^{<,>}_{i,i+2} / X^{<,>}_{i,i+3} on top of the block-tridiagonal band. These
-feed the ``sse_g_band`` bubble contraction, so they must equal the exact dense
-congruence solution X = A^{-1} Sigma A^{-dagger} on every requested block.
-
-This closes a coverage gap: the default path had a parity test
-(``test_selected_solve``) but the off-diagonal extension did not.
-"""
+"""Compare selected RGF block bands with the dense solution."""
 import numpy as np
 import pytest
 
@@ -94,7 +84,7 @@ def _band_mask(block_sizes: NDArray, band: int) -> NDArray:
 
 
 @pytest.mark.parametrize("block_sizes", BLOCK_SIZES)
-@pytest.mark.parametrize("n_offdiagonals", [1, 2, 3])
+@pytest.mark.parametrize("n_offdiagonals", [1, 2, 3, 4, 8])
 @pytest.mark.parametrize("dsdbsparse_type", [DSDBCOO, DSDBCSR])
 @pytest.mark.parametrize("max_batch_size", [1, 100])
 def test_rgf_offdiagonals(block_sizes, n_offdiagonals, dsdbsparse_type,
@@ -151,8 +141,7 @@ def test_rgf_offdiagonals(block_sizes, n_offdiagonals, dsdbsparse_type,
         f"greater off-diagonals wrong at n_offdiagonals={n_offdiagonals}")
 
 
-def test_rgf_rejects_unsupported_band():
-    """n_offdiagonals outside {1,2,3} is a clear error, not silent garbage."""
+def test_rgf_rejects_nonpositive_band():
     block_sizes = np.array([3] * 5)
     bt = _bt_dense(block_sizes)
     coo = sparse.coo_matrix(bt)
@@ -169,6 +158,6 @@ def test_rgf_rejects_unsupported_band():
     Xg = DSDBCOO.empty_like(Bl)
     Xg.allocate_data()
     Xg.data = 0.0
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="positive"):
         RGF(max_batch_size=100).selected_solve(
-            A, Bl, Bg, out=[Xl, Xg], n_offdiagonals=4)
+            A, Bl, Bg, out=[Xl, Xg], n_offdiagonals=0)

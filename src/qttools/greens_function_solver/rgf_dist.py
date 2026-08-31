@@ -141,134 +141,67 @@ def _offdiag_post_pass(
     glg: list[NDArray],
     n_offdiagonals: int,
 ) -> None:
-    """Emit the selected 2nd (and 3rd) off-diagonal X^{<,>} blocks.
-
-    Uniform local post-pass over this rank's rows, identical for all
-    three selinv variants: the k-th off-diagonal identities (the same
-    upward-propagation used by the single-node RGF backward sweep,
-    ``rgf.py``) read ONLY fully-connected first off-diagonals already
-    written to the outputs, the left-connected auxiliaries from
-    :func:`_left_connected_chain`, and local A / Sigma blocks:
-
-        X^x_{i,m} = -g^L_i A_{i,i+1} X^x_{i+1,m}
-                    + (g^L_i Sigma^x_{i,i+1} - g^{L,x}_i A_{i+1,i}^dag)
-                      (X^R_{m,i+1})^dag,
-        X^R_{i+3,i+1} = -X^R_{i+3,i+2} A_{i+2,i+1} g^L_{i+1}.
-
-    Rows whose operands cross into the next partition use a single
-    point-to-point halo (received before those rows are computed); the
-    boundary-crossing OUTPUT blocks are owned by this (left) rank via
-    the arrow-wise partitioning, so no write ownership changes.
-    """
+    """Write exact Keldysh block bands with a right-to-left pipeline."""
     n = a.num_local_blocks
     bcomm = comm.block._mpi_comm
     rank, size = comm.block.rank, comm.block.size
-    k3 = n_offdiagonals >= 3
+    first = a.num_blocks - len(a.local_block_sizes)
+    valid_first_band = min(n, a.num_blocks - first - 1)
+    xl_previous = [xl_out.blocks[i, i + 1] for i in range(valid_first_band)]
+    xg_previous = [xg_out.blocks[i, i + 1] for i in range(valid_first_band)]
+    xr_previous = [xr_out.blocks[i + 1, i] for i in range(valid_first_band)]
+    padding = [None] * (n - valid_first_band)
+    xl_previous += padding
+    xg_previous += padding
+    xr_previous += padding
 
-    def _emit(i, m_l, m_g, xa):
-        """Write X^{<,>}_{i, i+d} (and mirrors) from the identity."""
-        a_ij = a.blocks[i, i + 1]
-        a_ji_dag = _dag(a.blocks[i + 1, i])
-        sl_ij = sigma_lesser.blocks[i, i + 1]
-        sg_ij = sigma_greater.blocks[i, i + 1]
-        gA = glr[i] @ a_ij
-        xl_val = -gA @ m_l + (glr[i] @ sl_ij - gll[i] @ a_ji_dag) @ xa
-        xg_val = -gA @ m_g + (glr[i] @ sg_ij - glg[i] @ a_ji_dag) @ xa
-        return xl_val, xg_val
-
-    def _write(i, d, xl_val, xg_val):
-        xl_out.blocks[i, i + d] = xl_val
-        xg_out.blocks[i, i + d] = xg_val
-        if xl_out.symmetry is None:
-            xl_out.blocks[i + d, i] = -_dag(xl_val)
-        if xg_out.symmetry is None:
-            xg_out.blocks[i + d, i] = -_dag(xg_val)
-
-    # ---- step 1: halo-independent k=2 rows (i + 2 <= n: operands local
-    # or already written to this rank's outputs by selinv / mapback).
-    # The LAST rank has no next partition: its rows clip at the global
-    # matrix end (i + 2 <= n - 1), exactly like the single-node sweep.
-    d2_l: dict[int, NDArray] = {}
-    d2_g: dict[int, NDArray] = {}
-    top2 = n - 2 if rank + 1 < size else n - 3
-    for i in range(top2, -1, -1):
-        xl_val, xg_val = _emit(
-            i,
-            xl_out.blocks[i + 1, i + 2],
-            xg_out.blocks[i + 1, i + 2],
-            _dag(xr_out.blocks[i + 2, i + 1]),
-        )
-        _write(i, 2, xl_val, xg_val)
-        d2_l[i], d2_g[i] = xl_val, xg_val
-
-    # ---- step 2: single neighbour halo. My top-row content flows UP to
-    # rank-1; I receive the mirror package from rank+1. Everything sent
-    # is halo-independent (my rows 0..2), so no pipeline forms.
-    halo = None
-    req = None
-    if rank > 0:
-        package = {
-            "xl_01": xl_out.blocks[0, 1],
-            "xg_01": xg_out.blocks[0, 1],
-            "xr_10": xr_out.blocks[1, 0],
-        }
-        if k3:
-            package.update(
-                xl_02=d2_l[0], xg_02=d2_g[0],
-                xr_21=xr_out.blocks[2, 1],
-                a_10=a.blocks[1, 0],
-                glr_0=glr[0],
+    for distance in range(2, min(n_offdiagonals, a.num_blocks - 1) + 1):
+        request = None
+        if rank > 0:
+            request = bcomm.isend(
+                (xl_previous[0], xg_previous[0], xr_previous[0]),
+                dest=rank - 1,
+                tag=72,
             )
-        req = bcomm.isend(package, dest=rank - 1, tag=72)
-    if rank + 1 < size:
-        halo = bcomm.recv(source=rank + 1, tag=72)
-    if req is not None:
-        req.wait()
+        halo = bcomm.recv(source=rank + 1, tag=72) if rank + 1 < size else None
+        if request is not None:
+            request.wait()
 
-    # ---- step 3: boundary k=2 row (i = n-1; operand rows f=n, f+1 live
-    # in the next partition). The output block (n-1, n+1) and its mirror
-    # are in this rank's arrow-wise strip.
-    if halo is not None:
-        xl_val, xg_val = _emit(
-            n - 1, halo["xl_01"], halo["xg_01"], _dag(halo["xr_10"])
+        xl_current = [None] * n
+        xg_current = [None] * n
+        xr_current = [None] * n
+        for i in range(n):
+            if first + i + distance >= a.num_blocks:
+                continue
+            xl_next, xg_next, xr_next = (
+                (xl_previous[i + 1], xg_previous[i + 1], xr_previous[i + 1])
+                if i + 1 < n else halo
+            )
+            j = i + 1
+            a_down_dag = _dag(a.blocks[j, i])
+            xa = _dag(xr_next)
+            g_a = glr[i] @ a.blocks[i, j]
+            xl_value = (
+                -g_a @ xl_next
+                + (glr[i] @ sigma_lesser.blocks[i, j] - gll[i] @ a_down_dag)
+                @ xa
+            )
+            xg_value = (
+                -g_a @ xg_next
+                + (glr[i] @ sigma_greater.blocks[i, j] - glg[i] @ a_down_dag)
+                @ xa
+            )
+            xr_current[i] = -xr_next @ a.blocks[j, i] @ glr[i]
+            xl_current[i], xg_current[i] = xl_value, xg_value
+            xl_out.blocks[i, i + distance] = xl_value
+            xg_out.blocks[i, i + distance] = xg_value
+            if xl_out.symmetry is None:
+                xl_out.blocks[i + distance, i] = -_dag(xl_value)
+            if xg_out.symmetry is None:
+                xg_out.blocks[i + distance, i] = -_dag(xg_value)
+        xl_previous, xg_previous, xr_previous = (
+            xl_current, xg_current, xr_current
         )
-        _write(n - 1, 2, xl_val, xg_val)
-        d2_l[n - 1], d2_g[n - 1] = xl_val, xg_val
-
-    if not k3:
-        return
-
-    # ---- step 4: halo-independent k=3 rows (operand rows <= n, all
-    # local: X_{i+1,i+3} is a step-1 k=2 result, X^R rows <= n are
-    # selinv/mapback outputs, A_{i+2,i+1} is local for i <= n-3). The
-    # last rank clips at the global matrix end (i + 3 <= n - 1).
-    top3 = n - 3 if rank + 1 < size else n - 4
-    for i in range(top3, -1, -1):
-        # For i = n-3 the retarded operand is the boundary coupling
-        # X^R_{n,n-1} written to this rank's output by the reduced-system
-        # mapback; all other operands are interior selinv outputs.
-        xr_d3 = (
-            -xr_out.blocks[i + 3, i + 2] @ a.blocks[i + 2, i + 1] @ glr[i + 1]
-        )
-        xl_val, xg_val = _emit(i, d2_l[i + 1], d2_g[i + 1], _dag(xr_d3))
-        _write(i, 3, xl_val, xg_val)
-
-    # ---- step 5: boundary k=3 rows n-2 and n-1.
-    if halo is not None:
-        # Row n-2: X_{n-1,n+1} is my own boundary k=2 (step 3);
-        # X^R_{n+1,n} is the halo's xr_10; A_{n,n-1} is in my strip.
-        xr_d3 = -halo["xr_10"] @ a.blocks[n, n - 1] @ glr[n - 1]
-        xl_val, xg_val = _emit(
-            n - 2, d2_l[n - 1], d2_g[n - 1], _dag(xr_d3)
-        )
-        _write(n - 2, 3, xl_val, xg_val)
-        # Row n-1: X_{n,n+2} is the neighbour's own k=2 at its row 0;
-        # X^R_{n+2,n+1}, A_{n+1,n} and g^L_n come from the halo.
-        xr_d3 = -halo["xr_21"] @ halo["a_10"] @ halo["glr_0"]
-        xl_val, xg_val = _emit(
-            n - 1, halo["xl_02"], halo["xg_02"], _dag(xr_d3)
-        )
-        _write(n - 1, 3, xl_val, xg_val)
 
 
 class RGFDist(GFSolver):
@@ -421,17 +354,10 @@ class RGFDist(GFSolver):
             currents are computed correctly.
         n_offdiagonals : int, optional
             Highest off-diagonal block order of X^{<,>} to compute and
-            write (1 = block-tridiagonal only, the default; 2 also
-            writes X^{<,>}_{i,i+2}; 3 also writes X^{<,>}_{i,i+3}),
-            together with their skew-hermitian mirrors. Requires
-            ``return_retarded=True`` (the post-pass reads the
-            fully-connected X^R off-diagonals from the output),
-            every comm.block rank to own at least ``n_offdiagonals + 1``
-            block rows, and the output sparsity pattern to contain the
-            extra off-diagonal blocks -- including the boundary-crossing
-            ones in each rank's arrow-wise strip (writes to absent
-            blocks drop silently). Only 1, 2 or 3 are supported. By
-            default 1.
+            write, including skew-hermitian mirrors. Values wider than the
+            matrix are clipped. Bands above one require ``return_retarded``
+            and an output pattern containing all requested blocks. By default
+            1.
 
         Returns
         -------
@@ -440,24 +366,14 @@ class RGFDist(GFSolver):
             current for each layer.
 
         """
-        if n_offdiagonals not in (1, 2, 3):
-            raise ValueError(
-                f"n_offdiagonals must be 1, 2, or 3 (got {n_offdiagonals})."
-            )
+        if n_offdiagonals < 1:
+            raise ValueError("n_offdiagonals must be positive.")
         if n_offdiagonals > 1:
             if not return_retarded:
                 raise ValueError(
                     "n_offdiagonals > 1 requires return_retarded=True (the "
                     "off-diagonal post-pass reads the fully-connected X^R "
                     "off-diagonals from the output)."
-                )
-            if sigma_lesser.num_local_blocks < n_offdiagonals + 1:
-                raise ValueError(
-                    f"n_offdiagonals={n_offdiagonals} requires every "
-                    f"comm.block rank to own at least {n_offdiagonals + 1} "
-                    f"block rows (this rank owns "
-                    f"{sigma_lesser.num_local_blocks}); reduce "
-                    "block_comm_size."
                 )
 
         with profiler.profile_range(

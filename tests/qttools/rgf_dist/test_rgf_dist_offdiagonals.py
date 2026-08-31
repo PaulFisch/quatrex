@@ -1,19 +1,5 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the qttools package.
-"""Parity of the DISTRIBUTED RGF off-diagonal X^{<,>} blocks vs dense.
-
-The distributed selected solve can emit the 2nd and 3rd off-diagonal
-X^{<,>} blocks (``n_offdiagonals``) via the left-connected chain +
-uniform post-pass + boundary halo. Unlike ``test_rgf_dist`` (which masks
-the dense reference to the solver's nonzeros, hiding unwritten blocks),
-this test asserts every block out to the requested band EXPLICITLY
-against the unmasked dense congruence solution -- an unwritten block
-fails loudly.
-
-Run with:  mpirun -np 2 pytest ... (two boundary partitions)
-           mpirun -np 3 pytest ... (adds an interior/arrowhead partition,
-                                    exercising pipeline + halo mid-chain)
-The block communicator spans ALL ranks (block_comm_size = world size).
-"""
+"""Compare distributed RGF block bands with the dense solution."""
 import numpy as np
 import pytest
 from mpi4py.MPI import COMM_WORLD as global_comm
@@ -80,7 +66,7 @@ def _block_band_pattern(block_sizes: NDArray, band: int, dtype):
 @pytest.mark.mpi(min_size=2)
 @pytest.mark.parametrize("block_sizes", BLOCK_SIZES)
 @pytest.mark.parametrize("global_stack_shape", GLOBAL_STACK_SHAPES)
-@pytest.mark.parametrize("n_offdiagonals", [2, 3])
+@pytest.mark.parametrize("n_offdiagonals", [2, 3, 4, 7])
 @pytest.mark.parametrize("max_batch_size", [100, 1])
 def test_rgf_dist_offdiagonals(
     block_sizes: NDArray,
@@ -171,7 +157,7 @@ def test_rgf_dist_offdiagonals(
 
 @pytest.mark.mpi(min_size=2)
 def test_rgf_dist_offdiagonals_validation():
-    """Bad n_offdiagonals / missing retarded / thin partitions raise."""
+    """Invalid bands and missing retarded output raise."""
     block_sizes = np.array([5] * 4)
     global_block_sizes = np.tile(block_sizes, comm.block.size)
     n = int(global_block_sizes.sum())
@@ -187,9 +173,9 @@ def test_rgf_dist_offdiagonals_validation():
     a, sl, sg = mk(), mk(), mk()
     xl, xg, xr = mk(), mk(), mk()
     solver = RGFDist()
-    with pytest.raises(ValueError, match="must be 1, 2, or 3"):
+    with pytest.raises(ValueError, match="positive"):
         solver.selected_solve(a, sl, sg, out=(xl, xg, xr),
-                              return_retarded=True, n_offdiagonals=4)
+                              return_retarded=True, n_offdiagonals=0)
     with pytest.raises(ValueError, match="return_retarded"):
         solver.selected_solve(a, sl, sg, out=(xl, xg),
                               return_retarded=False, n_offdiagonals=2)
