@@ -439,7 +439,7 @@ def _analytic_harness(monkeypatch, mixed_scale=1.0):
     ASSEMBLY -- which hook each half goes through, and what the mixed sector is
     handed. Both are invisible to a kernel test and both cost a device run.
     """
-    from quatrex.core import interaction as I
+    from quatrex.phonon.experimental.pole import interaction as I
     from quatrex.phonon.experimental.pole import pole_congruence as PC
 
     n_w, nnz = 6, 4

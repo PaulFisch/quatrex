@@ -518,7 +518,9 @@ def test_bubble_covariance_correction_runs_on_a_production_shaped_state():
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.core.interaction import _bubble_covariance_correction
+    from quatrex.phonon.experimental.pole.interaction import (
+        _bubble_covariance_correction,
+    )
     from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
     n_dof, n_w, n_p = 3, 9, 1
@@ -578,7 +580,9 @@ def test_bubble_covariance_correction_is_silent_without_promoted_poles():
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.core.interaction import _bubble_covariance_correction
+    from quatrex.phonon.experimental.pole.interaction import (
+        _bubble_covariance_correction,
+    )
 
     freqs = np.arange(5) * 0.5
     called = []
