@@ -1,0 +1,6 @@
+case_id,job_id,run_state,q_mesh,n_frequency,fmax_thz,dw_thz,aux_fmax_thz,aux_dw_thz,retarded,eta,vertex,primitive_g_band,generated_sigma_span,iterations,final_residual,min_residual,lead_balance,internal_spread,bubble_balance,lead_current_internal,conductance_mw_m2k,released,source_commit,notes
+q5_f161_initial,4559546,continued,5,161,40,0.25,80,0.25,fft,0,dense,4,4,170,0.0052365,0.0052365,0.00034373,0.00034373,7.138e-17,69.0535022552,1413.65711361,false,9791a2ab,Monotone but above the strict root gate; conductance is diagnostic only
+q5_f161_certification,4561700,running,5,161,40,0.25,80,0.25,fft,0,dense,4,4,,,,,,,,,false,bfb300a1,Continuation to the common 1e-4 SCBA root
+q5_f321,,planned,5,321,40,0.125,80,0.125,fft,0,dense,4,4,,,,,,,,,false,,Frequency refinement from the certified q5 state
+q7_f161,,planned,7,161,40,0.25,80,0.25,fft,0,dense,4,4,,,,,,,,,false,,First transverse-mesh refinement from the certified q5 state
+q9_f161,4561701,input-building,9,161,40,0.25,80,0.25,fft,0,dense,4,4,,,,,,,,,false,bfb300a1,Second transverse-mesh refinement; exact dense input build
