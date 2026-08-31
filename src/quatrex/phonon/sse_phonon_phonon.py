@@ -58,12 +58,6 @@ from quatrex.phonon.units import bubble_prefactor_thz
 
 profiler = Profiler()
 
-#: Slots in the ``_ensure_tau_buffers`` tuple that hold the Sigma(tau)
-#: ACCUMULATORS rather than a leg. The order is
-#: ``(gtl, gtg, stl, stg, gtlr, gtgr[, dgtl, dgtg, dgtlr, dgtgr])``.
-#: They are the only buffers that must stay whole when ``comm.q`` sections the
-#: transverse axis, because the bubble is a convolution over q and one slice
-#: pair contributes to every external momentum.
 _SIGMA_TAU_SLOTS = frozenset({2, 3})
 
 class SigmaPhononPhonon(ScatteringSelfEnergy):
@@ -135,15 +129,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._ring_c64 = (
             getattr(config.phonon, "sse_ring_dtype", "complex128")
             == "complex64")
-        # Sigma^> reconstruction from the Sigma^< cross terms (WP3): exact
-        # bosonic tau-domain identity, 4 instead of 6 ring calls per quad.
         self._g_from_l = bool(
             getattr(config.phonon, "sse_greater_from_lesser", False))
         self._fold_verify = int(
             getattr(config.phonon, "sse_fold_verify_iterations", 0))
         self._fold_verify_done = 0
-        # Hermitian pair-halving (WP4): contract I <= J only, mirror the
-        # lower blocks via Sigma_JI = -Sigma_IJ^dagger.
         self._herm_pairs = bool(
             getattr(config.phonon, "sse_hermitian_pairs", False))
         retarded_method = getattr(config.phonon, "retarded_method", "fft")
@@ -191,10 +181,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if phi_blocks is None:
                 phi_blocks = vertices[(0, 0)]
 
-        # TENSOR-DECOMPOSED coupled-q vertex (exact per-leg factorisation of
-        # the q-folded blocks, see quatrex.phonon.vertex_factors). Mutually
-        # exclusive with the dense qfold dict; the factored kernel replaces
-        # the per-(q', q2) triple-GEMM loop by skinny Grams + a sandwich.
         self._vfactors = None
         if vfactors is None:
             dv_path = getattr(config.phonon, "decomposed_vertices_path", None)
@@ -229,22 +215,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     f"not match the SSE vertex block size {vertex_dof}."
                 )
             if np.iscomplexobj(vfactors.D) or np.iscomplexobj(vfactors.lambdas):
-                # The kernel conjugates only the contracted-leg row factor; the
-                # external leg carries no conjugate because D and lambda are real.
                 raise ValueError(
                     "The external-leg factors D and lambdas must be real."
                 )
             self._vfactors = vfactors
             self._q_diff_map = np.asarray(vfactors.q_diff_map, dtype=int)
             self._n_kpts = int(vfactors.n_kpts)
-            # Kernel choice for consuming the factors:
-            #   "reconstruct": materialise the RANK-LOCAL slice of
-            #     the dense q-folded dict from the factors once at first
-            #     compute (the vertex is fixed) and run the dense path; the
-            #     factored win is MEMORY + build time, not flops.
-            #   "gram": the skinny-Gram contraction (bubble_factored) --
-            #     fewer flops than dense only at small rank or large block
-            #     sizes (memory-bound in R^2 on small-block systems).
             self._vf_kernel = str(getattr(
                 config.phonon, "decomposed_kernel", "reconstruct"))
             if self._vf_kernel not in ("gram", "reconstruct"):
@@ -253,17 +229,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     "use 'gram' or 'reconstruct'.")
             self._vf_dense_cache: tuple | None = None
             if phi_blocks is None:
-                # Gamma-point dense blocks reconstructed from the factors --
-                # feeds the (nq-independent) pair index and any Gamma-only
-                # consumer; the coupled-q contraction itself stays factored.
                 phi_blocks = self._phi_blocks_from_factors(vfactors)
 
         device_cfg = getattr(config, "device", None)
         if self._n_kpts > 1 and device_cfg is not None:
-            # The q-difference index arithmetic ((i-j) mod n), the q -> -q
-            # fold and the offline vertices all assume the GAMMA-CENTERED
-            # mesh q = k/n. Validate the configured Monkhorst-Pack mesh
-            # against it instead of failing silently.
             from quatrex.grid.kpoints import monkhorst_pack
 
             grid = np.asarray(device_cfg.kpoint_grid, dtype=int)
@@ -273,11 +242,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             want = np.stack(
                 np.meshgrid(*[np.arange(n) / n for n in grid[tr]],
                             indexing="ij"), axis=-1).reshape(-1, int(tr.sum()))
-            # ORDERED comparison: the q-difference/negation index arithmetic
-            # requires q_k = k/n at index k, not merely the same point set. The
-            # mesh lives on a torus, so the residual is the SIGNED circular
-            # distance -- q = -1e-11 and q = 0 are the same point, whereas a
-            # plain modulo maps them to opposite ends of the cell.
             residual = (mesh - want + 0.5) % 1.0 - 0.5
             if mesh.shape != want.shape or not np.allclose(
                 residual, 0.0, atol=1e-6
@@ -321,18 +285,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             min(1, self.n_blocks - 1)
             if self._micro_layout is not None else self.g_band
         )
-        # Coupled-q dense ring: strided-batched GEMMs over the (q', quad)
-        # task axis instead of one Python task at a time (the per-task
-        # dispatch cost ~200 us dominated the film ring at 4-10% of peak).
         self._dense_q_batched = bool(
             getattr(config.phonon, "sse_dense_q_batched", True))
         if self._solver_g_band > 1 and ranks.block.size > 1:
-            # The band halo exchange and the bosonic-fold plan only span
-            # the IMMEDIATE comm.block neighbours; with every rank owning
-            # at least g_band + 1 blocks all band links land there (the
-            # halo width itself is data-driven via _links_for_range). The
-            # distributed RGF enforces the same bound for its
-            # off-diagonal post-pass.
             min_local = int(
                 min(get_section_sizes(self.n_blocks, ranks.block.size)[0])
             )
@@ -360,11 +315,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     + ", ".join(unsupported)
                 )
 
-        # Precompute the full off-diagonal pair index: for each output
-        # block pair (I, J) with |I-J| <= 1, collect the ring quads
-        #   (K1, K2, K1', K2', phi_left, phi_right)
-        # with phi_left = Phi[(I, K1, K2)], phi_right = Phi[(J, K2', K1')]
-        # and the inner G links (K1, K1'), (K2, K2') inside the band.
         self._phi_pair_index: dict[
             tuple[int, int],
             list[tuple[int, int, int, int, NDArray, NDArray]],
@@ -402,8 +352,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                 (K1, K2, K1p, K2p, phi_left, phi_right)
                             )
 
-        # Distinct inner G band blocks (K, K') referenced by any quad,
-        # that must be gathered to full omega.
         self._g_band_keys: set[tuple[int, int]] = set()
         if self._micro_pair_index is not None:
             for pairs in self._micro_pair_index.values():
@@ -421,14 +369,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     self._g_band_keys.add((K1, K1p))
                     self._g_band_keys.add((K2, K2p))
 
-        # Cached intermediate tau-domain buffers (length
-        # n_fft) for FFTd G
         self._tau_cache: tuple | None = None
-        # Cached bosonic-fold plan (local gather perm + neighbour exchange
-        # schedule); False = not yet built, None = no pattern, else the tuple.
         self._rev_perm: tuple | bool = False
-        # Pre-permuted phi factors, built lazily on first compute (after any
-        # ballistic zeroing); the FC3 vertex is fixed so this is computed once.
         self._phi_pre: dict | None = None
         self._full_freqs: NDArray | None = None
 
@@ -491,8 +433,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         lam_D = vf.D * vf.lambdas[None, :]          # (b, R)
         qv: dict = {}
         for (iq1, iq2) in pairs:
-            # One offset-table einsum per pair; blocks are I-independent
-            # (bulk vertex, minimum-image offsets), shared across I.
             table = np.einsum(
                 "ar,dbr,ecr->deabc", lam_D,
                 vf.UB[:, iq1], vf.UC[:, iq2], optimize=True)
@@ -513,9 +453,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._vf_dense_cache = (key, qv)
         return qv
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     @profiler.profile(label="SigmaPhononPhonon", level="default", comm=comm)
     def compute(
@@ -639,18 +576,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         ne_full = int(g_lesser.global_stack_shape[0])
         nk = tuple(int(k) for k in g_lesser.global_stack_shape[1:])
         nq = int(np.prod(nk)) if len(nk) else 1
-        # A q-SECTIONED G: the legs carry only this rank's slice of the
-        # transverse mesh. The bubble is a convolution over q, so the rotation
-        # in :meth:`_rotate_internal_q` accumulates at EVERY external momentum
-        # and only the reduction over ``comm.q`` completes it -- the asymmetry
-        # recorded in phonon/docs/bubble_positivity.md Sec. 7 (the legs
-        # section, the Sigma accumulator does not until that reduction).
-        #
-        # The two halves of the reduce-scatter therefore live apart: the
-        # accumulators are allocated WHOLE (``_SIGMA_TAU_SLOTS``), summed over
-        # comm.q after the rotation, and only then cut down to this rank's
-        # section, in stage (5) where the outputs are formed. Covered by
-        # test_internal_q_rotation_reproduces_the_replicated_result.
         q_split = (nq > 1
                    and getattr(g_lesser, "q_section_offsets", None) is not None)
         if nq > 1 and self._qvertices is None and self._vfactors is None:
@@ -666,20 +591,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 f"function has {nq} transverse momenta {nk}."
             )
         if nq > 1 and self._vfactors is not None:
-            # The momentum index is flattened in C order, so the per-axis mesh
-            # must match, not just its product: (3, 9) and (9, 3) both give
-            # n_kpts = 27 but index every transverse momentum differently.
             if tuple(self._vfactors.nk_shape) != nk:
                 raise ValueError(
                     "The decomposed vertices are for a transverse mesh "
                     f"{tuple(self._vfactors.nk_shape)} but the Green's function "
                     f"has {nk}."
                 )
-        # Transverse q with block-parallel transport. The band halo derives
-        # its buffer shape from the leg buffers (_exchange_band_halo), so the
-        # nk axes ride through it, and the bosonic fold already works on the
-        # nnz axis alone with data.shape[:-1] preserved -- those two were the
-        # blockers. Covered by tests/quatrex/phonon/test_sse_coupled_q_dist.py.
 
         # Linearized (mixed-leg cross) mode: dG legs provided.
         lin = dg_lesser is not None
@@ -712,29 +629,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         if nq > 1:
             prefactor = prefactor / nq
 
-        # Sigma^> reconstruction mode (sse_greater_from_lesser): during the
-        # first sse_fold_verify_iterations calls the LEGACY 6-ring path runs
-        # and the reconstruction identity is checked in place (single-rank
-        # runs only); afterwards the 4-ring fast path takes over and the
-        # reversed-lesser leg buffer (gtlr) is repurposed as the cross-term
-        # accumulator stx.
         _gram_now = (self._vfactors is not None
                      and self._vf_kernel == "gram")
         if self._g_from_l and _gram_now:
-            # gram takes precedence over the dense path since the
-            # two-collapse commit; with greater_from_lesser the
-            # repurposed gtlr/stx buffers are never written by the
-            # factored kernel -> silently wrong Sigma^>. Refuse.
             raise ValueError(
                 "sse_greater_from_lesser supports the DENSE kernels only "
                 "(no decomposed gram kernel)."
             )
         if self._g_from_l and nq > 1 and self._vfactors is not None:
-            # The coupled-q fold identity
-            #   Sigma^>_IJ(q, tau) = Sigma^<_JI(-q, -tau)^T
-            # relies on the vertex reality Phi(-q1,-q2) = conj(Phi(q1,q2))
-            # (real real-space FC3). Production qfold vertices satisfy it;
-            # the factor-reconstructed slice is not audited for it. Refuse.
             raise ValueError(
                 "sse_greater_from_lesser at nq > 1 requires the explicit "
                 "dense q-folded vertex (qfold); the factor-reconstructed "
@@ -753,9 +655,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._fold_verify_done = self._fold_verify
         fast_now = self._g_from_l and not verify_now
         if self._herm_pairs and (nq > 1 or _gram_now):
-            # The factored kernel contracts ALL owned pairs; the stage-5
-            # mirror completion would then overwrite directly-computed
-            # blocks with the tau reversal -> garbage. Refuse.
             raise ValueError(
                 "sse_hermitian_pairs supports the Gamma-only DENSE kernel "
                 "only (nq == 1, no decomposed gram kernel)."
@@ -765,21 +664,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "sse_hermitian_pairs needs the full local nnz pattern for "
                 "the mirror masks; single-rank runs only."
             )
-        # Halving is suspended during the fold-verify iterations (the gate
-        # needs both triangles contracted directly).
         halve_now = self._herm_pairs and not verify_now
         if lin:
-            # The symmetry fast paths fuse legs across the (I,J)<->(J,I)
-            # mirror -- exact for the symmetric quadratic form B(G, G),
-            # not for the asymmetric cross B(dG, G) + B(G, dG). The
-            # linearized bubble always runs the plain 6-ring path.
             fast_now = halve_now = verify_now = False
         if q_split:
-            # The fast path parks its cross-term accumulator in the gtlr LEG
-            # slot (``stx = gtlr`` below). Under q sectioning a leg is a slice
-            # and an accumulator is whole, so one buffer cannot be both. The
-            # fast path is an optimisation, not a correctness requirement, so
-            # it stands down rather than the sectioning.
             fast_now = False
 
         bufs = self._ensure_tau_buffers(g_lesser, n_fft, with_dg=lin)
@@ -802,22 +690,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 p_l, p_g = pole.channel
                 gl_in = gl_in - p_l
                 gg_in = gg_in - p_g
-            # The omega=0 bin never enters the bubble (Bose divergence at DC;
-            # the zero-measure convention of the theory). The Green's functions
-            # stay intact for Dyson/observables; only the copies fed into the
-            # 3-phonon convolution are masked, with the matching output mask in
-            # step (5). conv_mask masks the (conv-grid) legs and raw outputs,
-            # out_mask the primary-grid legs/outputs; they coincide in legacy
-            # mode.
             conv_mask = xp.abs(xp.asarray(conv_freqs)) < 1e-6
             out_mask = (conv_mask if not aux_on
                         else xp.abs(xp.asarray(full_freqs)) < 1e-6)
             if aux_on:
-                # Mask the PRIMARY bins BEFORE interpolating: the omega = 0
-                # sample carries the near-singular acoustic spectral peak
-                # (|G^>(0)| >> neighbours), and interpolating it smears the
-                # DC pole into the neighbouring aux bins -- the legacy path
-                # zeroes it before the FFT, so must the bridge.
                 if bool(out_mask.any()):
                     gl_in = gl_in.copy(); gl_in[out_mask] = 0.0
                     gg_in = gg_in.copy(); gg_in[out_mask] = 0.0
@@ -829,17 +705,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             elif bool(conv_mask.any()):
                 gl_in = gl_in.copy(); gl_in[conv_mask] = 0.0
                 gg_in = gg_in.copy(); gg_in[conv_mask] = 0.0
-            # NOTE: no IR treatment is applied to the bubble legs -- the device
-            # G^< has no 1/omega pole (the bosonic fold and the bounded spectral
-            # function force it to cancel). The Bose pole is real only in the
-            # lead occupation, where the odd lead broadening Gamma(omega) keeps
-            # the injection finite. The bubble is the bare conserving convolution.
             if os.environ.get("QX_DIAG_SPECTRAL") == "1":
-                # eta=0 convergence diagnostic: per-omega magnitude of the bubble
-                # INPUT G^<, RAW (g_lesser.data) vs WINDOWED/masked (gl_in, what is
-                # actually convolved). Full-omega axis here (nnz distribution);
-                # rank-local max over nnz is reduced to the global per-omega max
-                # over WORLD. Read on rank 0 in engine/run.py. No effect on the math.
                 nw_raw = int(g_lesser.data.shape[0])
                 nw_win = int(gl_in.shape[0])
                 graw = np.abs(np.asarray(get_host(g_lesser.data))).reshape(
@@ -852,45 +718,24 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 comm.Allreduce(MPI.IN_PLACE, gwin, op=MPI.MAX)
                 self._diag_graw_w = graw
                 self._diag_gwin_w = gwin
-                # graw lives on the primary grid, gwin on the conv grid
-                # (identical in legacy mode).
                 self._diag_full_freqs = np.abs(
                     np.asarray(get_host(full_freqs)).real)
                 self._diag_win_freqs = np.abs(
                     np.asarray(get_host(conv_freqs)).real)
             gtl.data[:] = self._fft_pad(gl_in, n_fft)
             gtg.data[:] = self._fft_pad(gg_in, n_fft)
-            # Reversed (absorption) legs: rev(X)[l] = X[(-l) mod n_fft] of the
-            # FFT'd G. The bosonic continuation carries the ji-TRANSPOSE (and
-            # -q for coupled-q): G^<_ij(q, -w) = G^>_ji(-q, w). The
-            # no-transpose shortcut is exact only for the equilibrium
-            # (complex-symmetric) part of G and breaks the Phi-derivable energy
-            # balance off equilibrium.
-            #
-            # Ordering: q-negation and FFT + tau reversal are state-independent
-            # and done here in the nnz state; the ji-transpose is applied after
-            # the nnz->stack dtranspose, where the full nnz pattern is local on
-            # every rank. All three commute, so this is exactly the serial fold
-            # at any rank count, and the already-FFT'd decay legs are reused.
             Xl, Xg = gtl.data, gtg.data
             if nq > 1 and q_split:
-                # Sectioned: q -> -q lands on another rank's slice, so the
-                # axis has to be reassembled for the negation. One transverse
-                # axis by construction under q_distributed.
                 _lo = int(g_lesser.local_q_offset)
                 _hi = _lo + int(g_lesser.local_q_shape[0])
                 Xl = self._negate_q_across_comm(Xl, nq, _lo, _hi, xp)
                 Xg = self._negate_q_across_comm(Xg, nq, _lo, _hi, xp)
             elif nq > 1:
-                # negate the transverse momentum axes (Gamma-centered IDFT
-                # meshes are closed under q -> -q)
                 for ax, k in enumerate(nk, start=1):
                     neg = (-xp.arange(k)) % k
                     Xl = xp.take(Xl, neg, axis=ax)
                     Xg = xp.take(Xg, neg, axis=ax)
             if not fast_now:
-                # (skipped in fast mode: only Sigma^> consumed the
-                # reversed-lesser leg, and Sigma^> is reconstructed)
                 gtlr.data[0] = Xl[0]
                 gtlr.data[1:] = Xl[:0:-1]
             gtgr.data[0] = Xg[0]
@@ -936,13 +781,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if lin:
                 for m in (dgtl, dgtg, dgtlr, dgtgr):
                     m.dtranspose()
-            # ji-transpose of the reversed legs, applied in the "stack" state where
-            # the FULL nnz axis is local on every rank (the decay legs gtl/gtg are
-            # NOT transposed). The transpose (i,j)->(j,i) is a pure function of the
-            # sparsity pattern; with block_comm_size>1 the partner (j,i) of a
-            # block-boundary entry lives on a neighbour block rank and is fetched by
-            # an immediate-neighbour exchange (BT band => |I-J|<=1). Exact + conserving
-            # at any nranks AND any block_comm_size.
             self._fold_reversed_legs(
                 (gtlr, gtgr, dgtlr, dgtgr) if lin
                 else ((gtgr,) if fast_now else (gtlr, gtgr)), g_lesser)
@@ -965,10 +803,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 dgtlv, dgtgv = dgtl.stack[...], dgtg.stack[...]
                 dgtlrv, dgtgrv = dgtlr.stack[...], dgtgr.stack[...]
 
-            # (3) Ring contraction per tau-slice in stack. Under a comm.block
-            # split each rank owns outputs (I,J) with min(I,J) in its block
-            # window and fetches the off-window band links from its
-            # neighbours via a width-N_h halo
             start = int(stl.block_section_offsets[ranks.block.rank])
             end = int(stl.block_section_offsets[ranks.block.rank + 1])
             owned = self._owned_outputs(start, end)
@@ -980,10 +814,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             else:
                 halo_l = halo_g = halo_lr = halo_gr = {}
 
-            # Materialise each distinct band link. With the
-            # single-precision ring the links are downcast copies (the
-            # tau buffers themselves stay complex128). Gamma-only: the
-            # coupled-q kernels ignore sse_ring_dtype.
             _c = ((lambda a: xp.ascontiguousarray(a, dtype=xp.complex64))
                   if (self._ring_c64 and nq == 1) else (lambda a: a))
             gl_blk: dict[tuple[int, int], NDArray] = {}
@@ -1015,30 +845,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     glr_blk[(K, Kp)] = _c(halo_lr[(K, Kp)])
                     ggr_blk[(K, Kp)] = _c(halo_gr[(K, Kp)])
 
-            # The full bubble folds the negative-omega contribution
-            # into the one-sided grid via G^<(-omega)=G^>(omega): per ring quad
-            #   Sigma^<  = ring(g^<_a, g^<_b) + ring(g^<_a, rev g^>_b) + ring(rev g^>_a, g^<_b)
-            #   Sigma^>  = ring(g^>_a, g^>_b) + ring(g^>_a, rev g^<_b) + ring(rev g^<_a, g^>_b)
-            # The omega/tau batch is parallelised ONCE over the whole
-            # (I,J)/phi-pair loop below (single-thread BLAS per chunk), and the
-            # fixed phi factors are pre-permuted once -- per (I,J) a list of
-            # (K1,K2,K1p,K2p, PL,PR,nI,bK2,nJ) -- to avoid per-call transpose
-            # copies.
-            # Only the dense ring consumes the pre-permuted phi factors.
             use_factored = (
                 self._vfactors is not None and self._vf_kernel == "gram"
             )
             if (self._phi_pre is None and not use_factored
                     and self._micro_pair_index is None):
                 self._phi_pre = {}
-                # xp.asarray stages the host vertex factors to the
-                # device once here (free view under numpy). With the
-                # single-precision ring the copies are downcast so the
-                # per-quad GEMMs run as batched CGEMM -- prescaled by an
-                # exact power of two: the raw FC3 elements are ~1e20, so
-                # the Phi G G Phi product would overflow float32 (~1e38).
-                # The 2^-e / 2^e pair is exact in floating point, adding
-                # no rounding beyond the downcast itself.
                 _dt = xp.complex64 if self._ring_c64 else None
                 _sl = _sr = 1.0
                 if self._ring_c64:
@@ -1046,10 +858,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                  float(np.abs(pr).max()))
                              for quads in self._phi_pair_index.values()
                              for (*_, pl, pr) in quads), default=1.0)
-                    # Full scale on EACH side: the T = Phi@G and
-                    # U = G@Phi intermediates must stay ~O(|G| b), or
-                    # the S = T@U product overflows float32 in the
-                    # Bose-enhanced low-omega bins.
                     e = int(np.ceil(np.log2(max(m, 1e-300))))
                     _sl = _sr = 2.0 ** -e
                     self._ring_unscale = 2.0 ** (2 * e)
@@ -1094,9 +902,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 mglr_blk, mggr_blk = glr_blk, ggr_blk
 
             if use_factored:
-                # The factored kernel serves the Gamma-only device too: at
-                # nq == 1 the momentum convolution is the identity and what
-                # remains is the Gram collapse, b^4 -> R b^2 + R^2 b.
                 def _qflat_f(d):
                     return {
                         kk: v.reshape(v.shape[0], nq, v.shape[-2], v.shape[-1])
@@ -1124,36 +929,22 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             elif nq == 1:
                 _pair_debug = os.environ.get("QTX_PROFILE_LEVEL") == "debug"
 
-                # Hermitian pair-halving: contract only I <= J; the (J, I)
-                # blocks are mirrored below via Sigma_JI = -Sigma_IJ^dagger.
                 pairs_c = ([ij for ij in owned if ij[0] <= ij[1]]
                            if halve_now else owned)
 
                 n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
-                # Sigma dtype, NOT the leg dtype: with the c64 ring the
-                # accumulators are complex128 (unscaled magnitudes far
-                # beyond float32 range) -- a c64 output buffer would clip
-                # the largest Sigma^>(tau) elements to inf on assignment.
                 _dt = stl.data.dtype
-                # Preallocated per-pair outputs: pool tasks write disjoint
-                # tau slices directly (race-free), removing the per-pair
-                # concatenate alloc+copy of the chunked path.
                 out_l = {ij: xp.empty(
                     (n_tau, int(self.block_sizes[ij[0]]),
                      int(self.block_sizes[ij[1]])), dtype=_dt)
                     for ij in pairs_c}
                 out_g = {ij: xp.empty_like(out_l[ij]) for ij in pairs_c}
-                # Cross-term (t2+t3) accumulator for the Sigma^>
-                # reconstruction; in verify mode also the direct t5+t6 for
-                # the identity gate.
                 out_x = ({ij: xp.empty_like(out_l[ij]) for ij in pairs_c}
                          if (fast_now or verify_now) else None)
                 out_t56 = ({ij: xp.empty_like(out_l[ij]) for ij in pairs_c}
                            if verify_now else None)
 
                 def _rings3(pre, da, db, ra, rb):
-                    # The 3-term bosonic fold, pieces kept separate:
-                    # ring(decay, decay), ring(decay, rev), ring(rev, decay).
                     PL, PR, nI, bK2, nJ = pre
                     return (
                         ring_contract_pre(PL, PR, nI, bK2, nJ, da, db, xp),
@@ -1161,9 +952,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                         ring_contract_pre(PL, PR, nI, bK2, nJ, ra, db, xp),
                     )
 
-                # Compute Sigma^{<,>} for the tau slice [lo:hi] of the given
-                # pairs, writing into the preallocated outputs; returns the
-                # per-pair wall time under profile-level debug.
                 def _contract_tau(lo, hi, pairs):
                     times = {} if _pair_debug else None
                     for (I, J) in pairs:
@@ -1178,11 +966,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             ggr_a = ggr_blk[(K1, K1p)][lo:hi]
                             ggr_b = ggr_blk[(K2, K2p)][lo:hi]
                             if lin:
-                                # Mixed-leg cross (product rule): each of
-                                # the 3 bosonic-fold rings with leg a, then
-                                # leg b, carrying the direction. Exactly
-                                # B(dG, G) + B(G, dG); the reversed
-                                # direction legs are rev(dG) (R-linear).
                                 dgl_a = dgl_blk[(K1, K1p)][lo:hi]
                                 dgl_b = dgl_blk[(K2, K2p)][lo:hi]
                                 dgg_a = dgg_blk[(K1, K1p)][lo:hi]
@@ -1210,9 +993,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             r1, r2, r3 = _rings3(pre, gl_a, gl_b, ggr_a, ggr_b)
                             sl = (r1 + r2) + r3  # == legacy _fold_l order
                             if fast_now:
-                                # Exact reconstruction: only the diagonal
-                                # term ring(g^>, g^>) is contracted; the
-                                # cross terms come from (J, I)'s t2+t3.
                                 PL, PR, nI, bK2, nJ = pre
                                 sg = ring_contract_pre(
                                     PL, PR, nI, bK2, nJ, gg_a, gg_b, xp)
@@ -1240,8 +1020,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                            else acc_t56 + t56)
                         if acc_l is not None:
                             if self._ring_c64:
-                                # exact power-of-two unscale (see the
-                                # _phi_pre build)
                                 u = self._ring_unscale
                                 acc_l = acc_l * u
                                 acc_g = acc_g * u
@@ -1259,23 +1037,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             times[(I, J)] = perf_counter() - t0
                     return times
 
-                # Cap the tau-split so each worker keeps >= sse_tau_min_chunk
-                # tau points: the per-ring contraction scales with threads
-                # only while each chunk's BS^3 intermediate stays in cache;
-                # shorter chunks regress into dispatch/allocator churn.
                 pool, n_threads = ring_pool()
                 nt = min(n_threads, max(1, n_tau // self._tau_min_chunk))
                 self._print_ring_stats(
                     pairs_c, n_tau, n_threads, nt,
                     rings_per_quad=12 if lin else (4 if fast_now else 6))
                 pair_times: dict | None = {} if _pair_debug else None
-                # The pool only pays off for the CPU backend (single-thread BLAS
-                # per chunk); on GPU the GEMMs are already batched on-device.
                 if pool is not None and xp is np and nt > 1:
                     bnds = [(i * n_tau // nt, (i + 1) * n_tau // nt) for i in range(nt)]
                     if self._pool_scope == "pair_tau":
-                        # (pair x tau-chunk) tiles: fat chunks still fill
-                        # the pool.
                         tasks = [(ij, lo, hi)
                                  for ij in pairs_c for (lo, hi) in bnds]
                         tlists = list(pool.map(
@@ -1295,10 +1065,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     stlv.blocks[ij[0] - start, ij[1] - start] = out_l[ij]
                     stgv.blocks[ij[0] - start, ij[1] - start] = out_g[ij]
                 if halve_now:
-                    # Mirror the lower blocks: Sigma_JI = -Sigma_IJ^dagger
-                    # with sign -conj(pref)/pref = +1 (purely imaginary
-                    # bubble prefactor); the tau reversal that completes the
-                    # identity is applied in the nnz state before the IFFT.
                     if abs(prefactor.real) > 1e-30 * abs(prefactor):
                         raise RuntimeError(
                             "sse_hermitian_pairs: the bubble prefactor is "
@@ -1316,23 +1082,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     for ij in pairs_c:
                         stxv.blocks[ij[0] - start, ij[1] - start] = out_x[ij]
                     if halve_now:
-                        # Mirror the cross terms too; after the fold the
-                        # upper stx entries then hold conj((t2+t3)_IJ), and
-                        # the reversal in stage 5 (upper mask) makes the
-                        # merge deliver Sigma^>_IJ[l] += conj((t2+t3)_IJ[l]).
                         for (I, J) in pairs_c:
                             if I == J:
                                 continue
                             stxv.blocks[J - start, I - start] = xp.conj(
                                 out_x[(I, J)].swapaxes(-1, -2))
-                    # ji-transpose the cross terms in the stack state; the
-                    # tau reversal happens after the stage-4 dtranspose (nnz
-                    # state, full tau axis), completing
-                    #   Sigma^>_IJ[l] = t4_IJ[l] + (t2+t3)_JI[(-l) mod n]^T.
                     self._fold_reversed_legs((stx,), g_lesser)
                 if verify_now:
-                    # Identity gate (single rank: full tau + all pairs
-                    # local): (t5+t6)_IJ[l, a, b] == (t2+t3)_JI[-l, b, a].
                     rev = (-xp.arange(n_tau)) % n_tau
                     worst = worst_rel = 0.0
                     for (I, J) in owned:
@@ -1351,8 +1107,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             flush=True,
                         )
                 if _pair_debug and ranks.rank == 0 and pair_times:
-                    # Summed over pool chunks: CPU time per output pair (the
-                    # wall time of one chunk's pair-loop pass, accumulated).
                     tot = sum(pair_times.values())
                     per = "  ".join(
                         f"({I},{J}):{t:.2f}s/{len(self._phi_pre[(I, J)])}q"
@@ -1365,12 +1119,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 qv = self._qvertices
 
                 def _qflat(d):
-                    # (tau, *nk, b, b) -> (tau, N_q_local, b, b); the q-axis is
-                    # contiguous in the same C-order as global_stack_shape[1:].
-                    # Sized from the ARRAY rather than from nq: when comm.q
-                    # sections the axis the local width is smaller, and the
-                    # rotation carries the global count separately (it needs
-                    # global bounds, the legs are local).
                     return {
                         kk: v.reshape(v.shape[0], -1, v.shape[-2], v.shape[-1])
                         for kk, v in d.items()
@@ -1397,19 +1145,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     free_mempool()
                 n_tau = next(iter(gl_q.values())).shape[0]
                 dtype = next(iter(gl_q.values())).dtype
-                # Distribute the EXTERNAL-q loop over comm.q. The q-folded
-                # internal q' Green's functions are kept whole/local on every
-                # rank (only the energy axis is split across comm.stack), so each
-                # q-rank computes a disjoint subset of iq_ext from the full local
-                # q' data -- no internal-q gather -- and the per-rank partial
-                # Sigma(q_ext) are summed over comm.q after the loop. This is the
-                # dedicated q axis: N_q-way parallelism on top of the energy axis.
                 q_lo = ranks.q.rank * nq // ranks.q.size
                 q_hi = (ranks.q.rank + 1) * nq // ranks.q.size
 
                 if self._vfactors is not None:
-                    # decomposed_kernel="reconstruct": dense path fed the
-                    # factor-reconstructed rank-local vertex slice.
                     qv = self._reconstructed_qvertices(q_lo, q_hi, nq)
                 self._rotate_internal_q(
                     owned, qdm, qv, q_lo, q_hi, nq, nk, n_tau, dtype,
@@ -1422,16 +1161,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                              if self._release_legs else None),
                 )
                 if fast_now:
-                    # ji-transpose the cross terms in the stack state (same
-                    # exchange pattern as the Gamma fast path); the tau
-                    # reversal AND the q_ext -> -q_ext gather complete the
-                    # fold in stage 5 (nnz state, full tau/q axes local).
                     self._fold_reversed_legs((stx,), g_lesser)
 
-            # Assemble the external-q distribution: each comm.q rank computed a
-            # disjoint subset of iq_ext (others left zero), so sum over comm.q
-            # (in fast mode also the cross-term accumulator stx -- the fold
-            # permutation is rank-independent, so it commutes with the sum).
             if nq > 1 and ranks.q.size > 1:
                 for m in ((stl, stg, stx) if fast_now else (stl, stg)):
                     recv = xp.empty_like(m.data)
@@ -1452,24 +1183,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             "PhPh SSE: 5 IFFT + Hilbert", level="default", comm=comm,
         ):
             if halve_now:
-                # Complete the mirrored lower blocks (and, in fast mode, the
-                # folded upper cross terms) with their tau reversal: the
-                # stack-state fill could only conjugate-transpose (tau is
-                # split there); the reversal is local here (full tau axis).
-                # RHS advanced indexing copies first -- alias-safe.
                 ml, mu = self._herm_masks(g_lesser)
                 stl.data[1:, ..., ml] = stl.data[:0:-1, ..., ml]
                 stg.data[1:, ..., ml] = stg.data[:0:-1, ..., ml]
                 if fast_now:
                     stx.data[1:, ..., mu] = stx.data[:0:-1, ..., mu]
             if fast_now:
-                # Complete the Sigma^> reconstruction: add the ji-transposed
-                # cross terms with the tau axis reversed (circular; l = 0
-                # self-maps, n_fft odd so there is no Nyquist bin). At
-                # coupled-q the identity carries exactly one extra
-                # operation, the external q -> -q gather on the transverse
-                # axes (Gamma-centered mesh, closed under q -> -q; the same
-                # negation as the stage-1 reversed legs).
                 xs = stx.data
                 if nq > 1:
                     for ax, k in enumerate(nk, start=1):
@@ -1479,16 +1198,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             sl_conv = prefactor * xp.fft.ifft(stl.data, axis=0)[:ne_conv]
             sg_conv = prefactor * xp.fft.ifft(stg.data, axis=0)[:ne_conv]
             if q_split:
-                # The SCATTER half of the reduce-scatter. The rotation
-                # accumulated at every external momentum and the comm.q sum
-                # above completed them, so every rank now holds the WHOLE
-                # Sigma; the outputs are sectioned, so each keeps only the
-                # section it owns. Cut here, before the corrections and masks,
-                # so everything downstream sees one consistent q extent.
-                #
-                # ``q_distributed`` admits exactly one transverse axis
-                # (dsdbsparse.py: a mesh with several must be flattened first),
-                # so this is axis 1 and the slice is the buffer's own.
                 q_out = sigma_lesser.local_q_slice
                 sl_conv = sl_conv[:, q_out]
                 sg_conv = sg_conv[:, q_out]
@@ -1500,18 +1209,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 _mx_l, _mx_g = pole.mixed
                 sl_conv = sl_conv + _mx_l
                 sg_conv = sg_conv + _mx_g
-            # OUTPUT mask, completing the input masking above: the scattering
-            # Sigma is NOT applied below the SSE cutoff (transport there stays
-            # ballistic), and never at the omega=0 bin (a nonzero Sigma^{<,>}(0)
-            # hits the near-singular acoustic G^R(0); the bin carries zero heat
-            # anyway).
             if bool(conv_mask.any()):
                 sl_conv[conv_mask] = 0.0
                 sg_conv[conv_mask] = 0.0
             if aux_on:
-                # Sample Sigma back on the (possibly non-uniform) primary
-                # grid; the conv-grid values keep the full [0, 2*omega_max]
-                # support for the Hilbert transform below.
                 sl_data = aux_grid.restrict(sl_conv)
                 sg_data = aux_grid.restrict(sg_conv)
                 if bool(out_mask.any()):
@@ -1519,39 +1220,18 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     sg_data[out_mask] = 0.0
             else:
                 sl_data, sg_data = sl_conv, sg_conv
-            # SIGN CONVENTION: fed with this solver's occupation-positive
-            # Green's functions (-i G^{<,>} >= 0, the same convention as the
-            # lead injection sigma^{<,>} = +i n(+1) gamma), the bubble returns
-            # TEXTBOOK-signed sigma^{<,>} (-i sigma^{<,>} <= 0) -- the exact
-            # negative of what the Keldysh feedback G^{<,>} = G^R sigma^{<,>} G^A
-            # expects (unflipped it injects anti-dissipation), so negate here.
-            # ... and on the OUTPUT, with the same PSD mask, so the Sigma the
-            # solver stores is a congruence-preserving Hadamard product of
-            # the untruncated one rather than a boxcar slice of it. Applied
-            # to THIS call's contribution, never to the accumulated buffer.
             if pole is not None and pole.self_energy is not None:
                 _ss_l, _ss_g, _ss_r = pole.self_energy
                 if bool(out_mask.any()):
-                    # The omega = 0 bin carries no scattering by convention (a
-                    # nonzero Sigma^{<,>}(0) hits the near-singular acoustic
-                    # G^R(0)). The analytic term obeys the same mask as the
-                    # numerical one, or the two halves of Sigma disagree about
-                    # which bins exist.
                     _ss_l = _ss_l.copy(); _ss_l[out_mask] = 0.0
                     _ss_g = _ss_g.copy(); _ss_g[out_mask] = 0.0
                 sl_data = sl_data + _ss_l
                 sg_data = sg_data + _ss_g
             sigma_lesser.data[:] = sigma_lesser.data - sl_data
             sigma_greater.data[:] = sigma_greater.data - sg_data
-            # Sigma^R contribution (from the RAW, textbook-signed values:
-            # Gamma = i(sigma^> - sigma^<)_raw >= 0, matching the lead OBC
-            # damping sign -- unchanged by the convention flip above).
             if self.retarded_method == "fft":
                 delta = sg_conv - sl_conv
                 self._check_kk_grid_support(delta)
-                # transverse_shape: the exact bosonic mirror carries q -> -q on
-                # the transverse axes (exact off equilibrium, unlike the plain
-                # conjugate shortcut).
                 hil = 0.5j * hilbert_transform(delta, conv_freqs,
                                                transverse_shape=nk)
                 if aux_on:
@@ -1582,10 +1262,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             return
         self._kk_grid_checked = True
 
-        # A rank can own NO frequencies: the stack split pads up to
-        # ceil(ne / n_ranks) per rank, so e.g. 121 frequencies over 32 ranks
-        # leaves the last rank empty. There is nothing to check there, and
-        # reducing over the empty slice raises.
         if delta.size == 0:
             return
 
@@ -1626,9 +1302,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 bK1 = PL.shape[1]
                 bK2p = PR.shape[0]
                 bK1p = PR.shape[1] // nJ
-                # 3 GEMMs per ring call; 6 ring calls per quad in the legacy
-                # 3-term fold for each of Sigma^{<,>}, 4 with the Sigma^>
-                # reconstruction; 8 real flops per complex MAC.
                 ring = 8 * n_tau * (
                     nI * bK2 * bK1 * bK1p
                     + bK2 * bK2p * bK1p * nJ
@@ -1716,18 +1389,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         rank, size = ranks.q.rank, ranks.q.size
         a_lo, a_hi = bounds[rank], bounds[rank + 1]
-        # Leg B rotates; start from a copy so leg A is never aliased by the
-        # receive buffer (the first step contracts A against itself).
         buf = tuple({k: xp.array(v, copy=True) for k, v in d.items()}
                     for d in legs)
         for step in range(size):
             src = (rank + step) % size
             b_lo, b_hi = bounds[src], bounds[src + 1]
-            # NOT (q_lo, q_hi): the external-q split is how the REPLICATED
-            # path divides work, and it is mutually exclusive with this one.
-            # Here every rank produces partial sums at every external
-            # momentum -- its own slice paired with whatever it currently
-            # holds -- and the all_reduce over comm.q completes them.
             contract(
                 owned, qdm, qv, 0, nq, nq, nk, n_tau, dtype,
                 *legs, _fold_l, _fold_g, stlv, stgv, start, xp,
@@ -1838,33 +1504,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         gl_b, gg_b, glr_b, ggr_b = (
             (gl_q, gg_q, glr_q, ggr_q) if legs_b is None else legs_b)
         cache_key = (q_lo, q_hi, nq, a_lo, a_hi, b_lo, b_hi, tuple(owned))
-        # A q-sectioned calculation visits one (q_a, q_b) tile at a time as
-        # leg B rotates around comm.q.  Do not accumulate every tile's task
-        # metadata on the instance: taken together they are the complete
-        # O(nq**2) plan, whereas a rotation consumes them one at a time.  The
-        # contraction below also caches left and right FC3 permutations
-        # independently, rather than caching their combinatorial pairing.
-        # These are exact scheduling changes; the same q pairs and ring
-        # contractions are accumulated below.
         transient_tile = a_slice is not None or b_slice is not None
         cache = getattr(self, "_micro_qtasks_cache", {})
         qtasks = None if transient_tile else cache.get(cache_key)
         if qtasks is None:
-            # qdm[Q, q1] = q2 is the authoritative mesh arithmetic.  Its
-            # inverse gives Q for each (q1, q2).  Flat-index addition is only
-            # valid for a one-dimensional mesh; on a film mesh such as 9x9 it
-            # carries from the second transverse coordinate into the first
-            # and changes roughly half the momentum-conserving triples.
             qsum = np.empty((nq, nq), dtype=np.int64)
             qprime = np.arange(nq, dtype=np.int64)
             for iq_ext in range(nq):
                 qsum[qprime, np.asarray(qdm[iq_ext], dtype=np.int64)] = iq_ext
-            # Cache the two fixed vertex permutations INDEPENDENTLY.  A paired
-            # cache duplicates one PL for every PR it meets (and vice versa),
-            # so its memory follows the number of ring tasks; exact q5 Si
-            # filled a 96-GiB GH200 before map zero.  Separate caches contain
-            # at most one PL and one PR per q-folded FC3 block, hence follow
-            # the input vertex size instead of the combinatorial pairing.
             perm_left: dict[tuple, NDArray] = {}
             perm_right: dict[tuple, NDArray] = {}
             qtasks = {}
@@ -1998,8 +1645,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 return _run(lo, hi)
 
             def _scatter_micro(out, iqe, oi, oj, values, bs_i, bs_j):
-                # values: (C, wt, d, d).  Flatten (q,row,col) into one
-                # target index and retain tau as the contiguous value axis.
                 d = values.shape[-1]
                 rr = xp.arange(d, dtype=xp.int64)[None, :, None]
                 cc = xp.arange(d, dtype=xp.int64)[None, None, :]
@@ -2167,9 +1812,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         out = []
         for d in buf:
             new = {}
-            # SORTED, not dict order: the peers must post their messages in
-            # one agreed sequence (there are no tags), and these dicts are
-            # populated by iterating _links_for_range, which returns a SET.
             for key in sorted(d):
                 val = d[key]
                 shape = val.shape[:1] + (width,) + val.shape[2:]
@@ -2203,26 +1845,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         ``verify_now``: legacy 6-ring result shipped, the reconstruction
         identity checked in place (single-rank runs only).
         """
-        # Resolve the per-(I, J) vertex-pair task list once. The LEFT
-        # vertex is CONJUGATED: the bubble at external q pairs
-        # Phi(q', q_ext-q')^* with Phi(q_ext-q', q'); the unconjugated
-        # pairing breaks momentum bookkeeping (Sigma(-q) != Sigma(q)^T
-        # under time reversal). At Gamma the vertices are real, so the
-        # Gamma-only (nq==1) path is unaffected.
-        # The task list depends only on the (fixed) vertex and mesh, so it
-        # is built once and cached; identical (pl, pr) vertex pairs share
-        # one pre-permuted copy (the bulk-homogeneous blocks repeat across
-        # I and across (iq_ext, iqp) with the same q-difference).
-        # Which internal-momentum slices this rank currently holds. Whole
-        # axis by default, which is what the replicated (non-q-distributed)
-        # path always has.
         a_lo, a_hi = (0, nq) if a_slice is None else a_slice
         b_lo, b_hi = (0, nq) if b_slice is None else b_slice
-        # Leg A is read at the first internal momentum, leg B at the second.
-        # They come from one family in the replicated case and from two -- own
-        # slice and rotating slice -- under the q rotation. ``a_off``/``b_off``
-        # are the GLOBAL index of each family's first stored momentum, so they
-        # are 0 whenever the arrays span the whole axis.
         gl_a, gg_a, glr_a, ggr_a = gl_q, gg_q, glr_q, ggr_q
         gl_b, gg_b, glr_b, ggr_b = (
             (gl_q, gg_q, glr_q, ggr_q) if legs_b is None else legs_b)
@@ -2232,12 +1856,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         else:
             bulk_vertex = self._vfactors is not None
             if not bulk_vertex and self._perm_share == "auto":
-                # The dense q-folded vertex is I-dependent in general, but
-                # for a bulk-homogeneous device its blocks repeat along the
-                # block row. Verify that EXACTLY (once) rather than assume
-                # it; on success the transport-offset key is equivalent and
-                # collapses the cache to a single distinct key on every
-                # device shipped so far.
                 bulk_vertex = self._qfold_is_translation_invariant(qv, xp)
                 if ranks.rank == 0:
                     print(f"PhPh SSE perm cache: q-folded vertex "
@@ -2247,19 +1865,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                           flush=True)
             perm_cache: dict[tuple, tuple] = {}
             qtasks = {}
-            # Indexed by the two INTERNAL momenta rather than by the
-            # external one. They determine it -- ``qdm[iq_ext, iqp]`` is
-            # ``(iq_ext - iqp) mod nq``, so ``iq_ext = (iqp + iq2) mod nq`` --
-            # and this is the form the q-distributed rotation needs: leg A is
-            # read at ``iqp`` and leg B at ``iq2``, so restricting the two
-            # loops to the two slices a rank currently holds selects exactly
-            # the pairs it can compute. See phonon/docs/bubble_positivity.md
-            # Sec. 7.
-            #
-            # Bit-identical to iterating ``iq_ext`` outer: the map is a
-            # bijection on the pairs, distinct ``iq_ext`` accumulate into
-            # distinct memory, and for a fixed ``iq_ext`` the ``iqp`` still
-            # arrive ascending, so no sum is reassociated.
             for iqp in range(a_lo, a_hi):
                 for iq2 in range(b_lo, b_hi):
                     iq_ext = (iqp + iq2) % nq
@@ -2275,13 +1880,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             pr = phiR.get((J, K2p, K1p))
                             if pl is None or pr is None:
                                 continue
-                            # Only the factor-reconstructed vertex is
-                            # translationally invariant, so only there may the
-                            # permuted pair be shared across the block row via
-                            # the transport offsets. A dense q-folded vertex has
-                            # I-dependent blocks and must be keyed in full.
-                            # (Keying on id() shares nothing at all: the
-                            # reconstructed blocks are fresh views per I.)
                             pkey = (
                                 (iqp, iq2, K1 - I, K2 - I, K2p - J, K1p - J)
                                 if bulk_vertex
@@ -2298,10 +1896,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._qtasks_cache_key = cache_key
             self._qtasks_cache = qtasks
 
-        # One-time stage-3 cost model for the COUPLED-Q ring (mirrors
-        # _print_ring_stats): 6 ring calls of 3 GEMMs per task, 8 real
-        # flops per complex MAC. Without this every film run reported
-        # _ring_model_gflop = 0 and no in-engine GF/s could be derived.
         if not getattr(self, "_ring_stats_printed", False) and ranks.rank == 0:
             self._ring_stats_printed = True
             n_tasks = sum(len(t) for t in qtasks.values())
@@ -2326,13 +1920,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 flush=True,
             )
 
-        # Sigma^{<,>}(I, J, q_ext) for the tau slice [lo:hi]; mirrors the
-        # nq==1 _contract_tau so the omega/tau batch parallelises across
-        # the ring pool. In fast/verify mode the two mixed (absorption)
-        # Sigma^< rings are kept separate and accumulated into out_x --
-        # they double as the Sigma^> cross-term source of the bosonic tau
-        # fold; in verify mode the direct mixed Sigma^> rings go to
-        # out_t56 for the in-place identity gate.
         def _contract_tau_q(lo, hi):
             res = {}
             need_x = fast_now or verify_now
@@ -2364,9 +1951,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     gga = gg_a[(K1, K1p)][lo:hi, iqp - a_off]
                     ggb = gg_b[(K2, K2p)][lo:hi, iq2 - b_off]
                     if fast_now:
-                        # Exact reconstruction: only the diagonal ring
-                        # (g^>, g^>); the cross terms come from (J, I)'s
-                        # folded out_x at negated external q.
                         PL, PR, nI, bK2, nJ = pre
                         sg = ring_contract_pre(
                             PL, PR, nI, bK2, nJ, gga, ggb, xp)
@@ -2424,29 +2008,11 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stxv.blocks[i, j] = out_x.reshape(blk_shape)
 
         def _scatter_add_q(out, idx, vals):
-            # out (w, nq, bI, bJ); vals (C, w, bI, bJ); idx (C,) with
-            # duplicates -> accumulate on axis 1 of out via a transposed
-            # view (both add.at and scatter_add handle repeated indices).
             outT = out.transpose(1, 0, 2, 3)          # view
             if xp is np:
                 np.add.at(outT, idx, vals)
             else:
                 import cupyx
-                # cupy.add.at has no complex support -> scatter the real
-                # and imaginary float64 views separately.
-                #
-                # This is why the GPU bubble is not reproducible run to
-                # run: cupyx.scatter_add resolves duplicate indices with
-                # atomicAdd, whose ORDER is not fixed. Measured on an RTX
-                # A1000 (2026-08-16): repeated scatter_add of 4e5 values
-                # into 4096 slots varies at 5.4e-13 relative, and the
-                # whole compute() varies at ~1e-13 in ~88% of Sigma's
-                # entries with the bed, the settings and the process all
-                # held fixed. np.add.at above is exact, so the CPU path
-                # IS bit-reproducible -- run bit-identity gates under
-                # QTX_ARRAY_MODULE=numpy, never on the GPU. The jitter is
-                # ~10 orders below the SCBA residual floor and explains
-                # no convergence behaviour.
                 cupyx.scatter_add(outT.real, idx, vals.real)
                 cupyx.scatter_add(outT.imag, idx, vals.imag)
 
@@ -2456,10 +2022,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             ring shape). Reduction order differs from the task loop only
             within the scatter-add -> gate at ~1e-12, not bit."""
             w = hi - lo
-            # Stack each G dict once: {(K, K'): (n_tau, nq, b, b)} ->
-            # (n_pairs, n_tau, nq, b, b) + index map (per shape group the
-            # block sizes are uniform, so one stack per dict suffices for
-            # uniform-block devices; mixed-block devices fall back).
             def _stack(d):
                 keys = sorted(d.keys())
                 shapes = {d[k].shape[-2:] for k in keys}
@@ -2467,18 +2029,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     return None, None
                 return xp.stack([xp.ascontiguousarray(d[k]) for k in keys]), \
                     {k: i for i, k in enumerate(keys)}
-            # Leg A is always this rank's own family; leg B is the SAME
-            # family on the replicated path and the ROTATING one under the q
-            # rotation, where it is a different rank's slice and generally a
-            # different width. Stacking only the A family (as this path did
-            # until 2026-08-16) silently contracts a rank's own slice against
-            # itself and, once the widths differ, indexes out of bounds. The
-            # serial path above always read gl_b/gg_b/glr_b/ggr_b.
             GL, gl_i = _stack(gl_a)
             GG, gg_i = _stack(gg_a)
             GGR, ggr_i = _stack(ggr_a)
-            # Fast mode never contracts the reversed-lesser legs (its
-            # buffer is repurposed as stx and holds zeros here).
             GLR, _glr_i = (GG, gg_i) if fast_now else _stack(glr_a)
             if legs_b is None:
                 GLb, GGb, GGRb, GLRb, glb_i = GL, GG, GGR, GLR, gl_i
@@ -2491,11 +2044,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                    (GL, GG, GGR, GLR, GLb, GGb, GGRb, GLRb)):
                 return _contract_tau_q(lo, hi)
             if release is not None:
-                # The stacks now hold every value the leg dicts did, and the
-                # dicts are dead from here on (the fallback above already
-                # returned). Releasing them here rather than at the end of
-                # the SSE removes one full copy of 4L (n_tau, N_q, b, b)
-                # from the peak -- 13.9 GB of a 100 GB phase on 6-cell MoS2.
                 release()
 
             need_x = fast_now or verify_now
@@ -2519,15 +2067,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     Tn = len(ts)
                     bK1 = shpL[1]
                     bK1p = shpR[1] // nJ
-                    # Memory budget bounds the GEMM batch VOLUME C * wt
-                    # (tasks x tau window). The old code fixed wt = w and
-                    # let C absorb the budget with a floor of 16, so at
-                    # large n_tau (fine aux grids) the intermediates blew
-                    # past the budget ~10x. Now the tau axis is windowed
-                    # too: pick wt so a preferred task depth fits, then C
-                    # from the remaining budget. Throughput is flat once
-                    # C * wt saturates the b-ceiling (microbench: by a few
-                    # hundred), so this is a memory fix, not a speed knob.
                     per_tt = 16 * (
                         2 * bK1 * bK1p + shpL[0] * bK1p
                         + bK2 * shpR[1] + 2 * nI * nJ)
@@ -2539,15 +2078,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     iqe = xp.asarray([t[0] for t in ts], dtype=xp.int64)
                     a_id = xp.asarray([gl_i[(t[3], t[4])] for t in ts],
                                       dtype=xp.int64)
-                    # B-family index map: the rotating stack is keyed by its
-                    # own sorted links, which need not match leg A's.
                     b_id = xp.asarray([glb_i[(t[5], t[6])] for t in ts],
                                       dtype=xp.int64)
-                    # GLOBAL momenta in the task tuples, LOCAL rows in the leg
-                    # arrays: subtract the slice offsets, exactly as the serial
-                    # path does at ``iqp - a_off`` / ``iq2 - b_off``. Both are
-                    # zero unless the q rotation is running, so this is a no-op
-                    # on the replicated path.
                     qa = xp.asarray([t[1] for t in ts], dtype=xp.int64) - a_off
                     qb = xp.asarray([t[2] for t in ts], dtype=xp.int64) - b_off
                     for c0 in range(0, Tn, C):
@@ -2564,9 +2096,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             _tau_ix = xp.arange(lo + w0, lo + w1)[None, :]
 
                             def _legs(A, B):
-                                # single gather -> (C, wt, b, b); no
-                                # (C, wt, nq, b, b) intermediate (25x the
-                                # needed memory).
                                 Ga = A[ai[:, None], _tau_ix, qi[:, None]]
                                 Gb = B[bi[:, None], _tau_ix, q2[:, None]]
                                 return Ga, Gb
@@ -2582,9 +2111,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
                             tx = t56 = None
                             if need_x:
-                                # mixed lesser rings kept separate: they
-                                # double as the Sigma^> cross-term source
-                                # of the bosonic tau fold
                                 Ga, Gb = _legs(GL, GGRb)
                                 tx = _ring(Ga, Gb)
                                 Ga, Gb = _legs(GGR, GLb)
@@ -2598,10 +2124,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                     s = _ring(Ga, Gb)
                                     sl = s if sl is None else sl + s
                             if fast_now:
-                                # Exact reconstruction: only the diagonal
-                                # ring (g^>, g^>); the cross terms come
-                                # from (J, I)'s folded out_x at negated
-                                # external q.
                                 Ga, Gb = _legs(GG, GGb)
                                 sg = _ring(Ga, Gb)
                             elif verify_now:
@@ -2653,17 +2175,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         else:
             res = _contract_tau_q(0, n_tau)
         for (I, J), (out_l, out_g, out_x, _t56) in res.items():
-            # out_x reaches the stx buffer only in fast mode; in verify
-            # mode that buffer still holds the reversed-lesser legs.
             _write_q(I, J, out_l, out_g, out_x if fast_now else None)
 
         if verify_now:
-            # Identity gate (single rank: full tau + all q_ext + all pairs
-            # local), the coupled-q mirror of the Gamma gate:
-            #   (t5+t6)_IJ[l, qe, a, b] == (t2+t3)_JI[-l, -qe, b, a].
             rev = (-xp.arange(n_tau)) % n_tau
-            # Flat-index permutation of the per-axis q -> -q negation
-            # (C-order flattening of the transverse mesh).
             qneg = xp.arange(nq).reshape(nk)
             for ax, k in enumerate(nk):
                 qneg = xp.take(qneg, (-xp.arange(k)) % k, axis=ax)
@@ -2723,15 +2238,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             }
             factor_block_sizes = self.block_sizes
         off_pos = vf.offset_index()
-        # lambda folded into the external leg ONCE per vertex: the sandwich
-        # is Dt @ H @ Dt^T with Dt = D diag(lambda) (D, lambda real).
         Dt = xp.asarray(vf.D * vf.lambdas[None, :])
         UB = xp.asarray(vf.UB)
         UC = UB if vf.UB is vf.UC else xp.asarray(vf.UC)
         g_dicts = {"l": gl_q, "g": gg_q, "lr": glr_q, "gr": ggr_q}
-        # Whether the two contracted legs coincide is a property of the ARRAYS,
-        # not of the ansatz label: a mislabelled file would otherwise silently
-        # serve an a-role Gram for a b-role request.
         shared = UB is UC or bool(xp.array_equal(UB, UC))
 
         def _run(lo, hi):
@@ -2770,19 +2280,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 stlv.blocks[I - start, J - start] = out_l.reshape(shape)
                 stgv.blocks[I - start, J - start] = out_g.reshape(shape)
 
-        # The Gram tables are (nq, n_tau, R, R), so the working set grows with the
-        # tau slice AND with R^2 -- at R=128 the full local tau axis is tens of
-        # GB. Bound it by splitting tau, whether or not there is a pool to
-        # parallelise over (on the GPU there is none).
         pool, n_threads = ring_pool()
         bytes_per_table_tau = (
             nq * Dt.shape[1] ** 2 * xp.dtype(dtype).itemsize
         )
-        # GramTables caches four variants for every distinct contracted link
-        # while one output pair is evaluated.  The old budget counted only
-        # ONE such table, so R=64 q9 already exceeded a 6 GB GPU although the
-        # configured temporary budget was 256 MB.  Add the exact cache count
-        # (roles share it for INDSCAL) and space for the live sums/FFT plans.
         table_multiplier = 1
         for quads in quads_by_pair.values():
             a_links = {(q[0], q[2]) for q in quads}
@@ -2861,8 +2362,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         rows = getattr(g, "rows", None)
         cols = getattr(g, "cols", None)
         if rows is None or cols is None:
-            # Skipping the fold would silently drop the ji-transpose of the
-            # absorption legs and break the bubble's energy balance, so refuse.
             raise TypeError(
                 f"The 3-phonon bosonic fold needs the (row, col) nnz pattern, "
                 f"which {type(g).__name__} does not expose. Use DSDBCOO "
@@ -2883,8 +2382,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 want.setdefault(nbr, []).append((k, (int(j), int(i))))
         recv_dest, send_src = {}, {}
         if want or ranks.block.size > 1:
-            # Pattern-only key exchange: pickled python objects, one-time,
-            # host-side -- stays on the raw mpi4py communicator.
             bcomm = ranks.block._mpi_comm
             rank, size = ranks.block.rank, ranks.block.size
             for nbr in (rank - 1, rank + 1):
@@ -3012,11 +2509,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         """
         rank, size = ranks.block.rank, ranks.block.size
         offs = ref.block_section_offsets
-        # Leading axes of a block: (local tau,) in the Gamma-only case, and
-        # (local tau, *nk) once the device is transversely periodic. Read off
-        # the buffer rather than assumed, because hardcoding the Gamma shape
-        # here is what made transverse q and comm.block.size > 1 mutually
-        # exclusive: the halo would post buffers nq times too small.
         lead = tuple(int(n) for n in ref.data.shape[:-1])
 
         def is_local(link):
@@ -3033,9 +2525,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if 0 <= nbr < size
         ]
 
-        # Guard: every non-local needed link must be in an immediate
-        # neighbour. Checked BEFORE posting so the (rank-symmetric)
-        # failure leaves no dangling group state.
         needed_nonlocal = {l for l in self._links_for_range(start, end)
                            if not is_local(l)}
         received = set()
@@ -3116,21 +2605,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         bufs = existing + tuple(
             cls.from_sparray(
                 pattern, self.block_sizes, global_stack_shape=(n_fft,) + nk,
-                # Inherit the source's transverse sectioning -- but only on the
-                # LEGS. Without it the tau buffers span the WHOLE mesh while the
-                # G legs written into them carry only this rank's slice, and the
-                # assignment fails on the shape -- asymmetrically, so one rank
-                # raises while its peers block in the next collective and the
-                # run looks like a deadlock rather than an error.
-                #
-                # Slots 2 and 3 are the Sigma ACCUMULATORS (stl, stg) and must
-                # stay whole. The rotation is a convolution over q: one slice
-                # pair contributes to EVERY external momentum, so a rank
-                # legitimately accumulates across the whole mesh and only owns a
-                # section of the RESULT. Sectioning them here is what produced
-                #   IndexError: index 2 is out of bounds for axis 1 with size 1
-                # The section is taken after the comm.q reduction instead --
-                # ``_scatter_sigma_q`` below.
                 q_distributed=q_split and slot not in _SIGMA_TAU_SLOTS,
             )
             for slot in range(len(existing), n_needed)
@@ -3146,9 +2620,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._tau_cache = (key, bufs)
         return bufs
 
-    # ------------------------------------------------------------------
-    # block-bubble FFT contraction
-    # ------------------------------------------------------------------
 
     def _bubble_block(
         self,
@@ -3216,11 +2687,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     "The phonon frequency grid must be strictly ascending "
                     "and non-negative."
                 )
-            # The FFT bin arithmetic (forward convolution bin n = k + m and
-            # the index-reversal fold bin l -> -l) represents omega sums only
-            # on a UNIFORM grid ANCHORED AT ZERO; anything else runs silently
-            # shifted. With the auxiliary bubble grid the FFT runs there
-            # instead, and the primary grid may be non-uniform.
             if self._aux_spacing <= 0.0:
                 df = float(freqs[1] - freqs[0])
                 if abs(float(freqs[0])) > 1e-9 * abs(df) or bool(
