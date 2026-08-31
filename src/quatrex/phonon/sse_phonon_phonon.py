@@ -809,6 +809,8 @@ class SigmaPhononPhonon(
             start = int(stl.block_section_offsets[ranks.block.rank])
             end = int(stl.block_section_offsets[ranks.block.rank + 1])
             owned = self._owned_outputs(start, end)
+            pairs_c = ([ij for ij in owned if ij[0] <= ij[1]]
+                       if halve_now else owned)
 
             if ranks.block.size > 1:
                 halo_l, halo_g = self._exchange_band_halo(gtlv, gtgv, gtl, start, end)
@@ -864,7 +866,8 @@ class SigmaPhononPhonon(
                     e = int(np.ceil(np.log2(max(m, 1e-300))))
                     _sl = _sr = 2.0 ** -e
                     self._ring_unscale = 2.0 ** (2 * e)
-                for (I, J), quads in self._phi_pair_index.items():
+                for I, J in pairs_c:
+                    quads = self._phi_pair_index[(I, J)]
                     pre_list = []
                     for (K1, K2, K1p, K2p, pl, pr) in quads:
                         pl_eff = pl
@@ -931,9 +934,6 @@ class SigmaPhononPhonon(
                 )
             elif nq == 1:
                 _pair_debug = os.environ.get("QTX_PROFILE_LEVEL") == "debug"
-
-                pairs_c = ([ij for ij in owned if ij[0] <= ij[1]]
-                           if halve_now else owned)
 
                 n_tau = next(iter(gl_blk.values())).shape[0] if gl_blk else 0
                 _dt = stl.data.dtype
