@@ -37,3 +37,22 @@ def test_complete_internal_current_spread_is_reported():
     balance, spread = SCBA._phonon_heat_flow_metrics([10.0, 8.0, 9.0])
     np.testing.assert_allclose(balance, 1.0 / 9.5)
     np.testing.assert_allclose(spread, 2.0 / 9.5)
+
+
+def test_converged_checkpoint_uses_the_measured_iterate():
+    solver = object.__new__(SCBA)
+    current = [SimpleNamespace(data=np.array([i])) for i in range(3)]
+    previous = [SimpleNamespace(data=np.array([i + 3])) for i in range(3)]
+    solver.data = SimpleNamespace(
+        sigma_lesser=current[0],
+        sigma_greater=current[1],
+        sigma_retarded_hermitian=current[2],
+        sigma_lesser_prev=previous[0],
+        sigma_greater_prev=previous[1],
+        sigma_retarded_hermitian_prev=previous[2],
+    )
+    solver._converged = True
+    solver._diverged = False
+    assert solver._sigma_checkpoint_buffers() == tuple(previous)
+    solver._converged = False
+    assert solver._sigma_checkpoint_buffers() == tuple(current)

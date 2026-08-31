@@ -929,11 +929,11 @@ if ranks.rank == 0:
 # Sigma snapshot for wall-time chaining / warm starts: EVERY rank writes its
 # own slice (multi-rank layouts restart via QX_SIGMA_INIT with the same grid).
 if os.environ.get("QX_SAVE_SIGMA") and err is None:
+    _sl, _sg, _sr = scba._sigma_checkpoint_buffers()
     np.savez(_sigma_file(os.environ["QX_SAVE_SIGMA"]),
-             sigma_lesser=np.asarray(get_host(scba.data.sigma_lesser.data)),
-             sigma_greater=np.asarray(get_host(scba.data.sigma_greater.data)),
-             sigma_retarded=np.asarray(
-                 get_host(scba.data.sigma_retarded_hermitian.data)))
+             sigma_lesser=np.asarray(get_host(_sl.data)),
+             sigma_greater=np.asarray(get_host(_sg.data)),
+             sigma_retarded=np.asarray(get_host(_sr.data)))
     if ranks.rank == 0:
         print(f"SAVED SIGMA {os.environ['QX_SAVE_SIGMA']}"
               f"{' (per-rank slices)' if ranks.size > 1 else ''}", flush=True)

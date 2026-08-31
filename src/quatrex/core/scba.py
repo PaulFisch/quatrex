@@ -538,6 +538,20 @@ class SCBA(TransportSolver):
         self.data.sigma_lesser.data[:] = 0.0
         self.data.sigma_greater.data[:] = 0.0
 
+    def _sigma_checkpoint_buffers(self):
+        """Return the state from which the next SCBA step should start."""
+        if self._converged or self._diverged:
+            return (
+                self.data.sigma_lesser_prev,
+                self.data.sigma_greater_prev,
+                self.data.sigma_retarded_hermitian_prev,
+            )
+        return (
+            self.data.sigma_lesser,
+            self.data.sigma_greater,
+            self.data.sigma_retarded_hermitian,
+        )
+
     @profiler.profile(label="SCBA: Symmetrize Sigma", level="default", comm=comm)
     def _symmetrize_sigma(self) -> None:
         # Symmetrization.
