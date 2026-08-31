@@ -85,8 +85,6 @@ class PhononJVP:
         config = scba.config
         ph = config.phonon
 
-        # ---- guards: the map must be iteration-independent and the
-        # contacts Sigma-independent for the frozen-G linearisation. ----
         def _forbid(cond: bool, what: str) -> None:
             if cond:
                 raise NotImplementedError(
@@ -127,11 +125,6 @@ class PhononJVP:
             and not bool(getattr(ph, "sse_hermitian_pairs", False))
         )
         if jvp_form == "bilinear" and not self._bilinear_supported:
-            # compute_linearized deliberately implements only the plain dense
-            # Gamma path.  The polarisation identity calls the unmodified
-            # production kernel, so it already covers coupled q, factored
-            # vertices and the symmetry fast paths without duplicating their
-            # product rules here.
             reasons = []
             if self._nq != 1:
                 reasons.append(f"coupled q (nq={self._nq})")
@@ -171,22 +164,12 @@ class PhononJVP:
                                 side="right") - 1
         blk_c = np.searchsorted(self._block_offsets, self._cols,
                                 side="right") - 1
-        # Only the block-tridiagonal band of Sigma enters the Dyson solve
-        # (system-matrix subtraction and the RGF source reads); the d2
-        # pattern slots (present when sse_g_band = 2) carry J == 0.
         self._bt_mask = np.abs(blk_r - blk_c) <= 1
         self._bt_mask_device = xp.asarray(self._bt_mask)
-        # The RGF writes G only on its output band (= sse_g_band: 1 =
-        # block-tridiagonal, 2 = + second off-diagonal, 3 = + third); pattern
-        # slots beyond it -- present when the cutoff makes the pattern
-        # block-dense -- stay zero in the production buffers and must stay
-        # zero in the JVP's dG too.
         out_band = int(getattr(self._solver, "_gf_band", 1))
         self._g_mask = np.abs(blk_r - blk_c) <= out_band
         self._g_mask_device = xp.asarray(self._g_mask)
 
-        # Scratch buffers: two kernel inputs (G pattern) and three kernel
-        # outputs (Sigma pattern) -- reused across all JVPs.
         dsdbsparse_type = config.compute.dsdbsparse_type
 
         def _scratch():
@@ -212,14 +195,9 @@ class PhononJVP:
         self._g_g_flat = None
         self._g_l_flat_device = None
         self._g_g_flat_device = None
-        # Backwards-compatible name used by the validation harness.  It now
-        # counts every local stack element, not frequencies alone.
         self._n_local = self._n_batch
         self._nnz = int(self._rows.size)
 
-    # ------------------------------------------------------------------
-    # small dense-block helpers
-    # ------------------------------------------------------------------
     def _sl(self, i: int) -> slice:
         return slice(int(self._block_offsets[i]),
                      int(self._block_offsets[i + 1]))
@@ -299,9 +277,6 @@ class PhononJVP:
                 out[:, sj, si] = -out[:, si, sj].conj().swapaxes(-2, -1)
         return out
 
-    # ------------------------------------------------------------------
-    # per-Newton-step preparation
-    # ------------------------------------------------------------------
     def prepare(self) -> float:
         """Freeze the dense Green's function at the current iterate.
 
@@ -346,9 +321,6 @@ class PhononJVP:
         bN = self._sl(self._nb - 1)
         if obc.retarded[0] is not None:
             A[:, b0, b0] -= self._stack_block(obc.retarded[0])
-        # A one-block device stores the SUM of the two reservoir self-energies
-        # in the sole OBC slot (PhononSolver._compute_obc).  Index 0 and -1
-        # then alias and must not be applied twice.
         if self._nb > 1 and obc.retarded[-1] is not None:
             A[:, bN, bN] -= self._stack_block(obc.retarded[-1])
 
@@ -375,8 +347,6 @@ class PhononJVP:
         self._GL_device = xp.asarray(GL)
         self._GG_device = xp.asarray(GG)
 
-        # Reconstruction self-check against the solver's actual output
-        # (catches any forgotten A-term before it corrupts a Newton step).
         self._g_l_flat = self._host(data.g_lesser.data).reshape(
             n_local, self._nnz).copy()
         self._g_g_flat = self._host(data.g_greater.data).reshape(
@@ -389,8 +359,6 @@ class PhononJVP:
             got = self._to_flat(self._skew_project(dense))
             num2 += float(np.linalg.norm(got[:, gm] - flat[:, gm]) ** 2)
             den2 += float(np.linalg.norm(flat[:, gm]) ** 2)
-        # Global relative norm (a rank with pathological frequencies must
-        # not silently poison the Krylov space).
         from quatrex.core.mpi_linalg import allreduce_sum, get_comm
         mpi_comm, op_sum = get_comm()
         buf = allreduce_sum(mpi_comm, op_sum,
@@ -404,9 +372,6 @@ class PhononJVP:
                 "matrix does not match the solver's."
             )
 
-        # S(G_frozen): the raw kernel output is exactly what sits in the
-        # sigma buffers, except that the driver has already added the
-        # skew part 0.5*(S_l - S_g) into sigma_retarded_hermitian.
         s_l = self._host(data.sigma_lesser.data).ravel().copy()
         s_g = self._host(data.sigma_greater.data).ravel().copy()
         s_r = self._host(data.sigma_retarded_hermitian.data).ravel().copy()
@@ -414,9 +379,6 @@ class PhononJVP:
         self._s_base = (s_l, s_g, s_r)
         return recon
 
-    # ------------------------------------------------------------------
-    # Jacobian-vector product
-    # ------------------------------------------------------------------
     def apply(self, dx: np.ndarray, form: str | None = None) -> np.ndarray:
         """Return ``J_F dx`` for a flat complex direction ``dx`` in the
         mixer layout ``[dSigma^<, dSigma^>, dSigma^R]`` (rank-local).
@@ -441,8 +403,6 @@ class PhononJVP:
         dg = work[size:2 * size].reshape(n_local, nnz)
         dr = work[2 * size:].reshape(n_local, nnz)
 
-        # Dyson half: projected onto the invariant skew subspace, plain
-        # dense identities, RGF output projections.
         dl_d = self._skew_project(self._to_dense(
             dl, bt_only=True, device=device))
         dg_d = self._skew_project(self._to_dense(
@@ -471,12 +431,8 @@ class PhononJVP:
 
         # Bubble half.
         if form == "bilinear":
-            # Mixed-leg cross through compute_linearized: one kernel call,
-            # frozen legs read straight from the driver's live G buffers.
             dS_l, dS_g, dS_r = self._kernel_linearized(dGl_flat, dGg_flat)
         else:
-            # Polarisation identity: two production-kernel calls plus the
-            # cached S(G) from the driver's own SSE output.
             s1 = self._kernel(g_l_flat + dGl_flat,
                               g_g_flat + dGg_flat)
             s2 = self._kernel(dGl_flat, dGg_flat)

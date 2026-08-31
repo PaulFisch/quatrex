@@ -109,13 +109,6 @@ class SCBAData:
                 config.phonon, "sse_microblock_dof", 0) or 0)
             if (getattr(config, "simulation_type", "") == "phonon"
                     and micro_dof):
-                # The microblock bubble generates exact primitive shells and
-                # assembles them into same/adjacent grouped Dyson blocks.  A
-                # Cartesian atom-distance cutoff can remove entries inside
-                # those blocks, and is not a transport coordinate for an
-                # oblique Si primitive lattice.  Store the complete grouped
-                # BTD band explicitly, with the same arrow ownership as the
-                # ordinary sparsity builder.
                 from quatrex.phonon.microblocks import grouped_band_indices
 
                 rows_, cols_ = grouped_band_indices(
@@ -135,11 +128,6 @@ class SCBAData:
                     end_idx=end_idx,
                 )
 
-            # sse_g_band > 1: the bubble contraction keeps inner G links
-            # beyond the tridiagonal band, so the solver must produce (and
-            # the shared pattern must hold) the second off-diagonal blocks.
-            # Sigma's extra blocks stay structurally zero (the SSE output
-            # band is unchanged).
             g_band = 1
             if getattr(config, "simulation_type", "") == "phonon":
                 g_band = min(
@@ -151,11 +139,6 @@ class SCBAData:
             if g_band > 1:
                 from qttools import sparse as _sparse
 
-                # Distributed: emit the extra band blocks only within
-                # this rank's arrow-wise window (min block index inside
-                # the rank's section), matching compute_sparsity_pattern
-                # above. At block.size == 1 the window spans all blocks
-                # and this reduces to the legacy full loop.
                 sec_lo = int(section_offsets[comm.block.rank])
                 sec_hi = int(section_offsets[comm.block.rank + 1])
                 block_offsets_ = np.hstack(([0], np.cumsum(block_sizes)))
@@ -175,8 +158,6 @@ class SCBAData:
                         cols_.append(cc.ravel())
                 if rows_:
                     n_ = int(block_offsets_[-1])
-                    # backend-native arrays: qttools sparse is cupyx
-                    # under cupy, which rejects numpy index arrays
                     band_pattern = _sparse.coo_matrix(
                         (
                             xp.ones(sum(len(r) for r in rows_)),
@@ -195,16 +176,11 @@ class SCBAData:
         dsdbsparse_type = config.compute.dsdbsparse_type
 
         def _zeros_like(dsdbsparse: DSDBSparse) -> DSDBSparse:
-            # These buffers live for the whole SCBA (no allocate/free
-            # choreography) and must start zeroed (Sigma = 0 at iteration 0).
             out = dsdbsparse_type.empty_like(dsdbsparse)
             out.allocate_data()
             out.data[:] = 0.0
             return out
 
-        # G^R is only needed between the solve and the observables, so it
-        # follows the allocate/free choreography in SCBA.run() -- it must not
-        # be resident while the interactions allocate their own buffers.
         self.g_retarded = dsdbsparse_type.from_sparray(
             sparray=self.sparsity_pattern.astype(xp.complex128),
             block_sizes=block_sizes,
@@ -235,11 +211,6 @@ class SCBAData:
             self.sigma_retarded_hermitian_prev.symmetry = "hermitian"
 
         if config.scba.coulomb_screening:
-            # NOTE: The polarization has the same sparsity pattern as
-            # the electronic system (the interactions are local in real
-            # space). However, we need to change the block sizes of the
-            # screened Coulomb interaction. These buffers follow the
-            # allocate/free choreography in the interaction compute.
             self.p_retarded_hermitian = dsdbsparse_type.empty_like(self.g_lesser)
             self.p_lesser = dsdbsparse_type.empty_like(self.g_lesser)
             self.p_greater = dsdbsparse_type.empty_like(self.g_lesser)
@@ -355,11 +326,6 @@ class SCBA(TransportSolver):
         self.data = SCBAData(config, electron_energies=electron_energies)  # dummy data
         self.mixing_factor = self.config.scba.mixing_factor
 
-        # Optional quasi-Newton mixing. Damped/Anderson mixing accelerates a
-        # contractive iteration; broyden/rpm/rre/jfnk LAND a fixed point whose
-        # Jacobian has |lambda| > 1, which mixing cannot reach. Anderson with a
-        # linear warm-up is built later, once the iterate is past the cold
-        # start (see _update_sigma).
         self._anderson_mixer = None
         if self.config.scba.mixing_method != "linear" and not (
             self.config.scba.mixing_method == "anderson"
@@ -367,15 +333,6 @@ class SCBA(TransportSolver):
         ):
             self._anderson_mixer = self._build_mixer()
 
-        # Anharmonic-phonon convergence by HEAT-FLOW conservation. The
-        # reported result is the CONVERGED fixed point (last iterate with
-        # converged == True); a run that does not converge is reported as
-        # such, with its last iterate. No "best-conserved iterate" is
-        # tracked: over a non-converged trajectory the most-conserved
-        # iterate is not a fixed point (it is typically an early, still
-        # near-ballistic step, which conserves trivially because Sigma has
-        # not developed), so headlining it misrepresents a non-result as
-        # the answer.
         self._scba_iteration = 0
         self._last_heat_current = None
         self._diverged = False
@@ -516,19 +473,9 @@ class SCBA(TransportSolver):
             if self.config.phonon.model == "negf":
                 energies_path = self.config.input_dir / "phonon_energies.npy"
                 self.phonon_energies = distributed_load(energies_path)
-                # The SSE MUST live on the grid the Green's functions live on
-                # (the solver grid): its bubble prefactor and the SCP <uu>
-                # carry the grid spacing d-omega. A stale phonon_energies.npy
-                # that disagrees with the configured window would silently
-                # misscale Sigma, so pass the solver grid and only warn
-                # about the mismatch.
                 solver_freqs = np.asarray(
                     get_host(self.phonon_solver.local_frequencies))
                 npy_freqs = np.asarray(get_host(self.phonon_energies))
-                # Compare against the GLOBAL configured window -- NOT the
-                # rank-local slice (len(global)/stack points). With
-                # frequency_grid = "file" the npy IS the solver grid, so
-                # there is nothing to reconcile.
                 if getattr(config.phonon, "frequency_grid",
                            "window") == "file":
                     global_freqs = np.asarray(get_host(self.energies))
@@ -654,9 +601,6 @@ class SCBA(TransportSolver):
     @profiler.profile(label="SCBA: Update Sigma", level="default", comm=comm)
     def _update_sigma(self) -> None:
         """Updates the self-energy: damped linear or quasi-Newton mixing."""
-        # Linear-warmup -> Anderson hand-off. _scba_iteration is already
-        # incremented (in _has_converged) when the first update runs, so the
-        # strict ">" gives exactly anderson_warmup_iters linear updates.
         if (self._anderson_mixer is None
                 and self.config.scba.mixing_method == "anderson"
                 and self._scba_iteration > self.config.scba.anderson_warmup_iters):
@@ -709,9 +653,6 @@ class SCBA(TransportSolver):
     @profiler.profile(label="SCBA: Convergence test", level="default", comm=comm)
     def _has_converged(self) -> bool:
         """Checks if the SCBA has converged."""
-        # A JFNK finite-difference probe is x_k + eps*v, not an iterate of the
-        # SCBA map: its residual is that of x_k up to O(eps), so testing
-        # convergence on it would accept a deliberately perturbed self-energy.
         if self._anderson_mixer is not None and self._anderson_mixer.probing:
             self._scba_iteration += 1
             return False
@@ -754,17 +695,8 @@ class SCBA(TransportSolver):
 
         self._scba_iteration += 1
 
-        # Anharmonic phonon convergence requires a GENUINE fixed point: the
-        # scattering self-energy must reach self-consistency (relative Sigma
-        # residual small) AND the heat flow must be conserved. NB the
-        # current_conservation above is the NUMBER-current G-R balance,
-        # which 3-phonon processes violate by design -- the physical
-        # criterion is the hbar-omega-weighted HEAT flow.
         if (self.config.scba.phonon
                 and self.config.phonon.model == "negf"):
-            # Relative residual ||Sigma_new - Sigma_old||_inf / ||Sigma||_inf
-            # over ALL components (lesser, greater, retarded-Hermitian): the
-            # Sigma^R part alone is blind to a common lesser+greater drift.
             local_diff = local_max_diff
             local_smag = get_host(
                 xp.max(xp.abs(self.data.sigma_retarded_hermitian.data)))
@@ -782,8 +714,6 @@ class SCBA(TransportSolver):
             global_comm.Allreduce(local_smag, smag, op=MPI.MAX)
             rel_sigma = float(max_diff_all) / (float(smag) + 1e-300)
             self._last_rel_sigma = rel_sigma
-            # Divergence guard: an exploded update never recovers, so abort
-            # instead of burning the remaining iterations.
             abort_at = self.config.scba.abort_residual
             if (abort_at > 0 and self._scba_iteration > 3
                     and rel_sigma > abort_at):
@@ -795,41 +725,17 @@ class SCBA(TransportSolver):
                 return True
             heat, balance, spread = self._phonon_heat_flow_conservation()
             if heat is not None:
-                # Last-iterate heat: the actual current SCBA state. This is
-                # the reported current when converged; on a non-converged
-                # run it is transparently the last iterate, not a
-                # cherry-picked one.
                 self._last_heat_current = heat.copy()
                 self._last_heat_spread = spread
                 if comm.rank == 0:
-                    # lead balance is a SIGN gate, not a magnitude one: both
-                    # currents count positive left-to-right, so a steady state
-                    # has heat[0] == heat[-1] and balance -> 0, while
-                    # heat[-1] == -heat[0] gives EXACTLY 2. That is the device
-                    # emitting into both leads -- anti-damping -- and it is a
-                    # different failure from "somewhat unbalanced". Say so,
-                    # because reading 2.0 as a large imbalance costs days.
                     _sign = ("  [SIGN INVERSION: emitting into both leads]"
                              if balance > 1.5 else "")
-                    # The lead current itself, on the same line: `balance`
-                    # and `spread` are both normalised by it, so without it
-                    # a run killed by the wall reports how self-consistent
-                    # it was but not WHAT it computed. That cost two 24 nh
-                    # MoS2 rungs (lsM4c/lsM4w, 2026-08-16), whose currents
-                    # existed at every iteration and were never printed.
-                    # Appended at the END of the line on purpose: several
-                    # log parsers anchor on "residual ...; lead balance ..."
-                    # (e.g. phonon/studies/_psd_trace_report.py), so a new
-                    # field may only go where it cannot split that pair.
                     _lead_J = 0.5 * (abs(float(heat[0]))
                                      + abs(float(heat[-1])))
                     print(f"Phonon: rel Sigma^R residual {rel_sigma:.4e}; "
                           f"lead balance {balance:.4e}; "
                           f"internal spread {spread:.4e}; "
                           f"lead current {_lead_J:.6e}{_sign}", flush=True)
-                # NOTE: G survives the back-transpose only when
-                # bubble_balance_check keeps it; on discarded G the traces
-                # would evaluate to a spurious machine-perfect 0 == 0.
                 bubble_resid = None
                 if self.config.phonon.bubble_balance_check:
                     bal = self._phonon_bubble_energy_balance()
@@ -841,25 +747,9 @@ class SCBA(TransportSolver):
                         self._bubble_balance_history.append(
                             (p_in.real, p_out.real, bres))
                         if comm.rank == 0:
-                            # resid is a RATIO and therefore blind to a
-                            # blow-up: it read 1.9e-14 while P_in grew from
-                            # 2.6e+05 to 4.4e+32. |P_in| is printed beside it
-                            # for exactly that reason, and the convergence
-                            # criterion is rel Sigma^R above, not this.
                             print(f"Bubble energy balance: P_in={p_in.real:.6e} "
                                   f"P_out={p_out.real:.6e} resid={bres:.3e}",
                                   flush=True)
-                # Conservation gate = LEAD balance |J_L - J_R| / |J|: in
-                # steady state the in/out lead currents must match. The
-                # max-min spread over ALL interfaces additionally contains
-                # physical redistribution between the harmonic and
-                # interaction-current channels, as well as finite-eta
-                # absorption. With non-local FC2/Sigma terms it is also
-                # partition dependent unless the current operator includes
-                # every term crossing the cut. It is therefore reported as
-                # a diagnostic only, not gated on.
-                # Optional additional gate on the Phi-derivable bubble
-                # balance; 0 disables.
                 bb_tol = self.config.phonon.bubble_balance_tol
                 bubble_ok = (
                     bb_tol <= 0.0
@@ -970,8 +860,6 @@ class SCBA(TransportSolver):
 
         spec_in = weighted(s_l, g_g)
         spec_out = weighted(s_g, g_l)
-        # Cache the per-omega spectra (rank-local frequency slice) for the
-        # engine's bubble_balance_spectrum output key.
         self._bubble_balance_spectra = (spec_in, spec_out)
         p_in = complex(spec_in.sum())
         p_out = complex(spec_out.sum())
@@ -1020,10 +908,6 @@ class SCBA(TransportSolver):
             slab_r = np.searchsorted(offs, r, side="right") - 1
             slab_c = np.searchsorted(offs, c, side="right") - 1
             n_blocks = offs.size - 1
-            # Row-binned attribution: the restricted trace Tr_k[Sigma G]
-            # of eq. P_abs (row of Sigma in slab k, all columns). The
-            # block-DIAGONAL-only variant (Sigma_kk G_kk) is kept as an
-            # experimental alternative in slot [1].
             onehot = np.zeros((r.size, n_blocks))
             onehot[np.arange(r.size), slab_r] = 1.0
             onehot_diag = np.where((slab_r == slab_c)[:, None], onehot, 0.0)
@@ -1047,8 +931,6 @@ class SCBA(TransportSolver):
             recv = np.empty_like(p_abs)
             comm.stack.all_reduce(np.ascontiguousarray(p_abs), recv, op="sum")
             p_abs = recv
-        # (2, n_blocks): [0] = row-binned (sums to the global balance),
-        # [1] = block-diagonal-only (experimental alternative attribution).
         return p_abs
 
     def _phonon_heat_flow_conservation(self):
@@ -1072,10 +954,6 @@ class SCBA(TransportSolver):
         w = self._phonon_hw_weights(solver).reshape(
             (-1,) + (1,) * (mw.ndim - 1))
         heat_e = xp.real(xp.sum(w * mw, axis=0))    # (*nk, interface)
-        # Sum over any transverse-q axes: under 3-phonon scattering the
-        # PER-q heat current is not conserved (the momentum convolution
-        # exchanges energy between q), only the q-summed energy current is.
-        # The q-axis is local (not stack-partitioned), so this sum is exact.
         while heat_e.ndim > 1:
             heat_e = xp.sum(heat_e, axis=0)
         local_heat = get_host(heat_e)               # per interface
@@ -1084,12 +962,6 @@ class SCBA(TransportSolver):
             recv = np.empty_like(heat)
             comm.stack.all_reduce(np.ascontiguousarray(local_heat), recv, op="sum")
             heat = recv
-        # The "inv" solver and the distributed RGF leave the internal
-        # interfaces NaN, so the denominator uses the leads and the spread is
-        # NaN-aware. Both lead currents count positive left-to-right, so a
-        # steady state has heat[0] == heat[-1]; differencing them WITHOUT
-        # taking absolute values first is what makes the gate sensitive to a
-        # sign inversion (anti-damping emits into both leads).
         denom = 0.5 * (abs(float(heat[0])) + abs(float(heat[-1]))) + 1e-300
         spread = float((np.nanmax(heat) - np.nanmin(heat)) / denom)
         balance = float(abs(float(heat[0]) - float(heat[-1])) / denom)
@@ -1315,9 +1187,6 @@ class SCBA(TransportSolver):
         """Runs the SCBA to convergence."""
         print("Entering SCBA loop...", flush=True) if comm.rank == 0 else None
 
-        # Phonon post-processing reads G^R off the final iterate, so that path
-        # holds the buffer; the electron path frees it before the interactions
-        # allocate theirs.
         keep_g_retarded = "phonon" in self.subsystems
 
         for i in range(self.config.scba.max_iterations):
@@ -1339,8 +1208,6 @@ class SCBA(TransportSolver):
                             self.data.g_retarded,
                         ),
                     )
-                # Electron-specific observables; phonon transport reads the
-                # heat current from PhononSolver.meir_wingreen_current instead.
                 if "electron" in self.subsystems:
                     self._compute_electron_observables()
 
@@ -1373,11 +1240,6 @@ class SCBA(TransportSolver):
                 with profiler.profile_range(
                     label="SCBA: stack->nnz transpose back", level="default", comm=comm
                 ):
-                    # G must survive the back-transpose for the whole phonon
-                    # path, not just for the bubble-balance diagnostic: the
-                    # slab absorption and the post-hoc G^< diagonals are also
-                    # read off the final iterate. Discarding it here does not
-                    # fail, it silently zeroes those observables.
                     keep_g = bool(
                         self.config.scba.phonon
                         and self.config.phonon.model == "negf"
@@ -1393,19 +1255,8 @@ class SCBA(TransportSolver):
                         m.dtranspose(discard=False)  # This must not be discarded.
                         assert m.distribution_state == "stack"
 
-            # The anharmonic phonon path keeps the raw SSE output: the
-            # skew-Hermitian projection of Sigma^{<,>} breaks the
-            # Phi-derivable bubble energy balance. The SSE writes only the
-            # Hermitian part of Sigma^R ("half": nothing; "fft": the KK real
-            # part), so the skew part is assembled here -- PhononSolver
-            # consumes the buffer as the full retarded self-energy (the
-            # electron solver, by contrast, adds the skew part internally).
             if (self.config.scba.phonon
                     and self.config.phonon.model == "negf"):
-                # "half" retarded rule in the solver's occupation-positive
-                # convention (sigma^{<,>} = +i n(+1) Gamma_s, like the lead
-                # injection): the damping skew part is (sigma^< - sigma^>)/2
-                # = -i Gamma_s / 2.
                 self.data.sigma_retarded_hermitian.data += 0.5 * (
                     self.data.sigma_lesser.data - self.data.sigma_greater.data
                 )

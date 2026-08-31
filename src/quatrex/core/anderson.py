@@ -33,8 +33,6 @@ class AndersonMixer:
         Damping factor applied to the residual (the linear mixing factor).
     """
 
-    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
-    #: the driver may always test convergence on its output.
     probing: bool = False
 
     def __init__(self, depth: int = 5, beta: float = 0.5, period: int = 1,
@@ -44,30 +42,9 @@ class AndersonMixer:
                  collect_diagnostics: bool = False) -> None:
         self.depth = int(depth)
         self.beta = float(beta)
-        # Periodic-Pulay / alternating-Anderson stride: extrapolate only every
-        # `period`-th step, plain damped linear mixing in between (history
-        # still accumulated). The damped steps stop the accelerator from
-        # locking onto a near-unit-modulus Jacobian eigenvector and
-        # limit-cycling. period=1 reproduces ordinary Anderson(m).
         self.period = max(1, int(period))
-        # `restart`: periodically forget the history (every `restart` steps)
-        # so the accelerator cannot lock into a limit cycle on a marginal
-        # (Jacobian eigenvalue ~1) mode. 0 = never restart.
         self.restart = int(restart)
-        # `ridge`: scale-relative Tikhonov regularisation of the least-squares
-        # coefficients, suppressing the blow-ups from a near-rank-deficient
-        # history. 0 = plain lstsq (SVD).
         self.ridge = float(ridge)
-        # Safeguards (ported from the dense _AndersonAccelerator; all off at
-        # their zero defaults, in which case step() is bit-identical to the
-        # unguarded implementation):
-        #   step_cap: reject the Anderson step when its correction exceeds
-        #     step_cap x the damped-linear step norm; take the linear step
-        #     that iteration (history kept).
-        #   revert_factor: when the residual exceeds revert_factor x the best
-        #     residual seen, clear the history and return the best iterate.
-        #   stagnation_restart: clear the history after N consecutive
-        #     non-improving steps (gentler than restarting on every uptick).
         self.step_cap = float(step_cap)
         self.revert_factor = float(revert_factor)
         self.stagnation_restart = int(stagnation_restart)
@@ -100,8 +77,6 @@ class AndersonMixer:
                 "capped": 0, "reverted": 0, "restarted": 0} if guarded else None
         fnorm = None
         if guarded:
-            # Global residual norm (collective -- called symmetrically on all
-            # ranks whenever any safeguard/diagnostic is enabled).
             fnorm = np.sqrt(self._global_norm2(f))
             diag["fnorm"] = fnorm
             # Best-iterate tracking + revert / stagnation safeguards.
@@ -127,8 +102,6 @@ class AndersonMixer:
                     self._x_prev = None; self._f_prev = None
                     self._n_since_best = 0
                     diag["restarted"] = 1
-        # Periodic restart: drop the accumulated history (and the diff baseline)
-        # so the next step is a clean damped-linear restart that rebuilds it.
         if self.restart and self._it and (self._it % self.restart == 0):
             self._dx.clear()
             self._df.clear()
@@ -155,10 +128,6 @@ class AndersonMixer:
         dX = np.stack(self._dx, axis=1)  # (n_local, m)
         dF = np.stack(self._df, axis=1)
         m = dF.shape[1]
-        # The least-squares coefficients contract the distributed rows, so the
-        # normal equations (dF^H dF) gamma = dF^H f are GLOBAL inner products:
-        # reduce them (one packed Allreduce(SUM)) and solve the replicated
-        # (m x m) system so gamma is identical on every rank.
         A = dF.conj().T @ dF
         rhs = dF.conj().T @ f
         packed = allreduce_sum(
@@ -180,13 +149,6 @@ class AndersonMixer:
             diag["cond"] = float(ev[-1] / max(ev[0], 1e-300))
         x_new = x + self.beta * f - (dX + self.beta * dF) @ gamma
         if self.step_cap > 0.0:
-            # Step-cap safeguard: the Anderson step may not exceed
-            # step_cap x the UNDAMPED residual norm ||f|| (global norms).
-            # A clean quasi-Newton step is ~||f||/(1-lambda_max), so the cap
-            # is interpretable as the largest 1/(1-lambda) the extrapolation
-            # is trusted for, independent of beta. (The dense solver's cap
-            # was relative to the damped step beta*||f||; that made the
-            # threshold beta-dependent.)
             corr2 = self._global_norm2(x_new - x)
             f2 = fnorm ** 2 if fnorm is not None else self._global_norm2(f)
             if corr2 > (self.step_cap ** 2) * f2:
