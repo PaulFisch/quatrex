@@ -575,16 +575,10 @@ class SCBA(TransportSolver):
         self.interactions: list[Interaction] = build_interactions(self)
 
     def _build_mixer(self):
-        """Constructs the mixer selected by `scba.mixing_method`."""
+        """Construct the configured SCBA mixer."""
         from quatrex.core.anderson import AndersonMixer
-        from quatrex.experimental.mixers.rre import RREMixer
-        from quatrex.experimental.mixers.broyden import BroydenMixer
-        from quatrex.experimental.mixers.jfnk import JFNKMixer
-        from quatrex.experimental.mixers.rpm import RPMMixer
 
         scba = self.config.scba
-        xm = scba.experimental_mixer
-
         if scba.mixing_method == "anderson":
             return AndersonMixer(
                 depth=scba.anderson_depth,
@@ -597,66 +591,16 @@ class SCBA(TransportSolver):
                 stagnation_restart=scba.anderson_stagnation_restart,
                 collect_diagnostics=scba.mixer_diagnostics,
             )
-        if scba.mixing_method == "broyden":
-            return BroydenMixer(
-                depth=scba.anderson_depth,
-                beta=self.mixing_factor,
-                ridge=xm.broyden_ridge,
-                warmup=xm.broyden_warmup_iters,
-                trust=xm.broyden_trust,
-            )
-        if scba.mixing_method == "rpm":
-            return RPMMixer(
-                max_subspace=xm.rpm_max_subspace,
-                beta=self.mixing_factor,
-                ridge=xm.broyden_ridge,
-                warmup=xm.broyden_warmup_iters,
-                trust=xm.broyden_trust,
-            )
-        if scba.mixing_method == "rre":
-            return RREMixer(
-                cycle=xm.rre_cycle,
-                beta=self.mixing_factor,
-                ridge=xm.rre_ridge,
-            )
-        if scba.mixing_method == "jfnk":
-            return JFNKMixer(
-                warmup=xm.jfnk_warmup_iters,
-                beta=self.mixing_factor,
-                max_krylov=xm.jfnk_max_krylov,
-                inner_tol=xm.jfnk_inner_tol,
-                forcing=xm.jfnk_forcing,
-                max_newton=xm.jfnk_max_newton,
-                eps=xm.jfnk_eps,
-                trust=xm.jfnk_trust,
-                trust_max=xm.jfnk_trust_max,
-                newton_damp=xm.jfnk_newton_damp,
-                ptc=xm.jfnk_ptc,
-            )
-        if scba.mixing_method == "newton":
-            from quatrex.experimental.mixers.newton import NewtonKrylovMixer
 
-            # The JVP context is built lazily on the first Newton step:
-            # the mixer is constructed before the phonon solver (and the
-            # interactions) exist.
-            return NewtonKrylovMixer(
-                jvp_factory=self._get_phonon_jvp,
-                warmup=xm.newton_warmup_iters,
-                switch_tol=xm.newton_switch_tol,
-                beta=self.mixing_factor,
-                max_krylov=xm.newton_max_krylov,
-                inner_tol=xm.newton_inner_tol,
-                forcing=xm.newton_forcing,
-                max_newton=xm.newton_max_newton,
-                trust=xm.newton_trust,
-                trust_max=xm.newton_trust_max,
-                newton_damp=xm.newton_damp,
-                backtrack=xm.newton_backtrack,
-                precond=xm.newton_precond,
-                precond_rank=xm.newton_precond_rank,
-            )
+        from quatrex.experimental.mixers.factory import build_mixer
 
-        raise ValueError(f"Unknown mixing method '{scba.mixing_method}'.")
+        return build_mixer(
+            scba.mixing_method,
+            scba.experimental_mixer,
+            self.mixing_factor,
+            scba.anderson_depth,
+            self._get_phonon_jvp,
+        )
 
     def _get_phonon_jvp(self):
         """Construct (once) and return the exact-JVP context for the

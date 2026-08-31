@@ -18,6 +18,8 @@ from quatrex.experimental.mixers.jfnk import JFNKMixer
 from quatrex.core.mpi_linalg import complex_to_real, real_to_complex
 from quatrex.experimental.mixers.newton import NewtonKrylovMixer
 from quatrex.experimental.mixers.rpm import RPMMixer
+from quatrex.experimental.mixers.config import ExperimentalMixerConfig
+from quatrex.experimental.mixers.factory import build_mixer
 
 N = 40
 
@@ -235,3 +237,24 @@ def test_exact_newton_backtracks_on_relative_not_absolute_residual():
 
     np.testing.assert_allclose(retry, base + 0.5 * delta)
     assert mixer._trust_k == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    ("name", "mixer_type"),
+    [
+        ("broyden", BroydenMixer),
+        ("rpm", RPMMixer),
+        ("rre", RREMixer),
+        ("jfnk", JFNKMixer),
+        ("newton", NewtonKrylovMixer),
+    ],
+)
+def test_experimental_mixer_factory(name, mixer_type):
+    mixer = build_mixer(
+        name,
+        ExperimentalMixerConfig(),
+        beta=0.2,
+        depth=5,
+        jvp_factory=lambda: None,
+    )
+    assert isinstance(mixer, mixer_type)
