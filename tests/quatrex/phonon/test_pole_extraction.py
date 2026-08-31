@@ -1,10 +1,10 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""Doc Phase 1: extract poles of G^R from a GRID-SAMPLED scattering self-energy.
 
-This is where the three Phase-0/1 modules meet: :mod:`quatrex.phonon.pole_kernel`
+This is where the three Phase-0/1 modules meet: :mod:`quatrex.phonon.experimental.pole.pole_kernel`
 continues ``Sigma_s^R`` off the real axis from its grid samples,
-:mod:`quatrex.phonon.btd_linalg` factorises ``M(z)``, and
-:mod:`quatrex.phonon.pole_nevp` solves ``M(z) r = 0``.
+:mod:`quatrex.phonon.experimental.pole.btd_linalg` factorises ``M(z)``, and
+:mod:`quatrex.phonon.experimental.pole.pole_nevp` solves ``M(z) r = 0``.
 
 The mechanism these tests are meant to expose:
 
@@ -25,9 +25,9 @@ import numpy as np
 import pytest
 
 from quatrex.core.fft_utils import hilbert_transform
-from quatrex.phonon.btd_linalg import BTDFactorization
-from quatrex.phonon.pole_kernel import sigma_retarded_at_z
-from quatrex.phonon.pole_nevp import bordered_newton
+from quatrex.phonon.experimental.pole.btd_linalg import BTDFactorization
+from quatrex.phonon.experimental.pole.pole_kernel import sigma_retarded_at_z
+from quatrex.phonon.experimental.pole.pole_nevp import bordered_newton
 
 TINY = 1e-30
 FMAX = 30.0

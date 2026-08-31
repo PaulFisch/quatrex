@@ -36,9 +36,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from quatrex.core.config import PoleSectorConfig
-from quatrex.phonon.pole_nevp import bordered_newton, bordered_newton_batch
-from quatrex.phonon.pole_probe import BlockLayout, nnz_to_blocks
-from quatrex.phonon.pole_sector import PoleSector
+from quatrex.phonon.experimental.pole.pole_nevp import bordered_newton, bordered_newton_batch
+from quatrex.phonon.experimental.pole.pole_probe import BlockLayout, nnz_to_blocks
+from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
 from test_pole_sector import (
     _bed, _dense_d, _h, _operator, _sparse_indices,
@@ -327,7 +327,7 @@ def test_changing_delta_invalidates_everything_derived_from_it():
 
 def _q_sectors(nq=4, nf=201, seed0=0):
     """``nq`` INDEPENDENT pole problems sharing a grid and a block layout."""
-    from quatrex.phonon.pole_probe import BlockLayout
+    from quatrex.phonon.experimental.pole.pole_probe import BlockLayout
 
     sizes = (3, 3, 3)
     rows, cols = _sparse_indices(np.array(sizes))
@@ -362,7 +362,7 @@ def test_q_batching_returns_the_per_q_answer():
     The q are independent problems; sharing a corrector is a statement about
     kernel launches, not about the physics, and this is what says so.
     """
-    from quatrex.phonon.pole_sector import refresh_many
+    from quatrex.phonon.experimental.pole.pole_sector import refresh_many
 
     apart = [sec.refresh() for sec in _q_sectors()]
     together = refresh_many(_q_sectors())
@@ -382,7 +382,7 @@ def test_q_batching_returns_the_per_q_answer():
 
 def test_q_batching_survives_unequal_candidate_counts():
     """The batch is a rectangle; the q are not."""
-    from quatrex.phonon.pole_sector import refresh_many
+    from quatrex.phonon.experimental.pole.pole_sector import refresh_many
 
     sectors = _q_sectors(nq=3)
     # Force different windows so the q disagree on how many candidates exist.
@@ -406,7 +406,7 @@ def test_q_batching_survives_unequal_candidate_counts():
 
 def test_q_batch_size_does_not_change_the_answer():
     """q_batch is a memory knob. Chunking must be invisible in the result."""
-    from quatrex.phonon.pole_sector import refresh_many
+    from quatrex.phonon.experimental.pole.pole_sector import refresh_many
 
     ref = refresh_many(_q_sectors(nq=6))
     for chunk in (1, 2, 4, 6):
@@ -423,7 +423,7 @@ def test_q_batch_size_does_not_change_the_answer():
 
 def test_q_batch_refuses_sectors_that_do_not_share_a_layout():
     """A silently mismatched layout would scatter one q's Sigma into another's."""
-    from quatrex.phonon.pole_sector import PoleQBatch
+    from quatrex.phonon.experimental.pole.pole_sector import PoleQBatch
 
     sectors = _q_sectors(nq=2)
     sectors[1]._set_layout()           # a fresh, equal-but-distinct layout
@@ -433,7 +433,7 @@ def test_q_batch_refuses_sectors_that_do_not_share_a_layout():
 
 def test_each_q_keeps_its_own_tracker_and_promoted_set():
     """Only the SOLVE is shared. Identity is per q and must stay that way."""
-    from quatrex.phonon.pole_sector import refresh_many
+    from quatrex.phonon.experimental.pole.pole_sector import refresh_many
 
     sectors = _q_sectors(nq=3)
     refresh_many(sectors)
@@ -446,7 +446,7 @@ def test_each_q_keeps_its_own_tracker_and_promoted_set():
 
 def test_q_batching_samples_each_q_contact_at_its_own_anchor():
     """The contacts are per q AND per candidate, and both indices must land."""
-    from quatrex.phonon.pole_sector import PoleQBatch, refresh_many
+    from quatrex.phonon.experimental.pole.pole_sector import PoleQBatch, refresh_many
 
     nq = 3
     sectors = _q_sectors(nq=nq)

@@ -5,7 +5,7 @@ r"""The leg construction, batched over every q and every cluster.
 physics tests read. Production drove it through a Python loop of
 ``n_q * n_clusters`` iterations over routines that themselves looped over pole
 columns and pole pairs: 6.85 million Python calls and 33 s per SCBA iteration
-on Si, against a bubble of 7.4 s. :mod:`~quatrex.phonon.pole_legs` does the
+on Si, against a bubble of 7.4 s. :mod:`~quatrex.phonon.experimental.pole.pole_legs` does the
 same arithmetic in one pass.
 
 Two things are pinned here and they are different questions.
@@ -30,8 +30,8 @@ from qttools import xp
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from quatrex.phonon.pole_keldysh import PoleCluster
-from quatrex.phonon.pole_probe import BlockLayout
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_probe import BlockLayout
 from quatrex.phonon.solver import PhononSolver
 
 

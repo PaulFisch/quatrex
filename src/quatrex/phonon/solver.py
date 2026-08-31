@@ -563,7 +563,7 @@ class PhononSolver(SubsystemSolver):
         Frequency independent and cached per q: ``D`` does not move during the
         SCBA, so this runs once per q per run.
         """
-        from quatrex.phonon.pole_sector import lead_band_edges
+        from quatrex.phonon.experimental.pole.pole_sector import lead_band_edges
 
         if getattr(self._pole_cfg, "band_edges", "none") != "lead":
             return None
@@ -639,7 +639,7 @@ class PhononSolver(SubsystemSolver):
         cfg = getattr(self.config.phonon, "pole_sector", None)
         if cfg is None or not getattr(cfg, "psd_check", False):
             return
-        from quatrex.phonon.pole_audit import psd_residual
+        from quatrex.phonon.experimental.pole.pole_audit import psd_residual
 
         # Sigma is checked as well as G, and it is the ROOT check:
         # G^< = G^R Sigma^< G^A is a congruence, so a PSD Sigma cannot produce
@@ -747,8 +747,8 @@ class PhononSolver(SubsystemSolver):
         if not self._pole_enabled:
             return
 
-        from quatrex.phonon.pole_probe import delta_from_sigma
-        from quatrex.phonon.pole_sector import PoleSector
+        from quatrex.phonon.experimental.pole.pole_probe import delta_from_sigma
+        from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
         if comm.block.size > 1:
             raise NotImplementedError(
@@ -858,8 +858,8 @@ class PhononSolver(SubsystemSolver):
         unrelated modes or churn membership every iteration -- exactly what the
         hysteresis exists to prevent.
         """
-        from quatrex.phonon.pole_probe import BlockLayout
-        from quatrex.phonon.pole_sector import PoleSector, refresh_many
+        from quatrex.phonon.experimental.pole.pole_probe import BlockLayout
+        from quatrex.phonon.experimental.pole.pole_sector import PoleSector, refresh_many
 
         if getattr(self._pole_cfg, "leg", "congruence") != "congruence":
             raise NotImplementedError(
@@ -1059,20 +1059,20 @@ class PhononSolver(SubsystemSolver):
                          states, sectors, iq) -> tuple:
         """The congruence leg for EVERY q and cluster in one pass.
 
-        The per-cluster routines in :mod:`~quatrex.phonon.pole_congruence` say
+        The per-cluster routines in :mod:`~quatrex.phonon.experimental.pole.pole_congruence` say
         what the leg is, one cluster at a time, and are what this is verified
         against. Driving production through them cost a Python loop of
         ``n_q * n_clusters`` iterations over routines that themselves looped
         over pole columns and pole pairs -- 6.85 million calls and 33 s per
         SCBA iteration on Si, against a bubble of 7.4 s. See
-        :mod:`~quatrex.phonon.pole_legs`.
+        :mod:`~quatrex.phonon.experimental.pole.pole_legs`.
 
         Only the ``congruence`` route comes through here. ``congruence_analytic``
         and the superseded ``keldysh`` route flatten each cluster into its own
         partial fractions, which is per-cluster by construction and is not a
         production setting; they keep the reference path.
         """
-        from quatrex.phonon.pole_legs import (
+        from quatrex.phonon.experimental.pole.pole_legs import (
             ClusterBatch, ClusterViews, CoefficientViews,
             congruence_legs, source_fit,
         )
@@ -1129,7 +1129,7 @@ class PhononSolver(SubsystemSolver):
     def _build_pole_legs_chunk(self, sse_lesser, sse_greater, g_retarded,
                                states, per_q, iq, n_dof) -> tuple:
         """One memory-sized slice of :meth:`_build_pole_legs`."""
-        from quatrex.phonon.pole_legs import (
+        from quatrex.phonon.experimental.pole.pole_legs import (
             ClusterBatch, ClusterViews, CoefficientViews,
             congruence_legs, source_fit,
         )
@@ -1215,7 +1215,7 @@ class PhononSolver(SubsystemSolver):
         """
         if comm.rank != 0 or leg is None:
             return
-        from quatrex.phonon.pole_audit import pole_pair_weight
+        from quatrex.phonon.experimental.pole.pole_audit import pole_pair_weight
 
         w_host = np.asarray(get_host(self.local_frequencies), dtype=float)
         hw = np.asarray(get_host(self.local_frequency_weights), dtype=float)
@@ -1268,11 +1268,11 @@ class PhononSolver(SubsystemSolver):
         drives the device. Everything stays on the stored sparsity pattern --
         the dense intermediate would be ``(n_omega, n_dof, n_dof)``.
         """
-        from quatrex.phonon.pole_bridge import (
+        from quatrex.phonon.experimental.pole.pole_bridge import (
             add_contact_source, pole_keldysh_pf_sparse, project_source_sparse,
             source_at_poles, source_variation,
         )
-        from quatrex.phonon.pole_congruence import (
+        from quatrex.phonon.experimental.pole.pole_congruence import (
             apply_sparse, background_coefficients, coefficients_at_poles,
             fit_residual, partial_fraction_legs, pf_leg_sample,
             remainder_resolution, residue_sum, sector_cell_average,
@@ -1450,7 +1450,7 @@ class PhononSolver(SubsystemSolver):
             # between two bins -- and it worsens with h/gamma. The congruence
             # route's accuracy is an accident of registration unless this is
             # small.
-            from quatrex.phonon.pole_audit import pole_pair_weight
+            from quatrex.phonon.experimental.pole.pole_audit import pole_pair_weight
 
             w_host = np.asarray(get_host(freqs), dtype=float)
             hw = np.asarray(get_host(self.local_frequency_weights), dtype=float)
@@ -1525,11 +1525,11 @@ class PhononSolver(SubsystemSolver):
         Report only: the threshold at which a pole should be refused is not
         yet established, and gating on a guess would hide the answer.
         """
-        from quatrex.phonon.pole_audit import psd_residual, subcell_positivity
-        from quatrex.phonon.pole_bridge import (
+        from quatrex.phonon.experimental.pole.pole_audit import psd_residual, subcell_positivity
+        from quatrex.phonon.experimental.pole.pole_bridge import (
             pole_keldysh_pf_sparse, source_at_poles,
         )
-        from quatrex.phonon.pole_keldysh import pole_retarded
+        from quatrex.phonon.experimental.pole.pole_keldysh import pole_retarded
 
         cfg = getattr(self.config.phonon, "pole_sector", None)
         if cfg is None or not getattr(cfg, "psd_check", False):
@@ -1640,7 +1640,7 @@ class PhononSolver(SubsystemSolver):
         # whether the redesign is worth its cost on a real device.
         cong = None
         try:
-            from quatrex.phonon.pole_audit import subcell_congruence
+            from quatrex.phonon.experimental.pole.pole_audit import subcell_congruence
 
             def _pole_ret_at(omega):
                 acc = None

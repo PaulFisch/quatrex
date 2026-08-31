@@ -33,7 +33,7 @@ def cell_resolvent_mean(zeta: NDArray, centre: float, h: float) -> NDArray:
 
     The poles sit strictly off the real axis, so the two logarithms lie on the
     same side of the cut and their difference has no branch ambiguity -- the
-    same statement :func:`~quatrex.phonon.pole_congruence.cell_weights` relies
+    same statement :func:`~quatrex.phonon.experimental.pole.pole_congruence.cell_weights` relies
     on, and the reason this is a closed form rather than a quadrature.
     """
     z = xp.asarray(zeta, dtype=xp.complex128)
@@ -97,7 +97,7 @@ def covariance_kernel(
 ) -> NDArray:
     r"""``K_pq(Omega)`` for one cell pair -- the ring's error, per residue
     pair."""
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     zk = xp.asarray(zeta_k, dtype=xp.complex128)
     zl = xp.asarray(zeta_l, dtype=xp.complex128)
@@ -116,7 +116,7 @@ def spectrum_correction(
 ) -> tuple[NDArray, dict]:
     r"""The total correction to add to the ring's output, on the stored
     pattern."""
-    from quatrex.phonon.pole_bridge import analytic_prefactor, modal_vertex_blocks
+    from quatrex.phonon.experimental.pole.pole_bridge import analytic_prefactor, modal_vertex_blocks
 
     if prefactor is None:
         prefactor = analytic_prefactor()

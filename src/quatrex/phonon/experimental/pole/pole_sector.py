@@ -3,11 +3,11 @@ r"""Driver for the pole-subtracted SCBA sector.
 
 Ties together the pieces that each have their own module: the complex-frequency
 continuation of the scattering self-energy
-(:mod:`~quatrex.phonon.pole_kernel`), the nonlinear eigenvalue solve
-(:mod:`~quatrex.phonon.pole_nevp`), continuation across SCBA iterations
-(:mod:`~quatrex.phonon.pole_tracker`), the cluster Keldysh matrix
-(:mod:`~quatrex.phonon.pole_keldysh`) and the analytic pole-pole bubble
-(:mod:`~quatrex.phonon.pole_bubble`).
+(:mod:`~quatrex.phonon.experimental.pole.pole_kernel`), the nonlinear eigenvalue solve
+(:mod:`~quatrex.phonon.experimental.pole.pole_nevp`), continuation across SCBA iterations
+(:mod:`~quatrex.phonon.experimental.pole.pole_tracker`), the cluster Keldysh matrix
+(:mod:`~quatrex.phonon.experimental.pole.pole_keldysh`) and the analytic pole-pole bubble
+(:mod:`~quatrex.phonon.experimental.pole.pole_bubble`).
 
 One update does:
 
@@ -33,22 +33,22 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_bubble import bosonic_closure
-from quatrex.phonon.pole_keldysh import (
+from quatrex.phonon.experimental.pole.pole_bubble import bosonic_closure
+from quatrex.phonon.experimental.pole.pole_keldysh import (
     PoleCluster,
     coherence_metric,
     occupation_matrix,
     project_source,
 )
-from quatrex.phonon.pole_kernel import (
+from quatrex.phonon.experimental.pole.pole_kernel import (
     LocalFitPlan, bosonic_partner, contract_delta, continuation_weights,
     local_fit_weights,
 )
-from quatrex.phonon.pole_nevp import (
+from quatrex.phonon.experimental.pole.pole_nevp import (
     PoleSolution, _lift, _matvec, _vdot, bordered_newton_batch,
 )
-from quatrex.phonon.pole_probe import BlockLayout, nnz_to_blocks
-from quatrex.phonon.pole_tracker import (
+from quatrex.phonon.experimental.pole.pole_probe import BlockLayout, nnz_to_blocks
+from quatrex.phonon.experimental.pole.pole_tracker import (
     PoleTracker, cluster_poles, match_poles,
 )
 
@@ -120,7 +120,7 @@ class PoleSectorState:
     c_lesser: list = field(default_factory=list)
     c_greater: list = field(default_factory=list)
     """``(c_sr, c_rs, c_ss)`` per leg, from
-    :func:`~quatrex.phonon.pole_congruence.background_coefficients`. Empty
+    :func:`~quatrex.phonon.experimental.pole.pole_congruence.background_coefficients`. Empty
     unless ``pole_sector.leg`` is a congruence route. ``c_ss`` duplicates
     ``source_*`` by construction -- both are ``V^dagger Sigma_tot V`` -- and
     the other two are what the mixed sectors need in place of the frozen

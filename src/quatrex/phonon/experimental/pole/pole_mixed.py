@@ -197,7 +197,7 @@ def bosonic_extend(
             ``(n_freq,)`` non-negative, uniform, zero-anchored.
         transpose_index : NDArray, optional
             Permutation taking pattern entry ``(i, j)`` to ``(j, i)``, from
-            :func:`~quatrex.phonon.pole_audit.transpose_index`. Required whenever
+            :func:`~quatrex.phonon.experimental.pole.pole_audit.transpose_index`. Required whenever
             the pattern is not symmetric under the index swap; omitting it assumes
             the transpose is the identity, which holds only for a diagonal bed.
         transverse_shape : tuple, optional

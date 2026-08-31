@@ -15,8 +15,8 @@ from qttools import xp
 from qttools.comm import comm as _qtt_comm
 from qttools.datastructures import DSDBCOO
 
-from quatrex.phonon.pole_kernel import sigma_retarded_at_z
-from quatrex.phonon.pole_probe import (
+from quatrex.phonon.experimental.pole.pole_kernel import sigma_retarded_at_z
+from quatrex.phonon.experimental.pole.pole_probe import (
     delta_from_sigma,
     nnz_to_blocks,
 )

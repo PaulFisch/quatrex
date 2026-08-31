@@ -14,10 +14,10 @@ left contact).
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_bubble import bosonic_closure
-from quatrex.phonon.pole_keldysh import PoleCluster
-from quatrex.phonon.pole_audit import transpose_index
-from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
+from quatrex.phonon.experimental.pole.pole_bubble import bosonic_closure
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_audit import transpose_index
+from quatrex.phonon.experimental.pole.pole_mixed import bosonic_extend, mixed_convolution_batched
 
 
 def _h(a):
@@ -84,7 +84,7 @@ def test_bosonic_extend_uses_the_partner_component():
 
 def test_bosonic_extend_transposes_the_partner_on_the_pattern():
     """``G^<_ij(-w) = G^>_ji(w)``: the index swap is part of the relation."""
-    from quatrex.phonon.pole_audit import transpose_index
+    from quatrex.phonon.experimental.pole.pole_audit import transpose_index
 
     sizes = np.array([2, 2])
     rows, cols, _ = _pattern(sizes)
@@ -138,7 +138,7 @@ def test_state_separates_the_leg_set_from_the_solved_set():
     makes enabling the closure a one-line change once the mirrored source
     exists, and stops a closed set doubling the reported pole count.
     """
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     st = PoleSectorState()
     assert hasattr(st, "legs") and st.legs == []
@@ -161,7 +161,7 @@ def test_closure_is_deferred_because_the_frozen_source_cannot_serve_both_branche
 
 def test_sr_equals_rs_on_a_leg_symmetric_vertex():
     """On a real vertex the two mixed sectors are the SAME object."""
-    from quatrex.phonon.pole_bridge import (
+    from quatrex.phonon.experimental.pole.pole_bridge import (
         _mixed_one_sector_blocked, mixed_vertex_block_dict)
 
     sizes = np.array([3, 3, 3])
@@ -218,7 +218,7 @@ def test_sr_equals_rs_on_a_leg_symmetric_vertex():
 
 def test_pair_source_is_exact_on_the_diagonal_and_averaged_off_it():
     """One source per pole PAIR, at that pair's own frequency."""
-    from quatrex.phonon.pole_bridge import source_at_poles
+    from quatrex.phonon.experimental.pole.pole_bridge import source_at_poles
 
     w = np.linspace(0.0, 20.0, 401)
     z = np.array([8.0 - 0.3j, 11.0 - 0.4j])
@@ -245,7 +245,7 @@ def test_pair_source_is_exact_on_the_diagonal_and_averaged_off_it():
 
 def test_gpp_decays_like_one_over_omega_squared():
     """The asymptotics gate: ``c_a + c_b`` must vanish."""
-    from quatrex.phonon.pole_bridge import source_at_poles
+    from quatrex.phonon.experimental.pole.pole_bridge import source_at_poles
 
     w = np.linspace(0.0, 40.0, 4001)
     z = np.array([9.0 - 0.5j, 14.0 - 0.7j])
@@ -280,7 +280,7 @@ def test_gpp_decays_like_one_over_omega_squared():
 
 def test_negative_frequency_poles_use_the_bosonic_mirror():
     """A partner at -Omega takes S(-w) = conj(S(w)), not an extrapolation."""
-    from quatrex.phonon.pole_bridge import source_at_poles
+    from quatrex.phonon.experimental.pole.pole_bridge import source_at_poles
 
     w = np.linspace(0.0, 20.0, 401)
     z = np.array([8.0 - 0.3j, -8.0 - 0.3j])          # a closed pair
@@ -294,8 +294,8 @@ def test_negative_frequency_poles_use_the_bosonic_mirror():
 
 def test_gpp_partial_fraction_form_matches_what_the_sectors_represent():
     """The leg subtracted from the ring must BE the leg the sectors put back."""
-    from quatrex.phonon.pole_bridge import pole_keldysh_pf_sparse
-    from quatrex.phonon.pole_bubble import leg_partial_fractions
+    from quatrex.phonon.experimental.pole.pole_bridge import pole_keldysh_pf_sparse
+    from quatrex.phonon.experimental.pole.pole_bubble import leg_partial_fractions
 
     rng = np.random.default_rng(0)
     n, ne = 4, 128
@@ -324,7 +324,7 @@ def test_resolved_and_partial_fraction_legs_differ_when_the_source_varies():
     Measured 7e-3 apart on a source with a 2%/THz slope, which is the size of
     inconsistency that broke the spatial energy balance.
     """
-    from quatrex.phonon.pole_keldysh import pole_keldysh
+    from quatrex.phonon.experimental.pole.pole_keldysh import pole_keldysh
 
     rng = np.random.default_rng(0)
     n, ne = 4, 512
@@ -362,7 +362,7 @@ def test_resolved_and_partial_fraction_legs_differ_when_the_source_varies():
 
 def test_source_variation_is_a_measured_residual_not_an_asymptotic_claim():
     """``source_fit_tol`` gates on THIS, not on ``O((|Im z|/h)^(p+1))``."""
-    from quatrex.phonon.pole_bridge import source_variation
+    from quatrex.phonon.experimental.pole.pole_bridge import source_variation
 
     w = np.linspace(0.0, 40.0, 4001)
     z = np.array([9.0 - 0.5j, 14.0 - 0.7j])
@@ -387,14 +387,14 @@ def test_source_variation_is_a_measured_residual_not_an_asymptotic_claim():
 
 
 def test_state_records_the_source_fit_per_cluster():
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     assert PoleSectorState().source_fit == []
 
 
 def test_sr_and_rs_are_computed_independently():
     """The two mixed sectors must stay separate paths, not one doubled."""
-    from quatrex.phonon.pole_bridge import (
+    from quatrex.phonon.experimental.pole.pole_bridge import (
         _mixed_one_sector_blocked, mixed_vertex_block_dict)
 
     sizes = np.array([2, 2])

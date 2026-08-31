@@ -86,7 +86,7 @@ from dataclasses import dataclass
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_bubble import pair_convolution
+from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
 __all__ = [
     "LocalLeg",
@@ -277,7 +277,7 @@ def pair_correction(
     convolved, not the local models evaluated at the cell centres. Those differ
     in a pole cell by exactly the error being removed, and using the model here
     instead would leave the ring's contribution silently in place. It is the
-    requirement :func:`~quatrex.phonon.pole_congruence.pf_leg_sample` states for
+    requirement :func:`~quatrex.phonon.experimental.pole.pole_congruence.pf_leg_sample` states for
     the global route -- the leg taken out and the leg put back have to be one
     function.
     """

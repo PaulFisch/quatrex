@@ -17,7 +17,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests/quatrex/phonon"))
 
 from quatrex.core.config import PoleSectorConfig                # noqa: E402
-from quatrex.phonon.pole_sector import PoleSector               # noqa: E402
+from quatrex.phonon.experimental.pole.pole_sector import PoleSector               # noqa: E402
 from test_pole_sector import FMAX, DAMP, W_C, _sparse_indices   # noqa: E402
 
 

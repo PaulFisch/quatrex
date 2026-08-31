@@ -28,8 +28,8 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_bubble import modal_convolution
-from quatrex.phonon.pole_keldysh import PoleCluster, modal_denominator
+from quatrex.phonon.experimental.pole.pole_bubble import modal_convolution
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster, modal_denominator
 from quatrex.phonon.units import HBAR_SI
 
 __all__ = [
@@ -238,9 +238,9 @@ def _mixed_one_sector(
             block-structured GEMM at fixed frequency; refusing loudly is better than
             quietly running for hours.
     """
-    from quatrex.phonon.pole_audit import transpose_index
-    from quatrex.phonon.pole_bubble import _split_leg
-    from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
+    from quatrex.phonon.experimental.pole.pole_audit import transpose_index
+    from quatrex.phonon.experimental.pole.pole_bubble import _split_leg
+    from quatrex.phonon.experimental.pole.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     nnz = int(np.asarray(_host(rows)).size)
     if nnz > max_nnz:
@@ -436,9 +436,9 @@ def _mixed_one_sector_blocked(
     """ONE mixed sector via the block triple product. See
     :func:`_mixed_one_sector` for the physics; this is the same object at
     device-scale cost."""
-    from quatrex.phonon.pole_audit import transpose_index
-    from quatrex.phonon.pole_bubble import _split_leg
-    from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
+    from quatrex.phonon.experimental.pole.pole_audit import transpose_index
+    from quatrex.phonon.experimental.pole.pole_bubble import _split_leg
+    from quatrex.phonon.experimental.pole.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     if prefactor is None:
         prefactor = analytic_prefactor()
@@ -547,7 +547,7 @@ def source_at_poles(
         NDArray
             ``(Np, Np)``.
     """
-    from quatrex.phonon.pole_kernel import LocalFitPlan
+    from quatrex.phonon.experimental.pole.pole_kernel import LocalFitPlan
 
     z = xp.asarray(cluster.z, dtype=xp.complex128)
     npp = int(z.shape[0])

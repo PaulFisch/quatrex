@@ -9,7 +9,7 @@ follows subspaces does not.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_tracker import (
+from quatrex.phonon.experimental.pole.pole_tracker import (
     PoleTracker,
     cluster_poles,
     match_poles,

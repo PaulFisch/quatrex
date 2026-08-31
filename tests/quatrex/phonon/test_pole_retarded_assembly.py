@@ -111,7 +111,7 @@ def test_pole_sum_retarded_is_the_lower_half_plane_part():
     Checked against the closed form for a single Lorentzian:
     ``1/2 L + i/2 H[L] = i/(w - Omega + i gamma)``.
     """
-    from quatrex.phonon.pole_kernel import lorentz_retarded
+    from quatrex.phonon.experimental.pole.pole_kernel import lorentz_retarded
 
     w = np.linspace(0.0, 40.0, 2001)
     centre, gamma = 9.0, 0.4

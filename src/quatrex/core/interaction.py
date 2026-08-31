@@ -186,7 +186,7 @@ class PhononPhononInteraction(Interaction):
         if state is None or not state.clusters:
             return
 
-        from quatrex.phonon.pole_bridge import (
+        from quatrex.phonon.experimental.pole.pole_bridge import (
             mixed_self_energy_blocked, modal_vertex_blocks,
             source_at_poles, ss_self_energy_sparse,
         )
@@ -402,8 +402,8 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
     a fluctuation-dissipation break by construction, and it is what
     ``lead balance = 2.0000`` measured on job 4398805.
     """
-    from quatrex.phonon.pole_bridge import modal_vertex_blocks
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         pf_mixed_self_energy, pf_self_energy,
     )
 
@@ -475,7 +475,7 @@ def _bubble_covariance_correction(scba, state, ssp) -> None:
     the covariance of the two subcell fluctuations. This adds the second term
     and touches nothing else -- no leg is modified, nothing is subtracted, and
     an empty active set gives exactly zero. See
-    :mod:`quatrex.phonon.pole_covariance`.
+    :mod:`quatrex.phonon.experimental.pole.pole_covariance`.
 
     The active set is built on the EXTENDED axis: each promoted cell enters
     once at ``+omega_k`` from this Keldysh component and once at ``-omega_k``
@@ -483,8 +483,8 @@ def _bubble_covariance_correction(scba, state, ssp) -> None:
     ``Sigma^<(-w) = Sigma^>(w)^T`` the ring applies to its own legs. Without
     the negative entries the difference-frequency channel is silently absent.
     """
-    from quatrex.phonon.pole_congruence import partial_fraction_legs_percell
-    from quatrex.phonon.pole_covariance import cell_variance, spectrum_correction
+    from quatrex.phonon.experimental.pole.pole_congruence import partial_fraction_legs_percell
+    from quatrex.phonon.experimental.pole.pole_covariance import cell_variance, spectrum_correction
 
     ps = scba.config.phonon.pole_sector
     solver = scba.phonon_solver

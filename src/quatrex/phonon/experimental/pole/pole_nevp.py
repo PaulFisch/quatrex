@@ -14,7 +14,7 @@ simply :math:`r_\alpha l_\alpha^\dagger`.
 :func:`bordered_newton` is the corrector. The bordered system is solved by
 eliminating the border analytically, so each step costs two BTD solves against
 one factorisation rather than an :math:`(N+1)`-dimensional solve. Seeds come
-from the harmonic re-seed in :func:`~quatrex.phonon.pole_sector.refresh_many`;
+from the harmonic re-seed in :func:`~quatrex.phonon.experimental.pole.pole_sector.refresh_many`;
 there is no contour initialiser.
 
 The operator is supplied as callables returning block-tridiagonal blocks, so the
@@ -30,7 +30,7 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.btd_linalg import BTDFactorization, btd_matvec, btd_norm2
+from quatrex.phonon.experimental.pole.btd_linalg import BTDFactorization, btd_matvec, btd_norm2
 
 __all__ = [
     "PoleSolution",

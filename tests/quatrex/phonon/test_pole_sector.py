@@ -15,15 +15,15 @@ import numpy as np
 import pytest
 
 from quatrex.core.config import PoleSectorConfig
-from quatrex.phonon.btd_linalg import BTDFactorization
-from quatrex.phonon.pole_bubble import (
+from quatrex.phonon.experimental.pole.btd_linalg import BTDFactorization
+from quatrex.phonon.experimental.pole.pole_bubble import (
     leg_partial_fractions,
     modal_convolution,
     retarded_from_pole_sum,
 )
-from quatrex.phonon.pole_keldysh import pole_keldysh, project_source
-from quatrex.phonon.pole_kernel import sigma_retarded_at_z
-from quatrex.phonon.pole_sector import PoleSector
+from quatrex.phonon.experimental.pole.pole_keldysh import pole_keldysh, project_source
+from quatrex.phonon.experimental.pole.pole_kernel import sigma_retarded_at_z
+from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
 FMAX, DAMP, W_C = 30.0, 0.012, 11.0
 HBAR_EVS, KB_EV, THZ = 6.582119569e-16, 8.617333262e-5, 2.0 * np.pi * 1e12
@@ -480,7 +480,7 @@ def test_operator_reduces_a_frequency_resolved_contact_block():
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     freqs = np.linspace(0.0, 20.0, 41)
     sizes = np.array([2, 2])
@@ -536,7 +536,7 @@ def test_hysteresis_survives_across_iterations():
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     freqs = np.linspace(0.0, 20.0, 41)               # h = 0.5
     sec = PoleSector(PoleSectorConfig(enabled=True, omega_min_thz=1.0,
@@ -595,7 +595,7 @@ def test_hysteresis_survives_across_iterations():
 
 def test_coverage_chain_separates_the_reasons_a_candidate_is_lost():
     """"2/144" says the sector carries little; it does not say why."""
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     st = PoleSectorState()
     st.clusters, st.coherence = [], []
@@ -646,8 +646,8 @@ def test_audit_reports_candidates_without_allocating_a_sector():
 
 def test_population_says_whether_there_is_anything_to_extract():
     """Two ratios decide it, and both are physics rather than solver state."""
-    from quatrex.phonon.pole_keldysh import PoleCluster
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     def _state(zs, h):
         st = PoleSectorState()
@@ -768,7 +768,7 @@ def test_eps_z_gate_has_hysteresis():
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     freqs = np.linspace(0.0, 20.0, 41)               # h = 0.5
     cfg = PoleSectorConfig(enabled=True, omega_min_thz=1.0,
@@ -817,7 +817,7 @@ def test_leg_weight_gate_has_hysteresis():
     import numpy as np
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     freqs = np.linspace(0.0, 20.0, 41)
     cfg = PoleSectorConfig(enabled=True, omega_min_thz=1.0,
@@ -850,7 +850,7 @@ def test_a_rescan_adds_candidates_and_never_replaces_the_held_set():
     r"""The period-two oscillator, as a gate."""
     import numpy as np
 
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     sec = _context_run(nf=201, omega_min_thz=0.5, omega_max_thz=15.0)
 
@@ -905,7 +905,7 @@ def test_frozen_membership_holds_the_set_but_still_evicts_a_dead_pole():
     """What ``freeze_membership`` must and must not do."""
     import numpy as np
 
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     sec = _context_run(nf=201, omega_min_thz=0.5, omega_max_thz=15.0)
     sec.cfg = sec.cfg.model_copy(update={"freeze_membership": True})

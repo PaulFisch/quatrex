@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 
 from quatrex.core.config import PoleSectorConfig
-from quatrex.phonon.pole_sector import PoleSector
+from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
 
 def _h(a):
@@ -51,7 +51,7 @@ def _sector(freqs, delta, **kw):
 def test_serial_path_is_unchanged_by_the_distributed_plumbing():
     """No ``global_freqs``/``reduce`` must reproduce the undistributed answer
     exactly, not merely closely -- the reducer is the identity when serial."""
-    from quatrex.phonon.pole_kernel import sigma_retarded_at_z
+    from quatrex.phonon.experimental.pole.pole_kernel import sigma_retarded_at_z
 
     freqs, delta = _bed()
     sec = _sector(freqs, delta)

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from quatrex.phonon.btd_linalg import (
+from quatrex.phonon.experimental.pole.btd_linalg import (
     BTDFactorization,
     btd_matvec,
     remap_full_block_snapshot,
@@ -143,7 +143,7 @@ def test_matvec_accepts_blocks_carrying_a_singleton_stack_axis():
 
 def test_bordered_newton_matvec_carries_the_candidate_axis():
     """The stack axis is the CANDIDATE axis and must survive the matvec."""
-    from quatrex.phonon.pole_nevp import _matvec
+    from quatrex.phonon.experimental.pole.pole_nevp import _matvec
 
     b, nb, npole = 2, 2, 4
     rng = np.random.default_rng(1)

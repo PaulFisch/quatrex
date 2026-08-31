@@ -11,7 +11,7 @@ control that shows a dropped sector is actually visible.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_audit import (
+from quatrex.phonon.experimental.pole.pole_audit import (
     keldysh_identity,
     psd_residual,
     sector_sum_residual,

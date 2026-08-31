@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""The congruence leg, for every q and every cluster in one pass.
 
-:mod:`~quatrex.phonon.pole_congruence` states the physics one cluster at a
+:mod:`~quatrex.phonon.experimental.pole.pole_congruence` states the physics one cluster at a
 time, which is how it is read and tested. Production cannot be driven that way:
 looping over q and clusters in Python cost 6.85 million calls and 33 s per SCBA
 iteration on Si (81 q, ~600 poles), against a 7.4 s bubble.
@@ -9,7 +9,7 @@ iteration on Si (81 q, ~600 poles), against a 7.4 s bubble.
 The arithmetic is unchanged. What changes is that the number of Python calls no
 longer depends on the number of q, clusters, poles, frequencies or nonzeros --
 only on the device blocking, through
-:class:`~quatrex.phonon.pole_probe.BlockLayout`. Every step is one gather, one
+:class:`~quatrex.phonon.experimental.pole.pole_probe.BlockLayout`. Every step is one gather, one
 matmul or one elementwise expression over the whole (q, cluster) stack.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_probe import BlockLayout
+from quatrex.phonon.experimental.pole.pole_probe import BlockLayout
 
 __all__ = ["ClusterBatch", "ClusterViews", "CoefficientViews",
            "congruence_legs", "source_fit"]
@@ -165,7 +165,7 @@ def _pole_factors(z: NDArray, omega: NDArray, widths: NDArray | None):
 
     ``widths is None`` gives the point sample ``1/(w - z)`` and its outer
     product; otherwise the exact cell averages of
-    :func:`~quatrex.phonon.pole_congruence.cell_weights`, written over the
+    :func:`~quatrex.phonon.experimental.pole.pole_congruence.cell_weights`, written over the
     whole (q, cluster) stack.
     """
     w = xp.asarray(omega, dtype=xp.complex128)[None, None, :, None]
@@ -294,7 +294,7 @@ def source_fit(batch: ClusterBatch, source: NDArray, omega: NDArray,
         NDArray
             ``(Q, M)`` relative residual, zero for a padded slot.
     """
-    from quatrex.phonon.pole_kernel import LocalFitPlan
+    from quatrex.phonon.experimental.pole.pole_kernel import LocalFitPlan
 
     n_q, m_max, p_max = batch.shape
     if m_max == 0 or p_max == 0:

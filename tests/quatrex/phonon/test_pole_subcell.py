@@ -132,7 +132,7 @@ def test_congruence_reconstruction_stays_positive():
 
 def test_subcell_metric_reports_the_failure():
     """``subcell_positivity`` must see what the bed above demonstrates."""
-    from quatrex.phonon.pole_audit import subcell_positivity
+    from quatrex.phonon.experimental.pole.pole_audit import subcell_positivity
 
     _, _, _, sigma_l, g_l, u = _device()
     z = OMEGA - 1j * GAMMA
@@ -168,8 +168,8 @@ def test_report_subcell_runs_on_a_production_shaped_state():
     import types
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_keldysh import PoleCluster
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
     from quatrex.phonon.solver import PhononSolver
 
     rows, cols = np.meshgrid(np.arange(N), np.arange(N), indexing="ij")
@@ -248,8 +248,8 @@ def test_ring_leg_gate_excludes_the_bins_the_ring_masks():
     import types
 
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_keldysh import PoleCluster
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
     from quatrex.phonon.solver import PhononSolver
 
     rows, cols = np.meshgrid(np.arange(N), np.arange(N), indexing="ij")
@@ -286,7 +286,7 @@ def test_ring_leg_gate_excludes_the_bins_the_ring_masks():
 
     # The metric, first: the bad bin decides the whole gate, and skipping it
     # is what makes the remaining -- physical -- bins visible.
-    from quatrex.phonon.pole_audit import psd_residual
+    from quatrex.phonon.experimental.pole.pole_audit import psd_residual
 
     raw = psd_residual(vals, rows, cols, np.array([N]), sign=-1.0)
     assert raw["omega_index"] == 0
@@ -519,7 +519,7 @@ def test_bubble_covariance_correction_runs_on_a_production_shaped_state():
 
     from quatrex.core.config import PoleSectorConfig
     from quatrex.core.interaction import _bubble_covariance_correction
-    from quatrex.phonon.pole_keldysh import PoleCluster
+    from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
     n_dof, n_w, n_p = 3, 9, 1
     freqs = np.arange(n_w) * 0.5

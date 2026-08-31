@@ -33,7 +33,7 @@ def main() -> int:
                         "full retarded before testing")
     a = p.parse_args()
 
-    from quatrex.phonon.pole_audit import keldysh_identity, psd_residual
+    from quatrex.phonon.experimental.pole.pole_audit import keldysh_identity, psd_residual
 
     z = np.load(a.sigma, allow_pickle=True)
     sl = z["sigma_lesser"].reshape(z["sigma_lesser"].shape[0], -1)

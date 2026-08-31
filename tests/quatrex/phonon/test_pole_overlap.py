@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from quatrex.phonon.pole_keldysh import (                       # noqa: E402
+from quatrex.phonon.experimental.pole.pole_keldysh import (                       # noqa: E402
     pole_keldysh, project_source,
 )
 from test_pole_keldysh import (                                 # noqa: E402

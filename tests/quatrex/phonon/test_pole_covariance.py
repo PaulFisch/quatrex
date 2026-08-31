@@ -14,7 +14,7 @@ tolerance chosen to pass.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_covariance import (
+from quatrex.phonon.experimental.pole.pole_covariance import (
     cell_resolvent_mean,
     cell_variance,
     centred_gram,
@@ -105,7 +105,7 @@ def test_variance_is_the_norm_the_bound_uses():
 def test_finite_cell_kernel_is_stable_at_the_combination_frequency():
     r"""The small-denominator regime, which cannot actually be reached."""
     mp = pytest.importorskip("mpmath")
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     mp.mp.dps = 60
     a, b = -H / 2, H / 2
@@ -160,7 +160,7 @@ def _phi(n_dof=3, seed=9):
 
 def test_spectrum_correction_is_empty_without_active_cells():
     """Gate 0: no active cell, no correction, bit-exactly."""
-    from quatrex.phonon.pole_covariance import spectrum_correction
+    from quatrex.phonon.experimental.pole.pole_covariance import spectrum_correction
 
     phi, sizes = _phi()
     rows, cols = _pattern()
@@ -173,8 +173,8 @@ def test_spectrum_correction_is_empty_without_active_cells():
 def test_spectrum_correction_bins_each_pair_at_the_sum_frequency():
     """One active pair must land on ``omega_k + omega_l`` and nowhere else,
     carrying exactly the kernel the verified pair routine gives."""
-    from quatrex.phonon.pole_bridge import analytic_prefactor, modal_vertex_blocks
-    from quatrex.phonon.pole_covariance import (
+    from quatrex.phonon.experimental.pole.pole_bridge import analytic_prefactor, modal_vertex_blocks
+    from quatrex.phonon.experimental.pole.pole_covariance import (
         covariance_kernel, spectrum_correction,
     )
 
@@ -217,7 +217,7 @@ def test_negative_cells_produce_the_difference_channel():
     silently lose every ``Omega_a - Omega_b`` process -- half the convolution,
     and the half that lands mid-band rather than at the sum frequency.
     """
-    from quatrex.phonon.pole_covariance import spectrum_correction
+    from quatrex.phonon.experimental.pole.pole_covariance import spectrum_correction
 
     n_dof = 3
     phi, sizes = _phi(n_dof)
@@ -246,7 +246,7 @@ def test_negative_cells_produce_the_difference_channel():
 def test_the_mixed_pairing_drives_s_through_zero_and_is_still_exact():
     r"""The case the same-half-plane argument does not cover."""
     mp = pytest.importorskip("mpmath")
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     mp.mp.dps = 50
     a, b = -H / 2, H / 2
@@ -297,7 +297,7 @@ def test_centred_gram_handles_a_conjugate_pair_in_the_family():
 def test_spectrum_correction_chunking_is_exact_and_bounds_the_working_set():
     """``vl[rows]`` is ``(nnz, P, P)``; unchunked that is what took the sector
     kernels to a 290 GB allocation. Chunking must change nothing."""
-    from quatrex.phonon.pole_covariance import spectrum_correction
+    from quatrex.phonon.experimental.pole.pole_covariance import spectrum_correction
 
     n_dof = 4
     rng = np.random.default_rng(7)
@@ -326,8 +326,8 @@ def test_spectrum_correction_chunking_is_exact_and_bounds_the_working_set():
 
 def test_cells_from_clusters_of_different_size_pair_correctly():
     """Two clusters, two pole counts -- the first real device call's crash."""
-    from quatrex.phonon.pole_bridge import modal_vertex_blocks
-    from quatrex.phonon.pole_covariance import spectrum_correction
+    from quatrex.phonon.experimental.pole.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.experimental.pole.pole_covariance import spectrum_correction
 
     n_dof = 4
     rng = np.random.default_rng(13)

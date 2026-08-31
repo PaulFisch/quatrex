@@ -25,7 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 from quatrex.core.config import PoleSectorConfig                    # noqa: E402
-from quatrex.phonon.pole_sector import PoleSector, _solve_batched   # noqa: E402
+from quatrex.phonon.experimental.pole.pole_sector import PoleSector, _solve_batched   # noqa: E402
 from test_pole_sector import _bed, _h, _sparse_indices              # noqa: E402
 
 

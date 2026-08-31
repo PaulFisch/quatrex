@@ -218,7 +218,7 @@ def passive_bubble_channel(
     r"""Exact cluster--cluster bubble as one Kronecker-sum auxiliary channel.
 
     ``vertex[m,i,j]`` is the same dense cubic vertex ordering used by
-    :func:`quatrex.phonon.pole_bubble.modal_vertex`.  The returned state has
+    :func:`quatrex.phonon.experimental.pole.pole_bubble.modal_vertex`.  The returned state has
     poles ``z_a+z_b`` and physical coupling
     ``vertex @ (U_a tensor U_b)``.  For either Keldysh component,
 
@@ -633,7 +633,7 @@ class GlobalAuxiliaryWoodbury:
     @staticmethod
     def _source_correction(fac, p_blocks, x, y, q, xp):
         """Low-rank correction to ``G0 P G0^H`` for one Keldysh source."""
-        from quatrex.phonon.btd_linalg import btd_matvec
+        from quatrex.phonon.experimental.pole.btd_linalg import btd_matvec
 
         yh = y.conj().swapaxes(-2, -1)
         p_yh = btd_matvec(*p_blocks, yh)
@@ -646,7 +646,7 @@ class GlobalAuxiliaryWoodbury:
                        return_current: bool = False):
         from qttools import xp
         from qttools.comm import comm
-        from quatrex.phonon.btd_linalg import BTDFactorization
+        from quatrex.phonon.experimental.pole.btd_linalg import BTDFactorization
 
         if comm.block.size != 1:
             raise NotImplementedError(

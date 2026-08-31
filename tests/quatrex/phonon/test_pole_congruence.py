@@ -9,10 +9,10 @@ reproduce it for several poles, several dof, and a nontrivial sparsity pattern.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_congruence import (
+from quatrex.phonon.experimental.pole.pole_congruence import (
     background_coefficients, reconstruct, sector_grid_sample, sector_terms,
 )
-from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
 N_DOF, N_P, N_W = 6, 3, 5
 
@@ -116,7 +116,7 @@ def test_apply_sparse_matches_a_dense_product():
     """The one primitive that touches the full operator. Duplicate row indices
     must accumulate, and the dense contact corners must be included -- without
     them ``G^R Sigma G^A`` is not ``G^<``."""
-    from quatrex.phonon.pole_congruence import apply_sparse
+    from quatrex.phonon.experimental.pole.pole_congruence import apply_sparse
 
     rng = np.random.default_rng(3)
     rows = np.array([0, 1, 1, 3, 4, 5, 2, 2])
@@ -141,7 +141,7 @@ def test_apply_sparse_matches_a_dense_product():
 
 def test_cell_average_matches_quadrature():
     """The analytic cell weights against brute-force Gauss-Legendre."""
-    from quatrex.phonon.pole_congruence import sector_cell_average, sector_terms
+    from quatrex.phonon.experimental.pole.pole_congruence import sector_cell_average, sector_terms
 
     cl, w, gk, sig = _bed()
     co = _coeffs(cl, w, gk, sig)
@@ -162,7 +162,7 @@ def test_cell_average_matches_quadrature():
 def test_cell_averaged_leg_is_psd():
     """What the ring will consume. An average of PSD matrices is PSD, so the
     corrected leg cannot anti-damp however wrong the pole model is."""
-    from quatrex.phonon.pole_congruence import sector_cell_average
+    from quatrex.phonon.experimental.pole.pole_congruence import sector_cell_average
 
     cl, w, gk, sig = _bed()
     co = _coeffs(cl, w, gk, sig)
@@ -184,7 +184,7 @@ def test_correction_vanishes_as_the_grid_resolves_the_line():
     """The pole channel is a DISCRETISATION correction, so it must go to zero
     on a grid fine enough to hold the line. If it did not, it would be adding
     physics the ring already has, and the two would double-count."""
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         sector_cell_average, sector_grid_sample,
     )
 
@@ -209,7 +209,7 @@ def test_correction_vanishes_as_the_grid_resolves_the_line():
 def test_partial_fraction_legs_reproduce_the_sectors():
     """The flattening is algebra, not a model: with the SAME coefficients the
     2Np simple poles must give back SR + RS + SS at every frequency."""
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         partial_fraction_legs, pf_leg_sample, sector_terms,
     )
 
@@ -254,7 +254,7 @@ def test_pair_convolution_is_the_residue_formula():
     only ``w' = w - q``, and only when ``p`` and ``q`` sit in the SAME half
     plane; otherwise both poles fall on the same side and the integral is zero.
     """
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     w = np.linspace(-3.0, 7.0, 11)
     lo = np.array([2.0 - 0.3j, 5.0 - 0.1j])
@@ -276,8 +276,8 @@ def test_pf_self_energy_matches_a_dense_contraction():
     formula -- and compares. A transposed vertex leg or a swapped (p, q) would
     survive every other test in this file.
     """
-    from quatrex.phonon.pole_bridge import modal_vertex_blocks
-    from quatrex.phonon.pole_congruence import pf_self_energy
+    from quatrex.phonon.experimental.pole.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.experimental.pole.pole_congruence import pf_self_energy
 
     blocks, phi, sizes, n = _phi_bed()
     rng = np.random.default_rng(9)
@@ -310,7 +310,7 @@ def test_pf_self_energy_matches_a_dense_contraction():
 
 def test_leg_tail_is_the_residue_sum_and_the_closure_kills_it():
     """The analytic leg is a GLOBAL function, so its tail is not cosmetic."""
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         background_coefficients, partial_fraction_legs, pf_leg_sample,
     )
 
@@ -356,7 +356,7 @@ def test_pf_mixed_sectors_match_the_brute_force_ring():
     import importlib.util
     import pathlib
 
-    from quatrex.phonon.pole_congruence import pf_mixed_self_energy
+    from quatrex.phonon.experimental.pole.pole_congruence import pf_mixed_self_energy
 
     # the sibling module is not a package; load it by path
     _p = pathlib.Path(__file__).with_name("test_pole_mixed_sectors.py")
@@ -440,7 +440,7 @@ def _analytic_harness(monkeypatch, mixed_scale=1.0):
     handed. Both are invisible to a kernel test and both cost a device run.
     """
     from quatrex.core import interaction as I
-    from quatrex.phonon import pole_congruence as PC
+    from quatrex.phonon.experimental.pole import pole_congruence as PC
 
     n_w, nnz = 6, 4
     freqs = np.linspace(0.0, 5.0, n_w)
@@ -460,7 +460,7 @@ def _analytic_harness(monkeypatch, mixed_scale=1.0):
     monkeypatch.setattr(PC, "pf_mixed_self_energy", _fake_mixed)
     monkeypatch.setattr(I, "data_rows_cols", lambda scba: (rows, cols))
     monkeypatch.setattr(
-        "quatrex.phonon.pole_bridge.modal_vertex_blocks",
+        "quatrex.phonon.experimental.pole.pole_bridge.modal_vertex_blocks",
         lambda *a, **k: np.zeros((nnz, 2, 2), dtype=complex))
 
     class _PS:
@@ -533,7 +533,7 @@ def test_finite_window_kernel_matches_quadrature_and_its_residue_limit():
     it."""
     from scipy.integrate import quad
 
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     w = np.array([7.0])
 
@@ -570,7 +570,7 @@ def test_finite_window_kernel_matches_quadrature_and_its_residue_limit():
 def test_window_and_cell_average_are_refused_together():
     """The cell average of the log form has no elementary antiderivative, so
     silently ignoring one of the two would emit a kernel that is neither."""
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     with pytest.raises(ValueError, match="mutually exclusive"):
         pair_convolution(np.array([1 - 1j]), np.array([2 - 1j]),
@@ -582,8 +582,8 @@ def test_analytic_sectors_sum_to_the_bubble_of_the_same_hybrid():
     import importlib.util
     import pathlib
 
-    from quatrex.phonon.pole_audit import sector_sum_residual
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_audit import sector_sum_residual
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         pf_mixed_self_energy, pf_self_energy,
     )
 
@@ -630,7 +630,7 @@ def test_analytic_sectors_sum_to_the_bubble_of_the_same_hybrid():
     total = m._brute_ring(phi, off, hybrid, hybrid, w_full, rows, cols)
     rr = m._brute_ring(phi, off, reg_full, reg_full, w_full, rows, cols)
 
-    from quatrex.phonon.pole_bridge import modal_vertex_blocks
+    from quatrex.phonon.experimental.pole.pole_bridge import modal_vertex_blocks
     vl = modal_vertex_blocks(phi, m.SIZES, p_row, conjugate=False)
     vr = modal_vertex_blocks(phi, m.SIZES, q_col, conjugate=False)
     ss = np.asarray(pf_self_energy(w_pos, zeta, vl, vr, rows, cols))
@@ -720,7 +720,7 @@ def test_registration_error_is_dominated_by_pole_cell_PAIRS():
 
 def _flat_bed(closed, n_dof=6, n_p=2, n_w=41, seed=4):
     """Coefficients -> freeze -> flatten, on a smooth anti-Hermitian source."""
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         background_coefficients, coefficients_at_poles, partial_fraction_legs,
     )
 
@@ -786,7 +786,7 @@ def test_pole_pair_weight_bounds_where_the_registration_error_can_live():
     in ``Sigma`` is bounded by this fraction times ~0.8. The measure has to
     get three things right or the bound is not a bound.
     """
-    from quatrex.phonon.pole_audit import pole_pair_weight
+    from quatrex.phonon.experimental.pole.pole_audit import pole_pair_weight
 
     n = 41
     w = np.arange(n, dtype=float)
@@ -832,8 +832,8 @@ def test_pole_pair_weight_bounds_where_the_registration_error_can_live():
 
 def test_state_report_carries_the_promotion_yield():
     """"2 pole(s)" reads like a small system; "2/144" reads like a threshold."""
-    from quatrex.phonon.pole_keldysh import PoleCluster
-    from quatrex.phonon.pole_sector import PoleSectorState
+    from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSectorState
 
     st = PoleSectorState()
     st.iteration = 1
@@ -852,7 +852,7 @@ def test_state_report_carries_the_promotion_yield():
 
 def test_chunked_sector_kernels_match_the_unchunked_result_exactly():
     """Chunking is a memory transform, not a numerical one."""
-    from quatrex.phonon.pole_congruence import (
+    from quatrex.phonon.experimental.pole.pole_congruence import (
         sector_cell_average, sector_grid_sample,
     )
 
@@ -877,7 +877,7 @@ def test_pattern_chunk_bounds_the_working_set_as_poles_are_added():
     This is the number that decides whether a promotion-yield experiment
     measures physics or memory.
     """
-    from quatrex.phonon.pole_congruence import _pattern_chunk
+    from quatrex.phonon.experimental.pole.pole_congruence import _pattern_chunk
 
     n_w, nnz, budget = 201, 700_000, 1 << 28
     prev = None
@@ -929,7 +929,7 @@ def test_an_additive_remainder_may_be_indefinite_while_the_total_is_fine():
 # cell centre is positive.
 # --------------------------------------------------------------------------- #
 
-from quatrex.phonon.pole_keldysh import (          # noqa: E402
+from quatrex.phonon.experimental.pole.pole_keldysh import (          # noqa: E402
     pole_keldysh, pole_retarded,
 )
 

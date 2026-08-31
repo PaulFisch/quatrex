@@ -509,7 +509,7 @@ if _restart_terms:
         for (_path, _coefficient), _state in zip(_restart_terms, _states):
             _loaded = _state[_key]
             if os.environ.get("QX_SIGMA_INIT_PRIMITIVE_DOF"):
-                from quatrex.phonon.btd_linalg import remap_full_block_snapshot
+                from quatrex.phonon.experimental.pole.btd_linalg import remap_full_block_snapshot
 
                 _loaded = remap_full_block_snapshot(
                     _loaded,

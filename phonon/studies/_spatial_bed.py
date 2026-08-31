@@ -328,7 +328,7 @@ def spectral_obc(freqs_thz, d00, d01, d10, n_slabs, t_left, t_right):
 
 def lead_edges(d00, d01, d10) -> np.ndarray:
     """Band extrema of the periodic lead, in THz."""
-    from quatrex.phonon.pole_sector import lead_band_edges
+    from quatrex.phonon.experimental.pole.pole_sector import lead_band_edges
 
     return np.asarray(lead_band_edges(d00, d01, d10))
 

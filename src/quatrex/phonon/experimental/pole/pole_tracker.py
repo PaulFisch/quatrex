@@ -17,7 +17,7 @@ The design is predictor / corrector / subspace match / contour fallback:
 
    which costs one projection and is a far better starting point than a global
    re-solve.
-2. **Corrector**: bordered Newton, in :mod:`quatrex.phonon.pole_nevp`.
+2. **Corrector**: bordered Newton, in :mod:`quatrex.phonon.experimental.pole.pole_nevp`.
 3. **Cluster and match**: poles closer than :math:`c_{\rm cl}(\gamma_\alpha+\gamma_\beta)`
    are carried as one cluster, and clusters are matched between iterations by
    principal angles between their invariant subspaces (doc Eqs. 57-58). Isolated

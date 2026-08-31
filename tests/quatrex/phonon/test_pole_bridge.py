@@ -10,7 +10,7 @@ against the dense form it replaces.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_bridge import (
+from quatrex.phonon.experimental.pole.pole_bridge import (
     add_contact_source,
     analytic_prefactor,
     modal_vertex_blocks,
@@ -18,8 +18,8 @@ from quatrex.phonon.pole_bridge import (
     project_source_sparse,
     ss_self_energy_sparse,
 )
-from quatrex.phonon.pole_bubble import modal_convolution, modal_vertex
-from quatrex.phonon.pole_keldysh import PoleCluster, pole_keldysh, project_source
+from quatrex.phonon.experimental.pole.pole_bubble import modal_convolution, modal_vertex
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster, pole_keldysh, project_source
 from quatrex.phonon.units import HBAR_SI, bubble_prefactor_thz
 
 

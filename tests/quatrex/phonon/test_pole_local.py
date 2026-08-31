@@ -14,7 +14,7 @@ the correction is trivially right.
 import numpy as np
 import pytest
 
-from quatrex.phonon import pole_local as L
+from quatrex.phonon.experimental.pole import pole_local as L
 
 _GL = np.polynomial.legendre.leggauss(48)
 

@@ -13,7 +13,7 @@ sits in the upper half plane, since ``Im z = gamma > 0``).
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_mixed import mixed_convolution
+from quatrex.phonon.experimental.pole.pole_mixed import mixed_convolution
 
 BG = ((1.0, 6.0, 3.0), (0.6, 14.0, 5.0))
 PROBES = np.array([4.0, 9.0, 15.0])

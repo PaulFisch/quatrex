@@ -14,7 +14,7 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
 __all__ = [
     "pair_convolution",
@@ -49,7 +49,7 @@ def pair_convolution(
                                  {2\pi\,(\omega - p - q)} .
 
             This is the production kernel of the LOCAL route
-            (:mod:`quatrex.phonon.pole_local`), where ``[a, b]`` is one grid cell
+            (:mod:`quatrex.phonon.experimental.pole.pole_local`), where ``[a, b]`` is one grid cell
             and the result replaces what the ring's rectangle rule put there.
             Verified against dense composite Gauss-Legendre on one cell, pole cell
             against a smooth partner, as relative error of the pair contribution:
@@ -274,7 +274,7 @@ def _split_leg(cluster, src):
     ``src`` is either a single ``(Np, Np)`` matrix (the frozen source, kept for
     the analytic tests and for backwards compatibility) or a
     ``(S_at_row_pole, S_at_col_pole)`` pair from
-    :func:`~quatrex.phonon.pole_bridge.source_at_poles`, which carries the
+    :func:`~quatrex.phonon.experimental.pole.pole_bridge.source_at_poles`, which carries the
     exact residues.
     """
     if isinstance(src, tuple):

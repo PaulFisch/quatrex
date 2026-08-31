@@ -14,14 +14,14 @@ separately in ``test_pole_mixed.py``.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_bridge import (
+from quatrex.phonon.experimental.pole.pole_bridge import (
     analytic_prefactor,
     mixed_self_energy_sparse,
     mixed_vertex_blocks,
 )
-from quatrex.phonon.pole_audit import transpose_index
-from quatrex.phonon.pole_mixed import bosonic_extend
-from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_audit import transpose_index
+from quatrex.phonon.experimental.pole.pole_mixed import bosonic_extend
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
 SIZES = np.array([2, 2])
 N_DOF = int(SIZES.sum())
@@ -144,7 +144,7 @@ def test_mixed_sectors_match_the_brute_force_ring():
 
 def test_rs_is_not_a_doubling_of_sr():
     """The two mixed sectors are genuinely different contractions."""
-    from quatrex.phonon.pole_bridge import _mixed_one_sector
+    from quatrex.phonon.experimental.pole.pole_bridge import _mixed_one_sector
 
     gamma = 0.5
     w = np.arange(0.0, 24.0 + 1e-9, 0.1)
@@ -205,7 +205,7 @@ def test_invalid_leg_raises():
 
 def test_production_kernel_matches_an_explicit_ring():
     """The production path against an explicit ring, end to end."""
-    from quatrex.phonon.pole_bridge import (analytic_prefactor,
+    from quatrex.phonon.experimental.pole.pole_bridge import (analytic_prefactor,
                                             mixed_self_energy_blocked)
 
     sizes = np.array([2, 2])

@@ -14,7 +14,7 @@ Every pole quantity is known in closed form on this bed (see
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_keldysh import (
+from quatrex.phonon.experimental.pole.pole_keldysh import (
     PoleCluster,
     coherence_metric,
     occupation_matrix,

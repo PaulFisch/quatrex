@@ -19,7 +19,7 @@ Every quantity the pole sector needs therefore has an independent reference.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_nevp import (
+from quatrex.phonon.experimental.pole.pole_nevp import (
     bordered_newton,
     residue,
 )

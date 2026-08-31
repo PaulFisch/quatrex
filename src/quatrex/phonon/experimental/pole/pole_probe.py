@@ -16,7 +16,7 @@ different part of the existing data layout:
 :math:`\Sigma_s^R(z)`
     The one that needs care. It is reconstructed from
     :math:`\Delta = \Sigma^> - \Sigma^<` by the exact cell-integrated
-    continuation of :mod:`quatrex.phonon.pole_kernel`, and that contraction runs
+    continuation of :mod:`quatrex.phonon.experimental.pole.pole_kernel`, and that contraction runs
     over **all** frequencies.
 
 The distribution follows from that last point. In the ``"nnz"`` state every rank
@@ -37,7 +37,7 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_kernel import (
+from quatrex.phonon.experimental.pole.pole_kernel import (
     continuation_weights,
     contract_delta,
     delta_local_fit,

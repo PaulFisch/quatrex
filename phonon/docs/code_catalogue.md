@@ -72,7 +72,7 @@ with focused oracle tests and a short result note.
 
 | Programme | Current files | Verdict |
 |---|---|---|
-| Analytic pole sector | `pole_*.py`, `btd_linalg.py`, pole hooks in `solver.py`, `interaction.py`, `sse_phonon_phonon.py`, and `PoleSectorConfig` | The warm bulk broadens but a strongly mixed unresolved tail remains; the simple-pole production route is not reliable. Preserve as an experiment, disabled structurally rather than by a default flag. |
+| Analytic pole sector | `src/quatrex/phonon/experimental/pole/` and its opt-in hooks | The warm bulk broadens but a strongly mixed unresolved tail remains. The simple-pole route is not reliable for production. |
 | Passive auxiliary states | `auxiliary_scba.py` | Algebraic tests pass, but real-Si constant-source errors are 10-16 percent and wholesale promotion costs more than reblocking. Preserve as a selective-cluster experiment. |
 | Modal and semiseparable spatial tails | `spatial_*.py` | One-sided fitting and post-hoc compression lose to exact reblocking. The direct-generator construction remains an unclosed research idea. Preserve only its oracle and derivation. |
 | Adaptive/nonuniform collision integration | study modules under `phonon/studies/` | The reduced P1 oracle is accurate, but the current production bridge is not a faster conserving collision backend. Keep out of runtime. |

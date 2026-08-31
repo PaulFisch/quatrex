@@ -23,7 +23,7 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
 __all__ = [
     "apply_sparse",
@@ -410,8 +410,8 @@ def pf_self_energy(
     chunk: int = 1 << 17,
 ) -> NDArray:
     r"""Analytic bubble of two partial-fraction legs, on the stored pattern."""
-    from quatrex.phonon.pole_bridge import analytic_prefactor
-    from quatrex.phonon.pole_bubble import pair_convolution
+    from quatrex.phonon.experimental.pole.pole_bridge import analytic_prefactor
+    from quatrex.phonon.experimental.pole.pole_bubble import pair_convolution
 
     if prefactor is None:
         prefactor = analytic_prefactor()
@@ -446,12 +446,12 @@ def pf_mixed_self_energy(
     prefactor: complex | None = None,
 ) -> NDArray:
     r"""``Sigma_SR + Sigma_RS`` for a partial-fraction leg."""
-    from quatrex.phonon.pole_audit import transpose_index
-    from quatrex.phonon.pole_bridge import (
+    from quatrex.phonon.experimental.pole.pole_audit import transpose_index
+    from quatrex.phonon.experimental.pole.pole_bridge import (
         analytic_prefactor, block_offsets, blocks_from_pattern,
         mixed_vertex_block_dict, pattern_from_blocks,
     )
-    from quatrex.phonon.pole_mixed import bosonic_extend, mixed_convolution_batched
+    from quatrex.phonon.experimental.pole.pole_mixed import bosonic_extend, mixed_convolution_batched
 
     if prefactor is None:
         prefactor = analytic_prefactor()
@@ -510,8 +510,8 @@ def coefficients_at_poles(
     window: int = 4,
 ) -> tuple[NDArray, NDArray, NDArray]:
     r"""Freeze the sector coefficients at their own poles."""
-    from quatrex.phonon.pole_bridge import source_at_poles
-    from quatrex.phonon.pole_kernel import delta_local_fit
+    from quatrex.phonon.experimental.pole.pole_bridge import source_at_poles
+    from quatrex.phonon.experimental.pole.pole_kernel import delta_local_fit
 
     c_sr, c_rs, c_ss = coefficients
     z = np.asarray(_h(cluster.z))
@@ -550,7 +550,7 @@ def fit_residual(
     conflated: a perfect fit whose regularized remainder the grid cannot carry
     is useless, and so is a resolvable remainder built on a bad fit.
     """
-    from quatrex.phonon.pole_kernel import delta_local_fit
+    from quatrex.phonon.experimental.pole.pole_kernel import delta_local_fit
 
     w = np.asarray(_h(freqs), dtype=float)
     z = np.asarray(_h(cluster.z))
@@ -577,7 +577,7 @@ def remainder_resolution(
     order: int = 2, window: int = 4, refine: int = 16,
 ) -> float:
     r"""``eps_reg,int`` -- is the REGULARIZED remainder carried by the grid?"""
-    from quatrex.phonon.pole_kernel import delta_local_fit
+    from quatrex.phonon.experimental.pole.pole_kernel import delta_local_fit
 
     w = np.asarray(_h(freqs), dtype=float)
     z = np.asarray(_h(cluster.z))

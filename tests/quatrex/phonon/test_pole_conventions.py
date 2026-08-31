@@ -14,7 +14,7 @@ Audit checklist T0.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_nevp import PoleSolution
+from quatrex.phonon.experimental.pole.pole_nevp import PoleSolution
 
 
 def _sol(z):
@@ -87,7 +87,7 @@ def test_the_resolution_gate_consumes_the_half_width():
     2\pi/...}-1)` in the variable :math:`r = h/\gamma`, with ``gamma`` the
     HALF width."""
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     h = 0.125
     freqs = np.arange(0.0, 20.0 + h, h)
@@ -107,7 +107,7 @@ def test_a_non_positive_width_is_refused_rather_than_ranked():
     """A root on or above the real axis has no line-weight to speak of, and the
     gate returns ``inf`` so it can never read as resolved."""
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     sec = PoleSector(PoleSectorConfig(), np.arange(0.0, 10.0, 0.1))
     assert np.isinf(sec.leg_weight_error(0.0))
@@ -118,7 +118,7 @@ def test_a_non_positive_width_is_refused_rather_than_ranked():
 
 def _sector(h=0.125, top=20.0):
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
     return PoleSector(PoleSectorConfig(), np.arange(0.0, top + h, h))
 
 
@@ -186,7 +186,7 @@ def test_finite_support_refuses_a_non_positive_width():
 
 def test_the_census_prints_on_one_rank_only(monkeypatch, capsys):
     """Four ranks writing the same report to one stdout interleave mid-word."""
-    import quatrex.phonon.pole_sector as ps
+    import quatrex.phonon.experimental.pole.pole_sector as ps
 
     rows = [{"z": 3 - 0.01j, "gamma": 0.01, "separation": 1.0, "chi": 0.01,
              "q_omega": 0.04, "leg_weight_error": 12.0, "E_finite": 0.9,
@@ -207,7 +207,7 @@ def test_the_census_prints_on_one_rank_only(monkeypatch, capsys):
 def test_an_empty_census_is_also_silent_off_rank_zero(monkeypatch, capsys):
     """The no-candidates line is a print too, and was outside the guard in the
     first version of this fix."""
-    import quatrex.phonon.pole_sector as ps
+    import quatrex.phonon.experimental.pole.pole_sector as ps
 
     monkeypatch.setattr(ps, "_report_rank", lambda: 2)
     ps.PoleSector._report_census([])
@@ -234,7 +234,7 @@ def test_the_exact_line_weight_gate_is_the_default():
 def test_the_default_tolerance_splits_the_population_where_the_census_did():
     r"""0.05 promotes the tail and leaves the median mode on the grid."""
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     tol = PoleSectorConfig().leg_weight_tol
     h = 0.25                                    # the census grid, wmax 35 / 140
@@ -269,7 +269,7 @@ def test_lead_band_edges_match_the_monatomic_chain_closed_form():
     The one lead whose dispersion is elementary, used so the sampler is pinned
     against algebra rather than against itself.
     """
-    from quatrex.phonon.pole_sector import lead_band_edges
+    from quatrex.phonon.experimental.pole.pole_sector import lead_band_edges
 
     for k_s in (1.0, 4.0, 17.5):
         edges = lead_band_edges(np.array([[2.0 * k_s]]),
@@ -280,7 +280,7 @@ def test_lead_band_edges_match_the_monatomic_chain_closed_form():
 def test_lead_band_edges_finds_both_branches_of_a_diatomic_chain():
     r"""Two masses give an acoustic and an optical branch with a gap between
     them, so a correct sampler returns FOUR edges, not two."""
-    from quatrex.phonon.pole_sector import lead_band_edges
+    from quatrex.phonon.experimental.pole.pole_sector import lead_band_edges
 
     k_s, m1, m2 = 1.0, 1.0, 3.0
     d00 = np.array([[2 * k_s / m1, -k_s / np.sqrt(m1 * m2)],
@@ -299,7 +299,7 @@ def test_lead_band_edges_finds_both_branches_of_a_diatomic_chain():
 def test_lead_band_edges_refuses_a_stack_instead_of_a_block():
     """A leading frequency axis reaching this would silently make a 'band edge'
     per frequency. Refuse rather than average."""
-    from quatrex.phonon.pole_sector import lead_band_edges
+    from quatrex.phonon.experimental.pole.pole_sector import lead_band_edges
 
     d = np.zeros((7, 2, 2))
     with pytest.raises(ValueError, match="one square block"):
@@ -313,7 +313,7 @@ def test_the_band_edge_gate_is_off_by_default_and_bites_when_supplied():
     unenforced. Default stays off because switching it on changes which poles
     are promoted."""
     from quatrex.core.config import PoleSectorConfig
-    from quatrex.phonon.pole_sector import PoleSector
+    from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
     assert PoleSectorConfig().band_edges == "none"
 

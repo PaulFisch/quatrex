@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from quatrex.core.config import PoleSectorConfig
-from quatrex.phonon.pole_sector import PoleSector
+from quatrex.phonon.experimental.pole.pole_sector import PoleSector
 
 G_DAMP = np.diag([1.6, 0.004])          # broad, narrow
 LAM = np.array([64.0, 70.0])            # squared frequencies

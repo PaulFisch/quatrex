@@ -7,7 +7,7 @@ solver already builds,
     Sigma^R = 0.5*Delta + 0.5j*hilbert_transform(Delta),   Delta = Sigma^> - Sigma^<,
 
 is the real-axis restriction of an explicit analytic function of complex z (see
-:mod:`quatrex.phonon.pole_kernel`). If that identity does not hold to roundoff,
+:mod:`quatrex.phonon.experimental.pole.pole_kernel`). If that identity does not hold to roundoff,
 then evaluating M(z) off the real axis is a new approximation rather than a
 change of representation, and the whole sector loses its justification. These
 tests are therefore the acceptance gate for Phase 0.
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from quatrex.core.fft_utils import hilbert_transform
-from quatrex.phonon.pole_kernel import (
+from quatrex.phonon.experimental.pole.pole_kernel import (
     bosonic_partner,
     cell_width,
     contract_delta,
@@ -317,7 +317,7 @@ def test_pinned_anchor_makes_the_local_fit_continuous():
     """``M(z)`` must be holomorphic, not piecewise holomorphic."""
     import numpy as np
 
-    from quatrex.phonon.pole_kernel import delta_local_fit
+    from quatrex.phonon.experimental.pole.pole_kernel import delta_local_fit
 
     rng = np.random.default_rng(0)
     e = np.linspace(0.0, 20.0, 81)
@@ -343,7 +343,7 @@ def test_pinned_anchor_keeps_the_derivative_exact():
     ``(z - anchor)/h``, so the analytic derivative is still the true one."""
     import numpy as np
 
-    from quatrex.phonon.pole_kernel import sigma_retarded_at_z
+    from quatrex.phonon.experimental.pole.pole_kernel import sigma_retarded_at_z
 
     rng = np.random.default_rng(1)
     e = np.linspace(0.0, 20.0, 81)

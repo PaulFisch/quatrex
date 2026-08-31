@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from quatrex.phonon import pole_local
-from quatrex.phonon.pole_keldysh import (
+from quatrex.phonon.experimental.pole import pole_local
+from quatrex.phonon.experimental.pole.pole_keldysh import (
     PoleCluster,
     pole_keldysh,
     pole_retarded,

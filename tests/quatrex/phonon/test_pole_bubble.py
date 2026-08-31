@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from scipy.integrate import quad
 
-from quatrex.phonon.pole_bubble import (
+from quatrex.phonon.experimental.pole.pole_bubble import (
     bosonic_closure,
     leg_partial_fractions,
     modal_convolution,
@@ -25,7 +25,7 @@ from quatrex.phonon.pole_bubble import (
     retarded_from_pole_sum,
     ss_self_energy,
 )
-from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
 
 def _h(a):
@@ -221,7 +221,7 @@ def test_ss_self_energy_matches_an_explicit_contraction():
 
 def test_retarded_from_pole_sum_reproduces_the_lorentzian_partner():
     """Keeping only the LHP poles must give i/(w - Omega + i gamma)."""
-    from quatrex.phonon.pole_kernel import lorentz_retarded
+    from quatrex.phonon.experimental.pole.pole_kernel import lorentz_retarded
 
     Omega, gamma = 8.0, 0.35
     # L = 2g/((w-O)^2+g^2) in partial fractions: -i/(w-p) + i/(w-q),

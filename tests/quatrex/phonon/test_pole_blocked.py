@@ -11,7 +11,7 @@ roundoff -- not at some tolerance that would hide a bookkeeping error.
 import numpy as np
 import pytest
 
-from quatrex.phonon.pole_bridge import (
+from quatrex.phonon.experimental.pole.pole_bridge import (
     blocks_from_pattern,
     mixed_self_energy_blocked,
     mixed_self_energy_sparse,
@@ -19,7 +19,7 @@ from quatrex.phonon.pole_bridge import (
     mixed_vertex_blocks,
     pattern_from_blocks,
 )
-from quatrex.phonon.pole_keldysh import PoleCluster
+from quatrex.phonon.experimental.pole.pole_keldysh import PoleCluster
 
 
 def _h(a):
@@ -167,7 +167,7 @@ def test_blocked_contraction_has_no_nnz_guard():
 
 def test_blocked_sr_and_rs_remain_distinct():
     """SR and RS on a NON-leg-symmetric vertex."""
-    from quatrex.phonon.pole_bridge import _mixed_one_sector_blocked
+    from quatrex.phonon.experimental.pole.pole_bridge import _mixed_one_sector_blocked
 
     sizes = np.array([2, 2])
     phi, cl, src, _ = _bed(sizes, seed=6)
