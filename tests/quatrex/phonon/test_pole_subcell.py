@@ -609,7 +609,8 @@ def test_the_q_slice_lands_on_the_transverse_axes_not_the_leading_one():
 
     import numpy as np
 
-    from quatrex.phonon.solver import PhononSolver, _q_block
+    from quatrex.phonon.experimental.pole.runtime import _q_block
+    from quatrex.phonon.solver import PhononSolver
 
     nk, b = (9, 9), 6
     taken = {}
