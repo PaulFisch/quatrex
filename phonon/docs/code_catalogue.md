@@ -73,7 +73,7 @@ with focused oracle tests and a short result note.
 | Programme | Current files | Verdict |
 |---|---|---|
 | Analytic pole sector | `src/quatrex/phonon/experimental/pole/` and its opt-in hooks | The warm bulk broadens but a strongly mixed unresolved tail remains. The simple-pole route is not reliable for production. |
-| Passive auxiliary states | `auxiliary_scba.py` | Algebraic tests pass, but real-Si constant-source errors are 10-16 percent and wholesale promotion costs more than reblocking. Preserve as a selective-cluster experiment. |
+| Passive auxiliary states | `src/quatrex/phonon/experimental/auxiliary_scba.py` | Algebraic tests pass, but real-Si constant-source errors are 10-16 percent and wholesale promotion costs more than reblocking. Preserve as a selective-cluster experiment. |
 | Modal and semiseparable spatial tails | `spatial_*.py` | One-sided fitting and post-hoc compression lose to exact reblocking. The direct-generator construction remains an unclosed research idea. Preserve only its oracle and derivation. |
 | Adaptive/nonuniform collision integration | study modules under `phonon/studies/` | The reduced P1 oracle is accurate, but the current production bridge is not a faster conserving collision backend. Keep out of runtime. |
 | Auxiliary frequency grid | `sse_aux_grid_*` and `_prepare_nonuniform_production.py` | Keep as an opt-in experiment. The Si 113/121 case was accurate, but two CNT cases failed lead conservation and saved little time because the FC3 ring retained the full auxiliary grid. Auxiliary-spacing convergence is still open. |

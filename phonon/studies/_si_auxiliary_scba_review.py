@@ -38,7 +38,7 @@ from pathlib import Path
 
 import numpy as np
 
-from quatrex.phonon.auxiliary_scba import lyapunov_gramian
+from quatrex.phonon.experimental.auxiliary_scba import lyapunov_gramian
 from quatrex.phonon.vertex_factors import load_decomposed
 
 

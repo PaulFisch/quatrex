@@ -429,7 +429,7 @@ class PhononSolver(SubsystemSolver):
                     "the local auxiliary RGF requires block_comm_size == 1; "
                     "the distributed augmented recurrence is not implemented")
             if self._auxiliary_rgf is None:
-                from quatrex.phonon.auxiliary_scba import (
+                from quatrex.phonon.experimental.auxiliary_scba import (
                     GlobalAuxiliaryWoodbury,
                     LocalAuxiliaryChannel,
                     LocalAuxiliaryRGF,
@@ -522,7 +522,7 @@ class PhononSolver(SubsystemSolver):
         r"""Install a fixed-basis rational self-energy for the next solves.
 
         ``channel`` must be a
-        :class:`quatrex.phonon.auxiliary_scba.LocalAuxiliaryChannel`, or
+        :class:`quatrex.phonon.experimental.auxiliary_scba.LocalAuxiliaryChannel`, or
         ``None`` to restore the ordinary RGF.  This method deliberately does
         not project a sampled self-energy or mix two changing pole sets.  A
         self-consistent caller must hold the basis fixed over an SCBA epoch and
@@ -531,7 +531,7 @@ class PhononSolver(SubsystemSolver):
         a non-conserving change of the fixed-point map.
         """
         if channel is not None:
-            from quatrex.phonon.auxiliary_scba import (
+            from quatrex.phonon.experimental.auxiliary_scba import (
                 LocalAuxiliaryChannel, RationalKeldyshChannel)
 
             if not isinstance(channel, (LocalAuxiliaryChannel,

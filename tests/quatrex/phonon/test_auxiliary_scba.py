@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.integrate import quad_vec
 
-from quatrex.phonon.auxiliary_scba import (
+from quatrex.phonon.experimental.auxiliary_scba import (
     GlobalAuxiliaryWoodbury,
     LocalAuxiliaryRGF,
     LocalAuxiliaryChannel,
