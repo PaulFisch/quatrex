@@ -63,7 +63,8 @@ def test_cm_subtraction_switch_is_removed():
         "eta_obc_ramp_iterations", "eta_obc_final", "eta_ir_floor_cells",
         "eta_ir_floor_final_cells", "eta_ir_floor_ramp_iterations",
         "buttiker_probe", "sse_vertex_scale", "sse_cross_slab_scale",
-        "sse_ramp_iterations",
+        "sse_ramp_iterations", "sse_low_freq_mask_thz",
+        "low_freq_mixing_thz", "low_freq_mixing_factor",
     ),
 )
 def test_broadening_switches_are_removed(name):
@@ -78,13 +79,6 @@ def test_half_retarded_is_refused():
     resonances."""
     with pytest.raises(ValidationError, match="retarded_method='fft'"):
         PhononConfig(retarded_method="half", **_phonon())
-
-
-def test_pole_window_must_sit_above_the_low_frequency_mask():
-    with pytest.raises(ValidationError, match="ABOVE sse_low_freq_mask_thz"):
-        PhononConfig(sse_low_freq_mask_thz=1.5, **_phonon(omega_min_thz=1.0))
-    cfg = PhononConfig(sse_low_freq_mask_thz=1.5, **_phonon(omega_min_thz=2.0))
-    assert cfg.pole_sector.omega_min_thz == 2.0
 
 
 def test_outgoing_sheet_requires_the_spectral_obc():

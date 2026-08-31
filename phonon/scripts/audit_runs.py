@@ -4,10 +4,9 @@
 The config file is not the record of what ran. ``phonon/studies/engine/run.py``
 takes environment overrides that never touch the TOML and prints two lines per
 run for exactly this reason -- ``RUN config=...`` (effective eta, retarded,
-nblk, ne, fgrid) and ``RUN env ...`` (every ``QX_*``). Two of the gates below
-are not recoverable from the TOML at all: ``sse_g_band`` appears in zero of the
-stored configs, and ``sse_low_freq_mask_thz`` in zero as well. This script reads
-the logs first, the config second, and the code default for the run's date last.
+nblk, ne, fgrid) and ``RUN env ...`` (every ``QX_*``). ``sse_g_band`` is not
+recoverable from the stored TOMLs. This script reads the logs first, the config
+second, and the code default for the run's date last.
 
 The gates, and where each was established:
 

@@ -217,7 +217,7 @@ class PoleSectorConfig(BaseModel):
     """Lower edge of the pole search (THz). Below it the quasiparticle picture
     does not apply: the Bose factor carries its own 1/omega pole, the acoustic
     resolvent is near-singular, and the lead-driven translation channel lives
-    there. 0 = auto, resolved to ``max(4*dw, sse_low_freq_mask_thz + 2*dw)``."""
+    there. 0 = auto, resolved to ``4*dw``."""
     omega_max_thz: NonNegativeFloat = 0.0
     """Upper edge of the pole search (THz). 0 = the top of the frequency grid."""
     max_poles: PositiveInt = 16
@@ -1935,14 +1935,6 @@ class PhononConfig(BaseModel):
     the nnz->stack back-transpose, which costs one extra all-to-all per
     iteration at stack > 1."""
 
-    sse_low_freq_mask_thz: NonNegativeFloat = 0.0
-    """Zero the bubble legs and outputs on all |omega| < this (THz). The
-    frequency grid stays anchored at zero (the FFT convolution and the
-    bosonic fold require it), so this is the working equivalent of
-    starting the window above the acoustic region: masked bins keep their
-    ballistic Dyson/transport content but contribute no three-phonon
-    scattering. 0 = legacy (only the omega = 0 bin is masked)."""
-
     pole_sector: PoleSectorConfig = PoleSectorConfig()
     """Pole-subtracted SCBA (see :class:`PoleSectorConfig`). Disabled by
     default = legacy (bit-identical)."""
@@ -1983,19 +1975,6 @@ class PhononConfig(BaseModel):
     energy measure and keeps the Phi-derivable energy balance to roundoff;
     ``"sample"`` is pointwise, sharper at resonance peaks and not conserving.
     The two coincide when the grids do, up to the masked omega = 0 bin."""
-
-    low_freq_mixing_thz: NonNegativeFloat = 0.0
-    """Frequency-dependent SCBA mixing: self-energy bins with |omega| < this
-    (THz) are mixed with ``low_freq_mixing_factor`` instead of the global
-    ``scba.mixing_factor``. 0 = off (uniform mixing). This DAMPS the IR
-    (Bose-divergent) marginal mode at the lowest frequency bins WITHOUT
-    removing the low-omega anharmonic scattering: the mode sits near the
-    unit circle (|lambda|~1) and a small mixing factor pulls it inside
-    (|1+a(lambda-1)|<1)."""
-    low_freq_mixing_factor: NonNegativeFloat = 0.02
-    """Gentle SCBA mixing factor applied to the |omega| < ``low_freq_mixing_thz``
-    bins (see there). Small (~0.01-0.03) to damp the IR marginal mode; the rest
-    of the spectrum keeps ``scba.mixing_factor``."""
 
     sse_release_leg_blocks: bool = False
     """Free the densified G leg blocks once the batched coupled-q kernel has
@@ -2257,15 +2236,6 @@ class PhononConfig(BaseModel):
                 "operator whose poles are being sought is not causal and its "
                 "roots are not resonances."
             )
-        if ps.omega_min_thz and self.sse_low_freq_mask_thz:
-            if ps.omega_min_thz <= self.sse_low_freq_mask_thz:
-                raise ValueError(
-                    f"pole_sector: omega_min_thz ({ps.omega_min_thz}) must sit "
-                    f"ABOVE sse_low_freq_mask_thz "
-                    f"({self.sse_low_freq_mask_thz}). Sigma is identically zero "
-                    "below the mask, so the continuation has no cut there while "
-                    "the device Green's function still does."
-                )
         if ps.sheet == "outgoing" and self.obc.algorithm != "spectral":
             raise ValueError(
                 f"pole_sector: sheet='outgoing' requires obc.algorithm="

@@ -666,14 +666,8 @@ class PhononSolver(SubsystemSolver):
         # explicitly removed from both bubble legs and outputs.  Testing it
         # here pins the otherwise useful gate to the near-singular contact
         # Green function at DC (typically a normalised floor of exactly -1),
-        # even though that sample never enters the SCBA map.  A configured
-        # low-frequency mask has the same status and must be skipped as well.
-        cutoff = max(
-            1e-6,
-            float(getattr(self.config.phonon,
-                          "sse_low_freq_mask_thz", 0.0) or 0.0),
-        )
-        skip = xp.abs(xp.asarray(self.local_frequencies).real) < cutoff
+        # even though that sample never enters the SCBA map.
+        skip = xp.abs(xp.asarray(self.local_frequencies).real) < 1e-6
         for name, buf, sign in targets:
             rep = psd_residual(
                 buf.data.reshape(n_freq, -1), buf.rows, buf.cols,
@@ -1254,10 +1248,8 @@ class PhononSolver(SubsystemSolver):
             gl = (self._q_stack(g_lesser.data, iq, 1)
                   - xp.asarray(leg).reshape(iq.size, w_host.size, -1))
             norms = np.linalg.norm(np.asarray(get_host(gl)), axis=2).max(axis=0)
-            low = max(1e-6, float(getattr(
-                self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
             pw = pole_pair_weight(norms, pole_cells, freqs=w_host,
-                                  skip=np.abs(w_host) < low)
+                                  skip=np.abs(w_host) < 1e-6)
         else:
             pw = {"mean": float("nan"), "worst": float("nan"),
                   "omega": float("nan")}
@@ -1489,11 +1481,9 @@ class PhononSolver(SubsystemSolver):
             if g_lesser is not None:
                 gl = (_q(g_lesser.data).reshape(w_host.size, -1)
                       - acc_l.reshape(w_host.size, -1))
-                low = max(1e-6, float(getattr(
-                    self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
                 pw = pole_pair_weight(
                     np.linalg.norm(np.asarray(get_host(gl)), axis=1),
-                    pole_cells, freqs=w_host, skip=np.abs(w_host) < low)
+                    pole_cells, freqs=w_host, skip=np.abs(w_host) < 1e-6)
             else:
                 pw = {"mean": float("nan"), "worst": float("nan"),
                       "omega": float("nan")}
@@ -1576,10 +1566,8 @@ class PhononSolver(SubsystemSolver):
             # constrained.
             rows, cols = out[0].rows, out[0].cols
             n_freq = int(self.local_frequencies.shape[0])
-            low = max(1e-6, float(
-                getattr(self.config.phonon, "sse_low_freq_mask_thz", 0.0) or 0.0))
             w_host = np.asarray(get_host(self.local_frequencies), dtype=float)
-            skip = xp.asarray(np.abs(w_host) < low)
+            skip = xp.asarray(np.abs(w_host) < 1e-6)
             # ... and a second reading restricted to the CELLS THE POLES
             # TOUCH. The global worst is whatever the baseline's own worst bin
             # is, and the correction is localised, so the global number goes
@@ -1592,7 +1580,7 @@ class PhononSolver(SubsystemSolver):
                         continue
                     k = int(np.argmin(np.abs(w_host - x)))
                     near[max(0, k - 2):min(n_freq, k + 3)] = True
-            skip_far = xp.asarray((np.abs(w_host) < low) | ~near)
+            skip_far = xp.asarray((np.abs(w_host) < 1e-6) | ~near)
             rep_all = {}
             for name, got, pp in (("lesser", out[0], state.g_pp_lesser),
                                   ("greater", out[1], state.g_pp_greater)):

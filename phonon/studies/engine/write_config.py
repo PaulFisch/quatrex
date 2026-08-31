@@ -124,8 +124,6 @@ retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
-low_freq_mixing_thz = {a.low_freq_mix_thz}
-low_freq_mixing_factor = {a.low_freq_mix_factor}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
 frequency_grid = "{a.freq_grid}"
@@ -224,8 +222,6 @@ retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
-low_freq_mixing_thz = {a.low_freq_mix_thz}
-low_freq_mixing_factor = {a.low_freq_mix_factor}
 sigma_convergence_tol = {a.sigma_tol}
 heat_flow_conservation_tol = 1e-2
 frequency_grid = "{a.freq_grid}"
@@ -361,14 +357,6 @@ def main():
                    help="SCBA cap; the conductance (best-iterate) converges well "
                         "before the Sigma residual (F30), so 50 bounds wall-time")
     p.add_argument("--retarded", default="fft", choices=["half", "fft"])
-    p.add_argument("--low-freq-mix-thz", dest="low_freq_mix_thz", type=float,
-                   default=0.0,
-                   help="frequency-dependent mixing: bins below this THz get "
-                        "--low-freq-mix-factor (damps the IR Bose marginal mode "
-                        "at eta=0 without removing low-omega scattering; 0=off)")
-    p.add_argument("--low-freq-mix-factor", dest="low_freq_mix_factor",
-                   type=float, default=0.02,
-                   help="gentle mixing factor for the low-omega bins")
     p.add_argument("--sigma-tol", type=float, default=1e-3,
                    help="relative Sigma^R residual tolerance")
     p.add_argument("--tadpole", action="store_true",

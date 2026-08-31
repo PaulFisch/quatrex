@@ -432,7 +432,7 @@ class _Buf:
         self.rows, self.cols = rows, cols
 
 
-def _analytic_harness(monkeypatch, mixed_scale=1.0, low_freq_mask=0.0):
+def _analytic_harness(monkeypatch, mixed_scale=1.0):
     """Drive ``_pole_analytic_sectors`` with stubbed kernels.
 
     The kernels are covered by their own tests; what is under test here is the
@@ -469,7 +469,6 @@ def _analytic_harness(monkeypatch, mixed_scale=1.0, low_freq_mask=0.0):
 
     class _SSP:
         phi_blocks, block_sizes = {}, np.array([nnz])
-        _low_freq_mask = low_freq_mask
 
         def set_pole_self_energy(self, l, g, r):
             seen["ss"] = (np.asarray(l), np.asarray(g), np.asarray(r))
@@ -516,16 +515,6 @@ def test_analytic_mixed_sector_goes_through_the_hilbert_hook(monkeypatch):
     # because both components stub to the same value: the point is that it is
     # built from the SS accumulators, which now exclude mx.
     assert np.allclose(seen["ss"][2], 0.0)
-
-
-def test_analytic_mixed_sector_masks_the_background_leg(monkeypatch):
-    """The same low-frequency mask the ring applies to its own legs."""
-    seen = _analytic_harness(monkeypatch, low_freq_mask=1.5)
-    regs = seen["reg"]
-    assert regs, "the mixed kernel was never called"
-    for r in regs:
-        assert np.abs(r[:2]).max() == 0.0, "background leg not masked below 1.5"
-        assert np.abs(r[2:]).max() > 0.0, "the whole leg was masked"
 
 
 def test_analytic_route_honours_mixed_scale(monkeypatch):

@@ -739,10 +739,7 @@ class SCBA(TransportSolver):
         if self._anderson_mixer is not None:
             self._update_sigma_anderson()
             return
-        # Frequency-dependent mixing factor: gentle on the IR-divergent low-omega
-        # bins (which limit-cycle the eta=0 Sigma^R), normal elsewhere. Scalar
-        # when the feature is off.
-        a = self._freq_mixing_factor()
+        a = self.mixing_factor
         self.data.sigma_lesser.data[:] = (
             (1 - a) * self.data.sigma_lesser_prev.data
             + a * self.data.sigma_lesser.data
@@ -755,36 +752,6 @@ class SCBA(TransportSolver):
             (1 - a) * self.data.sigma_retarded_hermitian_prev.data
             + a * self.data.sigma_retarded_hermitian.data
         )
-
-    def _freq_mixing_factor(self):
-        """Per-omega SCBA mixing factor (cached). Returns the scalar
-        ``mixing_factor`` when frequency-dependent mixing is off
-        (``phonon.low_freq_mixing_thz <= 0``), else a broadcastable
-        ``(n_local_freq, 1, ...)`` array that is ``low_freq_mixing_factor`` on
-        the |omega| < cutoff bins and ``mixing_factor`` elsewhere -- damping the
-        IR (Bose) marginal mode without removing the low-omega scattering."""
-        cached = getattr(self, "_freq_mix", None)
-        if cached is not None:
-            return cached
-        w_c = float(self.config.phonon.low_freq_mixing_thz)
-        if w_c <= 0.0 or not hasattr(self, "phonon_solver"):
-            self._freq_mix = self.mixing_factor
-            return self._freq_mix
-        a_low = float(self.config.phonon.low_freq_mixing_factor)
-        wloc = xp.abs(xp.asarray(self.phonon_solver.local_frequencies,
-                                 dtype=float).real)
-        a = xp.where(wloc < w_c, a_low, self.mixing_factor)
-        data = self.data.sigma_retarded_hermitian.data
-        if a.shape[0] == data.shape[0]:
-            a = a.reshape((a.shape[0],) + (1,) * (data.ndim - 1))
-        else:  # state/shape mismatch -> safe fallback to uniform mixing
-            a = self.mixing_factor
-        self._freq_mix = a
-        if comm.rank == 0:
-            n_low = int(get_host(xp.asarray(wloc < w_c).sum()))
-            print(f"freq-dependent mixing: rank0 has {n_low} bins < {w_c} THz "
-                  f"at factor {a_low} (rest {self.mixing_factor})", flush=True)
-        return self._freq_mix
 
     def _update_sigma_anderson(self) -> None:
         """Anderson(m) step over the concatenated

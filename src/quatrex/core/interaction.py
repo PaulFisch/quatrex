@@ -292,8 +292,7 @@ class PhononPhononInteraction(Interaction):
         # two sectors integrate different data and injects that peak into
         # Sigma. Measured: without this, Sigma^> is non-PSD by 0.15 at mid-band,
         # strictly linear in the injected term.
-        low = max(1e-6, float(getattr(ssp, "_low_freq_mask", 0.0) or 0.0))
-        leg_mask = xp.abs(freqs) < low
+        leg_mask = xp.abs(freqs) < 1e-6
         if bool(leg_mask.any()):
             reg_l = reg_l.copy(); reg_l[leg_mask] = 0.0
             reg_g = reg_g.copy(); reg_g[leg_mask] = 0.0
@@ -429,8 +428,7 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
     # makes the two sectors integrate different data and injects that peak
     # straight into Sigma. Measured there: Sigma^> non-PSD by 0.15 at
     # mid-band, strictly LINEAR in the injected mixed term.
-    low = max(1e-6, float(getattr(ssp, "_low_freq_mask", 0.0) or 0.0))
-    leg_mask = xp.abs(freqs) < low
+    leg_mask = xp.abs(freqs) < 1e-6
     if bool(leg_mask.any()):
         reg_l = reg_l.copy(); reg_l[leg_mask] = 0.0
         reg_g = reg_g.copy(); reg_g[leg_mask] = 0.0

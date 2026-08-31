@@ -86,8 +86,6 @@ def _bed(sizes=(3, 3, 3), nk=(2, 2), poles=((2, 1), (3,), (1, 2, 1), (2,)),
     solver.local_frequency_weights = np.full(n_freq, 12.0 / (n_freq - 1))
     solver._pole_cfg = types.SimpleNamespace(leg="congruence",
                                              source_fit_tol=1e9)
-    solver.config = types.SimpleNamespace(
-        phonon=types.SimpleNamespace(sse_low_freq_mask_thz=0.0))
     solver._pole_layout = BlockLayout(rows, cols, sizes, band=1)
 
     b0, bN = int(sizes[0]), int(sizes[-1])

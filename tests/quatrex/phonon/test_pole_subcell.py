@@ -304,7 +304,6 @@ def test_ring_leg_gate_excludes_the_bins_the_ring_masks():
     # Then the solver hook: it passes the ring's mask, so it lands on `clean`.
     solver.config = types.SimpleNamespace(
         phonon=types.SimpleNamespace(
-            sse_low_freq_mask_thz=0.0,
             pole_sector=PoleSectorConfig(enabled=True, psd_check=True,
                                          leg="congruence")))
     solver.psd_report = {}
@@ -312,8 +311,7 @@ def test_ring_leg_gate_excludes_the_bins_the_ring_masks():
     got = solver.psd_report["ring_leg"]["lesser"]
     assert got["omega_index"] != 0
     assert got["worst"] == clean["worst"], (
-        "the gate must exclude w = 0 even at sse_low_freq_mask_thz = 0: the "
-        "ring's own mask is max(1e-6, mask), never empty")
+        "the gate must exclude the ring's zero-frequency endpoint")
 
 
 # --------------------------------------------------------------------------
