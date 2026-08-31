@@ -1858,9 +1858,6 @@ class PhononConfig(BaseModel):
 
     """
 
-    interaction_cutoff_taper: Literal["none", "triangular"] = "none"
-    """Shape of the spatial interaction cutoff applied to the phonon SSE."""
-
     solver: SolverConfig = SolverConfig()
     """Parameters concerning the system solver."""
 
@@ -2079,18 +2076,6 @@ class PhononConfig(BaseModel):
     blocks.  The generated primitive self-energy range is determined from the
     actual FC3 support and must fit inside the same/adjacent grouped blocks;
     otherwise construction fails rather than dropping an output shell."""
-
-    sse_g_band_taper: Literal["none", "bartlett"] = "none"
-    """Positive semi-definite taper of the inner-G band mask, against the
-    boxcar's non-causal gain. ``"bartlett"`` weights each inner G link by
-    ``w_d = 1 - d/(sse_g_band+1)`` and the Sigma output blocks by the same
-    weight, which is the Phi-derivable pair and so conserves energy. It
-    restores end-to-end positivity only at ``sse_g_band = 1``: the output
-    band is pinned at ``|I-J| <= 1``, whose tapered Toeplitz symbol needs
-    ``w_1 <= 1/2``. At wider bands it fixes the legs and not Sigma, and the
-    code warns. Price at band 1 is half the off-diagonal coherence.
-    ``"none"`` is the legacy boxcar. Not supported with
-    ``decomposed_kernel="gram"``."""
 
     sse_dense_q_batched: bool = True
     """Coupled-q dense ring: flatten the (q', quad) task axis into

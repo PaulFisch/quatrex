@@ -64,12 +64,6 @@ class SCBAData:
         self.orbitals_per_atom = [
             config.device.num_orbitals_per_atom.get(s, 1) for s in atomic_species
         ]
-        # Kept so the phonon SSE can weight the interaction cutoff by the
-        # transport-axis separation (phonon.interaction_cutoff_taper); this is
-        # the same `grid` compute_sparsity_pattern masks with, so the taper and
-        # the stored pattern are guaranteed to agree.
-        self.grid = grid
-
         block_sizes = get_block_sizes(config, grid)
 
         kpoint_grid = config.device.kpoint_grid
@@ -572,7 +566,6 @@ class SCBA(TransportSolver):
                     phonon_energies=solver_freqs,
                     block_sizes=self.data.g_lesser.block_sizes,
                     dynamical_matrix=self.phonon_solver.dynamical_matrix,
-                    orbital_grid=getattr(self.data, "grid", None),
                 )
 
             elif self.config.phonon.model == "pseudo-scattering":

@@ -247,7 +247,6 @@ def _ref_compute_multiblock(
     block_sizes: np.ndarray,
     dw_thz: float,
     g_band: int = 1,
-    taper_w: list[float] | None = None,
     output_band: int = 1,
 ) -> tuple[
     dict[tuple[int, int], np.ndarray],
@@ -305,14 +304,6 @@ def _ref_compute_multiblock(
                 phi_left, phi_right,
                 gg_band[la], gl_band[laT].swapaxes(-1, -2),
                 gg_band[lb], gl_band[lbT].swapaxes(-1, -2), dw_thz)
-            if taper_w is not None:
-                # Bartlett-tapered band: the two inner G-link weights and
-                # the Sigma output-block weight collapse to one scalar per
-                # quad (mirrors SigmaPhononPhonon._quad_weight).
-                wq = (taper_w[abs(K1 - K1p)] * taper_w[abs(K2 - K2p)]
-                      * taper_w[abs(I - J)])
-                sl = sl * wq
-                sg = sg * wq
             sl_full[(I, J)] = sl_full.get((I, J), 0) + sl
             sg_full[(I, J)] = sg_full.get((I, J), 0) + sg
 
@@ -542,9 +533,8 @@ def test_compute_restores_distribution_state() -> None:
         )
 
 
-def _taper_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
-    """NN phi blocks, Hermitian-PSD-per-omega band G^{<,>}, and the DSDBSparse
-    buffers for a taper/causality test device."""
+def _psd_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
+    """Build a symmetric vertex and positive semidefinite Green functions."""
     from qttools.datastructures import DSDBCOO
     from scipy.sparse import csr_matrix
 
@@ -623,15 +613,9 @@ def _taper_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
     return phi_blocks, gl_band, gg_band, block_sizes, offs, make_buffers
 
 
-def _run_sigma(phi_blocks, block_sizes, ne, make_buffers, taper: str | None):
-    """Run the production bubble; return the (I,J)->block Sigma^{<,>} dicts.
-
-    ``taper=None`` leaves the config attribute ABSENT (pre-option configs);
-    a string sets ``sse_g_band_taper`` explicitly.
-    """
+def _run_sigma(phi_blocks, block_sizes, ne, make_buffers):
+    """Run the production bubble and return its lesser and greater blocks."""
     cfg = _make_cfg("fft")
-    if taper is not None:
-        cfg.phonon.sse_g_band_taper = taper
     freqs_thz = np.linspace(0.0, 16.0, ne)
     gl, gg, sl, sg, sr = make_buffers()
     ssp = SigmaPhononPhonon(
@@ -656,100 +640,11 @@ def _assemble(blocks: dict, offs: np.ndarray, N: int, ne: int) -> np.ndarray:
     return out
 
 
-def test_taper_none_is_bit_identical() -> None:
-    """sse_g_band_taper='none' (and absent) reproduce the legacy output
-    bit-for-bit -- the option must not perturb existing runs."""
-    phi_blocks, _, _, block_sizes, _, make_buffers = _taper_fixture(4, 2, 15)
-    # "none" set explicitly vs attribute entirely absent (pre-option config).
-    l_none, g_none = _run_sigma(
-        phi_blocks, block_sizes, 15, make_buffers, taper="none")
-    l_absent, g_absent = _run_sigma(
-        phi_blocks, block_sizes, 15, make_buffers, taper=None)
-    for key in l_none:
-        assert np.array_equal(l_none[key], l_absent[key])
-        assert np.array_equal(g_none[key], g_absent[key])
-
-
-def test_taper_matches_tapered_reference() -> None:
-    """Production bartlett == independently-tapered dense reference."""
-    phi_blocks, gl_band, gg_band, block_sizes, _, make_buffers = (
-        _taper_fixture(4, 2, 15))
-    ne = 15
-    dw = 16.0 / (ne - 1)
-    out_l, out_g = _run_sigma(
-        phi_blocks, block_sizes, ne, make_buffers, taper="bartlett")
-    ref_l, ref_g, _ = _ref_compute_multiblock(
-        phi_blocks, gl_band, gg_band, block_sizes, dw,
-        g_band=1, taper_w=[1.0, 0.5])
-    for key in out_l:
-        np.testing.assert_allclose(
-            out_l[key], ref_l.get(key, 0), atol=1e-40, rtol=1e-9,
-            err_msg=f"tapered Sigma^< mismatch at block {key}")
-        np.testing.assert_allclose(
-            out_g[key], ref_g.get(key, 0), atol=1e-40, rtol=1e-9,
-            err_msg=f"tapered Sigma^> mismatch at block {key}")
-
-
-def test_taper_restores_causality_psd() -> None:
-    """THE point of the taper: with Hermitian-PSD G^{<,>} inputs, the
-    boxcar band-1 Sigma^{<,>} is INDEFINITE on a >=4-block device
-    (non-causal gain -- the documented sse_g_band=1 disease), while the
-    Bartlett-tapered band-1 Sigma^{<,>} is PSD at every omega (Schur
-    product theorem with the PSD taper matrix)."""
-    ne = 15
-    n_blocks, nbs = 5, 2
-    phi_blocks, _, _, block_sizes, offs, make_buffers = (
-        _taper_fixture(n_blocks, nbs, ne))
-    N = int(block_sizes.sum())
-
-    # Orientation calibration on a single block (no masking -> exact,
-    # causal by construction): find the phase z in {1,-1,1j,-1j} that
-    # makes z * Sigma(omega) Hermitian PSD. This decouples the test from
-    # the production sign convention.
-    phi1, _, _, bs1, offs1, mk1 = _taper_fixture(1, 4, ne)
-    sl1, _ = _run_sigma(phi1, bs1, ne, mk1, taper="none")
-    S1 = _assemble(sl1, offs1, int(bs1.sum()), ne)
-    z_found = None
-    for z in (1.0, -1.0, 1j, -1j):
-        M = z * S1
-        herm = np.linalg.norm(M - M.conj().swapaxes(-1, -2))
-        if herm > 1e-8 * np.linalg.norm(M):
-            continue
-        if np.linalg.eigvalsh(M).min() >= -1e-10 * np.abs(M).max():
-            z_found = z
-            break
-    assert z_found is not None, "no PSD orientation on the 1-block device"
-
-    def min_eig(blocks):
-        S = z_found * _assemble(blocks, offs, N, ne)
-        # Hermitian part (the anti-Hermitian remainder is zero for exact
-        # channels; the masked kernel's defect shows up here too).
-        S = 0.5 * (S + S.conj().swapaxes(-1, -2))
-        return np.linalg.eigvalsh(S).min(), np.abs(S).max()
-
-    box_l, box_g = _run_sigma(
-        phi_blocks, block_sizes, ne, make_buffers, taper="none")
-    tap_l, tap_g = _run_sigma(
-        phi_blocks, block_sizes, ne, make_buffers, taper="bartlett")
-
-    lam_box, scale_box = min_eig(box_l)
-    assert lam_box < -1e-4 * scale_box, (
-        "expected the boxcar band-1 Sigma^< to be indefinite (non-causal "
-        f"gain); min eig {lam_box:.3e} vs scale {scale_box:.3e}")
-
-    for tag, blocks in (("<", tap_l), (">", tap_g)):
-        lam, scale = min_eig(blocks)
-        assert lam >= -1e-9 * scale, (
-            f"tapered Sigma^{tag} lost PSD-ness: min eig {lam:.3e} vs "
-            f"scale {scale:.3e}")
-
-
 def _psd_orientation(blocks, offs, N, ne):
     """Phase z in {1,-1,i,-i} that makes Sigma hermitian PSD.
 
-    Decouples the assertions from the production sign convention exactly
-    as test_taper_restores_causality_psd does (the fixture feeds PSD
-    matrices as G directly, not as -iG, so the convention differs by i).
+    The fixture feeds PSD matrices as G directly, not as -iG, so the
+    convention differs by i.
     """
     S = _assemble(blocks, offs, N, ne)
     for z in (1.0, -1.0, 1j, -1j):
@@ -772,10 +667,9 @@ def test_bubble_psd_gamma_complete_band() -> None:
     give a PSD Sigma^{<,>} when NO band mask is active."""
     ne, n_blocks, nbs = 15, 2, 3
     phi_blocks, _, _, block_sizes, offs, make_buffers = (
-        _taper_fixture(n_blocks, nbs, ne))
+        _psd_fixture(n_blocks, nbs, ne))
     N = int(block_sizes.sum())
-    out_l, out_g = _run_sigma(phi_blocks, block_sizes, ne, make_buffers,
-                              taper="none")
+    out_l, out_g = _run_sigma(phi_blocks, block_sizes, ne, make_buffers)
     z = _psd_orientation(out_l, offs, N, ne)
     assert z is not None, "no PSD orientation found for the unmasked bubble"
     for tag, blocks in (("<", out_l), (">", out_g)):
@@ -794,10 +688,9 @@ def test_bubble_psd_broken_by_asymmetric_vertex() -> None:
     """
     ne, n_blocks, nbs = 15, 2, 3
     phi_blocks, _, _, block_sizes, offs, make_buffers = (
-        _taper_fixture(n_blocks, nbs, ne))
+        _psd_fixture(n_blocks, nbs, ne))
     N = int(block_sizes.sum())
-    good_l, _ = _run_sigma(phi_blocks, block_sizes, ne, make_buffers,
-                           taper="none")
+    good_l, _ = _run_sigma(phi_blocks, block_sizes, ne, make_buffers)
     z = _psd_orientation(good_l, offs, N, ne)
     assert z is not None
 
@@ -806,7 +699,7 @@ def test_bubble_psd_broken_by_asymmetric_vertex() -> None:
     for (I, K1, K2) in list(bad):
         if K1 != K2:                       # break only the exchange pair
             bad[(I, K1, K2)] = rng.standard_normal((nbs, nbs, nbs))
-    bad_l, _ = _run_sigma(bad, block_sizes, ne, make_buffers, taper="none")
+    bad_l, _ = _run_sigma(bad, block_sizes, ne, make_buffers)
     lam, scale = _worst_neg(bad_l, offs, N, ne, z)
     assert lam < -1e-6 * scale, (
         "an asymmetric vertex should destroy PSD-ness of the bubble; "
@@ -915,18 +808,6 @@ def test_bubble_psd_coupled_q_complete_band() -> None:
         lam = np.linalg.eigvalsh(M).min()
         assert lam >= -1e-9 * np.abs(M).max(), (
             f"coupled-q Sigma^{tag} lost PSD-ness: min eig {lam:.3e}")
-
-
-def test_taper_above_band_one_warns() -> None:
-    """Combining the taper with g_band > 1 must not look safe."""
-    _, _, _, block_sizes, _, _ = _taper_fixture(5, 2, 9)
-    phi_blocks = _taper_fixture(5, 2, 9)[0]
-    cfg = _make_cfg("fft", g_band=2)
-    cfg.phonon.sse_g_band_taper = "bartlett"
-    with pytest.warns(UserWarning, match="only restores.*g_band = 1"):
-        SigmaPhononPhonon(
-            cfg, phonon_frequencies=np.linspace(0.0, 16.0, 9),
-            block_sizes=block_sizes, phi_blocks=phi_blocks)
 
 
 def test_fc3_writer_roundtrip(tmp_path) -> None:
@@ -1857,157 +1738,6 @@ def test_qfold_translation_invariance_gate() -> None:
     assert gate(qv_rand, xp) is False
     # Nothing to share must NOT be reported as invariance.
     assert gate({(0, 0): {(0, 0, 0): xp.ones((2, 2, 2))}}, xp) is False
-
-
-# ---------------------------------------------------------------------------
-# Positive-definite interaction cutoff (phonon.interaction_cutoff_taper)
-# ---------------------------------------------------------------------------
-def _run_sigma_cut(phi_blocks, block_sizes, ne, make_buffers, *,
-                   taper="none", radius=10.0, grid=None, tdir="z"):
-    """Production bubble with the interaction-cutoff taper configured."""
-    cfg = _make_cfg("fft")
-    cfg.phonon.interaction_cutoff_taper = taper
-    cfg.phonon.interaction_cutoff = radius
-
-    class _Dev:
-        transport_direction = tdir
-    cfg.device = _Dev()
-    gl, gg, sl, sg, sr = make_buffers()
-    ssp = SigmaPhononPhonon(
-        cfg, phonon_frequencies=np.linspace(0.0, 16.0, ne),
-        block_sizes=block_sizes, phi_blocks=phi_blocks, orbital_grid=grid)
-    ssp.compute(gl, gg, out=(sl, sg, sr))
-    return (np.asarray(get_host(sl.data)).copy(),
-            np.asarray(get_host(sg.data)).copy(), ssp, sl)
-
-
-def _chain_grid(N: int, spacing: float = 1.0, axis: int = 2) -> np.ndarray:
-    g = np.zeros((N, 3))
-    g[:, axis] = spacing * np.arange(N)
-    return g
-
-
-def test_cutoff_taper_weight_vector() -> None:
-    """The weights are exactly max(0, 1 - |z_i - z_j|/R) on the stored
-    entries: unity on the diagonal (the local channel is never reweighted),
-    linear in separation, zero beyond R."""
-    ne, n_blocks, nbs = 9, 2, 3
-    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
-    N = int(block_sizes.sum())
-    R = 4.0
-    grid = _chain_grid(N)
-    _, _, ssp, sl = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
-                                   taper="triangular", radius=R, grid=grid)
-    w = np.asarray(get_host(ssp._cutoff_taper(sl, xp)))
-    rows, cols = (np.asarray(get_host(a)) for a in sl.spy())
-    d = np.abs(grid[rows, 2] - grid[cols, 2])
-    np.testing.assert_allclose(w, np.clip(1.0 - d / R, 0.0, None), atol=1e-14)
-    assert np.all(w[rows == cols] == 1.0)
-    assert np.all(w[d >= R] == 0.0)
-
-
-def test_cutoff_taper_none_is_legacy() -> None:
-    """Supplying positions must change nothing while the taper is off."""
-    ne, n_blocks, nbs = 9, 2, 3
-    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
-    N = int(block_sizes.sum())
-    a_l, a_g, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
-                                    taper="none", grid=_chain_grid(N))
-    b_l, b_g, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
-                                    taper="none", grid=None)
-    np.testing.assert_array_equal(a_l, b_l)
-    np.testing.assert_array_equal(a_g, b_g)
-
-
-def test_cutoff_taper_tends_to_untapered_at_large_radius() -> None:
-    """As R -> infinity the triangle tends to the all-ones mask, so the
-    tapered Sigma must tend to the untapered one. This pins the
-    normalisation (f(0) = 1) and that the weights multiply rather than
-    replace."""
-    ne, n_blocks, nbs = 9, 2, 3
-    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
-    N = int(block_sizes.sum())
-    grid = _chain_grid(N)
-    ref_l, ref_g, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
-                                        taper="none", grid=grid)
-    prev = None
-    for R in (1e3, 1e5, 1e7):
-        got_l, _, _, _ = _run_sigma_cut(phi, block_sizes, ne, make_buffers,
-                                        taper="triangular", radius=R,
-                                        grid=grid)
-        err = (np.abs(got_l - ref_l).max()
-               / max(np.abs(ref_l).max(), 1e-300))
-        if prev is not None:
-            assert err < prev, f"error must fall with R: {err} !< {prev}"
-        prev = err
-    assert prev < 1e-5, f"residual error at R=1e7 too large: {prev}"
-
-
-def test_cutoff_taper_requires_orbital_grid() -> None:
-    """Refuse to run a boxcar silently when a taper was asked for."""
-    ne, n_blocks, nbs = 9, 2, 3
-    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
-    with pytest.raises(ValueError, match="orbital grid"):
-        _run_sigma_cut(phi, block_sizes, ne, make_buffers,
-                       taper="triangular", grid=None)
-
-
-def test_cutoff_taper_nnz_distributed_slice(monkeypatch) -> None:
-    """In the "nnz" distribution state the buffer's last axis is this rank's
-    section of the global nnz axis, not the whole of it. spy() is global, so
-    the weights must be cut to the same section -- a mismatch here silently
-    misaligns every weight with the wrong entry, which is how the first
-    multi-rank taper run failed.
-    """
-    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
-
-    ne, n_blocks, nbs = 9, 2, 3
-    phi, _, _, block_sizes, _, make_buffers = _taper_fixture(n_blocks, nbs, ne)
-    N = int(block_sizes.sum())
-    grid = _chain_grid(N)
-    R = 4.0
-    cfg = _make_cfg("fft")
-    cfg.phonon.interaction_cutoff_taper = "triangular"
-    cfg.phonon.interaction_cutoff = R
-
-    class _Dev:
-        transport_direction = "z"
-    cfg.device = _Dev()
-    ssp = SigmaPhononPhonon(cfg, phonon_frequencies=np.linspace(0.0, 16.0, ne),
-                            block_sizes=block_sizes, phi_blocks=phi,
-                            orbital_grid=grid)
-    gl, *_ = make_buffers()
-    rows, cols = (np.asarray(get_host(a)) for a in gl.spy())
-    full = np.clip(1.0 - np.abs(grid[rows, 2] - grid[cols, 2]) / R, 0.0, None)
-    nnz = full.size
-
-    # Two fake sections; rank 1 is the short one, padded up to the longest.
-    n0 = nnz // 2
-    sizes = np.array([n0, nnz - n0])
-    offs = np.array([0, n0, nnz])
-    pad = int(sizes.max())
-
-    class _Buf:
-        distribution_state = "nnz"
-        nnz_section_sizes = sizes
-        nnz_section_offsets = offs
-
-        def __init__(self):
-            self.data = np.zeros((ne, pad), dtype=complex)
-
-        def spy(self):
-            return rows, cols
-
-    import quatrex.phonon.sse_phonon_phonon as _m
-    for r in (0, 1):
-        monkeypatch.setattr(_m.ranks.stack, "rank", r, raising=False)
-        ssp._taper_cache.clear()
-        w = np.asarray(get_host(ssp._cutoff_taper(_Buf(), xp)))
-        assert w.size == pad
-        n = int(sizes[r])
-        np.testing.assert_allclose(w[:n], full[offs[r]:offs[r] + n],
-                                   atol=1e-14)
-        assert np.all(w[n:] == 0.0), "padding beyond the section must be zero"
 
 
 # --------------------------------------------------------------------------

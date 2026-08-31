@@ -67,8 +67,7 @@ def hygiene() -> None:
 
 
 def run_rung(tag: str, L: int, g: int, bcs: int, nranks: int,
-             max_iter: int, taper: bool = False,
-             bind: str = "core") -> float:
+             max_iter: int, bind: str = "core") -> float:
     """Returns wall seconds (0.0 if skipped)."""
     d = OUT / tag
     npz = d / "run.npz"
@@ -84,14 +83,12 @@ def run_rung(tag: str, L: int, g: int, bcs: int, nranks: int,
                QX_SCATCONTACTS="0", QX_BBCHECK="1",
                QX_CONFIG=str(d / "quatrex_config.toml"),
                QX_NPZ=str(npz))
-    if taper:
-        env["QX_GBAND_TAPER"] = "bartlett"
     bind_args = (["--bind-to", "core", "--map-by", "core"]
                  if bind == "core" else
                  ["--bind-to", "core", "--map-by", "numa"])
     t0 = time.time()
     print(f"[run  ] {tag} (L={L} g={g} bcs={bcs} np={nranks} bind={bind} "
-          f"taper={taper} max_iter={max_iter})", flush=True)
+          f"max_iter={max_iter})", flush=True)
     with open(OUT / f"{tag}.log", "w") as log:
         rc = subprocess.run(
             ["mpirun", *bind_args, "-np", str(nranks),
@@ -173,8 +170,6 @@ def main() -> int:
     print("===== PHASE C: physics (L16 -> L24 -> L32) =====", flush=True)
     for L in (16, 24, 32):
         run_rung(f"L{L}_g3", L, 3, b_bcs, b_np, MAX_ITER, bind=b_bind)
-        run_rung(f"L{L}_g1t", L, 1, 2, b_np, MAX_ITER, taper=True,
-                 bind=b_bind)
     print("===== ALL PHASES COMPLETE =====", flush=True)
     return 0
 

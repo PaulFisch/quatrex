@@ -89,7 +89,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         dynamical_matrix: DSDBSparse | None = None,
         qfold: tuple | None = None,
         vfactors=None,
-        orbital_grid: NDArray | None = None,
     ) -> None:
         self.local_frequencies = np.asarray(phonon_frequencies)
 
@@ -126,27 +125,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._tau_chunk_bytes = int(config.phonon.sse_tau_chunk_bytes)
         self._release_legs = bool(
             getattr(config.phonon, "sse_release_leg_blocks", False))
-        # Positive-definite interaction cutoff (see
-        # phonon.interaction_cutoff_taper). The taper is a function of the
-        # transport-axis separation only, matching strategy="box".
-        self._cut_taper = str(
-            getattr(config.phonon, "interaction_cutoff_taper", "none")
-            or "none")
-        self._cut_radius = float(
-            getattr(config.phonon, "interaction_cutoff", 0.0) or 0.0)
-        _tdir = getattr(getattr(config, "device", None),
-                        "transport_direction", "z")
-        self._cut_axis = {"x": 0, "y": 1, "z": 2}.get(str(_tdir), 2)
-        self._orbital_grid = (None if orbital_grid is None
-                              else np.asarray(get_host(orbital_grid)))
-        self._taper_cache: dict[int, NDArray] = {}
-        if self._cut_taper != "none" and self._orbital_grid is None:
-            raise ValueError(
-                "phonon.interaction_cutoff_taper is set but no orbital grid "
-                "was supplied to SigmaPhononPhonon; the taper needs the "
-                "orbital positions the sparsity pattern was built from. "
-                "Refusing to run an untapered boxcar silently."
-            )
         self._perm_share = str(
             getattr(config.phonon, "sse_perm_cache_share", "off") or "off")
         self._pool_scope = str(
@@ -397,52 +375,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     "block_comm_size."
                 )
 
-        # PSD taper of the band mask. Bartlett weights w_d = 1 -
-        # d/(g_band+1) make the LEG mask PSD at any band, and the same taper
-        # on legs and Sigma output is the Phi-derivable pair, so energy
-        # conservation is retained.
-        #
-        # It restores OUTPUT positivity only at g_band = 1. The output band is
-        # pinned at |I-J| <= 1 regardless of g_band, and that tridiagonal
-        # symbol 1 + 2*w_1*cos(theta) needs w_1 <= 1/2. Decoupling the output
-        # weights from the leg weights would fix positivity and break the
-        # Phi-derivable pairing, so the combination is warned about rather
-        # than silently changed. Test: test_taper_is_psd_only_at_band_one.
-        # Implementation: the ring is linear in each factor, so the two
-        # G-leg weights and the output weight collapse to ONE scalar per
-        # quad, w(K1,K1') * w(K2,K2') * w(I,J), folded into the left
-        # vertex factor at the consumption sites (_phi_pre build for the
-        # nq==1 dense ring; the qtask weight for the coupled-q ring).
-        _taper = str(
-            getattr(config.phonon, "sse_g_band_taper", "none") or "none")
-        self._taper_w: list[float] | None = (
-            [1.0 - d / (self.g_band + 1.0) for d in range(self.g_band + 1)]
-            if _taper == "bartlett" else None
-        )
-        if self._taper_w is not None and self.g_band > 1:
-            warnings.warn(
-                f"sse_g_band_taper='bartlett' with sse_g_band="
-                f"{self.g_band} only restores PSD-ness of the inner G "
-                "legs, not of Sigma: the output band is pinned at "
-                "|I-J| <= 1, whose tapered Toeplitz symbol "
-                f"1 + 2*{self._taper_w[1]:.3g}*cos(theta) is indefinite "
-                "(needs w_1 <= 1/2, i.e. g_band = 1). Use g_band = 1 with "
-                "the taper, or g_band > 1 without it and treat the result "
-                "as the non-PSD upper bracket. See "
-                "phonon/docs/bubble_positivity.md.",
-                stacklevel=2,
-            )
-        if (self._taper_w is not None and self._vfactors is not None
-                and self._vf_kernel == "gram"):
-            raise NotImplementedError(
-                "sse_g_band_taper requires the dense ring: per-quad taper "
-                "weights do not factor through the Gram collapse "
-                "(decomposed_kernel='gram')."
-            )
         if self._micro_layout is not None:
             unsupported = []
-            if self._taper_w is not None:
-                unsupported.append("sse_g_band_taper")
             if self._g_from_l:
                 unsupported.append("sse_greater_from_lesser")
             if self._herm_pairs:
@@ -1090,14 +1024,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if m.distribution_state != "nnz":
                     m.dtranspose(discard=True)
             gl_in, gg_in = g_lesser.data, g_greater.data
-            # Positive-definite interaction cutoff on the LEGS. Theorem 1
-            # needs -i G^< >= 0 at the input; the stored boxcar pattern
-            # already destroys that whenever it truncates, so the taper has
-            # to hit the legs before the bubble runs, not just the output.
-            _tw = self._cutoff_taper(g_lesser, xp)
-            if _tw is not None:
-                gl_in = gl_in * _tw
-                gg_in = gg_in * _tw
             if self._pole_enabled and self._pole_channel is not None:
                 # Remove the pole sector from the LEGS, on the primary grid and
                 # before the DC mask and the aux interpolation: interpolating a
@@ -1335,10 +1261,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             )
             if (self._phi_pre is None and not use_factored
                     and self._micro_pair_index is None):
-                # The Bartlett taper weight (1.0 when off) is folded into
-                # the left vertex factor once here; every downstream ring
-                # (legacy, lin, fast, verify, hermitian mirror) is linear
-                # in PL and inherits it.
                 self._phi_pre = {}
                 # xp.asarray stages the host vertex factors to the
                 # device once here (free view under numpy). With the
@@ -1365,8 +1287,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 for (I, J), quads in self._phi_pair_index.items():
                     pre_list = []
                     for (K1, K2, K1p, K2p, pl, pr) in quads:
-                        w = self._quad_weight(I, J, K1, K1p, K2, K2p)
-                        pl_eff = pl if w == 1.0 else pl * w
+                        pl_eff = pl
                         pr_eff = pr
                         if self._ring_c64:
                             pl_eff = pl_eff * _sl
@@ -1859,10 +1780,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     _ss_g = _ss_g.copy(); _ss_g[out_mask] = 0.0
                 sl_data = sl_data + _ss_l
                 sg_data = sg_data + _ss_g
-            _tw_out = self._cutoff_taper(sigma_lesser, xp)
-            if _tw_out is not None:
-                sl_data = sl_data * _tw_out
-                sg_data = sg_data * _tw_out
             sigma_lesser.data[:] = sigma_lesser.data - sl_data
             sigma_greater.data[:] = sigma_greater.data - sg_data
             # Sigma^R contribution (from the RAW, textbook-signed values:
@@ -1881,20 +1798,16 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if bool(out_mask.any()):
                     # post-mask the retarded consistently with Sigma^<>
                     hil[out_mask] = 0.0
-                if _tw_out is not None:
-                    hil = hil * _tw_out
                 sigma_retarded.data[:] = sigma_retarded.data + hil
             if self._pole_enabled and self._pole_sigma_ss is not None:
                 # Closed-form Kramers-Kronig partner of the analytic sector.
                 # Routing it through the discrete Hilbert transform would both
                 # cost resolution and put back the grid dependence the sector
-                # removes. Masked and tapered exactly like the numerical half.
+                # removes. It uses the same endpoint mask as the numerical half.
                 _ss_r = self._pole_sigma_ss[2]
                 if bool(out_mask.any()):
                     _ss_r = _ss_r.copy()
                     _ss_r[out_mask] = 0.0
-                if _tw_out is not None:
-                    _ss_r = _ss_r * _tw_out
                 sigma_retarded.data[:] = sigma_retarded.data + _ss_r
             # Never let an injected channel survive into the next iteration: it
             # was built from THIS iterate's self-energy.
@@ -1981,70 +1894,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             f"model={flops / 1e9:.1f} GFLOP/pass",
             flush=True,
         )
-
-    def _cutoff_taper(self, buf, xp):
-        """Length-nnz weights of the positive-definite interaction cutoff.
-
-        Returns ``None`` when the taper is off, so the legacy boxcar path is
-        untouched. Otherwise ``w[n] = max(0, 1 - |z_i - z_j| / R)`` for the
-        n-th stored entry, aligned with the LAST axis of ``buf.data`` in the
-        stack distribution state (which spans the full nnz).
-
-        Applying this to the G legs and to the Sigma contribution is exactly
-        the Hadamard product ``A -> A o M`` of the positivity note, with
-        ``M_ij = f(z_i - z_j)`` and ``f`` positive definite -- so by Bochner
-        and the Schur product theorem it preserves ``-i G^< >= 0``, which the
-        boxcar does not.
-        """
-        if self._cut_taper == "none":
-            return None
-        nnz_local = int(buf.data.shape[-1])
-        state = getattr(buf, "distribution_state", "stack")
-        key = (nnz_local, state)
-        w = self._taper_cache.get(key)
-        if w is not None:
-            return w
-
-        rows, cols = buf.spy()
-        rows = np.asarray(get_host(rows), dtype=int)
-        cols = np.asarray(get_host(cols), dtype=int)
-        z = self._orbital_grid[:, self._cut_axis]
-        d = np.abs(z[rows] - z[cols])
-        if self._cut_taper != "triangular":         # pragma: no cover
-            raise ValueError(self._cut_taper)
-        w_full = np.clip(1.0 - d / self._cut_radius, 0.0, None)
-
-        if w_full.size != nnz_local:
-            # In the "nnz" distribution state the last axis is this rank's
-            # greedy section of the global nnz axis, padded up to the largest
-            # section (dsdbsparse.py:232-252). `spy()` is global, so it has to
-            # be cut to the same section -- getting this wrong silently
-            # misaligns weights with entries, so anything unexpected raises
-            # rather than broadcasts.
-            offs = getattr(buf, "nnz_section_offsets", None)
-            sizes = getattr(buf, "nnz_section_sizes", None)
-            if offs is None or sizes is None:
-                raise ValueError(
-                    f"interaction_cutoff_taper: buffer has {nnz_local} local "
-                    f"entries against {w_full.size} in the pattern, and "
-                    f"exposes no nnz sectioning to reconcile them.")
-            offs = np.asarray(get_host(offs), dtype=int)
-            sizes = np.asarray(get_host(sizes), dtype=int)
-            r = int(ranks.stack.rank)
-            if r >= sizes.size or nnz_local < int(sizes[r]):
-                raise ValueError(
-                    f"interaction_cutoff_taper: stack rank {r} has "
-                    f"{nnz_local} local entries but its nnz section is "
-                    f"{sizes[r] if r < sizes.size else 'absent'}.")
-            lo, n = int(offs[r]), int(sizes[r])
-            # Entries past this rank's section are allocation padding and are
-            # never read; zero is the safe filler.
-            seg = np.zeros(nnz_local, dtype=float)
-            seg[:n] = w_full[lo:lo + n]
-            w_full = seg
-        w = xp.asarray(w_full)
-        self._taper_cache[key] = w
-        return w
 
     @staticmethod
     def _qfold_is_translation_invariant(qv, xp) -> bool:
@@ -2695,14 +2544,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                     xp.conj(xp.asarray(pl)), xp.asarray(pr), xp
                                 )
                                 perm_cache[pkey] = pre
-                            # Taper weight OUTSIDE the perm cache: pkey is
-                            # shared across the block row (bulk_vertex), but
-                            # the weight depends on the absolute |I-J| and
-                            # link distances of THIS quad.
                             qtasks.setdefault((I, J), []).append(
-                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p,
-                                 self._quad_weight(I, J, K1, K1p, K2, K2p))
-                                + pre)
+                                (iq_ext, iqp, iq2, K1, K1p, K2, K2p) + pre)
             self._qtasks_cache_key = cache_key
             self._qtasks_cache = qtasks
 
@@ -2717,7 +2560,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             flops = 0.0
             for tasks in qtasks.values():
                 for t in tasks:
-                    PL, PR, nI, bK2, nJ = t[8], t[9], t[10], t[11], t[12]
+                    PL, PR, nI, bK2, nJ = t[7], t[8], t[9], t[10], t[11]
                     bK1 = PL.shape[1]
                     bK2p = PR.shape[0]
                     bK1p = PR.shape[1] // nJ
@@ -2753,7 +2596,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                          if need_x else None)
                 out_t56 = (xp.zeros((hi - lo, nq, bs_I, bs_J), dtype=dtype)
                            if verify_now else None)
-                for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, wq, *pre) in tasks:
+                for (iq_ext, iqp, iq2, K1, K1p, K2, K2p, *pre) in tasks:
                     gla = gl_a[(K1, K1p)][lo:hi, iqp - a_off]
                     glb = gl_b[(K2, K2p)][lo:hi, iq2 - b_off]
                     ggra = ggr_a[(K1, K1p)][lo:hi, iqp - a_off]
@@ -2796,13 +2639,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                             glr_a[(K1, K1p)][lo:hi, iqp - a_off],
                             glr_b[(K2, K2p)][lo:hi, iq2 - b_off],
                         )
-                    if wq != 1.0:
-                        sl *= wq
-                        sg *= wq
-                        if tx is not None:
-                            tx *= wq
-                        if t56 is not None:
-                            t56 *= wq
                     out_l[:, iq_ext] += sl
                     out_g[:, iq_ext] += sg
                     if tx is not None:
@@ -2927,7 +2763,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # group tasks by ring shape (uniform blocks -> one group)
                 groups: dict[tuple, list] = {}
                 for t in tasks:
-                    PL, PR, nI, bK2, nJ = t[8], t[9], t[10], t[11], t[12]
+                    PL, PR, nI, bK2, nJ = t[7], t[8], t[9], t[10], t[11]
                     groups.setdefault(
                         (PL.shape, PR.shape, nI, bK2, nJ), []).append(t)
                 for (shpL, shpR, nI, bK2, nJ), ts in groups.items():
@@ -2965,11 +2801,10 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     # on the replicated path.
                     qa = xp.asarray([t[1] for t in ts], dtype=xp.int64) - a_off
                     qb = xp.asarray([t[2] for t in ts], dtype=xp.int64) - b_off
-                    wq = xp.asarray([t[7] for t in ts], dtype=xp.float64)
                     for c0 in range(0, Tn, C):
                         c1 = min(c0 + C, Tn)
-                        PLc = xp.stack([t[8] for t in ts[c0:c1]])
-                        PRc = xp.stack([t[9] for t in ts[c0:c1]])
+                        PLc = xp.stack([t[7] for t in ts[c0:c1]])
+                        PRc = xp.stack([t[8] for t in ts[c0:c1]])
                         PLc = PLc[:, None]            # (C,1,nIbK2,bK1)
                         PRc = PRc[:, None]            # (C,1,bK2p,bK1pnJ)
                         ai, bi = a_id[c0:c1], b_id[c0:c1]
@@ -3033,14 +2868,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                                     Ga, Gb = _legs(A, B)
                                     s = _ring(Ga, Gb)
                                     sg = s if sg is None else sg + s
-                            wc = wq[c0:c1]
-                            if bool((wc != 1.0).any()):
-                                sl = sl * wc[:, None, None, None]
-                                sg = sg * wc[:, None, None, None]
-                                if tx is not None:
-                                    tx = tx * wc[:, None, None, None]
-                                if t56 is not None:
-                                    t56 = t56 * wc[:, None, None, None]
                             _scatter_add_q(
                                 out_l[w0:w1], iqe[c0:c1],
                                 sl.astype(dtype, copy=False))
@@ -3378,18 +3205,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             [data, xp.zeros(pad_shape, dtype=data.dtype)], axis=0
         )
         return xp.fft.fft(padded, axis=0)
-
-    def _quad_weight(
-        self, I: int, J: int, K1: int, K1p: int, K2: int, K2p: int,
-    ) -> float:
-        """Bartlett taper weight of one ring quad: the product of the two
-        inner G-link weights and the Sigma output-block weight (the ring is
-        linear in each factor, so the three Schur-taper applications
-        collapse to this one scalar). 1.0 when the taper is off."""
-        if self._taper_w is None:
-            return 1.0
-        w = self._taper_w
-        return w[abs(K1 - K1p)] * w[abs(K2 - K2p)] * w[abs(I - J)]
 
     def _links_for_range(self, a: int, b: int) -> set[tuple[int, int]]:
         """Distinct inner G band links needed by outputs owned

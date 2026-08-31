@@ -65,9 +65,10 @@ def test_cm_subtraction_switch_is_removed():
         "buttiker_probe", "sse_vertex_scale", "sse_cross_slab_scale",
         "sse_ramp_iterations", "sse_low_freq_mask_thz",
         "low_freq_mixing_thz", "low_freq_mixing_factor",
+        "sse_g_band_taper", "interaction_cutoff_taper",
     ),
 )
-def test_broadening_switches_are_removed(name):
+def test_deprecated_phonon_switches_are_removed(name):
     with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs"):
         PhononConfig(**{name: 1})
 

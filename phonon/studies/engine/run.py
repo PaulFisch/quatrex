@@ -73,7 +73,6 @@ if os.environ.get("QX_VERTEX_RANK"):
     cfg.phonon.sse_vertex_rank = int(os.environ["QX_VERTEX_RANK"])
 if os.environ.get("QX_DECOMPOSED_KERNEL"):
     cfg.phonon.decomposed_kernel = os.environ["QX_DECOMPOSED_KERNEL"]
-if os.environ.get("QX_GBAND_TAPER"): cfg.phonon.sse_g_band_taper = os.environ["QX_GBAND_TAPER"]
 if os.environ.get("QX_SCATCONTACTS"): cfg.phonon.obc_scattering_contacts = bool(int(os.environ["QX_SCATCONTACTS"]))
 if os.environ.get("QX_BBCHECK"):  cfg.phonon.bubble_balance_check = bool(int(os.environ["QX_BBCHECK"]))
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
@@ -804,13 +803,11 @@ if ranks.rank == 0:
         sse_aux_grid_dw_thz=float(cfg.phonon.sse_aux_grid_dw_thz),
         sse_aux_grid_fmax_thz=float(cfg.phonon.sse_aux_grid_fmax_thz),
         eta_obc=0.0,
-        sse_g_band_taper=str(cfg.phonon.sse_g_band_taper),
         sse_greater_from_lesser=bool(cfg.phonon.sse_greater_from_lesser),
         scp_tadpole=bool(cfg.phonon.scp_tadpole),
         scp_loop=bool(cfg.phonon.scp_loop),
         pole_sector_enabled=bool(cfg.phonon.pole_sector.enabled),
         interaction_cutoff=float(cfg.phonon.interaction_cutoff),
-        interaction_cutoff_taper=str(cfg.phonon.interaction_cutoff_taper),
         sigma_convergence_tol=float(cfg.phonon.sigma_convergence_tol),
         heat_flow_conservation_tol=float(
             cfg.phonon.heat_flow_conservation_tol),
