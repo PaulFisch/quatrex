@@ -1249,10 +1249,11 @@ a relative self-energy residual of \(10^{-4}\).
 The discretisation campaign precedes every length extension.  At fixed q=5,
 161 and 321 primary frequency points over 0--40 THz are compared while the
 auxiliary convolution grid is refined consistently from 0.25 to 0.125 THz.
-A 641-point, 0.0625 THz calculation is required if the first refinement moves
-the conductance by more than 0.2 per cent.  At fixed 161 points, q=5, 7 and 9
-form the transverse sequence.  q=13 is required if q=7 to q=9 does not satisfy
-the same gate.  Every target functional is converged independently; periodic
-convex interpolation of the preceding checkpoint supplies only its initial
-state.  The exact-dense q=9 input is job 4561701.  The machine-readable table
-is `phonon/scripts/data/si_discretization_convergence.csv`.
+A 641-point primary grid and 0.0625 THz auxiliary grid provide the second
+required refinement; 1281 points are required if 321 to 641 does not satisfy
+the 0.2 per cent gate.  At fixed 161 points, q=5, 7 and 9 form the transverse
+sequence.  q=13 is required if q=7 to q=9 does not satisfy the same gate.
+Every target functional is converged independently; periodic convex
+interpolation of the preceding checkpoint supplies only its initial state.
+The exact-dense q=9 input is job 4561701.  The machine-readable table is
+`phonon/scripts/data/si_discretization_convergence.csv`.
