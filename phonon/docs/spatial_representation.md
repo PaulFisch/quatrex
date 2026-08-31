@@ -13,7 +13,7 @@ untracked.
 
 ## Verdict
 
-**The analytic / modal route is dead.** Supplying `G`'s far blocks from an
+**The one-sided fitted modal route is dead.** Supplying `G`'s far blocks from an
 exponential fit and rebuilding `Sigma` from them (arms E and F) loses to plain
 reblocking by 12x on a 1-DOF chain, and at 4 DOF per cell it does not merely
 lose -- it collapses, driving the lead current to `-4e-23` and `-6e-12` against
@@ -21,27 +21,29 @@ a reference `1.7e-09`. The mechanism is in Sec. 20: the modal fit's median
 far-block error rises from 9.0e-02 to 9.3e-01 between `d = 1` and `d = 4`, and
 it refuses 124 of 241 frequencies. More degrees of freedom mean more
 near-degenerate modes in the pencil, so the route gets worse exactly where a
-real device lives.
+real device lives.  This result does not cover cell-dependent bidirectional
+states generated inside the bubble.
 
-**The bidirectional semiseparable route is a correct representation whose cost
-is undecided.** It is exact at its rank, converges monotonically where
-reblocking does not converge at all, and preserves the positivity structure for
-free. It has never been cheaper than the incumbent on any bed measured: at
-`d = 4` a 4-cell reblock costs `16x` the pin for `eps(J_L) = 4.66e-04` where the
-nearest semiseparable arm costs `125x` for `5.04e-04`.
+**Post-hoc bidirectional compression is settled against.** It is exact at full
+rank and preserves the Keldysh symmetry, but the completed `d = 8` bed does not
+cross over.  A 2-cell reblock has current error `1.31e-4`; the nominally
+narrower S2 arm has `2.19e-3` and a `6.62e-3` lead imbalance.  S4 already has
+the same width as reblocking and is still less accurate.  Higher ranks exceed
+the reblock width.
 
-**What would settle it.** Two trends compete and only their product matters.
-The rank needed at matched accuracy is FLAT in the DOF count -- 6, 8, 4 at
-`d = 1, 2, 4` -- so the cost of matching a reblock falls `2197x -> 729x -> 27x`,
-pointing at a crossing near `d ~ 8-16`, below a real Si or CNT cell at
-`d = 24-96`. Against that, `r_Sigma` grows like `N^0.75` in device LENGTH. The
-product has not been measured because **no bed survives long enough**: the
-16-cell chains converge, `N = 24` diverges outright, and no real device admits
-a frozen state at `eta = 0` at all. One `d = 8` bed at fixed `N` is the cheapest
-decisive step.
+**A different direct-generator route remains open.**  The SCBA far bubble
+closes exactly under Kronecker products of bidirectional SSS transitions, and
+the resulting Dyson matrix has a sparse recurrence extension.  The old
+`N(d+2r)^3` cost treated that extension as dense.  Keeping the near shells
+exact and carrying generators between SCBA steps avoids the interface-rank
+penalty of fitting the completed dense Sigma.  The derivation and private
+prototype are in
+[`conserving_long_range_tail.md`](conserving_long_range_tail.md).  It still
+needs streaming state reduction, a specialised SSS/ULV solve and a closed CNT
+SCBA conservation test.
 
-Nothing here should be implemented in `src/quatrex/` until that measurement
-exists.
+Nothing here should be implemented in `src/quatrex/` until those direct-state
+gates pass.
 
 ---
 
@@ -1409,6 +1411,34 @@ because quoting either alone misleads.
 The rank is robust to convergence: a 6-iteration probe of the same bed gave the
 same `17`.
 
+### `d = 6`, and the mechanism behind the `d = 8` verdict
+
+`d = 6` on the same 16 cells (`resid = 5.29e-08`, stopped at the 800-iteration
+cap rather than at tolerance -- immaterial for a rank read at 1e-2):
+
+| bed | `N` | `d` | `r_Sigma` b1 @1e-2 | cap | aug `d+2r` | `(aug/d)^3` |
+|---|---|---|---|---|---|---|
+| `multi2_L20` | 20 | 2 | 11 | 34 | 24 | 1728 |
+| `multi4_L16` | 16 | 4 | 17 | 48 | 38 | **857** |
+| `multi6_L16` | 16 | 6 | 26 | 72 | 58 | **903** |
+
+Between the two beds matched in length, `d = 4` and `d = 6`, the exact-rank cost
+ratio **stopped falling and rose slightly**, 857 to 903. (`multi2_L20` is at 20
+cells and carries some of Sec. 16's `N^0.75` length growth, so it is not a clean
+third point.) `r/d` reads 5.5, 4.25, 4.33: **`r_Sigma` grows linearly in `d`**,
+at about `4.3 d` on a 16-cell bed, which fixes the augmented width near `9.6 d`
+whatever `d` is. The exact-rank route therefore saturates around `900x` the pin
+and never approaches a reblock's `4x` to `16x`; it does not improve with a
+bigger cell.
+
+This is the mechanism behind the `d = 8` result in the Verdict. A post-hoc
+compression of a completed dense `Sigma` has to pay a state count proportional
+to `d`, so the width it needs grows exactly as fast as the reblock width it is
+trying to undercut, and the crossing that Sec. 20's three iso-accuracy points
+(6, 8, 4) appeared to promise does not arrive. Those three points were thin
+support -- they do not order monotonically -- and `d = 8` measured the accuracy
+directly rather than extrapolating from them.
+
 ## 23. The length axis is blocked
 
 Sec. 16 measured `r_Sigma` growing like `N^0.75` over `N = 16 -> 32`, and
@@ -1432,8 +1462,8 @@ at all. **Every number in Parts I and II is therefore on 12-to-20-cell synthetic
 chains**, and the length extrapolation is one measured decade with no
 confirmation available.
 
-Still pending at the time of writing: the `d = 6` bed, which would add a fourth
-point to Sec. 20's DOF ladder. It is stated as pending rather than guessed.
+The `d = 6` bed has since completed and is reported in Sec. 22; it added the
+fourth DOF point and pointed the same way the `d = 8` arm ladder later settled.
 
 ---
 
@@ -1466,7 +1496,7 @@ frequencies (Sec. 17), after correcting the coarse-grid artefact of Sec. 14.
 Krylov basis reaches `N_D` exactly, so a solve costs `N_D` matvecs and the
 compression buys nothing at solve time.
 
-## 25. What is not settled, and the one measurement that would settle it
+## 25. The `d = 8` measurement settles the post-hoc Arm S question
 
 Arm S has never been cheaper than the incumbent on any bed. At `d = 4`:
 
@@ -1482,17 +1512,37 @@ Reblocking wins every row. What has changed is the size of the gap: roughly
 `500x` at `d = 1`, roughly `3x` at `d = 4`, because the rank needed at matched
 accuracy is flat in `d` (6, 8, 4) while the reblock's width is not.
 
-So the decisive quantity is `r_Sigma(d, N)` jointly, and the cheapest step is
-**one `d = 8` bed at fixed `N = 16`**. If the matching rank stays near 4, the
-augmented block undercuts a 2-cell reblock somewhere near `d ~ 8-16` and a real
-Si or CNT cell at `d = 24-96` is past it, and an implementation has a case. If
-it flattens at the `d = 4` gap, the programme is finished and this document is
-the deliverable.
+The missing `d = 8`, `N = 16` bed was run on Alps as job 4552671.  The
+coupling `1.25e15` continues the converged `d = 1,2,4` sequence; the first
+generic `3e17` attempt diverged and was stopped rather than stabilised with a
+finite `eta`.  The corrected bed converged in 98 iterations at `eta = 0`, with
+residual `9.32e-9` and conservation `3.10e-4`.
 
-Until then nothing here should be ported into `src/quatrex/`: it would be a
-representation that is correct, positivity-preserving, and about three times too
-expensive in the only regime measured, with an unquantified length penalty on
-top.
+| arm | augmented width | `eps(J_L)` | lead imbalance |
+|---|---:|---:|---:|
+| 2-cell reblock | 16 | **1.31e-4** | **4.70e-7** |
+| S2 | 12 | 2.19e-3 | 6.62e-3 |
+| S4 | 16 | 2.29e-3 | 3.13e-3 |
+| S6 | 20 | 4.11e-3 | 3.24e-4 |
+| S8 | 24 | 4.31e-3 | 6.06e-5 |
+
+Rank 2 is nominally narrower than reblocking, but it misses the current and
+current balance.  Rank 4 already has the same nominal width and is still an
+order of magnitude less accurate in current.  Higher ranks improve balance
+but exceed the reblock width and do not improve the current monotonically.
+Post-hoc global semiseparable compression of the completed self-energy is
+therefore a no-go on this bed at matched accuracy.
+
+The bed also says that no expensive tail treatment is warranted for this toy:
+the full-output `C -> D` current change is `8.12e-4`, below the pre-registered
+`9.31e-4` numerical floor, while the 2-cell reblock is already at `1.31e-4`.
+
+This does not reject the direct-generator construction derived later in
+[`conserving_long_range_tail.md`](conserving_long_range_tail.md).  That method
+keeps the near band exact, generates SSS states inside the bubble, and uses the
+sparse recurrence rather than fitting the completed dense Sigma.  It has a
+different rank and cost gate.  It remains a research path; Arm S itself should
+not be ported into `src/quatrex/`.
 
 ---
 

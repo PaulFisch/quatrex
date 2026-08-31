@@ -1,0 +1,50 @@
+{
+  "L3": {
+    "n_cells": 3,
+    "cell_dof": 6,
+    "n_q": 81,
+    "n_clusters": 195,
+    "n_invalid_passive_clusters": 195,
+    "source_psd_floor_min": -8.428512495121216,
+    "source_variation": {
+      "median": 9.633950381412395,
+      "p90": 72.16982564891808,
+      "max": 146.8910540132006
+    },
+    "input_poles_per_q": {
+      "median": 0.0,
+      "max": 0,
+      "total": 0
+    },
+    "input_mode_effective_cells": {
+      "median": 2.8576688224199547,
+      "p90": 2.987121819916083,
+      "max": 2.997213314687867
+    },
+    "qfold_status": "refused because at least one source is materially non-passive"
+  },
+  "L8": {
+    "n_cells": 8,
+    "cell_dof": 6,
+    "n_q": 81,
+    "n_clusters": 365,
+    "n_invalid_passive_clusters": 365,
+    "source_psd_floor_min": -11.231266553097415,
+    "source_variation": {
+      "median": 13.79451657390651,
+      "p90": 280.53338866871803,
+      "max": 642.297173396344
+    },
+    "input_poles_per_q": {
+      "median": 0.0,
+      "max": 0,
+      "total": 0
+    },
+    "input_mode_effective_cells": {
+      "median": 7.163896404916391,
+      "p90": 7.927451602670576,
+      "max": 7.993257370092807
+    },
+    "qfold_status": "refused because at least one source is materially non-passive"
+  }
+}
