@@ -119,9 +119,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
                 "the negative axis is handled by the bosonic fold in the SSE."
             )
         self.local_frequencies = get_local_slice(frequencies, comm.stack)
-        # Per-bin quadrature cell widths + uniformity flag: every heat/energy
-        # integral uses these.  A uniform grid supplies the constant dw; it
-        # cancels from balance ratios but is required for an absolute current.
         from quatrex.grid.energies import (
             frequency_cell_widths, is_uniform_grid)
         self.local_frequency_weights = get_local_slice(
@@ -135,17 +132,11 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             shift_kpoints=False
         )
 
-        # Make sure that the system matrix sparsity is a superset of
-        # self-energy and Dynaimcal Matrix sparsity.
         sparsity_pattern += dynamical_matrix_sparsity_pattern
 
         del dynamical_matrix_sparsity_pattern
         self.block_sizes = self.dynamical_matrix.block_sizes
 
-        # With one finite Dyson block the two periodic FC2 couplings are not
-        # present in the finite matrix, but remain available in the unit-cell
-        # input.  Retain them for the exact two-contact OBC.  The minus sign is
-        # the Dyson convention A = omega^2 I - D - Sigma^R.
         self._single_block_periodic = None
         self._single_block_contacts = None
         if len(self.block_sizes) == 1:
@@ -165,8 +156,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             dtype=self.dynamical_matrix.dtype
         )
 
-        # The system matrix is allocated per solve and freed again, so it does
-        # not sit alongside the interaction buffers.
         self.system_matrix = config.compute.dsdbsparse_type.from_sparray(
             sparsity_pattern.astype(xp.complex128),
             block_sizes=self.block_sizes,
@@ -186,11 +175,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
 
         self.compute_meir_wingreen_current = config.phonon.solver.compute_current
 
-        # sse_g_band = k: the SSE bubble consumes the G^{<,>} blocks out to
-        # the k-th off-diagonal, so the selected solve must produce them. The
-        # RGF takes this as an integer off-diagonal band (1 = block-tridiagonal
-        # only, 2 = + second off-diagonal, 3 = + third). Clamped to the
-        # widest off-diagonal the device has.
         micro_dof = int(
             getattr(config.phonon, "sse_microblock_dof", 0) or 0)
         self._gf_band = min(
@@ -198,17 +182,10 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
              int(getattr(config.phonon, "sse_g_band", 1) or 1)),
             len(self.block_sizes) - 1,
         )
-        # Experimental rational-state sidecar.  It is installed explicitly by
-        # a fixed-basis SCBA representation (or a frozen-state validation),
-        # never inferred from the sampled Sigma buffers.  Keeping the default
-        # ``None`` makes the established RGF path bit-identical.
         self._auxiliary_channel = None
         self._auxiliary_rgf = None
         self._solver_max_batch_size = int(config.phonon.solver.max_batch_size)
 
-        # GW-style self-consistent contacts: compute the OBC AFTER Sigma^R
-        # is folded into the system matrix, dressing the periodic lead
-        # superblocks with the boundary slab's scattering self-energy.
         self._obc_scattering_contacts = bool(
             getattr(config.phonon, "obc_scattering_contacts", False)
         )
@@ -225,11 +202,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             xp.isfinite(self.left_occupancies), self.left_occupancies, 0.0)
         self.right_occupancies = xp.where(
             xp.isfinite(self.right_occupancies), self.right_occupancies, 0.0)
-        # NOTE: the full physical Bose occupation is kept at all omega > 0:
-        # the lead broadening Gamma(omega) is odd (Gamma(0) = 0, ~omega for
-        # acoustic modes), so Gamma*n stays finite as omega -> 0 even though
-        # n ~ kT/(hbar*omega) diverges. Only the omega = 0 bin is clipped
-        # above (its injection is ~0 since Gamma(0) = 0).
 
         self.obc_blocks = OBCBlocks(num_blocks=self.system_matrix.num_local_blocks)
         self.block_sections = config.phonon.obc.block_sections
@@ -238,11 +210,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             self.system_matrix.num_blocks, comm.block.size
         )
 
-        # Pole-subtracted SCBA sector. The pole set is a deterministic function
-        # of the mixed self-energy, so it is recomputed every iteration and only
-        # warm-started from the previous one -- it is deliberately NOT part of
-        # the mixed state (that would make the Anderson/RRE least-squares
-        # rank-deficient and invalidate the exact Newton JVP).
         _ps = getattr(config.phonon, "pole_sector", None)
         self._pole_enabled = bool(_ps is not None and _ps.enabled)
         self._pole_cfg = _ps
@@ -252,9 +219,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
         self.pole_q_states = []      # coupled-q: (q index, state) per solved q
         self.psd_report = {}         # last positivity gate result, if enabled
         self._psd_sigma = None       # Sigma buffers for the gate, if enabled
-        # A congruence is PSD exactly, so anything above roundoff on the
-        # normalised eigenvalue is structural rather than numerical. The
-        # normalisation is global, so this is a single scale-free number.
         self._psd_tol = 1e-10
 
     @profiler.profile(label="PhononSolver: OBC", level="default", comm=comm)
@@ -280,11 +244,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             # Apply the retarded boundary self-energy.
             sigma_00 = m_10 @ g_00 @ m_01
             if len(self.system_matrix.global_stack_shape) == 1:
-                # Gamma-only (real-symmetric D): the exact contact Sigma^R is
-                # complex-SYMMETRIC, but the NEVP eigenvector construction
-                # breaks the symmetry, which propagates into G and breaks
-                # the bosonic fold of the SSE. Project back onto the
-                # symmetric subspace.
                 sigma_00 = 0.5 * (sigma_00 + sigma_00.swapaxes(-2, -1))
             self.obc_blocks.retarded[0] = sigma_00
             gamma_00 = 1j * (sigma_00 - sigma_00.conj().swapaxes(-2, -1))
@@ -307,9 +266,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             m = n - 1
 
             if one_block:
-                # This is exactly the result of the established flip/get/flip
-                # construction with a_ji=m_01 and a_ij=m_10 at
-                # block_sections=1.
                 m_mn = self._single_block_periodic[1]
                 m_nn = self.system_matrix.blocks[0, 0]
                 m_nm = self._single_block_periodic[0]
@@ -337,8 +293,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             # ... bop it.
             g_nn = xp.flip(g_nn, axis=(-2, -1))
 
-            # NOTE: Here we could possibly do peak/discontinuity detection
-            # on the surface Green's function DOS (not same as actual DOS).
 
             # Apply the retarded boundary self-energy.
             sigma_nn = m_mn @ g_nn @ m_nm
@@ -368,9 +322,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
                         "one-block OBC requires block_comm_size=1"
                     )
                 self._single_block_contacts = (left_contact, right_contact)
-                # The Green function sees the sum of both reservoirs on the
-                # same device block.  Keep the individual triples above for
-                # the two separate Meir-Wingreen lead currents.
                 self.obc_blocks.retarded[0] = (
                     left_contact[0] + right_contact[0]
                 )
@@ -445,12 +396,6 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
             and one_block_contacts is None
         )
         if comm.block.size > 1:
-            # NOTE: mirror the single-block branch -- the distributed RGF
-            # also returns the (block-all-reduced) lead heat current when
-            # asked. Without this the block-parallel path leaves
-            # ``meir_wingreen_current`` unset, so the heat-flow convergence
-            # criterion (the only valid one for the anharmonic phonon SCBA)
-            # never fires and no conductance can be extracted.
             self.meir_wingreen_current = self.solver_dist.selected_solve(
                 a=self.system_matrix,
                 sigma_lesser=sse_lesser,
@@ -563,24 +508,13 @@ class PhononSolver(PoleRuntimeMixin, SubsystemSolver):
         self._assemble_system_matrix()
 
         if self._obc_scattering_contacts:
-            # GW-style self-consistent contacts: fold Sigma^R into the
-            # system matrix FIRST, so the periodic lead superblocks (built
-            # from the boundary blocks) carry the boundary slab's
-            # scattering self-energy, and the contact injection is the
-            # fluctuation-dissipation pair of the dressed escape rate.
-            # At iteration 0 (Sigma = 0) this degenerates to bare leads.
             _btd_subtract(self.system_matrix, sse_retarded)
             self._compute_obc()
         else:
-            # OBC from the bare harmonic blocks (ideal-reservoir
-            # contacts); the scattering self-energy enters the device
-            # Dyson only.
             self._compute_obc()
             _btd_subtract(self.system_matrix, sse_retarded)
         self._selected_solve(sse_lesser, sse_greater, out)
 
-        # Must run BEFORE free_data(): the pole solve reads the assembled
-        # operator's blocks.
         self._update_pole_sector(sse_lesser, sse_greater, out[2], out[0])
         self._psd_sigma = (sse_lesser, sse_greater)
         self._check_positivity(out)
