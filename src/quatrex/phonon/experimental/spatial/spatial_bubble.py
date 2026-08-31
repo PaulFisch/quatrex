@@ -14,7 +14,7 @@ differently:
 
 * ``_spatial_tail_tails.sigma_decompressed`` fits the :math:`G^{<,>}`
   block sequence itself
-  (block-ESPRIT, :mod:`quatrex.phonon.spatial_hankel`). Cheapest, and it does
+  (block-ESPRIT, :mod:`quatrex.phonon.experimental.spatial.spatial_hankel`). Cheapest, and it does
   not preserve the matrix sign structure.
 * ``_spatial_tail_tails.sigma_congruence`` continues :math:`G^R` modally and
   rebuilds
@@ -146,7 +146,7 @@ def analytic_tail(psi, series_a, series_b, r_values, *, freqs_thz,
     r"""``{R: Sigma_R(Omega)}`` in the pure-tail region, by the modal-pair sum.
 
     ``series_a[iw]`` / ``series_b[iw]`` are per-frequency
-    :class:`~quatrex.phonon.spatial_fit.ModalSeries` for the two legs, or
+    :class:`~quatrex.phonon.experimental.spatial.spatial_fit.ModalSeries` for the two legs, or
     ``None`` where the pencil had nothing usable at that frequency (those
     samples contribute zero and are counted in the return).
 

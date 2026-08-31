@@ -194,7 +194,7 @@ def _blocks(omega, sigma=0.0):
 def test_the_nevp_reproduces_the_closed_form_roots(frac):
     """The fixed point of reusing the OBC's solver: handed the chain's own
     blocks it must return the quadratic's roots."""
-    from quatrex.phonon.spatial_modes import bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes
 
     omega = frac * BAND_TOP
     got = np.asarray(bloch_modes(*_blocks(omega)).lam)
@@ -217,7 +217,7 @@ def test_an_undressed_in_band_mode_has_no_range_at_all():
     undressed operator is that no mask is long enough, and the reply is a modal
     representation rather than a wider one.
     """
-    from quatrex.phonon.spatial_modes import band_range_cells, bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import band_range_cells, bloch_modes
 
     modes = bloch_modes(*_blocks(0.5 * BAND_TOP))
     assert modes.propagating().all()
@@ -228,7 +228,7 @@ def test_an_undressed_in_band_mode_has_no_range_at_all():
 @pytest.mark.parametrize("gamma_s", [0.05, 0.5, 5.0])
 def test_dressing_gives_a_propagating_mode_a_finite_mean_free_path(gamma_s):
     r"""The substitution the spatial leg turns on, Eq. (144)."""
-    from quatrex.phonon.spatial_modes import band_range_cells, bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import band_range_cells, bloch_modes
 
     blocks = _blocks(0.5 * BAND_TOP, sigma=-1j * gamma_s)
     modes = bloch_modes(*blocks)
@@ -249,7 +249,7 @@ def test_the_mean_free_path_scales_as_one_over_the_damping():
     of cells off a device says a band of a few cannot be right, whatever the
     convergence table appears to show.
     """
-    from quatrex.phonon.spatial_modes import band_range_cells
+    from quatrex.phonon.experimental.spatial.spatial_modes import band_range_cells
 
     xis = [band_range_cells(*_blocks(0.5 * BAND_TOP, sigma=-1j * g))
            for g in (0.05, 0.5, 5.0)]
@@ -265,7 +265,7 @@ def test_a_short_band_discards_weight_the_range_predicts():
     ``xi``. At ``xi = 55`` cells a band of 3 keeps 95 % of the amplitude it
     should have removed -- which is a truncation in name only.
     """
-    from quatrex.phonon.spatial_modes import band_range_cells
+    from quatrex.phonon.experimental.spatial.spatial_modes import band_range_cells
 
     xi = band_range_cells(*_blocks(0.5 * BAND_TOP, sigma=-0.5j))
     assert xi == pytest.approx(55.4, rel=0.02)
@@ -274,7 +274,7 @@ def test_a_short_band_discards_weight_the_range_predicts():
 
 
 def test_non_square_blocks_are_refused():
-    from quatrex.phonon.spatial_modes import bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes
 
     with pytest.raises(ValueError, match="square"):
         bloch_modes(np.zeros((2, 3)), np.zeros((2, 3)), np.zeros((2, 3)))
@@ -283,7 +283,7 @@ def test_non_square_blocks_are_refused():
 def test_decay_lengths_label_each_character_distinctly():
     """A growing partner gets ``nan``, not a negative length -- otherwise a
     ``min`` over the array silently returns it as the binding range."""
-    from quatrex.phonon.spatial_modes import decay_lengths
+    from quatrex.phonon.experimental.spatial.spatial_modes import decay_lengths
 
     xi = decay_lengths(np.array([0.5, 1.0, 2.0, 0.0], dtype=complex))
     assert xi[0] == pytest.approx(-1.0 / np.log(0.5))
@@ -297,7 +297,7 @@ def test_decay_lengths_label_each_character_distinctly():
 def test_the_range_is_the_group_velocity_over_the_linewidth(frac, gamma_s):
     r"""``xi = v_g / gamma``, and it ties the spatial half to the frequency
     one."""
-    from quatrex.phonon.spatial_modes import band_range_cells
+    from quatrex.phonon.experimental.spatial.spatial_modes import band_range_cells
 
     omega = frac * BAND_TOP
     k = 2.0 * np.arcsin(omega / (2.0 * np.sqrt(K_S)))
@@ -310,7 +310,7 @@ def test_the_range_is_the_group_velocity_over_the_linewidth(frac, gamma_s):
 
 def test_a_census_linewidth_implies_a_band_far_longer_than_any_in_use():
     r"""What that bridge says about a bed already measured."""
-    from quatrex.phonon.spatial_modes import band_range_cells
+    from quatrex.phonon.experimental.spatial.spatial_modes import band_range_cells
 
     gamma_thz = 0.16
     for v_g in (1.0, 3.0, 6.0):                   # cells * THz
@@ -365,7 +365,7 @@ def _green_blocks(omega, n_max, n_k=2048):
 
 def _modal_fit(omega):
     """``V``, ``lambda`` and ``C`` of ``G(n) = V diag(lambda^n) C``."""
-    from quatrex.phonon.spatial_modes import bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes
 
     modes = bloch_modes(*_blocks2(omega))
     keep = np.abs(modes.lam) < 1.0 - 1e-12
@@ -378,7 +378,7 @@ def _modal_fit(omega):
 
 
 def test_the_bed_has_an_invertible_coupling_and_two_decaying_modes():
-    from quatrex.phonon.spatial_modes import bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes
 
     assert np.linalg.cond(D01_2) < 10.0
     modes = bloch_modes(*_blocks2(1.05 * BAND_TOP_2))

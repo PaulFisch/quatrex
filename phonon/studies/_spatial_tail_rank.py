@@ -145,9 +145,9 @@ def _seq(mat, bed, anchor, span, *, along, column_is_cell: bool = True):
 
 def run(bed: FrozenBed, *, iw: int, eps: float = 1e-6, m_edge: int = 2,
         rank: int | None = None, sigma_range_tol: float = 1e-6):
-    from quatrex.phonon.spatial_hankel import (cluster_exponents,
+    from quatrex.phonon.experimental.spatial.spatial_hankel import (cluster_exponents,
                                                matrix_pencil, numerical_rank)
-    from quatrex.phonon.spatial_modes import bloch_modes, bloch_modes_poly
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes, bloch_modes_poly
 
     arms, resid, _ = source_arms(bed)
     anchor = bed.p + m_edge

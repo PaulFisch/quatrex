@@ -130,7 +130,7 @@ def decompressed_blocks(bed: FrozenBed, mat, band: int, *, rank=None,
     cell pair: that IS the translation-invariance assumption, and
     ``eps_Toeplitz`` is what says how good it is.
     """
-    from quatrex.phonon.spatial_hankel import matrix_pencil
+    from quatrex.phonon.experimental.spatial.spatial_hankel import matrix_pencil
 
     nd, n = bed.n_dof, bed.n_slabs
     anchor = bed.p + m_edge
@@ -187,7 +187,7 @@ def hybrid_retarded(bed: FrozenBed, band: int, *, rank=None, eps: float = 1e-3,
     blocks it replaces, as a median and a worst case, so a congruence result can
     be attributed to the reconstruction rather than to the congruence.
     """
-    from quatrex.phonon.spatial_hankel import ExponentialSeries, matrix_pencil
+    from quatrex.phonon.experimental.spatial.spatial_hankel import ExponentialSeries, matrix_pencil
 
     nd, n = bed.n_dof, bed.n_slabs
     dropped_w = kept_w = 0.0
@@ -387,7 +387,7 @@ def sigma_semiseparable(bed: FrozenBed, sigma_l, sigma_g, rank: int):
     but the structure is preserved by the realisation, not by this line. See
     ``test_the_realisation_preserves_hermitian_symmetry_under_truncation``.
     """
-    from quatrex.phonon.spatial_operator import SemiSepOperator
+    from quatrex.phonon.experimental.spatial.spatial_operator import SemiSepOperator
 
     nd, nw = bed.n_dof, sigma_l.shape[0]
     out = []
@@ -556,7 +556,7 @@ def modal_range_by_frequency(bed, *, m_edge: int = 2):
     The quantity that says whether a bed can show a tail at all: a range longer
     than the device means ``G`` has not decayed anywhere in it.
     """
-    from quatrex.phonon.spatial_modes import bloch_modes
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes
 
     nd, anchor = bed.n_dof, bed.p + m_edge
     out = np.full(bed.freqs_thz.size, np.nan)

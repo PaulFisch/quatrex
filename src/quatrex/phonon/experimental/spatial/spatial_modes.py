@@ -31,7 +31,7 @@ stops at seven cells because of it.
 Diagnostic only. Nothing here enters the Dyson equation or the bubble; it
 measures the operator the solver already builds. The representation built ON
 these modes -- coefficient fits, tail pruning, geometric sums -- lives in
-:mod:`quatrex.phonon.spatial_fit`, so that separation survives.
+:mod:`quatrex.phonon.experimental.spatial.spatial_fit`, so that separation survives.
 
 The same pencil is what the lead OBC solves, so this reuses
 :mod:`qttools.nevp` rather than reimplementing it -- with undressed lead blocks
@@ -225,7 +225,7 @@ def bloch_modes_poly(a_blocks, nevp=None, *, residual: bool = False) -> ModeSet:
             f"(cond(sum a_n) = {np.max(cond):.3e}), which the dense "
             "linearisation inverts. That is an exact unit root -- dress the "
             "operator, or perturb it by an infinitesimal retarded damping "
-            "(see quatrex.phonon.spatial_operator.directional_modes).")
+            "(see quatrex.phonon.experimental.spatial.spatial_operator.directional_modes).")
 
     ws, vs = nevp(blocks)
     lam = np.asarray(_host(ws))

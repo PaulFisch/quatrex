@@ -35,10 +35,10 @@ from solver.toy_models import (                                  # noqa: E402
     gapped_chain_green, gapped_chain_root, neighbour_cubic_vertex)
 from studies import _spatial_bed as bed                          # noqa: E402
 
-from quatrex.phonon.spatial_fit import (                         # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_fit import (                         # noqa: E402
     geometric_block_sum, geometric_factor, modal_fit,
     prune_by_amplitude, tail_amplitudes)
-from quatrex.phonon.spatial_modes import (                       # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_modes import (                       # noqa: E402
     band_range_cells, bloch_modes, bloch_modes_poly, nevp_residual)
 
 BAND_TOP_2 = chain2_band_top()
@@ -264,7 +264,7 @@ def test_the_tail_amplitude_ranks_by_contribution_and_not_by_decay_rate():
     lam = np.array([0.95, 0.40])
     vecs = np.eye(2, dtype=complex)
     coef = np.array([[1e-8, 0.0], [1.0, 0.0]], dtype=complex)
-    from quatrex.phonon.spatial_fit import ModalSeries
+    from quatrex.phonon.experimental.spatial.spatial_fit import ModalSeries
     s = ModalSeries(lam=lam, vecs=vecs, coef=coef, anchor=(1,))
 
     amp = tail_amplitudes(s, 3)
@@ -411,7 +411,7 @@ def test_the_reblocking_arm_is_a_mask_and_the_block_count_is_what_drives_it():
 # object is not the resolvent of anything, and whether it is a sum of
 # exponentials in the separation at all is a measurement.
 
-from quatrex.phonon.spatial_hankel import (                      # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_hankel import (                      # noqa: E402
     cluster_exponents, directional_exponents, matrix_pencil, numerical_rank,
     semiseparable_fit, singular_spectrum)
 
@@ -575,9 +575,9 @@ def test_the_pencil_refuses_a_sequence_too_short_to_shift():
 from solver.se_finite import (                                   # noqa: E402
     bubble_prefactor, compute_phph_self_energy_finite_multi_slab)
 
-from quatrex.phonon.spatial_bubble import (                      # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_bubble import (                      # noqa: E402
     analytic_tail, pair_importance, pair_vertex_projection)
-from quatrex.phonon.spatial_fit import ModalSeries               # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_fit import ModalSeries               # noqa: E402
 
 
 def _exact_modal_ring(n_cell=20, npos=10, offset=0.35, seed=7):
@@ -677,8 +677,8 @@ def test_pair_importance_refuses_a_geometric_sum_it_cannot_take():
 from solver.leads import build_device_hamiltonian                # noqa: E402
 from studies._spatial_bed import spectral_obc                    # noqa: E402
 
-from quatrex.phonon.spatial_hankel import ExponentialSeries      # noqa: E402
-from quatrex.phonon.spatial_operator import (                    # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_hankel import ExponentialSeries      # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_operator import (                    # noqa: E402
     SemiSepOperator, directional_modes)
 
 
@@ -899,7 +899,7 @@ def test_both_directional_families_are_stored_as_decaying_factors():
 # bosonic mirror branch is CONJUGATE-linear, so the probe has to be real -- and
 # it silently returns the transform of a different operator if it is not.
 
-from quatrex.phonon.spatial_dyson import (                       # noqa: E402
+from quatrex.phonon.experimental.spatial.spatial_dyson import (                       # noqa: E402
     RetardedAction, _from_dense_actions, shared_krylov_dyson)
 
 
@@ -1041,7 +1041,7 @@ def test_the_realisation_preserves_hermitian_symmetry_under_truncation():
     shape at one rank would not distinguish a structural property from an
     accident of a particular SVD.
     """
-    from quatrex.phonon.spatial_operator import SemiSepOperator
+    from quatrex.phonon.experimental.spatial.spatial_operator import SemiSepOperator
 
     rng = np.random.default_rng(12)
     for n_cells, n_dof in ((10, 2), (9, 3), (12, 1)):
@@ -1057,7 +1057,7 @@ def test_the_realisation_preserves_hermitian_symmetry_under_truncation():
 def test_arm_s_leaves_an_anti_hermitian_input_untouched():
     """The arm's projection is a guard, not a repair -- it must not move a
     realisation that is already anti-Hermitian by the test above."""
-    from quatrex.phonon.spatial_operator import SemiSepOperator
+    from quatrex.phonon.experimental.spatial.spatial_operator import SemiSepOperator
     from studies._spatial_tail_tails import sigma_semiseparable
 
     rng = np.random.default_rng(14)

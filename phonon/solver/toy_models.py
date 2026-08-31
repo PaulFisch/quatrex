@@ -365,7 +365,7 @@ def bulk_green_blocks(a_ii, a_ij, a_ji, n_max: int, n_k: int = 2048) -> dict:
     """``{n: G(n)}`` of an infinite periodic chain, by the same quadrature.
 
     ``a_xx`` are SYSTEM-matrix blocks in the OBC convention, the ones
-    :func:`quatrex.phonon.spatial_modes.bloch_modes` takes -- so a caller
+    :func:`quatrex.phonon.experimental.spatial.spatial_modes.bloch_modes` takes -- so a caller
     cannot accidentally feed the pencil one convention and the reference
     another.
     """

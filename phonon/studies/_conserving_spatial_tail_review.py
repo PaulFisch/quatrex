@@ -38,7 +38,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import splu
 
-from quatrex.phonon.spatial_operator import SemiSepOperator
+from quatrex.phonon.experimental.spatial.spatial_operator import SemiSepOperator
 from studies._spatial_hierarchy_review import block_band
 
 

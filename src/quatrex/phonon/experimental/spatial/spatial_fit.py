@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""The spatial modal REPRESENTATION: coefficients, pruning, geometric sums.
 
-:mod:`quatrex.phonon.spatial_modes` answers "what are the complex bands of this
+:mod:`quatrex.phonon.experimental.spatial.spatial_modes` answers "what are the complex bands of this
 operator". This module answers "and what does the block sequence look like in
 them":
 
@@ -95,7 +95,7 @@ def modal_fit(vecs, lam, blocks, anchors, *, rcond=None) -> ModalSeries:
     ----------
     vecs, lam
         ``(b, r)`` mode vectors and ``(r,)`` Bloch factors, from
-        :func:`~quatrex.phonon.spatial_modes.bloch_modes`. Pass the retained
+        :func:`~quatrex.phonon.experimental.spatial.spatial_modes.bloch_modes`. Pass the retained
         (typically decaying) branch; the caller owns that selection because it
         is a physical choice, not a numerical one.
     blocks : mapping or sequence

@@ -4,7 +4,7 @@ r"""Bidirectional semiseparable operators, and the directions they need.
 Two things the spatial-modal layer was missing, and one measured failure that
 follows from both.
 
-**Direction.** :mod:`quatrex.phonon.spatial_modes` classifies a mode by
+**Direction.** :mod:`quatrex.phonon.experimental.spatial.spatial_modes` classifies a mode by
 :math:`|\lambda| < 1` and nothing else; ``decay_lengths`` returns ``nan`` for the
 growing partner, on the reasoning that its range "describes the opposite
 direction". That is right, and it is exactly the information a two-terminal
@@ -30,7 +30,7 @@ with the :math:`+` family decaying rightward and the :math:`-` family leftward,
 so **no mode is ever propagated in its growing direction**.
 
 **An operator, rather than a sampler.**
-:class:`quatrex.phonon.spatial_hankel.Semiseparable` can evaluate a block and
+:class:`quatrex.phonon.experimental.spatial.spatial_hankel.Semiseparable` can evaluate a block and
 nothing else; its docstring advertises an ``O(N r)`` matvec "through
 prefix/suffix recurrences" that does not exist anywhere in the tree.
 :class:`SemiSepOperator` implements it:
@@ -106,7 +106,7 @@ def directional_modes(a_blocks, nevp=None, *, unit_tol: float = 1e-9,
     r"""Split a spatial pencil's roots into rightward- and leftward-decaying.
 
     ``a_blocks`` is the coefficient tuple of
-    :func:`quatrex.phonon.spatial_modes.bloch_modes_poly`, lowest power first.
+    :func:`quatrex.phonon.experimental.spatial.spatial_modes.bloch_modes_poly`, lowest power first.
 
     Under SCBA dressing no root sits on the unit circle, so :math:`|\lambda|<1`
     and :math:`|\lambda|>1` is a complete and unambiguous split and no
@@ -137,7 +137,7 @@ def directional_modes(a_blocks, nevp=None, *, unit_tol: float = 1e-9,
     block size ``b`` has ``2Mb`` roots, ``Mb`` per direction), and silently
     returning fewer destroys it.
     """
-    from quatrex.phonon.spatial_modes import bloch_modes_poly
+    from quatrex.phonon.experimental.spatial.spatial_modes import bloch_modes_poly
 
     modes = bloch_modes_poly(a_blocks, nevp=nevp, residual=True)
     lam = np.asarray(_host(modes.lam)).ravel()

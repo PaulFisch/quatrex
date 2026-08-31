@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 r"""How many exponentials a spatial block sequence actually needs.
 
-:mod:`quatrex.phonon.spatial_modes` gets the exponents from the OPERATOR -- it
+:mod:`quatrex.phonon.experimental.spatial.spatial_modes` gets the exponents from the OPERATOR -- it
 solves the pencil the device already defines. This module gets them from the
 DATA, by fitting the sequence itself, and the difference is the point: the
 bubble uses :math:`G^{<,>}`, not :math:`G^R`, and the Keldysh object is not the
