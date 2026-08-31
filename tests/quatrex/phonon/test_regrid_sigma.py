@@ -120,3 +120,63 @@ def test_replicated_rank_files_keep_nonfrequency_axes(tmp_path, monkeypatch):
             result["sigma_lesser"][:old.size], rank + 1.0j)
         np.testing.assert_array_equal(
             result["sigma_lesser"][old.size:], 0.0)
+
+
+def test_cartesian_stack_q_layout_and_periodic_q_refinement(
+        tmp_path, monkeypatch):
+    old_grid = np.array([0.0, 1.0, 2.0])
+    new_grid = np.linspace(0.0, 2.0, 5)
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    qx, qy = np.meshgrid(
+        np.arange(2, dtype=float) / 2,
+        np.arange(2, dtype=float) / 2,
+        indexing="ij",
+    )
+    values = (
+        old_grid[:, None, None, None]
+        + 1j * (qx[None, :, :, None] + 2 * qy[None, :, :, None])
+    )
+    state = {key: values for key in regrid_sigma._SIGMA_KEYS}
+    regrid_sigma._save_sigma(source, state, parts=2)
+    # The second q-work group stores the same reduced Sigma.
+    for rank in range(2):
+        original = regrid_sigma._rank_path(source, rank)
+        duplicate = regrid_sigma._rank_path(source, rank + 2)
+        duplicate.hardlink_to(original)
+    np.save(tmp_path / "old.npy", old_grid)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "regrid_sigma.py",
+            "--sigma", str(source),
+            "--stack-parts", "2",
+            "--q-parts", "2",
+            "--old-grid", str(tmp_path / "old.npy"),
+            "--new-min", "0.0",
+            "--new-max", "2.0",
+            "--new-points", "5",
+            "--old-q-shape", "2,2",
+            "--new-q-shape", "3,3",
+            "--out", str(target),
+        ],
+    )
+    regrid_sigma.main()
+
+    result = regrid_sigma._load_sigma(target, parts=2)["sigma_lesser"]
+    assert result.shape == (5, 3, 3, 1)
+    expected = regrid_sigma._interpolate_periodic_q(
+        regrid_sigma._interpolate_frequency(values, old_grid, new_grid),
+        (2, 2), (3, 3),
+    )
+    np.testing.assert_allclose(result, expected)
+    for stack_rank in range(2):
+        first = regrid_sigma._rank_path(target, stack_rank)
+        replica = regrid_sigma._rank_path(target, stack_rank + 2)
+        np.testing.assert_array_equal(
+            np.load(first)["sigma_lesser"],
+            np.load(replica)["sigma_lesser"],
+        )
+        assert first.stat().st_ino == replica.stat().st_ino
