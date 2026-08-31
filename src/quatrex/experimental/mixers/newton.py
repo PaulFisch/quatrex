@@ -74,10 +74,6 @@ class _LowRankPrecond:
         try:
             self._D = np.linalg.inv(small)
         except np.linalg.LinAlgError:
-            # I - Q^T Yk singular <=> a stored direction with J_F ~ I
-            # (marginal mode / fold point): fall back to the pseudo-
-            # inverse, which deflates the regular part and leaves the
-            # marginal direction untouched.
             self._D = np.linalg.pinv(small)
 
     @property
@@ -136,8 +132,6 @@ class NewtonKrylovMixer:
         Rank-0 per-step diagnostics.
     """
 
-    #: No probe iterates are ever emitted; the driver's convergence test
-    #: reads this unconditionally.
     probing: bool = False
 
     def __init__(self, jvp_factory, warmup: int = 5,
@@ -171,11 +165,6 @@ class NewtonKrylovMixer:
         self._newton_it = 0
         self._R_first = None
         self._trust_k = float(trust)
-        # Pending accept/reject bookkeeping: the iterate emitted by the last
-        # Newton step, its base point, residual, relative merit and step.  The
-        # scale-free merit matches the production convergence gate; an
-        # absolute residual can fall merely because a trial collapses the
-        # self-energy scale.
         self._pending = None
         # Low-rank deflation state.
         self._precond_op: _LowRankPrecond | None = None
@@ -203,9 +192,6 @@ class NewtonKrylovMixer:
         if self._R_first is None:
             self._R_first = rk
 
-        # Accept/reject the previous Newton step on its actual residual.
-        # A non-finite trial residual (diverged map evaluation) counts as
-        # rejected -- NaN comparisons would otherwise silently accept it.
         if self._pending is not None:
             xk, delta, Rk, rk_base, merit_base, halvings = self._pending
             worse = (not np.isfinite(merit)) or merit >= merit_base
@@ -221,17 +207,10 @@ class NewtonKrylovMixer:
                         f"  newton: relative residual {merit_base:.3e} -> "
                         f"{merit:.3e}, backtrack to {frac:.3g}*delta")
                     return xk + frac * delta
-                # Exhausted: damped Picard from the BASE point (whose
-                # residual we stored). The trust radius has been halved at
-                # every rejection, so the next Newton attempt is shorter.
                 self._pending = None
                 self._log("  newton: backtracking exhausted, damped Picard "
                           "from the base point")
                 return xk + self.beta * Rk
-            # Accepted: adapt the trust radius with hysteresis. A solidly
-            # accepted step recovers the radius (else a collapsed radius
-            # after a rejection burst never regrows and the iteration
-            # flatlines); a marginal accept keeps it.
             if merit < 0.95 * merit_base:
                 self._trust_k = min(self._trust_k * 1.3, self.trust_max)
             elif merit < 0.999 * merit_base:
@@ -253,12 +232,6 @@ class NewtonKrylovMixer:
             self._jvp = self._jvp_factory()
         recon = self._jvp.prepare()
 
-        # Eisenstat-Walker forcing from the previous Newton residual.
-        # The base ``inner_tol`` is the CEILING: forcing may only tighten
-        # the inner solve as the outer residual falls, never loosen it
-        # (a loose direction on a stagnating residual gets rejected by
-        # the backtracking test, which shrinks the trust region, which
-        # stalls the residual -- a self-sustaining deadlock).
         if self.forcing == "ew" and getattr(self, "_rk_prev", None):
             ew = 0.9 * (rk / self._rk_prev) ** 2
             inner_tol = float(min(self.inner_tol, max(1e-4, ew)))
@@ -271,13 +244,6 @@ class NewtonKrylovMixer:
         beta_g = rk
         m_max = self.max_krylov
 
-        # Right preconditioner for this step (fixed across the solve).
-        # Staleness guard: the harvested images are exact for the PREVIOUS
-        # iterate's Jacobian; after a large accepted step they mislead the
-        # inner solve more than they deflate it (measured: a stale basis
-        # can push GMRES to the Krylov cap). Deflation is applied only in
-        # the small-step regime -- the endgame, where m matters most --
-        # while harvesting continues every step so the basis stays warm.
         step_frac = getattr(self, "_last_step_frac", None)
         stale = step_frac is None or step_frac > 0.05
         if self.precond == "fresh":
@@ -287,8 +253,6 @@ class NewtonKrylovMixer:
         else:
             M = None
 
-        # GMRES on (J_F - I) M^{-1}; the Krylov basis V spans the
-        # preconditioned space, delta = M^{-1} (V y) at the end.
         V = [b / beta_g]
         Hg = np.zeros((m_max + 1, m_max), dtype=np.float64)
         H_raw = np.zeros((m_max + 1, m_max), dtype=np.float64)
@@ -350,8 +314,6 @@ class NewtonKrylovMixer:
         self._last_step_frac = (self._gnorm(step_r) / xnorm
                                 if xnorm > 0.0 else None)
 
-        # Harvest the deflation basis for the NEXT step from this step's
-        # Arnoldi relation (exact operator images, no extra JVPs).
         if self.precond == "recycle":
             self._precond_op = self._harvest_ritz(V, v_tail, H_raw, m, M)
 
@@ -399,19 +361,10 @@ class NewtonKrylovMixer:
         except np.linalg.LinAlgError:
             f = np.linalg.lstsq(H.T, e_m, rcond=None)[0]
         theta, Gv = np.linalg.eig(H + h2 * np.outer(f, e_m))
-        # Ritz-residual quality: ||A u - theta u|| ~ |h_{m+1,m} g_m| for
-        # the Ritz combination u = V_m g. Only CONVERGED pairs (detached
-        # outliers, marginal modes) are worth deflating -- unconverged
-        # bulk combinations pollute the basis and can make M^{-1} worse
-        # than the identity.
         h_last = float(H_raw[m, m - 1])
         quality = np.abs(h_last * Gv[m - 1, :]) / np.maximum(
             np.abs(theta) * np.linalg.norm(Gv, axis=0), 1e-300)
         converged = quality < 0.1
-        # Both ends of the spectrum stall GMRES: near-singular
-        # directions of A (marginal modes, smallest |theta|) delay
-        # convergence, and each detached outlier (largest |theta|)
-        # costs a Krylov dimension per solve. Interleave both ends.
         by_small = [i for i in np.argsort(np.abs(theta)) if converged[i]]
         by_large = by_small[::-1]
         order = []
@@ -429,8 +382,6 @@ class NewtonKrylovMixer:
             if abs(th.imag) <= 1e-12 * max(abs(th.real), 1e-300):
                 cols.append(np.real(gvec))
             else:
-                # Complex pair: span the real 2D subspace, mark the
-                # conjugate partner as consumed.
                 cols.append(np.real(gvec))
                 if len(cols) < r:
                     cols.append(np.imag(gvec))
@@ -444,8 +395,6 @@ class NewtonKrylovMixer:
         G = np.array(cols, dtype=np.float64).T      # (m, r_eff)
         r_eff = G.shape[1]
 
-        # x-space directions U and exact images Yk = J_F U, built as
-        # small combinations of the stored basis (no (m x 2n) copies).
         Vfull = V + ([v_tail] if len(V) == m and v_tail is not None else [])
         n_rows = min(len(Vfull), m + 1)
         Himg = H_raw[:n_rows, :m] @ G               # (n_rows, r_eff)
@@ -461,14 +410,6 @@ class NewtonKrylovMixer:
                 ya = ya + Himg[i, jcol] * Vfull[i]
             U.append(u)
             Yk.append(ya + u)          # J_F u = (J_F - I) u + u
-        # Merge with the previous basis: fresh pairs first (the Jacobian
-        # drifts, and the new Krylov space is dominated by whatever the
-        # old basis failed to deflate -- e.g. the embedded i-partners of
-        # near-C-linear eigenmodes); surviving old pairs behind them,
-        # capped at the configured rank. Global MGS mirrors every
-        # operation onto Yk so the image property Yk[i] = J_F U[i] is
-        # preserved exactly (old images stay exact up to Jacobian drift,
-        # which is the approximation a preconditioner tolerates).
         if self._precond_op is not None:
             U += list(self._precond_op._Q)
             Yk += list(self._precond_op._Yk)
@@ -517,4 +458,3 @@ class NewtonKrylovMixer:
                              self._comm, self._SUM)
         self._precond_op = op
         return op
-

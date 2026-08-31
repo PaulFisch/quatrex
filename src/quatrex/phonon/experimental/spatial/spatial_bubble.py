@@ -222,11 +222,6 @@ def analytic_tail(psi, series_a, series_b, r_values, *, freqs_thz,
             if not np.isfinite(weights[pq]) or weights[pq] > importance_floor * peak]
     n_pairs, n_kept = len(todo), len(kept)
 
-    # Each leg depends on the two offset pairs only through ONE separation --
-    # a through r + delta - alpha, b through r + gamma - beta -- and the two
-    # take one index from each loop crosswise. Distinct differences are far
-    # fewer than the |offsets|^2 iterations, so memoise on the separation and
-    # the double loop stops re-FFTing the same leg. Not a change of exponents.
     fft_cache: dict = {}
 
     def leg_fft(side, idx, expo):

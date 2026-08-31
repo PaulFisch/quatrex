@@ -150,8 +150,6 @@ class BlockLayout:
         self.block_sizes = sizes
         self.nnz = nnz
         self._band = int(band)
-        # Sentinel = nnz: the caller appends one zero column, so an empty slot
-        # gathers a zero. This reproduces nnz_to_blocks' zero-filled block.
         source = np.full(0, nnz, dtype=np.int64)
         pieces, self.slices, pos = [], [], 0
         for i in range(len(sizes)):
@@ -160,8 +158,6 @@ class BlockLayout:
                 blk = np.full(bi * bj, nnz, dtype=np.int64)
                 sel = np.where((br == i) & (bc == j))[0]
                 if sel.size:
-                    # Last wins on a duplicated (row, col), exactly as the
-                    # fancy-index assignment in nnz_to_blocks does.
                     blk[(r[sel] - off[i]) * bj + (c[sel] - off[j])] = sel
                 pieces.append(blk)
                 self.slices.append(((i, j), slice(pos, pos + bi * bj), bi, bj))
@@ -221,16 +217,6 @@ class BlockLayout:
         return {ij: flat[..., sl].reshape(flat.shape[:-1] + (bi, bj))
                 for ij, sl, bi, bj in self.slices}
 
-    # -- band-tensor form -------------------------------------------------- #
-    #
-    # ``blocks()`` hands back a LIST, one entry per block, so every consumer
-    # walks it in Python and the call count grows with the device length. The
-    # band form carries the same data as a single dense tensor
-    # ``(..., n_blocks, 3, bmax, bmax)`` -- block row, band offset ``j - i + 1``,
-    # and the two intra-block indices -- padded to the largest block and zero
-    # filled outside the band and outside a short block. Every operation the
-    # legs need on a block-tridiagonal operator is then ONE einsum or matmul
-    # over that tensor, with no loop over blocks at all.
 
     def _build_band(self) -> None:
         sizes = self.block_sizes
@@ -240,8 +226,6 @@ class BlockLayout:
         n_dof = int(off[-1])
         self.n_blocks, self.bmax, self.n_dof = nb, bmax, n_dof
 
-        # Global row of local row r of block i; n_dof marks padding, which
-        # gathers a zero from a caller-appended sentinel row.
         row_index = np.full((nb, bmax), n_dof, dtype=np.int64)
         for i in range(nb):
             row_index[i, :sizes[i]] = np.arange(off[i], off[i + 1])
@@ -249,8 +233,6 @@ class BlockLayout:
 
         # Which nnz column feeds band slot (i, o, r, s); self.nnz marks empty.
         band = np.full((nb, 3, bmax, bmax), self.nnz, dtype=np.int64)
-        # Sentinel = the band size: an nnz entry OUTSIDE the band unbands to
-        # zero, matching nnz_to_blocks, which materialises |I-J| <= band only.
         band_of_nnz = np.full(self.nnz, nb * 3 * bmax * bmax, dtype=np.int64)
         flat_src = np.asarray(_host(self.source))
         for (i, j), sl, bi, bj in self.slices:
@@ -270,9 +252,6 @@ class BlockLayout:
         self.shift_index = xp.asarray(np.where((shift < 0) | (shift >= nb),
                                                nb, shift))
 
-        # Slot holding the TRANSPOSED entry: (i, o, r, s) -> (i+o-1, 2-o, s, r).
-        # Out-of-band slots map to a sentinel, which :meth:`band_transpose`
-        # serves a zero from.
         ii, oo, rr, ss = np.meshgrid(np.arange(nb), np.arange(3),
                                      np.arange(bmax), np.arange(bmax),
                                      indexing="ij")

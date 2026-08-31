@@ -108,26 +108,6 @@ def pair_convolution(
         a, b = (float(window[0]), float(window[1]))
         s_val = w - p - q
         aa, bb = a - p, b - p
-        # Two forms of the same integral, split on |s| against the distances
-        # from the pole to the cell ENDPOINTS.
-        #
-        # s does vanish. It is NOT bounded below by gamma_p + gamma_q, which
-        # only holds when both poles are in the same half plane: a flattened
-        # family is [z, conj(z)] by construction, and for such a MIXED pairing
-        # p + q = 2 Re z is real, so Im s = gamma_p - gamma_q = 0 and s passes
-        # exactly through zero as Omega sweeps. The log form then divides a
-        # cancelling bracket by it; the previous code returned exactly 0.0
-        # there, which is silently wrong rather than loud.
-        #
-        # Writing Omega - u - q = s - (u - p) puts the bracket in the form
-        # log1p(-s/A) - log1p(-s/B), whose term-by-term expansion is
-        #   J = (1/2pi) sum_n s^n/(n+1) [B^-(n+1) - A^-(n+1)],
-        # convergent for |s| < min(|A|, |B|) and exact at s = 0.
-        # Convergence needs |s| < min_u |u - p| over the WHOLE path, not just
-        # at the endpoints: for a pole INSIDE the cell -- which is the case the
-        # sector exists for -- that minimum is |Im p|, and using the endpoint
-        # distance instead selects the series where it diverges (measured:
-        # +1.27 against a true -98.73).
         inside = ((xp.real(p) >= a) & (xp.real(p) <= b))
         reach = xp.where(inside, xp.abs(xp.imag(p)),
                          xp.minimum(xp.abs(aa), xp.abs(bb)))
@@ -149,16 +129,6 @@ def pair_convolution(
     sign = xp.where(both_lower, -1j, xp.where(both_upper, 1j, 0.0))
 
     if cell:
-        # CELL AVERAGE, not a point sample. The grid solver treats every array
-        # as piecewise constant over its cell and integrates with weight dw;
-        # handing it the value AT omega_m instead re-imports exactly the
-        # registration error this sector exists to remove, at the interface.
-        #
-        # Measured, summing c/(w-p) over a grid and comparing with the exact
-        # integral: point samples are wrong by 16.5 % at gamma/h = 0.4 and
-        # 286 % at 0.08, while the cell average is exact to 1e-16 at every
-        # width. Promoted poles have gamma/h < q_in = 1 by construction, so
-        # the sector always operates in the regime where this matters.
         half = 0.5 * float(cell)
         pq = p + q
         return sign * (xp.log(w + half - pq) - xp.log(w - half - pq)) / float(cell)
@@ -207,18 +177,6 @@ def leg_partial_fractions(
         )
 
     if source_b is not None:
-        # Per-pole sources: the EXACT residues. Writing
-        # S(w)/((w-z_a)(w-zb_b)), the residue at z_a is S(z_a)/gap and the one
-        # at conj(z_b) is S(conj(z_b))/gap -- each leg carries the source at
-        # ITS OWN pole, not one value shared by the whole cluster.
-        #
-        # This is what the frozen approximation gets wrong once a cluster holds
-        # more than one pole, and badly wrong once it is closed under
-        # z -> -z^*: the partner sits at -Omega while the frozen value is taken
-        # at +Omega. A polynomial model in (w - Omega_c)/h cannot fix that
-        # either, because it would EXTRAPOLATE across the whole band; the
-        # source at a negative-frequency pole is the bosonic mirror of the
-        # positive one, not a continuation of it.
         sb = xp.asarray(source_b, dtype=xp.complex128)
         if sb.shape != s.shape:
             raise ValueError(
@@ -237,11 +195,6 @@ def leg_partial_fractions(
             )
         n_moments = int(s.shape[0])
         if n_moments > 2:
-            # t^m/((t-t_a)(t-t_b)) leaves a polynomial quotient of degree m-2,
-            # which is NOT a simple pole and convolves to moments of the
-            # background rather than to a resolvent. Refusing beats silently
-            # dropping it: the dropped piece is the smooth part of the source,
-            # so the answer would look reasonable and be wrong.
             raise NotImplementedError(
                 f"a source of order {n_moments - 1} needs the degree-"
                 f"{n_moments - 2} polynomial remainder of the partial-fraction "
@@ -250,8 +203,6 @@ def leg_partial_fractions(
             )
         ta = (za - complex(centre)) / float(scale)
         tb = (zb - complex(centre)) / float(scale)
-        # Residue at z_alpha carries t_a^m, at conj(z_beta) carries t_b^m; both
-        # over the SAME gap, so m = 0 reduces to the frozen expression exactly.
         ca = sum(s[m] * ta**m for m in range(n_moments)) / gap
         cb = sum(s[m] * tb**m for m in range(n_moments)) / gap
         poles = xp.stack([xp.broadcast_to(za, gap.shape),
@@ -316,9 +267,6 @@ def modal_convolution(
     pa, ca = _split_leg(cluster, source_a)             # (Np,Np,2)
     pb, cb = _split_leg(cluster, source_b)
 
-    # Sum over the 2x2 pole pairings; only like-half-plane pairs survive. Index
-    # 0 of the partial fraction is z_alpha (retarded), index 1 is conj(z_beta)
-    # (advanced), so retarded_only keeps the (0, 0) pairing alone.
     out = None
     pairs = [(0, 0)] if retarded_only else [(j, k) for j in range(2) for k in range(2)]
     for j, k in pairs:

@@ -75,11 +75,6 @@ def cluster_poles(
         return []
     gam = -zz.imag
 
-    # Adjacency, then its transitive closure by repeated squaring. The union-
-    # find this replaces walked every PAIR in Python -- O(Np^2) calls per q,
-    # and there is one q per transverse momentum. Squaring reaches the closure
-    # in ceil(log2(n)) boolean matmuls, so the call count grows with the
-    # LOGARITHM of the pole count rather than its square.
     adj = (np.abs(zz[:, None] - zz[None, :])
            <= factor * (gam[:, None] + gam[None, :]))
     adj |= np.eye(n, dtype=bool)

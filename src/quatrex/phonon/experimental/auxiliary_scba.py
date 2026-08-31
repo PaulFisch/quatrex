@@ -495,9 +495,6 @@ class LocalAuxiliaryRGF:
         owner = int(self.local.owner)
         rank = self.local.channel.rank
 
-        # Physical blocks.  The Dyson operator and Keldysh source consumed by
-        # RGF are block tridiagonal; farther entries in the shared G pattern are
-        # output slots and are intentionally not copied into the operator.
         for i, bi in enumerate(sizes):
             for j in range(max(0, i - 1), min(sizes.size, i + 2)):
                 bj = int(sizes[j])
@@ -511,9 +508,6 @@ class LocalAuxiliaryRGF:
                 al.blocks[i, j] = bl
                 ag.blocks[i, j] = bg
 
-        # The rational state is frequency local and broadcast over replicated
-        # q axes.  Its physical maps may touch owner +/- 1, which are exactly
-        # augmented neighbouring blocks.
         c = self.local.channel
         aux = slice(int(sizes[owner]), int(sizes[owner]) + rank)
         stack_ndim = len(aa.shape[:-2])
@@ -526,9 +520,6 @@ class LocalAuxiliaryRGF:
         bl = al.blocks[owner, owner]
         bg = ag.blocks[owner, owner]
         ba[..., aux, aux] = 0.0
-        # Index the augmented block directly.  Chaining ``[..., aux, aux]``
-        # and then integer-array diagonal indexing produces a temporary under
-        # NumPy/CuPy, leaving the stored auxiliary pivot zero and singular.
         ba[..., int(sizes[owner]) + ii,
            int(sizes[owner]) + ii] = diag
         bl[..., aux, aux] = 1j * xp.asarray(c.q_lesser)
@@ -558,9 +549,6 @@ class LocalAuxiliaryRGF:
             return_retarded=True, return_current=return_current,
             n_offdiagonals=self.n_offdiagonals)
 
-        # Return only physical selected blocks.  Output matrices may use a
-        # symmetry-compressed pattern; writing the stored half is sufficient,
-        # while the non-symmetric case receives both directions here.
         ol, og, *orr = out
         for i, bi in enumerate(sizes):
             for j in range(max(0, i - self.n_offdiagonals),
@@ -665,9 +653,6 @@ class GlobalAuxiliaryWoodbury:
         if int(sum(a.block_sizes)) != self.channel.n_dof:
             raise ValueError("auxiliary coupling does not span the physical device")
 
-        # Established selected result for A and the smooth source.  The update
-        # below touches only selected output blocks, so the default path stays
-        # the numerical oracle rather than being reimplemented here.
         self._rgf.selected_solve(
             a, sigma_lesser, sigma_greater, out=out,
             obc_blocks=obc_blocks, return_retarded=return_retarded,
@@ -689,8 +674,6 @@ class GlobalAuxiliaryWoodbury:
         wshape = (self.frequencies.size,) + (1,) * (len(stack) - 1) + (1,)
         w = xp.asarray(self.frequencies).reshape(wshape)
         poles = xp.asarray(self.channel.poles).reshape((1,) * len(stack) + (r,))
-        # Schur pivot is D^{-1} - R G0 L.  ``y`` already contains R G0,
-        # whereas ``x`` contains G0 L; multiplying y@x would insert G0 twice.
         s = -(y @ left)
         ii = xp.arange(r)
         s[..., ii, ii] += w - poles

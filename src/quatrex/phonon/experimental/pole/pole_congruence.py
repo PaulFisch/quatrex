@@ -78,8 +78,6 @@ def apply_sparse(
     out = xp.zeros((n_w, n_dof, n_p), dtype=xp.complex128)
     for a in range(n_p):
         va = v[..., a]                                        # (n_dof,) | (w, n_dof)
-        # (nnz,) broadcasts against (n_omega, nnz); (n_omega, nnz) is already
-        # the frequency-dependent case, and both cost one self-energy.
         contrib = values * xp.take(va, c, axis=va.ndim - 1)
         tgt = out[:, :, a].T                                  # (n_dof, n_omega) view
         if xp is np:
@@ -244,9 +242,6 @@ def cell_weights(
     d1 = (xp.log(w + 0.5 * hh - z[None, :])
           - xp.log(w - 0.5 * hh - z[None, :])) / hh
     gap = z[:, None] - xp.conj(z)[None, :]                    # (Np, Np)
-    # z_a - conj(z_b) has imaginary part -(gamma_a + gamma_b) < 0, so it never
-    # vanishes: the retarded poles are strictly in the lower half plane and
-    # their conjugates strictly in the upper one.
     d2 = (d1[:, :, None] - xp.conj(d1)[:, None, :]) / gap[None]
     return d1, d2
 
@@ -455,9 +450,6 @@ def pf_mixed_self_energy(
 
     if prefactor is None:
         prefactor = analytic_prefactor()
-    # The convolution runs over the WHOLE axis while the solver holds G only
-    # for omega >= 0; the negative half comes from the PARTNER component,
-    # transposed, not from conjugating this one.
     g_ext, f_ext = bosonic_extend(
         g_reg, g_partner, freqs, transpose_index=transpose_index(rows, cols))
 
@@ -603,8 +595,6 @@ def remainder_resolution(
 
         g_c = w[lo:hi]
         g_f = np.linspace(g_c[0], g_c[-1], (hi - lo - 1) * refine + 1)
-        # The grid's own rule -- a dw-weighted sum -- against a dense
-        # trapezoid of the same interval. The gap IS the unresolved part.
         i_c = np.asarray(_rem(g_c)).sum(axis=0) * float(w[1] - w[0])
         i_f = np.trapezoid(np.asarray(_rem(g_f)), g_f, axis=0)
         den = float(np.linalg.norm(i_f))

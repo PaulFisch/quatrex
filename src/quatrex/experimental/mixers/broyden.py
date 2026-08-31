@@ -82,8 +82,6 @@ class BroydenMixer:
         then deactivates near the root. 0 disables it.
     """
 
-    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
-    #: the driver may always test convergence on its output.
     probing: bool = False
 
     def __init__(self, depth: int = 8, beta: float = 0.5,
@@ -120,25 +118,14 @@ class BroydenMixer:
         self._f_prev = f.copy()
         self._it += 1
 
-        # Warm-up (or empty history): plain damped Picard, but keep building the
-        # secant history so Broyden engages with a clean, near-the-root buffer.
         if self._it <= self.warmup or not self._dx:
             return x + self.beta * f
 
-        # STALL GATE (optional, patience>0): only take the quasi-Newton step
-        # once plain Picard has PLATEAUED. While the residual keeps
-        # shrinking, Picard is doing the right thing and the far-from-root
-        # secant model would overshoot; a stalled / limit-cycling residual
-        # is the signature of a |lambda|>1 mode -- also where the secant
-        # buffer is cleanest. Secants keep accumulating above so Broyden
-        # engages warm.
         if self.patience > 0:
             self._fhist.append(global_norm(self._comm, self._SUM, f))
             if len(self._fhist) > self.patience + 2:
                 self._fhist.pop(0)
             if len(self._fhist) <= self.patience:
-                # Not enough post-warmup residual history to demonstrate a
-                # plateau -- keep accumulating secants under damped Picard.
                 return x + self.beta * f
             if self._fhist[-1] < self.progress_thresh * self._fhist[0]:
                 return x + self.beta * f   # Picard still making progress
@@ -146,9 +133,6 @@ class BroydenMixer:
         dX = np.stack(self._dx, axis=1)  # (n_local, m)
         dF = np.stack(self._df, axis=1)
         m = dX.shape[1]
-        # type-I ("good" Broyden): (dX^H dF) gamma = dX^H f  (vs dF^H dF for
-        # Anderson/type-II). These are GLOBAL inner products over the distributed
-        # rows -> Allreduce(SUM). Pack A (m x m) and rhs (m) into one reduction.
         A = dX.conj().T @ dF
         rhs = dX.conj().T @ f
         # Both contract the distributed rows; pack into one Allreduce(SUM).
@@ -157,13 +141,8 @@ class BroydenMixer:
             np.concatenate([np.ascontiguousarray(A).ravel(), rhs]))
         A = packed[:m * m].reshape(m, m)
         rhs = packed[m * m:]
-        # Tiny ridge from the ALREADY-REDUCED A (do not reduce a local norm);
-        # the rank-revealing lstsq cutoff drops only degenerate secant
-        # directions, so the marginal subspace (large signal in dF) is
-        # preserved.
         reg = self.ridge * (float(np.linalg.norm(A)) + 1e-300)
         gamma = np.linalg.lstsq(A + reg * np.eye(m, dtype=A.dtype), rhs,
                                 rcond=self.rcond)[0]
         step = self.beta * f - (dX + self.beta * dF) @ gamma
         return x + trust_cap(self._comm, self._SUM, step, x, self.trust)
-

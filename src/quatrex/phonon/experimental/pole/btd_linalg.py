@@ -109,12 +109,6 @@ def btd_matvec(
     """
     sizes = [int(b.shape[-1]) for b in a_ii]
     off = _offsets(sizes)
-    # The operator may carry stack axes the vector does not (the pole solve
-    # hands a single flat null-vector to blocks assembled with a probe axis),
-    # so the output is allocated at the BROADCAST shape rather than
-    # ``zeros_like(x)``. An in-place ``+=`` into the narrower buffer raises
-    # instead of broadcasting, which is how this surfaced: the unit tests fed
-    # unstacked blocks and only the production assembly carried the axis.
     stack = xp.broadcast_shapes(
         *(b.shape[:-2] for b in a_ii),
         *(b.shape[:-2] for b in a_ij),
@@ -122,8 +116,6 @@ def btd_matvec(
         x.shape[:-2],
     )
     out = xp.zeros((*stack, x.shape[-2], x.shape[-1]), dtype=x.dtype)
-    # Accumulate throughout: the sub-diagonal term of block i lands in block
-    # i+1, so a plain assignment on the next iteration would clobber it.
     for i in range(len(a_ii)):
         seg = slice(off[i], off[i + 1])
         out[..., seg, :] += a_ii[i] @ x[..., seg, :]
@@ -169,17 +161,9 @@ def btd_norm2(
 
     n_dof = int(sum(int(b.shape[-1]) for b in a_ii))
     stack = a_ii[0].shape[:-2]
-    # The adjoint blocks do not depend on the iterate, so they are built ONCE
-    # rather than rebuilt inside the power loop -- that was n_power copies of
-    # the whole operator per call, and this function is called twice per pole.
     h_ii, h_ij, h_ji = ([dag(m) for m in a_ii], [dag(m) for m in a_ji],
                         [dag(m) for m in a_ij])
     rng = xp.random.default_rng(seed)
-    # ONE start vector, broadcast over the batch. Drawing a different vector
-    # per batch element would make ||M||, and through it eps_nep and kappa,
-    # depend on how the candidates happen to be grouped into a batch -- a
-    # pole's conditioning is a property of its operator, not of its neighbours
-    # in the solve. Identical to the unstacked draw when stack == ().
     v = (rng.standard_normal((n_dof, 1))).astype(a_ii[0].dtype)
     v /= xp.linalg.norm(v, axis=-2, keepdims=True)
     v = xp.broadcast_to(v, stack + (n_dof, 1))

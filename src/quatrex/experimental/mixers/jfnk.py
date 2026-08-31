@@ -96,8 +96,6 @@ class JFNKMixer:
         Rank-0 per-Newton-step diagnostics.
     """
 
-    #: True while the emitted iterate is a finite-difference PROBE rather than
-    #: an accepted Newton iterate. The driver must not test convergence on it.
     probing: bool = False
 
     def __init__(self, warmup: int = 10, beta: float = 0.3,
@@ -114,23 +112,9 @@ class JFNKMixer:
         self.max_newton = int(max_newton)
         self.eps = float(eps)
         self.trust = float(trust)
-        # A fixed 1e-3 lower bound used to *increase* a deliberately smaller
-        # requested trust radius after the first rejected trial.  Scale the
-        # floor from the requested radius instead: ordinary/default runs keep
-        # an effectively identical safeguard, while near-root continuation
-        # can legitimately ask for 1e-4 or smaller Newton steps.
         self._trust_floor = min(1e-3, max(1e-12, 1e-3 * self.trust))
-        # The radius is allowed to GROW from the (small, safe) initial
-        # ``trust`` up to ``trust_max`` as the residual descends.
-        # ``trust_max <= trust`` => no growth.
         self.trust_max = max(float(trust_max), float(trust))
         self.newton_damp = float(newton_damp)
-        # Pseudo-transient continuation / Levenberg-Marquardt shift: solve
-        # (J + mu I) delta = -R instead of J delta = -R, with mu annealed to
-        # 0 as the outer residual falls (mu_k = ptc * ||R_k||/||R_0||). The
-        # shift lifts the near-zero (marginal) eigenvalues of J off the
-        # origin so GMRES no longer stalls on the near-null-space; -> 0 at
-        # the root recovers pure Newton.
         self.ptc = float(ptc)
         self._mu = 0.0
         self.verbose = bool(verbose)
@@ -157,17 +141,10 @@ class JFNKMixer:
         self._beta_g = 1.0
         self._inner_tol_k = float(inner_tol)
         self._pending_v = None
-        # The iterate emitted after a completed GMRES solve is a TRIAL.  Its
-        # actual map residual arrives on the next mixer call.  Keep the base
-        # state so a non-descent trial can be rejected without accepting a
-        # bad point into the next Krylov linearisation.
         self._trial_pending = False
         self._trial_rejections = 0
         self._comm, self._SUM = get_comm()
 
-    # ---- MPI-correct distributed primitives (row-partitioned real vectors) ---
-    # The iterate is in the real embedding, so the inner product is the plain
-    # real dot; ``global_dot`` (vdot.real) reduces to exactly that for real input.
     def _dot(self, u: np.ndarray, v: np.ndarray) -> float:
         return global_dot(self._comm, self._SUM, u, v)
 
@@ -208,8 +185,6 @@ class JFNKMixer:
         self._it += 1
         self.probing = False
 
-        # WARM-UP: damped Picard to fall into the basin (the unstable modes are
-        # still small in the first few iterations).
         if self._it <= self.warmup:
             if self._it == self.warmup:
                 self._log(f"  JFNK: warmup done at it={self._it}, "
@@ -217,12 +192,6 @@ class JFNKMixer:
                           f" -> engaging Newton-Krylov")
             return x + self.beta * (gx - x)
 
-        # Globalise Newton with the same residual-merit test used by the
-        # synchronous exact-JVP solver.  Previously a worsening trial was
-        # accepted and only shrank the radius at the *next* base point.  On a
-        # strongly unstable fixed point that loses the basin the trust region
-        # was intended to preserve.  A rejected trial is discarded; reopen
-        # GMRES at the stored base with a smaller radius.
         if self._trial_pending:
             trial_norm = self._gnorm(_c2r(gx - x))
             base_norm = float(self._Rk_norm)
@@ -240,16 +209,11 @@ class JFNKMixer:
                     f"{trial_merit:.3e}; ||R|| {base_norm:.3e} -> "
                     f"{trial_norm:.3e}; trust -> {self._trust_k:.2g}"
                 )
-                # The exact base map value is already stored.  Emit the first
-                # finite-difference probe of the retry directly, avoiding a
-                # redundant evaluation of F(x_k).
                 return self._open_newton_step(
                     _r2c(self._xk_r), _r2c(self._Fxk_r)
                 )
             self._trial_rejections = 0
 
-        # Out of Newton budget -> gentle Picard (the best-conserved iterate is
-        # already captured by the SCBA driver).
         if self._newton_it >= self.max_newton:
             return x + self.beta * (gx - x)
 
@@ -274,11 +238,6 @@ class JFNKMixer:
         if self._R0_norm is None:
             self._R0_norm = rk
 
-        # Trust-region adaptation from the previous Newton step's progress.
-        # Asymmetric, with hysteresis: shrink HARD on any worsening (overshoot
-        # of the unstable mode), but GROW on any solid monotone descent up to
-        # ``trust_max``. Only when the trust region is enabled -- adapting a
-        # disabled one (trust = 0) would silently switch it back on.
         if self.trust > 0.0 and self._Rprev_norm is not None:
             if rk > self._Rprev_norm:            # step made it worse -> shrink
                 self._trust_k = max(self._trust_k * 0.5, self._trust_floor)
@@ -391,4 +350,3 @@ class JFNKMixer:
         self._phase = "newton_base"
         self._trial_pending = True
         return _r2c(x_new_r)
-

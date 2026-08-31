@@ -192,8 +192,6 @@ def shared_krylov_dyson(a_diag, sigma_action: RetardedAction, rhs, *,
         images.append(op(v))
         return True
 
-    # Seed with the right-hand side's own directions, real and imaginary: both
-    # are admissible REAL directions, and the transform requires real ones.
     seed = rhs.mean(axis=0)
     for part in (seed.real, seed.imag):
         for col in range(part.shape[-1]):
@@ -218,9 +216,6 @@ def shared_krylov_dyson(a_diag, sigma_action: RetardedAction, rhs, *,
         hist.append(rel)
         if rel < tol or m >= max_basis:
             break
-        # Grow along the worst frequency's residual. Both parts are pushed
-        # because a complex residual carries two real directions and dropping
-        # one halves the space for no saving.
         iw = int(np.argmax(np.linalg.norm(resid, axis=(1, 2))))
         grew = False
         for part in (resid[iw].real, resid[iw].imag):

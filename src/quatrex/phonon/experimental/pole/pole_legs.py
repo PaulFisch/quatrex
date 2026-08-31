@@ -26,9 +26,6 @@ from quatrex.phonon.experimental.pole.pole_probe import BlockLayout
 __all__ = ["ClusterBatch", "ClusterViews", "CoefficientViews",
            "congruence_legs", "source_fit"]
 
-# Padded pole columns carry zero u and v, so their location is irrelevant to
-# every contraction. It only has to stay off the real axis and out of the way
-# of z_a - conj(z_b), which is why it sits in the lower half plane.
 _PAD_Z = -1.0j
 
 
@@ -175,8 +172,6 @@ def _pole_factors(z: NDArray, omega: NDArray, widths: NDArray | None):
         return d1, d1[..., :, None] * xp.conj(d1)[..., None, :]
     h = xp.asarray(widths, dtype=xp.float64)[None, None, :, None]
     d1 = (xp.log(w + 0.5 * h - zz) - xp.log(w - 0.5 * h - zz)) / h
-    # z_a - conj(z_b) has imaginary part -(gamma_a + gamma_b) < 0, so it never
-    # vanishes: the retarded poles are strictly in the lower half plane.
     gap = z[:, :, None, :, None] - xp.conj(z)[:, :, None, None, :]
     d2 = (d1[..., :, None] - xp.conj(d1)[..., None, :]) / gap
     return d1, d2
@@ -251,8 +246,6 @@ def congruence_legs(
         z = xp.zeros((n_q, 0, w, layout.nnz), dtype=xp.complex128)
         return z, xp.zeros((n_q, 0, w, 0, 0), dtype=xp.complex128), ()
 
-    # Sigma_tot: the scattering self-energy PLUS both contacts. Dropping the
-    # contacts drops the injection that drives the device.
     sig_band = layout.band(sigma)
     for block, i in corners:
         if block is None:
@@ -327,8 +320,6 @@ def source_fit(batch: ClusterBatch, source: NDArray, omega: NDArray,
     centre = xp.abs(0.5 * (xp.real(za) + xp.real(zb))).reshape(-1)
     k0 = xp.argmin(xp.abs(w[None, :] - centre[:, None]), axis=1)
     span = xp.arange(-window, window + 1)
-    # Clamping at the grid edge only REPEATS a sample already inside the
-    # window, and the reduction is a maximum, so the answer is unchanged.
     win = xp.clip(k0[:, None] + span[None, :], 0, n_w - 1)
     local = xp.take_along_axis(per_pair, win, axis=1)
     neg = (0.5 * (xp.real(za) + xp.real(zb))).reshape(-1) < 0.0

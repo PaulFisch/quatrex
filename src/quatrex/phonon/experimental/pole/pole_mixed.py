@@ -142,8 +142,6 @@ def mixed_convolution(
         out = np.empty(om.size, dtype=complex)
         for i, o in enumerate(om):
             f = c / (w - p)
-            # Index of the sample at (o - w[k]) in the grid; the offset w[0]
-            # matters whenever the grid is not anchored at zero.
             idx = np.rint((o - w - w[0]) / h).astype(int)
             ok = (idx >= 0) & (idx < w.size)
             out[i] = np.sum(f[ok] * r[idx[ok]]) * h / (2.0 * np.pi)

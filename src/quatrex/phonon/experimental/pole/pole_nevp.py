@@ -257,9 +257,6 @@ def bordered_newton_batch(
     n_dof = int(sum(int(b.shape[-1]) for b in blocks[0]))
 
     if r0 is None:
-        # ONE start vector for the whole batch, so a candidate's answer does
-        # not depend on who it was batched with. Identical to the draw the
-        # per-candidate solve made, which reseeded rng(0) for every candidate.
         rng = xp.random.default_rng(0)
         r = rng.standard_normal(n_dof) + 1j * rng.standard_normal(n_dof)
         r = xp.broadcast_to(r, (n_probe, n_dof)) + 0.0
@@ -271,8 +268,6 @@ def bordered_newton_batch(
     tr = xp.broadcast_to(
         xp.asarray(trust_radius, dtype=xp.float64).reshape(-1), (n_probe,))
     active = xp.ones(n_probe, dtype=bool)
-    # Default: the candidate used its whole budget, exactly as the scalar loop
-    # leaves `it` at max_iter when it never breaks.
     iterations = xp.full(n_probe, max_iter, dtype=xp.int64)
     zero = xp.zeros((), dtype=xp.complex128)
 
@@ -298,10 +293,6 @@ def bordered_newton_batch(
         dr = -x1 - dz[:, None] * x2
 
         z = z + dz
-        # NOTE: r is deliberately NOT renormalised here. The gauge condition
-        # c^H r = 1 is what fixes the scale of the null vector and closes the
-        # bordered system; rescaling r inside the loop violates it and the
-        # iteration stops converging.
         r = r + xp.where(active[:, None], dr, zero)
 
         settled = xp.abs(dz) < 1e-15 * xp.maximum(1.0, xp.abs(z))
@@ -321,21 +312,9 @@ def bordered_newton_batch(
     scale = xp.abs(z) ** 2 + m_norm
     eps_nep = resid / (scale * xp.linalg.norm(r, axis=-1))
 
-    # Left null vector by inverse iteration on M^H, then the normalisation
-    # l^H M' r = 1 that makes d_alpha = 1 (doc Eqs. 49-50).
-    #
-    # M(z_alpha) is singular at the pole, so M^{-H} does not exist there and
-    # this is adjoint inverse iteration at a slightly unconverged z. That is
-    # well posed for the DIRECTION -- the solve amplifies precisely the null
-    # component being sought -- but the conditioning worsens as the pole solve
-    # improves, so the result is iterated until its own residual stops falling
-    # and that residual is reported rather than assumed.
     adj = _adjoint_blocks(blocks)
     l = c
     eps_left = xp.full(n_probe, xp.inf)
-    # Latching: once a candidate stops improving it is DONE, exactly as the
-    # scalar loop's `break` left it. A plain per-step minimum would let a later
-    # iterate revive a candidate the scalar path had already abandoned.
     going = xp.ones(n_probe, dtype=bool)
     for _ in range(left_iters):
         cand = fac.solve_hermitian(l[..., None])[..., 0]
@@ -356,14 +335,8 @@ def bordered_newton_batch(
     nz = d != 0.0
     l = l / xp.where(nz, xp.conj(d), 1.0)[:, None]
 
-    # One more bordered-Newton step's worth of information, in THz. With the
-    # normalisation above, l^H M'(z) r = 1, so the Newton correction is just
-    # -l^H M(z) r -- no extra solve. Reported, never applied: applying it
-    # would be a ninth iteration taken outside the trust region.
     dz_est = xp.where(nz, -_vdot(l, _matvec(blocks, r)), zero)
 
-    # M'(z) is routinely singular (for the phonon operator it is essentially
-    # 2z*I plus lead derivatives), so take its norm without factorising it.
     dm_norm = btd_norm2(*dblocks, n_power=norm_power)
     kappa = (xp.linalg.norm(l, axis=-1) * xp.linalg.norm(r, axis=-1) * dm_norm)
 
@@ -432,5 +405,4 @@ def bordered_newton(
         **kwargs,
     )
     return batch.to_list()[0]
-
 

@@ -193,11 +193,6 @@ def bloch_modes_poly(a_blocks, nevp=None, *, residual: bool = False) -> ModeSet:
             "bloch_modes_poly: need an odd number of coefficient blocks "
             f"(2M+1, M >= 1), got {len(a_blocks)}")
 
-    # Complex on the way in. The linearisation inverts sum(a_xx) and hands the
-    # companion matrix to a numba eig kernel that requires a complex dtype; a
-    # caller passing real blocks -- which a dynamical matrix naturally is --
-    # otherwise fails inside the kernel with a SystemError rather than
-    # anywhere legible.
     dtype = np.result_type(*(np.asarray(_host(a)).dtype for a in a_blocks),
                            np.complex128)
     arrs = tuple(xp.asarray(a).astype(dtype, copy=False) for a in a_blocks)
@@ -212,10 +207,6 @@ def bloch_modes_poly(a_blocks, nevp=None, *, residual: bool = False) -> ModeSet:
     batched = arrs[0].ndim > 2
     blocks = arrs if batched else tuple(a[xp.newaxis, :, :] for a in arrs)
 
-    # Full() linearises by inverting sum(a_xx), which is the pencil evaluated
-    # at lambda = 1. An exact unit root -- an undamped zone-centre mode, the
-    # case this module's docstring is entirely about -- makes that singular,
-    # and the failure surfaces inside a numba eig kernel rather than here.
     total = np.asarray(_host(sum(arrs)))
     with np.errstate(divide="ignore", invalid="ignore"):
         cond = np.linalg.cond(total.reshape(-1, *total.shape[-2:]))

@@ -40,62 +40,28 @@ def inject_pole_sector(ssp, scba) -> None:
 
     # (1) The legs: remove the pole sector before the FFT ring sees them.
     ssp.set_pole_channel(state.g_pp_lesser, state.g_pp_greater)
-    # Independent of `leg`: the ring can be corrected whether or not the
-    # legs also carry a cell-average correction, because this ADDS the
-    # covariance the ring omits rather than replacing anything it computed.
     if getattr(ps, "bubble_correction", "none") == "local_covariance":
         _bubble_covariance_correction(scba, state, ssp)
     if getattr(ps, "leg", "congruence") == "congruence_analytic":
         _pole_analytic_sectors(scba, state, ssp)
         return
     if getattr(ps, "leg", "congruence") == "congruence":
-        # The pole channel here is the point-minus-cell-average
-        # correction, so the ring convolves the cell average of the
-        # congruence reconstruction -- what a dw-weighted sum wants, and
-        # what the raw grid sample gets wrong by order one for an
-        # under-resolved line. Being an average of PSD matrices, the leg is
-        # PSD however bad the pole model is, which is the difference from
-        # the superseded route.
-        #
-        # It does NOT resolve the pole inside the convolution: the output
-        # resolution is still the grid's. Carrying SR/RS analytically needs
-        # a vertex contraction against per-pole pattern-valued
-        # coefficients, which is not built.
         return
     if ps.sectors == "rr":
-        # Deliberately incomplete: SS/SR/RS are not added back, so this
-        # DROPS real three-phonon processes. It is a staging setting whose
-        # purpose is to measure how large they are.
         return
 
-    # (2) The analytic pole-pole channel, contracted against the vertex on
-    # the stored pattern.
     rows, cols = data_rows_cols(scba)
     freqs = xp.asarray(solver.local_frequencies, dtype=float)
     shape = scba.data.sigma_lesser.data.shape
     acc_l = acc_g = acc_r = None
-    # state.legs, not state.clusters: the sources are indexed alongside
-    # the bosonically closed set the solver built them from.
     for cl, s_l, s_g in zip(state.legs, state.source_lesser,
                             state.source_greater):
         vl = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
                                  conjugate=False)
         vr = modal_vertex_blocks(ssp.phi_blocks, ssp.block_sizes, cl.u,
                                  conjugate=True)
-        # Per-pole sources, NOT one frozen value at the cluster centre:
-        # each leg must carry the source where its own pole sits. A frozen
-        # value is wrong as soon as a cluster holds more than one pole, and
-        # badly wrong once the set is closed under z -> -z^*, where the
-        # partner sits at -Omega. It is what made G_PP and the pole leg the
-        # sectors put back different functions, which breaks the SPATIAL
-        # balance while leaving the scalar P_in = P_out nearly intact.
-        # One source per pole PAIR: shared by both residues, which is what
-        # keeps G_PP decaying like 1/w^2 (see source_at_poles).
         sa = source_at_poles(s_l, freqs, cl)
         sb = source_at_poles(s_g, freqs, cl)
-        # Cell width, so the analytic sector lands in the SAME
-        # representation the grid solver integrates: piecewise constant
-        # with weight dw, not a point sample.
         _h = float(xp.real(freqs[1] - freqs[0])) if freqs.shape[0] > 1 else 0.0
         kw = dict(rows=rows, cols=cols,
                   cell=_h if getattr(ps, "cell_average", True) else None)
@@ -111,49 +77,25 @@ def inject_pole_sector(ssp, scba) -> None:
         rr = rr_g - rr_l
         acc_r = rr if acc_r is None else acc_r + rr
 
-    # (3) Inject only the KRAMERS-KRONIG HALF of Sigma^R. The driver
-    # (core/scba.py) already adds 0.5*(sigma^< - sigma^>) globally for the
-    # total stored self-energy, which now includes this analytic term, so
-    # supplying the full Sigma_SS^R here would double-count the half term
-    # and break causality.
     kk_half = acc_r - 0.5 * (acc_g - acc_l)
     ssp.set_pole_self_energy(acc_l.reshape(shape), acc_g.reshape(shape),
                              kk_half.reshape(shape))
     if ps.sectors != "rr_ss_sr":
         return
 
-    # (4) The mixed pole-background sectors. They must be evaluated as a
-    # symmetric pair with the same quadrature, or the Phi-derivable energy
-    # balance that makes the decomposition conserving is lost.
     g_l = scba.data.g_lesser.data.reshape(freqs.shape[0], -1)
     g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
     reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
     reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
-    # Mask the background leg EXACTLY as the ring masks its own legs. The
-    # omega = 0 bin carries the near-singular acoustic peak and the ring
-    # excludes it; feeding the mixed convolution an unmasked leg makes the
-    # two sectors integrate different data and injects that peak into
-    # Sigma. Measured: without this, Sigma^> is non-PSD by 0.15 at mid-band,
-    # strictly linear in the injected term.
     leg_mask = xp.abs(freqs) < 1e-6
     if bool(leg_mask.any()):
         reg_l = reg_l.copy(); reg_l[leg_mask] = 0.0
         reg_g = reg_g.copy(); reg_g[leg_mask] = 0.0
     mx_l = mx_g = None
-    # state.legs, not state.clusters: the sources are indexed alongside
-    # the bosonically closed set the solver built them from.
     for cl, s_l, s_g in zip(state.legs, state.source_lesser,
                             state.source_greater):
         common = dict(freqs=freqs, phi_blocks=ssp.phi_blocks,
                       block_sizes=ssp.block_sizes, rows=rows, cols=cols)
-        # Blocked, not pattern-level: the pattern contraction is
-        # O(nnz_out * nnz_in) and refuses above 4096 entries, which no
-        # real device is under. Same object, pinned to 1e-12 against the
-        # pattern form in test_pole_blocked.py.
-        # Each component is extended onto the negative axis from its
-        # Keldysh PARTNER: G^<(q,-w) = G^>(-q,w)^T. Passing the same
-        # component twice would restore the conjugate mirror, which is
-        # correct for Delta but wrong for a lesser/greater leg by 244 %.
         a = mixed_self_energy_blocked(
             freqs, cl, source_at_poles(s_l, freqs, cl),
             reg_l, reg_g, **common)
@@ -211,13 +153,6 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
     g_g = scba.data.g_greater.data.reshape(freqs.shape[0], -1)
     reg_l = g_l - state.g_pp_lesser.reshape(g_l.shape)
     reg_g = g_g - state.g_pp_greater.reshape(g_g.shape)
-    # Mask the background leg EXACTLY as the ring masks its own legs
-    # (sse_phonon_phonon: gl_in[conv_mask] = 0), for the same reason as the
-    # rr_ss_sr route above: the omega = 0 bin carries the near-singular
-    # acoustic spectral peak and the ring excludes it, so an unmasked leg
-    # makes the two sectors integrate different data and injects that peak
-    # straight into Sigma. Measured there: Sigma^> non-PSD by 0.15 at
-    # mid-band, strictly LINEAR in the injected mixed term.
     leg_mask = xp.abs(freqs) < 1e-6
     if bool(leg_mask.any()):
         reg_l = reg_l.copy(); reg_l[leg_mask] = 0.0
@@ -249,10 +184,6 @@ def _pole_analytic_sectors(scba, state, ssp) -> None:
                 mx_g = mx if mx_g is None else mx_g + mx
                 acc_r = rr if acc_r is None else acc_r + rr
 
-    # Inject only the KRAMERS-KRONIG HALF of the pole-pole Sigma^R:
-    # core/scba.py already adds 0.5*(sigma^< - sigma^>) globally over the
-    # stored total. acc_l/acc_g are SS alone here, which is what acc_r is the
-    # causal partner OF -- the mixed sectors get theirs from the transform.
     kk_half = acc_r - 0.5 * (acc_g - acc_l)
     ssp.set_pole_self_energy(acc_l.reshape(shape), acc_g.reshape(shape),
                              kk_half.reshape(shape))
@@ -291,8 +222,6 @@ def _bubble_covariance_correction(scba, state, ssp) -> None:
 
     built = {"l": [], "g": []}
     for cl, co_l, co_g in zip(state.legs, state.c_lesser, state.c_greater):
-        # Only the cells that hold a promoted pole carry subcell structure
-        # worth correcting; the rest are already smooth on the grid.
         cells = np.unique([int(np.argmin(np.abs(freqs - float(np.real(z)))))
                            for z in np.asarray(get_host(cl.z))
                            if float(np.real(z)) >= 0.0])
@@ -320,12 +249,6 @@ def _bubble_covariance_correction(scba, state, ssp) -> None:
     out = {}
     for tag, partner in (("l", "g"), ("g", "l")):
         pos = _screen(built[tag])
-        # The negative half is the PARTNER component folded:
-        # G^<(-w) = G^>(w)^T, so a leg sum_p R_p/(u - zeta_p) placed at -w_k
-        # becomes sum_p (-R_p^T)/(u + zeta_p) -- poles at -zeta, residues
-        # negated and TRANSPOSED. For a rank-one residue the transpose is just
-        # the two factors swapped, (p (x) q)^T = q (x) p, so no pattern
-        # permutation is needed and the sign rides on one of them.
         neg = [(-c, -z, -q, p) for c, z, p, q in _screen(built[partner])]
         corr, rep = spectrum_correction(freqs, pos + neg, ssp.phi_blocks,
                                         ssp.block_sizes, rows, cols, h)

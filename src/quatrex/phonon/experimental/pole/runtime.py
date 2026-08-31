@@ -113,30 +113,12 @@ class PoleRuntimeMixin:
             return
         from quatrex.phonon.experimental.pole.pole_audit import psd_residual
 
-        # Sigma is checked as well as G, and it is the ROOT check:
-        # G^< = G^R Sigma^< G^A is a congruence, so a PSD Sigma cannot produce
-        # a non-PSD G. If G^< fails, Sigma^< must have failed first, and
-        # reporting only G would send the search to the wrong place.
         n_freq = int(self.local_frequencies.shape[0])
-        # BOTH lesser and greater carry sign -1. This solver uses the
-        # occupation-positive convention sigma^{<,>} = +i n(+1) Gamma, so
-        # -i sigma^< = n Gamma >= 0 AND -i sigma^> = (n+1) Gamma >= 0
-        # (bubble_positivity.md: "the solver stores -i G^{<,>} >= 0").
-        # The textbook convention has +i G^> >= 0, and borrowing it here made
-        # the gate report worst = -1.000 -- uniformly negative -- on the
-        # pole-free baseline, which is what a flipped sign looks like rather
-        # than a physics result.
         targets = [("g_lesser", out[0], -1.0), ("g_greater", out[1], -1.0)]
         if self._psd_sigma is not None:
             sl, sg = self._psd_sigma
             targets = [("sigma_lesser", sl, -1.0),
                        ("sigma_greater", sg, -1.0)] + targets
-        # Match the positivity functional to the bubble functional.  The
-        # acoustic zero-frequency sample is a zero-measure convention and is
-        # explicitly removed from both bubble legs and outputs.  Testing it
-        # here pins the otherwise useful gate to the near-singular contact
-        # Green function at DC (typically a normalised floor of exactly -1),
-        # even though that sample never enters the SCBA map.
         skip = xp.abs(xp.asarray(self.local_frequencies).real) < 1e-6
         for name, buf, sign in targets:
             rep = psd_residual(
@@ -166,12 +148,6 @@ class PoleRuntimeMixin:
         if comm.stack.size <= 1:
             return {}
 
-        # comm.stack.all_gather is IN-PLACE -- all_gather(sendbuf, recvbuf)
-        # returning None -- and every rank must send the same count, which the
-        # frequency split does not guarantee. So gather the counts first, then
-        # pad to the max and trim on the way out. Calling it as if it returned
-        # a value raised "missing 1 required positional argument: 'recvbuf'"
-        # on every rank, which made every multi-rank pole run dead on arrival.
         n_ranks = comm.stack.size
         sizes = np.empty(n_ranks, dtype=np.int64)
         comm.stack.all_gather(np.array([local_freqs.size], dtype=np.int64),
@@ -237,18 +213,9 @@ class PoleRuntimeMixin:
 
         delta = delta_from_sigma(sse_lesser.data, sse_greater.data)
         if float(xp.abs(delta).max()) == 0.0:
-            # Iteration 0: no scattering yet, so every pole sits on the real
-            # axis and none is a resonance. Nothing to promote.
             self.pole_state = None
             return
 
-        # A q-resolved device has one pole problem PER q: M_q(z) = z^2 I -
-        # D(q) - Sigma^R_q(z), and the sets are unrelated. Allocating a sector
-        # from them additionally needs the vertex fold (the bubble at q sums
-        # over q' and q - q'), which is not built -- but the CENSUS needs none
-        # of that, and the census is what says whether coupled-q is worth
-        # building at all. So extraction-only walks the q axis; the allocating
-        # path still refuses it in set_operator_context.
         nq = 1
         if delta.ndim > 2:
             nq = int(np.prod(delta.shape[1:-1]))
@@ -279,8 +246,6 @@ class PoleRuntimeMixin:
         with profiler.profile_range("PhononSolver: Pole legs", "default",
                                     comm):
             if getattr(self._pole_cfg, "leg", "congruence") == "congruence":
-                # Same batched path as the q-resolved route, with one q, so
-                # both are the same code and every single-q test covers it.
                 self._pole_layout = getattr(self._pole, "_layout", None)
                 state = self.pole_state
                 if self._pole_layout is not None and state is not None \
@@ -354,10 +319,6 @@ class PoleRuntimeMixin:
         acc_g = xp.zeros_like(sse_greater.data)
         states, promoted = [], 0
 
-        # ONE block layout for every q. The map from the stored sparsity
-        # pattern to dense blocks depends on (rows, cols, block_sizes) alone,
-        # which no q changes, so building it per q repeats the same scan nq
-        # times -- and it is what lets the sectors share a batched solve.
         layout = BlockLayout(sse_lesser.rows, sse_lesser.cols,
                              self.block_sizes, band=1)
         sectors = []
@@ -381,9 +342,6 @@ class PoleRuntimeMixin:
             )
             sectors.append(sec)
 
-        # The q are independent, so their correctors are one batch. q_batch
-        # caps how many share a solve, for memory only -- the answer does not
-        # depend on it.
         chunk = int(getattr(self._pole_cfg, "q_batch", 0) or 0) or len(sectors)
         solved = []
         with profiler.profile_range("PhononSolver: Pole solve", "default",
@@ -396,9 +354,6 @@ class PoleRuntimeMixin:
             if st is not None and st.clusters:
                 promoted += st.n_poles
 
-        # One leg build for EVERY q and cluster. The q are independent and the
-        # clusters within a q are independent, so this is one batched pass, not
-        # a Python loop of n_q x n_clusters. See PhononSolver._build_pole_legs.
         self._pole_layout = layout
         with profiler.profile_range("PhononSolver: Pole legs", "default", comm):
             leg_l, leg_g = self._build_pole_legs(
@@ -418,9 +373,6 @@ class PoleRuntimeMixin:
                                        np.array([iq for iq, _ in todo],
                                                 dtype=int))
 
-        # One state for the consumers, carrying the STACKED channel. Its
-        # clusters are the union so the interaction's emptiness test is right;
-        # its per-q detail stays in `q_states` for reporting.
         total = states[0][1] if states and states[0][1] is not None else None
         if total is None or not any(
                 st is not None and st.clusters for _, st in states):
@@ -436,11 +388,6 @@ class PoleRuntimeMixin:
                          if st is not None and st.clusters)
             skipped = nq - len(todo)
             tail = f", {skipped} q skipped (q_stride/q_max)" if skipped else ""
-            # A count alone cannot say WHY the set moved. "Refused" and "never
-            # found" need opposite fixes, and the hysteresis in
-            # PoleSector.screen can only act on a candidate the tracker
-            # matched -- so report seeded, matched and the refusal histogram
-            # summed over q, not just the promoted total.
             seeded = sum(st.n_seeded for _, st in states if st is not None)
             matched = sum(st.n_matched for _, st in states if st is not None)
             why: dict[str, int] = {}
@@ -481,8 +428,6 @@ class PoleRuntimeMixin:
         nq = int(np.prod(shape))
         d_flat = delta.reshape(delta.shape[0], nq, delta.shape[-1])
         for iq in range(nq):
-            # plain ints: np.unravel_index yields np.int64, which both
-            # prints as 'np.int64(0)' and makes the log ungreppable.
             idx = tuple(int(i) for i in np.unravel_index(iq, shape))
             try:
                 self._pole.set_operator_context(
@@ -500,14 +445,8 @@ class PoleRuntimeMixin:
                     print(f"  q {idx}:", flush=True)
                 self._pole.refresh()
             except (AttributeError, NameError, ImportError):
-                # Never "this q is hard" -- these are programming errors, and
-                # absorbing them into the per-q report turns a broken build
-                # into a survey that quietly visits nothing. Measured: a
-                # missing local import made every q read as "census failed".
                 raise
             except Exception as exc:                       # noqa: BLE001
-                # One q failing must not lose the other 24: the census is a
-                # survey, and a q that cannot be solved is itself a datum.
                 if comm.rank == 0:
                     print(f"  q {idx}: census failed ({type(exc).__name__}: "
                           f"{exc})", flush=True)
@@ -559,12 +498,6 @@ class PoleRuntimeMixin:
         if not any(per_q):
             return None, None
 
-        # The batch trades memory for launches: on Si it peaks around 1.5 GB
-        # against a 44 MB self-energy, because every intermediate carries the
-        # q, cluster, frequency and pole axes at once. That is the right trade
-        # on a GPU and the wrong one if it does not fit, so the q axis is cut
-        # to a budget. One chunk whenever it fits -- and it is REPORTED when it
-        # does not, because a silently chunked run looks like an unchunked one.
         chunk = int(getattr(self._pole_cfg, "q_batch", 0) or 0)
         if not chunk:
             n_p = max((int(c.z.shape[0]) for legs in per_q for c in legs),
@@ -625,20 +558,11 @@ class PoleRuntimeMixin:
                 batch, self._pole_layout, self._q_stack(buf.data, iq, 1), gr,
                 corners, omega, widths)
 
-        # source_fit_tol as a real gate: carrying a source analytically
-        # presumes it is smooth across its own pole window, and this is the
-        # measured statement of that. Reported, never silently applied -- an
-        # asymptotic error estimate cannot see a source with structure of its
-        # own.
         fit_l = source_fit(batch, out["l"][1], omega)
         fit_g = source_fit(batch, out["g"][1], omega)
         fit = xp.maximum(fit_l, fit_g)
         fit_host = np.asarray(get_host(fit))
 
-        # Per-q bookkeeping, as VIEWS. Slicing the padded results per cluster
-        # is a Python call and a device slice each, which is exactly the cost
-        # this path removes -- and the consumers are diagnostics that usually
-        # never run. ClusterViews defers it to whoever actually indexes.
         sizes = [[int(cl.z.shape[0]) for cl in legs] for legs in per_q]
         for k, (st, legs) in enumerate(zip(states, per_q)):
             if st is None or not legs:
@@ -651,9 +575,6 @@ class PoleRuntimeMixin:
                                             sizes[k])
             st.source_fit = list(fit_host[k, :len(legs)])
 
-        # source_fit_tol is REPORTED, never applied -- an asymptotic error
-        # estimate cannot see a source with structure of its own. The offenders
-        # are found without a walk over the clusters; normally there are none.
         if comm.rank == 0:
             over = np.argwhere(fit_host > self._pole_cfg.source_fit_tol)
             for k, m in over:
@@ -705,15 +626,6 @@ class PoleRuntimeMixin:
         off_worst = float(np.max(np.abs(np.real(z)[good] - w_host[k[good]])
                                  / hw[k[good]])) if good.any() else 0.0
 
-        # ... and how much of the ring's weight the offset can actually move.
-        # The registration error is order one ONLY on cell pairs (k, m-k) with
-        # both ends in a pole cell -- one displaced leg against a resolved
-        # partner costs O((delta/Gamma)^2) instead -- so the error in Sigma is
-        # bounded by this fraction times ~0.8. A scalar-norm proxy for the
-        # vertex contraction, hence an upper bound: a small value is
-        # conclusive, a large one is a reason to measure properly.
-        # The RING's leg, G^< - g_pp -- not Sigma, and not the raw G^<: the
-        # whole point is what the convolution is fed.
         if g_lesser is not None:
             gl = (self._q_stack(g_lesser.data, iq, 1)
                   - xp.asarray(leg).reshape(iq.size, w_host.size, -1))
@@ -774,15 +686,6 @@ class PoleRuntimeMixin:
         sg = _q(sse_greater.data).reshape(freqs.shape[0], -1)
         last = int(np.sum(self.block_sizes[:-1]))
 
-        # The pole set must be closed under z -> -z^*: every resonance at
-        # +Omega has a partner at -Omega, and the NEP finds only the positive
-        # members because the search window is positive. Leaving it unclosed
-        # flatters the rr_ss staging setting and costs the complete method
-        # four orders.
-        #
-        # The clusters come from the sector that SOLVED this q, i.e.
-        # self._pole_q[iq]. self._pole exists (built before the q dispatch)
-        # but has no operator context and returns an empty closure.
         state.legs = (sector or self._pole).bubble_clusters()
         acc_l = acc_g = None
         _leg = getattr(self._pole_cfg, "leg", "congruence")
@@ -814,11 +717,6 @@ class PoleRuntimeMixin:
                     s_l = add_contact_source(s_l, corner_l, cl.v, off)
                 if corner_g is not None:
                     s_g = add_contact_source(s_g, corner_g, cl.v, off)
-            # source_fit_tol as a real gate: carrying a source analytically
-            # presumes it is smooth across its own pole window, and this is
-            # the measured statement of that. Above the tolerance the cluster
-            # is reported rather than silently approximated -- an asymptotic
-            # error estimate cannot see a source with structure of its own.
             eps_fit = max(source_variation(s_l, freqs, cl),
                           source_variation(s_g, freqs, cl))
             state.source_fit.append(eps_fit)
@@ -830,10 +728,6 @@ class PoleRuntimeMixin:
             state.source_lesser.append(s_l)
             state.source_greater.append(s_g)
             if congruence:
-                # Split the RETARDED function and let the Keldysh components
-                # follow, so the leg the ring keeps is B^R_k Sigma B^A_k -- a
-                # congruence of a PSD source, hence PSD -- instead of the
-                # indefinite frozen remainder. See pole_congruence.py.
                 for src, corn, c_out, g_out in (
                     (sl, corners_l, state.c_lesser, "l"),
                     (sg, corners_g, state.c_greater, "g"),
@@ -845,27 +739,11 @@ class PoleRuntimeMixin:
                         apply_sparse(gr, rows, cols, sv, n_dof))
                     c_out.append(co)
                     if analytic:
-                        # The sectors are put back as ANALYTIC terms, so what
-                        # the ring gives up is the analytic leg's own sample --
-                        # not a cell-average correction. G_reg = G - G_S is
-                        # exact for any G_S, but only if the leg subtracted
-                        # here and the leg the sectors restore are literally
-                        # the same function.
                         frozen = coefficients_at_poles(cl, freqs, co)
                         zeta, p_row, q_col = partial_fraction_legs(cl, frozen)
                         (state.pf_lesser if g_out == "l"
                          else state.pf_greater).append((zeta, p_row, q_col))
                         state.residue_sum.append(residue_sum(p_row, q_col))
-                        # source_fit_tol gates c_ss and nothing else. The
-                        # mixed coefficient c_rs = G^R_k Sigma V - U D_k c_ss
-                        # is frozen by the same approximation and carries the
-                        # whole retarded background, so it needs its own
-                        # measurement -- but of the right thing. Its VARIATION
-                        # across the window is not an error: the principal
-                        # part is c(z)/(w-z) exactly and the variation lands
-                        # in [c(w)-c(z)]/(w-z), which is regular. What can go
-                        # wrong is the local model's own residual, and whether
-                        # the grid carries that regular remainder.
                         state.mixed_fit.append((
                             fit_residual(co[1], freqs, cl),
                             remainder_resolution(co[1], frozen[1], freqs, cl),
@@ -873,12 +751,6 @@ class PoleRuntimeMixin:
                         smp = pf_leg_sample(zeta, p_row, q_col, freqs,
                                             rows, cols)
                     else:
-                        # What the ring must give up is the difference between
-                        # the POINT sample it would otherwise use and the CELL
-                        # AVERAGE the bubble's dw-weighted sum actually wants.
-                        # Subtracting it leaves the ring holding <G~^{<,>}>_k,
-                        # an average of PSD matrices, hence PSD whatever the
-                        # pole model does.
                         smp = (sector_grid_sample(cl, freqs, co, rows, cols)
                                - sector_cell_average(cl, freqs, co, rows,
                                                      cols, cell_widths))
@@ -887,17 +759,6 @@ class PoleRuntimeMixin:
                     else:
                         acc_g = smp if acc_g is None else acc_g + smp
                 continue
-            # PARTIAL-FRACTION form, not U D^R S(w) D^A U^dag. The analytic
-            # sectors split every leg into simple poles, which carries only a
-            # rational source, so the resolved form is a DIFFERENT function
-            # whenever S varies with frequency (measured 7e-3 apart at a
-            # 2%/THz slope, against 7e-16 for a constant source).
-            #
-            # G_reg = G - G_PP is exact for ANY G_PP, so the sector sum holds
-            # iff the leg subtracted here and the leg the sectors put back are
-            # literally the same object. Using the resolved form on one side
-            # and partial fractions on the other is what broke the SPATIAL
-            # balance while leaving the scalar P_in = P_out nearly intact.
             g_l = pole_keldysh_pf_sparse(
                 freqs, cl, source_at_poles(s_l, freqs, cl), rows, cols)
             g_g = pole_keldysh_pf_sparse(
@@ -905,23 +766,11 @@ class PoleRuntimeMixin:
             acc_l = g_l if acc_l is None else acc_l + g_l
             acc_g = g_g if acc_g is None else acc_g + g_g
         if acc_l is None or acc_g is None:
-            # No leg carried a pole, so there is nothing to remove from the
-            # ring. Leave the channel unset rather than reshaping None: an
-            # empty sector must be a no-op, not a crash.
             state.g_pp_lesser = state.g_pp_greater = None
             return
         state.g_pp_lesser = acc_l.reshape(_q(sse_lesser.data).shape)
         state.g_pp_greater = acc_g.reshape(_q(sse_greater.data).shape)
         if congruence and comm.rank == 0:
-            # Where each promoted pole sits inside its cell, in cells, worst
-            # over the set: 0 is registered on a grid point, 0.5 on a cell
-            # boundary. This is the control parameter of the bubble's
-            # registration error. A cell-averaged leg still places a line's
-            # weight at the cell CENTRE, so the combination frequency is
-            # displaced by up to a full cell and the ring splits the peak
-            # between two bins -- and it worsens with h/gamma. The congruence
-            # route's accuracy is an accident of registration unless this is
-            # small.
             from quatrex.phonon.experimental.pole.pole_audit import pole_pair_weight
 
             w_host = np.asarray(get_host(freqs), dtype=float)
@@ -938,16 +787,6 @@ class PoleRuntimeMixin:
                     hk = float(hw[k]) if k < hw.size else 0.0
                     if hk > 0.0:
                         off_worst = max(off_worst, abs(x - w_host[k]) / hk)
-            # ... and how much of the ring's weight the offset can actually
-            # move. The registration error is order one ONLY on cell pairs
-            # (k, m-k) with both ends in a pole cell -- one displaced leg
-            # against a resolved partner costs O((delta/Gamma)^2) instead --
-            # so the error in Sigma is bounded by this fraction times ~0.8.
-            # A scalar-norm proxy for the vertex contraction, hence an upper
-            # bound: a small value is conclusive, a large one is a reason to
-            # measure properly.
-            # The RING's leg, G^< - g_pp -- not Sigma, and not the raw G^<:
-            # the whole point is what the convolution is fed.
             if g_lesser is not None:
                 gl = (_q(g_lesser.data).reshape(w_host.size, -1)
                       - acc_l.reshape(w_host.size, -1))
@@ -964,15 +803,6 @@ class PoleRuntimeMixin:
                   f"{100 * pw['worst']:.3g}% at w={pw['omega']:.2f}",
                   flush=True)
         if analytic and comm.rank == 0:
-            # eps_tail is the coefficient of the leg's 1/w tail. The analytic
-            # leg is global -- the pole-pole sector integrates it over the
-            # whole axis -- and the true G decays like 1/w^2, so a spurious
-            # 1/w is not cosmetic. It vanishes only for a bosonically closed
-            # set whose freezing preserved the cancellation.
-            #
-            # eps_fit is the local model's residual against its own samples;
-            # eps_reg is whether the grid integrates the regular remainder.
-            # Separate errors; one number cannot stand for both.
             tail = max(state.residue_sum) if state.residue_sum else 0.0
             fits = [a for a, _ in state.mixed_fit] or [0.0]
             regs = [b for _, b in state.mixed_fit] or [0.0]
@@ -1010,38 +840,16 @@ class PoleRuntimeMixin:
         if state is None or not state.legs:
             return
         if out[0].data.ndim > 2:
-            # Coupled-q: every gate below reshapes to (n_freq, nnz) against one
-            # rows/cols pair, and a q axis breaks that silently -- it would
-            # still produce a number. A per-q subcell gate is its own work.
             if comm.rank == 0:
                 print("  ring leg positivity: skipped (q-resolved; the gate is "
                       "per-q and not written)", flush=True)
             return
 
         if getattr(cfg, "leg", "congruence") == "congruence":
-            # The ring convolves G^{<,>}_k - g_pp, which on the cell-average
-            # route is an average of PSD matrices: PSD by construction, so
-            # this gate checks the implementation (a sign, an index, a cell
-            # width), not the maths. Three things it must do: report lesser
-            # and greater separately, since a single min hides which failed;
-            # EXCLUDE the bins the ring masks (unmasked, the near-singular
-            # G^>(0) acoustic bin makes the gate read exactly -1.000 on the
-            # pole-free baseline); and print the same gate on the uncorrected
-            # leg as a control, since agreement means it is not measuring the
-            # pole sector at all.
-            #
-            # Deliberately NOT taken on congruence_analytic: there the leg is
-            # the remainder G - G_S, a difference of PSD objects, which may be
-            # indefinite with nothing wrong. Only the total -i Sigma^{<,>} is
-            # constrained.
             rows, cols = out[0].rows, out[0].cols
             n_freq = int(self.local_frequencies.shape[0])
             w_host = np.asarray(get_host(self.local_frequencies), dtype=float)
             skip = xp.asarray(np.abs(w_host) < 1e-6)
-            # ... and a second reading restricted to the CELLS THE POLES
-            # TOUCH. The global worst is whatever the baseline's own worst bin
-            # is, and the correction is localised, so the global number goes
-            # blind against its control by construction. This one cannot.
             near = np.zeros(n_freq, dtype=bool)
             for cl in state.legs:
                 for z in np.asarray(get_host(cl.z)):
@@ -1066,10 +874,6 @@ class PoleRuntimeMixin:
             if comm.rank == 0:
                 for name in ("lesser", "greater"):
                     a, b = rep_all[name], rep_all[f"{name}_control"]
-                    # RELATIVE, not absolute: the two agreeing to a part in
-                    # 1e3 already means the worst bin is one the pole
-                    # correction does not touch, and the gate is reporting the
-                    # baseline's own worst bin whatever the sector does.
                     scale = max(abs(a["worst"]), abs(b["worst"]), 1e-300)
                     same = ("  [== control: gate is blind]"
                             if abs(a["worst"] - b["worst"]) <= 1e-3 * scale
@@ -1105,11 +909,6 @@ class PoleRuntimeMixin:
             freqs, rows, cols, self.block_sizes, centres=centres, window=1)
         self.psd_report["subcell"] = rep
 
-        # ... and the same measure for the CONGRUENCE reconstruction, which
-        # rebuilds the Keldysh component from the retarded split instead of
-        # freezing the Keldysh remainder. Offline the two differ completely
-        # (-1.000 against +1.3e-05); this is the in-situ comparison that says
-        # whether the redesign is worth its cost on a real device.
         cong = None
         try:
             from quatrex.phonon.experimental.pole.pole_audit import subcell_congruence
@@ -1136,5 +935,4 @@ class PoleRuntimeMixin:
             print(f"  subcell positivity: worst={rep['worst']:+.3e} at "
                   f"w[{rep['worst_centre']}], at-centres="
                   f"{rep['at_centres']:+.3e}{tail}", flush=True)
-
 

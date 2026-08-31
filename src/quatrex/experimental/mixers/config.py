@@ -52,11 +52,6 @@ class ExperimentalMixerConfig(BaseModel):
     complement). A single complex pair needs k = 2; 6 leaves margin. Cf.
     ``RPMMixer`` in ``quatrex/core/rpm.py``."""
 
-    # --- Jacobian-free Newton-Krylov (mixing_method = "jfnk") -----------------
-    # GMRES on the matrix-free Newton system J delta = -R (finite-difference
-    # J*v products), run in the real embedding [Re Sigma, Im Sigma]; lands
-    # strongly-unstable fixed points where the subspace-tracking RPM fails.
-    # Cf. ``quatrex/core/jfnk.py``.
     jfnk_warmup_iters: NonNegativeInt = 10
     """For ``mixing_method = "jfnk"``: damped-LINEAR steps to fall into the
     fixed point's basin before engaging Newton-Krylov."""
@@ -100,13 +95,6 @@ class ExperimentalMixerConfig(BaseModel):
     (marginal) eigenvalues of ``J = J_F - I`` off the origin so the inner
     GMRES no longer stalls on the near-null-space. 0 = pure Newton."""
 
-    # --- exact-Jacobian Newton-Krylov (mixing_method = "newton") --------------
-    # Same Newton system as jfnk, but the Jacobian-vector products are the
-    # EXACT analytic linearisation (frozen-G Dyson identity + polarisation
-    # identity of the quadratic bubble; cf. ``quatrex/core/phonon_jvp.py``),
-    # computed synchronously inside one mixer call -- no finite differences,
-    # no probe iterates. Phonon-only; requires a stationary map (no ramps,
-    # bare-lead contacts and the rgf solver).
     newton_warmup_iters: NonNegativeInt = 5
     """For ``mixing_method = "newton"``: minimum damped-Picard iterations
     before Newton may engage (basin capture)."""
@@ -171,4 +159,3 @@ class ExperimentalMixerConfig(BaseModel):
     requires the symmetry fast paths (``sse_greater_from_lesser``,
     ``sse_hermitian_pairs``) off; with either enabled it falls back to
     polarization with a notice."""
-

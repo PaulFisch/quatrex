@@ -84,9 +84,6 @@ def lead_band_edges(d_00, d_01, d_10, n_k: int = 257) -> NDArray:
     k = np.linspace(0.0, np.pi, int(n_k))
     ph = np.exp(1j * k)[:, None, None]
     dk = d0[None] + d1[None] * ph + d2[None] * np.conj(ph)
-    # D(k) is Hermitian for a physical lead; symmetrise so eigvalsh is exact
-    # rather than nearly so, and a broken input surfaces as a large residual
-    # instead of a silently complex frequency.
     lam = np.linalg.eigvalsh(0.5 * (dk + np.conj(np.swapaxes(dk, -2, -1))))
     w = np.sqrt(np.maximum(lam.real, 0.0))              # (n_k, b), THz
     edges = np.concatenate([w.min(axis=0), w.max(axis=0)])
@@ -321,24 +318,8 @@ class PoleSector:
             epoch_iterations=config.epoch_iterations,
         )
         self.state = PoleSectorState()
-        # Promoted poles are remembered by LOCATION, not by object identity.
-        # bordered_newton builds a fresh PoleSolution every iteration, so a set
-        # of id(sol) can never match across iterations -- and CPython recycles
-        # ids of freed objects, so it could match arbitrarily. That left the
-        # hysteresis permanently disengaged: every pole was judged at the
-        # strict q_in instead of the lenient q_out once promoted, and
-        # membership churned exactly as this config field warns.
         self._promoted: list[tuple[complex, NDArray]] = []
-        # Two modes count as the same one only if their eigenvectors are not
-        # nearly orthogonal. Half is a deliberate midpoint: it admits the
-        # smooth rotation a pole undergoes between SCBA iterations and refuses
-        # the swap that happens at a crossing.
         self._match_min_overlap = 0.5
-        # Fit anchors for the current pole solve, one per candidate. Pinning
-        # them makes M(z) a genuine analytic function of z for the whole Newton
-        # iteration; deriving the stencil from Re z instead makes M only
-        # PIECEWISE holomorphic, with a measured 17 % jump at each stencil
-        # boundary. Set for the duration of solve_poles and restored after.
         self._fit_anchors: NDArray | None = None
         self._fit_plan: LocalFitPlan | None = None
         self._delta_raw: NDArray | None = None
@@ -390,11 +371,6 @@ class PoleSector:
         z_new = xp.asarray([complex(s.z) for s in solutions])
         r_new = xp.stack([xp.asarray(s.r).reshape(-1) for s in solutions], axis=1)
 
-        # The optimal assignment uses the combined cost; acceptance then
-        # tests the two ingredients SEPARATELY. Their sum is too permissive:
-        # an orthogonal eigenvector contributes only 1.0, which sits under
-        # cluster_factor, so a summed threshold would carry identity straight
-        # through a crossing -- the very case position alone already fails.
         assign = match_poles(z_old, r_old, z_new, r_new, s_z=self.h)
         zo = np.asarray(_host(z_old))
         zn = np.asarray(_host(z_new))
@@ -434,9 +410,6 @@ class PoleSector:
         if w.size < 2:
             return float("inf")
         c = float(centre)
-        # The support is the union of the cells, so it runs half a spacing
-        # past the outermost NODES -- the same convention the ring integrates
-        # under, where every sample owns a cell of width h.
         a, b = w[0] - 0.5 * self.h, w[-1] + 0.5 * self.h
         point = (self.h / np.pi) * float(np.sum(g / ((w - c) ** 2 + g * g)))
         exact = (np.arctan((b - c) / g) - np.arctan((a - c) / g)) / np.pi
@@ -468,10 +441,6 @@ class PoleSector:
             return None
         if getattr(self.cfg, "accept", "locate") == "locate":
             eps_z = self.locate_error(sol, separation)
-            # Hysteresis, same rule as q_in/q_out below: strict to enter,
-            # lenient to stay. A single threshold here closes a feedback loop
-            # through Sigma and the promoted set limit-cycles with period two
-            # (measured on Si: 620 <-> 460 poles, residual stuck at O(1)).
             tol_z = (float(getattr(self.cfg, "locate_tol_out",
                                    self.cfg.locate_tol))
                      if was_promoted else self.cfg.locate_tol)
@@ -484,11 +453,6 @@ class PoleSector:
         gamma = gamma_          # both hard gates ran above, before hard_only
         tol = float(getattr(self.cfg, "leg_weight_tol", 0.0) or 0.0)
         if tol > 0.0:
-            # Exact: how much of the line's weight the grid can misrepresent,
-            # worst case over where it falls between nodes. See leg_weight_tol.
-            # Hysteresis runs the other way here than for eps_z: this gate
-            # refuses a pole the grid ALREADY resolves, so staying in the
-            # sector means a smaller threshold, not a larger one.
             if was_promoted:
                 out = float(getattr(self.cfg, "leg_weight_tol_out", 0.0) or 0.0)
                 tol = out if out > 0.0 else tol / 3.0
@@ -538,8 +502,6 @@ class PoleSector:
             edge = np.abs(self.band_edges[None, :] - z.real[:, None]).min(axis=1)
             nearest = np.minimum(nearest, edge)
         floor = self.cfg.trust_radius_cells * self.h
-        # No competing scale at all -> unbounded, as the scalar form returns
-        # inf rather than the floor when its `scales` list comes out empty.
         return xp.asarray(np.where(np.isfinite(nearest),
                                    np.maximum(floor,
                                               self.cfg.trust_factor * nearest),
@@ -621,9 +583,6 @@ class PoleSector:
         promoted = self._match_previous(solutions)
         seps = self.separations(solutions)
         eps_ok, eps_no = [], []
-        # Membership frozen: the epoch decided who is in, and re-deciding
-        # every iteration is what puts a floor under rel Sigma. Positions
-        # still track Sigma; only the SET is held.
         frozen = (bool(getattr(self.cfg, "freeze_membership", False))
                   and bool(self._promoted)
                   and self.tracker.membership_frozen())
@@ -690,20 +649,10 @@ class PoleSector:
             d = d.reshape(d.shape[0], d.shape[-1])
         self._delta = d
         self._d_blocks = d_blocks
-        # The contact blocks arrive on the WHOLE frequency grid,
-        # ``(n_freq, b, b)``. M(z) is a single matrix, so they have to be
-        # sampled at one frequency; holding them flat at the grid point
-        # nearest Re z is exactly the approximation this docstring states.
-        # Passing the full array instead silently assembles M at every
-        # frequency at once and hands the bordered Newton a stack it cannot
-        # interpret -- which is what happened on the first production run.
         self._obc = tuple(
             None if o is None else xp.asarray(o) for o in (obc_left, obc_right)
         )
         if band_edges is not None:
-            # Per q: D depends on the transverse momentum, so the lead branch
-            # points do too. Supplied here rather than at construction because
-            # the census walks every q through ONE sector object.
             self.band_edges = np.asarray(_host(band_edges), dtype=float)
 
         self._block_sizes = np.asarray(_host(block_sizes), dtype=int)
@@ -722,22 +671,10 @@ class PoleSector:
         self._layout = layout if layout is not None else BlockLayout(
             self._rows, self._cols, self._block_sizes, band=1)
         d_lay = self._layout.flatten_blocks(self._d_blocks)
-        # Drop leading singletons: the dynamical matrix carries a singleton
-        # where the Keldysh buffers carry frequency, and the operator's own
-        # batch axis is the probe axis.
         self._d_lay = d_lay.reshape(-1, self._layout.total)
         if self._d_lay.shape[0] == 1:
             self._d_lay = self._d_lay[0]
 
-    # ``Delta`` is held behind a property so that everything DERIVED from it --
-    # the bosonic mirror and the two block-layout gathers -- cannot survive a
-    # change to it. They are pure functions of Delta and rebuilding them per
-    # Newton step is the waste this refactor removes, but a stale copy is the
-    # exact failure this module refuses to risk: Delta is rebuilt from the
-    # mixed buffers every iteration precisely so it cannot drift out of step
-    # with the Sigma^R the Dyson operator was built from. Assigning _delta
-    # anywhere -- set_operator_context, the predictor's temporary swap, a test
-    # perturbing it in place -- invalidates the cache.
     @property
     def _delta(self) -> NDArray:
         return self._delta_raw
@@ -845,8 +782,6 @@ class PoleSector:
         assembled operator always sees one matrix per block per candidate.
         """
         anchors = getattr(self, "_fit_anchors", None)
-        # Pinned to the same anchor as the fit: sampling the contact at the
-        # point nearest Re z would reintroduce a jump into M(z).
         ref = xp.real(zz) if anchors is None else anchors
         out = []
         for o in self._obc:
@@ -874,8 +809,6 @@ class PoleSector:
 
         def m_blocks(z):
             zz = xp.asarray(z, dtype=xp.complex128).reshape(-1)
-            # Assembled in the same order as the scalar path built it,
-            # z^2 I - D - Sigma_s - Sigma_c, so the arithmetic matches.
             flat = _flat(zz)
             flat[..., lay.diag] = (zz * zz)[:, None]
             flat = flat - self._d_lay - self._continue_flat(zz, 0)
@@ -911,9 +844,6 @@ class PoleSector:
         cols = np.asarray(_host(self._cols), dtype=int)
 
         lo, hi = self.window()
-        # Over the whole spectrum at once. The loop this replaces built a dense
-        # (n_dof, n_dof) Delta per MODE -- n_dof of them per q, so n_dof * n_q
-        # per SCBA iteration -- to take one quadratic form from each.
         keep = np.nonzero((lam.real > 0.0)
                           & (np.sqrt(np.maximum(lam.real, 0.0)) >= lo)
                           & (np.sqrt(np.maximum(lam.real, 0.0)) <= hi))[0]
@@ -927,8 +857,6 @@ class PoleSector:
         vals = ((1.0 - f)[:, None] * delta[idx - 1]
                 + f[:, None] * delta[idx])                          # (K, nnz)
 
-        # v^H Delta v on the stored pattern, without densifying: the quadratic
-        # form is a weighted sum over the nonzeros.
         v = vec[:, keep]                                            # (n_dof, K)
         quad = np.sum(np.conj(v[rows, :]).T * vals * v[cols, :].T, axis=1)
         gamma = np.maximum(-np.imag(quad) / (4.0 * om), 1e-12)
@@ -948,11 +876,6 @@ class PoleSector:
                      m_blocks, dm_blocks) -> PoleSectorState:
         """Screen, cluster and track what the corrector returned."""
         if getattr(self.cfg, "extraction_only", False):
-            # Census only: report what the solve found and hand back an EMPTY
-            # state, so the ring runs pole-free and the numbers cost nothing
-            # but the solve. Deliberately BEFORE build_clusters -- allocating
-            # and then discarding would still project sources and could still
-            # hit the memory path this mode exists to stay clear of.
             self._report_census(self._census_rows(sols, seeds))
             self.state = PoleSectorState(iteration=self.state.iteration + 1)
             self._prev_delta = xp.array(self._delta, copy=True)
@@ -978,8 +901,6 @@ class PoleSector:
         try:
             sens = self.sensitivities(sols)
         except (AttributeError, ValueError):
-            # No operator context (the manually driven route): the location
-            # census is still worth having without it.
             sens = [complex("nan")] * len(sols)
         rows = []
         for k, sol in enumerate(sols):
@@ -1073,17 +994,11 @@ class PoleSector:
         if not (getattr(self.cfg, "audit_every_iteration", True)
                 or self.tracker.needs_rescan()):
             return seeds, vecs
-        # Audit: offer the harmonic candidates the held set does not already
-        # cover. "Already covered" is the same cluster_factor * h that defines
-        # "the same mode" everywhere else, so a re-found pole is not duplicated
-        # into its own neighbour and then split by the clusterer.
         reach = self.cfg.cluster_factor * self.h
         extra = [w for w in self.harmonic_seeds()
                  if min(abs(w - t) for t in seeds) > reach]
         if not extra:
             return seeds, vecs
-        # The same unit vector the unbatched solve would have drawn, so an
-        # added candidate starts exactly where a cold solve would start it.
         rng = xp.random.default_rng(0)
         n_dof = int(np.sum(self._block_sizes))
         default = rng.standard_normal(n_dof) + 1j * rng.standard_normal(n_dof)
@@ -1109,9 +1024,6 @@ class PoleSector:
             return None
         saved = self._delta
         try:
-            # The setter invalidates the derived gathers, so the contraction
-            # below really is against the difference and not against a cached
-            # Delta -- see the property.
             self._delta = diff
             flat = self._continue_flat(
                 xp.asarray(z, dtype=xp.complex128).reshape(-1), 0)
@@ -1305,8 +1217,6 @@ def refresh_many(sectors: list["PoleSector"]) -> list[PoleSectorState]:
     states: list[PoleSectorState | None] = [None] * len(sectors)
     for k in range(len(sectors)):
         if k not in live:
-            # Nothing in the window at this q: no solve, but the iteration
-            # still has to advance so the epoch and the tracker stay in step.
             states[k] = sectors[k]._end_refresh([], [], None, None, None)
     if not live:
         return states
@@ -1314,9 +1224,6 @@ def refresh_many(sectors: list["PoleSector"]) -> list[PoleSectorState]:
     sols = _solve_batched([sectors[k] for k in live],
                           [seeded[k] for k in live])
 
-    # A failed correction is a tracking failure, not a reason to carry a pole:
-    # re-seed from the harmonic spectrum and try once more. Only the q that
-    # lost everything are re-solved, and they are re-solved together.
     again = [i for i, k in enumerate(live)
              if sectors[k].state.solutions and not any(s.converged
                                                        for s in sols[i])]
@@ -1345,9 +1252,6 @@ def _solve_batched(sectors, seeded) -> list[list[PoleSolution]]:
     seeds, vectors, valid = _pad_seeds(seeded, n_probe)
     n_dof = int(np.sum(sectors[0]._block_sizes))
 
-    # Trust radii come from the UNPADDED seed lists: a duplicated seed sits at
-    # zero distance from its original, and the nearest-competing-seed rule
-    # would then collapse the real candidate's search region to the floor.
     radii = xp.stack([
         xp.concatenate([xp.asarray(sec.trust_radii(sd[:n])),
                         xp.full(n_probe - n, xp.inf)])
@@ -1357,8 +1261,6 @@ def _solve_batched(sectors, seeded) -> list[list[PoleSolution]]:
                     dtype=xp.complex128)
     r0 = None
     if any(v is not None for v in vectors):
-        # Where a q has no predicted vector, use the same random unit vector
-        # the unbatched solve would have drawn for it.
         rng = xp.random.default_rng(0)
         default = rng.standard_normal(n_dof) + 1j * rng.standard_normal(n_dof)
         r0 = xp.stack([

@@ -253,8 +253,6 @@ def _mixed_one_sector(
     if prefactor is None:
         prefactor = analytic_prefactor()
 
-    # See _mixed_one_sector_blocked: the negative half comes from the PARTNER
-    # Keldysh component, transposed.
     g_reg, freqs = bosonic_extend(
         g_reg, g_partner, freqs, transpose_index=transpose_index(rows, cols))
 
@@ -314,20 +312,6 @@ def mixed_self_energy_sparse(
     return sr + rs
 
 
-# ---------------------------------------------------------------------------
-# Block-structured mixed contraction
-#
-# ``_mixed_one_sector`` contracts at the pattern level, which is O(nnz_out *
-# nnz_in) and hopeless at device scale (nnz ~ 1e5 gives 1e10 entries in a
-# single intermediate). The contraction is really a matrix triple product,
-#
-#     Sigma[I, J] = sum_{a, b} BL[I, a] M[a, b] BR[J, b]^T,
-#
-# and every factor is block-banded: M lives on G's block-tridiagonal pattern,
-# and BL/BR inherit the cubic vertex's |I - a| <= 1. So each output block needs
-# only a handful of b x b GEMMs, and the dense (n_dof, n_dof) vertex -- 1.5 GB
-# per pole at production size -- is never formed either.
-# ---------------------------------------------------------------------------
 
 def block_offsets(block_sizes: NDArray) -> NDArray:
     """Cumulative block offsets, ``(n_blocks + 1,)`` on the host."""
@@ -443,11 +427,6 @@ def _mixed_one_sector_blocked(
     if prefactor is None:
         prefactor = analytic_prefactor()
 
-    # The convolution runs over the WHOLE frequency axis; the solver only holds
-    # G for omega >= 0. The negative half is fixed by the bosonic relation
-    # G^<(q,-w) = G^>(-q,w)^T -- it comes from the PARTNER component,
-    # transposed, NOT from conjugating this one. Extended once here, not per
-    # pole pair.
     g_reg, freqs = bosonic_extend(
         g_reg, g_partner, freqs, transpose_index=transpose_index(rows, cols))
 
@@ -455,8 +434,6 @@ def _mixed_one_sector_blocked(
     npp = cluster.n_poles
     n_omega = int(omega.shape[0])
 
-    # The pole set is shared by every sector, so both the convolved M and its
-    # block view are built once and reused across output blocks.
     m_blocks = {}
     for al in range(npp):
         for dl in range(npp):
@@ -554,13 +531,6 @@ def source_at_poles(
     src = xp.asarray(source, dtype=xp.complex128)
     flat = src.reshape(src.shape[0], -1)
 
-    # One fit per PAIR, two probes each. The loop this replaces ran the fit
-    # over the whole (Np, Np) source for every pair and then kept a single
-    # entry of the result -- Np^2 least-squares solves whose Np^2 - 1 other
-    # outputs were discarded, so Np^4 of the work was waste. The stencil
-    # depends only on the pair's centre, so all 2 Np^2 probes go through one
-    # batched pseudo-inverse (LocalFitPlan) and only the entry each pair
-    # actually needs is contracted.
     a_idx = xp.repeat(xp.arange(npp), npp)
     b_idx = xp.tile(xp.arange(npp), npp)
     za, zbb = z[a_idx], xp.conj(z[b_idx])
@@ -591,16 +561,10 @@ def source_variation(
     if scale == 0.0:
         return 0.0
 
-    # Vectorised over pole pairs. The loop this replaces pulled the whole
-    # (n_omega, Np, Np) source back to the host and walked Np^2 windows there,
-    # which on a device is a synchronisation per cluster per Keldysh component.
     centre = 0.5 * (xp.real(z)[:, None] + xp.real(z)[None, :])    # (Np, Np)
     flat_c = xp.abs(centre).reshape(-1)                           # (Np^2,)
     k0 = xp.argmin(xp.abs(w[None, :] - flat_c[:, None]), axis=1)
     span = xp.arange(-window, window + 1)
-    # Clamping rather than shortening the window at the grid edges only
-    # REPEATS a sample that is already inside it, and the reduction below is a
-    # maximum, so the answer is the one the variable-length slice gave.
     idx = xp.clip(k0[:, None] + span[None, :], 0, int(w.shape[0]) - 1)
 
     local = xp.take(src.reshape(src.shape[0], -1), idx, axis=0)   # (Np^2, win, Np^2)

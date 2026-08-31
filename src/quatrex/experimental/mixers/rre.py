@@ -28,8 +28,6 @@ class RREMixer:
     global (frequency-coupled) mode, not a per-slice one.
     """
 
-    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
-    #: the driver may always test convergence on its output.
     probing: bool = False
 
     def __init__(self, cycle: int = 8, beta: float = 0.2, ridge: float = 1e-6) -> None:
@@ -69,5 +67,4 @@ class RREMixer:
             return s
         except np.linalg.LinAlgError:
             return x + self.beta * f           # degenerate cycle -> damped restart
-
 

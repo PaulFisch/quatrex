@@ -37,8 +37,6 @@ __all__ = [
     "lorentz_pair_retarded",
 ]
 
-# A mirror cell coincides with the omega=0 cell when the grid is anchored at
-# zero; the same guard the production kernel uses (fft_utils.py:108).
 _DC_ANCHOR = 0.25
 
 
@@ -244,8 +242,6 @@ class LocalFitPlan:
         self.positive = a >= 0.0
         w_c = np.where(self.positive, a, -a)
 
-        # Same stencil arithmetic as the scalar path; the width collapses to
-        # the whole grid only when the grid is shorter than the window.
         wid = min(2 * window, n_freq)
         centre = np.clip(np.round(w_c / self.h), 0, n_freq - 1)
         lo = np.clip(centre - window, 0, n_freq - wid).astype(int)
@@ -269,8 +265,6 @@ class LocalFitPlan:
                 f"plan holds {self.n_probe} anchors, got {int(zz.shape[0])} "
                 "probe points."
             )
-        # On the mirror branch the model is a function of -z, so the chain
-        # rule flips the sign of ds/dz.
         s = (self._sign * xp.real(zz) - self.w_c
              + 1j * self._sign * xp.imag(zz)) / self.h
         ds_dz = self._sign / self.h
@@ -392,9 +386,6 @@ def delta_local_fit(
     out = xp.empty((zz.shape[0], flat.shape[1]), dtype=xp.complex128)
     for p in range(int(zz.shape[0])):
         zp = complex(zz[p])
-        # Negative-frequency z is served by the mirrored branch: Delta(-w) = Dbar(w).
-        # ``anchor`` pins the branch AND the stencil so the result is analytic
-        # in z; see local_fit_weights for the measured 17 % jump without it.
         ref = zp.real if anchor is None else float(anchor)
         src, w_c = (flat, ref) if ref >= 0.0 else (mirror, -ref)
         centre = int(np.clip(round(w_c / h), 0, n_freq - 1))
@@ -407,8 +398,6 @@ def delta_local_fit(
         coeff, *_ = xp.linalg.lstsq(
             vander.astype(xp.complex128), src[lo:hi], rcond=None
         )
-        # Fit variable and its derivative w.r.t. z. On the mirror branch the
-        # model is a function of -z, so the chain rule flips the sign.
         if ref >= 0.0:
             s, ds_dz = (zp.real - w_c + 1j * zp.imag) / h, 1.0 / h
         else:

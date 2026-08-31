@@ -78,8 +78,6 @@ class RPMMixer:
         Relative singular-value cutoff for admitting a direction into ``Z``.
     """
 
-    #: JFNK emits finite-difference PROBE iterates; this mixer never does, so
-    #: the driver may always test convergence on its output.
     probing: bool = False
 
     def __init__(self, max_subspace: int = 6, beta: float = 0.3,
@@ -134,17 +132,8 @@ class RPMMixer:
         if self._it <= self.warmup or len(self._dx) < 2:
             return x + self.beta * f
 
-        # STALL GATE: only engage the Newton correction when plain Picard has
-        # PLATEAUED. While the residual keeps shrinking, Picard is doing the
-        # right thing and the DMD H-estimate from the still-moving iterate is
-        # unreliable (a blind Newton there hallucinates "unstable" modes).
-        # Newton is needed ONLY for a mode that DEFEATS Picard (|lambda|>1),
-        # whose signature is exactly a stalled/limit-cycling residual -- and
-        # that is also where the increment buffer is cleanest.
         if self.patience > 0:
             if len(self._fhist) <= self.patience:
-                # Not enough residual history to demonstrate a plateau --
-                # keep accumulating increments under damped Picard.
                 return x + self.beta * f
             ratio = fnorm / (self._fhist[0] + 1e-300)
             if ratio < self.progress_thresh:
@@ -168,21 +157,10 @@ class RPMMixer:
                 return x + self.beta * f
             V, sig = V[:, :k], sig[:k]
             Z = dX @ (V / sig)                # (n_local, k), Z^H Z = I_k (global)
-            # Restricted Jacobian H = Z^H G' Z from the projected secants:
-            #   Z^H dG = H (Z^H dX)  =>  H = (Z^H dG) pinv(Z^H dX).
             Ahat = self._gram(Z, dX)          # (k, p)
             Bhat = self._gram(Z, dG)          # (k, p)
             H = Bhat @ np.linalg.pinv(Ahat, rcond=1e-10)   # (k, k)
             Zf = self._gram(Z, f.reshape(-1, 1))[:, 0]     # (k,) global Z^H f
-            # SAFEGUARDED MODAL NEWTON: the map can have a near-marginal mode
-            # (lambda ~ 1, I - G' near-singular) on which a blind Newton
-            # blows up but plain Picard converges (slowly). So Newton ONLY on
-            # the genuinely UNSTABLE modes (|lambda(H)| > 1 + margin), Picard
-            # on the rest. In the eigenbasis H = W diag(lam) W^{-1}, the RPM
-            # correction (I_k-H)^{-1}-I_k has eigenvalues
-            # phi(lam) = lam/(1-lam); it is zeroed on contractive/marginal
-            # modes and |phi| is capped (the trust region then caps the
-            # assembled step).
             try:
                 lam, W = np.linalg.eig(H)
                 Winv = np.linalg.inv(W)
@@ -206,4 +184,3 @@ class RPMMixer:
             return x_new
         except (np.linalg.LinAlgError, ValueError):
             return x + self.beta * f
-

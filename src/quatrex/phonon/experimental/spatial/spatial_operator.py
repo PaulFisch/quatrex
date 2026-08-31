@@ -12,7 +12,7 @@ device needs and that module throws away. In a finite device the field at an
 interior cell carries waves injected from BOTH contacts, and relative to one
 anchor the far-contact contribution appears with :math:`|\lambda| > 1`.
 Measured on the converged chain, that branch is **26-30 % of the fitted residue
-weight** (``phonon/docs/spatial_representation.md`` §11): dropping it loses a
+weight** (section 11 of ``phonon/docs/spatial_representation.md``): dropping it loses a
 quarter of the amplitude, and continuing it outward diverges.
 
 The repair is not a better fit. It is to stop writing the interior as one
@@ -160,8 +160,6 @@ def directional_modes(a_blocks, nevp=None, *, unit_tol: float = 1e-9,
                         + 1j * eta_select * scale * np.eye(blocks[mid].shape[-1]))
         lam_eta = np.asarray(_host(
             bloch_modes_poly(tuple(shifted), nevp=nevp).lam)).ravel()
-        # keep the EXACT roots; only the direction is read off the perturbed
-        # ones, matched by proximity.
         inside = np.zeros(lam.shape, dtype=bool)
         for k in np.where(on_unit)[0]:
             j = int(np.argmin(np.abs(lam_eta - lam[k])))
@@ -348,10 +346,6 @@ class SemiSepOperator:
         """
         if i == j:
             return self.diag[i]
-        # The order is not symmetric and getting it backwards still produces a
-        # decaying tail: `apply` unrolls to A_{i-1} ... A_{j+1} B_j, so B_j is
-        # innermost and the factors are applied from the SOURCE outwards --
-        # ascending for the rightward tail, descending for the leftward one.
         if i > j:
             a, b, c = self.a_plus, self.b_plus, self.c_plus
             rng = range(j + 1, i)

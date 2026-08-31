@@ -50,16 +50,6 @@ def centred_gram(zeta: NDArray, centre: float, h: float) -> NDArray:
     hh = float(h)
     d = cell_resolvent_mean(z, centre, hh)
     gap = z[:, None] - xp.conj(z)[None, :]
-    # zeta_p == conj(zeta_q) is the RULE here, not an exception: a flattened
-    # family is [z, conj(z)] by construction, so every pole meets its own
-    # conjugate and the partial fraction is 0/0 for that pair. The limit is the
-    # double-pole integral,
-    #
-    #     (1/h) int_I du/(u - zeta)^2 = (1/h)[1/(c - h/2 - zeta)
-    #                                         - 1/(c + h/2 - zeta)],
-    #
-    # which is elementary. Refusing instead -- as an earlier version did --
-    # rejects every real pole set the sector can produce.
     lo = 1.0 / (centre - 0.5 * hh - z)
     hi = 1.0 / (centre + 0.5 * hh - z)
     double = ((lo - hi) / hh)[:, None] * xp.ones_like(gap)
@@ -77,13 +67,7 @@ def cell_variance(residues: NDArray, zeta: NDArray, centre: float,
     r = r.reshape(r.shape[0], -1)
     gram = centred_gram(zeta, centre, h)
     inner = r @ xp.conj(r).T                      # <R_p, R_q>_F
-    # |delta G|^2 = sum_pq <R_p, R_q>_F phi_p conj(phi_q), so the Gram pairs
-    # with inner UNCONJUGATED. Conjugating it here gave 7.30e+03 against a
-    # quadrature 7.80e+03 -- a 6 % error that looks like a tolerance issue and
-    # is not one.
     val = float(xp.real(xp.sum(gram * inner)))
-    # Hermitian PSD in exact arithmetic; a small negative is roundoff on a
-    # near-null basis, a large one is a defect in the basis.
     if val < -1e-8 * float(xp.abs(inner).max() + 1.0):
         raise ValueError(
             f"cell_variance: negative variance {val:.3e}; the centred basis or "
@@ -128,8 +112,6 @@ def spectrum_correction(
 
     r_idx, c_idx = xp.asarray(rows), xp.asarray(cols)
     w0, hh = float(w[0]), float(h)
-    # cells can come from different clusters, so the family sizes differ;
-    # size the chunk from the largest.
     n_p = max(int(np.asarray(_host(c[1])).size) for c in cells)
     applied = dropped = 0
     for centre_k, zeta_k, p_k, q_k in cells:
@@ -142,17 +124,10 @@ def spectrum_correction(
             kern = covariance_kernel(zeta_k, zeta_l, float(centre_k),
                                      float(centre_l), hh,
                                      xp.asarray([w[m]]))[0]
-            # The two legs are different cells, so the vertex is projected onto
-            # a MIXED pair of families -- p_row from k on alpha, p_row from l
-            # on beta, and the mirrored pairing on the right.
             vl = modal_vertex_blocks(phi_blocks, block_sizes, p_k,
                                      conjugate=False, v=p_l)
             vr = modal_vertex_blocks(phi_blocks, block_sizes, q_l,
                                      conjugate=False, v=q_k)
-            # CHUNKED over the pattern. vl[rows] is (nnz, P, P): at a
-            # production nnz and P = 2 N_p that is tens of gigabytes per pair,
-            # which is the same materialisation that took the sector kernels
-            # to a 290 GB allocation.
             step = max(1, int(chunk_bytes // max(1, 32 * n_p * n_p)))
             for lo in range(0, nnz, step):
                 hi = min(lo + step, nnz)

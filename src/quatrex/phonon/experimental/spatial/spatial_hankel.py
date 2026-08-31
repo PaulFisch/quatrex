@@ -157,8 +157,6 @@ def cluster_exponents(xi, tol: float = 1e-6):
             uniq.append(complex(z))
             mult.append(1)
         else:
-            # running mean keeps the representative from drifting to whichever
-            # member happened to come first
             uniq[hit] = (uniq[hit] * mult[hit] + z) / (mult[hit] + 1)
             mult[hit] += 1
     return np.asarray(uniq), np.asarray(mult, dtype=int)
@@ -234,10 +232,6 @@ def matrix_pencil(seq, rank: int | None = None, *, eps: float = 1e-8,
         rank = numerical_rank(arr, eps, n_rows)
     rank = int(min(max(rank, 0), u.shape[1], u.shape[0] - b))
     if rank == 0:
-        # numerical_rank only reaches zero on an identically-zero sequence, so
-        # the fitted model is zero -- carried as an empty residue array of the
-        # right shape rather than as None, which would make rel_error raise on
-        # a source arm that legitimately contributes nothing here.
         return ExponentialSeries(xi=np.zeros(0, complex),
                                  residues=np.zeros((0, arr.shape[1],
                                                     arr.shape[2]), complex),
