@@ -53,6 +53,26 @@ def _remove_retired_phonon_options(config: str) -> str:
     return "".join(kept)
 
 
+def _set_config_option(config: str, section: str, key: str, value: str) -> str:
+    """Set one option in an existing TOML section."""
+    pattern = re.compile(
+        rf"(?ms)^\[{re.escape(section)}]\n.*?(?=^\[|\Z)"
+    )
+    match = pattern.search(config)
+    if match is None:
+        raise SystemExit(f"config template has no [{section}] section")
+    lines = match.group(0).splitlines(keepends=True)
+    option = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    replacement = f"{key} = {value}\n"
+    for index, line in enumerate(lines):
+        if option.match(line):
+            lines[index] = replacement
+            break
+    else:
+        lines.append(replacement)
+    return config[:match.start()] + "".join(lines) + config[match.end():]
+
+
 # ---------------------------------------------------------------------------
 # source device
 # ---------------------------------------------------------------------------
@@ -302,6 +322,7 @@ def main() -> None:
     if not cfg_path.is_absolute():
         cfg_path = ROOT / cfg_path
     cfg_txt = _remove_retired_phonon_options(cfg_path.read_text())
+    cfg_txt = _set_config_option(cfg_txt, "scba", "symmetric", "false")
     tdir = a.tdir or re.search(r'transport_direction\s*=\s*"(\w)"',
                                cfg_txt).group(1)
     tidx = "xyz".index(tdir)

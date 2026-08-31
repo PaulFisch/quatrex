@@ -131,6 +131,7 @@ def test_reblock_source_must_use_primitive_harmonic_blocks() -> None:
 
 def test_reblock_config_removes_only_retired_phonon_options() -> None:
     config = """\
+[scba]
 [electron]
 eta_obc = 0.1
 [phonon]
@@ -140,10 +141,15 @@ sse_g_band = 3
 [phonon.solver]
 max_batch_size = 512
 """
-    cleaned = _mod()._remove_retired_phonon_options(config)
+    module = _mod()
+    cleaned = module._remove_retired_phonon_options(config)
+    cleaned = module._set_config_option(
+        cleaned, "scba", "symmetric", "false"
+    )
 
     assert "[electron]\neta_obc = 0.1" in cleaned
     assert "[phonon]\nsse_g_band = 3" in cleaned
     assert "[phonon.solver]\nmax_batch_size = 512" in cleaned
+    assert "[scba]\nsymmetric = false" in cleaned
     assert "sse_ramp_iterations" not in cleaned
     assert "\neta =" not in cleaned
