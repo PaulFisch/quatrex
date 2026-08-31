@@ -899,11 +899,9 @@ class SCBA(TransportSolver):
         the energy (stack) partition. ``lead_balance`` is
         ``|J_lead0 - J_leadN| / |mean|`` -- the physical steady-state
         criterion. ``rel_spread`` is the max-min spread over all RGF
-        interfaces. It can contain finite-eta absorption and physical
-        redistribution between the harmonic bond-current and interaction
-        channels. For a non-local self-energy it is also dependent on how
-        the device is partitioned unless every term crossing a cut is included.
-        It is consequently a diagnostic only, not a conservation criterion."""
+        interfaces, or NaN when the distributed solver omits them. It can
+        contain physical redistribution between the harmonic and interaction
+        channels. It is a diagnostic, not a conservation criterion."""
         solver = self.subsystems.get("phonon")
         mw = getattr(solver, "meir_wingreen_current", None)
         if mw is None:
@@ -920,10 +918,21 @@ class SCBA(TransportSolver):
             recv = np.empty_like(heat)
             comm.stack.all_reduce(np.ascontiguousarray(local_heat), recv, op="sum")
             heat = recv
-        denom = 0.5 * (abs(float(heat[0])) + abs(float(heat[-1]))) + 1e-300
-        spread = float((np.nanmax(heat) - np.nanmin(heat)) / denom)
-        balance = float(abs(float(heat[0]) - float(heat[-1])) / denom)
+        balance, spread = self._phonon_heat_flow_metrics(heat)
         return heat, balance, spread
+
+    @staticmethod
+    def _phonon_heat_flow_metrics(heat: NDArray) -> tuple[float, float]:
+        """Return lead balance and the complete-interface spread."""
+        heat = np.asarray(heat)
+        denom = 0.5 * (abs(float(heat[0])) + abs(float(heat[-1]))) + 1e-300
+        balance = float(abs(float(heat[0]) - float(heat[-1])) / denom)
+        spread = (
+            float(np.ptp(heat) / denom)
+            if np.all(np.isfinite(heat))
+            else float("nan")
+        )
+        return balance, spread
 
     @profiler.profile(label="SCBA: Interactions", level="default", comm=comm)
     def _compute_interactions(self) -> None:

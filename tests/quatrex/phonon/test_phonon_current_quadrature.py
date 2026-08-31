@@ -25,3 +25,15 @@ def test_nonuniform_phonon_current_weights_use_local_cells():
     )
     got = np.asarray(get_host(SCBA._phonon_hw_weights(solver)))
     np.testing.assert_allclose(got, [0.0, 0.07, 0.35])
+
+
+def test_missing_internal_currents_do_not_duplicate_lead_balance():
+    balance, spread = SCBA._phonon_heat_flow_metrics([10.0, np.nan, 9.0])
+    np.testing.assert_allclose(balance, 1.0 / 9.5)
+    assert np.isnan(spread)
+
+
+def test_complete_internal_current_spread_is_reported():
+    balance, spread = SCBA._phonon_heat_flow_metrics([10.0, 8.0, 9.0])
+    np.testing.assert_allclose(balance, 1.0 / 9.5)
+    np.testing.assert_allclose(spread, 2.0 / 9.5)
