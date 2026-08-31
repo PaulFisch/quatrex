@@ -158,18 +158,6 @@ class PhononPhononInteraction(Interaction):
     @profiler.profile(label="Interaction: Phonon-Phonon", level="default", comm=comm)
     def compute(self, scba: "SCBA") -> None:
         data = scba.data
-        if (
-            getattr(scba.config.phonon, "sse_cm_subtraction", False)
-            and self.sigma_phonon_phonon._cm_channel is None
-        ):
-            # Build the CM-channel data once from the run's own inputs
-            # (rank-local, deterministic; see quatrex.phonon.cm_channel).
-            from quatrex.phonon.cm_channel import compute_cm_channel
-
-            n_blocks = len(self.sigma_phonon_phonon.block_sizes)
-            self.sigma_phonon_phonon.set_cm_channel(
-                *compute_cm_channel(scba.config, n_blocks)
-            )
         self._inject_pole_sector(scba)
         self.sigma_phonon_phonon.compute(
             data.g_lesser,

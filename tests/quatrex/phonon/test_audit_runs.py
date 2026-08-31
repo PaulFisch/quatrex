@@ -77,7 +77,7 @@ def test_name_probe_catches_every_way_a_path_is_spelled(audit) -> None:
 
 # --- 2. the gates ---------------------------------------------------------
 
-def test_a_clean_run_fails_only_the_gate_no_run_satisfies(audit) -> None:
+def test_a_clean_run_passes_the_current_gates(audit) -> None:
     rec = audit.classify(_rec(audit), 2)
     assert rec["verdict"] == "keep-current"
     assert rec["reasons"] == ""
@@ -117,19 +117,6 @@ def test_a_referenced_directory_is_never_archived(audit) -> None:
              read_by_code="phonon/scripts/figures/x.py"), 1)
     assert rec["verdict"] == "keep-referenced"
     assert "gband=1" in rec["reasons"]       # still recorded, just not moved
-
-
-def test_the_universal_gate_cannot_become_an_archive_class(audit) -> None:
-    """Every run in the corpus fails no-cm-subtraction, so classing on it
-    would put the whole corpus in one bucket."""
-    import importlib.util as ilu
-    spec = ilu.spec_from_file_location(
-        "_archive_runs", ROOT / "phonon/scripts/archive_runs.py")
-    arch = ilu.module_from_spec(spec)
-    spec.loader.exec_module(arch)
-    assert arch.classify("no-cm-subtraction") == "other"
-    assert arch.classify("no-cm-subtraction;gband=1") == "gband"
-    assert arch.classify("h6-cutoff=10;gband=1") == "h6-cutoff"
 
 
 # --- 3. the geometry ------------------------------------------------------

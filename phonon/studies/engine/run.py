@@ -161,7 +161,6 @@ if os.environ.get("QX_JVP_FORM"):    cfg.scba.experimental_mixer.newton_jvp_form
 if os.environ.get("QX_NEWTON_PRECOND"): cfg.scba.experimental_mixer.newton_precond = os.environ["QX_NEWTON_PRECOND"]
 if os.environ.get("QX_NEWTON_PRECOND_RANK"): cfg.scba.experimental_mixer.newton_precond_rank = int(os.environ["QX_NEWTON_PRECOND_RANK"])
 if os.environ.get("QX_SSE_LOWMASK"): cfg.phonon.sse_low_freq_mask_thz = float(os.environ["QX_SSE_LOWMASK"])
-if os.environ.get("QX_SSE_CMSUB"): cfg.phonon.sse_cm_subtraction = bool(int(os.environ["QX_SSE_CMSUB"]))
 # Pole-subtracted SCBA sector (phonon/docs/pole_scba_implemented.md).
 # The config validators refuse the combinations that would be silently wrong
 # (retarded="half", an IR broadening floor, a pole window overlapping either the
@@ -826,7 +825,6 @@ if ranks.rank == 0:
         eta_ir_floor_ramp_iterations=int(
             cfg.phonon.eta_ir_floor_ramp_iterations),
         sse_low_freq_mask_thz=float(cfg.phonon.sse_low_freq_mask_thz),
-        sse_cm_subtraction=bool(cfg.phonon.sse_cm_subtraction),
         sse_g_band_taper=str(cfg.phonon.sse_g_band_taper),
         sse_ramp_iterations=int(cfg.phonon.sse_ramp_iterations),
         sse_greater_from_lesser=bool(cfg.phonon.sse_greater_from_lesser),

@@ -1,5 +1,9 @@
 # What has no evidence behind it
 
+> Historical audit, 2026-08-31: CM subtraction was rejected and removed after
+> the runs described here. Its entries below are retained as negative-result
+> evidence. See `code_catalogue.md` for the current production boundary.
+
 2026-08-27, written alongside `run_audit_2026-08.md`. Three separate
 things get confused under the word "untested", and they need different
 fixes, so they are kept apart here: a knob that no device run has ever

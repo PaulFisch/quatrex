@@ -2006,20 +2006,6 @@ class PhononConfig(BaseModel):
     """Pole-subtracted SCBA (see :class:`PoleSectorConfig`). Disabled by
     default = legacy (bit-identical)."""
 
-    sse_cm_subtraction: bool = False
-    """Subtract the exact centre-of-mass (lead-driven translation)
-    channel from the SSE bubble legs at the q = Gamma pair (env
-    QX_SSE_CMSUB). The channel carries a non-integrable rank-r
-    -iG^{<,>} ~ C2/omega^2 infrared weight that the full crystal's
-    cubic acoustic sum rule annihilates exactly but the
-    device-truncated vertex cannot -- the measured driver of the
-    eta = 0 grid-refinement divergence. The subtracted field is the
-    exact CM-subsystem Green's-function pair (fold- and KMS-exact, no
-    regulator, no free parameter), built from the run's own lead model;
-    Dyson and all observables keep the full G. See
-    phonon/docs/ir_residue_derivation.md. False = legacy
-    (bit-identical)."""
-
     frequency_grid: Literal["window", "file"] = "window"
     """Source of the phonon frequency grid. ``"window"`` (legacy): the
     uniform ``linspace`` from the electron ``energy_window_*`` fields.
@@ -2342,13 +2328,6 @@ class PhononConfig(BaseModel):
                 "fabricates a broadening on exactly the unresolved soft modes "
                 "the sector exists to treat exactly, so the two cannot be "
                 "combined without double counting the linewidth."
-            )
-        if self.sse_cm_subtraction and ps.omega_min_thz <= 0.0:
-            raise ValueError(
-                "pole_sector needs an explicit omega_min_thz > 0 when "
-                "sse_cm_subtraction is on: the CM channel already carries the "
-                "omega -> 0 lead-driven translation physics, and the two "
-                "subtractions must stay disjoint."
             )
         if ps.omega_min_thz and self.sse_low_freq_mask_thz:
             if ps.omega_min_thz <= self.sse_low_freq_mask_thz:

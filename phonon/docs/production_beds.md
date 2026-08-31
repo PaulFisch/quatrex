@@ -1,5 +1,9 @@
 # Beds that clear every gate, and what they cost
 
+> Historical plan, 2026-08-31: this document includes the rejected CM
+> subtraction gate and is not a production recipe. The regenerated manifests
+> no longer use that gate. See `code_catalogue.md` for the current method.
+
 2026-08-27, from `run_audit_2026-08.md`. That audit found no run in the
 corpus satisfying gates (a) and (b) together. This is what such a run looks
 like, per system, with the arithmetic that fixes the size.

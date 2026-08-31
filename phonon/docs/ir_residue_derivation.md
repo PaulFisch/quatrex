@@ -1,5 +1,10 @@
 # The infrared channel of the phonon-phonon bubble: continuum derivation and the surgical subtraction
 
+> Historical result, 2026-08-31: the CM subtraction was rejected after the
+> device campaigns and removed from production. This derivation is retained as
+> negative-result evidence, not as a runtime prescription. See
+> `code_catalogue.md` for the current method.
+
 2026-08-05. Companion measurements: `phonon/studies/_ir_exponents.py`,
 `_ir_killtest.py`, `_ir_residue_check.py` (artifacts under
 `phonon/studies/out/ir_residue/`). All numbers below are measured on the

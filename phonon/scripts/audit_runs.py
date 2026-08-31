@@ -15,9 +15,8 @@ The gates, and where each was established:
                                           spatial_representation.md Sec. 0.3
   b  sse_g_band = 3                       report_rerun_backlog.md Sec. 6
   c  grid resolved, extent ~2 omega_max   grid_audit.md
-  d  DC/infrared channel subtracted       ir_residue_derivation.md
-  e  eta = 0                              CLAUDE.md
-  f  interaction_cutoff >= 22 A (MoS2)    bubble_positivity.md Sec. 6.8-6.10
+  d  eta = 0                              report_removed.md
+  e  interaction_cutoff >= 22 A (MoS2)    bubble_positivity.md Sec. 6.8-6.10
 
 Gate (b) is clamped to ``n_blocks - 1`` at three sites in the solver, so it
 competes with gate (a) for the same cells: g_band = 3 needs >= 4 blocks and
@@ -490,20 +489,20 @@ def audit_dir(path, root, refs):
     rec["kk_percent"] = log["kk"] or ""
     rec["arms"] = log["arms"] or ""
 
-    # (d) DC channel
+    # Historical DC-channel settings remain useful provenance.
     rec["lowmask"] = env.get("QX_SSE_LOWMASK") or \
         _dig(cfg, "phonon", "sse_low_freq_mask_thz", default="")
     rec["cmsub"] = env.get("QX_SSE_CMSUB") or \
         ("1" if _dig(cfg, "phonon", "sse_cm_subtraction") else "")
 
-    # (e) eta
+    # (d) eta
     eta = env.get("QX_ETA") or (log["run_cfg"] or {}).get("eta") \
         or _dig(cfg, "phonon", "eta")
     rec["eta"] = eta if eta not in (None, "") else ""
     rec["eta_ir_floor"] = env.get("QX_ETA_IR_FLOOR") or \
         _dig(cfg, "phonon", "eta_ir_floor_cells", default="")
 
-    # (f) interaction cutoff
+    # (e) interaction cutoff
     if cfg:
         ic = _dig(cfg, "phonon", "interaction_cutoff")
         rec["interaction_cutoff"] = (ic if ic is not None
@@ -576,8 +575,6 @@ def classify(rec, cells_per_block):
                 reasons.append("h6-cutoff=unknown")
             elif ic < MOS2_CUTOFF_MIN:
                 reasons.append(f"h6-cutoff={ic:g}")
-        if not rec["cmsub"]:
-            reasons.append("no-cm-subtraction")
         for flag in ("crash", "oom", "timeout"):
             if flag in rec["outcome"].split("+"):
                 reasons.append(flag)

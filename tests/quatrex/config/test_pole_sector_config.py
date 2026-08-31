@@ -53,6 +53,11 @@ def test_unknown_key_is_rejected():
         PoleSectorConfig(enabled=True, not_a_knob=1.0)
 
 
+def test_cm_subtraction_switch_is_removed():
+    with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs"):
+        PhononConfig(sse_cm_subtraction=True)
+
+
 # --- cross-field gates ------------------------------------------------------ #
 
 def test_half_retarded_is_refused():
@@ -66,15 +71,6 @@ def test_ir_floor_is_refused():
     """The floor broadens exactly the modes the sector treats exactly."""
     with pytest.raises(ValidationError, match="eta_ir_floor_cells"):
         PhononConfig(eta_ir_floor_cells=2.0, **_phonon())
-
-
-def test_cm_subtraction_requires_an_explicit_lower_edge():
-    """The CM channel already owns omega -> 0; the two must stay disjoint."""
-    with pytest.raises(ValidationError, match="omega_min_thz > 0"):
-        PhononConfig(sse_cm_subtraction=True, **_phonon())
-    # ... and is fine once the pole window is lifted clear of it.
-    cfg = PhononConfig(sse_cm_subtraction=True, **_phonon(omega_min_thz=1.0))
-    assert cfg.pole_sector.omega_min_thz == 1.0
 
 
 def test_pole_window_must_sit_above_the_low_frequency_mask():

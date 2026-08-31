@@ -1,5 +1,10 @@
 # The run corpus audited against the gates the method now has
 
+> Historical audit, 2026-08-31: the CM subtraction gate below was rejected and
+> removed. The CSV manifests have been regenerated without it. The remaining
+> text records the reasoning available on 2026-08-27 and is not the current
+> production specification. See `code_catalogue.md`.
+
 2026-08-27. Tools: `phonon/scripts/audit_runs.py` (verdicts),
 `phonon/scripts/archive_runs.py` (prune and move). Manifests:
 `phonon/scripts/data/run_manifest_{cluster,alps,studies_out,scripts_out}.csv`,
