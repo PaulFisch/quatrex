@@ -1937,41 +1937,16 @@ class PhononConfig(BaseModel):
     default = legacy (bit-identical)."""
 
     frequency_grid: Literal["window", "file"] = "window"
-    """Source of the phonon frequency grid. ``"window"`` (legacy): the
-    uniform ``linspace`` from the electron ``energy_window_*`` fields.
-    ``"file"``: the grid is read verbatim from
-    ``<input_dir>/phonon_energies.npy`` -- it may be NON-UNIFORM
-    (ascending, non-negative). A non-uniform grid requires the auxiliary
-    bubble grid (``sse_aux_grid_dw_thz > 0``): the FFT convolution and
-    the bosonic fold only exist on a uniform, zero-anchored grid."""
+    """Read frequencies from the energy window or ``phonon_energies.npy``."""
 
     sse_aux_grid_dw_thz: NonNegativeFloat = 0.0
-    """Spacing (THz) of the AUXILIARY uniform, zero-anchored grid on which
-    the 3-phonon bubble convolution, the bosonic fold and the
-    Kramers-Kronig Hilbert transform are evaluated. When > 0 the
-    Green's-function legs are linearly interpolated from the primary
-    (possibly non-uniform) frequency grid onto the auxiliary grid, the
-    FFT pipeline runs there unchanged, and Sigma^{<,>,R} is sampled back
-    onto the primary grid. Linear interpolation preserves the sign of
-    -i G^{<,>} >= 0 (a convex combination), so the interpolated bubble
-    stays dissipative. 0 = legacy (bubble on the primary grid, which
-    must then be uniform and start at 0)."""
+    """Experimental uniform bubble-grid spacing in THz. Zero disables it."""
 
     sse_aux_grid_fmax_thz: NonNegativeFloat = 0.0
-    """Upper edge (THz) of the auxiliary bubble grid (only used when
-    ``sse_aux_grid_dw_thz > 0``). The 3-phonon bubble has support up to
-    2*omega_max and the Kramers-Kronig integral is support-complete only
-    on a grid reaching it, so set this >= 2*omega_max; the PRIMARY grid
-    (Dyson solves) can then stop just above omega_max -- the
-    [omega_max, 2*omega_max] half consumes no Dyson solves. 0 = span the
-    primary grid (no extension beyond its top)."""
+    """Experimental upper edge of the auxiliary grid in THz."""
 
     sse_aux_restrict: Literal["adjoint", "sample"] = "adjoint"
-    """How Sigma returns from the auxiliary bubble grid to the primary grid.
-    ``"adjoint"`` is the adjoint of the leg interpolation with respect to the
-    energy measure and keeps the Phi-derivable energy balance to roundoff;
-    ``"sample"`` is pointwise, sharper at resonance peaks and not conserving.
-    The two coincide when the grids do, up to the masked omega = 0 bin."""
+    """Experimental auxiliary-to-primary transfer."""
 
     sse_release_leg_blocks: bool = False
     """Free the densified G leg blocks once the batched coupled-q kernel has

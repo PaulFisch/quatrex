@@ -1,19 +1,5 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
-"""Tests for the auxiliary-uniform-grid (non-uniform primary grid) SSE path.
-
-The bubble FFT + bosonic fold only exist on a uniform, zero-anchored
-grid. With ``sse_aux_grid_dw_thz > 0`` the legs are linearly
-interpolated from the (possibly non-uniform) primary grid onto an
-auxiliary uniform grid, the FFT pipeline runs there, and the outputs
-are sampled back. Pinned here:
-
-* aux path == legacy path when the aux grid coincides with a uniform
-  primary grid (the bridge degenerates to the identity);
-* a non-uniform primary grid clustered on the spectral peaks reproduces
-  the fine-uniform-reference self-energy at the primary points;
-* a non-uniform grid without the aux grid refuses to run;
-* the quadrature-cell-width helpers.
-"""
+"""Tests for the experimental auxiliary frequency grid."""
 
 from __future__ import annotations
 
@@ -23,6 +9,7 @@ import pytest
 from qttools import xp
 from qttools.comm import comm as _qtt_comm
 from qttools.utils.gpu_utils import get_host
+from quatrex.phonon.experimental.frequency_grid import make_auxiliary_grid
 
 
 def _h(a, **kw):
@@ -236,22 +223,14 @@ def test_nonuniform_matches_fine_uniform_reference(restrict: str) -> None:
     if restrict == "adjoint":
         # The reference grid IS the aux grid (same dw and span): apply
         # the identical restriction operator to the reference.
-        from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
-
-        ssp = SigmaPhononPhonon(
-            _make_cfg("half", aux_dw=dw_fine, aux_fmax=fmax),
-            phonon_frequencies=freqs_nu,
-            block_sizes=np.array([nbs]),
-            phi_blocks={(0, 0, 0): np.zeros((nbs, nbs, nbs), complex)},
+        grid = make_auxiliary_grid(
+            xp.asarray(freqs_nu), dw_fine, fmax, "adjoint"
         )
-        aux, _, r_plan = ssp._aux_grid_plan(
-            ssp._full_frequencies(freqs_nu.size))
-        np.testing.assert_allclose(_h(aux), freqs_fine, atol=1e-9)
+        np.testing.assert_allclose(_h(grid.frequencies), freqs_fine, atol=1e-9)
 
         def _interp_ref(block):
-            out = _h(
-                ssp._restrict_from_aux(xp.asarray(block), r_plan))
-            out[0] = 0.0  # the production out-masks the omega=0 bin
+            out = _h(grid.restrict(xp.asarray(block)))
+            out[0] = 0.0
             return out
     else:
         def _interp_ref(block):  # reference sampled at the nu points
@@ -324,77 +303,47 @@ def test_nonuniform_without_aux_grid_raises() -> None:
 
 
 def test_aux_fmax_extends_convolution_support() -> None:
-    """sse_aux_grid_fmax_thz extends the aux grid beyond the primary top
-    (the [omega_max, 2*omega_max] KK support without Dyson solves)."""
-    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
-
-    rng = np.random.default_rng(2)
-    nbs, ne = 2, 31
+    ne = 31
     freqs = np.linspace(0.0, 16.0, ne)
-    phi = {(0, 0, 0): rng.standard_normal((nbs, nbs, nbs)) + 0j}
-    ssp = SigmaPhononPhonon(
-        _make_cfg("half", aux_dw=0.5, aux_fmax=32.0,
-                  aux_restrict="sample"),
-        phonon_frequencies=freqs, block_sizes=np.array([nbs]),
-        phi_blocks=phi,
-    )
-    aux, p_plan, r_plan = ssp._aux_grid_plan(ssp._full_frequencies(ne))
+    grid = make_auxiliary_grid(xp.asarray(freqs), 0.5, 32.0, "sample")
+    aux = grid.frequencies
     assert float(aux[-1]) >= 32.0
     assert float(aux[1] - aux[0]) == 0.5
-    # P: linear functions are reproduced exactly inside the primary span,
-    # and zeroed beyond it (G has no support there).
-    lin = (2.0 * _h(ssp._full_frequencies(ne)) + 1.0)[:, None]
-    interp = _h(ssp._interp_axis0(xp.asarray(lin + 0j), p_plan))
+    lin = (2.0 * freqs + 1.0)[:, None]
+    interp = _h(grid.interpolate(xp.asarray(lin + 0j)))
     inside = _h(aux) <= 16.0 + 1e-12
     np.testing.assert_allclose(
         interp[inside, 0].real, 2.0 * _h(aux)[inside] + 1.0,
         rtol=1e-12)
     assert np.all(interp[~inside] == 0.0)
-    # R ("sample"): sampling back an aux-grid linear function is exact.
     lin_aux = (3.0 * _h(aux) - 0.5)[:, None]
-    back = _h(ssp._restrict_from_aux(xp.asarray(lin_aux + 0j),
-                                             r_plan))
+    back = _h(grid.restrict(xp.asarray(lin_aux + 0j)))
     np.testing.assert_allclose(
         back[:, 0].real, 3.0 * _h(freqs) - 0.5, rtol=1e-12)
 
 
 def test_adjoint_restriction_conserves_pairing() -> None:
-    """R adjoint w.r.t. the energy measure w*|omega| transfers the
-    hbar*omega-weighted aux-grid pairing exactly:
-    sum_m w_m om_m (R S)(m) G(m) == dw sum_n om_n S(n) (P G)(n) -- the
-    identity that keeps the dual-grid bubble's ENERGY balance (and with
-    it the lead heat balance) Phi-derivable."""
+    """The adjoint restriction preserves the energy-weighted pairing."""
     from quatrex.grid.energies import frequency_cell_widths
-    from quatrex.phonon.sse_phonon_phonon import SigmaPhononPhonon
 
     rng = np.random.default_rng(4)
-    nbs = 2
     freqs = np.unique(np.concatenate(
         [np.linspace(0.0, 16.0, 12), np.linspace(4.0, 6.0, 25)]))
-    phi = {(0, 0, 0): rng.standard_normal((nbs, nbs, nbs)) + 0j}
-    ssp = SigmaPhononPhonon(
-        _make_cfg("half", aux_dw=0.11, aux_fmax=20.0),
-        phonon_frequencies=freqs, block_sizes=np.array([nbs]),
-        phi_blocks=phi,
-    )
-    aux, p_plan, r_plan = ssp._aux_grid_plan(
-        ssp._full_frequencies(freqs.size))
-    assert r_plan[0] == "adjoint"
+    grid = make_auxiliary_grid(xp.asarray(freqs), 0.11, 20.0, "adjoint")
+    aux = grid.frequencies
+    assert grid.restriction[0] == "adjoint"
     ne_aux = int(_h(aux).size)
     sig = (rng.standard_normal((ne_aux, 3))
            + 1j * rng.standard_normal((ne_aux, 3)))
     g = (rng.standard_normal((freqs.size, 3))
          + 1j * rng.standard_normal((freqs.size, 3)))
-    # The production zeroes the (zero-measure, masked) omega = 0 bin of
-    # the legs BEFORE interpolating; the dropped omega = 0 row of R is
-    # consistent exactly under that convention.
     g[0] = 0.0
     w_prim = _h(frequency_cell_widths(freqs))
     dw = float(aux[1] - aux[0])
-    lhs = np.sum((w_prim * freqs)[:, None]
-                 * _h(ssp._restrict_from_aux(xp.asarray(sig),
-                                                     r_plan)) * g)
-    pg = _h(ssp._interp_axis0(xp.asarray(g), p_plan))
+    lhs = np.sum(
+        (w_prim * freqs)[:, None] * _h(grid.restrict(xp.asarray(sig))) * g
+    )
+    pg = _h(grid.interpolate(xp.asarray(g)))
     rhs = dw * np.sum(_h(aux)[:, None] * sig * pg)
     np.testing.assert_allclose(lhs, rhs, rtol=1e-12)
 

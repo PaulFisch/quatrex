@@ -383,11 +383,7 @@ class SCBA(TransportSolver):
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
 
-        # File-based (possibly NON-UNIFORM) phonon frequency grid: with
-        # phonon.frequency_grid = "file" the grid is read verbatim from
-        # phonon_energies.npy and overrides the electron energy window.
-        # The bubble then needs the auxiliary uniform grid
-        # (phonon.sse_aux_grid_dw_thz > 0) unless the file is uniform.
+        # A file-based phonon grid overrides the electron energy window.
         if (
             config.simulation_type == "phonon"
             and getattr(config.phonon, "frequency_grid", "window") == "file"
@@ -404,9 +400,6 @@ class SCBA(TransportSolver):
                     "phonon.frequency_grid='file' requires a strictly "
                     "ascending, non-negative grid in phonon_energies.npy."
                 )
-            # Fail fast (before a full Dyson sweep) on the combination the
-            # SSE will reject anyway: a non-uniform grid needs the
-            # auxiliary bubble grid.
             if (
                 config.scba.phonon
                 and config.phonon.model == "negf"

@@ -45,6 +45,10 @@ from quatrex.phonon.fc3_loader import (
     PhiBlocks,
     load_device_fc3,
 )
+from quatrex.phonon.experimental.frequency_grid import (
+    AuxiliaryGrid,
+    make_auxiliary_grid,
+)
 from quatrex.phonon.microblocks import (
     MicroblockLayout,
     build_micro_pair_index,
@@ -161,32 +165,17 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._pole_sigma_ss = None  # (sigma_ss_l, sigma_ss_g, sigma_ss_r)
         self._pole_sigma_mixed = None  # (sigma_sr_l, sigma_sr_g)
         self._bubble_correction = None  # subcell covariance, pre-KK
-        # Auxiliary uniform bubble grid (sse_aux_grid_dw_thz): the FFT
-        # convolution, the bosonic fold and the Hilbert transform only exist
-        # on a uniform, zero-anchored grid. With aux_dw > 0 they run on an
-        # auxiliary grid n*aux_dw; the G legs are linearly interpolated
-        # primary -> aux (convex combination: keeps -i G^{<,>} >= 0, so the
-        # bubble stays dissipative) and Sigma^{<,>,R} is sampled back on the
-        # primary grid, which may then be NON-UNIFORM. The aux grid extends
-        # to max(primary top, sse_aux_grid_fmax_thz): with aux_fmax >=
-        # 2*omega_max the convolution/KK support is complete even when the
-        # primary (Dyson) grid stops just above the band top.
-        self._aux_dw = float(
+        self._aux_spacing = float(
             getattr(config.phonon, "sse_aux_grid_dw_thz", 0.0) or 0.0)
-        self._aux_fmax = float(
+        self._aux_max_frequency = float(
             getattr(config.phonon, "sse_aux_grid_fmax_thz", 0.0) or 0.0)
-        # Restriction aux -> primary: "adjoint" (default) is the adjoint of
-        # the leg interpolation, R = W_prim^-1 P^T W_aux -- it transfers
-        # the Phi-derivable energy balance of the aux-grid bubble to the
-        # primary cell-width pairing EXACTLY. "sample" is the pointwise
-        # linear sample (sharper at peaks, not conserving).
-        self._aux_restrict = str(
+        self._aux_restriction = str(
             getattr(config.phonon, "sse_aux_restrict", "adjoint"))
-        if self._aux_restrict not in ("adjoint", "sample"):
+        if self._aux_restriction not in ("adjoint", "sample"):
             raise ValueError(
-                f"Unknown sse_aux_restrict={self._aux_restrict!r}; "
+                f"Unknown sse_aux_restrict={self._aux_restriction!r}; "
                 "use 'adjoint' or 'sample'.")
-        self._aux_plan: tuple | None = None
+        self._aux_grid: AuxiliaryGrid | None = None
 
         # Transversely-periodic (k>1) coupled-q vertices
         self._qvertices: dict | None = None
@@ -724,15 +713,15 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 )
 
         full_freqs = self._full_frequencies(ne_full)
-        # Auxiliary uniform bubble grid: the convolution (and everything
-        # tau-domain) runs on conv_freqs; legacy = the primary grid itself.
-        aux_on = self._aux_dw > 0.0
+        aux_on = self._aux_spacing > 0.0
         if aux_on:
-            conv_freqs, p_plan, r_plan = self._aux_grid_plan(full_freqs)
+            aux_grid = self._get_auxiliary_grid(full_freqs)
+            conv_freqs = aux_grid.frequencies
             ne_conv = int(conv_freqs.shape[0])
-            prefactor = bubble_prefactor_thz(self._aux_dw)
+            prefactor = bubble_prefactor_thz(self._aux_spacing)
         else:
-            conv_freqs, p_plan, r_plan = full_freqs, None, None
+            aux_grid = None
+            conv_freqs = full_freqs
             ne_conv = ne_full
             prefactor = bubble_prefactor_thz(
                 float(full_freqs[1] - full_freqs[0]))
@@ -854,8 +843,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if bool(out_mask.any()):
                     gl_in = gl_in.copy(); gl_in[out_mask] = 0.0
                     gg_in = gg_in.copy(); gg_in[out_mask] = 0.0
-                gl_in = self._interp_axis0(gl_in, p_plan)
-                gg_in = self._interp_axis0(gg_in, p_plan)
+                gl_in = aux_grid.interpolate(gl_in)
+                gg_in = aux_grid.interpolate(gg_in)
                 if bool(conv_mask.any()):
                     gl_in[conv_mask] = 0.0
                     gg_in[conv_mask] = 0.0
@@ -939,8 +928,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     if bool(out_mask.any()):
                         dgl_in = dgl_in.copy(); dgl_in[out_mask] = 0.0
                         dgg_in = dgg_in.copy(); dgg_in[out_mask] = 0.0
-                    dgl_in = self._interp_axis0(dgl_in, p_plan)
-                    dgg_in = self._interp_axis0(dgg_in, p_plan)
+                    dgl_in = aux_grid.interpolate(dgl_in)
+                    dgg_in = aux_grid.interpolate(dgg_in)
                     if bool(conv_mask.any()):
                         dgl_in[conv_mask] = 0.0
                         dgg_in[conv_mask] = 0.0
@@ -1549,8 +1538,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 # Sample Sigma back on the (possibly non-uniform) primary
                 # grid; the conv-grid values keep the full [0, 2*omega_max]
                 # support for the Hilbert transform below.
-                sl_data = self._restrict_from_aux(sl_conv, r_plan)
-                sg_data = self._restrict_from_aux(sg_conv, r_plan)
+                sl_data = aux_grid.restrict(sl_conv)
+                sg_data = aux_grid.restrict(sg_conv)
                 if bool(out_mask.any()):
                     sl_data[out_mask] = 0.0
                     sg_data[out_mask] = 0.0
@@ -1596,7 +1585,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 hil = 0.5j * hilbert_transform(delta, conv_freqs,
                                                transverse_shape=nk)
                 if aux_on:
-                    hil = self._restrict_from_aux(hil, r_plan)
+                    hil = aux_grid.restrict(hil)
                 if bool(out_mask.any()):
                     # post-mask the retarded consistently with Sigma^<>
                     hil[out_mask] = 0.0
@@ -1648,7 +1637,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "Raise phonon.sse_aux_grid_fmax_thz to about twice the "
                 "phonon band top (the auxiliary bubble grid sets the KK "
                 "support, not the energy window)."
-                if self._aux_dw > 0.0 else
+                if self._aux_spacing > 0.0 else
                 "Extend energy_window_max (or the grid in "
                 "phonon_energies.npy) to about twice the phonon band top."
             )
@@ -3311,7 +3300,7 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # on a UNIFORM grid ANCHORED AT ZERO; anything else runs silently
             # shifted. With the auxiliary bubble grid the FFT runs there
             # instead, and the primary grid may be non-uniform.
-            if self._aux_dw <= 0.0:
+            if self._aux_spacing <= 0.0:
                 df = float(freqs[1] - freqs[0])
                 if abs(float(freqs[0])) > 1e-9 * abs(df) or bool(
                     xp.max(xp.abs(xp.diff(freqs) - df)) > 1e-9 * abs(df)
@@ -3327,87 +3316,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._full_freqs = freqs
         return freqs
 
-    def _aux_grid_plan(self, full_freqs: NDArray) -> tuple:
-        """Cached interpolation bridge primary <-> auxiliary uniform grid.
-
-        Returns ``(aux_freqs, p_plan, r_plan)``: ``aux_freqs`` is the
-        uniform, zero-anchored grid ``n * aux_dw`` reaching
-        ``max(primary top, sse_aux_grid_fmax_thz)``; ``p_plan`` linearly
-        interpolates a primary-grid array onto it along axis 0 (aux
-        points outside the primary span are zero -- G has no support
-        there); ``r_plan`` samples an aux-grid array back on the primary
-        points (always interior: the aux grid covers the primary span).
-        """
-        if self._aux_plan is not None:
-            return self._aux_plan
-        prim = xp.asarray(full_freqs, dtype=float)
-        dw = float(self._aux_dw)
-        top = max(float(prim[-1]), float(self._aux_fmax))
-        ne_aux = int(np.ceil(top / dw - 1e-9)) + 1
-        aux = xp.arange(ne_aux, dtype=float) * dw
-        # P: primary -> aux. searchsorted handles the non-uniform primary.
-        hi = xp.clip(
-            xp.searchsorted(prim, aux, side="left"), 1, prim.shape[0] - 1
-        )
-        lo = hi - 1
-        gap = prim[hi] - prim[lo]
-        p_w = xp.clip((aux - prim[lo]) / xp.where(gap > 0, gap, 1.0), 0.0, 1.0)
-        p_valid = (aux >= prim[0] - 1e-12 * dw) & (aux <= prim[-1] + 1e-12 * dw)
-        # R: aux (uniform) -> primary.
-        if self._aux_restrict == "adjoint":
-            # Adjoint of the leg interpolation w.r.t. the ENERGY measure
-            # w*|omega|, R = (W O)^-1 P^T (dw O_aux) with O = diag(omega):
-            # the hbar*omega-weighted pairing
-            #   sum_m w_m om_m Sigma_prim(m) G(m)
-            #     == dw sum_n om_n Sigma_aux(n) (P G)(n)
-            # holds exactly, so the aux bubble's Phi-derivable ENERGY
-            # balance (P_in = P_out, and with it the lead heat balance
-            # J_L - J_R = P_in - P_out) transfers to roundoff. The plain
-            # cell-width adjoint transfers the unweighted pairing instead
-            # and leaves an O(interp-error) energy leak that the lead
-            # currents -- a small difference of large fluxes -- amplify.
-            # Aux bins outside the primary span pair with zero legs and
-            # are dropped (zero columns); the omega = 0 row/column carry
-            # zero measure (the DC bin is masked anyway). Each aux column
-            # has exactly two entries (lo, hi), so plain fancy assignment
-            # builds P^T without scatter-add.
-            from quatrex.grid.energies import frequency_cell_widths
-
-            w_prim = xp.asarray(frequency_cell_widths(prim), dtype=float)
-            col_w = dw * aux                      # dw * omega_n^aux
-            row_w = w_prim * prim                 # w_m * omega_m
-            R = xp.zeros((int(prim.shape[0]), ne_aux))
-            cols = xp.arange(ne_aux)
-            R[lo, cols] = (1.0 - p_w) * p_valid * col_w
-            R[hi, cols] = p_w * p_valid * col_w
-            R = xp.where(row_w[:, None] > 0.0,
-                         R / xp.where(row_w[:, None] > 0.0,
-                                      row_w[:, None], 1.0), 0.0)
-            r_plan = ("adjoint", R)
-        else:
-            pos = prim / dw
-            r_i0 = xp.clip(xp.floor(pos).astype(int), 0, ne_aux - 2)
-            r_w = xp.clip(pos - r_i0, 0.0, 1.0)
-            r_plan = ("sample", (r_i0, r_w))
-        self._aux_plan = (aux, (lo, hi, p_w, p_valid), r_plan)
-        return self._aux_plan
-
-    @staticmethod
-    def _interp_axis0(data: NDArray, plan: tuple) -> NDArray:
-        """Apply a (lo, hi, w, valid) linear-interpolation plan on axis 0."""
-        lo, hi, w, valid = plan
-        shape = (w.shape[0],) + (1,) * (data.ndim - 1)
-        w_ = w.reshape(shape)
-        return ((1.0 - w_) * data[lo] + w_ * data[hi]) * valid.reshape(shape)
-
-    @staticmethod
-    def _restrict_from_aux(data: NDArray, r_plan: tuple) -> NDArray:
-        """Apply the aux -> primary restriction plan on axis 0."""
-        kind, op = r_plan
-        if kind == "sample":
-            i0, w = op
-            shape = (w.shape[0],) + (1,) * (data.ndim - 1)
-            w_ = w.reshape(shape)
-            return (1.0 - w_) * data[i0] + w_ * data[i0 + 1]
-        flat = data.reshape(data.shape[0], -1)
-        return (op @ flat).reshape((op.shape[0],) + data.shape[1:])
+    def _get_auxiliary_grid(self, frequencies: NDArray) -> AuxiliaryGrid:
+        if self._aux_grid is None:
+            self._aux_grid = make_auxiliary_grid(
+                frequencies,
+                self._aux_spacing,
+                self._aux_max_frequency,
+                self._aux_restriction,
+            )
+        return self._aux_grid
