@@ -542,3 +542,7 @@ least-squares ladder rebuild.
 | 2026-08-31 | 4567863 | cnt-l48x2-conv-current | 4 | 00:30:00 | 2.00 | 575.80 | debug |
 | 2026-08-31 | 4567912 | prep-cnt-l64x2-debug | 1 | 00:10:00 | 0.17 | 575.97 | debug |
 | 2026-08-31 | 4567913 | cnt-l64x2-conv-current | 8 | 00:30:00 | 4.00 | 579.97 | debug |
+| 2026-08-31 | 4568007 | prep-cnt-l128x2-debug | 1 | 00:10:00 | 0.17 | 580.14 | debug |
+| 2026-08-31 | 4568012 | cnt-l128x2-conv-current | 16 | 00:30:00 | 8.00 | 588.14 | normal |
+| 2026-08-31 | 4568041 | cnt-l128x2-conv-current-r2 | 16 | 00:30:00 | 8.00 | 596.14 | normal |
+| 2026-08-31 | 4568119 | cnt-l16x2-cache-local-parity | 1 | 00:10:00 | 0.17 | 596.31 | debug |
