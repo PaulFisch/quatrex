@@ -116,8 +116,6 @@ energy_window_max = {a.fmax}
 energy_window_num = {a.nfreq}
 
 [phonon]
-eta = {a.eta}
-eta_obc = {a.eta_obc}
 left_temperature = {a.tL}
 right_temperature = {a.tR}
 model = "negf"
@@ -128,13 +126,6 @@ sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
-eta_ramp_iterations = {a.eta_ramp_iters}
-eta_final = {a.eta_final}
-eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
-eta_obc_final = {a.eta_obc_final}
-eta_ir_floor_cells = {a.eta_ir_floor_cells}
-eta_ir_floor_final_cells = {a.eta_ir_floor_final_cells}
-eta_ir_floor_ramp_iterations = {a.eta_ir_floor_ramp_iterations}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
 sigma_convergence_tol = {a.sigma_tol}
@@ -226,8 +217,6 @@ energy_window_max = {a.fmax}
 energy_window_num = {a.nfreq}
 
 [phonon]
-eta = {a.eta}
-eta_obc = {a.eta_obc}
 left_temperature = {a.tL}
 right_temperature = {a.tR}
 model = "negf"
@@ -239,13 +228,6 @@ sse_ramp_iterations = {a.ramp}
 sse_vertex_scale = {a.vertex_scale}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
-eta_ramp_iterations = {a.eta_ramp_iters}
-eta_final = {a.eta_final}
-eta_obc_ramp_iterations = {a.eta_obc_ramp_iters}
-eta_obc_final = {a.eta_obc_final}
-eta_ir_floor_cells = {a.eta_ir_floor_cells}
-eta_ir_floor_final_cells = {a.eta_ir_floor_final_cells}
-eta_ir_floor_ramp_iterations = {a.eta_ir_floor_ramp_iterations}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
 low_freq_mixing_factor = {a.low_freq_mix_factor}
 sigma_convergence_tol = {a.sigma_tol}
@@ -291,9 +273,6 @@ def main():
     p.add_argument("--temperature", type=float, default=300.0,
                    help="mean device temperature T (K); leads at T +/- dt/2")
     p.add_argument("--dt", type=float, default=10.0, help="lead temperature drop (K)")
-    p.add_argument("--eta", type=float, default=None,
-                   help="THz [0 = NO artificial broadening, the default -- do NOT add smearing, see CLAUDE.md]")
-    p.add_argument("--eta-obc", type=float, default=0.0)
     p.add_argument("--emin", type=float, default=0.0)
     p.add_argument("--nfreq", type=int, default=None)
     p.add_argument("--fmax", type=float, default=None)
@@ -386,17 +365,6 @@ def main():
                    help="SCBA cap; the conductance (best-iterate) converges well "
                         "before the Sigma residual (F30), so 50 bounds wall-time")
     p.add_argument("--retarded", default="fft", choices=["half", "fft"])
-    p.add_argument("--eta-ir-floor-cells", dest="eta_ir_floor_cells", type=float,
-                   default=0.0,
-                   help="sub-grid soft-mode broadening floor (grid cells); a "
-                        "DC-concentrated constant broadening that stabilises the "
-                        "eta=0 SCBA without crushing the low-omega current")
-    p.add_argument("--eta-ir-floor-final-cells", dest="eta_ir_floor_final_cells",
-                   type=float, default=0.0,
-                   help="anneal target for eta_ir_floor_cells")
-    p.add_argument("--eta-ir-floor-ramp-iterations",
-                   dest="eta_ir_floor_ramp_iterations", type=int, default=0,
-                   help="solves over which to anneal the soft-mode floor down")
     p.add_argument("--low-freq-mix-thz", dest="low_freq_mix_thz", type=float,
                    default=0.0,
                    help="frequency-dependent mixing: bins below this THz get "
@@ -411,18 +379,6 @@ def main():
                    help="3-phonon vertex scale lambda (Sigma ~ lambda^2)")
     p.add_argument("--ramp", type=int, default=0,
                    help="adiabatic bubble switch-on over N SCBA iterations")
-    p.add_argument("--eta-ramp-iters", type=int, default=0,
-                   help="anneal eta DOWN over N SCBA iterations (0=off; the "
-                        "anharmonic Sigma^R takes over the broadening)")
-    p.add_argument("--eta-final", type=float, default=0.0,
-                   help="target eta (THz) at the end of the eta ramp")
-    p.add_argument("--eta-obc-ramp-iters", dest="eta_obc_ramp_iters", type=int,
-                   default=0,
-                   help="anneal eta_obc (contact broadening, THz^2) DOWN over N SCBA "
-                        "iters then hold (in-run eta_obc continuation for eta=0 on "
-                        "long cells; 0=off)")
-    p.add_argument("--eta-obc-final", type=float, default=0.0,
-                   help="target eta_obc (THz^2) at the end of the eta_obc ramp")
     p.add_argument("--tadpole", action="store_true",
                    help="enable the self-consistent SCP cubic tadpole static SE")
     p.add_argument("--obc", default="spectral", choices=["spectral", "sancho-rubio"],
@@ -455,19 +411,16 @@ def main():
 
     if a.system in ("cnt33", "cnt80"):
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 161
         a.fmax = a.fmax or 55.0
         cfg = cnt_config(a)
     elif a.system in ("sinw_d5a", "sinw_d11a"):
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 101
         a.fmax = a.fmax or 18.0
         cfg = cnt_config(a)
     elif a.system == "srtio3":
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 121
         a.fmax = a.fmax or 26.0
         cfg = cnt_config(a)
@@ -475,13 +428,11 @@ def main():
         # 2H-MoS2 cross-plane: transport along c, hexagonal transverse
         # mesh (kpoint_shift 0.4 at nk=5); spectrum tops at 14.07 THz.
         a.tdir = a.tdir or "z"
-        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 121
         a.fmax = a.fmax or 16.0
         cfg = film_config(a)
     else:
         a.tdir = a.tdir or "x"
-        a.eta = a.eta if a.eta is not None else 0.0
         a.nfreq = a.nfreq or 121
         a.fmax = a.fmax or 15.0
         cfg = film_config(a)
@@ -512,7 +463,7 @@ def main():
             ep.unlink()  # break sym/hard links to the shared geometry copy
         np.save(ep, np.linspace(a.emin, a.fmax, a.nfreq))
     print(f"wrote {path}  system={a.system} T={a.temperature}(dT={a.dt}) "
-          f"eta={a.eta} retarded={a.retarded} "
+          f"retarded={a.retarded} "
           f"mix={a.mix}/{a.mixing_method} bcs={a.bcs} qcs={a.qcs} "
           f"nfreq={a.nfreq} fmax={a.fmax}")
 

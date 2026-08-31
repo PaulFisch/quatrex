@@ -1,5 +1,9 @@
 # Spectral-deformation audit: every knob that touches Σ or G, and whether it is physics
 
+> Historical audit, 2026-08-31: the broadening, floor, mask, and continuation
+> controls discussed below were rejected and removed from production. This
+> document is retained as negative-result evidence. See `code_catalogue.md`.
+
 2026-07-06. Trigger: the interface-continuity ledger (conservation appendix) and the
 grid-ladder diagnostics showed that several η=0 "stabilisation" knobs deform the physics
 they were meant to protect. This audit lists EVERY deformation of Σ^≷/G in the production

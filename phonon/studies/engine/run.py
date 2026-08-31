@@ -30,7 +30,6 @@ CFG = os.environ["QX_CONFIG"]
 cfg = parse_config(CFG)
 
 # --- env overrides (TOML is the base) -----------------------------------
-if os.environ.get("QX_ETA"):      cfg.phonon.eta = float(os.environ["QX_ETA"])
 if os.environ.get("QX_MIX"):      cfg.scba.mixing_factor = float(os.environ["QX_MIX"])
 if os.environ.get("QX_MIXMETHOD"):cfg.scba.mixing_method = os.environ["QX_MIXMETHOD"]
 if os.environ.get("QX_ADEPTH"):   cfg.scba.anderson_depth = int(os.environ["QX_ADEPTH"])
@@ -59,13 +58,7 @@ if os.environ.get("QX_DECOMPOSED"):
     # SigmaPhononPhonon, so clear the inherited dense path explicitly.
     cfg.phonon.decomposed_vertices_path = os.environ["QX_DECOMPOSED"]
     cfg.phonon.qfold_path = None
-if os.environ.get("QX_ETAOBC"):   cfg.phonon.eta_obc = float(os.environ["QX_ETAOBC"])
-if os.environ.get("QX_ETA_RAMP_ITERS"): cfg.phonon.eta_ramp_iterations = int(os.environ["QX_ETA_RAMP_ITERS"])
-if os.environ.get("QX_ETA_FINAL"):      cfg.phonon.eta_final = float(os.environ["QX_ETA_FINAL"])
 if os.environ.get("QX_ALGORITHM"):      cfg.phonon.solver.algorithm = os.environ["QX_ALGORITHM"]
-if os.environ.get("QX_ETA_IR_FLOOR"):   cfg.phonon.eta_ir_floor_cells = float(os.environ["QX_ETA_IR_FLOOR"])
-if os.environ.get("QX_ETA_IR_FLOOR_FINAL"): cfg.phonon.eta_ir_floor_final_cells = float(os.environ["QX_ETA_IR_FLOOR_FINAL"])
-if os.environ.get("QX_ETA_IR_FLOOR_RAMP"):  cfg.phonon.eta_ir_floor_ramp_iterations = int(os.environ["QX_ETA_IR_FLOOR_RAMP"])
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
 if os.environ.get("QX_HEATTOL"):  cfg.phonon.heat_flow_conservation_tol = float(os.environ["QX_HEATTOL"])
 if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
@@ -477,7 +470,7 @@ def _logged(self):
 SCBA._has_converged = _logged
 
 if ranks.rank == 0:
-    print(f"RUN config={CFG} phonon={cfg.scba.phonon} eta={cfg.phonon.eta} "
+    print(f"RUN config={CFG} phonon={cfg.scba.phonon} eta=0 "
           f"retarded={cfg.phonon.retarded_method} nblk={ph.block_sizes.shape[0]} "
           f"ne={int(scba.energies.shape[0])} "
           f"fgrid={cfg.phonon.frequency_grid} "
@@ -794,7 +787,7 @@ if ranks.rank == 0:
             getattr(ph, "uniform_frequency_grid", True)),
         frequency_cell_widths=np.asarray(get_host(
             frequency_cell_widths(xp.asarray(scba.energies).real))),
-        eta=float(cfg.phonon.eta), retarded=str(cfg.phonon.retarded_method),
+        eta=0.0, retarded=str(cfg.phonon.retarded_method),
         nblocks=int(ph.block_sizes.shape[0]), phonon=bool(cfg.scba.phonon),
         block_sizes=np.asarray(get_host(ph.block_sizes), dtype=np.int64),
         sse_g_band=int(cfg.phonon.sse_g_band),
@@ -815,15 +808,7 @@ if ranks.rank == 0:
         frequency_max_thz=float(np.asarray(get_host(scba.energies)).real[-1]),
         sse_aux_grid_dw_thz=float(cfg.phonon.sse_aux_grid_dw_thz),
         sse_aux_grid_fmax_thz=float(cfg.phonon.sse_aux_grid_fmax_thz),
-        eta_obc=float(cfg.phonon.eta_obc),
-        eta_ramp_iterations=int(cfg.phonon.eta_ramp_iterations),
-        eta_final=float(cfg.phonon.eta_final),
-        eta_obc_ramp_iterations=int(cfg.phonon.eta_obc_ramp_iterations),
-        eta_obc_final=float(cfg.phonon.eta_obc_final),
-        eta_ir_floor_cells=float(cfg.phonon.eta_ir_floor_cells),
-        eta_ir_floor_final_cells=float(cfg.phonon.eta_ir_floor_final_cells),
-        eta_ir_floor_ramp_iterations=int(
-            cfg.phonon.eta_ir_floor_ramp_iterations),
+        eta_obc=0.0,
         sse_low_freq_mask_thz=float(cfg.phonon.sse_low_freq_mask_thz),
         sse_g_band_taper=str(cfg.phonon.sse_g_band_taper),
         sse_ramp_iterations=int(cfg.phonon.sse_ramp_iterations),

@@ -1,5 +1,10 @@
 # Energy-conserving 3-phonon vertex: findings & new operating rules (2026-06-11/12)
 
+> Historical result, 2026-08-31: later campaigns rejected artificial
+> broadening, masks, and continuation schedules. References to those methods
+> below record the earlier investigation and are not production guidance. See
+> `code_catalogue.md`.
+
 TL;DR — the production bubble now conserves the scattering energy current to
 **machine precision (1e-15)** with the *natural* device vertex, no fix-up hooks.
 Getting there uncovered that the FC3 "ASR projection" we ran everywhere was

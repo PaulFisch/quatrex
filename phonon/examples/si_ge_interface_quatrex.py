@@ -151,11 +151,6 @@ freqs_thz = np.linspace(*freq_range)
 omega_rad = freqs_thz * THZ_TO_RAD
 omega_sq = omega_rad ** 2
 
-# Eta: match reference solver broadening
-dw = (freqs_thz[1] - freqs_thz[0]) * THZ_TO_RAD
-eta_match = dw ** 2 * 0.5
-
-
 def run_quatrex_phonon(config_dir, label):
     """Run quatrex PhononSolver and return per-frequency transmission."""
     print(f"\n--- quatrex: {label} ---")
@@ -164,8 +159,6 @@ def run_quatrex_phonon(config_dir, label):
 
     try:
         config = parse_config("quatrex_config.toml")
-        config.phonon.eta = eta_match
-
         # Load DM for sparsity pattern
         dm_temp, sp = load_matrix(
             config=config,
@@ -188,8 +181,6 @@ def run_quatrex_phonon(config_dir, label):
         solver.right_temperature = T_R
 
         print(f"  block sizes: {solver.block_sizes}")
-        print(f"  eta = {config.phonon.eta:.2e} (rad/s)^2")
-
         # Allocate zero self-energies (ballistic)
         DSDB = type(solver.dynamical_matrix)
         stack_shape = omega_sq.shape + tuple(

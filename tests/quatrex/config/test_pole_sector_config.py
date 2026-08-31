@@ -33,16 +33,14 @@ def test_default_is_off_and_legacy():
     # Deliberately NOT via _phonon(): that helper enables the sector.
     cfg = PhononConfig(model="negf", fc3_path=Path("/nonexistent/fc3.hdf5"))
     assert cfg.pole_sector.enabled is False
-    # Nothing else in the phonon block is perturbed by its presence.
     assert cfg.retarded_method == "fft"
-    assert cfg.eta_ir_floor_cells == 0.0
 
 
 def test_disabled_sector_skips_every_gate():
     """A disabled sector must not constrain the rest of the configuration."""
     cfg = PhononConfig(
         model="negf", fc3_path=Path("/nonexistent/fc3.hdf5"),
-        retarded_method="half", eta_ir_floor_cells=2.0,
+        retarded_method="half",
         pole_sector=PoleSectorConfig(enabled=False, q_in=2.0, q_out=1.0),
     )
     assert cfg.pole_sector.enabled is False
@@ -58,6 +56,20 @@ def test_cm_subtraction_switch_is_removed():
         PhononConfig(sse_cm_subtraction=True)
 
 
+@pytest.mark.parametrize(
+    "name",
+    (
+        "eta", "eta_obc", "eta_ramp_iterations", "eta_final",
+        "eta_obc_ramp_iterations", "eta_obc_final", "eta_ir_floor_cells",
+        "eta_ir_floor_final_cells", "eta_ir_floor_ramp_iterations",
+        "buttiker_probe",
+    ),
+)
+def test_broadening_switches_are_removed(name):
+    with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs"):
+        PhononConfig(**{name: 1})
+
+
 # --- cross-field gates ------------------------------------------------------ #
 
 def test_half_retarded_is_refused():
@@ -65,12 +77,6 @@ def test_half_retarded_is_refused():
     resonances."""
     with pytest.raises(ValidationError, match="retarded_method='fft'"):
         PhononConfig(retarded_method="half", **_phonon())
-
-
-def test_ir_floor_is_refused():
-    """The floor broadens exactly the modes the sector treats exactly."""
-    with pytest.raises(ValidationError, match="eta_ir_floor_cells"):
-        PhononConfig(eta_ir_floor_cells=2.0, **_phonon())
 
 
 def test_pole_window_must_sit_above_the_low_frequency_mask():

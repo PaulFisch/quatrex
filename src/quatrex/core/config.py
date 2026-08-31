@@ -828,12 +828,10 @@ class MemoizerConfig(BaseModel):
         The right mode for iteration-invariant boundary systems (eta = 0,
         fixed leads, no scattering contacts): the OBC input is identical
         every SCBA iteration, so from the second iteration the cache is
-        exact and the per-iteration OBC cost drops to one refinement
-        step. Self-invalidating: any input change (eta/eta_obc/ir-floor
-        ramps) breaks convergence of the cached solution and triggers
-        the full solve. Rank-local decision, no collectives. Unlike
-        "auto", a converged cache is never discarded and an unconverged
-        one is never returned.
+        exact and the per-iteration OBC cost drops to one refinement step.
+        Input changes invalidate the cache and trigger the full solve.
+        Rank-local decision, no collectives. Unlike "auto", a converged cache
+        is never discarded and an unconverged one is never returned.
     - "force": Always use memoization.
     - "force-after-first": Use memoization after the first SCBA iteration.
     - "off": Never use memoization.
@@ -1872,22 +1870,6 @@ class PhononConfig(BaseModel):
     lyapunov: LyapunovConfig = LyapunovConfig()
     """Parameters concerning the Lyapunov solver."""
 
-    eta_obc: NonNegativeFloat = 0  # THz^2 (constant imaginary OBC shift)
-    eta: NonNegativeFloat = 1e-12  # THz (frequency-linear damping 2*eta*|omega|)
-    eta_ramp_iterations: NonNegativeInt = 0
-    """Anneal the broadening DOWN over the first N SCBA iterations: the solver's
-    eta goes linearly from ``eta`` (iteration 0, while Sigma^R is still ~0) to
-    ``eta_final`` by iteration N, then stays at ``eta_final``. Lets the anharmonic
-    Sigma^R take over the broadening as it develops (the eta=0 limit). 0 = off
-    (constant eta)."""
-    eta_final: NonNegativeFloat = 0.0  # THz: target broadening at the end of the ramp
-    eta_obc_ramp_iterations: NonNegativeInt = 0
-    """Anneal the CONTACT broadening ``eta_obc`` DOWN over the first N SCBA
-    iterations: eta_obc goes linearly from ``eta_obc`` (iteration 0, large
-    enough to converge the cell cold) to ``eta_obc_final`` by iteration N,
-    then holds. 0 = off (constant eta_obc)."""
-    eta_obc_final: NonNegativeFloat = 0.0  # THz^2: target contact broadening at ramp end
-
     model: Literal["pseudo-scattering", "negf"] = "pseudo-scattering"
     r"""Which model to use for the electron-phonon interaction.
 
@@ -1945,29 +1927,6 @@ class PhononConfig(BaseModel):
     phonon_phonon_truncation_warn: NonNegativeFloat = 0.01
     """Frobenius-norm threshold for the FC3 nearest-neighbour-truncation
     warning (cf. ``fc3_loader.fc3_to_phi_blocks``)."""
-
-    eta_ir_floor_cells: NonNegativeFloat = 0.0
-    """Sub-grid soft-mode broadening floor for the eta=0 SCBA, in grid cells
-    (0 = off). Adds a DC-CONCENTRATED constant broadening to the Dyson
-    denominator,
-        z^2(omega) += i * Gamma_floor * omega_c^2/(omega^2 + omega_c^2),
-    Gamma_floor = (eta_ir_floor_cells*dw)^2 [THz^2], omega_c = 2*dw, damping
-    only the lowest (unresolved, ~zero-heat) bins that are otherwise
-    unregularised at eta=0 (G^R ~ 1/omega^2 at the acoustic soft modes).
-    Grid-consistent (Gamma_floor -> 0 as dw -> 0); not applied to the OBC."""
-    eta_ir_floor_final_cells: NonNegativeFloat = 0.0
-    """Target for the in-SCBA anneal of ``eta_ir_floor_cells`` (grid cells).
-    With ``eta_ir_floor_ramp_iterations`` > 0 the soft-mode floor is ramped
-    linearly from its start value down to this over the ramp, then held."""
-    eta_ir_floor_ramp_iterations: int = 0
-    """Number of SCBA solves over which to anneal ``eta_ir_floor_cells`` down to
-    ``eta_ir_floor_final_cells`` (0 = off, hold the floor constant)."""
-    buttiker_probe: bool = False
-    """Self-consistent Buttiker dephasing probe supplying the fluctuation that
-    matches the ``eta`` damping, with ``n_p`` solved each iteration so the
-    local probe current vanishes at every frequency. This is elastic
-    dephasing, i.e. physics rather than a regulariser, and it is identically
-    zero at ``eta = 0``. Single block-rank only."""
 
     bubble_balance_check: bool = False
     """Per-iteration Phi-derivable energy-balance diagnostic of the 3-phonon
@@ -2321,13 +2280,6 @@ class PhononConfig(BaseModel):
                 "Kramers-Kronig real part of Sigma^R is never built, so the "
                 "operator whose poles are being sought is not causal and its "
                 "roots are not resonances."
-            )
-        if self.eta_ir_floor_cells > 0.0:
-            raise ValueError(
-                "pole_sector refuses eta_ir_floor_cells > 0: the floor "
-                "fabricates a broadening on exactly the unresolved soft modes "
-                "the sector exists to treat exactly, so the two cannot be "
-                "combined without double counting the linewidth."
             )
         if ps.omega_min_thz and self.sse_low_freq_mask_thz:
             if ps.omega_min_thz <= self.sse_low_freq_mask_thz:

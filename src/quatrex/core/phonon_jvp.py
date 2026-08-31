@@ -102,15 +102,6 @@ class PhononJVP:
                 "evaluations)")
         _forbid(int(getattr(ph, "sse_fold_verify_iterations", 0)) > 0,
                 "sse_fold_verify_iterations == 0")
-        _forbid(int(getattr(ph, "eta_ramp_iterations", 0)) > 0,
-                "eta_ramp_iterations == 0 (frozen A)")
-        _forbid(int(getattr(ph, "eta_obc_ramp_iterations", 0)) > 0,
-                "eta_obc_ramp_iterations == 0 (frozen contacts)")
-        _forbid(int(getattr(ph, "eta_ir_floor_ramp_iterations", 0)) > 0,
-                "eta_ir_floor_ramp_iterations == 0 (frozen A)")
-        _forbid(bool(getattr(ph, "buttiker_probe", False)),
-                "buttiker_probe == false (G-dependent probe source is not "
-                "differentiated)")
         _forbid(bool(getattr(ph, "scp_tadpole", False)),
                 "scp_tadpole == false (the static tadpole mutates per "
                 "kernel call and is not quadratic in G)")
@@ -339,9 +330,7 @@ class PhononJVP:
         N = self._N
 
         w = self._host(solver.local_frequencies).astype(float, copy=False)
-        z2 = w**2 + 2j * float(solver.eta) * np.abs(w)
-        if getattr(solver, "_ir_floor_diag", None) is not None:
-            z2 = z2 + self._host(solver._ir_floor_diag)
+        z2 = w**2
         if not self._stack_shape or self._stack_shape[0] != w.size:
             raise RuntimeError(
                 f"Local frequency count {w.size} is incompatible with JVP "
