@@ -11,7 +11,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from quatrex.core.anderson import AndersonMixer, RREMixer
+from quatrex.core.anderson import AndersonMixer
+from quatrex.experimental.mixers.rre import RREMixer
 from quatrex.experimental.mixers.broyden import BroydenMixer
 from quatrex.experimental.mixers.jfnk import JFNKMixer
 from quatrex.core.mpi_linalg import complex_to_real, real_to_complex

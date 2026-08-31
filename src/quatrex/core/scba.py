@@ -576,7 +576,8 @@ class SCBA(TransportSolver):
 
     def _build_mixer(self):
         """Constructs the mixer selected by `scba.mixing_method`."""
-        from quatrex.core.anderson import AndersonMixer, RREMixer
+        from quatrex.core.anderson import AndersonMixer
+        from quatrex.experimental.mixers.rre import RREMixer
         from quatrex.experimental.mixers.broyden import BroydenMixer
         from quatrex.experimental.mixers.jfnk import JFNKMixer
         from quatrex.experimental.mixers.rpm import RPMMixer

@@ -25,8 +25,7 @@ class ExperimentalMixerConfig(BaseModel):
 
     rre_cycle: PositiveInt = 8
     """For ``mixing_method = "rre"``: restart cycle length (number of iterates
-    per reduced-rank-extrapolation step). Cf. ``RREMixer`` in
-    ``quatrex/core/anderson.py``."""
+    per reduced-rank-extrapolation step)."""
     rre_ridge: NonNegativeFloat = 1e-6
     """For ``mixing_method = "rre"``: Tikhonov ridge on the (rank-deficient by
     construction, once the residuals go collinear) Gram solve, scaled by its
@@ -172,5 +171,4 @@ class ExperimentalMixerConfig(BaseModel):
     requires the symmetry fast paths (``sse_greater_from_lesser``,
     ``sse_hermitian_pairs``) off; with either enabled it falls back to
     polarization with a notice."""
-
 
