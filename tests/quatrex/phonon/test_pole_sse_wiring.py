@@ -196,8 +196,8 @@ def test_injected_channel_does_not_survive_the_iteration():
     chan = (xp.asarray(0.25 * np.asarray(get_host(gl.data)).copy()),
             xp.asarray(0.25 * np.asarray(get_host(gg.data)).copy()))
     ssp, _ = _run(pole_enabled=True, channel=chan)
-    assert ssp._pole_channel is None
-    assert ssp._pole_sigma_ss is None
+    assert ssp._pole_injection.channel is None
+    assert ssp._pole_injection.self_energy is None
 
 
 def test_mixed_channel_is_bit_identical_when_absent():
@@ -280,4 +280,4 @@ def test_bubble_correction_does_not_survive_the_iteration():
     ssp.set_bubble_correction(xp.asarray(np.full(shape, 0.1 + 0j)),
                               xp.asarray(np.full(shape, 0.1 + 0j)))
     ssp.compute(gl, gg, out=(sl, sg, sr))
-    assert ssp._bubble_correction is None
+    assert ssp._pole_injection.covariance is None

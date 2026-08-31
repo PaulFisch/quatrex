@@ -153,18 +153,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 "use 'half' or 'fft'."
             )
         self.retarded_method = retarded_method
-        # Pole-subtracted SCBA sector. Narrow resonances of G are removed from
-        # the bubble LEGS and re-added analytically, so the frequency grid no
-        # longer has to resolve the sharpest linewidth in the problem. The
-        # split G = G_S + G_R is exact: this changes the representation, not
-        # the diagram. See phonon/docs/pole_scba_implemented.md.
         _ps = getattr(config.phonon, "pole_sector", None)
-        self._pole_cfg = _ps
-        self._pole_enabled = bool(_ps is not None and _ps.enabled)
-        self._pole_channel = None   # (g_pp_lesser, g_pp_greater) on the primary grid
-        self._pole_sigma_ss = None  # (sigma_ss_l, sigma_ss_g, sigma_ss_r)
-        self._pole_sigma_mixed = None  # (sigma_sr_l, sigma_sr_g)
-        self._bubble_correction = None  # subcell covariance, pre-KK
+        self._pole_injection = None
+        if _ps is not None and _ps.enabled:
+            from quatrex.phonon.experimental.pole.bubble_state import (
+                PoleBubbleState,
+            )
+            self._pole_injection = PoleBubbleState()
         self._aux_spacing = float(
             getattr(config.phonon, "sse_aux_grid_dw_thz", 0.0) or 0.0)
         self._aux_max_frequency = float(
@@ -802,13 +797,9 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 if m.distribution_state != "nnz":
                     m.dtranspose(discard=True)
             gl_in, gg_in = g_lesser.data, g_greater.data
-            if self._pole_enabled and self._pole_channel is not None:
-                # Remove the pole sector from the LEGS, on the primary grid and
-                # before the DC mask and the aux interpolation: interpolating a
-                # narrow Lorentzian through the coarse bridge is precisely the
-                # error being eliminated. What is left is G_R = G - G_PP, which
-                # is smooth enough for the existing FFT ring.
-                p_l, p_g = self._pole_channel
+            pole = self._pole_injection
+            if pole is not None and pole.channel is not None:
+                p_l, p_g = pole.channel
                 gl_in = gl_in - p_l
                 gg_in = gg_in - p_g
             # The omega=0 bin never enters the bubble (Bose divergence at DC;
@@ -1501,16 +1492,12 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 q_out = sigma_lesser.local_q_slice
                 sl_conv = sl_conv[:, q_out]
                 sg_conv = sg_conv[:, q_out]
-            if self._bubble_correction is not None:
-                # Before the masks and before delta: see set_bubble_correction.
-                _cl, _cg = self._bubble_correction
+            if pole is not None and pole.covariance is not None:
+                _cl, _cg = pole.covariance
                 sl_conv = sl_conv + _cl
                 sg_conv = sg_conv + _cg
-            if self._pole_enabled and self._pole_sigma_mixed is not None:
-                # The mixed sectors join the RAW bubble output here, before the
-                # masks and before delta is formed, so the existing
-                # Kramers-Kronig transform covers them along with Sigma_RR.
-                _mx_l, _mx_g = self._pole_sigma_mixed
+            if pole is not None and pole.mixed is not None:
+                _mx_l, _mx_g = pole.mixed
                 sl_conv = sl_conv + _mx_l
                 sg_conv = sg_conv + _mx_g
             # OUTPUT mask, completing the input masking above: the scattering
@@ -1542,12 +1529,8 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             # solver stores is a congruence-preserving Hadamard product of
             # the untruncated one rather than a boxcar slice of it. Applied
             # to THIS call's contribution, never to the accumulated buffer.
-            if self._pole_enabled and self._pole_sigma_ss is not None:
-                # Add the analytic pole-pole contribution on the PRIMARY grid.
-                # It is placed after _restrict_from_aux deliberately: it never
-                # crosses the energy-weighted adjoint transfer, so it cannot
-                # leak energy through it.
-                _ss_l, _ss_g, _ss_r = self._pole_sigma_ss
+            if pole is not None and pole.self_energy is not None:
+                _ss_l, _ss_g, _ss_r = pole.self_energy
                 if bool(out_mask.any()):
                     # The omega = 0 bin carries no scattering by convention (a
                     # nonzero Sigma^{<,>}(0) hits the near-singular acoustic
@@ -1577,22 +1560,14 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                     # post-mask the retarded consistently with Sigma^<>
                     hil[out_mask] = 0.0
                 sigma_retarded.data[:] = sigma_retarded.data + hil
-            if self._pole_enabled and self._pole_sigma_ss is not None:
-                # Closed-form Kramers-Kronig partner of the analytic sector.
-                # Routing it through the discrete Hilbert transform would both
-                # cost resolution and put back the grid dependence the sector
-                # removes. It uses the same endpoint mask as the numerical half.
-                _ss_r = self._pole_sigma_ss[2]
+            if pole is not None and pole.self_energy is not None:
+                _ss_r = pole.self_energy[2]
                 if bool(out_mask.any()):
                     _ss_r = _ss_r.copy()
                     _ss_r[out_mask] = 0.0
                 sigma_retarded.data[:] = sigma_retarded.data + _ss_r
-            # Never let an injected channel survive into the next iteration: it
-            # was built from THIS iterate's self-energy.
-            self._pole_channel = None
-            self._pole_sigma_ss = None
-            self._pole_sigma_mixed = None
-            self._bubble_correction = None
+            if pole is not None:
+                pole.clear()
 
     def _check_kk_grid_support(self, delta: NDArray) -> None:
         """Warns (once) if the bubble is still alive at the top of the grid.
@@ -3200,61 +3175,20 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         )
 
     def set_pole_channel(self, g_pp_lesser, g_pp_greater) -> None:
-        """Inject the pole-sector Keldysh legs for this SCBA iteration.
-
-        ``g_pp_{lesser,greater}`` are ``G_PP^{<,>}`` already projected onto the
-        stored sparsity pattern, on the PRIMARY grid and in the solver's
-        occupation-positive convention. They are subtracted from the bubble legs
-        before any interpolation or masking; the matching analytic contribution
-        is supplied separately through :meth:`set_pole_self_energy`.
-
-        Cleared after every :meth:`compute` so a stale channel can never be
-        consumed against a self-energy it was not built from.
-        """
-        self._pole_channel = (g_pp_lesser, g_pp_greater)
+        """Inject pole-sector Green-function legs for one iteration."""
+        self._pole_injection.channel = (g_pp_lesser, g_pp_greater)
 
     def set_pole_mixed(self, sigma_l, sigma_g) -> None:
-        """Inject the mixed pole-background sectors ``Sigma_SR + Sigma_RS``.
-
-        These go in BEFORE the Kramers-Kronig transform, unlike the pole-pole
-        channel. They carry only ONE narrow factor against a smooth background,
-        so they are ordinary grid objects and the existing numerical Hilbert
-        transform is the right tool for their retarded partner -- no separate
-        analytic reconstruction is needed, and using one would risk
-        double-counting against the transform that already sees them.
-        """
-        self._pole_sigma_mixed = (sigma_l, sigma_g)
+        """Inject mixed pole-background self-energies for one iteration."""
+        self._pole_injection.mixed = (sigma_l, sigma_g)
 
     def set_bubble_correction(self, corr_l, corr_g) -> None:
-        """Inject the subcell covariance correction for this iteration.
-
-        This is what the cell-averaged ring LEAVES BEHIND, not a replacement
-        for anything it computed: the correction is added to the raw bubble
-        output, nothing is subtracted, and with no active cell it is exactly
-        zero. That is why it needs no matching channel on the legs -- unlike
-        the pole-pole route, where the leg removed and the sector restored have
-        to be the same function.
-
-        Placed with the mixed sectors, BEFORE ``delta`` is formed, so the
-        existing Kramers-Kronig transform supplies its retarded partner. It
-        carries narrow structure at combination frequencies and has no
-        closed-form causal continuation of its own, so routing it after the
-        transform would leave ``Sigma^R`` missing exactly the dispersive part
-        ``Sigma^{<,>}`` had gained.
-        """
-        self._bubble_correction = (corr_l, corr_g)
+        """Inject a subcell covariance correction for one iteration."""
+        self._pole_injection.covariance = (corr_l, corr_g)
 
     def set_pole_self_energy(self, sigma_l, sigma_g, sigma_r) -> None:
-        """Inject the analytic pole-sector self-energy for this iteration.
-
-        Added to the output AFTER the auxiliary-grid restriction, so it never
-        passes through the interpolation bridge -- putting a narrow analytic
-        term through the coarse-grid transfer is exactly what this sector
-        exists to avoid. ``sigma_r`` bypasses the numerical Hilbert transform:
-        for a pole sum the Kramers-Kronig partner is the lower-half-plane part
-        of the same sum, in closed form.
-        """
-        self._pole_sigma_ss = (sigma_l, sigma_g, sigma_r)
+        """Inject an analytic pole self-energy for one iteration."""
+        self._pole_injection.self_energy = (sigma_l, sigma_g, sigma_r)
 
     def _full_frequencies(self, ne_full: int) -> NDArray:
         """Full (cached) frequency grid, all-gathers the local slice."""
