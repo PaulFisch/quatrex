@@ -315,26 +315,13 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
 
         self.phi_blocks = phi_blocks
 
-        # Inner Green's-function band kept in the contraction. The default
-        # RGF selected-inversion produces the block-tridiagonal G
-        # (diagonal + first off-diagonal, |K-K'| <= 1), and the ring masks
-        # the bubble kernel G(x)G to that band. That mask is NOT a
-        # congruence: it breaks the positive-semidefiniteness of Sigma^{<,>}
-        # on interior slabs (Schur product with the indefinite
-        # tridiagonal-ones mask), injecting non-causal gain. With
-        # sse_g_band = 2 the solver additionally produces the second
-        # off-diagonal G^{<,>} blocks and the kernel is complete for the
-        # nearest-neighbour vertex span (diagonal Sigma blocks exact).
+        # Retain the Green-function band requested by the vertex layout.
         self.g_band = min(
             (micro_band if self._micro_layout is not None else
              int(getattr(config.phonon, "sse_g_band", 1) or 1)),
             self._vertex_n_blocks - 1,
         )
-        # The selected solve is expressed in grouped Dyson blocks.  A valid
-        # microblock grouping is required below to place every retained
-        # primitive G link in the same or an adjacent grouped block, so the
-        # grouped solve remains block tridiagonal even when the primitive band
-        # is much wider.
+        # Grouped layouts retain wider primitive support in adjacent blocks.
         self._solver_g_band = (
             min(1, self.n_blocks - 1)
             if self._micro_layout is not None else self.g_band

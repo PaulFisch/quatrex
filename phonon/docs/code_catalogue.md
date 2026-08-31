@@ -23,12 +23,12 @@ being shortened and tested.
 | Spatial layout | `microblocks.py` | Keep the exact grouped-Dyson/primitive-bubble layout. This is the preferred route to retain the required physical support without paying for dense merged FC3 blocks. |
 | Units and grids | `units.py`, `quatrex/grid/energies.py` | Keep the THz/eV conversions and integration weights. Production uses a resolved uniform convolution grid. |
 | SCBA integration | `core/interaction.py`, `core/scba.py`, `core/config.py` | Keep a small phonon interaction adapter, fixed-point convergence and physical diagnostics. Separate phonon code from electron SCBA where practical. |
-| Distributed selected solve | `qttools/greens_function_solver/{rgf,rgf_dist}.py` and q distribution changes | Keep the wider selected Green-function blocks required by the FC3 support. Replace the fixed maximum band of three with support derived from the actual vertex/layout. |
+| Distributed selected solve | `qttools/greens_function_solver/{rgf,rgf_dist}.py` and q distribution changes | Keep band three as the validated production default. Allow other layouts to request their complete support without imposing band three as a solver-wide ceiling. |
 
 Band three remains the production default. It is exact for the retained
-adjacent-output contraction in the measured layouts. Removing the solver cap
-does not invalidate those results; it lets other layouts request their full
-support without changing the band-three path.
+adjacent-output contraction in the measured layouts. Generalising the selected
+solver does not change those results. It only lets another layout request more
+support when its vertex structure requires it.
 
 Two current approximations must be removed from the core design rather than
 hidden behind better defaults:
