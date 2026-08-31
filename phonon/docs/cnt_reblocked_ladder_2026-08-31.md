@@ -144,7 +144,8 @@ mixing when a state passes its gate, so the old `sigma_final` saved the raw map
 output while the logged observables belonged to the measured input iterate.
 Commit `c33748af` saves the measured iterate for converged or divergent runs.
 The `sigma_best` files used for the final comparisons already had the correct
-semantics.
+semantics. Follow-up commit `ef6a6468` initializes the convergence flag so a
+max-iteration exit can save the mixed state without failing after `run.npz`.
 
 ## Separating length and support convergence
 
@@ -230,3 +231,5 @@ This agreement is useful for choosing the spatial representation, but the
 endpoint value is not a final transport result. Both states are still moving
 and use the non-causal half-retarded reconstruction. The next physics ladder
 must use the causal `fft` reconstruction and converge the actual fixed point.
+The focused current, checkpoint and result-pull suite passes on Daint: 9 tests
+passed with two existing CuPy warnings.

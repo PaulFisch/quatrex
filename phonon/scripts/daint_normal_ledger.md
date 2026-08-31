@@ -577,3 +577,5 @@ The reset also reserves 5.07 nh for the remaining 19 minutes of the active
 16-node job 4568506. This replaces the deliberately conservative submitted
 walltime total above.
 | 2026-08-31 | 4568565 | cnt-l96x3-orbit300 | 32 | 00:45:00 | 24.00 | 487.80 | normal |
+| 2026-08-31 | 4568655 | test-cnt-recurrence-final | 1 | 00:10:00 | 0.17 | 487.97 | debug |
+| 2026-08-31 | 4568656 | test-cnt-recurrence-final-r2 | 1 | 00:10:00 | 0.17 | 488.14 | debug |
