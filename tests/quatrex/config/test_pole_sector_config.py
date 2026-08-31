@@ -62,7 +62,8 @@ def test_cm_subtraction_switch_is_removed():
         "eta", "eta_obc", "eta_ramp_iterations", "eta_final",
         "eta_obc_ramp_iterations", "eta_obc_final", "eta_ir_floor_cells",
         "eta_ir_floor_final_cells", "eta_ir_floor_ramp_iterations",
-        "buttiker_probe",
+        "buttiker_probe", "sse_vertex_scale", "sse_cross_slab_scale",
+        "sse_ramp_iterations",
     ),
 )
 def test_broadening_switches_are_removed(name):

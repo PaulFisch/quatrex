@@ -1935,24 +1935,6 @@ class PhononConfig(BaseModel):
     the nnz->stack back-transpose, which costs one extra all-to-all per
     iteration at stack > 1."""
 
-    sse_vertex_scale: PositiveFloat = 1.0
-    """Uniform 3-phonon vertex scale lambda (Sigma scales as lambda^2).
-    lambda < 1 = reduced-coupling runs for extrapolation and for soft-mode
-    structures whose full-coupling bubble-only SCBA is unstable."""
-
-    sse_cross_slab_scale: NonNegativeFloat = 1.0
-    """Selective scale on the CROSS-SLAB vertex blocks only: every FC3
-    device block (I, K1, K2) whose slab triple is not uniform (any leg
-    in a different transport cell than the anchor) is multiplied by
-    this factor; slab-diagonal blocks are untouched. 1.0 = legacy
-    (bit-identical). 0.0 = the intra-slab-only ablation. Values in
-    between support coupling continuation: converge the ablated model,
-    then anneal the cross-slab channel back in over chained segments
-    (QX_SIGMA_INIT warm starts). The class is permutation-invariant,
-    so the scaled vertex keeps its S3 symmetry and the bubble balance
-    identity. Applied to the Gamma fc3 blocks and the dense q-folded
-    vertex; unsupported (raises) with the factored vertex."""
-
     sse_low_freq_mask_thz: NonNegativeFloat = 0.0
     """Zero the bubble legs and outputs on all |omega| < this (THz). The
     frequency grid stays anchored at zero (the FFT convolution and the
@@ -2081,12 +2063,6 @@ class PhononConfig(BaseModel):
     NOT construction-exact) -- verify with a run-level A/B and watch the
     bubble-balance residual. Single-rank runs only. Diagonal blocks are
     always contracted fully (no projection is applied)."""
-
-    sse_ramp_iterations: NonNegativeInt = 0
-    """Adiabatic switch-on of the 3-phonon bubble: scale the scattering
-    self-energy by ``min(1, it/N)`` over the first N SCBA iterations
-    (0 = off). Stabilises soft-mode structures whose full-coupling SCBA
-    overshoots into unphysical gain states under plain damped iteration."""
 
     obc_scattering_contacts: bool = False
     """Dress the lead open-boundary problem with the device's boundary

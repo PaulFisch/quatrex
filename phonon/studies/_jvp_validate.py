@@ -435,7 +435,6 @@ def test_kernel() -> bool:
 
     def make_cfg(g_from_l, herm_pairs):
         phonon = SimpleNamespace(
-            sse_ramp_iterations=0, sse_vertex_scale=1.0,
             sse_ring_threads=1, sse_ring_min_w=None,
             sse_ring_workspaces=False, sse_tau_min_chunk=4,
             sse_tau_chunk_bytes=1 << 26, sse_pool_scope="tau",
@@ -594,7 +593,7 @@ def test_endtoend() -> bool:
     obc.greater[nb - 1] = 0.5 * (ogN - ogN.conj().swapaxes(-2, -1))
 
     phonon_cfg = SimpleNamespace(
-        sse_ramp_iterations=0, sse_vertex_scale=1.0, sse_ring_threads=1,
+        sse_ring_threads=1,
         sse_ring_min_w=None, sse_ring_workspaces=False, sse_tau_min_chunk=4,
         sse_tau_chunk_bytes=1 << 26, sse_pool_scope="tau",
         sse_greater_from_lesser=False, sse_fold_verify_iterations=0,

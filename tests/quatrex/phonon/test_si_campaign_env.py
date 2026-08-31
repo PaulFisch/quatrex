@@ -25,7 +25,6 @@ def test_campaign_aliases_populate_effective_driver_names() -> None:
         "QX_RETARDED_METHOD": "fft",
         "QX_MIX_METHOD": "anderson",
         "QX_MIXING": "0.3",
-        "QX_SSE_VERTEX_SCALE": "0.5",
         "QX_BUBBLE_BALANCE_CHECK": "1",
         "QX_TAU_CHUNK_BYTES": "8589934592",
     }
@@ -33,7 +32,6 @@ def test_campaign_aliases_populate_effective_driver_names() -> None:
     assert env["QX_RETARDED"] == "fft"
     assert env["QX_MIXMETHOD"] == "anderson"
     assert env["QX_MIX"] == "0.3"
-    assert env["QX_VSCALE"] == "0.5"
     assert env["QX_BBCHECK"] == "1"
     assert env["QX_TAUCHUNK"] == "8589934592"
 

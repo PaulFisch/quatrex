@@ -114,9 +114,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             if self._micro_layout is not None else self.n_blocks
         )
 
-        self._ramp_n = int(getattr(config.phonon, "sse_ramp_iterations", 0))
-        self._ramp_it = 0
-        self._vertex_scale = float(getattr(config.phonon, "sse_vertex_scale", 1.0))
         # Ring-contraction thread pool: config option, env vars as fallback.
         configure_ring_pool(
             threads=int(getattr(config.phonon, "sse_ring_threads", 0)),
@@ -360,42 +357,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
                 truncation_warn=config.phonon.phonon_phonon_truncation_warn,
             )
 
-        # Selective cross-slab vertex scale (sse_cross_slab_scale): scale
-        # every block whose slab triple (I, K1, K2) is non-uniform. The
-        # class is permutation-invariant, so S3 symmetry (and with it the
-        # bubble-balance identity) survives at any scale. The Gamma dict
-        # may alias the qfold (0, 0) entry, so both are rebuilt into fresh
-        # dicts to scale each block exactly once.
-        xscale = float(getattr(config.phonon, "sse_cross_slab_scale", 1.0))
-        if xscale != 1.0:
-            if self._vfactors is not None:
-                raise ValueError(
-                    "sse_cross_slab_scale != 1 is unsupported with the "
-                    "factored vertex (decomposed_vertices_path); use the "
-                    "dense qfold or Gamma path."
-                )
-
-            def _xs(trip, blk):
-                return blk if trip[0] == trip[1] == trip[2] else xscale * blk
-
-            if self._qvertices is not None:
-                self._qvertices = {
-                    qp: {trip: _xs(trip, blk) for trip, blk in blocks.items()}
-                    for qp, blocks in self._qvertices.items()
-                }
-                phi_blocks = self._qvertices[(0, 0)]
-            else:
-                phi_blocks = {
-                    trip: _xs(trip, blk) for trip, blk in phi_blocks.items()
-                }
-            n_cross = sum(
-                1 for t in phi_blocks if not (t[0] == t[1] == t[2]))
-            print(
-                f"[SigmaPhononPhonon] cross-slab vertex scale "
-                f"{xscale:g} on {n_cross} of {len(phi_blocks)} Gamma "
-                "blocks (and every q-folded block of the class).",
-                flush=True,
-            )
         self.phi_blocks = phi_blocks
 
         # Inner Green's-function band kept in the contraction. The default
@@ -1050,19 +1011,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             prefactor = bubble_prefactor_thz(
                 float(full_freqs[1] - full_freqs[0]))
         n_fft = 2 * ne_conv - 1
-        if self._vertex_scale != 1.0:
-            # Sigma ~ Phi^2 -> lambda^2 on the bubble
-            prefactor = prefactor * self._vertex_scale**2
-        if self._ramp_n > 0:
-            # adiabatic switch-on (config.phonon.sse_ramp_iterations).
-            # The linearized call reuses the CURRENT ramp factor without
-            # advancing the counter (it is not an SCBA iteration).
-            if not lin:
-                self._ramp_it += 1
-            ramp = min(1.0, self._ramp_it / float(self._ramp_n))
-            prefactor = prefactor * ramp
-            if ranks.rank == 0 and ramp < 1.0 and not lin:
-                print(f"SSE ramp: {ramp:.3f}", flush=True)
         # Coupled-q convolution carries the 1/N_q mesh-average
         if nq > 1:
             prefactor = prefactor / nq

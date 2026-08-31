@@ -61,8 +61,6 @@ if os.environ.get("QX_DECOMPOSED"):
 if os.environ.get("QX_ALGORITHM"):      cfg.phonon.solver.algorithm = os.environ["QX_ALGORITHM"]
 if os.environ.get("QX_SIGMATOL"): cfg.phonon.sigma_convergence_tol = float(os.environ["QX_SIGMATOL"])
 if os.environ.get("QX_HEATTOL"):  cfg.phonon.heat_flow_conservation_tol = float(os.environ["QX_HEATTOL"])
-if os.environ.get("QX_VSCALE"):   cfg.phonon.sse_vertex_scale = float(os.environ["QX_VSCALE"])
-if os.environ.get("QX_XSCALE"):   cfg.phonon.sse_cross_slab_scale = float(os.environ["QX_XSCALE"])
 if os.environ.get("QX_OBC_MEMO"): cfg.phonon.obc.memoizer.mode = os.environ["QX_OBC_MEMO"]
 if os.environ.get("QX_OBC_ALG"): cfg.phonon.obc.algorithm = os.environ["QX_OBC_ALG"]
 if os.environ.get("QX_NEVP"): cfg.phonon.obc.nevp_solver = os.environ["QX_NEVP"]
@@ -76,7 +74,6 @@ if os.environ.get("QX_VERTEX_RANK"):
 if os.environ.get("QX_DECOMPOSED_KERNEL"):
     cfg.phonon.decomposed_kernel = os.environ["QX_DECOMPOSED_KERNEL"]
 if os.environ.get("QX_GBAND_TAPER"): cfg.phonon.sse_g_band_taper = os.environ["QX_GBAND_TAPER"]
-if os.environ.get("QX_RAMP"):     cfg.phonon.sse_ramp_iterations = int(os.environ["QX_RAMP"])
 if os.environ.get("QX_SCATCONTACTS"): cfg.phonon.obc_scattering_contacts = bool(int(os.environ["QX_SCATCONTACTS"]))
 if os.environ.get("QX_BBCHECK"):  cfg.phonon.bubble_balance_check = bool(int(os.environ["QX_BBCHECK"]))
 if os.environ.get("QX_BCS"):      cfg.compute.comm.block_comm_size = int(os.environ["QX_BCS"])
@@ -801,7 +798,6 @@ if ranks.rank == 0:
             else ("qfold" if cfg.phonon.qfold_path is not None else "gamma")),
         sse_vertex_rank=int(
             getattr(getattr(_sse_diag, "_vfactors", None), "rank", 0)),
-        sse_vertex_scale=float(cfg.phonon.sse_vertex_scale),
         decomposed_kernel=str(cfg.phonon.decomposed_kernel),
         q_mesh=np.asarray(cfg.device.kpoint_grid, dtype=np.int64),
         frequency_grid=str(cfg.phonon.frequency_grid),
@@ -811,7 +807,6 @@ if ranks.rank == 0:
         eta_obc=0.0,
         sse_low_freq_mask_thz=float(cfg.phonon.sse_low_freq_mask_thz),
         sse_g_band_taper=str(cfg.phonon.sse_g_band_taper),
-        sse_ramp_iterations=int(cfg.phonon.sse_ramp_iterations),
         sse_greater_from_lesser=bool(cfg.phonon.sse_greater_from_lesser),
         scp_tadpole=bool(cfg.phonon.scp_tadpole),
         scp_loop=bool(cfg.phonon.scp_loop),

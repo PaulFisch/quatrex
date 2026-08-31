@@ -96,10 +96,6 @@ class PhononJVP:
         _forbid(config.simulation_type != "phonon",
                 "simulation_type == 'phonon'")
         _forbid(comm.block.size > 1, "block_comm_size == 1")
-        _forbid(int(getattr(ph, "sse_ramp_iterations", 0)) > 0,
-                "sse_ramp_iterations == 0 (the ramp counter advances per "
-                "kernel call and would desynchronise the polarisation "
-                "evaluations)")
         _forbid(int(getattr(ph, "sse_fold_verify_iterations", 0)) > 0,
                 "sse_fold_verify_iterations == 0")
         _forbid(bool(getattr(ph, "scp_tadpole", False)),

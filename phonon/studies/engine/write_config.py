@@ -122,8 +122,6 @@ model = "negf"
 fc3_path = "{a.work}/fc3_blocks.hdf5"
 retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
-sse_ramp_iterations = {a.ramp}
-sse_vertex_scale = {a.vertex_scale}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
@@ -224,8 +222,6 @@ fc3_path = "{a.work}/fc3_blocks.hdf5"
 {_vertex_source(a)}
 retarded_method = "{a.retarded}"
 scp_tadpole = {str(a.tadpole).lower()}
-sse_ramp_iterations = {a.ramp}
-sse_vertex_scale = {a.vertex_scale}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
 low_freq_mixing_thz = {a.low_freq_mix_thz}
@@ -375,10 +371,6 @@ def main():
                    help="gentle mixing factor for the low-omega bins")
     p.add_argument("--sigma-tol", type=float, default=1e-3,
                    help="relative Sigma^R residual tolerance")
-    p.add_argument("--vertex-scale", type=float, default=1.0,
-                   help="3-phonon vertex scale lambda (Sigma ~ lambda^2)")
-    p.add_argument("--ramp", type=int, default=0,
-                   help="adiabatic bubble switch-on over N SCBA iterations")
     p.add_argument("--tadpole", action="store_true",
                    help="enable the self-consistent SCP cubic tadpole static SE")
     p.add_argument("--obc", default="spectral", choices=["spectral", "sancho-rubio"],
