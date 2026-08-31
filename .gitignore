@@ -234,3 +234,12 @@ phonon/scripts/out/snapshots/
 # report lives in its own Overleaf repo (see memory: overleaf-report-repo)
 document/
 phonon/studies/out/anderson_test/jprobe_snaps/*.npz
+
+# Auto-generated documentation files
+docs/api/qttools
+docs/api/quatrex
+docs/user_guide/parameters
+
+# pixi environments
+.pixi/*
+!.pixi/config.toml

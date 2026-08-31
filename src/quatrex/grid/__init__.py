@@ -1,5 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 
+"""Includes energy and k point grid related functions."""
+
 from quatrex.grid.energies import (
     frequency_cell_widths,
     get_electron_energies,

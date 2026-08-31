@@ -1,5 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the qttools package.
 
+"""Includes the selected inversion solver."""
+
 from qttools import NDArray, xp
 from qttools.datastructures.dsdbsparse import DSDBSparse
 from qttools.greens_function_solver.solver import GFSolver, OBCBlocks
@@ -170,13 +172,13 @@ class RGF(GFSolver):
             # between each layer and from/to the leads (in total
             # num_blocks + 1).
             current = xp.zeros(
-                (*sigma_lesser.shape[:-2], sigma_lesser.num_blocks + 1),
+                (*sigma_lesser.local_stack_shape, sigma_lesser.num_blocks + 1),
                 dtype=sigma_lesser.dtype,
             )
 
         # Get list of batches to perform
         batches_sizes, batches_slices = get_batches(
-            sigma_lesser.shape[0], self.max_batch_size
+            sigma_lesser.local_stack_shape[0], self.max_batch_size
         )
 
         # xr will be the third element of the tuple.

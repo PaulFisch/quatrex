@@ -46,12 +46,10 @@ class ReducedSystem:
 
     Parameters
     ----------
-    solve_lesser : bool, optional
-        Whether to solve the quadratic system associated with the lesser
-        right-hand-side, by default False.
-    solve_greater : bool, optional
-        Whether to solve the quadratic system associated with the
-        greater right-hand-side, by default False.
+    selected_solve : bool, optional
+        Whether the ReducedSystem should also store blocks for solving
+        the quadratic systems associated with the lesser and greater
+        right-hand-sides, by default False.
 
     Attributes
     ----------
@@ -128,29 +126,41 @@ class ReducedSystem:
         Parameters
         ----------
         a : DSDBSparse
-            The system matrix A in A X A^T = I/B.
-        x_diag_blocks : list[NDArray]
-            The diagonal blocks of the system matrix.
-        buffer_upper : list[NDArray]
-            The upper off-diagonal blocks of the system matrix.
-        buffer_lower : list[NDArray]
-            The lower off-diagonal blocks of the system matrix.
-        bl : DSDBSparse, optional
-            The system matrix Bl in A X Bl A^T = I/Bl, by default None.
+            The system matrix.
+        xr_diag_blocks : list[NDArray]
+            The diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_buffer_upper : list[NDArray]
+            The super-diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_buffer_lower : list[NDArray]
+            The sub-diagonal blocks of the Schur factorization of the
+            retarded system.
+        sigma_lesser : DSDBSparse, optional
+            The self-energy matrix for the lesser Green's function, by
+            default None.
         xl_diag_blocks : list[NDArray], optional
-            The diagonal blocks of the system matrix Bl, by default None.
-        bl_buffer_upper : list[NDArray], optional
-            The upper off-diagonal blocks of the system matrix Bl, by default None.
-        bl_buffer_lower : list[NDArray], optional
-            The lower off-diagonal blocks of the system matrix Bl, by default None.
-        bg : DSDBSparse, optional
-            The system matrix Bg in A X Bg A^T = I/Bg, by default None.
+            The diagonal blocks of the Schur factorization of the lesser
+            system, by default None.
+        xl_buffer_upper : list[NDArray], optional
+            The super-diagonal blocks of the Schur factorization of the
+            lesser system, by default None.
+        xl_buffer_lower : list[NDArray], optional
+            The sub-diagonal blocks of the Schur factorization of the
+            lesser system, by default None.
+        sigma_greater : DSDBSparse, optional
+            The self-energy matrix for the greater Green's function, by
+            default None.
         xg_diag_blocks : list[NDArray], optional
-            The diagonal blocks of the system matrix Bg, by default None.
-        bg_buffer_upper : list[NDArray], optional
-            The upper off-diagonal blocks of the system matrix Bg, by default None.
-        bg_buffer_lower : list[NDArray], optional
-            The lower off-diagonal blocks of the system matrix Bg, by default None.
+            The diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+        xg_buffer_upper : list[NDArray], optional
+            The super-diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+        xg_buffer_lower : list[NDArray], optional
+            The sub-diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+
         """
 
         xr_diag_blocks, xr_upper_blocks, xr_lower_blocks = self._map_reduced_system(
@@ -220,29 +230,42 @@ class ReducedSystem:
         Parameters
         ----------
         a : DSDBSparse
-            The system matrix A in A X A^T = I/B.
-        x_diag_blocks : list[NDArray]
-            The diagonal blocks of the system matrix.
-        buffer_upper : list[NDArray]
-            The upper off-diagonal blocks of the system matrix.
-        buffer_lower : list[NDArray]
-            The lower off-diagonal blocks of the system matrix.
-        bl : DSDBSparse, optional
-            The system matrix Bl in A X Bl A^T = I/Bl, by default None.
+            The system matrix.
+        xr_diag_blocks : list[NDArray]
+            The diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_buffer_upper : list[NDArray]
+            The super-diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_buffer_lower : list[NDArray]
+            The sub-diagonal blocks of the Schur factorization of the
+            retarded system.
+        sigma_lesser : DSDBSparse, optional
+            The self-energy matrix for the lesser Green's function, by
+            default None.
         xl_diag_blocks : list[NDArray], optional
-            The diagonal blocks of the system matrix Bl, by default None.
-        bl_buffer_upper : list[NDArray], optional
-            The upper off-diagonal blocks of the system matrix Bl, by default None.
-        bl_buffer_lower : list[NDArray], optional
-            The lower off-diagonal blocks of the system matrix Bl, by default None.
-        bg : DSDBSparse, optional
-            The system matrix Bg in A X Bg A^T = I/Bg, by default None.
+            The diagonal blocks of the Schur factorization of the lesser
+            system, by default None.
+        xl_buffer_upper : list[NDArray], optional
+            The super-diagonal blocks of the Schur factorization of the
+            lesser system, by default None.
+        xl_buffer_lower : list[NDArray], optional
+            The sub-diagonal blocks of the Schur factorization of the
+            lesser system, by default None.
+        sigma_greater : DSDBSparse, optional
+            The self-energy matrix for the greater Green's function, by
+            default None.
         xg_diag_blocks : list[NDArray], optional
-            The diagonal blocks of the system matrix Bg, by default None.
-        bg_buffer_upper : list[NDArray], optional
-            The upper off-diagonal blocks of the system matrix Bg, by default None.
-        bg_buffer_lower : list[NDArray], optional
-            The lower off-diagonal blocks of the system matrix Bg, by default None.
+            The diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+        xg_buffer_upper : list[NDArray], optional
+            The super-diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+        xg_buffer_lower : list[NDArray], optional
+            The sub-diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+
+
         """
 
         xr_diag_blocks, xr_upper_blocks, xr_lower_blocks = (
@@ -331,7 +354,7 @@ class ReducedSystem:
 
         Parameters
         ----------
-        a : DSDBSparse
+        a : DSDBSparse | _DStackView
             Local partition of the matrix to map.
         x_diag_blocks : list[NDArray]
             Local (densified) diagonal blocks of the matrix to map.
@@ -379,7 +402,7 @@ class ReducedSystem:
 
         Parameters
         ----------
-        a : DSDBSparse
+        a : DSDBSparse | _DStackView
             Local partition of the matrix to map.
         x_diag_blocks : list[NDArray]
             Local (densified) diagonal blocks of the matrix to map.
@@ -392,14 +415,10 @@ class ReducedSystem:
         i = a.num_local_blocks - 1
         j = i + 1
 
-        if isinstance(a, DSDBSparse):
-            stack_shape = a._data.shape[:-1]
-            block_size = a.block_sizes[0]
-            dtype = a.dtype
-        else:
-            stack_shape = a._block_indexer._arg.shape[:-1]
-            block_size = a._dsdbsparse.block_sizes[0]
-            dtype = a._dsdbsparse.dtype
+        # NOTE: This is the local shape of the stack.
+        stack_shape = a.local_stack_shape
+        block_size = a.block_sizes[0]
+        dtype = a.dtype
 
         diag_blocks = xp.empty(
             (2 * comm.block.size, *stack_shape, block_size, block_size), dtype=dtype
@@ -601,40 +620,42 @@ class ReducedSystem:
 
         Parameters
         ----------
-        x_diag_blocks : list[NDArray]
-            The diagonal blocks of the reduced system.
-        buffer_upper : list[NDArray]
-            The upper off-diagonal blocks of the reduced system.
-        buffer_lower : list[NDArray]
-            The lower off-diagonal blocks of the reduced system.
-        out : DSDBSparse
-            The distributed block-sparse matrix to scatter to.
+        xr_diag_blocks : list[NDArray]
+            The diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_buffer_upper : list[NDArray]
+            The super-diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_buffer_lower : list[NDArray]
+            The sub-diagonal blocks of the Schur factorization of the
+            retarded system.
+        xr_out : DSDBSparse | _DStackView
+            The output matrix for the retarded system.
+        return_retarded : bool, optional
+            Whether to write the retarded Green's function to the output
+            matrix, by default True.
         xl_diag_blocks : list[NDArray], optional
-            The diagonal blocks of the reduced system associated with
-            the lesser right-hand-side, by default None.
+            The diagonal blocks of the Schur factorization of the lesser
+            system, by default None.
         xl_buffer_lower : list[NDArray], optional
-            The lower off-diagonal blocks of the reduced system
-            associated with the lesser right-hand-side, by default None.
+            The sub-diagonal blocks of the Schur factorization of the
+            lesser system, by default None.
         xl_buffer_upper : list[NDArray], optional
-            The upper off-diagonal blocks of the reduced system
-            associated with the lesser right-hand-side, by default None.
-        xl_out : DSDBSparse, optional
-            The distributed block-sparse matrix to scatter to associated
-            with the lesser right-hand-side, by default None.
+            The super-diagonal blocks of the Schur factorization of the
+            lesser system, by default None.
+        xl_out : DSDBSparse | _DStackView, optional
+            The output matrix for the lesser system, by default None.
         xg_diag_blocks : list[NDArray], optional
-            The diagonal blocks of the reduced system associated with
-            the greater right-hand-side, by default None.
+            The diagonal blocks of the Schur factorization of the
+            greater system, by default None.
         xg_buffer_lower : list[NDArray], optional
-            The lower off-diagonal blocks of the reduced system
-            associated with the greater right-hand-side, by default
-            None.
+            The sub-diagonal blocks of the Schur factorization of the
+            greater system, by default None.
         xg_buffer_upper : list[NDArray], optional
-            The upper off-diagonal blocks of the reduced system
-            associated with the greater right-hand-side, by default
-            None.
-        xg_out : DSDBSparse, optional
-            The distributed block-sparse matrix to scatter to associated
-            with the greater right-hand-side, by default None.
+            The super-diagonal blocks of the Schur factorization of the
+            greater system, by default None.
+        xg_out : DSDBSparse | _DStackView, optional
+            The output matrix for the greater system, by default None.
 
         """
         self._mapback_reduced_system(

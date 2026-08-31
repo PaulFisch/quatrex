@@ -1,5 +1,8 @@
 examples/**/* filter=lfs diff=lfs merge=lfs -text
 examples/**/*.toml text filter= diff= merge=
+examples/**/*.md text filter= diff= merge=
+docs/assets/images/**/* filter=lfs diff=lfs merge=lfs -text
+pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff
 
 # Phonon DFT results and pseudopotentials
 phonon/input_calc/scf_disp/results/**/* filter=lfs diff=lfs merge=lfs -text

@@ -1,5 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the qttools package.
 
+"""Includes the distributed selected inversion solver."""
+
 import numpy as np
 
 from qttools import NDArray, xp
@@ -274,12 +276,6 @@ class RGFDist(GFSolver):
 
     Parameters
     ----------
-    solve_lesser : bool, optional
-        Whether to solve the quadratic system associated with the lesser right-hand-side,
-        by default False.
-    solve_greater : bool, optional
-        Whether to solve the quadratic system associated with the greater right-hand-side,
-        by default False.
     max_batch_size : int, optional
         Maximum batch size to use when inverting the matrix, by default
         100.
@@ -398,7 +394,7 @@ class RGFDist(GFSolver):
         r"""Performs selected inversion of a block-tridiagonal matrix.
 
         Can optionally solve the quadratic system associated with the
-        Bl and Bg matrices in the equation AXA^T = B.
+        lesser and greater right-hand-sides.
 
         Parameters
         ----------
@@ -464,7 +460,48 @@ class RGFDist(GFSolver):
                     "block_comm_size."
                 )
 
-        with profiler.profile_range(label="RGF dist: init", level="default", comm=comm):
+        with profiler.profile_range(
+            label="RGF dist: init", level="default", comm=comm.block
+        ):
+
+            if obc_blocks is None:
+                obc_blocks = OBCBlocks(num_blocks=sigma_lesser.num_local_blocks)
+
+            if return_current:
+                # Allocate a buffer for the current. This includes current
+                # between each layer and from/to the leads (in total
+                # num_blocks + 1).
+                current = xp.zeros(
+                    (*sigma_lesser.local_stack_shape, sigma_lesser.num_blocks + 1),
+                    dtype=sigma_lesser.dtype,
+                )
+                # TODO: Only boundary currents are currently supported.
+                # Invalidate the remaining layers by setting them to
+                # xp.nan.
+                current[..., 1:-1] = xp.nan
+
+            xl_out, xg_out, *xr_out = out
+            if return_retarded:
+                if len(xr_out) != 1:
+                    raise ValueError("Invalid number of output matrices.")
+                xr_out = xr_out[0]
+
+            if xl_out.symmetry not in [None, "skew-hermitian"]:
+                raise ValueError(
+                    "Invalid symmetry for lesser Green's function. "
+                    "Expected None or 'skew-hermitian'."
+                )
+            if xg_out.symmetry not in [None, "skew-hermitian"]:
+                raise ValueError(
+                    "Invalid symmetry for greater Green's function. "
+                    "Expected None or 'skew-hermitian'."
+                )
+
+            batch_sizes, batch_offsets = get_batches(
+                sigma_lesser.local_stack_shape[0], self.max_batch_size
+            )
+
+        for i in range(len(batch_sizes)):
 
             # Initialize temporary buffers.
             reduced_system = _serinv.ReducedSystem(selected_solve=True)
@@ -495,44 +532,6 @@ class RGFDist(GFSolver):
                 None
             ] * sigma_lesser.num_local_blocks
 
-            if obc_blocks is None:
-                obc_blocks = OBCBlocks(num_blocks=sigma_lesser.num_local_blocks)
-
-            if return_current:
-                # Allocate a buffer for the current. This includes current
-                # between each layer and from/to the leads (in total
-                # num_blocks + 1).
-                current = xp.zeros(
-                    (*sigma_lesser.shape[:-2], sigma_lesser.num_blocks + 1),
-                    dtype=sigma_lesser.dtype,
-                )
-                # TODO: Only boundary currents are currently supported.
-                # Invalidate the remaining layers by setting them to
-                # xp.nan.
-                current[..., 1:-1] = xp.nan
-
-            xl_out, xg_out, *xr_out = out
-            if return_retarded:
-                if len(xr_out) != 1:
-                    raise ValueError("Invalid number of output matrices.")
-                xr_out = xr_out[0]
-
-            if xl_out.symmetry not in [None, "skew-hermitian"]:
-                raise ValueError(
-                    "Invalid symmetry for lesser Green's function. "
-                    "Expected None or 'skew-hermitian'."
-                )
-            if xg_out.symmetry not in [None, "skew-hermitian"]:
-                raise ValueError(
-                    "Invalid symmetry for greater Green's function. "
-                    "Expected None or 'skew-hermitian'."
-                )
-
-            batch_sizes, batch_offsets = get_batches(
-                sigma_lesser.shape[0], self.max_batch_size
-            )
-
-        for i in range(len(batch_sizes)):
             stack_slice = slice(int(batch_offsets[i]), int(batch_offsets[i + 1]))
 
             a_ = a.stack[stack_slice]
@@ -544,7 +543,7 @@ class RGFDist(GFSolver):
             xr_out_ = xr_out.stack[stack_slice] if return_retarded else None
 
             with profiler.profile_range(
-                label="RGF dist: Schur", level="debug", comm=comm
+                label="RGF dist: Schur", level="default", comm=comm.block
             ):
 
                 if comm.block.rank == 0:
@@ -605,13 +604,10 @@ class RGFDist(GFSolver):
                     )
 
             if n_offdiagonals > 1:
-                # Left-connected auxiliaries for the off-diagonal
-                # post-pass: stash them NOW -- the reduced-system mapback
-                # and the selinv overwrite the diag stacks.
                 with profiler.profile_range(
                     label="RGF dist: left-connected chain",
-                    level="debug",
-                    comm=comm,
+                    level="default",
+                    comm=comm.block,
                 ):
                     glr, gll, glg = _left_connected_chain(
                         a_,
@@ -625,7 +621,7 @@ class RGFDist(GFSolver):
                     )
 
             with profiler.profile_range(
-                label="RGF dist: Reduce gather", level="debug", comm=comm
+                label="RGF dist: Reduce gather", level="default", comm=comm.block
             ):
                 # Construct the reduced system.
                 if np.all(a.block_sizes == a.block_sizes[0]):
@@ -653,12 +649,12 @@ class RGFDist(GFSolver):
 
             # Perform selected-inversion on the reduced system.
             with profiler.profile_range(
-                label="RGF dist: Reduce solve", level="debug", comm=comm
+                label="RGF dist: Reduce solve", level="default", comm=comm.block
             ):
                 reduced_system.solve()
 
             with profiler.profile_range(
-                label="RGF dist: Reduce scatter", level="debug", comm=comm
+                label="RGF dist: Reduce scatter", level="default", comm=comm.block
             ):
                 # Scatter the result to the output matrix.
                 reduced_system.scatter(
@@ -680,7 +676,7 @@ class RGFDist(GFSolver):
                 )
 
             with profiler.profile_range(
-                label="RGF dist: Selinv", level="debug", comm=comm
+                label="RGF dist: Selinv", level="default", comm=comm.block
             ):
 
                 if comm.block.rank == 0:
@@ -744,8 +740,8 @@ class RGFDist(GFSolver):
             if n_offdiagonals > 1:
                 with profiler.profile_range(
                     label="RGF dist: off-diagonal post-pass",
-                    level="debug",
-                    comm=comm,
+                    level="default",
+                    comm=comm.block,
                 ):
                     _offdiag_post_pass(
                         a_,
@@ -761,9 +757,6 @@ class RGFDist(GFSolver):
                     )
 
             if return_current:
-                # Per-batch boundary traces: the diagonal blocks are the
-                # current batch's, so the OBC blocks and the output slots
-                # must be sliced to the same stack window.
                 if comm.block.rank == 0:
                     current[stack_slice, ..., 0] = xp.trace(
                         obc_blocks.greater[0][stack_slice] @ xl_diag_blocks[0]
