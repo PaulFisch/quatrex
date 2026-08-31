@@ -36,6 +36,15 @@ def test_default_is_off_and_legacy():
     assert cfg.retarded_method == "fft"
 
 
+def test_green_function_band_has_no_fixed_solver_ceiling():
+    cfg = PhononConfig(
+        model="negf",
+        fc3_path=Path("/nonexistent/fc3.hdf5"),
+        sse_g_band=5,
+    )
+    assert cfg.sse_g_band == 5
+
+
 def test_disabled_sector_skips_every_gate():
     """A disabled sector must not constrain the rest of the configuration."""
     cfg = PhononConfig(

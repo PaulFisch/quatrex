@@ -1680,15 +1680,8 @@ class PhononConfig(BaseModel):
     (no artificial contact broadening needed). Default off: bare
     harmonic reservoirs, scattering enters the device Dyson only."""
 
-    sse_g_band: int = Field(default=3, ge=1, le=3)
-    """Inner Green's-function block band ``|K - K'|`` kept in the bubble
-    contraction. Band 1 masks the kernel to the RGF block-tridiagonal G, and a
-    masked positive semi-definite form is not positive semi-definite, so
-    interior slabs acquire non-causal gain. Band 2 makes the diagonal Sigma
-    blocks exact and causal, band 3 the first off-diagonals as well. Extends
-    the shared G/Sigma sparsity pattern by the corresponding off-diagonal
-    blocks, and is clamped at use to ``n_blocks - 1``. Distributed use
-    needs every block rank to own at least ``sse_g_band + 1`` blocks."""
+    sse_g_band: PositiveInt = 3
+    """Selected Green-function block band. Band three is the validated default."""
 
     sse_microblock_dof: NonNegativeInt = 0
     """Primitive FC3 block size inside a grouped Dyson block.  Zero keeps the

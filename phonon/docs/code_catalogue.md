@@ -17,7 +17,7 @@ being shortened and tested.
 | Area | Files | Decision |
 |---|---|---|
 | Phonon Dyson solver | `src/quatrex/phonon/solver.py` | Keep the harmonic operator, spectral OBC, Bose contacts, selected solve and heat current. Remove the experimental branches listed below. |
-| Three-phonon self-energy | `src/quatrex/phonon/sse_phonon_phonon.py` | Keep the raw FFT bubble, complete absorption/emission fold, dense coupled-q contraction, exact four-ring identity and distributed execution. Split this file into small components. |
+| Three-phonon self-energy | `sse_phonon_phonon.py`, `q_contraction.py`, `contraction_support.py` | Keep the raw FFT bubble, complete absorption/emission fold, batched coupled-q contraction, exact four-ring identity and distributed execution. Communication and q contraction now have separate modules. |
 | Bubble kernels | `bubble.py`, `bubble_factored.py` | Keep the vectorized NumPy/CuPy kernels. A factored vertex is valid only when its source representation is certified; rank truncation is not a production default. |
 | Vertex input | `fc3_loader.py`, `qfold.py`, `vertex_factors.py`, `vertex_q_resample.py` | Keep loading, q folding and exact representation transforms. Approximate factor fits remain opt-in and must report their error. |
 | Spatial layout | `microblocks.py` | Keep the exact grouped-Dyson/primitive-bubble layout. This is the preferred route to retain the required physical support without paying for dense merged FC3 blocks. |
@@ -30,13 +30,13 @@ adjacent-output contraction in the measured layouts. Generalising the selected
 solver does not change those results. It only lets another layout request more
 support when its vertex structure requires it.
 
-Two current approximations must be removed from the core design rather than
-hidden behind better defaults:
+Two support rules apply to every production layout:
 
-1. `sse_g_band` is capped at three solver blocks and the generated self-energy
-   is pinned to adjacent solver blocks. Reblocking changes both physical
-   supports. The new solver must derive Green-function and self-energy support
-   from the FC3 block offsets and preserve it exactly.
+1. Band three remains exact for the measured adjacent-output layouts. The
+   selected solver no longer imposes three as a global ceiling, so another
+   layout can request the wider Green-function support its FC3 offsets require.
+   Unsupported self-energy output ranges must fail construction rather than be
+   dropped silently.
 2. `phonon.interaction_cutoff` defaults to 10 Angstrom. The MoS2 runs show that
    this box mask can break positivity before the self-energy is applied.
    Production should consume the loaded FC3 support as-is; an analysis-only
@@ -78,6 +78,7 @@ with focused oracle tests and a short result note.
 | Adaptive/nonuniform collision integration | study modules under `phonon/studies/` | The reduced P1 oracle is accurate, but the current production bridge is not a faster conserving collision backend. Keep out of runtime. |
 | Auxiliary frequency grid | `sse_aux_grid_*` and `_prepare_nonuniform_production.py` | Keep as an opt-in experiment. The Si 113/121 case was accurate, but two CNT cases failed lead conservation and saved little time because the FC3 ring retained the full auxiliary grid. Auxiliary-spacing convergence is still open. |
 | Ballistic and static audits | `src/quatrex/phonon/experimental/ballistic_audit.py` and study helpers | Verification tooling only; these are not solver dependencies. |
+| SCBA root finders | `src/quatrex/experimental/mixers/` | Broyden, RPM, RRE, JFNK and exact Newton remain research tools. Production linear and Anderson runs load none of their implementations. |
 
 ## Tooling and data
 
