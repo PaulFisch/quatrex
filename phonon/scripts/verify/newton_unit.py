@@ -25,7 +25,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
-from quatrex.core.newton import NewtonKrylovMixer  # noqa: E402
+from quatrex.experimental.mixers.newton import NewtonKrylovMixer  # noqa: E402
 
 
 class ToyJVP:
@@ -220,7 +220,7 @@ def test_woodbury():
     # right-preconditioning must deflate the outliers of A = J_F - I:
     # on exact eigenvector pairs, A M^{-1} q = -q.
     from quatrex.core.mpi_linalg import get_comm
-    from quatrex.core.newton import _LowRankPrecond
+    from quatrex.experimental.mixers.newton import _LowRankPrecond
 
     rng = np.random.default_rng(5)
     n = 50

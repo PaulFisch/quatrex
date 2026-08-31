@@ -12,11 +12,11 @@ import numpy as np
 import pytest
 
 from quatrex.core.anderson import AndersonMixer, RREMixer
-from quatrex.core.broyden import BroydenMixer
-from quatrex.core.jfnk import JFNKMixer
+from quatrex.experimental.mixers.broyden import BroydenMixer
+from quatrex.experimental.mixers.jfnk import JFNKMixer
 from quatrex.core.mpi_linalg import complex_to_real, real_to_complex
-from quatrex.core.newton import NewtonKrylovMixer
-from quatrex.core.rpm import RPMMixer
+from quatrex.experimental.mixers.newton import NewtonKrylovMixer
+from quatrex.experimental.mixers.rpm import RPMMixer
 
 N = 40
 

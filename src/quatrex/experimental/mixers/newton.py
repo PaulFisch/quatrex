@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
 """Newton-Krylov mixer with EXACT analytic Jacobian-vector products.
 
-Same Newton system as :mod:`quatrex.core.jfnk` -- ``(J_F - I) delta = -R``
+Same Newton system as :mod:`quatrex.experimental.mixers.jfnk` -- ``(J_F - I) delta = -R``
 with ``R = F[Sigma] - Sigma`` solved by real-embedded GMRES -- but the
 Jacobian-vector products come from :class:`quatrex.core.phonon_jvp.PhononJVP`
 (frozen-G Dyson linearisation + the polarisation identity of the quadratic
@@ -517,3 +517,4 @@ class NewtonKrylovMixer:
                              self._comm, self._SUM)
         self._precond_op = op
         return op
+

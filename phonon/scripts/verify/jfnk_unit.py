@@ -15,7 +15,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
-from quatrex.core.jfnk import JFNKMixer
+from quatrex.experimental.mixers.jfnk import JFNKMixer
 
 
 def drive(g, x0, mixer, tol=1e-11, max_calls=400):

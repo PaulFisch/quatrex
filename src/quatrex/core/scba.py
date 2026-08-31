@@ -577,9 +577,9 @@ class SCBA(TransportSolver):
     def _build_mixer(self):
         """Constructs the mixer selected by `scba.mixing_method`."""
         from quatrex.core.anderson import AndersonMixer, RREMixer
-        from quatrex.core.broyden import BroydenMixer
-        from quatrex.core.jfnk import JFNKMixer
-        from quatrex.core.rpm import RPMMixer
+        from quatrex.experimental.mixers.broyden import BroydenMixer
+        from quatrex.experimental.mixers.jfnk import JFNKMixer
+        from quatrex.experimental.mixers.rpm import RPMMixer
 
         scba = self.config.scba
         xm = scba.experimental_mixer
@@ -633,7 +633,7 @@ class SCBA(TransportSolver):
                 ptc=xm.jfnk_ptc,
             )
         if scba.mixing_method == "newton":
-            from quatrex.core.newton import NewtonKrylovMixer
+            from quatrex.experimental.mixers.newton import NewtonKrylovMixer
 
             # The JVP context is built lazily on the first Newton step:
             # the mixer is constructed before the phonon solver (and the

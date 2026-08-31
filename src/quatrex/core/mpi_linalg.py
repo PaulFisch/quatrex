@@ -34,7 +34,7 @@ def real_embedded(step):
     the Kramers-Kronig transform and the bosonic fold all conjugate -- so
     ``dF/dSigma`` is only R-linear. A secant/least-squares fit with complex
     coefficients therefore linearises the wrong map. Working in the real
-    embedding is what :class:`quatrex.core.jfnk.JFNKMixer` does internally.
+    embedding is what the experimental JFNK mixer does internally.
     """
 
     @wraps(step)

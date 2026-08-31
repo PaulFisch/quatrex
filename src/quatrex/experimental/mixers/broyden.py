@@ -166,3 +166,4 @@ class BroydenMixer:
                                 rcond=self.rcond)[0]
         step = self.beta * f - (dX + self.beta * dF) @ gamma
         return x + trust_cap(self._comm, self._SUM, step, x, self.trust)
+

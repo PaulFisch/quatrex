@@ -5,7 +5,7 @@ The anharmonic-phonon SCBA is one fixed-point map ``Sigma = F[Sigma] = B[G[Sigma
 When the map Jacobian ``J_F = dF/dSigma`` has a SMALL number of eigenvalues
 with ``|lambda| >> 1``, every contraction-based scheme -- Picard, Anderson,
 RRE -- diverges, and the DMD-subspace Newton
-(:class:`quatrex.core.rpm.RPMMixer`) also fails because it must explicitly
+(:class:`quatrex.experimental.mixers.rpm.RPMMixer`) also fails because it must explicitly
 identify that rank-noisy, high-``|lambda|`` outlier subspace.
 
 JFNK never identifies the unstable subspace. It applies NEWTON to the residual
@@ -391,3 +391,4 @@ class JFNKMixer:
         self._phase = "newton_base"
         self._trial_pending = True
         return _r2c(x_new_r)
+

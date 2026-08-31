@@ -16,7 +16,7 @@ multiplies ``f`` so the true fixed point (``f = 0``) is exactly preserved.
 condition that makes the full ``I - G'`` invertible -- and it is a TINY k x k
 solve done replicated on every rank.
 
-Where :class:`quatrex.core.broyden.BroydenMixer` builds the inverse-Jacobian
+Where :class:`quatrex.experimental.mixers.broyden.BroydenMixer` builds the inverse-Jacobian
 action implicitly from a rolling secant window, RPM holds the unstable
 directions in an explicit, persistently re-identified subspace -- more robust
 when a complex pair sits on the unit circle and the secant window proves too
@@ -206,3 +206,4 @@ class RPMMixer:
             return x_new
         except (np.linalg.LinAlgError, ValueError):
             return x + self.beta * f
+
