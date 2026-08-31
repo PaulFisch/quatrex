@@ -25,6 +25,11 @@ being shortened and tested.
 | SCBA integration | `core/interaction.py`, `core/scba.py`, `core/config.py` | Keep a small phonon interaction adapter, fixed-point convergence and physical diagnostics. Separate phonon code from electron SCBA where practical. |
 | Distributed selected solve | `qttools/greens_function_solver/{rgf,rgf_dist}.py` and q distribution changes | Keep the wider selected Green-function blocks required by the FC3 support. Replace the fixed maximum band of three with support derived from the actual vertex/layout. |
 
+Band three remains the production default. It is exact for the retained
+adjacent-output contraction in the measured layouts. Removing the solver cap
+does not invalidate those results; it lets other layouts request their full
+support without changing the band-three path.
+
 Two current approximations must be removed from the core design rather than
 hidden behind better defaults:
 
@@ -52,7 +57,6 @@ negative-result evidence stays in the docs and run manifests.
 | Interaction annealing | `sse_ramp_iterations`, `sse_vertex_scale`, cross-slab scaling and continuation hooks | Changes the nonlinear map during iteration. Remove from production. |
 | Frequency masks and special mixing | `sse_low_freq_mask_thz`, `low_freq_mixing_thz`, `low_freq_mixing_factor` | Deletes real scattering channels or changes only selected bins. Remove. |
 | Spatial and cutoff tapers | `sse_g_band_taper`, `interaction_cutoff_taper` | The tested tapers change the answer and do not repair the underlying support error. Remove. |
-| Auxiliary primary grid | `sse_aux_grid_*` runtime path | It moves narrow-line resolution cost to a uniform auxiliary grid and did not pass the CNT conservation gate. Retain only as a study oracle. |
 | Static SCP/tadpole additions | `static_self_energy.py` and the SCP/FC4 switches in the three-phonon runtime | These are separate physical models, not the raw cubic interaction. Move to experiments until they have an unbroadened production validation. |
 | Advanced root-finder campaign knobs | Broyden, RPM, RRE, JFNK/Newton campaign controls and continuation-specific safeguards | Useful research tools, but not part of the plain production solver. Keep reusable numerical algorithms outside the phonon runtime and expose only after an independent need is established. |
 
@@ -72,6 +76,7 @@ with focused oracle tests and a short result note.
 | Passive auxiliary states | `auxiliary_scba.py` | Algebraic tests pass, but real-Si constant-source errors are 10-16 percent and wholesale promotion costs more than reblocking. Preserve as a selective-cluster experiment. |
 | Modal and semiseparable spatial tails | `spatial_*.py` | One-sided fitting and post-hoc compression lose to exact reblocking. The direct-generator construction remains an unclosed research idea. Preserve only its oracle and derivation. |
 | Adaptive/nonuniform collision integration | study modules under `phonon/studies/` | The reduced P1 oracle is accurate, but the current production bridge is not a faster conserving collision backend. Keep out of runtime. |
+| Auxiliary frequency grid | `sse_aux_grid_*` and `_prepare_nonuniform_production.py` | Keep as an opt-in experiment. The Si 113/121 case was accurate, but two CNT cases failed lead conservation and saved little time because the FC3 ring retained the full auxiliary grid. Auxiliary-spacing convergence is still open. |
 | Ballistic and static audits | `ballistic_audit.py` and related study helpers | Move to verification tooling; these are not solver dependencies. |
 
 ## Tooling and data

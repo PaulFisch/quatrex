@@ -66,8 +66,6 @@ def test_cm_subtraction_switch_is_removed():
         "sse_ramp_iterations", "sse_low_freq_mask_thz",
         "low_freq_mixing_thz", "low_freq_mixing_factor",
         "sse_g_band_taper", "interaction_cutoff_taper",
-        "sse_aux_grid_dw_thz", "sse_aux_grid_fmax_thz",
-        "sse_aux_restrict",
         "scp_tadpole", "scp_tadpole_term", "scp_uu_source",
         "scp_uu_min_thz", "scp_loop", "scp_fc4_path",
         "scp_static_mixing", "scp_floor_thz",

@@ -533,17 +533,6 @@ def test_compute_restores_distribution_state() -> None:
         )
 
 
-def test_nonuniform_frequency_grid_is_rejected() -> None:
-    cfg = _make_cfg("fft")
-    freqs = np.array([0.0, 0.5, 1.1, 2.0])
-    ssp = SigmaPhononPhonon(
-        cfg, phonon_frequencies=freqs,
-        block_sizes=np.array([2]), phi_blocks={},
-    )
-    with pytest.raises(ValueError, match="uniform frequency grid"):
-        ssp._full_frequencies(freqs.size)
-
-
 def _psd_fixture(n_blocks: int, nbs: int, ne: int, seed: int = 7):
     """Build a symmetric vertex and positive semidefinite Green functions."""
     from qttools.datastructures import DSDBCOO

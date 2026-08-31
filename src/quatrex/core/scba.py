@@ -383,7 +383,11 @@ class SCBA(TransportSolver):
         # ----- Particles ----------------------------------------------
         self.energies = get_electron_energies(config)
 
-        # A file-based phonon grid overrides the electron energy window.
+        # File-based (possibly NON-UNIFORM) phonon frequency grid: with
+        # phonon.frequency_grid = "file" the grid is read verbatim from
+        # phonon_energies.npy and overrides the electron energy window.
+        # The bubble then needs the auxiliary uniform grid
+        # (phonon.sse_aux_grid_dw_thz > 0) unless the file is uniform.
         if (
             config.simulation_type == "phonon"
             and getattr(config.phonon, "frequency_grid", "window") == "file"
@@ -400,17 +404,24 @@ class SCBA(TransportSolver):
                     "phonon.frequency_grid='file' requires a strictly "
                     "ascending, non-negative grid in phonon_energies.npy."
                 )
+            # Fail fast (before a full Dyson sweep) on the combination the
+            # SSE will reject anyway: a non-uniform grid needs the
+            # auxiliary bubble grid.
             if (
                 config.scba.phonon
                 and config.phonon.model == "negf"
+                and float(getattr(config.phonon,
+                                  "sse_aux_grid_dw_thz", 0.0) or 0.0) <= 0.0
             ):
                 df = float(grid[1] - grid[0])
                 if abs(float(grid[0])) > 1e-9 * df or bool(
                     np.max(np.abs(np.diff(grid) - df)) > 1e-9 * df
                 ):
                     raise ValueError(
-                        "The three-phonon FFT requires phonon_energies.npy "
-                        "to contain a uniform, zero-anchored grid."
+                        "phonon_energies.npy holds a non-uniform (or "
+                        "non-zero-anchored) grid, but the bubble FFT runs "
+                        "on the primary grid (sse_aux_grid_dw_thz = 0). "
+                        "Set phonon.sse_aux_grid_dw_thz > 0."
                     )
             self.energies = xp.asarray(grid)
             if comm.rank == 0:
