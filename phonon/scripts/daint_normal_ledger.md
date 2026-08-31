@@ -1,11 +1,11 @@
 # daint NORMAL-partition job ledger
 
-Hard cap 700 node-hours committed (nodes x walltime at submission; raised from
+Hard cap 800 node-hours committed (nodes x walltime at submission; raised from
 100 by Paul 2026-08-05, to 300 on 2026-08-10, to 400 on 2026-08-15 and to 500
 on 2026-08-29, then to 525 on 2026-08-30 for one 2-node, 12-hour Si
 continuation, to 600 on 2026-08-31 for the Si q/frequency convergence matrix,
-and to 700 on 2026-08-31 for CNT L128). Paul authorises any excess BEFORE
-launch.
+to 700 on 2026-08-31 for CNT L128, and to 800 on 2026-08-31 for deeper CNT
+convergence checks). Paul authorises any excess BEFORE launch.
 
 **Reading the totals.** The `nh` column charges *submitted* walltime x nodes,
 which is the only figure known before a run starts, so it overcounts every job
@@ -546,3 +546,14 @@ least-squares ladder rebuild.
 | 2026-08-31 | 4568012 | cnt-l128x2-conv-current | 16 | 00:30:00 | 8.00 | 588.14 | normal |
 | 2026-08-31 | 4568041 | cnt-l128x2-conv-current-r2 | 16 | 00:30:00 | 8.00 | 596.14 | normal |
 | 2026-08-31 | 4568119 | cnt-l16x2-cache-local-parity | 1 | 00:10:00 | 0.17 | 596.31 | debug |
+| 2026-08-31 | 4568155 | prep-cnt-l96x2-debug | 1 | 00:10:00 | 0.17 | 596.48 | debug |
+| 2026-08-31 | 4568156 | prep-cnt-l96x3-debug | 1 | 00:10:00 | 0.17 | 596.65 | debug |
+| 2026-08-31 | 4568158 | prep-cnt-l96x4-debug | 1 | 00:10:00 | 0.17 | 596.82 | debug |
+| 2026-08-31 | 4568160 | cnt-l96x2-support-conv | 16 | 00:30:00 | 8.00 | 604.82 | normal |
+| 2026-08-31 | 4568161 | cnt-l96x3-support-conv | 32 | 00:30:00 | 16.00 | 620.82 | normal |
+| 2026-08-31 | 4568162 | cnt-l96x4-support-conv | 48 | 00:40:00 | 32.00 | 652.82 | normal |
+| 2026-08-31 | 4568197 | cnt-l96x3-support-conv-r2 | 32 | 00:30:00 | 16.00 | 668.82 | normal |
+| 2026-08-31 | 4568324 | cnt-l96x4-support-cont | 48 | 00:15:00 | 12.00 | 680.82 | normal |
+| 2026-08-31 | 4568359 | cnt-l96x3-support-tight | 32 | 00:10:00 | 5.33 | 686.15 | normal |
+| 2026-08-31 | 4568369 | cnt-l96x2-support-tight | 16 | 00:15:00 | 4.00 | 690.15 | normal |
+| 2026-08-31 | 4568371 | cnt-l96x3-support-tighter | 32 | 00:15:00 | 8.00 | 698.15 | normal |

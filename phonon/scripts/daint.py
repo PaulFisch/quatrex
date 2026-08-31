@@ -7,7 +7,7 @@ Policy (Paul, 2026-07-31 -- hard-coded, do not work around):
     --approved-by-paul. Other partitions: ask Paul first;
   - EVERY partition is charged to daint_normal_ledger.md, debug included
     (Paul 2026-08-10 -- CSCS bills debug like the rest, so leaving it out
-    understated the figure). Hard cap 700 committed node-hours
+    understated the figure). Hard cap 800 committed node-hours
     (nodes x walltime at submission); exceeding it needs Paul FIRST.
     Rows over-charge jobs that finish early, so the ledger drifts above
     real usage; a "Running total from here: **N nh**" line reconciles it
@@ -134,8 +134,8 @@ def cmd_sync(_):
 
 
 NORMAL_LEDGER = Path(__file__).resolve().parent / "daint_normal_ledger.md"
-# Paul raised the hard cap to 700 node-hours for CNT L128 on 2026-08-31.
-NORMAL_NH_CAP = 700.0
+# Paul raised the hard cap to 800 node-hours for CNT convergence on 2026-08-31.
+NORMAL_NH_CAP = 800.0
 NORMAL_MAX_NODES = 2         # per job, unless Paul authorises more
 
 
