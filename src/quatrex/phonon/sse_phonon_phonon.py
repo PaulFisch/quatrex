@@ -1133,14 +1133,7 @@ class SigmaPhononPhonon(
                 ggr_q = _qflat(mggr_blk)
 
                 def _release_leg_blocks():
-                    """Drop every reference to the densified leg blocks.
-
-                    `_qflat` returns reshape VIEWS, and the halo dicts alias
-                    the same arrays, so all three levels have to let go
-                    before the pool can reclaim anything. Called by the
-                    batched coupled-q kernel once its stacks hold the same
-                    values; see `phonon.sse_release_leg_blocks`.
-                    """
+                    """Release densified leg blocks after batched stacking."""
                     for _d in (gl_blk, gg_blk, glr_blk, ggr_blk,
                                gl_q, gg_q, glr_q, ggr_q,
                                halo_l, halo_g, halo_lr, halo_gr):
