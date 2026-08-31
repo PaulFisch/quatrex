@@ -1,10 +1,11 @@
 # daint NORMAL-partition job ledger
 
-Hard cap 600 node-hours committed (nodes x walltime at submission; raised from
+Hard cap 700 node-hours committed (nodes x walltime at submission; raised from
 100 by Paul 2026-08-05, to 300 on 2026-08-10, to 400 on 2026-08-15 and to 500
 on 2026-08-29, then to 525 on 2026-08-30 for one 2-node, 12-hour Si
-continuation, and to 600 on 2026-08-31 for the Si q/frequency convergence
-matrix). Paul authorises any excess BEFORE launch.
+continuation, to 600 on 2026-08-31 for the Si q/frequency convergence matrix,
+and to 700 on 2026-08-31 for CNT L128). Paul authorises any excess BEFORE
+launch.
 
 **Reading the totals.** The `nh` column charges *submitted* walltime x nodes,
 which is the only figure known before a run starts, so it overcounts every job
@@ -518,3 +519,26 @@ least-squares ladder rebuild.
 | 2026-08-30 | 4559546 | si-conventional-100-fc4refit-l5-q5-dense-w025-linear-m05-qleg-cont12h | 2 | 12:00:00 | 24.00 | 523.62 | normal |
 | 2026-08-31 | 4561700 | si-conventional-100-fc4refit-l5-q5-dense-w025-conv-cont8h | 2 | 08:00:00 | 16.00 | 539.62 | normal |
 | 2026-08-31 | 4561701 | si-conventional-100-fc4refit-l5-q9-dense-w025-in | 1 | 08:00:00 | 8.00 | 547.62 | normal |
+| 2026-08-31 | 4562602 | si-conventional-100-fc4refit-l5-q5-dense-w025-conv-cont2-8h | 2 | 08:00:00 | 16.00 | 563.62 | normal |
+| 2026-08-31 | 4562618 | si-conventional-100-fc4refit-l5-q9-dense-w025-reblock | 1 | 00:30:00 | 0.50 | 564.12 | debug |
+| 2026-08-31 | 4562620 | si-conventional-100-fc4refit-l5-q9-dense-w025-config | 1 | 00:30:00 | 0.50 | 564.62 | debug |
+| 2026-08-31 | 4562625 | si-conventional-100-fc4refit-l5-q9-dense-w025-reblock2 | 1 | 00:30:00 | 0.50 | 565.12 | debug |
+| 2026-08-31 | 4565701 | cnt-l16x2-current | 1 | 00:10:00 | 0.17 | 565.29 | debug |
+| 2026-08-31 | 4565860 | cnt-l16x2-scale-n1 | 1 | 00:10:00 | 0.17 | 565.46 | debug |
+| 2026-08-31 | 4565916 | cnt-l16x2-scale-n2 | 2 | 00:10:00 | 0.33 | 565.79 | normal |
+| 2026-08-31 | 4565918 | cnt-l16x2-scale-n4 | 4 | 00:10:00 | 0.67 | 566.46 | normal |
+| 2026-08-31 | 4565920 | cnt-l16x2-scale-n8 | 8 | 00:10:00 | 1.33 | 567.79 | normal |
+| 2026-08-31 | 4566076 | prep-cnt-l32x2-current | 1 | 00:10:00 | 0.17 | 567.96 | normal |
+| 2026-08-31 | 4566126 | cnt-l16x2-scale-debug-n2 | 2 | 00:10:00 | 0.33 | 568.29 | debug |
+| 2026-08-31 | 4566250 | cnt-l16x2-scale-debug-n4 | 4 | 00:10:00 | 0.67 | 568.96 | debug |
+| 2026-08-31 | 4566307 | cnt-l16x2-scale-debug-n8 | 8 | 00:10:00 | 1.33 | 570.29 | debug |
+| 2026-08-31 | 4566436 | prep-cnt-l32x2-debug | 1 | 00:10:00 | 0.17 | 570.46 | debug |
+| 2026-08-31 | 4566456 | prep-cnt-l24x2-debug | 1 | 00:10:00 | 0.17 | 570.63 | debug |
+| 2026-08-31 | 4566515 | cnt-l16x2-conv-current | 1 | 00:30:00 | 0.50 | 571.13 | debug |
+| 2026-08-31 | 4567378 | cnt-l24x2-conv-current | 1 | 00:30:00 | 0.50 | 571.63 | debug |
+| 2026-08-31 | 4567821 | cnt-l32x2-conv-current | 2 | 00:30:00 | 1.00 | 572.63 | debug |
+| 2026-08-31 | 4567827 | cnt-l32x2-conv-current-r2 | 2 | 00:30:00 | 1.00 | 573.63 | debug |
+| 2026-08-31 | 4567860 | prep-cnt-l48x2-debug | 1 | 00:10:00 | 0.17 | 573.80 | debug |
+| 2026-08-31 | 4567863 | cnt-l48x2-conv-current | 4 | 00:30:00 | 2.00 | 575.80 | debug |
+| 2026-08-31 | 4567912 | prep-cnt-l64x2-debug | 1 | 00:10:00 | 0.17 | 575.97 | debug |
+| 2026-08-31 | 4567913 | cnt-l64x2-conv-current | 8 | 00:30:00 | 4.00 | 579.97 | debug |
