@@ -23,8 +23,6 @@ import numpy as np
 
 from qttools import NDArray, xp
 
-# Re-export the SI / phonopy constants used by the standalone bubble so
-# downstream callers don't have to reach into ``phonon_inputs``.
 HBAR_EV = 6.582119569e-16   # eV*s
 EV_TO_J = 1.602176634e-19   # J/eV
 HBAR_SI = HBAR_EV * EV_TO_J  # J*s

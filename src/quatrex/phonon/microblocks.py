@@ -146,9 +146,6 @@ def build_micro_pair_index(
     for (i, k1, k2), phi_left in phi_blocks.items():
         for k1p in range(max(0, k1 - b), min(n, k1 + b + 1)):
             for k2p in range(max(0, k2 - b), min(n, k2 + b + 1)):
-                # ``right_by_links`` stores Phi[J, a, b] under (b, a), while
-                # the bubble consumes Phi[J, K2', K1'].  Its lookup key is
-                # therefore (K1', K2').
                 for j, phi_right in right_by_links.get((k1p, k2p), ()):
                     bi, bj = layout.grouped_pair(i, j)
                     if abs(bi - bj) > 1:

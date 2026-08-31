@@ -23,8 +23,6 @@ _RING_THREADS = max(1, int(os.environ.get("QUATREX_PHPH_RING_THREADS", "1")))
 _RING_POOL = ThreadPoolExecutor(max_workers=_RING_THREADS) if _RING_THREADS > 1 else None
 # Only worth the split + concatenate overhead when the batch is large enough.
 _RING_MIN_W = int(os.environ.get("QUATREX_PHPH_RING_MIN_W", "48"))
-# Thread-local T/U GEMM workspaces (config sse_ring_workspaces): recycles the
-# two per-call temporaries, which contend in the allocator at wide pool widths.
 _RING_WORKSPACES = os.environ.get("QUATREX_PHPH_RING_WORKSPACES", "0") == "1"
 _TLS = threading.local()
 
@@ -128,8 +126,6 @@ def bubble_dense(
     if xp is None:
         xp = np
 
-    # Accept host arrays on any backend (asarray is a free view under
-    # numpy); preserve the G_b-is-G_a aliasing the zero_freq path checks.
     same_input = G_b is G_a
     G_a = xp.asarray(G_a)
     G_b = G_a if same_input else xp.asarray(G_b)

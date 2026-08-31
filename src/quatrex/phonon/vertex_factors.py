@@ -161,8 +161,6 @@ def reblock_decomposed(vf: VertexFactors, cells_per_block: int) -> VertexFactors
 
     primitive_offsets = [int(x) for x in vf.offsets]
     offset_pos = vf.offset_index()
-    # All supercell offsets for which at least one (u,v) maps to a stored
-    # primitive offset.
     super_offsets = sorted({
         delta
         for u in range(c)

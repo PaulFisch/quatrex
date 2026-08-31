@@ -121,8 +121,6 @@ def contract_tau_q_factored(
     res = {}
 
     for (I, J), quads in quads_by_pair.items():
-        # The quad set is the product of the a-line and b-line link sets, so the
-        # Grams are summed over each line separately (see the module docstring).
         a_links = sorted({(K1, K1p) for (K1, _K2, K1p, _K2p) in quads})
         b_links = sorted({(K2, K2p) for (_K1, K2, _K1p, K2p) in quads})
         actual = set(quads)
@@ -144,8 +142,6 @@ def contract_tau_q_factored(
                     for (K, Kp) in b_links
                 )
 
-            # The 3-term bosonic fold, merged 6 -> 4 products on the shared
-            # a-line factor. One convolution per term, not one per quad.
             h_lesser = _convolve_q(
                 sa["l"], sb["l"] + sb["gr"], nk_shape, xp)
             h_lesser += _convolve_q(
@@ -155,23 +151,8 @@ def contract_tau_q_factored(
             h_greater += _convolve_q(
                 sa["lr"], sb["g"], nk_shape, xp)
         else:
-            # A real-space FC3 cutoff can couple the two contracted offsets.
-            # The admissible quad set then is not A x B, so independently
-            # summing all a- and b-links would manufacture the missing cross
-            # terms.  Decompose the Boolean support exactly into one row per
-            # a-link:
-            #
-            #   sum_(a,b in S) P_a * Q_b
-            #       = sum_a P_a * (sum_(b:(a,b) in S) Q_b).
-            #
-            # This retains the skinny-Gram/q-FFT scaling.  For nearest-
-            # neighbour Si the row count is at most nine, compared with the
-            # millions of dense q/quad contractions in reconstruction mode.
             h_lesser = None
             h_greater = None
-            # Rows with the same Boolean support are one exact rectangle.
-            # Summing their a-links first reduces both FFT count and live
-            # temporaries without filling any zero in the support mask.
             rectangles: dict[tuple, list[tuple]] = {}
             for a_link in a_links:
                 allowed_b = tuple(sorted({
