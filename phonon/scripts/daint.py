@@ -23,7 +23,8 @@ Launch:    python phonon/scripts/daint.py launch --name X \\
                --config cluster/X/quatrex_config.toml [--ranks 4] \\
                [--env QX_MAXIT=3 ...]
            python phonon/scripts/daint.py launch --name X -- <command>
-Monitor:   status | list | tail --name X [-f] | kill --name X | pull --name X
+Monitor:   status | list | tail --name X [-f] | kill --name X
+Results:   pull --name X  (excludes Sigma restart checkpoints)
 """
 from __future__ import annotations
 
@@ -333,8 +334,13 @@ def cmd_kill(args):
 
 def cmd_pull(args):
     subprocess.run(
-        ["rsync", "-avz", f"{HOST}:{REPO}/cluster/{args.name}/",
-         f"cluster/{args.name}/"],
+        [
+            "rsync", "-avz",
+            "--exclude=sigma*.npz",
+            "--exclude=sigma*.npz.shards/",
+            f"{HOST}:{REPO}/cluster/{args.name}/",
+            f"cluster/{args.name}/",
+        ],
         check=True,
     )
 

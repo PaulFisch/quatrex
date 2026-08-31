@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -34,3 +35,20 @@ def test_source_commit_omits_duplicate_local_audit(monkeypatch, capsys):
 
     assert MODULE._source_commit_env() == "export QX_SOURCE_COMMIT=same"
     assert capsys.readouterr().err == ""
+
+
+def test_pull_excludes_restart_checkpoints(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        MODULE.subprocess,
+        "run",
+        lambda args, check: calls.append((args, check)),
+    )
+
+    MODULE.cmd_pull(SimpleNamespace(name="sample"))
+
+    args, check = calls.pop()
+    assert "--exclude=sigma*.npz" in args
+    assert "--exclude=sigma*.npz.shards/" in args
+    assert args[-1] == "cluster/sample/"
+    assert check

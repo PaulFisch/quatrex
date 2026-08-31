@@ -293,6 +293,7 @@ class SCBA(TransportSolver):
 
         self._scba_iteration = 0
         self._last_heat_current = None
+        self._converged = False
         self._diverged = False
 
         # ----- Particles ----------------------------------------------

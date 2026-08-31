@@ -56,3 +56,16 @@ def test_converged_checkpoint_uses_the_measured_iterate():
     assert solver._sigma_checkpoint_buffers() == tuple(previous)
     solver._converged = False
     assert solver._sigma_checkpoint_buffers() == tuple(current)
+
+
+def test_max_iteration_checkpoint_uses_the_mixed_iterate():
+    solver = object.__new__(SCBA)
+    current = [SimpleNamespace(data=np.array([i])) for i in range(3)]
+    solver.data = SimpleNamespace(
+        sigma_lesser=current[0],
+        sigma_greater=current[1],
+        sigma_retarded_hermitian=current[2],
+    )
+    solver._converged = False
+    solver._diverged = False
+    assert solver._sigma_checkpoint_buffers() == tuple(current)
