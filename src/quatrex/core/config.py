@@ -1803,10 +1803,6 @@ class PhononConfig(BaseModel):
                 "spectral solver exposes."
             )
         if getattr(ps, "leg", "congruence") == "congruence":
-            # sectors is inert on this route: the correction goes into the
-            # ring's leg, not into analytic terms beside it, so there is no
-            # sector to switch off. Saying so beats letting the setting read
-            # as if it still selected something.
             if ps.sectors != "rr_ss_sr":
                 warnings.warn(
                     f"pole_sector.sectors={ps.sectors!r} is ignored when "
@@ -2490,9 +2486,6 @@ class CommConfig(BaseModel):
     stack_send_recv: Literal["host_mpi", "device_mpi", "nccl"] | None = None
     """Communication backend to use for stack send-receive."""
 
-    # Transverse-momentum (q-point) communicator: a third axis alongside
-    # block x stack, used to distribute the external q of the q-resolved
-    # phonon-phonon self-energy. Default 1 leaves block/stack unchanged.
     q_comm_size: PositiveInt = 1
 
     q_all_to_all: Literal["host_mpi", "device_mpi", "nccl"] | None = None
@@ -2735,8 +2728,6 @@ class QuatrexConfig(BaseModel):
         """Checks that at least one contact exists and is grounded."""
         # TODO: Contacts should be unified between the two formalisms.
         if self.simulation_type == "phonon":
-            # Phonon transport defines its leads via temperatures, not
-            # electronic contacts.
             return self
         if self.formalism == "negf":
             if (
