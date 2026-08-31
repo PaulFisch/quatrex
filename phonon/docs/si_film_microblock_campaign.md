@@ -1241,10 +1241,11 @@ turnover.  Its last forty residuals decrease monotonically from 0.031219 to
 0.0052365.  Over the same interval the internal current changes from 69.12532
 to 69.05350 in the driver's q-summed units, the lead imbalance decreases from
 \(4.82\times10^{-4}\) to \(3.44\times10^{-4}\), and bubble balance remains
-near \(10^{-16}\).  The last state corresponds to a diagnostic conductance of
-1413.66 MW m\(^{-2}\) K\(^{-1}\), but it is not released because the strict
-fixed-point gate has not yet passed.  Job 4561700 continues the same branch to
-a relative self-energy residual of \(10^{-4}\).
+near \(10^{-16}\).  With the refitted conventional-cell transverse area
+\(5.468^2=29.8990\) Angstrom\(^2\), the last state corresponds to a diagnostic
+conductance of 612.1315 MW m\(^{-2}\) K\(^{-1}\).  It is not released because
+the strict fixed-point gate has not yet passed.  Job 4561700 continues the
+same branch to a relative self-energy residual of \(10^{-4}\).
 
 The discretisation campaign precedes every length extension.  At fixed q=5,
 161 and 321 primary frequency points over 0--40 THz are compared while the
