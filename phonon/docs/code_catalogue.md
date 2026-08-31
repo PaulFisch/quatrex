@@ -77,7 +77,7 @@ with focused oracle tests and a short result note.
 | Modal and semiseparable spatial tails | `src/quatrex/phonon/experimental/spatial/` | One-sided fitting and post-hoc compression lose to exact reblocking. The direct-generator construction remains an unclosed research idea. Preserve only its oracle and derivation. |
 | Adaptive/nonuniform collision integration | study modules under `phonon/studies/` | The reduced P1 oracle is accurate, but the current production bridge is not a faster conserving collision backend. Keep out of runtime. |
 | Auxiliary frequency grid | `sse_aux_grid_*` and `_prepare_nonuniform_production.py` | Keep as an opt-in experiment. The Si 113/121 case was accurate, but two CNT cases failed lead conservation and saved little time because the FC3 ring retained the full auxiliary grid. Auxiliary-spacing convergence is still open. |
-| Ballistic and static audits | `ballistic_audit.py` and related study helpers | Move to verification tooling; these are not solver dependencies. |
+| Ballistic and static audits | `src/quatrex/phonon/experimental/ballistic_audit.py` and study helpers | Verification tooling only; these are not solver dependencies. |
 
 ## Tooling and data
 

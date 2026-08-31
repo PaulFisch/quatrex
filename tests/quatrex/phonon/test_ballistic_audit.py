@@ -1,6 +1,6 @@
 import numpy as np
 
-from quatrex.phonon.ballistic_audit import (
+from quatrex.phonon.experimental.ballistic_audit import (
     caroli_number_current,
     caroli_transmission,
     spectrum_error,

@@ -660,7 +660,7 @@ if os.environ.get("QX_DIAG_CAROLI") == "1":
                 "QX_DIAG_CAROLI requires one grouped Dyson block with two "
                 "separately retained contacts"
             )
-        from quatrex.phonon.ballistic_audit import (
+        from quatrex.phonon.experimental.ballistic_audit import (
             caroli_number_current,
             caroli_transmission,
             spectrum_error,
