@@ -86,7 +86,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         phonon_frequencies: NDArray,
         block_sizes: NDArray,
         phi_blocks: PhiBlocks | None = None,
-        dynamical_matrix: DSDBSparse | None = None,
         qfold: tuple | None = None,
         vfactors=None,
     ) -> None:
@@ -435,12 +434,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
         self._phi_pre: dict | None = None
         self._full_freqs: NDArray | None = None
 
-        # Optional self-consistent SCP cubic-tadpole static self-energy.
-        self._scp_tadpole = bool(getattr(config.phonon, "scp_tadpole", False))
-        self._sigma_static: NDArray | None = None
-        if self._scp_tadpole:
-            self._setup_scp_tadpole(config, dynamical_matrix)
-
     def _phi_blocks_from_factors(self, vf) -> dict:
         """Dense Gamma-point (iq1 = iq2 = 0) vertex blocks reconstructed from
         the factors, over the factor offset window -- feeds the pair index.
@@ -521,197 +514,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             qv[(iq1, iq2)] = blocks
         self._vf_dense_cache = (key, qv)
         return qv
-
-    def _setup_scp_tadpole(self, config, dynamical_matrix) -> None:
-        """Prepare the self-consistent SCP cubic-tadpole static self-energy:
-        the dense device FC3 + dynamical matrix, the mixing/floor, and the
-        zeroed running Sigma_static."""
-        from quatrex.phonon.static_self_energy import device_fc3_mass_weighted
-
-        if dynamical_matrix is None:
-            warnings.warn(
-                "scp_tadpole requested but no dynamical_matrix passed to "
-                "SigmaPhononPhonon; SCP tadpole disabled.", stacklevel=2)
-            self._scp_tadpole = False
-            return
-        if not np.all(self.block_sizes == self.block_sizes[0]):
-            warnings.warn(
-                "scp_tadpole requires uniform block sizes; disabled.",
-                stacklevel=2)
-            self._scp_tadpole = False
-            return
-        if ranks.block.size > 1:
-            warnings.warn(
-                "scp_tadpole is not yet implemented for block-distributed "
-                "runs (comm.block.size>1); SCP tadpole disabled. ",
-                stacklevel=2)
-            self._scp_tadpole = False
-            return
-
-        n_dof = int(self.block_sizes[0])
-        n_blocks = self.n_blocks
-        N_D = n_blocks * n_dof
-        # Dense device FC3 in the tadpole mass-weighting
-        self._fc3_dev_mw = device_fc3_mass_weighted(
-            self.phi_blocks, n_blocks, n_dof)
-        # Dense device dynamical matrix D (THz^2), omega-independent.
-        D = np.zeros((N_D, N_D), dtype=float)
-        for I in range(n_blocks):
-            for J in range(max(0, I - 1), min(n_blocks, I + 2)):
-                blk = np.asarray(get_host(dynamical_matrix.blocks[I, J]))
-                while blk.ndim > 2:
-                    # Leading stack / transverse-q axes: take the first
-                    # stack entry and the Gamma point (index 0).
-                    blk = blk[0]
-                D[I * n_dof:(I + 1) * n_dof, J * n_dof:(J + 1) * n_dof] = blk.real
-        self._scp_D = 0.5 * (D + D.T)
-        self._sigma_static = np.zeros((N_D, N_D), dtype=float)
-        self._scp_cfg = config.phonon
-        # Quartic (SCP) loop: Sigma_L = 1/2 Phi4 : <uu> -- the
-        # stiffening counterterm that GROWS with <uu>, restoring the
-        # negative feedback the cubic-only bubble lacks on soft-mode
-        # structures (the MoS2 film spiral instability).
-        self._fc4_blocks = None
-        if bool(getattr(config.phonon, "scp_loop", False)):
-            import h5py as _h5py
-            from pathlib import Path as _Path
-            _fc4p = getattr(config.phonon, "scp_fc4_path", None)
-            if _fc4p is None and getattr(config.phonon, "fc3_path", None):
-                _fc4p = str(_Path(config.phonon.fc3_path).parent
-                            / "fc4_blocks.hdf5")
-            if _fc4p is None or not _Path(_fc4p).exists():
-                raise FileNotFoundError(
-                    f"scp_loop requested but fc4_blocks not found "
-                    f"({_fc4p!r}); run the fc4 reap first.")
-            self._fc4_blocks = {}
-            with _h5py.File(_fc4p, "r") as _f:
-                for _k, _d in _f["fc4_blocks"].items():
-                    self._fc4_blocks[tuple(int(x) for x in
-                                           _k.split("_"))] = _d[()]
-            if ranks.rank == 0:
-                print(f"SCP loop: {len(self._fc4_blocks)} fc4 device "
-                      f"blocks from {_fc4p}", flush=True)
-        self._scp_mix = float(getattr(config.phonon, "scp_static_mixing", 0.1))
-        self._scp_floor2 = float(getattr(config.phonon, "scp_floor_thz", 0.5)) ** 2
-        if comm.rank == 0:
-            print(
-                f"[SigmaPhononPhonon] SCP tadpole on: N_D={N_D}, "
-                f"mixing={self._scp_mix}, Phi_eff floor="
-                f"{getattr(config.phonon, 'scp_floor_thz', 0.5)} THz.",
-                flush=True,
-            )
-
-    def _apply_scp_tadpole(self, g_lesser, g_greater, sigma_retarded) -> None:
-        """Self-consistent cubic tadpole, in the nnz state.
-
-        Forms <uu> from the omega-integral of the device G^{<,>} on the
-        one-sided grid: the negative-frequency half enters via the bosonic
-        fold G^<_ij(-w) = G^>_ji(w) (w=0 counted once), and the solver's
-        occupation-positive G (= -G_textbook) is negated. Solves the
-        regularised mean_displacement against Phi_eff = D + Sigma_static,
-        mixes the resulting static Sigma_T, and broadcasts it into Sigma^R
-        at every frequency.
-        """
-        from quatrex.phonon.static_self_energy import (
-            equal_time_uu_from_sum, mean_displacement, sigma_tadpole)
-
-        from quatrex.grid.energies import (
-            frequency_cell_widths, is_uniform_grid)
-
-        N_D = self._sigma_static.shape[0]
-        # omega-integral over every stack axis (full omega local per nnz
-        # slice); the w=0 bin is excluded from the folded G^> half.
-        ax = tuple(range(g_lesser.data.ndim - 1))
-        full_freqs = self._full_frequencies(int(g_lesser.data.shape[0]))
-        # <uu> quadrature floor: bins below the lowest device mode
-        # carry only eta=0 resolvent tails/leakage (no spectral
-        # weight), yet on IR-resolved grids they can dominate and
-        # even flip Tr<uu> negative. scp_uu_min_thz (default 0 =
-        # legacy) excludes them from BOTH G^< and the folded G^>.
-        _uu_min = float(getattr(self._scp_cfg, "scp_uu_min_thz", 0.0)
-                        if hasattr(self, "_scp_cfg") else 0.0)
-        _keep = xp.abs(xp.asarray(full_freqs)) >= max(_uu_min, 0.0)
-        pos = (xp.abs(xp.asarray(full_freqs)) > 1e-12) & _keep
-        if is_uniform_grid(full_freqs):
-            # Legacy path: plain sum, scalar dw applied downstream. The dw
-            # source is the rank-LOCAL first gap, as before this change:
-            # on linspace grids the local and global first gaps can differ
-            # in the last ulp, and the legacy bit-identity contract wins.
-            gl_sum_local = g_lesser.data[_keep].sum(axis=ax)
-            gg_sum_local = g_greater.data[pos].sum(axis=ax)
-            lf = np.asarray(self.local_frequencies)
-            dw = (float(lf[1] - lf[0]) if int(lf.shape[0]) >= 2
-                  else float(full_freqs[1] - full_freqs[0]))
-        else:
-            # Non-uniform grid: per-bin quadrature weights, dw folded in.
-            cw = frequency_cell_widths(full_freqs).reshape(
-                (-1,) + (1,) * (g_lesser.data.ndim - 1))
-            gl_sum_local = (cw * g_lesser.data)[_keep].sum(axis=ax)
-            gg_sum_local = (cw * g_greater.data)[pos].sum(axis=ax)
-            dw = 1.0
-        # Transverse-momentum mesh average (1/N_q).
-        nq = int(np.prod(g_lesser.data.shape[1:-1])) or 1
-        rows = xp.asarray(g_lesser.rows_nnz)
-        cols = xp.asarray(g_lesser.cols_nnz)
-        g_sum = xp.zeros((N_D, N_D), dtype=gl_sum_local.dtype)
-        g_sum[rows, cols] = gl_sum_local / nq
-        gg_sum = xp.zeros((N_D, N_D), dtype=gg_sum_local.dtype)
-        gg_sum[rows, cols] = gg_sum_local / nq
-        # nnz is split over comm.stack (full omega local, elements split).
-        if ranks.stack.size > 1:
-            for buf in (g_sum, gg_sum):
-                recv = xp.empty_like(buf)
-                ranks.stack.all_reduce(xp.ascontiguousarray(buf), recv, op="sum")
-                buf[:] = recv
-        # Textbook convention (G^< = -i n A) is the NEGATIVE of the solver's
-        # occupation-positive storage; the transpose is the ji fold.
-        g_total = np.asarray(get_host(-(g_sum + gg_sum.T)))
-        uu = equal_time_uu_from_sum(g_total, dw)
-        if float(np.trace(uu)) <= 0.0 and comm.rank == 0:
-            warnings.warn(
-                "SCP tadpole: Tr<uu> <= 0 -- sign-convention violation?",
-                stacklevel=2)
-        phi_eff = self._scp_D + self._sigma_static
-        if str(getattr(self._scp_cfg, "scp_uu_source", "g")) == "dressed":
-            # SCP closed form on the dressed model -- the eta=0 G^<
-            # quadrature is ill-conditioned on IR-resolved grids and
-            # produced O(10x) <uu> errors driving the static terms
-            # unphysical (2026-08-02).
-            from quatrex.phonon.static_self_energy import (
-                equal_time_uu_dressed)
-            _tbar = 0.5 * (float(self._scp_cfg.left_temperature)
-                           + float(self._scp_cfg.right_temperature))
-            uu = equal_time_uu_dressed(phi_eff, _tbar)
-        if bool(getattr(self._scp_cfg, "scp_tadpole_term", True)):
-            w_mean = mean_displacement(
-                self._fc3_dev_mw, uu, phi_eff,
-                omega2_floor_abs=self._scp_floor2)
-            sig_new = sigma_tadpole(self._fc3_dev_mw, w_mean)
-        else:
-            # Centrosymmetric crystals (2H-MoS2, P6_3/mmc): <u> = 0 by
-            # inversion symmetry -- the tadpole is pure numerical noise
-            # amplified through Phi_eff^+ (the loop3 runaway). Keep the
-            # inversion-even quartic loop only.
-            sig_new = np.zeros_like(self._sigma_static)
-        if self._fc4_blocks is not None:
-            from quatrex.phonon.static_self_energy import sigma_loop_blocks
-            sig_new = sig_new + sigma_loop_blocks(
-                self._fc4_blocks, uu,
-                self.n_blocks, int(self.block_sizes[0]))
-        self._sigma_static = (
-            (1.0 - self._scp_mix) * self._sigma_static + self._scp_mix * sig_new)
-        if ranks.rank == 0:
-            _ev = np.linalg.eigvalsh(
-                0.5 * (phi_eff + phi_eff.T)
-                + (self._sigma_static - (phi_eff - self._scp_D)))
-            _w = np.sign(_ev[:6]) * np.sqrt(np.abs(_ev[:6]))
-            print(f"SCP static: dressed low-6 (THz) "
-                  f"{np.round(_w, 4)}", flush=True)
-        # Broadcast the static self-energy into Sigma^R at every frequency.
-        sr_static = xp.asarray(
-            self._sigma_static[get_host(rows), get_host(cols)]
-        ).astype(sigma_retarded.data.dtype)
-        sigma_retarded.data[:] = sigma_retarded.data + sr_static
 
     # ------------------------------------------------------------------
     # Public API
@@ -1728,10 +1530,6 @@ class SigmaPhononPhonon(ScatteringSelfEnergy):
             self._pole_sigma_ss = None
             self._pole_sigma_mixed = None
             self._bubble_correction = None
-
-        # Self-consistent SCP cubic-tadpole static self-energy
-        if self._scp_tadpole and self._sigma_static is not None:
-            self._apply_scp_tadpole(g_lesser, g_greater, sigma_retarded)
 
     def _check_kk_grid_support(self, delta: NDArray) -> None:
         """Warns (once) if the bubble is still alive at the top of the grid.

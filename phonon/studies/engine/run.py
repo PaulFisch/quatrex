@@ -200,11 +200,6 @@ if os.environ.get("QX_G_FROM_L"):
 if os.environ.get("QX_FOLDVERIFY"):
     cfg.phonon.sse_fold_verify_iterations = int(os.environ["QX_FOLDVERIFY"])
 if os.environ.get("QX_QBATCH"):   cfg.phonon.sse_dense_q_batched = bool(int(os.environ["QX_QBATCH"]))
-if os.environ.get("QX_SCP_TADPOLE"): cfg.phonon.scp_tadpole = bool(int(os.environ["QX_SCP_TADPOLE"]))
-if os.environ.get("QX_SCP_LOOP"): cfg.phonon.scp_loop = bool(int(os.environ["QX_SCP_LOOP"]))
-if os.environ.get("QX_SCP_UU_MIN"): cfg.phonon.scp_uu_min_thz = float(os.environ["QX_SCP_UU_MIN"])
-if os.environ.get("QX_SCP_UU_SOURCE"): cfg.phonon.scp_uu_source = os.environ["QX_SCP_UU_SOURCE"]
-if os.environ.get("QX_SCP_TADPOLE_TERM"): cfg.phonon.scp_tadpole_term = bool(int(os.environ["QX_SCP_TADPOLE_TERM"]))
 if os.environ.get("QX_FREQGRID"):
     _fg = os.environ["QX_FREQGRID"].strip().lower()
     if _fg not in ("window", "file"):
@@ -290,12 +285,6 @@ if os.environ.get("QX_BALLISTIC") == "1":
                     q[4][...] = 0.0
                     q[5][...] = 0.0
         sse._tau_cache = None
-        # SCP tadpole holds its own dense FC3 copy (made at __init__, before
-        # this zeroing) -- disable it so the ballistic baseline is vertex-free.
-        if getattr(sse, "_scp_tadpole", False):
-            sse._scp_tadpole = False
-            if getattr(sse, "_sigma_static", None) is not None:
-                sse._sigma_static[...] = 0.0
     # With the vertex zeroed, Sigma_phph == 0 identically -- but the dense-q
     # contraction machinery would still allocate its full tau/fold buffer
     # stack (OOM at ~100 GB on the mos2 nk7 mesh, job 4344975). Drop the
@@ -798,8 +787,6 @@ if ranks.rank == 0:
         frequency_max_thz=float(np.asarray(get_host(scba.energies)).real[-1]),
         eta_obc=0.0,
         sse_greater_from_lesser=bool(cfg.phonon.sse_greater_from_lesser),
-        scp_tadpole=bool(cfg.phonon.scp_tadpole),
-        scp_loop=bool(cfg.phonon.scp_loop),
         pole_sector_enabled=bool(cfg.phonon.pole_sector.enabled),
         interaction_cutoff=float(cfg.phonon.interaction_cutoff),
         sigma_convergence_tol=float(cfg.phonon.sigma_convergence_tol),

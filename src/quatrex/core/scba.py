@@ -554,7 +554,6 @@ class SCBA(TransportSolver):
                     config=self.config,
                     phonon_energies=solver_freqs,
                     block_sizes=self.data.g_lesser.block_sizes,
-                    dynamical_matrix=self.phonon_solver.dynamical_matrix,
                 )
 
             elif self.config.phonon.model == "pseudo-scattering":

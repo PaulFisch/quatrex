@@ -144,13 +144,12 @@ class PhononPhononInteraction(Interaction):
     name = "phonon_phonon"
 
     def __init__(
-        self, config, phonon_energies, block_sizes, dynamical_matrix=None,
+        self, config, phonon_energies, block_sizes,
     ) -> None:
         self.sigma_phonon_phonon = SigmaPhononPhonon(
             config,
             phonon_energies,
             block_sizes=np.asarray(get_host(block_sizes)),
-            dynamical_matrix=dynamical_matrix,
         )
 
     @profiler.profile(label="Interaction: Phonon-Phonon", level="default", comm=comm)

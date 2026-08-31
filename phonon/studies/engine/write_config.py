@@ -121,7 +121,6 @@ right_temperature = {a.tR}
 model = "negf"
 fc3_path = "{a.work}/fc3_blocks.hdf5"
 retarded_method = "{a.retarded}"
-scp_tadpole = {str(a.tadpole).lower()}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
 sigma_convergence_tol = {a.sigma_tol}
@@ -217,7 +216,6 @@ model = "negf"
 fc3_path = "{a.work}/fc3_blocks.hdf5"
 {_vertex_source(a)}
 retarded_method = "{a.retarded}"
-scp_tadpole = {str(a.tadpole).lower()}
 sse_microblock_dof = {a.microblock_dof}
 sse_microblock_g_band = {a.microblock_g_band}
 sigma_convergence_tol = {a.sigma_tol}
@@ -347,8 +345,6 @@ def main():
     p.add_argument("--retarded", default="fft", choices=["half", "fft"])
     p.add_argument("--sigma-tol", type=float, default=1e-3,
                    help="relative Sigma^R residual tolerance")
-    p.add_argument("--tadpole", action="store_true",
-                   help="enable the self-consistent SCP cubic tadpole static SE")
     p.add_argument("--obc", default="spectral", choices=["spectral", "sancho-rubio"],
                    help="contact solver; spectral(NEVP-full) is robust on soft "
                         "modes where sancho-rubio stalls (d5a)")

@@ -98,9 +98,6 @@ class PhononJVP:
         _forbid(comm.block.size > 1, "block_comm_size == 1")
         _forbid(int(getattr(ph, "sse_fold_verify_iterations", 0)) > 0,
                 "sse_fold_verify_iterations == 0")
-        _forbid(bool(getattr(ph, "scp_tadpole", False)),
-                "scp_tadpole == false (the static tadpole mutates per "
-                "kernel call and is not quadratic in G)")
         _forbid(bool(getattr(ph, "obc_scattering_contacts", False)),
                 "obc_scattering_contacts == false (Sigma-independent leads)")
         _forbid(str(ph.solver.algorithm) != "rgf",

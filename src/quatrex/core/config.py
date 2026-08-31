@@ -459,7 +459,7 @@ class ExperimentalMixerConfig(BaseModel):
     # identity of the quadratic bubble; cf. ``quatrex/core/phonon_jvp.py``),
     # computed synchronously inside one mixer call -- no finite differences,
     # no probe iterates. Phonon-only; requires a stationary map (no ramps,
-    # no Buttiker probe, no SCP tadpole, bare-lead contacts, rgf solver).
+    # bare-lead contacts and the rgf solver).
     newton_warmup_iters: NonNegativeInt = 5
     """For ``mixing_method = "newton"``: minimum damped-Picard iterations
     before Newton may engage (basin capture)."""
@@ -2092,58 +2092,6 @@ class PhononConfig(BaseModel):
     """Optional third convergence gate on the Phi-derivable bubble energy
     balance ``|P_in - P_out| / |P_in|`` (requires ``bubble_balance_check``).
     0 disables (residual + lead heat balance only)."""
-
-    scp_tadpole: bool = False
-    """Optional self-consistent-phonon (SCP) cubic tadpole static self-energy
-    (``model == "negf"``). The cubic tadpole ``Sigma_T = Phi3 : <u>`` is a
-    STATIC real self-energy that stiffens the soft modes (the finite-T SCP
-    renormalisation), stabilising the dynamic bubble; it is recomputed
-    every SCBA iteration from the current device ``G^<`` and added to the
-    dynamical matrix via ``Sigma^R``. Needs only FC3 (the quartic loop,
-    which would need FC4, is omitted). Default OFF; cf.
-    ``quatrex/phonon/static_self_energy.py``."""
-
-    scp_tadpole_term: bool = True
-    """Include the cubic tadpole Phi3:<u> in the static SCP
-    self-energy. False for centrosymmetric crystals (<u> = 0 by
-    inversion; the numerical tadpole is noise amplified through
-    Phi_eff^+ and destabilises the map) -- keeps the quartic loop."""
-
-    scp_uu_source: Literal["g", "dressed"] = "g"
-    """Equal-time <uu> source for the static SCP terms: "g" =
-    the NEGF G^< quadrature (legacy; ill-conditioned at eta=0 on
-    IR-resolved grids), "dressed" = SCP closed form on the
-    dressed harmonic model Phi_eff at the mean lead temperature
-    (exact in equilibrium, robust)."""
-
-    scp_uu_min_thz: NonNegativeFloat = 0.0
-    """<uu> quadrature floor (THz): exclude bins below this from
-    the equal-time <uu> integral (eta=0 IR tails below the lowest
-    device mode can dominate and flip Tr<uu> negative). 0 = legacy
-    full integral. Set just below the lowest on-mesh mode."""
-
-    scp_loop: bool = False
-    """Quartic (SCP) loop static self-energy Sigma_L = 1/2 Phi4 : <uu>
-    on top of the cubic tadpole (requires ``scp_tadpole``): the SCP
-    stiffening counterterm that grows with <uu> -- restores the
-    negative feedback the cubic-only bubble lacks on soft-mode
-    structures. Device FC4 blocks from ``scp_fc4_path`` (default:
-    fc4_blocks.hdf5 next to the FC3 file; produced by the fc4 reap)."""
-
-    scp_fc4_path: str | None = None
-
-    scp_static_mixing: PositiveFloat = 0.1
-    """Linear mixing factor for the self-consistent static (tadpole)
-    self-energy across SCBA iterations. Gentler than the dynamic-Sigma
-    mixing (the static SE drives the soft-mode stiffening and overshoots
-    if mixed too fast). Only used when ``scp_tadpole``."""
-
-    scp_floor_thz: NonNegativeFloat = 0.5  # THz
-    """Absolute frequency floor (THz) for the regularised ``Phi_eff``
-    pseudo-inverse in the tadpole ``mean_displacement`` solve: modes below
-    this are dropped from the inverse (only the stiff optical modes relax),
-    preventing the soft mode's ~1/omega^2 amplification from blowing the
-    solve up. Only used when ``scp_tadpole``."""
 
     @model_validator(mode="after")
     def set_lead_temperatures(self) -> Self:
