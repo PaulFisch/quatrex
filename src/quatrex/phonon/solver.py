@@ -230,9 +230,7 @@ class PhononSolver(SubsystemSolver):
         self.left_temperature = config.phonon.left_temperature
         self.right_temperature = config.phonon.right_temperature
 
-        # frequencies are the linear-frequency grid in THz (uniform unless
-        # the SSE runs on the auxiliary bubble grid, sse_aux_grid_dw_thz);
-        # the Bose occupation needs hbar*omega.
+        # The Bose occupation uses hbar*omega.
         hbar_omega_eV = thz_to_ev(np.abs(self.local_frequencies))
         self.left_occupancies = bose_einstein(hbar_omega_eV, self.left_temperature)
         self.right_occupancies = bose_einstein(hbar_omega_eV, self.right_temperature)

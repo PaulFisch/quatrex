@@ -66,6 +66,8 @@ def test_cm_subtraction_switch_is_removed():
         "sse_ramp_iterations", "sse_low_freq_mask_thz",
         "low_freq_mixing_thz", "low_freq_mixing_factor",
         "sse_g_band_taper", "interaction_cutoff_taper",
+        "sse_aux_grid_dw_thz", "sse_aux_grid_fmax_thz",
+        "sse_aux_restrict",
     ),
 )
 def test_deprecated_phonon_switches_are_removed(name):

@@ -15,10 +15,8 @@ OUT = REPO / "phonon/studies/out/d5a_fixed_export"
 INPUTS = OUT / "inputs_L2"
 
 NCELLS = 2
-NFREQ = 181
-FMAX = 66.0
-AUX_DW = FMAX / (NFREQ - 1)
-AUX_FMAX = 132.0                      # >= 2*omega_max (H modes) -- complete KK
+NFREQ = 361
+FMAX = 132.0
 NRANKS = 64
 MAX_ITER = 300
 GEOM = ("dynamical_matrix.mat", "fc3_blocks.hdf5", "phonon_energies.npy",
@@ -70,7 +68,7 @@ def hygiene() -> None:
         subprocess.run(["kill", "-9", p], capture_output=True)
 
 
-def run_rung(tag: str, lowmask: float) -> None:
+def run_rung(tag: str) -> None:
     d = OUT / tag
     npz = d / "run.npz"
     if npz.exists():
@@ -85,8 +83,7 @@ def run_rung(tag: str, lowmask: float) -> None:
         [sys.executable, str(WC), "--system", "sinw_d5a", "--work", str(d),
          "-L", str(NCELLS), "--eta", "0", "--nfreq", str(NFREQ),
          "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.1",
-         "--max-iter", str(MAX_ITER),
-         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+         "--max-iter", str(MAX_ITER)],
         check=True)
     hygiene()
     env = dict(os.environ,
@@ -95,10 +92,8 @@ def run_rung(tag: str, lowmask: float) -> None:
                QX_SCATCONTACTS="0", QX_BBCHECK="1",
                QX_CONFIG=str(d / "quatrex_config.toml"),
                QX_NPZ=str(npz))
-    if lowmask > 0.0:
-        env["QX_SSE_LOWMASK"] = str(lowmask)
     t0 = time.time()
-    print(f"[run  ] {tag} (eta=0, lowmask={lowmask}, {NRANKS} ranks)",
+    print(f"[run  ] {tag} (eta=0, raw interaction, {NRANKS} ranks)",
           flush=True)
     with open(OUT / f"{tag}.log", "w") as log:
         rc = subprocess.run(
@@ -109,50 +104,10 @@ def run_rung(tag: str, lowmask: float) -> None:
           f"wall={(time.time() - t0) / 60:.1f} min", flush=True)
 
 
-OLD_FC2 = (REPO / "phonon/scripts/out/prod/sinw_d5a/work/T100/"
-           "dynamical_matrix.mat")
-
-
-def prep_oldfc2_inputs() -> bool:
-    """Attribution control: the CORRUPTED historical FC2 with otherwise
-    identical settings (grid, aux/KK support, FC3), so the corrected-
-    baseline shift can be attributed to the FC2 fix alone. The old .mat
-    may be pre-placed in inputs_oldfc2/ (e.g. scp'd from the laptop
-    mirror) or found at the historical prod path."""
-    d = OUT / "inputs_oldfc2"
-    d.mkdir(parents=True, exist_ok=True)
-    mat = d / "dynamical_matrix.mat"
-    if not mat.exists():
-        if not OLD_FC2.exists():
-            return False
-        mat.symlink_to(OLD_FC2)
-    for f in GEOM:
-        if f == "dynamical_matrix.mat":
-            continue
-        dst = d / f
-        if not dst.exists():
-            dst.symlink_to(INPUTS / f)
-    return True
-
-
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     build_and_validate_inputs()
-    run_rung("bare", 0.0)
-    run_rung("ircut", 1.5)
-    # Attribution control on the historical corrupted FC2.
-    if prep_oldfc2_inputs():
-        global INPUTS
-        saved = INPUTS
-        INPUTS = OUT / "inputs_oldfc2"
-        try:
-            run_rung("ircut_oldfc2", 1.5)
-        finally:
-            INPUTS = saved
-    else:
-        print(f"[warn ] old FC2 not found ({OLD_FC2} or pre-placed "
-              "inputs_oldfc2/dynamical_matrix.mat); skipping the "
-              "attribution control.", flush=True)
+    run_rung("bare")
     print("[done ] d5a fixed-export re-baseline complete.", flush=True)
     return 0
 

@@ -14,10 +14,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "phonon/studies/out/anderson_test/cnt33_L4_linear"
 OUT = REPO / "phonon/studies/out/cnt33_L4_conservation"
-FMAX = 55.0
-NFREQ = 361
-AUX_DW = FMAX / (NFREQ - 1)
-AUX_FMAX = 88.0
+FMAX = 88.0
+NFREQ = 577
 NRANKS = 64
 MAX_ITER = 120
 GEOM = ("dynamical_matrix.mat", "fc3_blocks.hdf5", "structure.xyz")
@@ -38,8 +36,7 @@ def prep(d: Path) -> None:
     subprocess.run(
         [sys.executable, str(WC), "--system", "cnt33", "--work", str(d),
          "-L", "4", "--eta", "0", "--nfreq", str(NFREQ), "--fmax", str(FMAX),
-         "--retarded", "fft", "--mix", "0.2", "--max-iter", str(MAX_ITER),
-         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+         "--retarded", "fft", "--mix", "0.2", "--max-iter", str(MAX_ITER)],
         check=True)
 
 

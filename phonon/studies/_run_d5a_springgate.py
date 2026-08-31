@@ -17,10 +17,8 @@ OUT = REPO / "phonon/studies/out/d5a_springgate"
 INPUTS = REPO / "phonon/studies/out/d5a_fixed_export/inputs_L2"
 
 NCELLS = 2
-NFREQ = 181
-FMAX = 66.0
-AUX_DW = FMAX / (NFREQ - 1)
-AUX_FMAX = 132.0
+NFREQ = 361
+FMAX = 132.0
 NRANKS = 64
 MAX_ITER = 300
 LINKED = ("fc3_blocks.hdf5", "phonon_energies.npy", "structure.xyz")
@@ -98,8 +96,7 @@ def run_rung(target: float, asr: bool = True) -> None:
         [sys.executable, str(WC), "--system", "sinw_d5a", "--work", str(d),
          "-L", str(NCELLS), "--eta", "0", "--nfreq", str(NFREQ),
          "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.1",
-         "--max-iter", str(MAX_ITER),
-         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+         "--max-iter", str(MAX_ITER)],
         check=True)
     hygiene()
     env = dict(os.environ,
@@ -140,8 +137,7 @@ def run_rung_long(target: float) -> None:
         [sys.executable, str(WC), "--system", "sinw_d5a", "--work", str(d),
          "-L", str(NCELLS), "--eta", "0", "--nfreq", str(NFREQ),
          "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.1",
-         "--mixing-method", "anderson", "--max-iter", "600",
-         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+         "--mixing-method", "anderson", "--max-iter", "600"],
         check=True)
     hygiene()
     env = dict(os.environ,

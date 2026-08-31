@@ -136,9 +136,7 @@ def main() -> None:
     src.add_argument("--dyn", type=Path,
                      help="dynamical matrix file (THz^2)")
     p.add_argument("--fmax", type=float, required=True,
-                   help="primary-grid top (THz), just above omega_max; the "
-                        "2*omega_max convolution support lives on the "
-                        "auxiliary grid (--aux-fmax at config time)")
+                   help="experimental nonuniform-grid upper edge (THz)")
     p.add_argument("--width-thz", type=float, default=0.1,
                    help="Lorentzian half-width per line (THz): the expected "
                         "ANHARMONIC linewidth Gamma_anh (golden rule, or "
@@ -203,9 +201,7 @@ def main() -> None:
           f"({np.count_nonzero((modes > 0) & (modes <= a.fmax))} raw lines; "
           f"a uniform grid at the finest spacing would need {n_uni} pts, "
           f"{n_uni / grid.size:.1f}x more)")
-    print("engine: pass --freq-grid file (write_config.py) or QX_FREQGRID="
-          "file, plus --aux-dw ~ finest spacing and --aux-fmax >= "
-          "2*omega_max.")
+    print("analysis only: production requires a uniform zero-anchored grid")
 
 
 if __name__ == "__main__":

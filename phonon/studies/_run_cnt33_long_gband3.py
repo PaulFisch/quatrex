@@ -17,10 +17,8 @@ AT = REPO / "phonon/studies/out/anderson_test"
 SRC_L8 = AT / "cnt33_L8_inputs"
 OUT = REPO / "phonon/studies/out/cnt33_long_gband3"
 
-FMAX = 55.0
-NFREQ = 361
-AUX_DW = FMAX / (NFREQ - 1)
-AUX_FMAX = 88.0
+FMAX = 88.0
+NFREQ = 577
 MAX_ITER = 600
 GEOM = ("dynamical_matrix.mat", "fc3_blocks.hdf5", "phonon_energies.npy",
         "structure.xyz")
@@ -53,8 +51,7 @@ def prep(d: Path, L: int, max_iter: int) -> None:
         [sys.executable, str(WC), "--system", "cnt33", "--work", str(d),
          "-L", str(L), "--eta", "0", "--nfreq", str(NFREQ),
          "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.2",
-         "--max-iter", str(max_iter),
-         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+         "--max-iter", str(max_iter)],
         check=True)
 
 

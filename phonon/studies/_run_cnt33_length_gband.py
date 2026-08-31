@@ -27,10 +27,8 @@ SRC = {
 GEOM = ("dynamical_matrix.mat", "fc3_blocks.hdf5", "phonon_energies.npy",
         "structure.xyz")
 
-FMAX = 55.0
-NFREQ = 361
-AUX_DW = FMAX / (NFREQ - 1)                # 0.1528 THz
-AUX_FMAX = 88.0                            # >= 2*omega_max (43.73) -- complete KK
+FMAX = 88.0
+NFREQ = 577
 NRANKS = 64
 MAX_ITER = 600
 
@@ -54,8 +52,7 @@ def prep(d: Path, L: int) -> None:
         [sys.executable, str(WC), "--system", "cnt33", "--work", str(d),
          "-L", str(L), "--eta", "0", "--nfreq", str(NFREQ),
          "--fmax", str(FMAX), "--retarded", "fft", "--mix", "0.2",
-         "--max-iter", str(MAX_ITER),
-         "--aux-dw", str(AUX_DW), "--aux-fmax", str(AUX_FMAX)],
+         "--max-iter", str(MAX_ITER)],
         check=True)
 
 
@@ -89,7 +86,7 @@ def run_rung(L: int, g: int) -> None:
                QX_CONFIG=str(d / "quatrex_config.toml"),
                QX_NPZ=str(npz))
     t0 = time.time()
-    print(f"[run  ] {tag} (eta=0, bare contacts, aux_fmax=88, {NRANKS} ranks)",
+    print(f"[run  ] {tag} (eta=0, bare contacts, fmax=88, {NRANKS} ranks)",
           flush=True)
     with open(OUT / f"{tag}.log", "w") as log:
         rc = subprocess.run(

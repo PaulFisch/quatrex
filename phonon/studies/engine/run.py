@@ -205,8 +205,6 @@ if os.environ.get("QX_SCP_LOOP"): cfg.phonon.scp_loop = bool(int(os.environ["QX_
 if os.environ.get("QX_SCP_UU_MIN"): cfg.phonon.scp_uu_min_thz = float(os.environ["QX_SCP_UU_MIN"])
 if os.environ.get("QX_SCP_UU_SOURCE"): cfg.phonon.scp_uu_source = os.environ["QX_SCP_UU_SOURCE"]
 if os.environ.get("QX_SCP_TADPOLE_TERM"): cfg.phonon.scp_tadpole_term = bool(int(os.environ["QX_SCP_TADPOLE_TERM"]))
-# Non-uniform frequency grid: primary grid from phonon_energies.npy
-# (QX_FREQGRID=file) + auxiliary uniform bubble grid (spacing/extent).
 if os.environ.get("QX_FREQGRID"):
     _fg = os.environ["QX_FREQGRID"].strip().lower()
     if _fg not in ("window", "file"):
@@ -216,8 +214,6 @@ if os.environ.get("QX_FREQGRID"):
 if cfg.phonon.frequency_grid == "file" and os.environ.get("QX_NE"):
     print("WARNING: QX_NE has no effect with frequency_grid='file' "
           "(the grid comes from phonon_energies.npy).", flush=True)
-if os.environ.get("QX_AUXDW"):    cfg.phonon.sse_aux_grid_dw_thz = float(os.environ["QX_AUXDW"])
-if os.environ.get("QX_AUXFMAX"):  cfg.phonon.sse_aux_grid_fmax_thz = float(os.environ["QX_AUXFMAX"])
 
 # Memory knobs. Neither had an override before, and both are the ones that
 # actually decide whether a run fits: QX_MAXBATCH bounds the ~21 RGF backward
@@ -800,8 +796,6 @@ if ranks.rank == 0:
         q_mesh=np.asarray(cfg.device.kpoint_grid, dtype=np.int64),
         frequency_grid=str(cfg.phonon.frequency_grid),
         frequency_max_thz=float(np.asarray(get_host(scba.energies)).real[-1]),
-        sse_aux_grid_dw_thz=float(cfg.phonon.sse_aux_grid_dw_thz),
-        sse_aux_grid_fmax_thz=float(cfg.phonon.sse_aux_grid_fmax_thz),
         eta_obc=0.0,
         sse_greater_from_lesser=bool(cfg.phonon.sse_greater_from_lesser),
         scp_tadpole=bool(cfg.phonon.scp_tadpole),
@@ -897,9 +891,7 @@ if ranks.rank == 0:
         out["iter_sigR_w"] = np.asarray(_iter_sigR_w)
         out["iter_sigL_w"] = np.asarray(_iter_sigL_w)
         if _iter_graw_w:
-            # graw lives on the primary grid (== energies); gwin on the
-            # bubble's conv grid (the aux grid when sse_aux_grid_dw_thz
-            # is on, else identical) -- save that axis alongside.
+            # Save the frequency axis alongside the spectral diagnostics.
             out["iter_graw_w"] = np.asarray(_iter_graw_w)
             out["iter_gwin_w"] = np.asarray(_iter_gwin_w)
             _wf = getattr(_sse_diag, "_diag_win_freqs", None)

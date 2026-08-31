@@ -5,8 +5,8 @@ Two things have to be true of any optional numerics feature in this solver, and
 they pull in opposite directions: switched off it must be BIT-identical to the
 code that existed before, and switched on it must demonstrably act. Both are
 pinned here against the real ``SigmaPhononPhonon.compute`` path rather than a
-mock, because the risk lives in where the hooks sit relative to the DC mask, the
-auxiliary-grid bridge and the Kramers-Kronig transform.
+mock, because the risk lives in where the hooks sit relative to the DC mask and
+the Kramers-Kronig transform.
 """
 import numpy as np
 import pytest
