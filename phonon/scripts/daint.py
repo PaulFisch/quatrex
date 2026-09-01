@@ -246,8 +246,19 @@ def _source_commit_env() -> str:
     return lines
 
 
+def _launch_line(payload: str, controller: bool) -> str:
+    if controller:
+        return payload
+    return (
+        "srun --cpu-bind=cores bash -c \\\n"
+        f"    'export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID; exec {payload}'"
+    )
+
+
 def cmd_launch(args):
     _guard(args)
+    if args.controller and not args.command:
+        sys.exit("--controller requires a raw command after --")
     if args.config and args.command:
         sys.exit(
             "config launch has unexpected trailing arguments: "
@@ -266,6 +277,7 @@ def cmd_launch(args):
         if not any(e.startswith("QX_NPZ=") for e in (args.env or [])):
             env_lines += f"\nexport QX_NPZ={run_dir}/run.npz"
         payload = f"python {REPO}/phonon/studies/engine/run.py"
+    launch_line = _launch_line(payload, args.controller)
     script = f"""#!/bin/bash
 #SBATCH --job-name=qx-{args.name}
 #SBATCH --account={ACCOUNT}
@@ -285,8 +297,7 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export QTX_PROFILE_LEVEL=${{QTX_PROFILE_LEVEL:-default}}
 {env_lines}
 cd {run_dir}
-srun --cpu-bind=cores bash -c \\
-    'export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID; exec {payload}'
+{launch_line}
 """
     ssh(f"mkdir -p {run_dir}", check=True)
     subprocess.run(
@@ -382,6 +393,8 @@ def main():
     q.add_argument("--env", action="append", metavar="K=V")
     q.add_argument("--approved-by-paul", action="store_true",
                    help="required for >1 node or non-debug partitions")
+    q.add_argument("--controller", action="store_true",
+                   help="run one raw allocation-controller command without srun")
     q.add_argument("command", nargs="*",
                    help="alternative to --config: raw command after --")
     q.set_defaults(fn=cmd_launch)

@@ -52,3 +52,18 @@ def test_pull_excludes_restart_checkpoints(monkeypatch):
     assert "--exclude=sigma*.npz.shards/" in args
     assert args[-1] == "cluster/sample/"
     assert check
+
+
+def test_controller_requires_a_raw_command(monkeypatch):
+    monkeypatch.setattr(MODULE, "_guard", lambda args: None)
+    args = SimpleNamespace(controller=True, command=[], config=None)
+
+    with __import__("pytest").raises(SystemExit, match="raw command"):
+        MODULE.cmd_launch(args)
+
+
+def test_controller_runs_once_without_an_outer_srun():
+    assert MODULE._launch_line("bash controller.sh", True) == (
+        "bash controller.sh"
+    )
+    assert MODULE._launch_line("python run.py", False).startswith("srun ")
