@@ -583,3 +583,5 @@ walltime total above.
 | 2026-09-01 | 4570184 | test-daint-controller | 1 | 00:10:00 | 0.17 | 536.31 | debug |
 | 2026-09-01 | 4570195 | test-daint-controller-step | 1 | 00:10:00 | 0.17 | 536.48 | debug |
 | 2026-09-01 | 4570210 | cnt-ladder-deep300-r2 | 16 | 03:00:00 | 48.00 | 584.48 | normal |
+| 2026-09-01 | 4572185 | cnt-ladder-deep300-r3-small | 4 | 02:00:00 | 8.00 | 592.48 | normal |
+| 2026-09-01 | 4572186 | cnt-ladder-deep300-r3-large | 16 | 03:00:00 | 48.00 | 640.48 | normal |
