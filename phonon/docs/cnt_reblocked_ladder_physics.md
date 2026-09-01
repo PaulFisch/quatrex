@@ -2,6 +2,9 @@
 
 **Status:** generated from the completed 2026-09-01 ladder continuations.
 
+The deeper L48 and causal-FFT follow-up is catalogued in
+`cnt_deep_kk_continuation_2026-09.md`.
+
 The reproducible generator is
 `phonon/scripts/figures/cnt_reblocked_ladder_physics.py`. Its compact input is
 `phonon/scripts/data/cnt_reblocked_ladder_physics.npz`; the PNG, PDF, CSV and
