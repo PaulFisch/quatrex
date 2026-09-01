@@ -580,3 +580,6 @@ walltime total above.
 | 2026-08-31 | 4568655 | test-cnt-recurrence-final | 1 | 00:10:00 | 0.17 | 487.97 | debug |
 | 2026-08-31 | 4568656 | test-cnt-recurrence-final-r2 | 1 | 00:10:00 | 0.17 | 488.14 | debug |
 | 2026-08-31 | 4568666 | cnt-ladder-deep300 | 16 | 03:00:00 | 48.00 | 536.14 | normal |
+| 2026-09-01 | 4570184 | test-daint-controller | 1 | 00:10:00 | 0.17 | 536.31 | debug |
+| 2026-09-01 | 4570195 | test-daint-controller-step | 1 | 00:10:00 | 0.17 | 536.48 | debug |
+| 2026-09-01 | 4570210 | cnt-ladder-deep300-r2 | 16 | 03:00:00 | 48.00 | 584.48 | normal |
