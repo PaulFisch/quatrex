@@ -586,3 +586,4 @@ walltime total above.
 | 2026-09-01 | 4572185 | cnt-ladder-deep300-r3-small | 4 | 02:00:00 | 8.00 | 592.48 | normal |
 | 2026-09-01 | 4572186 | cnt-ladder-deep300-r3-large | 16 | 03:00:00 | 48.00 | 640.48 | normal |
 | 2026-09-01 | 4574448 | cnt-l48x2-deeper-chunked | 4 | 06:00:00 | 24.00 | 664.48 | normal |
+| 2026-09-01 | 4574462 | c16-kk-restart-audit | 1 | 03:30:00 | 3.50 | 667.98 | normal |

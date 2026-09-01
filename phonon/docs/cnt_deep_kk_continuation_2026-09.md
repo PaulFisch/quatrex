@@ -57,7 +57,7 @@ rose mildly while retaining clean lead balance. The Broyden trajectory reduced
 the map residual but moved into a strongly non-conserving state. A small map
 residual alone is therefore not a sufficient acceptance gate.
 
-The `c16-kk-restart-audit` controller runs three stages on one node and four
+Job 4574462, `c16-kk-restart-audit`, runs three stages on one node and four
 ranks:
 
 1. Continue the existing corrected-KK final checkpoint for 500 iterations
@@ -73,8 +73,8 @@ lesser Green function. These arrays distinguish a global underdamped orbit
 from instability confined to a frequency sector. Both stages retain final and
 best checkpoints on Daint, but only `run.npz` and logs will be pulled locally.
 
-The controller requests one node for at most 3.5 hours. It will be submitted
-when the second Quatrex queue slot opens.
+The controller requests one node for at most 3.5 hours, or 3.5 committed
+node-hours.
 
 The committed controller is
 `phonon/studies/cnt_c16_kk_restart_audit_job.sh`.
